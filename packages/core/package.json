@@ -10,7 +10,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "autumn-js": "1.2.45",
-    "drizzle-orm": "0.44.7",
+    "drizzle-orm": "0.45.2",
     "pg": "8.22.0",
     "pg-boss": "12.26.3",
     "posthog-node": "^5.47.0",

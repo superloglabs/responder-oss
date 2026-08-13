@@ -9,3 +9,17 @@ allowBuilds:
   protobufjs: false
   sharp: true
   unrs-resolver: true
+
+overrides:
+  '@daytonaio/sdk>shell-quote': 1.9.0
+  '@esbuild-kit/core-utils>esbuild': 0.25.12
+  '@eslint/eslintrc>js-yaml': 4.3.1
+  'ajv>fast-uri': 3.1.5
+  'concurrently>shell-quote': 1.9.0
+  'minimatch@3>brace-expansion': 1.1.18
+  'minimatch@10>brace-expansion': 5.0.9
+
+minimumReleaseAgeExclude:
+  - '@posthog/core@1.48.0'
+  - '@posthog/types@1.403.1'
+  - posthog-js@1.416.1
