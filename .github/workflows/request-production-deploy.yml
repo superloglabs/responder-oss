@@ -1,0 +1,40 @@
+name: Request hosted deployment
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  request:
+    name: Request deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DEPLOY_TOKEN: ${{ secrets.HOSTED_DEPLOY_TOKEN }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Require deployment token
+        shell: bash
+        run: |
+          if [[ -z "${DEPLOY_TOKEN}" ]]; then
+            echo "HOSTED_DEPLOY_TOKEN is not configured."
+            exit 1
+          fi
+
+      - name: Dispatch hosted deployment
+        shell: bash
+        run: |
+          payload="$(jq -cn \
+            --arg ref main \
+            --arg source_sha "${SOURCE_SHA}" \
+            '{ref:$ref,inputs:{source_sha:$source_sha}}')"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${DEPLOY_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "${payload}" \
+            https://api.github.com/repos/superloglabs/responder/actions/workflows/deploy-production.yml/dispatches
