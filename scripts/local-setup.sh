@@ -58,10 +58,7 @@ else
   base_port="$(node scripts/local-port-block.mjs "$repository_root")"
 fi
 
-node scripts/local-write-environment.mjs \
-  "$repository_root/.env.local" \
-  "$repository_root" \
-  "$base_port"
+node scripts/local-write-environment.mjs "$base_port"
 
 set -a
 # shellcheck disable=SC1091

@@ -2,19 +2,20 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 import process from "node:process";
 
-const environmentFile = resolve(process.argv[2] ?? ".env.local");
-const workspacePath = resolve(process.argv[3] ?? process.cwd());
-const basePort = Number(process.argv[4]);
+const workspacePath = realpathSync(process.cwd());
+const environmentFile = join(workspacePath, ".env.local");
+const basePort = Number(process.argv[2]);
 
 if (!Number.isInteger(basePort) || basePort < 1 || basePort > 65_532) {
-  throw new Error(`Invalid local base port: ${process.argv[4] ?? "missing"}`);
+  throw new Error(`Invalid local base port: ${process.argv[2] ?? "missing"}`);
 }
 
 function slug(value) {
@@ -114,9 +115,15 @@ for (const [key, value] of updates) {
   output.push(`${key}=${value}`);
 }
 
-const temporaryFile = `${environmentFile}.${process.pid}.tmp`;
+const temporaryFile = join(
+  dirname(environmentFile),
+  `.${basename(environmentFile)}.${randomBytes(8).toString("hex")}.tmp`,
+);
 try {
-  writeFileSync(temporaryFile, `${output.join("\n")}\n`, { mode: 0o600 });
+  writeFileSync(temporaryFile, `${output.join("\n")}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
   renameSync(temporaryFile, environmentFile);
   chmodSync(environmentFile, 0o600);
 } finally {
