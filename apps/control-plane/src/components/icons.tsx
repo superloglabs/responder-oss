@@ -1,28 +1,31 @@
 import type { SVGProps } from "react";
+import {
+  providerGlyphs,
+  type ProviderGlyphId,
+} from "./provider-glyphs";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
 interface ProviderGlyphProps {
   className?: string;
   decorative?: boolean;
-  label: string;
-  text: string;
+  provider: ProviderGlyphId;
 }
 
 export function ProviderGlyph({
   className,
   decorative = false,
-  label,
-  text,
+  provider,
 }: ProviderGlyphProps) {
+  const glyph = providerGlyphs[provider];
   return (
     <span
       aria-hidden={decorative ? true : undefined}
-      aria-label={decorative ? undefined : label}
+      aria-label={decorative ? undefined : glyph.label}
       className={`providerGlyph${className ? ` ${className}` : ""}`}
       role={decorative ? undefined : "img"}
     >
-      {text}
+      {glyph.text}
     </span>
   );
 }

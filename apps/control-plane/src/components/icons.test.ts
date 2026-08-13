@@ -6,7 +6,7 @@ import { ProviderGlyph } from "./icons";
 describe("ProviderGlyph", () => {
   it("announces the provider when the glyph carries meaning", () => {
     const markup = renderToStaticMarkup(
-      createElement(ProviderGlyph, { label: "GitHub", text: "GH" }),
+      createElement(ProviderGlyph, { provider: "github" }),
     );
 
     expect(markup).toContain('aria-label="GitHub"');
@@ -18,8 +18,7 @@ describe("ProviderGlyph", () => {
     const markup = renderToStaticMarkup(
       createElement(ProviderGlyph, {
         decorative: true,
-        label: "Google",
-        text: "GO",
+        provider: "google",
       }),
     );
 

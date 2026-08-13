@@ -38,15 +38,6 @@ interface IntegrationResponse {
   integrations: IntegrationSummary[];
 }
 
-const integrationGlyphs: Record<IntegrationSummary["id"], string> = {
-  clickstack: "CS",
-  custom_mcp: "MCP",
-  datadog: "DD",
-  github: "GH",
-  sentry: "SE",
-  slack: "SL",
-};
-
 function connectionNotice(): {
   tone: "error" | "success" | "warning";
   message: string;
@@ -261,8 +252,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
           <ProviderGlyph
             className={`integrationLogo integrationLogo--${integration.id === "custom_mcp" ? "mcp" : integration.id}`}
             decorative
-            label={integration.name}
-            text={integrationGlyphs[integration.id]}
+            provider={integration.id}
           />
           {integration.state === "connected" ? (
             <span className="connectedBadge">Connected</span>

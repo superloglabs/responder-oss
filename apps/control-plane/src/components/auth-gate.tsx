@@ -131,7 +131,7 @@ function SignIn() {
           onClick={() => void socialSignIn("google")}
           type="button"
         >
-          <ProviderGlyph decorative label="Google" text="GO" />
+          <ProviderGlyph decorative provider="google" />
           {socialProvider === "google" ? "Opening Google…" : "Continue with Google"}
         </button>
         <button
@@ -140,7 +140,7 @@ function SignIn() {
           onClick={() => void socialSignIn("github")}
           type="button"
         >
-          <ProviderGlyph decorative label="GitHub" text="GH" />
+          <ProviderGlyph decorative provider="github" />
           {socialProvider === "github" ? "Opening GitHub…" : "Continue with GitHub"}
         </button>
       </div>

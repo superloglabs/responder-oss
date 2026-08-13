@@ -34,6 +34,7 @@ import {
   RepositoryIcon,
   SearchIcon,
 } from "../components/icons";
+import type { ProviderGlyphId } from "../components/provider-glyphs";
 import {
   Alert,
   Button,
@@ -1933,25 +1934,7 @@ function ChoiceCard({
   );
 }
 
-type ProviderId =
-  | "github"
-  | "slack"
-  | "sentry"
-  | "datadog"
-  | "custom_mcp"
-  | "clickstack";
-
-const providerGlyphs: Record<
-  ProviderId,
-  { label: string; text: string }
-> = {
-  clickstack: { label: "ClickStack", text: "CS" },
-  custom_mcp: { label: "Custom MCP", text: "MCP" },
-  datadog: { label: "Datadog", text: "DD" },
-  github: { label: "GitHub", text: "GH" },
-  sentry: { label: "Sentry", text: "SE" },
-  slack: { label: "Slack", text: "SL" },
-};
+type ProviderId = Exclude<ProviderGlyphId, "google">;
 
 function ProviderMark({
   connected = false,
@@ -1960,15 +1943,13 @@ function ProviderMark({
   connected?: boolean;
   provider: ProviderId;
 }) {
-  const glyph = providerGlyphs[provider];
   return (
     <ProviderGlyph
       className={`providerMark providerMark--${provider} ${
         connected ? "isConnected" : ""
       }`}
       decorative
-      label={glyph.label}
-      text={glyph.text}
+      provider={provider}
     />
   );
 }
@@ -2169,7 +2150,7 @@ function GitHubOrganizationPicker({
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
-        <ProviderGlyph label="GitHub" text="GH" />
+        <ProviderGlyph provider="github" />
         <span className="repositoryOrganizationPicker__label">
           {selected?.displayName ?? "Choose an organization"}
         </span>

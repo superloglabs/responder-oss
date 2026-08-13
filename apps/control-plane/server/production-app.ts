@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { app } from "./app.js";
+import { isSourceMapPath } from "./static-assets.js";
 
 const staticRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -13,6 +14,10 @@ const serveIndex = serveStatic({ path: "index.html", root: staticRoot });
 
 export const productionApp = new Hono()
   .route("/", app)
+  .use("*", async (context, next) => {
+    if (isSourceMapPath(context.req.path)) return context.notFound();
+    return next();
+  })
   .use("*", serveAsset)
   .get("*", async (context, next) => {
     if (
