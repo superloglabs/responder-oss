@@ -907,22 +907,14 @@ function ProviderIcon({
 }: {
   provider: InvestigationDetail["input"]["provider"];
 }) {
+  const label = providerLabel(provider);
   return (
     <span
-      aria-label={providerLabel(provider)}
+      aria-label={label}
       className="investigationProviderIcon"
       role="img"
     >
-      <img
-        alt=""
-        src={
-          provider === "slack"
-            ? "/slack-mark.svg"
-            : provider === "sentry"
-              ? "/sentry-mark.svg"
-              : "/datadog-mark.png"
-        }
-      />
+      <span aria-hidden="true">{label.slice(0, 1)}</span>
     </span>
   );
 }

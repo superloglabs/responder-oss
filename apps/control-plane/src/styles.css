@@ -2287,11 +2287,11 @@ button:disabled {
   background: var(--ds-surface-overlay);
 }
 
-.investigationProviderIcon img,
-.investigationProviderIcon svg {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.investigationProviderIcon > span {
+  color: var(--ds-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1;
 }
 
 .investigationTriggerCard__content {
