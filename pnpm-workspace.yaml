@@ -9,3 +9,16 @@ allowBuilds:
   protobufjs: false
   sharp: true
   unrs-resolver: true
+
+overrides:
+  'brace-expansion@<2.0.0': 1.1.18
+  'brace-expansion@>=5.0.0 <6.0.0': 5.0.9
+  esbuild: 0.25.12
+  fast-uri: 3.1.5
+  js-yaml: 4.3.1
+  shell-quote: 1.9.0
+
+minimumReleaseAgeExclude:
+  - '@posthog/core@1.48.0'
+  - '@posthog/types@1.403.1'
+  - posthog-js@1.416.1
