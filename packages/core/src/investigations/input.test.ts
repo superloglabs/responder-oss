@@ -4,7 +4,7 @@ import { investigationPrompt, investigationRequestSchema } from "./input.js";
 describe("investigation input", () => {
   it("normalizes a provider event into a bounded investigation", () => {
     const parsed = investigationRequestSchema.parse({
-      agentId: "4a45b497-ae82-4c48-b1df-d6057c0f4cef",
+      agentId: "06060606-0606-4606-8606-060606060606",
       provider: "sentry",
       externalEventId: "event-1842",
       title: "Elevated checkout errors",
@@ -22,7 +22,7 @@ describe("investigation input", () => {
   it("rejects unknown providers", () => {
     expect(() =>
       investigationRequestSchema.parse({
-        agentId: "4a45b497-ae82-4c48-b1df-d6057c0f4cef",
+        agentId: "06060606-0606-4606-8606-060606060606",
         provider: "email",
         externalEventId: "event-1",
         title: "Alert",

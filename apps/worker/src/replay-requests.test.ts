@@ -34,18 +34,18 @@ import {
 
 const request = {
   attemptCount: 1,
-  id: "9ec74cbd-b9bd-452b-932f-19bc64084203",
-  replayInvestigationId: "6dfc241e-e0d2-4a53-a9e4-eed12f994815",
+  id: "16161616-1616-4616-8616-161616161616",
+  replayInvestigationId: "09090909-0909-4909-8909-090909090909",
   requestedBy: "admin@example.com",
-  sourceInvestigationId: "b550694a-b433-4cb6-9466-80d1fcf341e9",
+  sourceInvestigationId: "18181818-1818-4818-8818-181818181818",
 };
 
 const replay = {
   config: {
-    agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
-    id: "684a11c5-f5b8-4ff5-b157-592e04164dd3",
+    agentId: "13131313-1313-4313-8313-131313131313",
+    id: "08080808-0808-4808-8808-080808080808",
     model: "provider-model",
-    organizationId: "dc0542d9-b577-45f2-9f46-6ff0db354c8b",
+    organizationId: "20202020-2020-4020-8020-202020202020",
     prMode: "always",
     prompt: "Investigate carefully.",
   },
@@ -58,7 +58,7 @@ const replay = {
   },
   investigationId: request.replayInvestigationId,
   replayStatus: "pending",
-  runtimeProfileId: "cf72339f-a631-448f-b8af-f9d8336ad879",
+  runtimeProfileId: "19191919-1919-4919-8919-191919191919",
 };
 
 describe("admin replay request processor", () => {

@@ -20,20 +20,20 @@ vi.mock("./db/pull-requests.js", () => ({
 
 import { queueIssueRemediationJob } from "./remediation-queue.js";
 
-const requestId = "4614c371-a4a3-4342-a9a8-36e526377345";
+const requestId = "05050505-0505-4505-8505-050505050505";
 const remediation = {
   requestId,
-  issueId: "6e55b174-e903-4d76-973f-9dff4a4e9883",
+  issueId: "10101010-1010-4010-8010-101010101010",
   issueTitle: "Broken route",
   issueDescription: "The route throws.",
   issueSeverity: "SEV-2" as const,
   issueRemediation: "Handle the missing value.",
   issueEvidence: [],
-  investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
-  agentConfigVersionId: "684a11c5-f5b8-4ff5-b157-592e04164dd3",
-  agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
-  organizationId: "9ba9e0a6-b15c-4674-bf91-18d70b6ff450",
-  runtimeProfileId: "cf72339f-a631-448f-b8af-f9d8336ad879",
+  investigationId: "16161616-1616-4616-8616-161616161616",
+  agentConfigVersionId: "08080808-0808-4808-8808-080808080808",
+  agentId: "13131313-1313-4313-8313-131313131313",
+  organizationId: "15151515-1515-4515-8515-151515151515",
+  runtimeProfileId: "19191919-1919-4919-8919-191919191919",
   status: "queued" as const,
 };
 const config = {

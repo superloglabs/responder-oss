@@ -779,8 +779,8 @@ describe("control-plane API", () => {
     vi.stubEnv("RESPONDER_APP_URL", "https://responder.example/");
 
     const message = investigatingSlackMessage({
-      agentId: "a494280e-0ba6-43d7-9d83-25b28a9f9a37",
-      investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
+      agentId: "17171717-1717-4717-8717-171717171717",
+      investigationId: "01010101-0101-4101-8101-010101010101",
       title: "Plant API error rate is elevated",
     });
 
@@ -796,7 +796,7 @@ describe("control-plane API", () => {
               {
                 type: "url",
                 text: "View investigation",
-                url: "https://responder.example/agents/a494280e-0ba6-43d7-9d83-25b28a9f9a37/investigations/153080dd-2a02-48a4-a433-78f27978e0d9",
+                url: "https://responder.example/agents/17171717-1717-4717-8717-171717171717/investigations/01010101-0101-4101-8101-010101010101",
               },
             ],
           }),
@@ -811,7 +811,7 @@ describe("control-plane API", () => {
     logSlackAcknowledgementFailure({
       alertProvider: "app",
       error: new Error("Slack returned HTTP 503"),
-      investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
+      investigationId: "01010101-0101-4101-8101-010101010101",
     });
 
     expect(errorLog).toHaveBeenCalledWith(
@@ -819,7 +819,7 @@ describe("control-plane API", () => {
         alertProvider: "app",
         error: "Slack returned HTTP 503",
         event: "slack_alert_acknowledgement_failed",
-        investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
+        investigationId: "01010101-0101-4101-8101-010101010101",
       }),
     );
   });
@@ -833,7 +833,7 @@ describe("control-plane API", () => {
         [new Error("reactions.add: not_allowed"), "chat.postMessage: timeout"],
         "Unable to fully acknowledge the Slack alert",
       ),
-      investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
+      investigationId: "01010101-0101-4101-8101-010101010101",
     });
 
     expect(errorLog).toHaveBeenCalledWith(
@@ -845,7 +845,7 @@ describe("control-plane API", () => {
           "chat.postMessage: timeout",
         ],
         event: "slack_alert_acknowledgement_failed",
-        investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
+        investigationId: "01010101-0101-4101-8101-010101010101",
       }),
     );
   });
@@ -889,12 +889,12 @@ describe("control-plane API", () => {
               {
                 type: "button",
                 action_id: "create_issue_pull_request",
-                value: "50124a45-ab04-4e85-aec9-836c1b4f9ad0",
+                value: "07070707-0707-4707-8707-070707070707",
               },
               {
                 type: "button",
                 action_id: "view_issue",
-                value: "50124a45-ab04-4e85-aec9-836c1b4f9ad0",
+                value: "07070707-0707-4707-8707-070707070707",
               },
             ],
           },
@@ -914,7 +914,7 @@ describe("control-plane API", () => {
             {
               type: "button",
               action_id: "view_issue",
-              value: "50124a45-ab04-4e85-aec9-836c1b4f9ad0",
+              value: "07070707-0707-4707-8707-070707070707",
             },
           ],
         },
@@ -935,12 +935,12 @@ describe("control-plane API", () => {
     vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
     vi.mocked(startSlackIssueRemediation).mockResolvedValue({
       ok: true,
-      requestId: "f7745ad3-97bf-4682-a451-f3bb84d25c94",
+      requestId: "23232323-2323-4323-8323-232323232323",
       sessionId: "session-1",
     });
     const responseUrl =
       "https://hooks.slack.com/actions/T123/B123/response-token";
-    const issueId = "50124a45-ab04-4e85-aec9-836c1b4f9ad0";
+    const issueId = "07070707-0707-4707-8707-070707070707";
     const payload = JSON.stringify({
       type: "block_actions",
       team: { id: "T123" },
@@ -1088,14 +1088,14 @@ describe("control-plane API", () => {
     vi.stubEnv("INTERNAL_INGEST_TOKEN", "test-secret");
     vi.mocked(queueInvestigation).mockResolvedValue({
       kind: "queued",
-      investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
-      jobId: "e9c7b0b1-1f28-448f-b5a7-0cb240ae41e4",
+      investigationId: "01010101-0101-4101-8101-010101010101",
+      jobId: "21212121-2121-4121-8121-212121212121",
     });
 
     const response = await app.request("/api/investigations", {
       method: "POST",
       body: JSON.stringify({
-        agentId: "a494280e-0ba6-43d7-9d83-25b28a9f9a37",
+        agentId: "17171717-1717-4717-8717-171717171717",
         provider: "sentry",
         externalEventId: "event-1",
         title: "Production error",
@@ -1110,11 +1110,11 @@ describe("control-plane API", () => {
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       duplicate: false,
-      investigationId: "153080dd-2a02-48a4-a433-78f27978e0d9",
-      jobId: "e9c7b0b1-1f28-448f-b5a7-0cb240ae41e4",
+      investigationId: "01010101-0101-4101-8101-010101010101",
+      jobId: "21212121-2121-4121-8121-212121212121",
     });
     expect(queueInvestigation).toHaveBeenCalledWith({
-      agentId: "a494280e-0ba6-43d7-9d83-25b28a9f9a37",
+      agentId: "17171717-1717-4717-8717-171717171717",
       provider: "sentry",
       externalEventId: "event-1",
       title: "Production error",

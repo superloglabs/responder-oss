@@ -28,8 +28,8 @@ describe("pull request tool", () => {
   });
 
   it("publishes changes only for its assigned remediation request", async () => {
-    const issueId = "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9";
-    const requestId = "4614c371-a4a3-4342-a9a8-36e526377345";
+    const issueId = "12121212-1212-4212-8212-121212121212";
+    const requestId = "05050505-0505-4505-8505-050505050505";
     const manifest = {
       repositories: [
         {
@@ -68,9 +68,9 @@ describe("pull request tool", () => {
       url: "https://github.com/acme/service/pull/17",
     });
     const pullRequestTool = createPullRequestTool({
-      agentConfigVersionId: "684a11c5-f5b8-4ff5-b157-592e04164dd3",
-      investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
-      organizationId: "9ba9e0a6-b15c-4674-bf91-18d70b6ff450",
+      agentConfigVersionId: "08080808-0808-4808-8808-080808080808",
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      organizationId: "15151515-1515-4515-8515-151515151515",
       pullRequestRequestId: requestId,
       session,
     });
