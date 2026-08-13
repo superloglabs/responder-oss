@@ -908,13 +908,18 @@ function ProviderIcon({
   provider: InvestigationDetail["input"]["provider"];
 }) {
   const label = providerLabel(provider);
+  const shortLabel = {
+    datadog: "DD",
+    sentry: "SE",
+    slack: "SL",
+  }[provider];
   return (
     <span
       aria-label={label}
       className="investigationProviderIcon"
       role="img"
     >
-      <span aria-hidden="true">{label.slice(0, 1)}</span>
+      <span aria-hidden="true">{shortLabel}</span>
     </span>
   );
 }

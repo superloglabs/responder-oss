@@ -6,7 +6,6 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
