@@ -16,15 +16,19 @@ jobs:
       DEPLOY_TOKEN: ${{ secrets.HOSTED_DEPLOY_TOKEN }}
       SOURCE_SHA: ${{ github.sha }}
     steps:
-      - name: Require deployment token
+      - name: Check deployment token
+        id: configuration
         shell: bash
         run: |
           if [[ -z "${DEPLOY_TOKEN}" ]]; then
-            echo "HOSTED_DEPLOY_TOKEN is not configured."
-            exit 1
+            echo "Hosted deployment is not configured yet."
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Dispatch hosted deployment
+        if: steps.configuration.outputs.enabled == 'true'
         shell: bash
         run: |
           payload="$(jq -cn \
