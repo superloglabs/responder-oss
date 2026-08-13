@@ -1,17 +1,18 @@
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
-  writeFileSync,
+  statSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  callbackTargetFile,
   clearCallbackTarget,
   readCallbackTarget,
   validCallbackTarget,
@@ -19,10 +20,19 @@ import {
 } from "./local-callback-routing.mjs";
 
 const temporaryDirectories = [];
+const repositoryRoot = process.cwd();
+const bridgeScript = join(repositoryRoot, "scripts/local-callback-bridge.mjs");
+const targetScript = join(repositoryRoot, "scripts/local-callback-target.mjs");
 
 function temporaryDirectory() {
   const directory = mkdtempSync(join(tmpdir(), "responder-callbacks-"));
   temporaryDirectories.push(directory);
+  return directory;
+}
+
+function temporaryGitRepository() {
+  const directory = temporaryDirectory();
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
   return directory;
 }
 
@@ -47,21 +57,19 @@ async function waitForBridge(port) {
   throw new Error("Callback bridge did not start.");
 }
 
-function startBridge(port, targetFile, stdio = "ignore") {
-  return spawn(process.execPath, ["scripts/local-callback-bridge.mjs"], {
-    cwd: process.cwd(),
+function startBridge(port, workspace, stdio = "ignore") {
+  return spawn(process.execPath, [bridgeScript], {
+    cwd: workspace,
     env: {
       ...process.env,
       RESPONDER_CALLBACK_BRIDGE_POLL_INTERVAL: "25",
       RESPONDER_CALLBACK_BRIDGE_PORT: String(port),
-      RESPONDER_CALLBACK_TARGET_FILE: targetFile,
     },
     stdio,
   });
 }
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -69,16 +77,25 @@ afterEach(() => {
 
 describe("local callback routing", () => {
   it("stores a shared loopback target atomically", () => {
-    const targetFile = join(temporaryDirectory(), "target.json");
-    vi.stubEnv("RESPONDER_CALLBACK_TARGET_FILE", targetFile);
+    const workspace = temporaryGitRepository();
+    const targetFile = callbackTargetFile(workspace);
 
-    writeCallbackTarget({
-      origin: "http://127.0.0.1:4321",
-      workspace: "/tmp/worktree",
-      updatedAt: "2026-07-31T00:00:00.000Z",
-    });
+    writeCallbackTarget(
+      {
+        origin: "http://127.0.0.1:4321",
+        workspace: "/tmp/worktree",
+        updatedAt: "2026-07-31T00:00:00.000Z",
+      },
+      workspace,
+    );
 
-    expect(readCallbackTarget()).toEqual({
+    expect(targetFile).toBe(
+      join(
+        realpathSync(workspace),
+        ".git/responder/callback-target.json",
+      ),
+    );
+    expect(readCallbackTarget(workspace)).toEqual({
       origin: "http://127.0.0.1:4321",
       workspace: "/tmp/worktree",
       updatedAt: "2026-07-31T00:00:00.000Z",
@@ -86,9 +103,10 @@ describe("local callback routing", () => {
     expect(JSON.parse(readFileSync(targetFile, "utf8"))).toMatchObject({
       origin: "http://127.0.0.1:4321",
     });
+    expect(statSync(targetFile).mode & 0o777).toBe(0o600);
 
-    clearCallbackTarget();
-    expect(readCallbackTarget()).toBeNull();
+    clearCallbackTarget(workspace);
+    expect(readCallbackTarget(workspace)).toBeNull();
   });
 
   it("rejects non-loopback and credentialed targets", () => {
@@ -110,16 +128,16 @@ describe("local callback routing", () => {
       response.writeHead(404).end();
     });
     const controlPlanePort = await listen(controlPlane);
-    const targetFile = join(temporaryDirectory(), "target.json");
+    const workspace = temporaryGitRepository();
+    const targetFile = callbackTargetFile(workspace);
     const selection = spawn(
       process.execPath,
-      ["scripts/local-callback-target.mjs", "use"],
+      [targetScript, "use"],
       {
-        cwd: process.cwd(),
+        cwd: workspace,
         env: {
           ...process.env,
           CONTROL_PLANE_WEB_PORT: String(controlPlanePort),
-          RESPONDER_CALLBACK_TARGET_FILE: targetFile,
         },
         stdio: "ignore",
       },
@@ -130,7 +148,7 @@ describe("local callback routing", () => {
       expect(exitCode).toBe(0);
       expect(JSON.parse(readFileSync(targetFile, "utf8"))).toMatchObject({
         origin: `http://127.0.0.1:${controlPlanePort}`,
-        workspace: realpathSync(process.cwd()),
+        workspace: realpathSync(workspace),
       });
     } finally {
       if (selection.exitCode === null) selection.kill("SIGTERM");
@@ -139,24 +157,22 @@ describe("local callback routing", () => {
   });
 
   it("releases only the current worktree's claim", async () => {
-    const targetFile = join(temporaryDirectory(), "target.json");
-    writeFileSync(
-      targetFile,
-      JSON.stringify({
+    const workspace = temporaryGitRepository();
+    const targetFile = callbackTargetFile(workspace);
+    writeCallbackTarget(
+      {
         origin: "http://127.0.0.1:4321",
-        workspace: realpathSync(process.cwd()),
+        workspace: realpathSync(workspace),
         updatedAt: "2026-07-31T00:00:00.000Z",
-      }),
+      },
+      workspace,
     );
     const release = spawn(
       process.execPath,
-      ["scripts/local-callback-target.mjs", "release"],
+      [targetScript, "release"],
       {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          RESPONDER_CALLBACK_TARGET_FILE: targetFile,
-        },
+        cwd: workspace,
+        env: process.env,
         stdio: "ignore",
       },
     );
@@ -191,17 +207,17 @@ describe("local callback routing", () => {
     const bridgePort = await listen(portReservation);
     await new Promise((resolve) => portReservation.close(resolve));
 
-    const targetFile = join(temporaryDirectory(), "target.json");
-    writeFileSync(
-      targetFile,
-      JSON.stringify({
+    const workspace = temporaryGitRepository();
+    writeCallbackTarget(
+      {
         origin: `http://127.0.0.1:${upstreamPort}`,
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
-      }),
+      },
+      workspace,
     );
 
-    const bridge = startBridge(bridgePort, targetFile);
+    const bridge = startBridge(bridgePort, workspace);
 
     try {
       await waitForBridge(bridgePort);
@@ -233,22 +249,22 @@ describe("local callback routing", () => {
 
   it("routes a GitHub setup fallback through the claimed worktree", async () => {
     const upstream = createServer((request, response) => {
-      response.end(request.url);
+      response.end("ok");
     });
     const upstreamPort = await listen(upstream);
     const portReservation = createServer();
     const bridgePort = await listen(portReservation);
     await new Promise((resolve) => portReservation.close(resolve));
-    const targetFile = join(temporaryDirectory(), "target.json");
-    writeFileSync(
-      targetFile,
-      JSON.stringify({
+    const workspace = temporaryGitRepository();
+    writeCallbackTarget(
+      {
         origin: `http://127.0.0.1:${upstreamPort}`,
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
-      }),
+      },
+      workspace,
     );
-    const bridge = startBridge(bridgePort, targetFile);
+    const bridge = startBridge(bridgePort, workspace);
 
     try {
       await waitForBridge(bridgePort);
@@ -283,8 +299,12 @@ describe("local callback routing", () => {
       response.writeHead(404).end();
     });
     const bridgePort = await listen(legacyBridge);
-    const targetFile = join(temporaryDirectory(), "target.json");
-    const bridge = startBridge(bridgePort, targetFile, ["ignore", "pipe", "pipe"]);
+    const workspace = temporaryGitRepository();
+    const bridge = startBridge(bridgePort, workspace, [
+      "ignore",
+      "pipe",
+      "pipe",
+    ]);
 
     try {
       await new Promise((resolve, reject) => {

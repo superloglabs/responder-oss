@@ -63,7 +63,7 @@ import {
 } from "./queue.js";
 
 const request = {
-  agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
+  agentId: "13131313-1313-4313-8313-131313131313",
   body: "The API is returning HTTP 500.",
   externalEventId: "event-1",
   provider: "sentry" as const,
@@ -73,19 +73,19 @@ const request = {
 const created = {
   config: {
     agentId: request.agentId,
-    id: "684a11c5-f5b8-4ff5-b157-592e04164dd3",
+    id: "08080808-0808-4808-8808-080808080808",
     model: "old-provider-model",
-    organizationId: "9ba9e0a6-b15c-4674-bf91-18d70b6ff450",
+    organizationId: "15151515-1515-4515-8515-151515151515",
     prMode: "disabled" as const,
     prompt: "Investigate carefully.",
   },
   created: true,
-  investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
-  runtimeProfileId: "cf72339f-a631-448f-b8af-f9d8336ad879",
+  investigationId: "16161616-1616-4616-8616-161616161616",
+  runtimeProfileId: "19191919-1919-4919-8919-191919191919",
 };
 const remediationRequest = {
-  requestId: "4614c371-a4a3-4342-a9a8-36e526377345",
-  issueId: "6e55b174-e903-4d76-973f-9dff4a4e9883",
+  requestId: "05050505-0505-4505-8505-050505050505",
+  issueId: "10101010-1010-4010-8010-101010101010",
   issueTitle: "Broken route",
   issueDescription: "The route throws.",
   issueSeverity: "SEV-2" as const,
@@ -117,7 +117,7 @@ describe("investigation queue", () => {
     );
     mocks.getRuntimeAgentConfig.mockResolvedValue(created.config);
     mocks.bossSend.mockResolvedValue(
-      "e9c7b0b1-1f28-448f-b5a7-0cb240ae41e4",
+      "21212121-2121-4121-8121-212121212121",
     );
   });
 
@@ -140,7 +140,7 @@ describe("investigation queue", () => {
   it("checks the monthly limit and adds a new job", async () => {
     await expect(queueInvestigation(request)).resolves.toEqual({
       investigationId: created.investigationId,
-      jobId: "e9c7b0b1-1f28-448f-b5a7-0cb240ae41e4",
+      jobId: "21212121-2121-4121-8121-212121212121",
       kind: "queued",
     });
     expect(mocks.consumeInvestigation).toHaveBeenCalledWith(

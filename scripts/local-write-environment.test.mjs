@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +14,10 @@ import process from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 
 const temporaryDirectories = [];
+const environmentScript = join(
+  process.cwd(),
+  "scripts/local-write-environment.mjs",
+);
 
 function temporaryDirectory() {
   const directory = mkdtempSync(join(tmpdir(), "responder-environment-"));
@@ -37,8 +44,11 @@ afterEach(() => {
 describe("local environment generation", () => {
   it("repairs copied workspace settings while preserving developer secrets", () => {
     const directory = temporaryDirectory();
-    const environmentFile = join(directory, ".env.local");
     const workspace = join(directory, "buffalo");
+    const environmentFile = join(workspace, ".env.local");
+    const sentinelFile = join(directory, "sentinel.txt");
+    mkdirSync(workspace);
+    writeFileSync(sentinelFile, "unchanged\n");
     writeFileSync(
       environmentFile,
       [
@@ -56,17 +66,14 @@ describe("local environment generation", () => {
 
     execFileSync(
       process.execPath,
-      [
-        "scripts/local-write-environment.mjs",
-        environmentFile,
-        workspace,
-        "22000",
-      ],
-      { cwd: process.cwd() },
+      [environmentScript, "22000"],
+      { cwd: workspace },
     );
 
     const values = environmentValues(readFileSync(environmentFile, "utf8"));
-    expect(values.get("RESPONDER_WORKSPACE_PATH")).toBe(workspace);
+    expect(values.get("RESPONDER_WORKSPACE_PATH")).toBe(
+      realpathSync(workspace),
+    );
     expect(values.get("RESPONDER_PORTLESS_NAME")).toBe("responder.buffalo");
     expect(values.get("COMPOSE_PROJECT_NAME")).toBe("responder-buffalo");
     expect(values.get("CONTROL_PLANE_WEB_PORT")).toBe("22000");
@@ -78,5 +85,7 @@ describe("local environment generation", () => {
     expect(values.get("AI_GATEWAY_API_KEY")).toBe("keep-this-key");
     expect(values.get("CUSTOM_LOCAL_VALUE")).toBe("preserved");
     expect(values.get("INTERNAL_INGEST_TOKEN")).toMatch(/^[a-f0-9]{64}$/);
+    expect(statSync(environmentFile).mode & 0o777).toBe(0o600);
+    expect(readFileSync(sentinelFile, "utf8")).toBe("unchanged\n");
   });
 });

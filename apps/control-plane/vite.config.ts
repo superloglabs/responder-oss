@@ -17,10 +17,12 @@ const uploadsSentrySourceMaps = Boolean(
     process.env.SENTRY_ORG?.trim() &&
     process.env.SENTRY_PROJECT?.trim(),
 );
+const buildsSentrySourceMaps =
+  uploadsSentrySourceMaps || process.env.SENTRY_BUILD_SOURCEMAPS === "true";
 
 export default defineConfig({
   build: {
-    sourcemap: uploadsSentrySourceMaps ? "hidden" : false,
+    sourcemap: buildsSentrySourceMaps ? "hidden" : false,
   },
   plugins: [
     react(),

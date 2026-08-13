@@ -26,8 +26,8 @@ vi.mock("./slack.js", () => ({
 }));
 
 const context = {
-  agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
-  investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
+  agentId: "13131313-1313-4313-8313-131313131313",
+  investigationId: "16161616-1616-4616-8616-161616161616",
   title: "Plant API error rate is elevated",
   traceItems: [],
   source: {

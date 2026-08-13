@@ -29,15 +29,12 @@ import { ClickStackConnectionDialog } from "../components/clickstack-connection-
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import {
   ChevronDownIcon,
-  ClickStackIcon,
   CogIcon,
-  DatadogIcon,
-  GitHubIcon,
+  ProviderGlyph,
   RepositoryIcon,
   SearchIcon,
-  SentryIcon,
-  SlackIcon,
 } from "../components/icons";
+import type { ProviderGlyphId } from "../components/provider-glyphs";
 import {
   Alert,
   Button,
@@ -1937,39 +1934,23 @@ function ChoiceCard({
   );
 }
 
+type ProviderId = Exclude<ProviderGlyphId, "google">;
+
 function ProviderMark({
   connected = false,
   provider,
 }: {
   connected?: boolean;
-  provider:
-    | "github"
-    | "slack"
-    | "sentry"
-    | "datadog"
-    | "custom_mcp"
-    | "clickstack";
+  provider: ProviderId;
 }) {
   return (
-    <span
+    <ProviderGlyph
       className={`providerMark providerMark--${provider} ${
         connected ? "isConnected" : ""
       }`}
-    >
-      {provider === "custom_mcp" ? (
-        "MCP"
-      ) : provider === "sentry" ? (
-        <SentryIcon />
-      ) : provider === "slack" ? (
-        <SlackIcon />
-      ) : provider === "github" ? (
-        <GitHubIcon />
-      ) : provider === "clickstack" ? (
-        <ClickStackIcon />
-      ) : (
-        <DatadogIcon />
-      )}
-    </span>
+      decorative
+      provider={provider}
+    />
   );
 }
 
@@ -2169,8 +2150,10 @@ function GitHubOrganizationPicker({
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
-        <GitHubIcon />
-        <span>{selected?.displayName ?? "Choose an organization"}</span>
+        <ProviderGlyph provider="github" />
+        <span className="repositoryOrganizationPicker__label">
+          {selected?.displayName ?? "Choose an organization"}
+        </span>
         <ChevronDownIcon />
       </button>
       {open ? (

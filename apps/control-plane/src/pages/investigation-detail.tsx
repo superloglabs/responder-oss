@@ -10,6 +10,7 @@ import {
   retryInvestigation,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { providerGlyphs } from "../components/provider-glyphs";
 import { InvestigationThinking } from "../components/investigation-thinking";
 import { InvestigationDetailSkeleton } from "../components/screen-skeletons";
 import { Badge, Button, Panel } from "../design-system";
@@ -907,22 +908,15 @@ function ProviderIcon({
 }: {
   provider: InvestigationDetail["input"]["provider"];
 }) {
+  const label = providerLabel(provider);
+  const shortLabel = providerGlyphs[provider].text;
   return (
     <span
-      aria-label={providerLabel(provider)}
+      aria-label={label}
       className="investigationProviderIcon"
       role="img"
     >
-      <img
-        alt=""
-        src={
-          provider === "slack"
-            ? "/slack-mark.svg"
-            : provider === "sentry"
-              ? "/sentry-mark.svg"
-              : "/datadog-mark.png"
-        }
-      />
+      <span aria-hidden="true">{shortLabel}</span>
     </span>
   );
 }

@@ -16,7 +16,7 @@ const evidence = {
 describe("investigation report", () => {
   it("renders a copy-ready issue remediation prompt", () => {
     const prompt = renderIssueFixPrompt({
-      id: "50124a45-ab04-4e85-aec9-836c1b4f9ad0",
+      id: "07070707-0707-4707-8707-070707070707",
       title: "Null care profile dereference",
       description: "The Nullingia route reads a missing care profile.",
       severity: "SEV-2",
@@ -41,7 +41,7 @@ describe("investigation report", () => {
   });
 
   it("rejects linking the same canonical issue twice", () => {
-    const issueId = "50124a45-ab04-4e85-aec9-836c1b4f9ad0";
+    const issueId = "07070707-0707-4707-8707-070707070707";
     const parsed = investigationReportSubmissionSchema.safeParse({
       schemaVersion: 1,
       headline: "Repeated null dereference",
@@ -56,7 +56,7 @@ describe("investigation report", () => {
   });
 
   it("renders deterministic Slack markdown from structured data", () => {
-    const issueId = "50124a45-ab04-4e85-aec9-836c1b4f9ad0";
+    const issueId = "07070707-0707-4707-8707-070707070707";
     const markdown = renderInvestigationReportMarkdown(
       {
         schemaVersion: 1,

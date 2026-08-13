@@ -9,12 +9,8 @@ import {
 const command = process.argv[2] ?? "status";
 const waitForHealth = process.argv.includes("--wait");
 const keepWatching = process.argv.includes("--watch");
-const healthPollInterval = Number(
-  process.env.RESPONDER_CALLBACK_TARGET_POLL_INTERVAL ?? 500,
-);
-const healthTimeout = Number(
-  process.env.RESPONDER_CALLBACK_TARGET_TIMEOUT ?? 60_000,
-);
+const healthPollInterval = 500;
+const healthTimeout = 60_000;
 
 function localWebPort() {
   if (process.env.CONTROL_PLANE_WEB_PORT) {

@@ -49,12 +49,12 @@ vi.mock("../../../../packages/core/src/integrations/slack-delivery.js", () => ({
 import { acknowledgeSlackAlert } from "./slack.js";
 
 const input = {
-  agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
+  agentId: "13131313-1313-4313-8313-131313131313",
   channelId: "C123",
-  integrationAccountId: "45c9305d-e7ef-4fa2-aa2a-991bf2aa9979",
-  investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
+  integrationAccountId: "04040404-0404-4404-8404-040404040404",
+  investigationId: "16161616-1616-4616-8616-161616161616",
   messageTimestamp: "1785500000.000100",
-  organizationId: "45052f41-0915-4f2f-b547-980f74cff377",
+  organizationId: "03030303-0303-4303-8303-030303030303",
   threadTimestamp: "1785500000.000100",
   title: "Plant API error rate is elevated",
 };

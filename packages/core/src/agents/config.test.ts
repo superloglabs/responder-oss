@@ -10,7 +10,7 @@ const baseConfiguration = {
   repositoryIds: [],
   trigger: {
     kind: "slack_mention" as const,
-    integrationAccountId: "2bcf1cc5-8589-4465-a9f2-7a461d35a43e",
+    integrationAccountId: "02020202-0202-4202-8202-020202020202",
     channelIds: [],
   },
   reporting: {
@@ -41,12 +41,12 @@ describe("agent configuration", () => {
     const manual = agentConfigurationSchema.safeParse({
       ...baseConfiguration,
       prMode: "manual",
-      repositoryIds: ["98bf28fc-92a9-41b2-8108-70db67029f48"],
+      repositoryIds: ["14141414-1414-4414-8414-141414141414"],
     });
     const legacy = agentConfigurationSchema.parse({
       ...baseConfiguration,
       prMode: true,
-      repositoryIds: ["98bf28fc-92a9-41b2-8108-70db67029f48"],
+      repositoryIds: ["14141414-1414-4414-8414-141414141414"],
     });
 
     expect(manual.success && manual.data.prMode).toBe("manual");
@@ -58,7 +58,7 @@ describe("agent configuration", () => {
       ...baseConfiguration,
       trigger: {
         kind: "sentry_issue",
-        integrationAccountId: "2bcf1cc5-8589-4465-a9f2-7a461d35a43e",
+        integrationAccountId: "02020202-0202-4202-8202-020202020202",
         projectIds: ["checkout"],
       },
     });
@@ -72,7 +72,7 @@ describe("agent configuration", () => {
       ...baseConfiguration,
       reporting: {
         mode: "output_channel",
-        integrationAccountId: "2bcf1cc5-8589-4465-a9f2-7a461d35a43e",
+        integrationAccountId: "02020202-0202-4202-8202-020202020202",
         outputChannelId: "incident-reports",
         severities: ["SEV-1", "SEV-2"],
       },
@@ -91,7 +91,7 @@ describe("agent configuration", () => {
       ...baseConfiguration,
       reporting: {
         mode: "output_channel",
-        integrationAccountId: "2bcf1cc5-8589-4465-a9f2-7a461d35a43e",
+        integrationAccountId: "02020202-0202-4202-8202-020202020202",
         outputChannelId: "incident-reports",
         severities: [],
       },

@@ -19,25 +19,25 @@ describe("background jobs", () => {
       investigationJobSchema.parse({
         kind: "investigation",
         config: {
-          agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
-          id: "684a11c5-f5b8-4ff5-b157-592e04164dd3",
+          agentId: "13131313-1313-4313-8313-131313131313",
+          id: "08080808-0808-4808-8808-080808080808",
           model: "instance/default",
-          organizationId: "9ba9e0a6-b15c-4674-bf91-18d70b6ff450",
+          organizationId: "15151515-1515-4515-8515-151515151515",
           prMode: "manual",
           prompt: "Investigate carefully.",
         },
-        investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
+        investigationId: "16161616-1616-4616-8616-161616161616",
         queuedAt: "2026-08-05T08:00:00.000Z",
         request: {
-          agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
+          agentId: "13131313-1313-4313-8313-131313131313",
           body: "The API is returning HTTP 500.",
           externalEventId: "event-1",
           provider: "sentry",
           title: "Production error",
         },
-        runtimeProfileId: "cf72339f-a631-448f-b8af-f9d8336ad879",
+        runtimeProfileId: "19191919-1919-4919-8919-191919191919",
       }).investigationId,
-    ).toBe("9ec74cbd-b9bd-452b-932f-19bc64084203");
+    ).toBe("16161616-1616-4616-8616-161616161616");
   });
 
   it("accepts a remediation job", () => {
@@ -45,16 +45,16 @@ describe("background jobs", () => {
       remediationJobSchema.parse({
         kind: "remediation",
         config: {
-          agentId: "7f83b096-1299-47d3-bd10-d617463a15d1",
-          id: "684a11c5-f5b8-4ff5-b157-592e04164dd3",
+          agentId: "13131313-1313-4313-8313-131313131313",
+          id: "08080808-0808-4808-8808-080808080808",
           model: "instance/default",
-          organizationId: "9ba9e0a6-b15c-4674-bf91-18d70b6ff450",
+          organizationId: "15151515-1515-4515-8515-151515151515",
           prMode: "manual",
           prompt: "Investigate carefully.",
         },
-        investigationId: "9ec74cbd-b9bd-452b-932f-19bc64084203",
+        investigationId: "16161616-1616-4616-8616-161616161616",
         issue: {
-          id: "6e55b174-e903-4d76-973f-9dff4a4e9883",
+          id: "10101010-1010-4010-8010-101010101010",
           title: "Broken route",
           description: "The route throws.",
           severity: "SEV-2",
@@ -62,8 +62,8 @@ describe("background jobs", () => {
           evidence: [],
         },
         queuedAt: "2026-08-05T08:00:00.000Z",
-        remediationRequestId: "4614c371-a4a3-4342-a9a8-36e526377345",
-        runtimeProfileId: "cf72339f-a631-448f-b8af-f9d8336ad879",
+        remediationRequestId: "05050505-0505-4505-8505-050505050505",
+        runtimeProfileId: "19191919-1919-4919-8919-191919191919",
       }).kind,
     ).toBe("remediation");
   });

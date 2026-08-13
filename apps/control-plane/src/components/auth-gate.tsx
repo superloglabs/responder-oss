@@ -9,6 +9,7 @@ import {
 import { trackXSignupPixel } from "../x-pixel";
 import { workspaceSlug } from "./workspace";
 import { ImpersonationBanner } from "./impersonation-banner";
+import { ProviderGlyph } from "./icons";
 
 interface AuthGateProps {
   children: ReactNode;
@@ -130,7 +131,7 @@ function SignIn() {
           onClick={() => void socialSignIn("google")}
           type="button"
         >
-          <GoogleLogo />
+          <ProviderGlyph decorative provider="google" />
           {socialProvider === "google" ? "Opening Google…" : "Continue with Google"}
         </button>
         <button
@@ -139,7 +140,7 @@ function SignIn() {
           onClick={() => void socialSignIn("github")}
           type="button"
         >
-          <GitHubLogo />
+          <ProviderGlyph decorative provider="github" />
           {socialProvider === "github" ? "Opening GitHub…" : "Continue with GitHub"}
         </button>
       </div>
@@ -207,43 +208,6 @@ function SignIn() {
           : "New to Responder? Create an account"}
       </button>
     </>
-  );
-}
-
-function GoogleLogo() {
-  return (
-    <svg aria-hidden="true" height="18" viewBox="0 0 24 24" width="18">
-      <path
-        d="M21.6 12.23c0-.71-.06-1.4-.18-2.06H12v3.9h5.38a4.6 4.6 0 0 1-2 3.02v2.53h3.24c1.9-1.75 2.98-4.33 2.98-7.39Z"
-        fill="#4285f4"
-      />
-      <path
-        d="M12 22c2.7 0 4.98-.9 6.63-2.38l-3.24-2.53c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.61A10 10 0 0 0 12 22Z"
-        fill="#34a853"
-      />
-      <path
-        d="M6.39 13.92A6 6 0 0 1 6.07 12c0-.67.12-1.32.32-1.92V7.47H3.04A10 10 0 0 0 2 12c0 1.63.39 3.17 1.04 4.53l3.35-2.61Z"
-        fill="#fbbc05"
-      />
-      <path
-        d="M12 5.95c1.47 0 2.79.5 3.82 1.49l2.88-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.47l3.35 2.61C7.18 7.71 9.39 5.95 12 5.95Z"
-        fill="#ea4335"
-      />
-    </svg>
-  );
-}
-
-function GitHubLogo() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="currentColor"
-      height="18"
-      viewBox="0 0 24 24"
-      width="18"
-    >
-      <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.23.7-3.91-1.37-3.91-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.26 3.38.97.1-.75.4-1.26.74-1.55-2.58-.29-5.29-1.29-5.29-5.68 0-1.26.45-2.28 1.2-3.09-.12-.29-.52-1.47.11-3.05 0 0 .97-.31 3.16 1.18A11 11 0 0 1 12 6.12c.98 0 1.95.13 2.86.38 2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.76.11 3.05.75.81 1.2 1.83 1.2 3.09 0 4.4-2.72 5.38-5.3 5.67.42.36.79 1.07.79 2.16v3.25c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" />
-    </svg>
   );
 }
 

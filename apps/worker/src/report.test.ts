@@ -39,7 +39,7 @@ describe("investigation report submission", () => {
       automaticPullRequestRequestIds: [],
       issues: [
         {
-          id: "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9",
+          id: "12121212-1212-4212-8212-121212121212",
           title: "Broken route",
           description: "The route throws.",
           severity: "SEV-2",
@@ -93,7 +93,7 @@ describe("investigation report submission", () => {
       accepted: true,
       automaticPullRequestIssueIds: [],
       deliveryWarnings: [],
-      issueIds: ["7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9"],
+      issueIds: ["12121212-1212-4212-8212-121212121212"],
       instruction: "The report was saved.",
       slackMarkdown: "saved markdown",
     });
@@ -117,10 +117,10 @@ describe("investigation report submission", () => {
     const onAutomaticPullRequestRequests = vi.fn().mockResolvedValue(undefined);
     vi.mocked(submitInvestigationReport).mockResolvedValue({
       automaticPullRequestIssueIds: [
-        "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9",
+        "12121212-1212-4212-8212-121212121212",
       ],
       automaticPullRequestRequestIds: [
-        "4614c371-a4a3-4342-a9a8-36e526377345",
+        "05050505-0505-4505-8505-050505050505",
       ],
       issues: [],
       markdown: "saved markdown",
@@ -156,7 +156,7 @@ describe("investigation report submission", () => {
       }),
     );
     expect(onAutomaticPullRequestRequests).toHaveBeenCalledWith([
-      "4614c371-a4a3-4342-a9a8-36e526377345",
+      "05050505-0505-4505-8505-050505050505",
     ]);
   });
 
@@ -241,7 +241,7 @@ describe("investigation report submission", () => {
   });
 
   it("captures replay reports without scheduling pull request fixes", async () => {
-    const existingIssueId = "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9";
+    const existingIssueId = "12121212-1212-4212-8212-121212121212";
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     const report = {
       schemaVersion: 1 as const,
