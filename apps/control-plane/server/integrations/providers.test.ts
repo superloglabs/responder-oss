@@ -1,0 +1,444 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const dnsMocks = vi.hoisted(() => ({
+  lookup: vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
+vi.mock("node:dns/promises", () => ({ lookup: dnsMocks.lookup }));
+
+import {
+  getIntegrationDefinition,
+  integrationIsConfigured,
+} from "./catalog.js";
+import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
+import {
+  datadogAccount,
+} from "./datadog.js";
+import {
+  clickStackAccount,
+  exchangeClickStackCloudCode,
+  registerClickStackCloudClient,
+} from "./clickstack.js";
+import {
+  exchangeGitHubCode,
+  GitHubOAuthError,
+  githubAuthorizeUrl,
+  githubInstallUrl,
+} from "./github.js";
+import { listSentryProjects, sentryInstallUrl } from "./sentry.js";
+import {
+  exchangeSlackCode,
+  joinSlackChannel,
+  SlackChannelJoinError,
+  slackAuthorizeUrl,
+} from "./slack.js";
+
+describe("integration providers", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("captures the Datadog datacenter and regional MCP URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({
+          data: {
+            id: "user-1",
+            attributes: {
+              handle: "operator@example.com",
+              name: "Operator",
+              service_account: false,
+            },
+            relationships: {
+              org: { data: { id: "org-1" } },
+            },
+          },
+          included: [
+            {
+              id: "org-1",
+              type: "orgs",
+              attributes: { name: "Example EU" },
+            },
+          ],
+        }),
+      ),
+    );
+
+    const account = await datadogAccount({
+      apiKey: "api-key",
+      applicationKey: "application-key",
+      site: getDatadogSite("datadoghq.eu"),
+    });
+
+    expect(account.metadata).toMatchObject({
+      datacenter: "EU1",
+      mcpUrl: "https://mcp.datadoghq.eu/v1/mcp",
+      site: "datadoghq.eu",
+      siteName: "EU1",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.datadoghq.eu/api/v2/current_user",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "dd-api-key": "api-key",
+          "dd-application-key": "application-key",
+        }),
+      }),
+    );
+  });
+
+  it("validates ClickStack access through the deployment team API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ data: { id: "team-1", name: "Production" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const infoLog = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await expect(
+      clickStackAccount({
+        accessKey: "personal-access-key",
+        mcpUrl: "https://clickstack.example.com/api/mcp",
+      }),
+    ).resolves.toEqual({
+      displayName: "Production",
+      externalAccountId: "https://clickstack.example.com:team-1",
+      mcpUrl: "https://clickstack.example.com/api/mcp",
+      teamId: "team-1",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(Request), {
+      redirect: "manual",
+    });
+    const request = fetchMock.mock.calls[0]?.[0] as Request;
+    expect(request.url).toBe(
+      "https://clickstack.example.com/api/api/v2/team",
+    );
+    expect(request.headers.get("authorization")).toBe(
+      "Bearer personal-access-key",
+    );
+    expect(infoLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "clickstack_team_validated",
+        mcpUrl: "https://clickstack.example.com/api/mcp",
+        teamId: "team-1",
+      }),
+    );
+  });
+
+  it("logs ClickStack team lookup failures without credentials", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 503 })),
+    );
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      clickStackAccount({
+        accessKey: "personal-access-key",
+        mcpUrl: "https://clickstack.example.com/api/mcp/",
+      }),
+    ).rejects.toThrow("Unable to load the ClickStack team");
+    expect(errorLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "clickstack_team_lookup_failed",
+        mcpUrl: "https://clickstack.example.com/api/mcp",
+        status: 503,
+      }),
+    );
+    expect(errorLog.mock.calls.flat().join(" ")).not.toContain(
+      "personal-access-key",
+    );
+  });
+
+  it("logs rejected ClickStack credentials without the access key", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+    );
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      clickStackAccount({
+        accessKey: "rejected-access-key",
+        mcpUrl: "https://clickstack.example.com/api/mcp",
+      }),
+    ).rejects.toThrow("ClickStack rejected the Personal API Access Key");
+    expect(errorLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "clickstack_credentials_rejected",
+        mcpUrl: "https://clickstack.example.com/api/mcp",
+        status: 401,
+      }),
+    );
+    expect(errorLog.mock.calls.flat().join(" ")).not.toContain(
+      "rejected-access-key",
+    );
+  });
+
+  it("logs ClickStack Cloud client registration failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 503 })),
+    );
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      registerClickStackCloudClient(
+        "https://responder.example/api/integrations/clickstack/callback",
+      ),
+    ).rejects.toThrow("ClickStack client registration failed");
+    expect(errorLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "clickstack_cloud_client_registration_failed",
+        isRedirectResponse: false,
+        redirectUri:
+          "https://responder.example/api/integrations/clickstack/callback",
+        status: 503,
+      }),
+    );
+  });
+
+  it("logs ClickStack Cloud token exchange failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({ error: "invalid_grant" }, { status: 503 }),
+      ),
+    );
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      exchangeClickStackCloudCode({
+        clientId: "dynamic-client-id",
+        code: "authorization-code",
+        codeVerifier: "pkce-verifier",
+        redirectUri:
+          "https://responder.example/api/integrations/clickstack/callback",
+      }),
+    ).rejects.toThrow("ClickStack authorization failed");
+    expect(errorLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "clickstack_cloud_token_exchange_failed",
+        oauthError: "invalid_grant",
+        status: 503,
+      }),
+    );
+  });
+
+  it("builds a tenant-correlated Slack OAuth URL", () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SLACK_CLIENT_ID", "slack-client");
+    vi.stubEnv("SLACK_CLIENT_SECRET", "slack-secret");
+
+    const url = new URL(slackAuthorizeUrl("state-token"));
+
+    expect(url.origin + url.pathname).toBe(
+      "https://slack.com/oauth/v2/authorize",
+    );
+    expect(url.searchParams.get("client_id")).toBe("slack-client");
+    expect(url.searchParams.get("state")).toBe("state-token");
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://responder.example/api/integrations/slack/callback",
+    );
+    const scopes = url.searchParams.get("scope")?.split(",") ?? [];
+    expect(scopes).toContain("app_mentions:read");
+    expect(scopes).toContain("channels:join");
+    expect(scopes).toContain("chat:write");
+    expect(scopes).toContain("chat:write.public");
+    const userScopes = url.searchParams.get("user_scope")?.split(",") ?? [];
+    expect(userScopes).toEqual(
+      expect.arrayContaining(["channels:history", "groups:history"]),
+    );
+  });
+
+  it("joins a selected public Slack channel", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await joinSlackChannel("xoxb-token", "C123");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://slack.com/api/conversations.join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ channel: "C123" }),
+      }),
+    );
+  });
+
+  it("captures the Slack user token used by the hosted MCP", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SLACK_CLIENT_ID", "slack-client");
+    vi.stubEnv("SLACK_CLIENT_SECRET", "slack-secret");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({
+          ok: true,
+          access_token: "xoxb-bot-token",
+          token_type: "bot",
+          scope: "channels:read",
+          bot_user_id: "U-BOT",
+          app_id: "A123",
+          team: { id: "T123", name: "Example" },
+          authed_user: {
+            id: "U123",
+            access_token: "xoxp-user-token",
+            token_type: "user",
+            scope: "channels:history,groups:history",
+          },
+        }),
+      ),
+    );
+
+    await expect(exchangeSlackCode("one-time-code")).resolves.toMatchObject({
+      access_token: "xoxb-bot-token",
+      authed_user: {
+        access_token: "xoxp-user-token",
+        scope: "channels:history,groups:history",
+      },
+    });
+  });
+
+  it("asks for Slack reconnection when auto-join scope is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({ ok: false, error: "missing_scope" }),
+      ),
+    );
+
+    await expect(joinSlackChannel("xoxb-token", "C123")).rejects.toEqual(
+      expect.objectContaining<Partial<SlackChannelJoinError>>({
+        slackCode: "missing_scope",
+      }),
+    );
+  });
+
+  it("builds a tenant-correlated GitHub App authorization URL", () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("GITHUB_APP_ID", "123");
+    vi.stubEnv("GITHUB_APP_SLUG", "responder-test");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "private-key");
+    vi.stubEnv("GITHUB_CLIENT_ID", "github-client");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "github-secret");
+
+    const url = new URL(githubAuthorizeUrl("state-token"));
+
+    expect(url.origin + url.pathname).toBe(
+      "https://github.com/login/oauth/authorize",
+    );
+    expect(url.searchParams.get("client_id")).toBe("github-client");
+    expect(url.searchParams.get("state")).toBe("state-token");
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://responder.example/api/integrations/github/callback",
+    );
+  });
+
+  it("preserves state through GitHub App installation", () => {
+    vi.stubEnv("GITHUB_APP_ID", "123");
+    vi.stubEnv("GITHUB_APP_SLUG", "responder-test");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "private-key");
+    vi.stubEnv("GITHUB_CLIENT_ID", "github-client");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "github-secret");
+
+    const url = new URL(githubInstallUrl("state-token"));
+
+    expect(url.origin + url.pathname).toBe(
+      "https://github.com/apps/responder-test/installations/new",
+    );
+    expect(url.searchParams.get("state")).toBe("state-token");
+  });
+
+  it("preserves GitHub's safe OAuth error code", async () => {
+    vi.stubEnv("GITHUB_APP_ID", "123");
+    vi.stubEnv("GITHUB_APP_SLUG", "responder-test");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "private-key");
+    vi.stubEnv("GITHUB_CLIENT_ID", "github-client");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "github-secret");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({
+          error: "incorrect_client_credentials",
+          error_description: "Sensitive provider detail is discarded",
+        }),
+      ),
+    );
+
+    await expect(exchangeGitHubCode("one-time-code", "")).rejects.toEqual(
+      expect.objectContaining<Partial<GitHubOAuthError>>({
+        githubCode: "incorrect_client_credentials",
+        message:
+          "GitHub OAuth token exchange failed: incorrect_client_credentials",
+      }),
+    );
+  });
+
+  it("preserves state through Sentry App installation", () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+
+    const url = new URL(sentryInstallUrl("state-token"));
+
+    expect(url.origin + url.pathname).toBe(
+      "https://sentry.io/sentry-apps/responder-test/external-install/",
+    );
+    expect(url.searchParams.get("state")).toBe("state-token");
+  });
+
+  it("follows trusted regional Sentry project pagination", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          [{ id: "1", slug: "example", name: "Example" }],
+          {
+            headers: {
+              link: '<https://de.sentry.io/api/0/organizations/example/projects/?cursor=next>; rel="next"; results="true"',
+            },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json([{ id: "2", slug: "responder", name: "Responder" }]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listSentryProjects("token", "example")).resolves.toEqual([
+      expect.objectContaining({ externalId: "1", displayName: "Example" }),
+      expect.objectContaining({ externalId: "2", displayName: "Responder" }),
+    ]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://de.sentry.io/api/0/organizations/example/projects/?cursor=next",
+      expect.any(Object),
+    );
+  });
+
+  it("reports missing provider app configuration", () => {
+    const slack = getIntegrationDefinition("slack");
+    expect(slack).toBeDefined();
+    expect(integrationIsConfigured(slack!)).toBe(false);
+
+    for (const key of slack!.requiredEnvironment) {
+      vi.stubEnv(key, "configured");
+    }
+    expect(integrationIsConfigured(slack!)).toBe(true);
+  });
+
+  it("does not require an unused webhook secret for GitHub setup", () => {
+    const github = getIntegrationDefinition("github");
+    expect(github).toBeDefined();
+    expect(github!.requiredEnvironment).not.toContain("GITHUB_WEBHOOK_SECRET");
+
+    for (const key of github!.requiredEnvironment) {
+      vi.stubEnv(key, "configured");
+    }
+
+    expect(integrationIsConfigured(github!)).toBe(true);
+  });
+});

@@ -1,0 +1,43 @@
+{
+  "name": "@responder/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "concurrently -k -n web,api \"vite\" \"tsx watch server/dev.ts\"",
+    "preview": "vite preview",
+    "start": "tsx server/production.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "1.6.25",
+    "@fontsource-variable/inter": "5.2.8",
+    "@hono/node-server": "2.0.12",
+    "@responder/core": "workspace:*",
+    "@sentry/hono": "10.69.0",
+    "@sentry/node": "10.69.0",
+    "@sentry/react": "10.69.0",
+    "@xyflow/react": "^12.11.2",
+    "better-auth": "1.6.25",
+    "hono": "4.12.32",
+    "posthog-js": "^1.409.5",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "7.18.2",
+    "tsx": "4.20.6",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@sentry/vite-plugin": "5.4.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "tailwindcss": "^4.3.3",
+    "vite": "8.1.5"
+  }
+}

@@ -1,0 +1,247 @@
+import { drizzleAdapter } from "@better-auth/drizzle-adapter";
+import { captureAnalyticsEvent } from "@responder/core/analytics";
+import { captureXSignupConversion } from "@responder/core/x-conversions";
+import { getDatabase } from "../../../packages/core/src/db/client.js";
+import {
+  getAuthUserSupportIdentity,
+  setPlatformRole,
+  type AuthUserSupportIdentity,
+} from "../../../packages/core/src/db/superusers.js";
+import {
+  rememberedOrganizationId,
+  rememberOrganization,
+} from "../../../packages/core/src/db/workspace-preferences.js";
+import { betterAuth } from "better-auth";
+import { admin, organization } from "better-auth/plugins";
+import {
+  adminAc as superuserAc,
+  userAc,
+} from "better-auth/plugins/admin/access";
+import {
+  adminAc as organizationAdminAc,
+  memberAc as organizationMemberAc,
+} from "better-auth/plugins/organization/access";
+
+export const superuserRoles = {
+  superuser: superuserAc,
+  user: userAc,
+};
+
+export function authHandlerErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "internal_error";
+  const detail = `${error.constructor.name} ${error.message}`.toLowerCase();
+  if (/timeout|timed out|etimedout/.test(detail)) return "timeout_error";
+  if (/database|postgres|connection|econnrefused/.test(detail)) {
+    return "database_error";
+  }
+  if (/secret|required|config|environment/.test(detail)) {
+    return "configuration_error";
+  }
+  if (/fetch|network|enotfound|eai_again/.test(detail)) return "network_error";
+  return "internal_error";
+}
+
+export function configuredSuperuserEmails(
+  environment: NodeJS.ProcessEnv = process.env,
+): Set<string> {
+  return new Set(
+    (environment.SUPERUSER_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export function canImpersonateSupportUser(
+  target: AuthUserSupportIdentity | null,
+  superuserEmails: ReadonlySet<string>,
+): boolean {
+  return Boolean(
+    target &&
+      !target.banned &&
+      !target.role?.split(",").includes("superuser") &&
+      !superuserEmails.has(target.email.toLowerCase()),
+  );
+}
+
+async function synchronizeSuperuserRole(
+  userId: string,
+  email: string,
+  context: "session_create_before" | "user_create_after",
+) {
+  const role = configuredSuperuserEmails().has(email.trim().toLowerCase())
+    ? "superuser"
+    : "user";
+  try {
+    await setPlatformRole(userId, role);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "superuser_role_sync_failed",
+        userId,
+        role,
+        context,
+        errorCode: error instanceof Error ? error.constructor.name : "unknown",
+        errorMessage: authHandlerErrorMessage(error),
+      }),
+    );
+    throw error;
+  }
+}
+
+export function createResponderAuth() {
+  const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret) {
+    throw new Error("BETTER_AUTH_SECRET is required for authentication");
+  }
+  const googleClientId = process.env.AUTH_GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.AUTH_GOOGLE_CLIENT_SECRET;
+  const githubClientId = process.env.AUTH_GITHUB_CLIENT_ID;
+  const githubClientSecret = process.env.AUTH_GITHUB_CLIENT_SECRET;
+
+  return betterAuth({
+    appName: "Responder",
+    baseURL,
+    database: drizzleAdapter(getDatabase(), {
+      provider: "pg",
+    }),
+    emailAndPassword: {
+      enabled: true,
+    },
+    socialProviders: {
+      ...(googleClientId && googleClientSecret
+        ? {
+            google: {
+              clientId: googleClientId,
+              clientSecret: googleClientSecret,
+            },
+          }
+        : {}),
+      ...(githubClientId && githubClientSecret
+        ? {
+            github: {
+              clientId: githubClientId,
+              clientSecret: githubClientSecret,
+            },
+          }
+        : {}),
+    },
+    user: {
+      additionalFields: {
+        lastOrganizationId: {
+          fieldName: "last_organization_id",
+          input: false,
+          required: false,
+          returned: false,
+          type: "string",
+        },
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user, context) => {
+            await synchronizeSuperuserRole(user.id, user.email, "user_create_after");
+            const path = context?.path ?? "";
+            const signupMethod = path.includes("google")
+              ? "google"
+              : path.includes("github")
+                ? "github"
+                : path.includes("email")
+                  ? "email"
+                  : "unknown";
+            await captureAnalyticsEvent({
+              distinctId: user.id,
+              event: "user signed up",
+              properties: {
+                email: user.email,
+                name: user.name,
+                signup_method: signupMethod,
+              },
+            });
+            await captureXSignupConversion({
+              conversionId: user.id,
+              email: user.email,
+              twclid: context?.getCookie("responder_twclid") ?? undefined,
+            });
+          },
+        },
+      },
+      session: {
+        create: {
+          async before(session) {
+            const identity = await getAuthUserSupportIdentity(session.userId);
+            if (identity) {
+              await synchronizeSuperuserRole(
+                session.userId,
+                identity.email,
+                "session_create_before",
+              );
+            }
+            const organizationId = await rememberedOrganizationId(session.userId);
+            if (!organizationId) return;
+            return { data: { ...session, activeOrganizationId: organizationId } };
+          },
+        },
+        update: {
+          async after(session) {
+            const organizationId = session.activeOrganizationId;
+            if (typeof organizationId === "string" || organizationId === null) {
+              await rememberOrganization(session.userId, organizationId);
+            }
+          },
+        },
+      },
+    },
+    plugins: [
+      admin({
+        adminRoles: ["superuser"],
+        defaultRole: "user",
+        impersonationSessionDuration: 60 * 60,
+        roles: superuserRoles,
+      }),
+      organization({
+        allowUserToCreateOrganization: true,
+        creatorRole: "admin",
+        roles: {
+          admin: organizationAdminAc,
+          member: organizationMemberAc,
+        },
+        organizationHooks: {
+          afterCreateOrganization: async ({ organization, user }) => {
+            await captureAnalyticsEvent({
+              distinctId: user.id,
+              event: "organization created",
+              organizationId: organization.id,
+              properties: {
+                organization_name: organization.name,
+                organization_slug: organization.slug,
+              },
+            });
+          },
+        },
+      }),
+    ],
+    secret,
+    trustedOrigins: [baseURL],
+    advanced: {
+      cookiePrefix: "responder-auth",
+      database: {
+        generateId: "uuid",
+      },
+      ipAddress: {
+        ipAddressHeaders: ["x-responder-client-ip"],
+      },
+    },
+  });
+}
+
+export type ResponderAuth = ReturnType<typeof createResponderAuth>;
+
+let auth: ResponderAuth | undefined;
+
+export function getAuth(): ResponderAuth {
+  auth ??= createResponderAuth();
+  return auth;
+}

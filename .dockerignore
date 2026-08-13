@@ -1,0 +1,9 @@
+**/.env
+**/.env.*
+**/.git
+**/.DS_Store
+**/cdk.out
+**/dist
+**/node_modules
+.context
+scripts

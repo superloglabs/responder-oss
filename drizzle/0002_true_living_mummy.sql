@@ -1,0 +1,1 @@
+ALTER TYPE "public"."trigger_kind" ADD VALUE 'datadog_monitor' BEFORE 'slack_channel';

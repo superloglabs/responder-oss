@@ -1,0 +1,3 @@
+DROP INDEX "integration_accounts_provider_external_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "integration_accounts_organization_provider_external_idx" ON "integration_accounts" USING btree ("organization_id","provider","external_account_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "integration_accounts_non_slack_provider_external_idx" ON "integration_accounts" USING btree ("provider","external_account_id") WHERE "integration_accounts"."provider" <> 'slack';

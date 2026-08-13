@@ -1,0 +1,22 @@
+name: ${COMPOSE_PROJECT_NAME:-responder-local}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    network_mode: bridge
+    environment:
+      POSTGRES_DB: responder
+      POSTGRES_PASSWORD: responder
+      POSTGRES_USER: responder
+    ports:
+      - "127.0.0.1:${LOCAL_DATABASE_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U responder -d responder"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:

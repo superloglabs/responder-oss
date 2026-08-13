@@ -1,0 +1,25 @@
+{
+  "name": "@responder/worker",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@daytonaio/sdk": "0.203.0",
+    "@opentelemetry/api": "1.9.1",
+    "@openai/agents": "0.14.2",
+    "@openai/agents-extensions": "0.14.2",
+    "@responder/core": "workspace:*",
+    "@sentry/node": "10.69.0",
+    "openai": "6.49.0",
+    "tsx": "4.20.6",
+    "zod": "4.4.3"
+  }
+}

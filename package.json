@@ -1,0 +1,69 @@
+{
+  "name": "responder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hostable incident-investigation agents for Sentry, Datadog, and Slack.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/superloglabs/responder-oss#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/superloglabs/responder-oss.git"
+  },
+  "bugs": {
+    "url": "https://github.com/superloglabs/responder-oss/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.15.0",
+  "scripts": {
+    "auth:generate": "pnpm dlx auth@1.6.25 generate --config apps/control-plane/server/auth.cli.ts --output packages/core/src/db/auth-schema.ts --yes",
+    "build": "pnpm --filter @responder/control-plane build",
+    "build:app": "pnpm --filter @responder/control-plane build",
+    "callbacks:clear": "bash scripts/local-tunnel.sh clear",
+    "callbacks:status": "bash scripts/local-tunnel.sh status",
+    "callbacks:use": "bash scripts/local-tunnel.sh claim",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "dev": "pnpm --filter @responder/control-plane dev",
+    "dev:worker": "bash scripts/local-worker.sh",
+    "dev:callback-bridge": "node scripts/local-callback-bridge.mjs",
+    "dev:full": "concurrently -k -n app,worker \"pnpm dev\" \"bash scripts/local-worker.sh\"",
+    "dev:local": "concurrently -k -n app,worker,callbacks \"pnpm dev\" \"bash scripts/local-worker.sh\" \"pnpm dev:callback-bridge\"",
+    "dev:local:ngrok": "concurrently -k -n app,worker,callbacks,ngrok \"pnpm dev\" \"bash scripts/local-worker.sh\" \"pnpm dev:callback-bridge\" \"pnpm dev:ngrok\"",
+    "dev:ngrok": "node scripts/local-ngrok.mjs",
+    "lint": "eslint apps packages",
+    "local:dev": "bash scripts/local-dev.sh",
+    "local:doctor": "bash scripts/local-doctor.sh",
+    "local:down": "bash scripts/local-down.sh",
+    "local:setup": "bash scripts/local-setup.sh",
+    "local:trust": "bash scripts/local-trust.sh",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "tunnel:claim": "bash scripts/local-tunnel.sh claim",
+    "tunnel:release": "bash scripts/local-tunnel.sh release",
+    "tunnel:status": "bash scripts/local-tunnel.sh status",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.2",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "26.0.0",
+    "@types/pg": "8.20.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "concurrently": "9.2.1",
+    "drizzle-kit": "0.31.7",
+    "eslint": "9.39.2",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.3",
+    "portless": "0.15.1",
+    "tsx": "4.20.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vite": "8.1.5",
+    "vitest": "4.1.9"
+  }
+}

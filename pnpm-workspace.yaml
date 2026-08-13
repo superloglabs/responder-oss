@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  '@sentry/cli': true
+  core-js: false
+  esbuild: true
+  protobufjs: false
+  sharp: true
+  unrs-resolver: true

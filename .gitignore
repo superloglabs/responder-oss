@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.local
+.env.providers.local
+.eve
+.next
+.output
+cdk.out/
+coverage
+dist
+node_modules
+playwright-report
+test-results
+tsconfig.tsbuildinfo
+*.log
+.env*
+!.env.example

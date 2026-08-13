@@ -1,0 +1,1 @@
+ALTER TABLE "investigations" ADD CONSTRAINT "investigations_replay_source_fk" FOREIGN KEY ("replay_of_investigation_id") REFERENCES "public"."investigations"("id") ON DELETE set null ON UPDATE no action;

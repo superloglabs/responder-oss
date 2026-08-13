@@ -1,0 +1,1 @@
+ALTER TABLE "integration_connection_states" ADD COLUMN "metadata" jsonb DEFAULT '{}'::jsonb NOT NULL;

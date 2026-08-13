@@ -1,0 +1,1 @@
+DROP INDEX "integration_accounts_non_slack_provider_external_idx";

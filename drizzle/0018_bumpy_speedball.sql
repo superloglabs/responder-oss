@@ -1,0 +1,1 @@
+ALTER TABLE "agent_config_versions" ADD COLUMN "context_resource_ids" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -1,0 +1,87 @@
+export const productIntegrationIds = [
+  "github",
+  "slack",
+  "sentry",
+  "datadog",
+  "custom_mcp",
+  "clickstack",
+] as const;
+
+export type ProductIntegrationId = (typeof productIntegrationIds)[number];
+
+interface IntegrationDefinition {
+  id: ProductIntegrationId;
+  name: string;
+  description: string;
+  implemented: boolean;
+  requiredEnvironment: string[];
+}
+
+export const integrationCatalog: IntegrationDefinition[] = [
+  {
+    id: "github",
+    name: "GitHub",
+    description: "Repository context and optional pull request creation.",
+    implemented: true,
+    requiredEnvironment: [
+      "GITHUB_APP_ID",
+      "GITHUB_APP_SLUG",
+      "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_CLIENT_ID",
+      "GITHUB_CLIENT_SECRET",
+    ],
+  },
+  {
+    id: "slack",
+    name: "Slack",
+    description: "Channel and mention triggers with investigation reporting.",
+    implemented: true,
+    requiredEnvironment: [
+      "SLACK_CLIENT_ID",
+      "SLACK_CLIENT_SECRET",
+      "SLACK_SIGNING_SECRET",
+    ],
+  },
+  {
+    id: "sentry",
+    name: "Sentry",
+    description: "Issue triggers with event, trace, and project context.",
+    implemented: true,
+    requiredEnvironment: [
+      "SENTRY_APP_SLUG",
+      "SENTRY_CLIENT_ID",
+      "SENTRY_CLIENT_SECRET",
+    ],
+  },
+  {
+    id: "datadog",
+    name: "Datadog",
+    description: "Monitor triggers with logs, metrics, and trace context.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "custom_mcp",
+    name: "Custom MCP",
+    description: "Connect any remote MCP server as investigation context.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "clickstack",
+    name: "ClickStack / HyperDX",
+    description: "Logs, traces, metrics, and service context through MCP.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+];
+
+export function integrationIsConfigured(definition: IntegrationDefinition): boolean {
+  return definition.requiredEnvironment.every((key) => Boolean(process.env[key]));
+}
+
+export function getIntegrationDefinition(
+  id: string,
+): IntegrationDefinition | undefined {
+  return integrationCatalog.find((definition) => definition.id === id);
+}

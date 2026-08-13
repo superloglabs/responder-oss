@@ -1,0 +1,689 @@
+import { randomUUID } from "node:crypto";
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  or,
+} from "drizzle-orm";
+import type {
+  InvestigationReportSubmission,
+  IssueEvidence,
+  StructuredInvestigationReport,
+} from "../investigations/report.js";
+import { renderInvestigationReportMarkdown } from "../investigations/report.js";
+import { getDatabase } from "./client.js";
+import {
+  agentConfigVersions,
+  agents,
+  integrationAccounts,
+  investigationIssues,
+  investigations,
+  issuePullRequests,
+  issues,
+  type AgentPrMode,
+  type InvestigationSlackTraceItem,
+} from "./schema.js";
+import { getIssuePullRequestState } from "./pull-requests.js";
+
+export interface IssueEmbedding {
+  model: string;
+  vector: number[];
+}
+
+export interface PreparedInvestigationReportSubmission {
+  report: InvestigationReportSubmission;
+  newIssueEmbeddings: Array<IssueEmbedding | null>;
+}
+
+export function issueEmbeddingText(issue: {
+  title: string;
+  description: string;
+  remediation?: string;
+}): string {
+  return [
+    `Title: ${issue.title}`,
+    `Description: ${issue.description}`,
+    issue.remediation ? `Remediation: ${issue.remediation}` : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+}
+
+export async function listIssueSearchCandidates(
+  organizationId: string,
+  limit = 1_000,
+) {
+  return getDatabase()
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      evidence: issues.evidence,
+      embedding: issues.embedding,
+      embeddingModel: issues.embeddingModel,
+      createdAt: issues.createdAt,
+    })
+    .from(issues)
+    .where(
+      and(
+        eq(issues.organizationId, organizationId),
+        isNull(issues.archivedAt),
+      ),
+    )
+    .orderBy(desc(issues.createdAt))
+    .limit(limit);
+}
+
+export async function searchIssuesByText(
+  organizationId: string,
+  query: string,
+  limit: number,
+) {
+  const pattern = `%${query.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+  return getDatabase()
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      evidence: issues.evidence,
+      createdAt: issues.createdAt,
+    })
+    .from(issues)
+    .where(
+      and(
+        eq(issues.organizationId, organizationId),
+        isNull(issues.archivedAt),
+        or(
+          ilike(issues.title, pattern),
+          ilike(issues.description, pattern),
+          ilike(issues.remediation, pattern),
+        ),
+      ),
+    )
+    .orderBy(desc(issues.createdAt))
+    .limit(limit);
+}
+
+export async function submitInvestigationReport(input: {
+  investigationId: string;
+  organizationId: string;
+  submission: PreparedInvestigationReportSubmission;
+}) {
+  const db = getDatabase();
+  return db.transaction(async (tx) => {
+    const investigationRows = await tx
+      .select({
+        id: investigations.id,
+        status: investigations.status,
+        agentConfigVersionId: investigations.agentConfigVersionId,
+        prMode: agentConfigVersions.prMode,
+      })
+      .from(investigations)
+      .innerJoin(
+        agentConfigVersions,
+        eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+      )
+      .where(
+        and(
+          eq(investigations.id, input.investigationId),
+          eq(investigations.organizationId, input.organizationId),
+        ),
+      )
+      .limit(1);
+    const investigation = investigationRows[0];
+    if (!investigation) throw new Error("Investigation not found");
+    if (
+      investigation.status !== "pending" &&
+      investigation.status !== "investigating"
+    ) {
+      throw new Error("Investigation report has already been submitted");
+    }
+
+    const existingIds = input.submission.report.issues
+      .filter((issue) => issue.resolution === "existing")
+      .map((issue) => issue.issueId);
+    const existingRows = existingIds.length
+      ? await tx
+          .select()
+          .from(issues)
+          .where(
+            and(
+              eq(issues.organizationId, input.organizationId),
+              isNull(issues.archivedAt),
+              inArray(issues.id, existingIds),
+            ),
+          )
+      : [];
+    const canonicalById = new Map(existingRows.map((issue) => [issue.id, issue]));
+    if (canonicalById.size !== new Set(existingIds).size) {
+      throw new Error("One or more existing issues are unavailable");
+    }
+
+    const references: StructuredInvestigationReport["issues"] = [];
+    let newIssueIndex = 0;
+    for (const submittedIssue of input.submission.report.issues) {
+      if (submittedIssue.resolution === "existing") {
+        references.push({
+          issueId: submittedIssue.issueId,
+          relationship: "recurrence",
+          evidence: submittedIssue.evidence,
+        });
+        continue;
+      }
+
+      const embedding = input.submission.newIssueEmbeddings[newIssueIndex] ?? null;
+      newIssueIndex += 1;
+      const issueId = randomUUID();
+      const inserted = await tx
+        .insert(issues)
+        .values({
+          id: issueId,
+          organizationId: input.organizationId,
+          title: submittedIssue.title,
+          description: submittedIssue.description,
+          severity: submittedIssue.severity,
+          remediation: submittedIssue.remediation,
+          evidence: submittedIssue.evidence,
+          embedding: embedding?.vector ?? null,
+          embeddingModel: embedding?.model ?? null,
+        })
+        .returning();
+      canonicalById.set(issueId, inserted[0]!);
+      references.push({
+        issueId,
+        relationship: "new",
+        evidence: submittedIssue.evidence,
+      });
+    }
+
+    const report: StructuredInvestigationReport = {
+      schemaVersion: 1,
+      headline: input.submission.report.headline,
+      summary: input.submission.report.summary,
+      issues: references,
+    };
+    const reportIssues = references.map((reference) => {
+      const issue = canonicalById.get(reference.issueId);
+      if (!issue) throw new Error("Unable to resolve submitted issue");
+      return issue;
+    });
+    const markdown = renderInvestigationReportMarkdown(report, reportIssues);
+    if (references.length > 0) {
+      await tx.insert(investigationIssues).values(
+        references.map((reference) => ({
+          investigationId: input.investigationId,
+          issueId: reference.issueId,
+          relationship: reference.relationship,
+          evidence: reference.evidence,
+        })),
+      );
+    }
+    const candidatePullRequestIssueIds = references.map(
+      (reference) => reference.issueId,
+    );
+    const existingPullRequestIssueIds =
+      investigation.prMode === "always" &&
+      candidatePullRequestIssueIds.length > 0
+        ? new Set(
+            (
+              await tx
+                .select({ issueId: issuePullRequests.issueId })
+                .from(issuePullRequests)
+                .where(
+                  and(
+                    inArray(
+                      issuePullRequests.issueId,
+                      candidatePullRequestIssueIds,
+                    ),
+                    inArray(issuePullRequests.status, [
+                      "queued",
+                      "creating",
+                      "created",
+                    ]),
+                  ),
+                )
+            ).map((request) => request.issueId),
+          )
+        : new Set<string>();
+    const automaticPullRequestIssueIds = candidatePullRequestIssueIds.filter(
+      (issueId) => !existingPullRequestIssueIds.has(issueId),
+    );
+    const automaticPullRequestRequests =
+      investigation.prMode === "always" &&
+      automaticPullRequestIssueIds.length > 0
+        ? await tx
+            .insert(issuePullRequests)
+            .values(
+              automaticPullRequestIssueIds.map((issueId) => ({
+                issueId,
+                investigationId: input.investigationId,
+                agentConfigVersionId: investigation.agentConfigVersionId,
+              })),
+            )
+            .returning({ id: issuePullRequests.id })
+        : [];
+    await tx
+      .update(investigations)
+      .set({
+        status: "resolved",
+        structuredReport: report,
+        reportMarkdown: markdown,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(investigations.id, input.investigationId));
+
+    return {
+      report,
+      issues: reportIssues.map((issue) => ({
+        id: issue.id,
+        title: issue.title,
+        description: issue.description,
+        severity: issue.severity,
+        remediation: issue.remediation,
+      })),
+      markdown,
+      automaticPullRequestIssueIds:
+        investigation.prMode === "always"
+          ? automaticPullRequestIssueIds
+          : [],
+      automaticPullRequestRequestIds: automaticPullRequestRequests.map(
+        (request) => request.id,
+      ),
+    };
+  });
+}
+
+export async function listIssues(
+  organizationId: string,
+  includeArchived = false,
+) {
+  return getDatabase()
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      archivedAt: issues.archivedAt,
+      createdAt: issues.createdAt,
+    })
+    .from(issues)
+    .where(
+      includeArchived
+        ? eq(issues.organizationId, organizationId)
+        : and(
+            eq(issues.organizationId, organizationId),
+            isNull(issues.archivedAt),
+          ),
+    )
+    .orderBy(desc(issues.createdAt));
+}
+
+export async function getIssueDetail(
+  organizationId: string,
+  issueId: string,
+) {
+  const db = getDatabase();
+  const issueRows = await db
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      evidence: issues.evidence,
+      archivedAt: issues.archivedAt,
+      createdAt: issues.createdAt,
+    })
+    .from(issues)
+    .where(
+      and(eq(issues.id, issueId), eq(issues.organizationId, organizationId)),
+    )
+    .limit(1);
+  const issue = issueRows[0];
+  if (!issue) return null;
+
+  const relatedInvestigations = await db
+    .select({
+      id: investigations.id,
+      agentId: investigations.agentId,
+      agentName: agents.name,
+      title: investigations.title,
+      status: investigations.status,
+      relationship: investigationIssues.relationship,
+      evidence: investigationIssues.evidence,
+      createdAt: investigations.createdAt,
+      completedAt: investigations.completedAt,
+    })
+    .from(investigationIssues)
+    .innerJoin(
+      investigations,
+      eq(investigations.id, investigationIssues.investigationId),
+    )
+    .innerJoin(agents, eq(agents.id, investigations.agentId))
+    .where(
+      and(
+        eq(investigationIssues.issueId, issue.id),
+        eq(investigations.organizationId, organizationId),
+      ),
+    )
+    .orderBy(desc(investigations.createdAt));
+
+  return {
+    issue,
+    investigations: relatedInvestigations,
+    pullRequestState: await getIssuePullRequestState(organizationId, issueId),
+  };
+}
+
+export async function setIssueArchived(input: {
+  archived: boolean;
+  issueId: string;
+  organizationId: string;
+}) {
+  const rows = await getDatabase()
+    .update(issues)
+    .set({
+      archivedAt: input.archived ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(issues.id, input.issueId),
+        eq(issues.organizationId, input.organizationId),
+      ),
+    )
+    .returning({ id: issues.id, archivedAt: issues.archivedAt });
+  return rows[0] ?? null;
+}
+
+export async function getIssueForSlackAction(input: {
+  issueId: string;
+  teamId: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      evidence: issues.evidence,
+      organizationId: issues.organizationId,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(issues)
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.organizationId, issues.organizationId),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.externalAccountId, input.teamId),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(eq(issues.id, input.issueId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getInvestigationIssueDetails(investigationId: string) {
+  return getDatabase()
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      relationship: investigationIssues.relationship,
+      evidence: investigationIssues.evidence,
+      createdAt: issues.createdAt,
+    })
+    .from(investigationIssues)
+    .innerJoin(issues, eq(issues.id, investigationIssues.issueId))
+    .where(eq(investigationIssues.investigationId, investigationId))
+    .orderBy(issues.createdAt);
+}
+
+export interface SlackInvestigationDeliveryContext {
+  agentId: string;
+  investigationId: string;
+  prMode: AgentPrMode;
+  report: StructuredInvestigationReport;
+  title: string;
+  traceItems?: InvestigationSlackTraceItem[];
+  issues: Array<{
+    id: string;
+    title: string;
+    description: string;
+    severity: "SEV-1" | "SEV-2" | "SEV-3";
+    remediation: string;
+    relationship: "new" | "recurrence";
+    evidence: IssueEvidence[];
+  }>;
+  source: {
+    channelId: string;
+    encryptedCredentials: string;
+    messageTimestamp: string | null;
+    reactionTimestamp: string;
+    threadTimestamp: string;
+  } | null;
+  output: {
+    channelId: string;
+    encryptedCredentials: string;
+    severities: Array<"SEV-1" | "SEV-2" | "SEV-3"> | null;
+  } | null;
+}
+
+export interface SlackInvestigationLiveContext {
+  agentId: string;
+  investigationId: string;
+  title: string;
+  traceItems: InvestigationSlackTraceItem[];
+  source: {
+    channelId: string;
+    encryptedCredentials: string;
+    messageTimestamp: string | null;
+    threadTimestamp: string;
+  };
+}
+
+function slackSourceAccountId(input: {
+  trigger: string;
+  triggerConfig: Record<string, unknown>;
+}): string | null {
+  return (input.trigger === "slack_channel" || input.trigger === "slack_mention") &&
+    typeof input.triggerConfig.integrationAccountId === "string"
+    ? input.triggerConfig.integrationAccountId
+    : null;
+}
+
+export async function getSlackInvestigationLiveContext(
+  investigationId: string,
+): Promise<SlackInvestigationLiveContext | null> {
+  const rows = await getDatabase()
+    .select({
+      agentId: investigations.agentId,
+      id: investigations.id,
+      input: investigations.input,
+      messageTimestamp: investigations.slackMessageTimestamp,
+      organizationId: investigations.organizationId,
+      title: investigations.title,
+      traceItems: investigations.slackTraceItems,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(investigations)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+    )
+    .where(eq(investigations.id, investigationId))
+    .limit(1);
+  const investigation = rows[0];
+  if (!investigation || investigation.input.provider !== "slack") return null;
+
+  const accountId = slackSourceAccountId({
+    trigger: investigation.trigger,
+    triggerConfig: investigation.triggerConfig,
+  });
+  const channelId = investigation.input.attributes?.channelId;
+  const sourceTimestamp = investigation.input.attributes?.timestamp;
+  const threadTimestamp =
+    investigation.input.attributes?.threadTimestamp ?? sourceTimestamp;
+  if (
+    !accountId ||
+    typeof channelId !== "string" ||
+    typeof threadTimestamp !== "string"
+  ) {
+    return null;
+  }
+
+  const accounts = await getDatabase()
+    .select({ encryptedCredentials: integrationAccounts.encryptedCredentials })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, accountId),
+        eq(integrationAccounts.organizationId, investigation.organizationId),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .limit(1);
+  const encryptedCredentials = accounts[0]?.encryptedCredentials;
+  if (!encryptedCredentials) return null;
+
+  return {
+    agentId: investigation.agentId,
+    investigationId: investigation.id,
+    title: investigation.title,
+    traceItems: investigation.traceItems,
+    source: {
+      channelId,
+      encryptedCredentials,
+      messageTimestamp: investigation.messageTimestamp,
+      threadTimestamp,
+    },
+  };
+}
+
+export async function getSlackInvestigationDeliveryContext(
+  investigationId: string,
+): Promise<SlackInvestigationDeliveryContext | null> {
+  const db = getDatabase();
+  const rows = await db
+    .select({
+      agentId: investigations.agentId,
+      id: investigations.id,
+      input: investigations.input,
+      messageTimestamp: investigations.slackMessageTimestamp,
+      organizationId: investigations.organizationId,
+      report: investigations.structuredReport,
+      title: investigations.title,
+      traceItems: investigations.slackTraceItems,
+      prMode: agentConfigVersions.prMode,
+      reportConfig: agentConfigVersions.reportConfig,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(investigations)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+    )
+    .where(eq(investigations.id, investigationId))
+    .limit(1);
+  const investigation = rows[0];
+  if (!investigation?.report) return null;
+
+  const sourceAccountId =
+    investigation.input.provider === "slack"
+      ? slackSourceAccountId({
+          trigger: investigation.trigger,
+          triggerConfig: investigation.triggerConfig,
+        })
+      : null;
+  const outputConfig =
+    investigation.reportConfig.mode === "thread"
+      ? null
+      : investigation.reportConfig;
+  const accountIds = [
+    ...new Set(
+      [sourceAccountId, outputConfig?.integrationAccountId].filter(
+        (value): value is string => Boolean(value),
+      ),
+    ),
+  ];
+  const accountRows = accountIds.length
+    ? await db
+        .select({
+          id: integrationAccounts.id,
+          encryptedCredentials: integrationAccounts.encryptedCredentials,
+        })
+        .from(integrationAccounts)
+        .where(
+          and(
+            inArray(integrationAccounts.id, accountIds),
+            eq(integrationAccounts.organizationId, investigation.organizationId),
+            eq(integrationAccounts.provider, "slack"),
+            eq(integrationAccounts.status, "connected"),
+          ),
+        )
+    : [];
+  const credentialsByAccount = new Map(
+    accountRows.map((account) => [account.id, account.encryptedCredentials]),
+  );
+  const sourceChannelId = investigation.input.attributes?.channelId;
+  const sourceReactionTimestamp = investigation.input.attributes?.timestamp;
+  const sourceTimestamp =
+    investigation.input.attributes?.threadTimestamp ??
+    investigation.input.attributes?.timestamp;
+  const sourceCredentials = sourceAccountId
+    ? credentialsByAccount.get(sourceAccountId)
+    : null;
+  const outputCredentials = outputConfig
+    ? credentialsByAccount.get(outputConfig.integrationAccountId)
+    : null;
+
+  return {
+    agentId: investigation.agentId,
+    investigationId: investigation.id,
+    prMode: investigation.prMode,
+    report: investigation.report,
+    title: investigation.title,
+    traceItems: investigation.traceItems,
+    issues: await getInvestigationIssueDetails(investigation.id),
+    source:
+      typeof sourceChannelId === "string" &&
+      typeof sourceReactionTimestamp === "string" &&
+      typeof sourceTimestamp === "string" &&
+      sourceCredentials
+        ? {
+            channelId: sourceChannelId,
+            encryptedCredentials: sourceCredentials,
+            messageTimestamp: investigation.messageTimestamp,
+            reactionTimestamp: sourceReactionTimestamp,
+            threadTimestamp: sourceTimestamp,
+          }
+        : null,
+    output:
+      outputConfig && outputCredentials
+        ? {
+            channelId: outputConfig.outputChannelId,
+            encryptedCredentials: outputCredentials,
+            severities: outputConfig.severities ?? null,
+          }
+        : null,
+  };
+}
+
+export type IssueDetailEvidence = IssueEvidence;
