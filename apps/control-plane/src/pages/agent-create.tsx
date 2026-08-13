@@ -29,14 +29,10 @@ import { ClickStackConnectionDialog } from "../components/clickstack-connection-
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import {
   ChevronDownIcon,
-  ClickStackIcon,
   CogIcon,
-  DatadogIcon,
-  GitHubIcon,
+  ProviderGlyph,
   RepositoryIcon,
   SearchIcon,
-  SentryIcon,
-  SlackIcon,
 } from "../components/icons";
 import {
   Alert,
@@ -1937,39 +1933,43 @@ function ChoiceCard({
   );
 }
 
+type ProviderId =
+  | "github"
+  | "slack"
+  | "sentry"
+  | "datadog"
+  | "custom_mcp"
+  | "clickstack";
+
+const providerGlyphs: Record<
+  ProviderId,
+  { label: string; text: string }
+> = {
+  clickstack: { label: "ClickStack", text: "CS" },
+  custom_mcp: { label: "Custom MCP", text: "MCP" },
+  datadog: { label: "Datadog", text: "DD" },
+  github: { label: "GitHub", text: "GH" },
+  sentry: { label: "Sentry", text: "SE" },
+  slack: { label: "Slack", text: "SL" },
+};
+
 function ProviderMark({
   connected = false,
   provider,
 }: {
   connected?: boolean;
-  provider:
-    | "github"
-    | "slack"
-    | "sentry"
-    | "datadog"
-    | "custom_mcp"
-    | "clickstack";
+  provider: ProviderId;
 }) {
+  const glyph = providerGlyphs[provider];
   return (
-    <span
+    <ProviderGlyph
       className={`providerMark providerMark--${provider} ${
         connected ? "isConnected" : ""
       }`}
-    >
-      {provider === "custom_mcp" ? (
-        "MCP"
-      ) : provider === "sentry" ? (
-        <SentryIcon />
-      ) : provider === "slack" ? (
-        <SlackIcon />
-      ) : provider === "github" ? (
-        <GitHubIcon />
-      ) : provider === "clickstack" ? (
-        <ClickStackIcon />
-      ) : (
-        <DatadogIcon />
-      )}
-    </span>
+      decorative
+      label={glyph.label}
+      text={glyph.text}
+    />
   );
 }
 
@@ -2169,8 +2169,10 @@ function GitHubOrganizationPicker({
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
-        <GitHubIcon />
-        <span>{selected?.displayName ?? "Choose an organization"}</span>
+        <ProviderGlyph label="GitHub" text="GH" />
+        <span className="repositoryOrganizationPicker__label">
+          {selected?.displayName ?? "Choose an organization"}
+        </span>
         <ChevronDownIcon />
       </button>
       {open ? (

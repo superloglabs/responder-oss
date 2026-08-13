@@ -703,6 +703,20 @@ button:disabled {
   gap: 10px;
 }
 
+.providerGlyph {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: inherit;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .socialAuth__button {
   height: 42px;
   padding: 0 14px;
@@ -4902,22 +4916,6 @@ button:disabled {
   font-weight: 600;
 }
 
-.providerMark svg {
-  display: block;
-}
-
-.configurationDialog__header .providerMark--github svg {
-  transform: translate(0, 7.5px);
-}
-
-.providerMark--github {
-  color: var(--foreground);
-}
-
-.providerMark--datadog {
-  color: #fff;
-}
-
 .providerMark.isConnected {
   border-color: var(--live);
 }
@@ -5583,13 +5581,13 @@ button:disabled {
   background: var(--background);
 }
 
-.repositoryOrganizationPicker__trigger > svg:first-child {
+.repositoryOrganizationPicker__trigger > .providerGlyph {
   width: 18px;
   height: 18px;
   color: var(--foreground);
 }
 
-.repositoryOrganizationPicker__trigger > span {
+.repositoryOrganizationPicker__trigger > .repositoryOrganizationPicker__label {
   min-width: 0;
   overflow: hidden;
   flex: 1 1 auto;

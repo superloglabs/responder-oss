@@ -13,17 +13,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
+      DEPLOY_REPOSITORY: ${{ vars.HOSTED_DEPLOY_REPOSITORY }}
       DEPLOY_TOKEN: ${{ secrets.HOSTED_DEPLOY_TOKEN }}
+      DEPLOY_WORKFLOW: ${{ vars.HOSTED_DEPLOY_WORKFLOW }}
       SOURCE_SHA: ${{ github.sha }}
     steps:
       - name: Check deployment token
         id: configuration
         shell: bash
         run: |
-          if [[ -z "${DEPLOY_TOKEN}" ]]; then
+          if [[ -z "${DEPLOY_TOKEN}" ]] || \
+            [[ -z "${DEPLOY_REPOSITORY}" ]] || \
+            [[ -z "${DEPLOY_WORKFLOW}" ]]; then
             echo "Hosted deployment is not configured yet."
             echo "enabled=false" >> "${GITHUB_OUTPUT}"
           else
+            if [[ ! "${DEPLOY_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || \
+              [[ ! "${DEPLOY_WORKFLOW}" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+              echo "Hosted deployment configuration is invalid."
+              exit 1
+            fi
             echo "enabled=true" >> "${GITHUB_OUTPUT}"
           fi
 
@@ -41,4 +50,4 @@ jobs:
             --header "Authorization: Bearer ${DEPLOY_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             --data "${payload}" \
-            https://api.github.com/repos/superloglabs/responder/actions/workflows/deploy-production.yml/dispatches
+            "https://api.github.com/repos/${DEPLOY_REPOSITORY}/actions/workflows/${DEPLOY_WORKFLOW}/dispatches"

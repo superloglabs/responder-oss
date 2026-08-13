@@ -5,7 +5,7 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
-import { ArrowIcon, ClickStackIcon } from "../components/icons";
+import { ArrowIcon, ProviderGlyph } from "../components/icons";
 import { SettingsTabs } from "../components/settings-tabs";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
@@ -37,6 +37,15 @@ interface IntegrationSummary {
 interface IntegrationResponse {
   integrations: IntegrationSummary[];
 }
+
+const integrationGlyphs: Record<IntegrationSummary["id"], string> = {
+  clickstack: "CS",
+  custom_mcp: "MCP",
+  datadog: "DD",
+  github: "GH",
+  sentry: "SE",
+  slack: "SL",
+};
 
 function connectionNotice(): {
   tone: "error" | "success" | "warning";
@@ -249,17 +258,12 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
         type="button"
       >
         <span className="integrationCard__top">
-          <span className={`integrationLogo integrationLogo--${integration.id === "custom_mcp" ? "mcp" : integration.id}`}>
-            {integration.id === "github" ? (
-              <GitHubLogo />
-            ) : integration.id === "custom_mcp" ? (
-              "MCP"
-            ) : integration.id === "clickstack" ? (
-              <ClickStackIcon />
-            ) : (
-              integration.name.slice(0, 1)
-            )}
-          </span>
+          <ProviderGlyph
+            className={`integrationLogo integrationLogo--${integration.id === "custom_mcp" ? "mcp" : integration.id}`}
+            decorative
+            label={integration.name}
+            text={integrationGlyphs[integration.id]}
+          />
           {integration.state === "connected" ? (
             <span className="connectedBadge">Connected</span>
           ) : integration.state === "coming_soon" ? (
@@ -297,13 +301,5 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
         returnTo="/settings"
       />
     </>
-  );
-}
-
-function GitHubLogo() {
-  return (
-    <svg aria-hidden="true" fill="currentColor" height="22" viewBox="0 0 24 24" width="22">
-      <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.23.7-3.91-1.37-3.91-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.26 3.38.97.1-.75.4-1.26.74-1.55-2.58-.29-5.29-1.29-5.29-5.68 0-1.26.45-2.28 1.2-3.09-.12-.29-.52-1.47.11-3.05 0 0 .97-.31 3.16 1.18A11 11 0 0 1 12 6.12c.98 0 1.95.13 2.86.38 2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.76.11 3.05.75.81 1.2 1.83 1.2 3.09 0 4.4-2.72 5.38-5.3 5.67.42.36.79 1.07.79 2.16v3.25c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" />
-    </svg>
   );
 }
