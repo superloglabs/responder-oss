@@ -33,7 +33,8 @@ const previewDocumentRoutes: Plugin = {
         response.end();
         return;
       }
-      const publicDocumentPath = url.pathname.replace(/\/$/, "");
+      const publicDocumentPath =
+        url.pathname === "/" ? "/" : url.pathname.replace(/\/$/, "");
       if (publicDocumentPath !== "/" && publicDocumentPaths.has(publicDocumentPath)) {
         request.url = `${publicDocumentPath}/index.html${url.search}`;
       } else if (
