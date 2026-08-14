@@ -30,6 +30,10 @@ const previewDocumentRoutes: Plugin = {
         request.url = `/blog/index.html${url.search}`;
       } else if (
         url.pathname !== "/" &&
+        url.pathname !== "/api" &&
+        !url.pathname.startsWith("/api/") &&
+        url.pathname !== "/mcp" &&
+        !url.pathname.startsWith("/mcp/") &&
         !url.pathname.split("/").pop()?.includes(".")
       ) {
         request.url = `/app.html${url.search}`;
@@ -63,6 +67,12 @@ export default defineConfig({
         ]
       : []),
   ],
+  preview: {
+    proxy: {
+      "/api": `http://127.0.0.1:${apiPort}`,
+      "/mcp": `http://127.0.0.1:${apiPort}`,
+    },
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

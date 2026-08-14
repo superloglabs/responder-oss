@@ -2,19 +2,28 @@ import { useEffect } from "react";
 import type { SeoMetadata } from "./page-metadata";
 
 const ownedSelector = "[data-responder-seo]";
+const shellTitle = "Responder";
 
 function removeOwnedMetadata() {
   document.head.querySelectorAll(ownedSelector).forEach((element) => element.remove());
 }
 
+function resetPageMetadata() {
+  removeOwnedMetadata();
+  document.title = shellTitle;
+}
+
 export function usePageMetadata(metadata: SeoMetadata | undefined) {
   useEffect(() => {
-    removeOwnedMetadata();
+    resetPageMetadata();
     if (!metadata) return;
 
     document.title = metadata.title;
 
     for (const tag of metadata.meta) {
+      document.head
+        .querySelector(`${tag.attribute === "name" ? "meta[name" : "meta[property"}="${tag.key}"]:not(${ownedSelector})`)
+        ?.remove();
       const element = document.createElement("meta");
       element.dataset.responderSeo = "";
       element.setAttribute(tag.attribute, tag.key);
@@ -34,6 +43,6 @@ export function usePageMetadata(metadata: SeoMetadata | undefined) {
     structuredData.text = JSON.stringify(metadata.jsonLd);
     document.head.append(structuredData);
 
-    return removeOwnedMetadata;
+    return resetPageMetadata;
   }, [metadata]);
 }

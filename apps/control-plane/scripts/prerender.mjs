@@ -56,10 +56,12 @@ await writeFile(path.join(distRoot, "app.html"), shell);
 
 for (const route of routes) {
   const metadata = editionSeoMetadataForPath(route.pathname);
-  if (!metadata) continue;
   const output = path.join(distRoot, route.output);
   await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(output, renderDocument(route.pathname, metadata));
+  await writeFile(
+    output,
+    metadata ? renderDocument(route.pathname, metadata) : shell,
+  );
 }
 
 await rm(path.join(applicationRoot, ".prerender"), {
