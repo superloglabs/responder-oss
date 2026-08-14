@@ -2010,7 +2010,6 @@ export function AgentCreatePage() {
                         </span>
                         <IconButton
                           aria-label="Close workspace secret dialog"
-                          autoFocus
                           disabled={creatingSecret}
                           onClick={closeSecretDialog}
                           size="small"
@@ -2054,6 +2053,7 @@ export function AgentCreatePage() {
                               <span>Environment variable</span>
                               <input
                                 autoComplete="off"
+                                autoFocus
                                 onChange={(event) =>
                                   setSecretName(event.target.value.toUpperCase())
                                 }

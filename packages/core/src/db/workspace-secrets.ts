@@ -6,6 +6,7 @@ import {
   agents,
   workspaceSecrets,
 } from "./schema.js";
+import { isWorkspaceSecretEnvironmentVariableName } from "../workspace-secret-names.js";
 
 export interface WorkspaceSecretSummary {
   id: string;
@@ -65,6 +66,9 @@ export async function createWorkspaceSecretRecord(input: {
   daytonaSecretId: string;
   daytonaSecretName: string;
 }): Promise<WorkspaceSecretSummary> {
+  if (!isWorkspaceSecretEnvironmentVariableName(input.name)) {
+    throw new Error("Invalid workspace secret environment variable name");
+  }
   if (input.allowedHosts.length === 0) {
     throw new Error("Workspace secrets require at least one allowed host");
   }

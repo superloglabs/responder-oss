@@ -3144,7 +3144,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "workspace_secrets_created_by_user_id_fk": {

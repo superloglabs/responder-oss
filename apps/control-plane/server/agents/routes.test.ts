@@ -112,6 +112,7 @@ const tenant = {
 describe("workspace secrets", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("stores plaintext only in Daytona and returns metadata", async () => {
@@ -245,6 +246,73 @@ describe("workspace secrets", () => {
     });
     expect(deleteDaytonaWorkspaceSecret).toHaveBeenCalledWith(
       "daytona-secret-orphan",
+    );
+  });
+
+  it("returns a conflict and removes the external secret after a concurrent create", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({
+      id: "daytona-secret-race",
+      name: "responder_external_race",
+    });
+    vi.mocked(createWorkspaceSecretRecord).mockRejectedValue({
+      code: "23505",
+      constraint: "workspace_secrets_organization_name_idx",
+    });
+    vi.mocked(deleteDaytonaWorkspaceSecret).mockResolvedValue(undefined);
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "never-return-this",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "SERVICE_API_KEY already exists in this workspace",
+    });
+    expect(deleteDaytonaWorkspaceSecret).toHaveBeenCalledWith(
+      "daytona-secret-race",
+    );
+  });
+
+  it("surfaces an external cleanup failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({
+      id: "daytona-secret-orphan",
+      name: "responder_external_orphan",
+    });
+    vi.mocked(createWorkspaceSecretRecord).mockRejectedValue(
+      new Error("database unavailable"),
+    );
+    vi.mocked(deleteDaytonaWorkspaceSecret).mockRejectedValue(
+      new Error("vault unavailable"),
+    );
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "never-return-this",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to clean up workspace secret after storage failed",
+    });
+    expect(console.error).toHaveBeenCalledWith(
+      "Unable to clean up workspace secret",
+      expect.objectContaining({ daytonaSecretId: "daytona-secret-orphan" }),
     );
   });
 });

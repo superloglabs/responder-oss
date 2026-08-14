@@ -293,7 +293,7 @@ export const workspaceSecrets = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
+      .references(() => organization.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     daytonaSecretId: text("daytona_secret_id").notNull(),
     daytonaSecretName: text("daytona_secret_name").notNull(),

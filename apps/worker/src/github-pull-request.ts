@@ -226,6 +226,7 @@ export async function createPullRequestFromSandbox(
     input.workspaceBaseSha,
   );
   assertNoDaytonaSecretPlaceholders(input.body, "Pull request body");
+  assertNoDaytonaSecretPlaceholders(input.title, "Pull request title");
   for (const file of files) {
     assertNoDaytonaSecretPlaceholders(file.path, "Changed file path");
     if (file.content) {

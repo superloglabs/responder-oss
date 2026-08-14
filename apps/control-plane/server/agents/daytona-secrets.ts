@@ -1,37 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { Daytona } from "@daytonaio/sdk";
+import { Daytona, DaytonaNotFoundError } from "@daytona/sdk";
+import {
+  daytonaClientOptions,
+  requireDaytonaClientConfig,
+  type DaytonaClientConfig,
+} from "@responder/core/daytona-config";
 
-interface DaytonaSecretConfig {
-  daytonaApiKey: string;
-  daytonaApiUrl?: string;
-  daytonaTarget?: string;
-}
-
-function daytonaSecretConfig(
-  environment: NodeJS.ProcessEnv = process.env,
-): DaytonaSecretConfig {
-  const daytonaApiKey = environment.DAYTONA_API_KEY;
-  if (!daytonaApiKey) throw new Error("DAYTONA_API_KEY is required");
-  return {
-    daytonaApiKey,
-    daytonaApiUrl: environment.DAYTONA_API_URL,
-    daytonaTarget: environment.DAYTONA_TARGET,
-  };
-}
-
-function daytonaClient(config: DaytonaSecretConfig): Daytona {
-  return new Daytona({
-    apiKey: config.daytonaApiKey,
-    apiUrl: config.daytonaApiUrl,
-    target: config.daytonaTarget,
-  });
+function daytonaClient(config: DaytonaClientConfig): Daytona {
+  return new Daytona(daytonaClientOptions(config));
 }
 
 export async function createDaytonaWorkspaceSecret(input: {
   value: string;
   allowedHosts: string[];
 }): Promise<{ id: string; name: string }> {
-  const client = daytonaClient(daytonaSecretConfig());
+  const client = daytonaClient(requireDaytonaClientConfig());
   try {
     const secret = await client.secret.create({
       name: `responder_${randomUUID().replaceAll("-", "")}`,
@@ -48,9 +31,30 @@ export async function createDaytonaWorkspaceSecret(input: {
 export async function deleteDaytonaWorkspaceSecret(
   daytonaSecretId: string,
 ): Promise<void> {
-  const client = daytonaClient(daytonaSecretConfig());
+  const client = daytonaClient(requireDaytonaClientConfig());
   try {
-    await client.secret.delete(daytonaSecretId);
+    let lastError: unknown;
+    for (const delayMs of [0, 250, 1_000]) {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      try {
+        await client.secret.delete(daytonaSecretId);
+        return;
+      } catch (error) {
+        if (
+          error instanceof DaytonaNotFoundError ||
+          (typeof error === "object" &&
+            error !== null &&
+            "statusCode" in error &&
+            error.statusCode === 404)
+        ) {
+          return;
+        }
+        lastError = error;
+      }
+    }
+    throw lastError;
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }

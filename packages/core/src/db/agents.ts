@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, exists, inArray } from "drizzle-orm";
+import { and, desc, eq, exists, inArray } from "drizzle-orm";
 import type { AgentConfiguration } from "../agents/config.js";
 import { getDatabase } from "./client.js";
 import {
@@ -14,6 +14,7 @@ import {
   type AgentReportConfig,
   type AgentTriggerConfig,
 } from "./schema.js";
+import { listWorkspaceSecrets } from "./workspace-secrets.js";
 
 type Provider = "github" | "slack" | "sentry" | "datadog";
 
@@ -650,7 +651,7 @@ export async function disableAgentsWithUnavailableRepositories(
 
 export async function listAgentOptions(organizationId: string) {
   const db = getDatabase();
-  const [accountRows, secretRows] = await Promise.all([
+  const [accountRows, workspaceSecretRows] = await Promise.all([
     db
       .select({
         id: integrationAccounts.id,
@@ -665,16 +666,13 @@ export async function listAgentOptions(organizationId: string) {
           eq(integrationAccounts.status, "connected"),
         ),
       ),
-    db
-      .select({
-        id: workspaceSecrets.id,
-        name: workspaceSecrets.name,
-        allowedHosts: workspaceSecrets.allowedHosts,
-      })
-      .from(workspaceSecrets)
-      .where(eq(workspaceSecrets.organizationId, organizationId))
-      .orderBy(asc(workspaceSecrets.name)),
+    listWorkspaceSecrets(organizationId),
   ]);
+  const secretRows = workspaceSecretRows.map((secret) => ({
+    id: secret.id,
+    name: secret.name,
+    allowedHosts: secret.allowedHosts,
+  }));
   const accounts = accountRows.map(({ metadata, ...account }) => ({
     ...account,
     slackContextAvailable:

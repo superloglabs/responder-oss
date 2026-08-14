@@ -29,6 +29,7 @@ import {
   createWorkspaceSecretRecord,
   findWorkspaceSecretByName,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
+import { isWorkspaceSecretEnvironmentVariableName } from "../../../../packages/core/src/workspace-secret-names.js";
 import type { InvestigationTraceEvent } from "../../../../packages/core/src/db/schema.js";
 import {
   joinSlackChannel,
@@ -61,29 +62,6 @@ const secretHostSchema = z
     "Use a hostname without a scheme, path, or port",
   );
 
-const reservedSecretEnvironmentVariables = new Set([
-  "BASH_ENV",
-  "ENV",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "LD_LIBRARY_PATH",
-  "LD_PRELOAD",
-  "LOGNAME",
-  "NODE_OPTIONS",
-  "OLDPWD",
-  "PATH",
-  "PWD",
-  "PYTHONPATH",
-  "SHELL",
-  "SHLVL",
-  "TEMP",
-  "TERM",
-  "TMP",
-  "TMPDIR",
-  "USER",
-]);
-
 export const workspaceSecretInputSchema = z.object({
   name: z
     .string()
@@ -96,11 +74,7 @@ export const workspaceSecretInputSchema = z.object({
       "Use an uppercase environment variable name",
     )
     .refine(
-      (name) =>
-        !reservedSecretEnvironmentVariables.has(name) &&
-        !["DAYTONA_", "OPENAI_", "RESPONDER_"].some((prefix) =>
-          name.startsWith(prefix),
-        ),
+      isWorkspaceSecretEnvironmentVariableName,
       "Choose a non-system environment variable name",
     ),
   value: z.string().min(1, "Secret value is required").max(65_536),
@@ -110,6 +84,17 @@ export const workspaceSecretInputSchema = z.object({
     .max(20)
     .transform((hosts) => [...new Set(hosts)]),
 });
+
+function isWorkspaceSecretNameConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "23505" &&
+    "constraint" in error &&
+    error.constraint === "workspace_secrets_organization_name_idx"
+  );
+}
 
 const tenantHiddenTraceEventTypes = new Set([
   "instructions.configured",
@@ -309,10 +294,25 @@ export const agentRoutes = new Hono()
         daytonaSecretName: daytonaSecret.name,
       });
       return context.json({ secret }, 201);
-    } catch {
+    } catch (error) {
       if (daytonaSecret) {
-        await deleteDaytonaWorkspaceSecret(daytonaSecret.id).catch(
-          () => undefined,
+        try {
+          await deleteDaytonaWorkspaceSecret(daytonaSecret.id);
+        } catch (cleanupError) {
+          console.error("Unable to clean up workspace secret", {
+            cleanupError,
+            daytonaSecretId: daytonaSecret.id,
+          });
+          return context.json(
+            { error: "Unable to clean up workspace secret after storage failed" },
+            502,
+          );
+        }
+      }
+      if (isWorkspaceSecretNameConflict(error)) {
+        return context.json(
+          { error: `${parsed.data.name} already exists in this workspace` },
+          409,
         );
       }
       return context.json({ error: "Unable to store workspace secret" }, 502);

@@ -2,15 +2,15 @@ import {
   Daytona,
   DaytonaNotFoundError,
   type Sandbox,
-} from "@daytonaio/sdk";
+} from "@daytona/sdk";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import {
+  daytonaClientOptions,
+  type DaytonaClientConfig,
+} from "@responder/core/daytona-config";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
 
-interface DaytonaCleanupConfig {
-  daytonaApiKey: string;
-  daytonaApiUrl?: string;
-  daytonaTarget?: string;
-}
+type DaytonaCleanupConfig = DaytonaClientConfig;
 
 export interface DaytonaSandboxSecretMount {
   environmentVariable: string;
@@ -30,12 +30,7 @@ export interface DaytonaCleanupDependencies {
 }
 
 const defaultCleanupDependencies: DaytonaCleanupDependencies = {
-  createClient: (config) =>
-    new Daytona({
-      apiKey: config.daytonaApiKey,
-      apiUrl: config.daytonaApiUrl,
-      target: config.daytonaTarget,
-    }),
+  createClient: (config) => new Daytona(daytonaClientOptions(config)),
   reportException: reportWorkerException,
   sleep: (delayMs) =>
     new Promise((resolve) => {
