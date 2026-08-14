@@ -18,6 +18,7 @@ import {
 import { SettingsPage } from "./pages/settings";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
+import { blogArticlePath } from "./public-routes";
 import { usePageMetadata } from "./use-page-metadata";
 
 function ProtectedApp() {
@@ -44,7 +45,7 @@ export function App() {
       <Route element={<BlogIndexPage />} path="/blog" />
       <Route
         element={<BlogArticlePage />}
-        path="/blog/kill-alert-fatigue-automating-on-call-with-ai"
+        path={blogArticlePath}
       />
       {import.meta.env.DEV ? (
         <Route element={<DesignLibraryPage />} path="/_design" />

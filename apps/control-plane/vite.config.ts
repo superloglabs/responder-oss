@@ -3,6 +3,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
+import { publicDocumentPathnames } from "./src/public-routes.js";
 
 const webPort = Number(
   process.env.PORT ?? process.env.CONTROL_PLANE_WEB_PORT ?? 3000,
@@ -19,6 +20,7 @@ const uploadsSentrySourceMaps = Boolean(
 );
 const buildsSentrySourceMaps =
   uploadsSentrySourceMaps || process.env.SENTRY_BUILD_SOURCEMAPS === "true";
+const publicDocumentPaths: ReadonlySet<string> = new Set(publicDocumentPathnames);
 
 const previewDocumentRoutes: Plugin = {
   configurePreviewServer(server) {
@@ -32,11 +34,7 @@ const previewDocumentRoutes: Plugin = {
         return;
       }
       const publicDocumentPath = url.pathname.replace(/\/$/, "");
-      if (
-        publicDocumentPath === "/blog" ||
-        publicDocumentPath ===
-          "/blog/kill-alert-fatigue-automating-on-call-with-ai"
-      ) {
+      if (publicDocumentPath !== "/" && publicDocumentPaths.has(publicDocumentPath)) {
         request.url = `${publicDocumentPath}/index.html${url.search}`;
       } else if (
         url.pathname !== "/" &&
