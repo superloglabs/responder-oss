@@ -77,6 +77,9 @@ importers:
       '@better-auth/drizzle-adapter':
         specifier: 1.6.25
         version: 1.6.25(@better-auth/core@1.6.25(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.4)(kysely@0.29.4)(nanostores@1.4.2))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(kysely@0.29.4)(pg@8.22.0))
+      '@daytonaio/sdk':
+        specifier: 0.203.0
+        version: 0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
       '@fontsource-variable/inter':
         specifier: 5.2.8
         version: 5.2.8
@@ -155,7 +158,7 @@ importers:
         version: 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@openai/agents-extensions':
         specifier: 0.14.2
-        version: 0.14.2(@ai-sdk/provider@4.0.4)(@aws-sdk/credential-provider-node@3.972.77)(@daytonaio/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.6.12)(ai@7.0.41(zod@4.4.3))(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)
+        version: 0.14.2(@ai-sdk/provider@4.0.4)(@aws-sdk/credential-provider-node@3.972.77)(@daytonaio/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.6.12)(ai@7.0.41(zod@4.4.3))(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
@@ -167,7 +170,7 @@ importers:
         version: 10.69.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(supports-color@8.1.1)
       openai:
         specifier: 6.49.0
-        version: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.1)(zod@4.4.3)
+        version: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.3)(zod@4.4.3)
       tsx:
         specifier: 4.20.6
         version: 4.20.6
@@ -4002,18 +4005,6 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.21.1:
-    resolution: {integrity: sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.21.3:
     resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
     engines: {node: '>=10.0.0'}
@@ -4847,21 +4838,6 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
-  '@openai/agents-core@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)':
-    dependencies:
-      debug: 4.4.3(supports-color@8.1.1)
-      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.1)(zod@4.4.3)
-    optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(supports-color@8.1.1)(zod@4.4.3)
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
-      - '@cfworker/json-schema'
-      - '@smithy/hash-node'
-      - '@smithy/signature-v4'
-      - supports-color
-      - ws
-
   '@openai/agents-core@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       debug: 4.4.3(supports-color@8.1.1)
@@ -4877,13 +4853,13 @@ snapshots:
       - supports-color
       - ws
 
-  '@openai/agents-extensions@0.14.2(@ai-sdk/provider@4.0.4)(@aws-sdk/credential-provider-node@3.972.77)(@daytonaio/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.6.12)(ai@7.0.41(zod@4.4.3))(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)':
+  '@openai/agents-extensions@0.14.2(@ai-sdk/provider@4.0.4)(@aws-sdk/credential-provider-node@3.972.77)(@daytonaio/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.6.12)(ai@7.0.41(zod@4.4.3))(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@openai/agents': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
-      '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)
+      '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@types/ws': 8.18.1
       debug: 4.4.3(supports-color@8.1.1)
-      ws: 8.21.1
+      ws: 8.21.3
       zod: 4.4.3
     optionalDependencies:
       '@ai-sdk/provider': 4.0.4
@@ -4900,7 +4876,7 @@ snapshots:
     dependencies:
       '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       debug: 4.4.3(supports-color@8.1.1)
-      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.1)(zod@4.4.3)
+      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.3)(zod@4.4.3)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
@@ -4912,10 +4888,10 @@ snapshots:
 
   '@openai/agents-realtime@0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(zod@4.4.3)':
     dependencies:
-      '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.1)(zod@4.4.3)
+      '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@types/ws': 8.18.1
       debug: 4.4.3(supports-color@8.1.1)
-      ws: 8.21.1
+      ws: 8.21.3
       zod: 4.4.3
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
@@ -4932,7 +4908,7 @@ snapshots:
       '@openai/agents-openai': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@openai/agents-realtime': 0.14.2(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(supports-color@8.1.1)(zod@4.4.3)
       debug: 4.4.3(supports-color@8.1.1)
-      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.1)(zod@4.4.3)
+      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.3)(zod@4.4.3)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
@@ -7273,13 +7249,6 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.1)(zod@4.4.3):
-    optionalDependencies:
-      '@aws-sdk/credential-provider-node': 3.972.77
-      '@smithy/signature-v4': 5.6.12
-      ws: 8.21.1
-      zod: 4.4.3
-
   openai@6.49.0(@aws-sdk/credential-provider-node@3.972.77)(@smithy/signature-v4@5.6.12)(ws@8.21.3)(zod@4.4.3):
     optionalDependencies:
       '@aws-sdk/credential-provider-node': 3.972.77
@@ -8066,8 +8035,6 @@ snapshots:
       strip-ansi: 6.0.1
 
   wrappy@1.0.2: {}
-
-  ws@8.21.1: {}
 
   ws@8.21.3: {}
 

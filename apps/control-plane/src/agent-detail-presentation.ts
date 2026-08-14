@@ -139,12 +139,19 @@ function summarizeContext(
     }),
   );
   const repositoryNames = repositories.map((repository) => repository.fullName);
+  const secretNames = configuration.secretIds.flatMap((secretId) => {
+    const secret = options.secrets.find((candidate) => candidate.id === secretId);
+    return secret ? [secret.name] : [];
+  });
 
   return {
     detail: `GitHub repositories: ${
       repositoryNames.length ? repositoryNames.join(" · ") : "None"
     }`,
     eyebrow: "Agent context",
+    meta: secretNames.length
+      ? `Workspace secrets: ${secretNames.join(" · ")}`
+      : undefined,
     title: providers.length ? providers.join(" · ") : "No additional providers",
   };
 }

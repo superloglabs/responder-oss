@@ -7,6 +7,7 @@ import {
   type InvestigationReportSubmission,
 } from "@responder/core/investigations/report";
 import { embedNewIssues } from "./issue-embeddings.js";
+import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
 const submitInvestigationReportDescription =
   "Submit the final structured investigation report. You must call this exactly once before giving your final response. Responder delivers its Slack messages after the investigation finishes.";
@@ -59,6 +60,7 @@ export async function submitInvestigationReportForRun(input: {
   environment?: NodeJS.ProcessEnv;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
 }) {
+  assertNoDaytonaSecretPlaceholders(input.report, "Investigation report");
   const newIssues = input.report.issues.filter(
     (issue) => issue.resolution === "new",
   );
@@ -126,6 +128,7 @@ export async function captureInvestigationReplayReport(input: {
   organizationId: string;
   report: InvestigationReportSubmission;
 }) {
+  assertNoDaytonaSecretPlaceholders(input.report, "Investigation replay report");
   try {
     await saveInvestigationReplayReport({
       investigationId: input.investigationId,

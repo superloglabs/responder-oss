@@ -25,6 +25,10 @@ import {
   investigationCanBeRetried,
   listInvestigationTraceEvents,
 } from "../../../../packages/core/src/db/investigations.js";
+import {
+  createWorkspaceSecretRecord,
+  findWorkspaceSecretByName,
+} from "../../../../packages/core/src/db/workspace-secrets.js";
 import type { InvestigationTraceEvent } from "../../../../packages/core/src/db/schema.js";
 import {
   joinSlackChannel,
@@ -33,6 +37,10 @@ import {
 } from "../integrations/slack.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
+import {
+  createDaytonaWorkspaceSecret,
+  deleteDaytonaWorkspaceSecret,
+} from "./daytona-secrets.js";
 
 const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
@@ -40,6 +48,67 @@ const slackCredentialsSchema = z.object({
 
 const agentEnabledSchema = z.object({
   enabled: z.boolean(),
+});
+
+const secretHostSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1)
+  .max(253)
+  .regex(
+    /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
+    "Use a hostname without a scheme, path, or port",
+  );
+
+const reservedSecretEnvironmentVariables = new Set([
+  "BASH_ENV",
+  "ENV",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LD_LIBRARY_PATH",
+  "LD_PRELOAD",
+  "LOGNAME",
+  "NODE_OPTIONS",
+  "OLDPWD",
+  "PATH",
+  "PWD",
+  "PYTHONPATH",
+  "SHELL",
+  "SHLVL",
+  "TEMP",
+  "TERM",
+  "TMP",
+  "TMPDIR",
+  "USER",
+]);
+
+export const workspaceSecretInputSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(1, "Environment variable name is required")
+    .max(80)
+    .regex(
+      /^[A-Z_][A-Z0-9_]*$/,
+      "Use an uppercase environment variable name",
+    )
+    .refine(
+      (name) =>
+        !reservedSecretEnvironmentVariables.has(name) &&
+        !["DAYTONA_", "OPENAI_", "RESPONDER_"].some((prefix) =>
+          name.startsWith(prefix),
+        ),
+      "Choose a non-system environment variable name",
+    ),
+  value: z.string().min(1, "Secret value is required").max(65_536),
+  allowedHosts: z
+    .array(secretHostSchema)
+    .min(1, "Add at least one allowed host")
+    .max(20)
+    .transform((hosts) => [...new Set(hosts)]),
 });
 
 const tenantHiddenTraceEventTypes = new Set([
@@ -196,6 +265,57 @@ export const agentRoutes = new Hono()
         },
         502,
       );
+    }
+  })
+  .post("/secrets", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = workspaceSecretInputSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Invalid workspace secret", issues: parsed.error.issues },
+        400,
+      );
+    }
+
+    const existing = await findWorkspaceSecretByName({
+      organizationId: tenant.organizationId,
+      name: parsed.data.name,
+    });
+    if (existing) {
+      return context.json(
+        { error: `${parsed.data.name} already exists in this workspace` },
+        409,
+      );
+    }
+
+    let daytonaSecret: { id: string; name: string } | null = null;
+    try {
+      daytonaSecret = await createDaytonaWorkspaceSecret({
+        value: parsed.data.value,
+        allowedHosts: parsed.data.allowedHosts,
+      });
+      const secret = await createWorkspaceSecretRecord({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        name: parsed.data.name,
+        allowedHosts: parsed.data.allowedHosts,
+        daytonaSecretId: daytonaSecret.id,
+        daytonaSecretName: daytonaSecret.name,
+      });
+      return context.json({ secret }, 201);
+    } catch {
+      if (daytonaSecret) {
+        await deleteDaytonaWorkspaceSecret(daytonaSecret.id).catch(
+          () => undefined,
+        );
+      }
+      return context.json({ error: "Unable to store workspace secret" }, 502);
     }
   })
   .post("/", async (context) => {

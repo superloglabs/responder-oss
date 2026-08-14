@@ -42,6 +42,7 @@ const EMPTY_OPTIONS: AgentOptions = {
   accounts: [],
   repositories: [],
   resources: [],
+  secrets: [],
 };
 
 function investigationStatus(

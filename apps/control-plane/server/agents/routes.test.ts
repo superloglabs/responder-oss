@@ -13,8 +13,16 @@ import {
   getInvestigationDetail,
   listInvestigationTraceEvents,
 } from "../../../../packages/core/src/db/investigations.js";
+import {
+  createWorkspaceSecretRecord,
+  findWorkspaceSecretByName,
+} from "../../../../packages/core/src/db/workspace-secrets.js";
 import { getActiveTenant } from "../tenant.js";
 import { listSlackChannels } from "../integrations/slack.js";
+import {
+  createDaytonaWorkspaceSecret,
+  deleteDaytonaWorkspaceSecret,
+} from "./daytona-secrets.js";
 import { agentRoutes } from "./routes.js";
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
@@ -41,6 +49,10 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   investigationCanBeRetried: vi.fn(),
   listInvestigationTraceEvents: vi.fn(),
 }));
+vi.mock("../../../../packages/core/src/db/workspace-secrets.js", () => ({
+  createWorkspaceSecretRecord: vi.fn(),
+  findWorkspaceSecretByName: vi.fn(),
+}));
 vi.mock("../integrations/slack.js", () => ({
   joinSlackChannel: vi.fn(),
   listSlackChannels: vi.fn(),
@@ -58,6 +70,10 @@ vi.mock("../tenant.js", () => ({
 }));
 vi.mock("../investigations/queue.js", () => ({
   queueInvestigationRetry: vi.fn(),
+}));
+vi.mock("./daytona-secrets.js", () => ({
+  createDaytonaWorkspaceSecret: vi.fn(),
+  deleteDaytonaWorkspaceSecret: vi.fn(),
 }));
 
 const app = new Hono().route("/api/agents", agentRoutes);
@@ -80,7 +96,158 @@ const options: Awaited<ReturnType<typeof listAgentOptions>> = {
     },
   ],
   repositories: [],
+  secrets: [],
 };
+
+const tenant = {
+  ok: true as const,
+  organizationId: "10000000-0000-4000-8000-000000000000",
+  user: {
+    id: "20000000-0000-4000-8000-000000000000",
+    name: "Test User",
+    email: "test@example.com",
+  },
+};
+
+describe("workspace secrets", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("stores plaintext only in Daytona and returns metadata", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({
+      id: "daytona-secret-1",
+      name: "responder_external_1",
+    });
+    vi.mocked(createWorkspaceSecretRecord).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+      createdAt: new Date("2026-08-14T10:00:00.000Z"),
+    });
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "service_api_key",
+        value: "never-return-this",
+        allowedHosts: ["API.EXAMPLE.COM"],
+      }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(JSON.stringify(body)).not.toContain("never-return-this");
+    expect(createDaytonaWorkspaceSecret).toHaveBeenCalledWith({
+      value: "never-return-this",
+      allowedHosts: ["api.example.com"],
+    });
+    expect(createWorkspaceSecretRecord).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+      daytonaSecretId: "daytona-secret-1",
+      daytonaSecretName: "responder_external_1",
+    });
+    expect(
+      vi.mocked(createWorkspaceSecretRecord).mock.calls[0]?.[0],
+    ).not.toHaveProperty("value");
+  });
+
+  it("requires a host allowlist before accepting a value", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "never-store-this",
+        allowedHosts: [],
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+    expect(createWorkspaceSecretRecord).not.toHaveBeenCalled();
+  });
+
+  it("rejects environment variables that could alter the sandbox runtime", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "NODE_OPTIONS",
+        value: "--require=./payload.js",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a workspace secret or send its new value", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+      createdAt: new Date(),
+    });
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "replacement",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+    expect(deleteDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it("removes the Daytona secret when metadata storage fails", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({
+      id: "daytona-secret-orphan",
+      name: "responder_external_orphan",
+    });
+    vi.mocked(createWorkspaceSecretRecord).mockRejectedValue(
+      new Error("database unavailable"),
+    );
+    vi.mocked(deleteDaytonaWorkspaceSecret).mockResolvedValue(undefined);
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "never-return-this",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to store workspace secret",
+    });
+    expect(deleteDaytonaWorkspaceSecret).toHaveBeenCalledWith(
+      "daytona-secret-orphan",
+    );
+  });
+});
 
 describe("Slack channel option refresh", () => {
   afterEach(() => {

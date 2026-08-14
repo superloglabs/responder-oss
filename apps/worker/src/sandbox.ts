@@ -12,6 +12,11 @@ interface DaytonaCleanupConfig {
   daytonaTarget?: string;
 }
 
+export interface DaytonaSandboxSecretMount {
+  environmentVariable: string;
+  daytonaSecretName: string;
+}
+
 interface DaytonaCleanupClient {
   delete(sandbox: Sandbox, timeout?: number, wait?: boolean): Promise<void>;
   get(sandboxIdOrName: string): Promise<Sandbox>;
@@ -41,11 +46,24 @@ const defaultCleanupDependencies: DaytonaCleanupDependencies = {
 export async function configureDaytonaSandboxLifecycle(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
+  secrets: DaytonaSandboxSecretMount[] = [],
   dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
 ): Promise<void> {
   const client = dependencies.createClient(config);
   try {
     const sandbox = await client.get(session.state.sandboxId);
+    if (secrets.length > 0) {
+      await sandbox.updateSecrets(
+        Object.fromEntries(
+          secrets.map((secret) => [
+            secret.environmentVariable,
+            secret.daytonaSecretName,
+          ]),
+        ),
+      );
+      await sandbox.stop();
+      await sandbox.start();
+    }
     await sandbox.setAutoDeleteInterval(0);
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
