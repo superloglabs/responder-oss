@@ -717,6 +717,12 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.providerGlyph > svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .socialAuth__button {
   height: 42px;
   padding: 0 14px;
