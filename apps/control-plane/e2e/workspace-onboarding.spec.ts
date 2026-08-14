@@ -35,6 +35,9 @@ function sessionResponse(activeOrganizationId: string | null) {
 }
 
 async function mockApplicationApis(page: Page) {
+  await page.route("**/api/agents", (route) =>
+    route.fulfill({ json: { agents: [] } }),
+  );
   await page.route("**/api/agents/options", (route) =>
     route.fulfill({ json: { accounts: [], resources: [], repositories: [] } }),
   );
@@ -52,6 +55,10 @@ async function mockApplicationApis(page: Page) {
     }),
   );
 }
+
+test.beforeEach(async ({ page }) => {
+  await mockApplicationApis(page);
+});
 
 test("opens agent creation after creating a workspace", async ({ page }) => {
   let activeOrganizationId: string | null = null;
@@ -87,8 +94,6 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
 
     await route.fulfill({ json: null });
   });
-  await mockApplicationApis(page);
-
   await page.goto("/agents");
   await expect(page.getByRole("heading", { name: "Create a workspace" })).toBeVisible();
 
@@ -190,8 +195,6 @@ test("accepts an invitation and opens its workspace", async ({ page }) => {
 
     await route.fulfill({ json: null });
   });
-  await mockApplicationApis(page);
-
   await page.goto(`/invite/${invitationId}`);
   await expect(
     page.getByRole("heading", { name: "Join this workspace" }),
@@ -218,5 +221,8 @@ test("redirects malformed invitation links", async ({ page }) => {
 
   await page.goto("/invite/xyz");
 
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/agents$/);
+  await expect(
+    page.getByRole("heading", { name: "Agents", exact: true }),
+  ).toBeVisible();
 });
