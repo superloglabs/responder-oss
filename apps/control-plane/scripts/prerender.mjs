@@ -50,6 +50,10 @@ function renderDocument(pathname, metadata) {
 const routes = [
   { output: "index.html", pathname: "/" },
   { output: "blog/index.html", pathname: "/blog" },
+  {
+    output: "blog/kill-alert-fatigue-automating-on-call-with-ai/index.html",
+    pathname: "/blog/kill-alert-fatigue-automating-on-call-with-ai",
+  },
 ];
 
 await writeFile(path.join(distRoot, "app.html"), shell);

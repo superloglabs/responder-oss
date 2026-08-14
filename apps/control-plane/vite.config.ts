@@ -31,8 +31,13 @@ const previewDocumentRoutes: Plugin = {
         response.end();
         return;
       }
-      if (url.pathname === "/blog" || url.pathname === "/blog/") {
-        request.url = `/blog/index.html${url.search}`;
+      const publicDocumentPath = url.pathname.replace(/\/$/, "");
+      if (
+        publicDocumentPath === "/blog" ||
+        publicDocumentPath ===
+          "/blog/kill-alert-fatigue-automating-on-call-with-ai"
+      ) {
+        request.url = `${publicDocumentPath}/index.html${url.search}`;
       } else if (
         url.pathname !== "/" &&
         url.pathname !== "/api" &&
