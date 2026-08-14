@@ -1,0 +1,26 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "pnpm local:setup"
+archive = "pnpm local:down"
+run_mode = "concurrent"
+
+[scripts.run.dev]
+command = "pnpm local:dev"
+default = true
+icon = "play"
+available_in = [ "local" ]
+
+[scripts.run.doctor]
+command = "pnpm local:doctor"
+icon = "stethoscope"
+available_in = [ "local" ]
+
+[scripts.run.tunnel]
+command = "pnpm tunnel:claim"
+icon = "radio-tower"
+available_in = [ "local" ]
+
+[scripts.run.test]
+command = "pnpm typecheck && pnpm lint && pnpm test"
+icon = "test-tube"

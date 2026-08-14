@@ -8,9 +8,9 @@
   
 <br />
 
-[![Last Commit](https://img.shields.io/github/last-commit/superloglabs/responder-oss?labelColor=333333&color=666666)](https://github.com/superloglabs/superlog/commits/main)
-[![Commit Activity](https://img.shields.io/github/commit-activity/m/superloglabs/responder-oss?labelColor=333333&color=666666)](https://github.com/superloglabs/superlog/graphs/commit-activity)
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache_2.0-555555.svg?labelColor=333333&color=666666)](./LICENSE.md)
+[![Last Commit](https://img.shields.io/github/last-commit/superloglabs/responder-oss?labelColor=333333&color=666666)](https://github.com/superloglabs/responder-oss/commits/main)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/superloglabs/responder-oss?labelColor=333333&color=666666)](https://github.com/superloglabs/responder-oss/graphs/commit-activity)
+[![Apache 2.0 License](https://img.shields.io/badge/License-Apache_2.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
 <br>
 [![Discord](https://img.shields.io/discord/1511214206123380867?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/wJ56aRh8hx)
 <a href="https://www.ycombinator.com"><img src="https://img.shields.io/badge/Y%20Combinator-P26-orange" alt="Y Combinator P26"></a>
