@@ -47,6 +47,7 @@ export interface AgentConfiguration {
   repositoryIds: string[];
   contextAccountIds: string[];
   contextResourceIds: string[];
+  secretIds: string[];
   trigger: AgentTrigger;
   reporting: AgentReporting;
 }
@@ -77,6 +78,11 @@ export interface AgentOptions {
     fullName: string;
     defaultBranch: string;
     private: boolean;
+  }>;
+  secrets: Array<{
+    id: string;
+    name: string;
+    allowedHosts: string[];
   }>;
 }
 
@@ -391,6 +397,21 @@ export async function refreshSlackAgentOptions(): Promise<AgentOptions> {
   return apiJson<AgentOptions>("/api/agents/options/refresh/slack", {
     method: "POST",
   });
+}
+
+export async function createWorkspaceSecret(input: {
+  name: string;
+  value: string;
+  allowedHosts: string[];
+}): Promise<AgentOptions["secrets"][number]> {
+  const response = await apiJson<{
+    secret: AgentOptions["secrets"][number];
+  }>("/api/agents/secrets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return response.secret;
 }
 
 export async function fetchIntegrations(): Promise<IntegrationSummary[]> {

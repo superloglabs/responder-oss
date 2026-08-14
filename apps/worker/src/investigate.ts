@@ -11,7 +11,13 @@ import {
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
 } from "@responder/core/db/investigations";
+import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
+import {
+  daytonaClientOptions,
+  requireDaytonaClientConfig,
+  type DaytonaClientConfig,
+} from "@responder/core/daytona-config";
 import type {
   InvestigationInput,
   InvestigationTraceEvent,
@@ -42,11 +48,12 @@ import {
 } from "./trace.js";
 import { createSentryMcpServer } from "./sentry.js";
 import { createSlackMcpServer } from "./slack.js";
+import {
+  redactDaytonaSecretPlaceholders,
+  workspaceSecretUsageInstructions,
+} from "./secret-safety.js";
 
-export interface SandboxAgentConfig {
-  daytonaApiKey: string;
-  daytonaApiUrl?: string;
-  daytonaTarget?: string;
+export interface SandboxAgentConfig extends DaytonaClientConfig {
   model: string;
   openAiApiKey: string;
 }
@@ -61,7 +68,7 @@ export function safeInvestigationError(
     const value = environment[name];
     if (value) message = message.replaceAll(value, "[redacted]");
   }
-  return message.slice(0, 2_000);
+  return redactDaytonaSecretPlaceholders(message).slice(0, 2_000);
 }
 
 export function investigationTraceWriteFailure(
@@ -106,13 +113,10 @@ export function sandboxAgentConfig(
   const openAiApiKey = environment.OPENAI_API_KEY;
   if (!openAiApiKey) throw new Error("OPENAI_API_KEY is required");
 
-  const daytonaApiKey = environment.DAYTONA_API_KEY;
-  if (!daytonaApiKey) throw new Error("DAYTONA_API_KEY is required");
+  const daytonaConfig = requireDaytonaClientConfig(environment);
 
   return {
-    daytonaApiKey,
-    daytonaApiUrl: environment.DAYTONA_API_URL,
-    daytonaTarget: environment.DAYTONA_TARGET,
+    ...daytonaConfig,
     model: environment.OPENAI_AGENT_MODEL ?? "gpt-5.6-sol",
     openAiApiKey,
   };
@@ -134,9 +138,14 @@ export function investigationInstructions(input: {
   runtimeSystemPrompt?: string | null;
   sentryConnected: boolean;
   slackChannels?: Array<{ id: string; name: string }>;
+  workspaceSecrets?: Array<{
+    environmentVariable: string;
+    allowedHosts: string[];
+  }>;
 }): string {
   const customMcpNames = input.customMcpNames ?? [];
   const slackChannels = input.slackChannels ?? [];
+  const workspaceSecrets = input.workspaceSecrets ?? [];
   const observabilityConnected =
     input.datadogConnected ||
     input.sentryConnected ||
@@ -177,6 +186,7 @@ export function investigationInstructions(input: {
     "Use the read-only repository inspection tools to list, search, and read attached repository files.",
     "This run is only for investigation and reporting. Do not modify repository code or create pull requests. Pull request remediation, when enabled, runs separately after the report is saved.",
     "Do not expose credentials or secret values.",
+    workspaceSecretUsageInstructions(workspaceSecrets),
     "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
     "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
     "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
@@ -244,6 +254,7 @@ export async function runInvestigationAgent(
     customMcpConnections,
     clickStackConnection,
     slackConnection,
+    workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeDatadogConnection(job.config.id),
@@ -272,6 +283,7 @@ export async function runInvestigationAgent(
     getRuntimeCustomMcpConnections(job.config.id),
     getRuntimeClickStackConnection(job.config.id),
     getRuntimeSlackConnection(job.config.id),
+    getRuntimeWorkspaceSecrets(job.config.id),
   ]);
   const datadogServer = datadogConnection
     ? createDatadogMcpServer(datadogConnection)
@@ -297,11 +309,9 @@ export async function runInvestigationAgent(
   );
 
   const client = new DaytonaSandboxClient({
-    apiKey: config.daytonaApiKey,
-    apiUrl: config.daytonaApiUrl,
+    ...daytonaClientOptions(config),
     name: `responder-investigation-${job.investigationId}`,
     pauseOnExit: false,
-    target: config.daytonaTarget,
   });
 
   let session: DaytonaSandboxSession | null = null;
@@ -327,7 +337,7 @@ export async function runInvestigationAgent(
       }),
     );
     session = await client.create();
-    await configureDaytonaSandboxLifecycle(session, config);
+    await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositories(
       session,
@@ -361,6 +371,7 @@ export async function runInvestigationAgent(
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
       slackChannels: slackConnection?.channels,
+      workspaceSecrets,
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -393,7 +404,7 @@ export async function runInvestigationAgent(
       throw new Error("OpenAI agent returned an empty report");
     }
     await writeTrace(traceEvent("session.completed"));
-    return result.finalOutput.trim();
+    return redactDaytonaSecretPlaceholders(result.finalOutput.trim());
   } catch (error) {
     await writeTrace(
       traceEvent("session.failed", {

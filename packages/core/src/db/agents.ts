@@ -5,13 +5,16 @@ import {
   agentConfigVersions,
   agents,
   agentVersionRepositories,
+  agentVersionSecrets,
   integrationAccounts,
   integrationResources,
   investigations,
   repositories,
+  workspaceSecrets,
   type AgentReportConfig,
   type AgentTriggerConfig,
 } from "./schema.js";
+import { listWorkspaceSecrets } from "./workspace-secrets.js";
 
 type Provider = "github" | "slack" | "sentry" | "datadog";
 
@@ -401,6 +404,31 @@ async function validateConfigurationResources(
       );
     }
   }
+
+  const secretIds = new Set(configuration.secretIds);
+  if (secretIds.size !== configuration.secretIds.length) {
+    throw new AgentConfigurationError(
+      "Workspace secrets must be unique",
+      "resource_not_found",
+    );
+  }
+  if (secretIds.size > 0) {
+    const secretRows = await db
+      .select({ id: workspaceSecrets.id })
+      .from(workspaceSecrets)
+      .where(
+        and(
+          eq(workspaceSecrets.organizationId, organizationId),
+          inArray(workspaceSecrets.id, [...secretIds]),
+        ),
+      );
+    if (secretRows.length !== secretIds.size) {
+      throw new AgentConfigurationError(
+        "Choose workspace secrets from this workspace",
+        "resource_not_found",
+      );
+    }
+  }
 }
 
 function splitTrigger(configuration: AgentConfiguration): {
@@ -458,6 +486,15 @@ export async function createAgent(input: {
         input.configuration.repositoryIds.map((repositoryId) => ({
           agentConfigVersionId: version.id,
           repositoryId,
+        })),
+      );
+    }
+
+    if (input.configuration.secretIds.length > 0) {
+      await tx.insert(agentVersionSecrets).values(
+        input.configuration.secretIds.map((workspaceSecretId) => ({
+          agentConfigVersionId: version.id,
+          workspaceSecretId,
         })),
       );
     }
@@ -529,6 +566,15 @@ export async function updateAgent(input: {
         input.configuration.repositoryIds.map((repositoryId) => ({
           agentConfigVersionId: version.id,
           repositoryId,
+        })),
+      );
+    }
+
+    if (input.configuration.secretIds.length > 0) {
+      await tx.insert(agentVersionSecrets).values(
+        input.configuration.secretIds.map((workspaceSecretId) => ({
+          agentConfigVersionId: version.id,
+          workspaceSecretId,
         })),
       );
     }
@@ -605,20 +651,28 @@ export async function disableAgentsWithUnavailableRepositories(
 
 export async function listAgentOptions(organizationId: string) {
   const db = getDatabase();
-  const accountRows = await db
-    .select({
-      id: integrationAccounts.id,
-      provider: integrationAccounts.provider,
-      displayName: integrationAccounts.displayName,
-      metadata: integrationAccounts.metadata,
-    })
-    .from(integrationAccounts)
-    .where(
-      and(
-        eq(integrationAccounts.organizationId, organizationId),
-        eq(integrationAccounts.status, "connected"),
+  const [accountRows, workspaceSecretRows] = await Promise.all([
+    db
+      .select({
+        id: integrationAccounts.id,
+        provider: integrationAccounts.provider,
+        displayName: integrationAccounts.displayName,
+        metadata: integrationAccounts.metadata,
+      })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.organizationId, organizationId),
+          eq(integrationAccounts.status, "connected"),
+        ),
       ),
-    );
+    listWorkspaceSecrets(organizationId),
+  ]);
+  const secretRows = workspaceSecretRows.map((secret) => ({
+    id: secret.id,
+    name: secret.name,
+    allowedHosts: secret.allowedHosts,
+  }));
   const accounts = accountRows.map(({ metadata, ...account }) => ({
     ...account,
     slackContextAvailable:
@@ -630,7 +684,7 @@ export async function listAgentOptions(organizationId: string) {
   const accountIds = accounts.map((account) => account.id);
 
   if (accountIds.length === 0) {
-    return { accounts: [], resources: [], repositories: [] };
+    return { accounts: [], resources: [], repositories: [], secrets: secretRows };
   }
 
   const [resources, repositoryRows] = await Promise.all([
@@ -666,7 +720,7 @@ export async function listAgentOptions(organizationId: string) {
       ),
   ]);
 
-  return { accounts, resources, repositories: repositoryRows };
+  return { accounts, resources, repositories: repositoryRows, secrets: secretRows };
 }
 
 export async function listAgents(organizationId: string) {
@@ -776,7 +830,7 @@ export async function getAgent(
   const agent = rows[0];
   if (!agent) return null;
 
-  const [repositoryRows, investigationRows] = await Promise.all([
+  const [repositoryRows, secretRows, investigationRows] = await Promise.all([
     agent.versionId
       ? db
           .select({
@@ -794,6 +848,21 @@ export async function getAgent(
             eq(
               agentVersionRepositories.agentConfigVersionId,
               agent.versionId,
+            ),
+          )
+      : Promise.resolve([]),
+    agent.versionId
+      ? db
+          .select({ id: workspaceSecrets.id })
+          .from(agentVersionSecrets)
+          .innerJoin(
+            workspaceSecrets,
+            eq(workspaceSecrets.id, agentVersionSecrets.workspaceSecretId),
+          )
+          .where(
+            and(
+              eq(agentVersionSecrets.agentConfigVersionId, agent.versionId),
+              eq(workspaceSecrets.organizationId, organizationId),
             ),
           )
       : Promise.resolve([]),
@@ -832,6 +901,7 @@ export async function getAgent(
             repositoryIds: repositoryRows.map((repository) => repository.id),
             contextAccountIds: agent.contextAccountIds ?? [],
             contextResourceIds: agent.contextResourceIds ?? [],
+            secretIds: secretRows.map((secret) => secret.id),
             trigger: {
               kind: agent.trigger,
               ...agent.triggerConfig,

@@ -209,6 +209,22 @@ describe("investigation report submission", () => {
     ).resolves.toEqual(expect.objectContaining({ accepted: true }));
   });
 
+  it("rejects workspace secret placeholders before storing a report", async () => {
+    await expect(
+      submitInvestigationReportForRun({
+        investigationId: "investigation-id",
+        organizationId: "organization-id",
+        report: {
+          schemaVersion: 1,
+          headline: "Leaked placeholder",
+          summary: "Observed dtn_secret_1234-abcd in command output.",
+          issues: [],
+        },
+      }),
+    ).rejects.toThrow("cannot contain a workspace secret placeholder");
+    expect(submitInvestigationReport).not.toHaveBeenCalled();
+  });
+
   it("captures a replay without writing issues or delivering to Slack", async () => {
     const report = {
       schemaVersion: 1 as const,

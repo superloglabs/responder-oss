@@ -287,6 +287,53 @@ export const agentVersionRepositories = pgTable(
   ],
 );
 
+export const workspaceSecrets = pgTable(
+  "workspace_secrets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    daytonaSecretId: text("daytona_secret_id").notNull(),
+    daytonaSecretName: text("daytona_secret_name").notNull(),
+    allowedHosts: jsonb("allowed_hosts").$type<string[]>().notNull(),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_secrets_organization_name_idx").on(
+      table.organizationId,
+      table.name,
+    ),
+    uniqueIndex("workspace_secrets_daytona_id_idx").on(table.daytonaSecretId),
+    uniqueIndex("workspace_secrets_daytona_name_idx").on(
+      table.daytonaSecretName,
+    ),
+  ],
+);
+
+export const agentVersionSecrets = pgTable(
+  "agent_version_secrets",
+  {
+    agentConfigVersionId: uuid("agent_config_version_id")
+      .notNull()
+      .references(() => agentConfigVersions.id, { onDelete: "cascade" }),
+    workspaceSecretId: uuid("workspace_secret_id")
+      .notNull()
+      .references(() => workspaceSecrets.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.agentConfigVersionId, table.workspaceSecretId],
+    }),
+  ],
+);
+
 export interface InvestigationInput {
   provider: "sentry" | "datadog" | "slack";
   externalEventId: string;
