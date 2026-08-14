@@ -676,6 +676,21 @@ button:disabled {
   margin-bottom: 28px;
 }
 
+.invitationLabel {
+  width: fit-content;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  display: block;
+  border: 1px solid var(--border-logo);
+  border-radius: 999px;
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
 .authIntro h1 {
   margin: 0;
   font-size: 30px;
