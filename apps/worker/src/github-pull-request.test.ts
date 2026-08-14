@@ -75,4 +75,76 @@ describe("GitHub pull requests from Daytona", () => {
       }),
     );
   });
+
+  it("rejects a changed file containing a workspace secret placeholder", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(commandResult(0, "src/config.ts\0"))
+        .mockResolvedValueOnce(commandResult(0, "present"))
+        .mockResolvedValueOnce(commandResult(1)),
+      readFile: vi
+        .fn()
+        .mockResolvedValue(
+          new TextEncoder().encode('export const key = "dtn_secret_1234-abcd";'),
+        ),
+    } as unknown as DaytonaSandboxSession;
+    const fetchMock = vi.fn<typeof fetch>();
+
+    await expect(
+      createPullRequestFromSandbox(
+        {
+          baseBranch: "main",
+          baseSha: "a".repeat(40),
+          body: "Pull request body",
+          installationId: 123,
+          repository: "acme/app",
+          repositoryPath: "/home/daytona/workspace/repositories/acme/app",
+          requestId: "12345678-1234-1234-1234-123456789012",
+          title: "Fix: Broken route",
+          workspaceBaseSha: "b".repeat(40),
+        },
+        session,
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+        },
+      ),
+    ).rejects.toThrow("cannot contain a workspace secret placeholder");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a pull request title containing a workspace secret placeholder", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(commandResult(0, "src/config.ts\0"))
+        .mockResolvedValueOnce(commandResult(0, "present"))
+        .mockResolvedValueOnce(commandResult(1)),
+      readFile: vi.fn().mockResolvedValue(new TextEncoder().encode("safe\n")),
+    } as unknown as DaytonaSandboxSession;
+    const fetchMock = vi.fn<typeof fetch>();
+
+    await expect(
+      createPullRequestFromSandbox(
+        {
+          baseBranch: "main",
+          baseSha: "a".repeat(40),
+          body: "Pull request body",
+          installationId: 123,
+          repository: "acme/app",
+          repositoryPath: "/home/daytona/workspace/repositories/acme/app",
+          requestId: "12345678-1234-1234-1234-123456789012",
+          title: "Fix dtn_secret_1234-abcd",
+          workspaceBaseSha: "b".repeat(40),
+        },
+        session,
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+        },
+      ),
+    ).rejects.toThrow("Pull request title cannot contain");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

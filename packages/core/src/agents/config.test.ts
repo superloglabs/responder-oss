@@ -25,6 +25,7 @@ describe("agent configuration", () => {
     expect(parsed.success).toBe(true);
     expect(parsed.data?.contextAccountIds).toEqual([]);
     expect(parsed.data?.contextResourceIds).toEqual([]);
+    expect(parsed.data?.secretIds).toEqual([]);
   });
 
   it("requires a repository when remediation is enabled", () => {

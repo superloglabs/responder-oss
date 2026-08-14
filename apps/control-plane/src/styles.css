@@ -676,6 +676,21 @@ button:disabled {
   margin-bottom: 28px;
 }
 
+.invitationLabel {
+  width: fit-content;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  display: block;
+  border: 1px solid var(--border-logo);
+  border-radius: 999px;
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
 .authIntro h1 {
   margin: 0;
   font-size: 30px;
@@ -715,6 +730,12 @@ button:disabled {
   letter-spacing: 0.04em;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.providerGlyph > svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .socialAuth__button {
@@ -2299,9 +2320,6 @@ button:disabled {
   border: 1px solid var(--ds-border-default);
   border-radius: 10px;
   background: var(--ds-surface-overlay);
-}
-
-.investigationProviderIcon > span {
   color: var(--ds-text-primary);
   font-size: 16px;
   font-weight: 650;
@@ -5341,6 +5359,148 @@ button:disabled {
   width: 100px;
 }
 
+.workspaceSecretsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspaceSelectedSecretList {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.workspaceSelectedSecret {
+  min-height: 64px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspaceSelectedSecret:last-child {
+  border-bottom: 0;
+}
+
+.workspaceSelectedSecret > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspaceSelectedSecret strong {
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.workspaceSelectedSecret small,
+.workspaceSecretsEmpty {
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.workspaceSecretsEmpty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.workspaceSecretList {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.workspaceSecretForm {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) minmax(220px, 1.2fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.workspaceSecretDialogIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.workspaceSecretDialogSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspaceSecretDialogSection + .workspaceSecretDialogSection {
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.workspaceSecretDialogSection__title {
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.workspaceSecretDialog .workspaceSecretForm {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspaceSecretDialog .workspaceSecretHosts {
+  grid-column: 1 / -1;
+}
+
+.workspaceSecretDialog .workspaceSecretForm > .dsButton {
+  width: fit-content;
+  grid-column: 1 / -1;
+}
+
+.workspaceSecretForm input {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface);
+  color: var(--secondary);
+  font: inherit;
+}
+
+.workspaceSecretForm input:focus {
+  border-color: var(--border-logo);
+}
+
+.workspaceSecretHint,
+.workspaceSecretError {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.workspaceSecretError {
+  color: var(--danger);
+}
+
 .contextAutomatic {
   color: var(--dim);
   font-size: 12px;
@@ -5924,6 +6084,7 @@ body:has(.appShell--create) {
 .appShell--create .connectedSetup,
 .appShell--create .connectionPrompt,
 .appShell--create .contextList,
+.appShell--create .workspaceSecretList,
 .appShell--create .repositoryConnectList,
 .appShell--create .severityChecks > label {
   border-color: var(--ds-border-default);
@@ -6015,7 +6176,8 @@ body:has(.appShell--create) {
 .appShell--create .channelPicker__trigger,
 .appShell--create .projectPicker > div,
 .appShell--create .repositorySearch,
-.appShell--create .repositoryOrganizationPicker__trigger {
+.appShell--create .repositoryOrganizationPicker__trigger,
+.appShell--create .workspaceSecretForm input {
   min-height: 44px;
   border-color: var(--ds-border-default);
   border-radius: var(--ds-radius-small);
@@ -7201,6 +7363,10 @@ a.issueInvestigationRow:focus-visible {
     grid-column: 3;
     justify-self: start;
   }
+
+  .workspaceSecretForm {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -7249,6 +7415,15 @@ a.issueInvestigationRow:focus-visible {
 
   .appShell--create .connectedSetup--channel {
     grid-template-columns: 1fr;
+  }
+
+  .workspaceSecretList,
+  .workspaceSecretForm {
+    grid-template-columns: 1fr;
+  }
+
+  .workspaceSecretForm .dsButton {
+    width: 100%;
   }
 
   .appShell--create .slackConnectionHeader {

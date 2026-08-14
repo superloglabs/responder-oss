@@ -21,6 +21,7 @@ const EMPTY_OPTIONS: AgentOptions = {
   accounts: [],
   resources: [],
   repositories: [],
+  secrets: [],
 };
 
 const TRIGGERS: Array<{
@@ -135,6 +136,7 @@ function createDefaultConfiguration(
     repositoryIds: [],
     contextAccountIds: [],
     contextResourceIds: [],
+    secretIds: [],
     trigger,
     reporting,
   };

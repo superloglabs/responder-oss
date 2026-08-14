@@ -107,7 +107,9 @@ export function WorkspaceSettingsPage() {
     );
     const link = invitationUrl(result.data.id);
     setLatestInvitation(link);
-    setNotice(`Invitation created for ${result.data.email}.`);
+    setNotice(
+      `Invitation created for ${result.data.email}. Copy the link if they don't receive the email.`,
+    );
     form.reset();
     setInvitationRole("member");
     await organization.refetch();
@@ -272,7 +274,7 @@ export function WorkspaceSettingsPage() {
           <form className="inviteForm" onSubmit={invite}>
             <div>
               <h3>Invite a teammate</h3>
-              <p>Create a secure link to share with the person you invite.</p>
+              <p>Email an invitation, with a secure link you can also copy.</p>
             </div>
             <div className="inviteForm__controls">
               <input

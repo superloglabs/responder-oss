@@ -1,5 +1,6 @@
 import type { RunStreamEvent } from "@openai/agents";
 import type { InvestigationTraceEvent } from "@responder/core/db/schema";
+import { redactDaytonaSecretPlaceholders } from "./secret-safety.js";
 
 const maximumTextLength = 20_000;
 const secretFieldPattern =
@@ -19,7 +20,7 @@ function redactText(
   value: string,
   environment: NodeJS.ProcessEnv,
 ): string {
-  let safe = value;
+  let safe = redactDaytonaSecretPlaceholders(value);
   for (const name of ["OPENAI_API_KEY", "DAYTONA_API_KEY"] as const) {
     const secret = environment[name];
     if (secret) safe = safe.replaceAll(secret, "[redacted]");
