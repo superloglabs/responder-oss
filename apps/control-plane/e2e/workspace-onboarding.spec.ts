@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const organization = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -19,6 +19,40 @@ const user = {
   updatedAt: new Date().toISOString(),
 };
 
+function sessionResponse(activeOrganizationId: string | null) {
+  return {
+    session: {
+      id: "session-id",
+      userId: user.id,
+      activeOrganizationId,
+      token: "session-token",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    user,
+  };
+}
+
+async function mockApplicationApis(page: Page) {
+  await page.route("**/api/agents/options", (route) =>
+    route.fulfill({ json: { accounts: [], resources: [], repositories: [] } }),
+  );
+  await page.route("**/api/integrations", (route) =>
+    route.fulfill({ json: { integrations: [] } }),
+  );
+  await page.route("**/api/billing", (route) =>
+    route.fulfill({
+      json: {
+        configured: false,
+        enabled: false,
+        payAsYouGo: false,
+        remaining: 0,
+      },
+    }),
+  );
+}
+
 test("opens agent creation after creating a workspace", async ({ page }) => {
   let activeOrganizationId: string | null = null;
 
@@ -26,20 +60,7 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
     const path = new URL(route.request().url()).pathname;
 
     if (path.endsWith("/get-session")) {
-      await route.fulfill({
-        json: {
-          session: {
-            id: "session-id",
-            userId: user.id,
-            activeOrganizationId,
-            token: "session-token",
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          user,
-        },
-      });
+      await route.fulfill({ json: sessionResponse(activeOrganizationId) });
       return;
     }
 
@@ -66,22 +87,7 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
 
     await route.fulfill({ json: null });
   });
-  await page.route("**/api/agents/options", (route) =>
-    route.fulfill({ json: { accounts: [], resources: [], repositories: [] } }),
-  );
-  await page.route("**/api/integrations", (route) =>
-    route.fulfill({ json: { integrations: [] } }),
-  );
-  await page.route("**/api/billing", (route) =>
-    route.fulfill({
-      json: {
-        configured: false,
-        enabled: false,
-        payAsYouGo: false,
-        remaining: 0,
-      },
-    }),
-  );
+  await mockApplicationApis(page);
 
   await page.goto("/agents");
   await expect(page.getByRole("heading", { name: "Create a workspace" })).toBeVisible();
@@ -96,11 +102,23 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
 test("keeps an invitation link open while the recipient signs in", async ({
   page,
 }) => {
+  let signedIn = false;
+
   await page.route("**/api/auth/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
 
     if (path.endsWith("/get-session")) {
-      await route.fulfill({ json: null });
+      await route.fulfill({
+        json: signedIn ? sessionResponse(null) : null,
+      });
+      return;
+    }
+
+    if (path.endsWith("/sign-in/email")) {
+      signedIn = true;
+      await route.fulfill({
+        json: { redirect: false, token: "session-token", user },
+      });
       return;
     }
 
@@ -112,6 +130,15 @@ test("keeps an invitation link open while the recipient signs in", async ({
 
   await expect(page).toHaveURL(new RegExp(`/invite/${invitationId}$`));
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+
+  await page.getByLabel("Email").fill(user.email);
+  await page.getByLabel("Password").fill("correct-horse-battery-staple");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/invite/${invitationId}$`));
+  await expect(
+    page.getByRole("heading", { name: "Join this workspace" }),
+  ).toBeVisible();
 });
 
 test("accepts an invitation and opens its workspace", async ({ page }) => {
@@ -123,20 +150,7 @@ test("accepts an invitation and opens its workspace", async ({ page }) => {
     const path = new URL(route.request().url()).pathname;
 
     if (path.endsWith("/get-session")) {
-      await route.fulfill({
-        json: {
-          session: {
-            id: "session-id",
-            userId: user.id,
-            activeOrganizationId,
-            token: "session-token",
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          user,
-        },
-      });
+      await route.fulfill({ json: sessionResponse(activeOrganizationId) });
       return;
     }
 
@@ -176,22 +190,7 @@ test("accepts an invitation and opens its workspace", async ({ page }) => {
 
     await route.fulfill({ json: null });
   });
-  await page.route("**/api/agents/options", (route) =>
-    route.fulfill({ json: { accounts: [], resources: [], repositories: [] } }),
-  );
-  await page.route("**/api/integrations", (route) =>
-    route.fulfill({ json: { integrations: [] } }),
-  );
-  await page.route("**/api/billing", (route) =>
-    route.fulfill({
-      json: {
-        configured: false,
-        enabled: false,
-        payAsYouGo: false,
-        remaining: 0,
-      },
-    }),
-  );
+  await mockApplicationApis(page);
 
   await page.goto(`/invite/${invitationId}`);
   await expect(
@@ -203,4 +202,21 @@ test("accepts an invitation and opens its workspace", async ({ page }) => {
   await expect(page).toHaveURL(/\/agents$/);
   expect(acceptedInvitationId).toBe(invitationId);
   expect(activeOrganizationId).toBe(organization.id);
+});
+
+test("redirects malformed invitation links", async ({ page }) => {
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(organization.id) });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+
+  await page.goto("/invite/xyz");
+
+  await expect(page).toHaveURL(/\/$/);
 });

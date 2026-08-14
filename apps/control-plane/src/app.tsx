@@ -36,7 +36,10 @@ export function App() {
       ) : null}
       <Route element={<ProtectedApp />}>
         <Route element={<Navigate replace to="/agents" />} path="/app" />
-        <Route element={null} path="/invite/:invitationId" />
+        <Route
+          element={<Navigate replace to="/" />}
+          path="/invite/:invitationId"
+        />
         <Route element={<AgentsPage />} path="/agents" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />
