@@ -12,10 +12,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@daytonaio/sdk": "0.203.0",
-    "@opentelemetry/api": "1.9.1",
+    "@daytona/sdk": "0.203.0",
     "@openai/agents": "0.14.2",
     "@openai/agents-extensions": "0.14.2",
+    "@opentelemetry/api": "1.9.1",
     "@responder/core": "workspace:*",
     "@sentry/node": "10.69.0",
     "openai": "6.49.0",

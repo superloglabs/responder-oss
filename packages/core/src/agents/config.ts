@@ -61,6 +61,7 @@ export const agentConfigurationSchema = z
     repositoryIds: z.array(z.uuid()).max(100).default([]),
     contextAccountIds: z.array(z.uuid()).max(20).default([]),
     contextResourceIds: z.array(z.uuid()).max(100).default([]),
+    secretIds: z.array(z.uuid()).max(20).default([]),
     trigger: agentTriggerSchema,
     reporting: agentReportingSchema,
   })

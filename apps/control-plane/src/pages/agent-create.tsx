@@ -15,6 +15,7 @@ import {
   fetchAgent,
   fetchAgentOptions,
   fetchIntegrations,
+  createWorkspaceSecret,
   refreshSlackAgentOptions,
   saveAgent,
   slackChannelLabel,
@@ -66,10 +67,13 @@ interface CreateDraft {
   prMode: AgentPrMode;
   contextAccountIds: string[];
   contextResourceIds: string[];
+  workspaceSecretRecordIds: string[];
   instructions: string;
 }
 
-type SavedCreateDraft = Partial<CreateDraft> & {
+type SavedCreateDraft = Partial<
+  Omit<CreateDraft, "workspaceSecretRecordIds">
+> & {
   postScope?: "all" | "selected";
 };
 
@@ -77,6 +81,7 @@ const EMPTY_OPTIONS: AgentOptions = {
   accounts: [],
   resources: [],
   repositories: [],
+  secrets: [],
 };
 
 const DEFAULT_INSTRUCTIONS =
@@ -129,6 +134,28 @@ function accountsFor(
 
 function storageKey(base: string, agentId: string | undefined): string {
   return agentId ? `${base}:${agentId}` : base;
+}
+
+function saveDraftToSessionStorage(
+  key: string,
+  draft: CreateDraft,
+): void {
+  const persistedDraft: SavedCreateDraft = {
+    inputKind: draft.inputKind,
+    sentryAccountId: draft.sentryAccountId,
+    sentryProjectResourceIds: draft.sentryProjectResourceIds,
+    slackInputResourceId: draft.slackInputResourceId,
+    outputMode: draft.outputMode,
+    outputChannelResourceId: draft.outputChannelResourceId,
+    severities: draft.severities,
+    githubAccountId: draft.githubAccountId,
+    repositoryIds: draft.repositoryIds,
+    prMode: draft.prMode,
+    contextAccountIds: draft.contextAccountIds,
+    contextResourceIds: draft.contextResourceIds,
+    instructions: draft.instructions,
+  };
+  window.sessionStorage.setItem(key, JSON.stringify(persistedDraft));
 }
 
 function readSavedDraft(key: string): SavedCreateDraft {
@@ -210,6 +237,7 @@ function draftFromConfiguration(
     prMode: configuration.prMode,
     contextAccountIds: configuration.contextAccountIds,
     contextResourceIds: configuration.contextResourceIds,
+    workspaceSecretRecordIds: configuration.secretIds,
     instructions: configuration.instructions,
   };
 }
@@ -242,6 +270,11 @@ function createInitialDraft(
     ) ??
     [];
   const configuredPrMode = saved.prMode ?? configured.prMode;
+  const workspaceSecretRecordIds =
+    configured.workspaceSecretRecordIds?.filter((id) =>
+      options.secrets.some((secret) => secret.id === id),
+    ) ??
+    [];
 
   return {
     inputKind: saved.inputKind ?? configured.inputKind ?? "sentry_issue",
@@ -321,6 +354,7 @@ function createInitialDraft(
         slackChannels.some((channel) => channel.id === id),
       ) ??
       [],
+    workspaceSecretRecordIds,
     instructions:
       saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS,
   };
@@ -400,6 +434,7 @@ export function AgentCreatePage() {
     );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
+  const [secretDialogOpen, setSecretDialogOpen] = useState(false);
   const [repositoryQuery, setRepositoryQuery] = useState("");
   const [promptStepReady, setPromptStepReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -412,22 +447,41 @@ export function AgentCreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshingSlackChannels, setRefreshingSlackChannels] = useState(false);
   const [slackRefreshError, setSlackRefreshError] = useState<string | null>(null);
+  const [secretName, setSecretName] = useState("");
+  const [secretValue, setSecretValue] = useState("");
+  const [secretHosts, setSecretHosts] = useState("");
+  const [creatingSecret, setCreatingSecret] = useState(false);
+  const [secretError, setSecretError] = useState<string | null>(null);
   const slackRefreshInFlight = useRef<Promise<void> | null>(null);
   const connectingProviderRef = useRef<IntegrationSummary["id"] | null>(null);
   const [notice] = useState(connectionNotice);
   useDocumentTitle(isEditing ? "Edit agent" : "Create agent");
 
   useEffect(() => {
-    if (!githubDialogOpen && !slackContextDialogOpen) return;
+    if (!githubDialogOpen && !slackContextDialogOpen && !secretDialogOpen) {
+      return;
+    }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setGithubDialogOpen(false);
         setSlackContextDialogOpen(false);
+        if (!creatingSecret) {
+          setSecretDialogOpen(false);
+          setSecretName("");
+          setSecretValue("");
+          setSecretHosts("");
+          setSecretError(null);
+        }
       }
     }
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [githubDialogOpen, slackContextDialogOpen]);
+  }, [
+    creatingSecret,
+    githubDialogOpen,
+    secretDialogOpen,
+    slackContextDialogOpen,
+  ]);
 
   useEffect(() => {
     if (activeStep !== 4 || promptStepReady) return;
@@ -517,7 +571,7 @@ export function AgentCreatePage() {
 
   useEffect(() => {
     if (!draft) return;
-    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    saveDraftToSessionStorage(draftStorageKey, draft);
   }, [draft, draftStorageKey]);
 
   useEffect(() => {
@@ -710,19 +764,19 @@ export function AgentCreatePage() {
       return;
     }
     if (provider === "datadog" || provider === "clickstack") {
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      saveDraftToSessionStorage(draftStorageKey, currentDraft);
       if (provider === "datadog") setChoosingDatadogSite(true);
       else setConnectingClickStack(true);
       return;
     }
     if (provider === "custom_mcp") {
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      saveDraftToSessionStorage(draftStorageKey, currentDraft);
       setConfiguringCustomMcp(true);
       return;
     }
     connectingProviderRef.current = provider;
     setConnectingProvider(provider);
-    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    saveDraftToSessionStorage(draftStorageKey, currentDraft);
     const separator = integration.connectUrl.includes("?") ? "&" : "?";
     const params = new URLSearchParams({ returnTo });
     window.location.assign(`${integration.connectUrl}${separator}${params}`);
@@ -753,6 +807,78 @@ export function AgentCreatePage() {
             resourceId,
           ],
     });
+  }
+
+  function toggleSecret(secretId: string) {
+    updateDraft({
+      workspaceSecretRecordIds:
+        currentDraft.workspaceSecretRecordIds.includes(secretId)
+          ? currentDraft.workspaceSecretRecordIds.filter(
+              (id) => id !== secretId,
+            )
+          : [...currentDraft.workspaceSecretRecordIds, secretId],
+    });
+  }
+
+  function closeSecretDialog() {
+    if (creatingSecret) return;
+    setSecretDialogOpen(false);
+    setSecretName("");
+    setSecretValue("");
+    setSecretHosts("");
+    setSecretError(null);
+  }
+
+  async function storeSecret() {
+    const allowedHosts = [
+      ...new Set(
+        secretHosts
+          .split(/[\s,]+/u)
+          .map((host) => host.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    ];
+    if (!secretName.trim() || !secretValue || allowedHosts.length === 0) {
+      setSecretError("Add a name, value, and at least one allowed host.");
+      return;
+    }
+
+    setCreatingSecret(true);
+    setSecretError(null);
+    try {
+      const secret = await createWorkspaceSecret({
+        name: secretName.trim().toUpperCase(),
+        value: secretValue,
+        allowedHosts,
+      });
+      setOptions((current) => ({
+        ...current,
+        secrets: [...current.secrets, secret].sort((left, right) =>
+          left.name.localeCompare(right.name),
+        ),
+      }));
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              workspaceSecretRecordIds:
+                current.workspaceSecretRecordIds.includes(secret.id)
+                  ? current.workspaceSecretRecordIds
+                  : [...current.workspaceSecretRecordIds, secret.id],
+            }
+          : current,
+      );
+      setSecretName("");
+      setSecretValue("");
+      setSecretHosts("");
+      setSecretDialogOpen(false);
+    } catch (caught) {
+      setSecretError(
+        caught instanceof Error ? caught.message : "Unable to store secret",
+      );
+    } finally {
+      setCreatingSecret(false);
+    }
   }
 
   function showStep(step: CreateStep) {
@@ -860,6 +986,7 @@ export function AgentCreatePage() {
       repositoryIds: currentDraft.repositoryIds,
       contextAccountIds: [...contextAccountIds],
       contextResourceIds: currentDraft.contextResourceIds,
+      secretIds: currentDraft.workspaceSecretRecordIds,
       trigger,
       reporting,
     };
@@ -903,6 +1030,9 @@ export function AgentCreatePage() {
   );
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
     draft.contextResourceIds.includes(channel.id),
+  );
+  const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
+    draft.workspaceSecretRecordIds.includes(secret.id),
   );
   const slackContextAvailable = slackAccounts.some(
     (account) => account.slackContextAvailable,
@@ -1800,6 +1930,197 @@ export function AgentCreatePage() {
                     }
                   />
                 </div>
+              </div>
+
+              <div className="workspaceSecretsPanel">
+                <div className="contextToolbar">
+                  <span>
+                    <strong>Workspace secrets</strong>
+                    <small>
+                      Selected secrets are exposed as opaque environment
+                      variables and only resolve for allowed hosts.
+                    </small>
+                  </span>
+                  <Button
+                    onClick={() => setSecretDialogOpen(true)}
+                    size="small"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Add secret
+                  </Button>
+                </div>
+
+                {selectedWorkspaceSecrets.length > 0 ? (
+                  <div className="workspaceSelectedSecretList">
+                    {selectedWorkspaceSecrets.map((secret) => (
+                      <div className="workspaceSelectedSecret" key={secret.id}>
+                        <span>
+                          <strong>{secret.name}</strong>
+                          <small>
+                            Allowed for {secret.allowedHosts.join(", ")}
+                          </small>
+                        </span>
+                        <Button
+                          onClick={() => toggleSecret(secret.id)}
+                          size="small"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="workspaceSecretsEmpty">
+                    No secrets added to this agent.
+                  </div>
+                )}
+
+                {secretDialogOpen ? (
+                  <div
+                    className="configurationDialogBackdrop"
+                    onMouseDown={(event) => {
+                      if (event.target === event.currentTarget) {
+                        closeSecretDialog();
+                      }
+                    }}
+                  >
+                    <section
+                      aria-labelledby="workspace-secret-dialog-title"
+                      aria-modal="true"
+                      className="configurationDialog workspaceSecretDialog"
+                      role="dialog"
+                    >
+                      <header className="configurationDialog__header">
+                        <div
+                          aria-hidden="true"
+                          className="workspaceSecretDialogIcon"
+                        >
+                          •••
+                        </div>
+                        <span>
+                          <strong id="workspace-secret-dialog-title">
+                            Add a workspace secret
+                          </strong>
+                          <small>
+                            Select an existing secret or create a write-only one.
+                          </small>
+                        </span>
+                        <IconButton
+                          aria-label="Close workspace secret dialog"
+                          disabled={creatingSecret}
+                          onClick={closeSecretDialog}
+                          size="small"
+                          variant="ghost"
+                        >
+                          ×
+                        </IconButton>
+                      </header>
+                      <div className="configurationDialog__body">
+                        <div className="workspaceSecretDialogSection">
+                          <span className="workspaceSecretDialogSection__title">
+                            Existing workspace secrets
+                          </span>
+                          {options.secrets.length > 0 ? (
+                            <div className="workspaceSecretList">
+                              {options.secrets.map((secret) => (
+                                <Checkbox
+                                  checked={draft.workspaceSecretRecordIds.includes(
+                                    secret.id,
+                                  )}
+                                  description={`Allowed for ${secret.allowedHosts.join(", ")}`}
+                                  key={secret.id}
+                                  label={secret.name}
+                                  onChange={() => toggleSecret(secret.id)}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="workspaceSecretsEmpty">
+                              This workspace does not have any secrets yet.
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="workspaceSecretDialogSection">
+                          <span className="workspaceSecretDialogSection__title">
+                            Create a new secret
+                          </span>
+                          <div className="workspaceSecretForm">
+                            <label className="createField">
+                              <span>Environment variable</span>
+                              <input
+                                autoComplete="off"
+                                autoFocus
+                                onChange={(event) =>
+                                  setSecretName(event.target.value.toUpperCase())
+                                }
+                                placeholder="SERVICE_API_KEY"
+                                value={secretName}
+                              />
+                            </label>
+                            <label className="createField">
+                              <span>Secret value</span>
+                              <input
+                                autoComplete="new-password"
+                                onChange={(event) =>
+                                  setSecretValue(event.target.value)
+                                }
+                                placeholder="Stored once and never shown again"
+                                type="password"
+                                value={secretValue}
+                              />
+                            </label>
+                            <label className="createField workspaceSecretHosts">
+                              <span>Allowed hosts</span>
+                              <input
+                                autoComplete="off"
+                                onChange={(event) =>
+                                  setSecretHosts(event.target.value)
+                                }
+                                placeholder="api.example.com, *.example.net"
+                                value={secretHosts}
+                              />
+                            </label>
+                            <Button
+                              disabled={creatingSecret}
+                              loading={creatingSecret}
+                              onClick={() => void storeSecret()}
+                              type="button"
+                              variant="secondary"
+                            >
+                              Store and add
+                            </Button>
+                          </div>
+                          {secretError ? (
+                            <p className="workspaceSecretError" role="alert">
+                              {secretError}
+                            </p>
+                          ) : null}
+                          <p className="workspaceSecretHint">
+                            The value cannot be viewed after storage. Rotate it by
+                            creating a replacement secret.
+                          </p>
+                        </div>
+                      </div>
+                      <footer className="configurationDialog__footer">
+                        <span>
+                          {selectedWorkspaceSecrets.length} selected
+                        </span>
+                        <Button
+                          disabled={creatingSecret}
+                          onClick={closeSecretDialog}
+                          size="small"
+                          variant="primary"
+                        >
+                          Done
+                        </Button>
+                      </footer>
+                    </section>
+                  </div>
+                ) : null}
               </div>
             </CreateSection>
           ) : null}

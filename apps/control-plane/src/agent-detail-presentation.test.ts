@@ -12,6 +12,13 @@ const options: AgentOptions = {
     { id: "datadog", provider: "datadog", displayName: "Acme Datadog" },
   ],
   repositories: [],
+  secrets: [
+    {
+      id: "service-key",
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+    },
+  ],
   resources: [
     {
       id: "input-channel",
@@ -33,6 +40,7 @@ const options: AgentOptions = {
 const configuration: AgentConfiguration = {
   contextAccountIds: ["sentry", "datadog"],
   contextResourceIds: [],
+  secretIds: ["service-key"],
   description: "Investigates production alerts.",
   enabled: true,
   instructions: "Investigate the issue.",
@@ -84,6 +92,9 @@ describe("buildAgentPipelinePresentation", () => {
     expect(presentation.context.detail).toBe(
       "GitHub repositories: acme/api · acme/web",
     );
+    expect(presentation.context.meta).toBe(
+      "Workspace secrets: SERVICE_API_KEY",
+    );
     expect(presentation.output).toEqual({
       detail: "SEV-1 · SEV-2 · SEV-3",
       eyebrow: "Output · Slack",
@@ -98,6 +109,7 @@ describe("buildAgentPipelinePresentation", () => {
         ...configuration,
         contextAccountIds: [],
         contextResourceIds: [],
+        secretIds: [],
         prMode: "disabled",
         reporting: { mode: "thread" },
         repositoryIds: [],
@@ -108,7 +120,7 @@ describe("buildAgentPipelinePresentation", () => {
         },
       },
       [],
-      { accounts: options.accounts, repositories: [], resources: [] },
+      { accounts: options.accounts, repositories: [], resources: [], secrets: [] },
     );
 
     expect(presentation.input.title).toBe("Any channel");
