@@ -1,0 +1,5 @@
+# Shared machine-local integration configuration.
+/.env.providers.local
+/.env.tunnel.local
+
+# .env.local is intentionally absent. Each worktree generates its own copy.
