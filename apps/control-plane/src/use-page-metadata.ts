@@ -21,8 +21,12 @@ export function usePageMetadata(metadata: SeoMetadata | undefined) {
     document.title = metadata.title;
 
     for (const tag of metadata.meta) {
-      document.head
-        .querySelector(`${tag.attribute === "name" ? "meta[name" : "meta[property"}="${tag.key}"]:not(${ownedSelector})`)
+      Array.from(document.head.querySelectorAll("meta"))
+        .find(
+          (element) =>
+            !element.matches(ownedSelector) &&
+            element.getAttribute(tag.attribute) === tag.key,
+        )
         ?.remove();
       const element = document.createElement("meta");
       element.dataset.responderSeo = "";
