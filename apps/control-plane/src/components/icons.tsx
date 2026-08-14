@@ -51,13 +51,20 @@ const providerLogos = {
   google: GoogleLogo,
 } as const;
 
+function ProviderGlyphContent({ provider }: { provider: ProviderGlyphId }) {
+  const glyph = providerGlyphs[provider];
+  if (!("logo" in glyph)) return glyph.text;
+
+  const Logo = providerLogos[glyph.logo];
+  return <Logo />;
+}
+
 export function ProviderGlyph({
   className,
   decorative = false,
   provider,
 }: ProviderGlyphProps) {
   const glyph = providerGlyphs[provider];
-  const Logo = "logo" in glyph ? providerLogos[glyph.logo] : null;
   return (
     <span
       aria-hidden={decorative ? true : undefined}
@@ -65,7 +72,7 @@ export function ProviderGlyph({
       className={`providerGlyph${className ? ` ${className}` : ""}`}
       role={decorative ? undefined : "img"}
     >
-      {Logo ? <Logo /> : "text" in glyph ? glyph.text : null}
+      <ProviderGlyphContent provider={provider} />
     </span>
   );
 }
