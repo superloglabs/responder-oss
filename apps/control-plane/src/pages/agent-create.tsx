@@ -67,7 +67,7 @@ interface CreateDraft {
   prMode: AgentPrMode;
   contextAccountIds: string[];
   contextResourceIds: string[];
-  secretIds: string[];
+  workspaceSecretRecordIds: string[];
   instructions: string;
 }
 
@@ -213,7 +213,7 @@ function draftFromConfiguration(
     prMode: configuration.prMode,
     contextAccountIds: configuration.contextAccountIds,
     contextResourceIds: configuration.contextResourceIds,
-    secretIds: configuration.secretIds,
+    workspaceSecretRecordIds: configuration.secretIds,
     instructions: configuration.instructions,
   };
 }
@@ -246,11 +246,11 @@ function createInitialDraft(
     ) ??
     [];
   const configuredPrMode = saved.prMode ?? configured.prMode;
-  const secretIds =
-    saved.secretIds?.filter((id) =>
+  const workspaceSecretRecordIds =
+    saved.workspaceSecretRecordIds?.filter((id) =>
       options.secrets.some((secret) => secret.id === id),
     ) ??
-    configured.secretIds?.filter((id) =>
+    configured.workspaceSecretRecordIds?.filter((id) =>
       options.secrets.some((secret) => secret.id === id),
     ) ??
     [];
@@ -333,7 +333,7 @@ function createInitialDraft(
         slackChannels.some((channel) => channel.id === id),
       ) ??
       [],
-    secretIds,
+    workspaceSecretRecordIds,
     instructions:
       saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS,
   };
@@ -790,9 +790,12 @@ export function AgentCreatePage() {
 
   function toggleSecret(secretId: string) {
     updateDraft({
-      secretIds: currentDraft.secretIds.includes(secretId)
-        ? currentDraft.secretIds.filter((id) => id !== secretId)
-        : [...currentDraft.secretIds, secretId],
+      workspaceSecretRecordIds:
+        currentDraft.workspaceSecretRecordIds.includes(secretId)
+          ? currentDraft.workspaceSecretRecordIds.filter(
+              (id) => id !== secretId,
+            )
+          : [...currentDraft.workspaceSecretRecordIds, secretId],
     });
   }
 
@@ -837,9 +840,10 @@ export function AgentCreatePage() {
         current
           ? {
               ...current,
-              secretIds: current.secretIds.includes(secret.id)
-                ? current.secretIds
-                : [...current.secretIds, secret.id],
+              workspaceSecretRecordIds:
+                current.workspaceSecretRecordIds.includes(secret.id)
+                  ? current.workspaceSecretRecordIds
+                  : [...current.workspaceSecretRecordIds, secret.id],
             }
           : current,
       );
@@ -961,7 +965,7 @@ export function AgentCreatePage() {
       repositoryIds: currentDraft.repositoryIds,
       contextAccountIds: [...contextAccountIds],
       contextResourceIds: currentDraft.contextResourceIds,
-      secretIds: currentDraft.secretIds,
+      secretIds: currentDraft.workspaceSecretRecordIds,
       trigger,
       reporting,
     };
@@ -1007,7 +1011,7 @@ export function AgentCreatePage() {
     draft.contextResourceIds.includes(channel.id),
   );
   const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
-    draft.secretIds.includes(secret.id),
+    draft.workspaceSecretRecordIds.includes(secret.id),
   );
   const slackContextAvailable = slackAccounts.some(
     (account) => account.slackContextAvailable,
@@ -2003,7 +2007,9 @@ export function AgentCreatePage() {
                             <div className="workspaceSecretList">
                               {options.secrets.map((secret) => (
                                 <Checkbox
-                                  checked={draft.secretIds.includes(secret.id)}
+                                  checked={draft.workspaceSecretRecordIds.includes(
+                                    secret.id,
+                                  )}
                                   description={`Allowed for ${secret.allowedHosts.join(", ")}`}
                                   key={secret.id}
                                   label={secret.name}
