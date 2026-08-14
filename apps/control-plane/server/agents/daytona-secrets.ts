@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { Daytona, DaytonaNotFoundError } from "@daytona/sdk";
+import { Daytona } from "@daytona/sdk";
 import {
   daytonaClientOptions,
+  isDaytonaNotFound,
   requireDaytonaClientConfig,
   type DaytonaClientConfig,
 } from "@responder/core/daytona-config";
@@ -42,13 +43,7 @@ export async function deleteDaytonaWorkspaceSecret(
         await client.secret.delete(daytonaSecretId);
         return;
       } catch (error) {
-        if (
-          error instanceof DaytonaNotFoundError ||
-          (typeof error === "object" &&
-            error !== null &&
-            "statusCode" in error &&
-            error.statusCode === 404)
-        ) {
+        if (isDaytonaNotFound(error)) {
           return;
         }
         lastError = error;

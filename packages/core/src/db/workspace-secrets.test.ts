@@ -46,6 +46,12 @@ describe("workspace secret storage", () => {
     expect(migration).toContain(
       'agent."organization_id" = secret."organization_id"',
     );
+    expect(migration).toContain(
+      'CREATE TRIGGER "agents_organization_immutable"',
+    );
+    expect(migration).toContain(
+      'CREATE TRIGGER "workspace_secrets_organization_immutable"',
+    );
   });
 });
 
@@ -60,6 +66,11 @@ describe("workspace secret environment variable names", () => {
     "NODE_OPTIONS",
     "HTTPS_PROXY",
     "GIT_CONFIG_COUNT",
+    "GIT_WORK_TREE",
+    "JAVA_TOOL_OPTIONS",
+    "PYTHONSTARTUP",
+    "PERL5OPT",
+    "RUBYOPT",
     "DYLD_INSERT_LIBRARIES",
     "OPENAI_API_KEY",
   ])("rejects runtime control variable %s", (name) => {

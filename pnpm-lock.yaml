@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@daytonaio/sdk>shell-quote': 1.9.0
+  '@daytona/sdk>shell-quote': 1.9.0
   '@esbuild-kit/core-utils>esbuild': 0.25.12
   '@eslint/eslintrc>js-yaml': 4.3.1
   ajv>fast-uri: 3.1.5

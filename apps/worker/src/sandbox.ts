@@ -1,11 +1,11 @@
 import {
   Daytona,
-  DaytonaNotFoundError,
   type Sandbox,
 } from "@daytona/sdk";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
   daytonaClientOptions,
+  isDaytonaNotFound,
   type DaytonaClientConfig,
 } from "@responder/core/daytona-config";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
@@ -63,16 +63,6 @@ export async function configureDaytonaSandboxLifecycle(
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }
-}
-
-function isDaytonaNotFound(error: unknown): boolean {
-  return (
-    error instanceof DaytonaNotFoundError ||
-    (typeof error === "object" &&
-      error !== null &&
-      "statusCode" in error &&
-      error.statusCode === 404)
-  );
 }
 
 export async function closeDaytonaSandbox(

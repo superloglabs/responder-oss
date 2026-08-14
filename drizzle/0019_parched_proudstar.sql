@@ -40,4 +40,19 @@ END;
 $$ LANGUAGE plpgsql;--> statement-breakpoint
 CREATE TRIGGER "agent_version_secrets_organization_guard"
 	BEFORE INSERT OR UPDATE ON "agent_version_secrets"
-	FOR EACH ROW EXECUTE FUNCTION "enforce_agent_version_secret_organization"();
+	FOR EACH ROW EXECUTE FUNCTION "enforce_agent_version_secret_organization"();--> statement-breakpoint
+CREATE FUNCTION "prevent_organization_ownership_change"() RETURNS trigger AS $$
+BEGIN
+	IF NEW."organization_id" IS DISTINCT FROM OLD."organization_id" THEN
+		RAISE EXCEPTION 'Organization ownership is immutable'
+			USING ERRCODE = '23514';
+	END IF;
+	RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;--> statement-breakpoint
+CREATE TRIGGER "agents_organization_immutable"
+	BEFORE UPDATE OF "organization_id" ON "agents"
+	FOR EACH ROW EXECUTE FUNCTION "prevent_organization_ownership_change"();--> statement-breakpoint
+CREATE TRIGGER "workspace_secrets_organization_immutable"
+	BEFORE UPDATE OF "organization_id" ON "workspace_secrets"
+	FOR EACH ROW EXECUTE FUNCTION "prevent_organization_ownership_change"();
