@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.prerender.config.ts && node scripts/prerender.mjs",
     "dev": "concurrently -k -n web,api \"vite\" \"tsx watch server/dev.ts\"",
     "preview": "vite preview",
     "start": "tsx server/production.ts",

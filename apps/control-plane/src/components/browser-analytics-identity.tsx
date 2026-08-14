@@ -6,10 +6,10 @@ export function BrowserAnalyticsIdentity() {
   const session = authClient.useSession();
   const lastIdentity = useRef<string | null>(null);
 
-  const userId = session.data?.user.id;
-  const userEmail = session.data?.user.email;
-  const userName = session.data?.user.name;
-  const organizationId = session.data?.session.activeOrganizationId;
+  const userId = session.data?.user?.id;
+  const userEmail = session.data?.user?.email;
+  const userName = session.data?.user?.name;
+  const organizationId = session.data?.session?.activeOrganizationId;
 
   useEffect(() => {
     if (session.isPending || !userId) return;

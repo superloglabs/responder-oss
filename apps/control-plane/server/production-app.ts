@@ -10,7 +10,7 @@ const staticRoot = path.resolve(
   "../dist",
 );
 const serveAsset = serveStatic({ root: staticRoot });
-const serveIndex = serveStatic({ path: "index.html", root: staticRoot });
+const serveAppShell = serveStatic({ path: "app.html", root: staticRoot });
 
 export const productionApp = new Hono()
   .route("/", app)
@@ -28,5 +28,5 @@ export const productionApp = new Hono()
     ) {
       return context.notFound();
     }
-    return serveIndex(context, next);
+    return serveAppShell(context, next);
   });
