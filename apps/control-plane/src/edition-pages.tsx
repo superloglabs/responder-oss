@@ -8,3 +8,7 @@ export function HomePage() {
 export function PricingPage() {
   return <Navigate replace to="/agents" />;
 }
+
+export function BlogPage() {
+  return <Navigate replace to="/agents" />;
+}
