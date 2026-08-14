@@ -249,6 +249,7 @@ export function createResponderAuth() {
               JSON.stringify({
                 errorCode:
                   error instanceof Error ? error.constructor.name : "unknown",
+                errorMessage: authHandlerErrorMessage(error),
                 event: "invitation_email_delivery_failed",
                 invitationId: id,
                 organizationId: organization.id,
