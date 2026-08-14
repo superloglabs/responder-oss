@@ -2320,9 +2320,6 @@ button:disabled {
   border: 1px solid var(--ds-border-default);
   border-radius: 10px;
   background: var(--ds-surface-overlay);
-}
-
-.investigationProviderIcon > span {
   color: var(--ds-text-primary);
   font-size: 16px;
   font-weight: 650;
