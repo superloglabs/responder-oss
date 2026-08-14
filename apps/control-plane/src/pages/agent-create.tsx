@@ -71,7 +71,9 @@ interface CreateDraft {
   instructions: string;
 }
 
-type SavedCreateDraft = Partial<CreateDraft> & {
+type SavedCreateDraft = Partial<
+  Omit<CreateDraft, "workspaceSecretRecordIds">
+> & {
   postScope?: "all" | "selected";
 };
 
@@ -132,6 +134,28 @@ function accountsFor(
 
 function storageKey(base: string, agentId: string | undefined): string {
   return agentId ? `${base}:${agentId}` : base;
+}
+
+function saveDraftToSessionStorage(
+  key: string,
+  draft: CreateDraft,
+): void {
+  const persistedDraft: SavedCreateDraft = {
+    inputKind: draft.inputKind,
+    sentryAccountId: draft.sentryAccountId,
+    sentryProjectResourceIds: draft.sentryProjectResourceIds,
+    slackInputResourceId: draft.slackInputResourceId,
+    outputMode: draft.outputMode,
+    outputChannelResourceId: draft.outputChannelResourceId,
+    severities: draft.severities,
+    githubAccountId: draft.githubAccountId,
+    repositoryIds: draft.repositoryIds,
+    prMode: draft.prMode,
+    contextAccountIds: draft.contextAccountIds,
+    contextResourceIds: draft.contextResourceIds,
+    instructions: draft.instructions,
+  };
+  window.sessionStorage.setItem(key, JSON.stringify(persistedDraft));
 }
 
 function readSavedDraft(key: string): SavedCreateDraft {
@@ -247,9 +271,6 @@ function createInitialDraft(
     [];
   const configuredPrMode = saved.prMode ?? configured.prMode;
   const workspaceSecretRecordIds =
-    saved.workspaceSecretRecordIds?.filter((id) =>
-      options.secrets.some((secret) => secret.id === id),
-    ) ??
     configured.workspaceSecretRecordIds?.filter((id) =>
       options.secrets.some((secret) => secret.id === id),
     ) ??
@@ -550,7 +571,7 @@ export function AgentCreatePage() {
 
   useEffect(() => {
     if (!draft) return;
-    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    saveDraftToSessionStorage(draftStorageKey, draft);
   }, [draft, draftStorageKey]);
 
   useEffect(() => {
@@ -743,19 +764,19 @@ export function AgentCreatePage() {
       return;
     }
     if (provider === "datadog" || provider === "clickstack") {
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      saveDraftToSessionStorage(draftStorageKey, currentDraft);
       if (provider === "datadog") setChoosingDatadogSite(true);
       else setConnectingClickStack(true);
       return;
     }
     if (provider === "custom_mcp") {
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      saveDraftToSessionStorage(draftStorageKey, currentDraft);
       setConfiguringCustomMcp(true);
       return;
     }
     connectingProviderRef.current = provider;
     setConnectingProvider(provider);
-    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    saveDraftToSessionStorage(draftStorageKey, currentDraft);
     const separator = integration.connectUrl.includes("?") ? "&" : "?";
     const params = new URLSearchParams({ returnTo });
     window.location.assign(`${integration.connectUrl}${separator}${params}`);
