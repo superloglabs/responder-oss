@@ -29,7 +29,7 @@ function AuthFrame({ children }: AuthGateProps) {
   );
 }
 
-function SignIn() {
+function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [socialProvider, setSocialProvider] = useState<"github" | "google" | null>(
@@ -117,9 +117,22 @@ function SignIn() {
   return (
     <>
       <div className="authIntro">
-        <h1>{isCreatingAccount ? "Create your account" : "Welcome back"}</h1>
+        {isInvitation ? (
+          <span className="invitationLabel">Workspace invitation</span>
+        ) : null}
+        <h1>
+          {isInvitation
+            ? isCreatingAccount
+              ? "Create your account to join"
+              : "You're invited"
+            : isCreatingAccount
+              ? "Create your account"
+              : "Welcome back"}
+        </h1>
         <p>
-          {isCreatingAccount
+          {isInvitation
+            ? "Sign in or create an account with the invited email to join this workspace."
+            : isCreatingAccount
             ? "Start a workspace for your incident response agents."
             : "Sign in to manage your agents and investigations."}
         </p>
@@ -501,7 +514,7 @@ export function AuthGate({ children }: AuthGateProps) {
   if (!session.data) {
     return (
       <AuthFrame>
-        <SignIn />
+        <SignIn isInvitation={Boolean(invitationMatch?.[1])} />
       </AuthFrame>
     );
   }
