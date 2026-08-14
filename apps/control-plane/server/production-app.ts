@@ -10,7 +10,8 @@ const staticRoot = path.resolve(
   "../dist",
 );
 const serveAsset = serveStatic({ root: staticRoot });
-const serveIndex = serveStatic({ path: "index.html", root: staticRoot });
+const serveAppShell = serveStatic({ path: "app.html", root: staticRoot });
+const serveBlog = serveStatic({ path: "blog/index.html", root: staticRoot });
 
 export const productionApp = new Hono()
   .route("/", app)
@@ -19,6 +20,8 @@ export const productionApp = new Hono()
     return next();
   })
   .use("*", serveAsset)
+  .get("/blog", serveBlog)
+  .get("/blog/", serveBlog)
   .get("*", async (context, next) => {
     if (
       context.req.path === "/api" ||
@@ -28,5 +31,5 @@ export const productionApp = new Hono()
     ) {
       return context.notFound();
     }
-    return serveIndex(context, next);
+    return serveAppShell(context, next);
   });

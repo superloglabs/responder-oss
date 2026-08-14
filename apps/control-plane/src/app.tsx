@@ -8,10 +8,12 @@ import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
+import { editionSeoMetadataForPath } from "./edition-metadata";
 import { BlogPage, HomePage, PricingPage } from "./edition-pages";
 import { SettingsPage } from "./pages/settings";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
+import { usePageMetadata } from "./use-page-metadata";
 
 function ProtectedApp() {
   return (
@@ -27,6 +29,9 @@ function LegacyBillingRedirect() {
 }
 
 export function App() {
+  const { pathname } = useLocation();
+  usePageMetadata(editionSeoMetadataForPath(pathname));
+
   return (
     <Routes>
       <Route element={<HomePage />} path="/" />
