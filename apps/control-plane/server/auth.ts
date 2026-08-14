@@ -228,14 +228,33 @@ export function createResponderAuth() {
             organizationName: organization.name,
             role,
           });
-          await sendEmail({
-            ...body,
-            idempotencyKey: `workspace-invitation/${id}/${new Date(
-              invitation.expiresAt,
-            ).getTime()}`,
-            subject: `You're invited to ${organization.name} in Responder`,
-            to: email,
-          });
+          try {
+            await sendEmail({
+              ...body,
+              idempotencyKey: `workspace-invitation/${id}/${new Date(
+                invitation.expiresAt,
+              ).getTime()}`,
+              subject: `You're invited to ${organization.name} in Responder`,
+              to: email,
+            });
+            console.info(
+              JSON.stringify({
+                event: "invitation_email_delivery_success",
+                invitationId: id,
+                organizationId: organization.id,
+              }),
+            );
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                errorCode:
+                  error instanceof Error ? error.constructor.name : "unknown",
+                event: "invitation_email_delivery_failed",
+                invitationId: id,
+                organizationId: organization.id,
+              }),
+            );
+          }
         },
         organizationHooks: {
           afterCreateOrganization: async ({ organization, user }) => {

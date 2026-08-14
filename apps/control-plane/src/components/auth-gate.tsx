@@ -38,6 +38,17 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
   const [error, setError] = useState<string | null>(() =>
     socialAuthErrorMessage(window.location.search),
   );
+  let heading = isCreatingAccount ? "Create your account" : "Welcome back";
+  let description = isCreatingAccount
+    ? "Start a workspace for your incident response agents."
+    : "Sign in to manage your agents and investigations.";
+  if (isInvitation) {
+    heading = isCreatingAccount
+      ? "Create your account to join"
+      : "You're invited";
+    description =
+      "Sign in or create an account with the invited email to join this workspace.";
+  }
 
   async function socialSignIn(provider: "github" | "google") {
     setError(null);
@@ -120,22 +131,8 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
         {isInvitation ? (
           <span className="invitationLabel">Workspace invitation</span>
         ) : null}
-        <h1>
-          {isInvitation
-            ? isCreatingAccount
-              ? "Create your account to join"
-              : "You're invited"
-            : isCreatingAccount
-              ? "Create your account"
-              : "Welcome back"}
-        </h1>
-        <p>
-          {isInvitation
-            ? "Sign in or create an account with the invited email to join this workspace."
-            : isCreatingAccount
-            ? "Start a workspace for your incident response agents."
-            : "Sign in to manage your agents and investigations."}
-        </p>
+        <h1>{heading}</h1>
+        <p>{description}</p>
       </div>
       <div className="socialAuth">
         <button
