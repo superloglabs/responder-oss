@@ -9,6 +9,10 @@ export function PricingPage() {
   return <Navigate replace to="/agents" />;
 }
 
-export function BlogPage() {
+export function BlogIndexPage() {
+  return <Navigate replace to="/agents" />;
+}
+
+export function BlogArticlePage() {
   return <Navigate replace to="/agents" />;
 }

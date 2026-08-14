@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   editionSeoMetadataForPath,
+  publicDocumentRoutes,
   renderPublicRoute,
 } from "../.prerender/prerender-entry.js";
 
@@ -47,14 +48,9 @@ function renderDocument(pathname, metadata) {
     .replace('<div id="root"></div>', `<div id="root">${markup}</div>`);
 }
 
-const routes = [
-  { output: "index.html", pathname: "/" },
-  { output: "blog/index.html", pathname: "/blog" },
-];
-
 await writeFile(path.join(distRoot, "app.html"), shell);
 
-for (const route of routes) {
+for (const route of publicDocumentRoutes) {
   const metadata = editionSeoMetadataForPath(route.pathname);
   const output = path.join(distRoot, route.output);
   await mkdir(path.dirname(output), { recursive: true });

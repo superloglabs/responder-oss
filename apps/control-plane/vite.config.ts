@@ -3,6 +3,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
+import { publicDocumentPathnames } from "./src/public-routes.js";
 
 const webPort = Number(
   process.env.PORT ?? process.env.CONTROL_PLANE_WEB_PORT ?? 3000,
@@ -19,6 +20,7 @@ const uploadsSentrySourceMaps = Boolean(
 );
 const buildsSentrySourceMaps =
   uploadsSentrySourceMaps || process.env.SENTRY_BUILD_SOURCEMAPS === "true";
+const publicDocumentPaths: ReadonlySet<string> = new Set(publicDocumentPathnames);
 
 const previewDocumentRoutes: Plugin = {
   configurePreviewServer(server) {
@@ -31,8 +33,10 @@ const previewDocumentRoutes: Plugin = {
         response.end();
         return;
       }
-      if (url.pathname === "/blog" || url.pathname === "/blog/") {
-        request.url = `/blog/index.html${url.search}`;
+      const publicDocumentPath =
+        url.pathname === "/" ? "/" : url.pathname.replace(/\/$/, "");
+      if (publicDocumentPath !== "/" && publicDocumentPaths.has(publicDocumentPath)) {
+        request.url = `${publicDocumentPath}/index.html${url.search}`;
       } else if (
         url.pathname !== "/" &&
         url.pathname !== "/api" &&
