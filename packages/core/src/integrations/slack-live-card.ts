@@ -707,7 +707,13 @@ export function slackInvestigationCard(input: {
   title: string;
   traceItems?: SlackInvestigationTraceItem[];
 }): { blocks: unknown[]; text: string } {
-  const title = truncate(input.title.trim() || "Investigation", 180);
+  const rawTitle = input.title.trim() || "Investigation";
+  const title = truncate(
+    rawTitle
+      .replace(/^\*([^\n]+)\*$/u, "$1")
+      .replace(/:rotating_light:/giu, "🚨"),
+    180,
+  );
   const source = {
     type: "url",
     text: "View investigation",
