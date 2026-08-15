@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@daytona/sdk": "0.203.0",
+    "@daytonaio/sdk": "0.162.0",
     "@openai/agents": "0.14.2",
     "@openai/agents-extensions": "0.14.2",
     "@opentelemetry/api": "1.9.1",
