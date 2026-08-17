@@ -10,14 +10,26 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
 
+blockExoticSubdeps: true
+minimumReleaseAge: 1440
+
 overrides:
   '@daytona/sdk>shell-quote': 1.9.0
-  '@esbuild-kit/core-utils>esbuild': 0.25.12
+  '@esbuild-kit/core-utils>esbuild': 0.28.2
   '@eslint/eslintrc>js-yaml': 4.3.1
   'ajv>fast-uri': 3.1.5
   'concurrently>shell-quote': 1.9.0
+  'drizzle-kit>esbuild': 0.28.2
   'minimatch@3>brace-expansion': 1.1.18
   'minimatch@10>brace-expansion': 5.0.9
+
+peerDependencyRules:
+  allowedVersions:
+    '@daytonaio/sdk': 0.203.0
+
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - semver@6.3.1
 
 minimumReleaseAgeExclude:
   - '@posthog/core@1.48.0'

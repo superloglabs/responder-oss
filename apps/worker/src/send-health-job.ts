@@ -3,9 +3,9 @@ import {
   prepareWorkerQueues,
   workerHealthQueue,
 } from "@responder/core/jobs";
+import { loadResponderSecrets } from "@responder/core/secrets";
 
-const secretsFile = process.env.RESPONDER_SECRETS_FILE;
-if (secretsFile) process.loadEnvFile(secretsFile);
+loadResponderSecrets();
 
 const marker = process.env.WORKER_HEALTH_MARKER;
 if (!marker) throw new Error("WORKER_HEALTH_MARKER is required");

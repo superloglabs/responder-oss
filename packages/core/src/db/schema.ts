@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   foreignKey,
@@ -229,6 +230,11 @@ export const integrationConnectionStates = pgTable(
   (table) => [
     index("integration_connection_states_expires_idx").on(table.expiresAt),
     index("integration_connection_states_organization_idx").on(table.organizationId),
+    uniqueIndex("integration_connection_states_owner_provider_idx").on(
+      table.organizationId,
+      table.userId,
+      table.provider,
+    ),
   ],
 );
 
@@ -510,6 +516,10 @@ export const issues = pgTable(
   ],
 );
 
+export const activeIssuePullRequestIndexPredicate = sql.raw(
+  `"status" in ('queued', 'creating', 'created')`,
+);
+
 export const issuePullRequests = pgTable(
   "issue_pull_requests",
   {
@@ -538,6 +548,9 @@ export const issuePullRequests = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => [
+    uniqueIndex("issue_pull_requests_active_issue_idx")
+      .on(table.issueId)
+      .where(activeIssuePullRequestIndexPredicate),
     index("issue_pull_requests_issue_created_idx").on(
       table.issueId,
       table.createdAt,

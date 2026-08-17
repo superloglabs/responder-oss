@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createJobBoss,
   investigationJobSchema,
   investigationQueue,
+  linearTicketQueue,
+  prepareWorkerQueues,
+  remediationQueue,
   remediationJobSchema,
   workerHealthJobSchema,
   workerHealthQueue,
@@ -12,6 +15,34 @@ describe("background jobs", () => {
   it("uses a stable worker health queue name", () => {
     expect(workerHealthQueue).toBe("responder-worker-health");
     expect(investigationQueue).toBe("responder-investigations");
+  });
+
+  it("enforces Linear request singleton keys at the queue policy boundary", async () => {
+    const createQueue = vi.fn().mockResolvedValue(undefined);
+
+    await prepareWorkerQueues({ createQueue } as never);
+
+    expect(linearTicketQueue).toBe("responder-linear-tickets-v2");
+    expect(createQueue).toHaveBeenCalledWith(
+      linearTicketQueue,
+      expect.objectContaining({ policy: "exclusive" }),
+    );
+  });
+
+  it("uses a versioned exclusive queue for remediation side effects", async () => {
+    const createQueue = vi.fn().mockResolvedValue(undefined);
+
+    await prepareWorkerQueues({ createQueue } as never);
+
+    expect(remediationQueue).toBe("responder-remediations-v2");
+    expect(createQueue).toHaveBeenCalledWith(
+      remediationQueue,
+      expect.objectContaining({ policy: "exclusive", retryLimit: 0 }),
+    );
+    expect(createQueue).not.toHaveBeenCalledWith(
+      remediationQueue,
+      expect.objectContaining({ retryBackoff: true }),
+    );
   });
 
   it("accepts an investigation job", () => {

@@ -30,4 +30,17 @@ describe("investigation input", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects executable source links before they can be rendered", () => {
+    expect(() =>
+      investigationRequestSchema.parse({
+        agentId: "06060606-0606-4606-8606-060606060606",
+        body: "An alert was triggered.",
+        externalEventId: "event-1",
+        provider: "sentry",
+        sourceUrl: "javascript:alert(document.domain)",
+        title: "Production alert",
+      }),
+    ).toThrow("Investigation source URLs must use HTTP or HTTPS");
+  });
 });

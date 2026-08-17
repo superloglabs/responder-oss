@@ -84,6 +84,7 @@ import {
 import {
   exchangeVercelCode,
   getVercelAccount,
+  getVercelConfiguration,
   listVercelProjects,
   vercelInstallUrl,
 } from "./vercel.js";
@@ -163,6 +164,50 @@ const clickStackConnectionSchema = z.discriminatedUnion("deployment", [
     returnTo: z.string().max(2_048).optional(),
   }),
 ]);
+const vercelCallbackSchema = z.object({
+  code: z.string().trim().min(1).max(2_048),
+  configurationId: z.string().regex(/^icfg_[A-Za-z0-9]+$/u),
+  teamId: z.string().regex(/^team_[A-Za-z0-9]+$/u).optional(),
+});
+
+type BrowserOAuthProvider =
+  | "clickstack"
+  | "custom_mcp"
+  | "github"
+  | "linear"
+  | "sentry"
+  | "slack"
+  | "vercel";
+
+async function consumeBrowserOAuthConnectionState(input: {
+  headers: Headers;
+  provider: BrowserOAuthProvider;
+  state: string;
+}): Promise<Awaited<ReturnType<typeof consumeIntegrationConnectionState>>> {
+  // Provider state proves that the callback belongs to a flow, but it does not
+  // prove that the browser completing that flow is the Responder user who
+  // started it. Authenticate before consuming state so signed-out callbacks do
+  // not destroy a legitimate user's pending flow.
+  const tenant = await getActiveTenant(input.headers);
+  if (tenant.ok === false) return null;
+
+  const connectionState = await consumeIntegrationConnectionState(
+    input.provider,
+    input.state,
+    {
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+    },
+  );
+  if (
+    !connectionState ||
+    connectionState.userId !== tenant.user.id ||
+    connectionState.organizationId !== tenant.organizationId
+  ) {
+    return null;
+  }
+  return connectionState;
+}
 
 function callbackErrorReason(error: unknown): string {
   if (error instanceof GitHubOAuthError) {
@@ -960,10 +1005,11 @@ export const integrationRoutes = new Hono()
     let accountId: string | undefined;
     let callbackErrorLogged = false;
     try {
-      connectionState = await consumeIntegrationConnectionState(
-        "custom_mcp",
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "custom_mcp",
         state,
-      );
+      });
       if (!connectionState) {
         console.error(
           JSON.stringify({
@@ -1087,10 +1133,11 @@ export const integrationRoutes = new Hono()
       );
     }
 
-    const connectionState = await consumeIntegrationConnectionState(
-      "linear",
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "linear",
       state,
-    );
+    });
     if (!connectionState) {
       return context.redirect(
         settingsRedirect("/settings", "linear", "error", "invalid_state"),
@@ -1116,7 +1163,10 @@ export const integrationRoutes = new Hono()
       const connectedAccountId = await upsertIntegrationAccount({
         organizationId: connectionState.organizationId,
         provider: "linear",
-        externalAccountId: LINEAR_MCP_URL,
+        // A workspace is the external account. Keying every connection by the
+        // shared MCP URL would overwrite credentials in-place and silently
+        // redirect existing immutable agent versions to another workspace.
+        externalAccountId: workspace.id,
         displayName: workspace.name,
         encryptedCredentials: encryptCredentials(credentials),
         credentialKeyVersion: 1,
@@ -1282,10 +1332,11 @@ export const integrationRoutes = new Hono()
       );
     }
 
-    const connectionState = await consumeIntegrationConnectionState(
-      "clickstack",
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "clickstack",
       state,
-    );
+    });
     if (!connectionState) {
       return context.redirect(
         settingsRedirect("/settings", "clickstack", "error", "invalid_state"),
@@ -1422,19 +1473,17 @@ export const integrationRoutes = new Hono()
         settingsRedirect("/settings", "vercel", "error", "invalid_state"),
       );
     }
-    const connectionState = await consumeIntegrationConnectionState(
-      "vercel",
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "vercel",
       state,
-    );
+    });
     if (!connectionState) {
       return context.redirect(
         settingsRedirect("/settings", "vercel", "error", "invalid_state"),
       );
     }
-
-    const code = context.req.query("code");
-    const configurationId = context.req.query("configurationId");
-    if (!code || !configurationId) {
+    if (context.req.query("error")) {
       return context.redirect(
         settingsRedirect(
           connectionState.returnTo,
@@ -1444,37 +1493,74 @@ export const integrationRoutes = new Hono()
         ),
       );
     }
+    const callback = vercelCallbackSchema.safeParse({
+      code: context.req.query("code"),
+      configurationId: context.req.query("configurationId"),
+      teamId: context.req.query("teamId"),
+    });
+    if (!callback.success) {
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "vercel",
+          "error",
+          "invalid_callback",
+        ),
+      );
+    }
 
     try {
       const token = await exchangeVercelCode({
-        code,
+        code: callback.data.code,
         redirectUri: integrationCallbackUrl("vercel"),
       });
-      const teamId = token.team_id ?? context.req.query("teamId") ?? null;
+      const teamId = token.team_id ?? null;
+      if (teamId !== (callback.data.teamId ?? null)) {
+        throw new Error("The Vercel callback team did not match the token");
+      }
+      const configuration = await getVercelConfiguration({
+        accessToken: token.access_token,
+        configurationId: callback.data.configurationId,
+        teamId,
+      });
       const account = await getVercelAccount({
         accessToken: token.access_token,
         teamId,
         userId: token.user_id,
       });
-      const projects = await listVercelProjects({
+      let projects = await listVercelProjects({
         accessToken: token.access_token,
         teamId,
       });
+      if (configuration.projectSelection === "selected") {
+        const selectedProjectIds = new Set(configuration.projects);
+        projects = projects.filter((project) =>
+          selectedProjectIds.has(project.externalId),
+        );
+        if (
+          new Set(projects.map((project) => project.externalId)).size !==
+          selectedProjectIds.size
+        ) {
+          throw new Error("The Vercel selected-project set could not be verified");
+        }
+      }
       const accountId = await upsertIntegrationAccount({
         organizationId: connectionState.organizationId,
         provider: "vercel",
-        externalAccountId: configurationId,
+        externalAccountId: callback.data.configurationId,
         displayName: account.displayName,
         encryptedCredentials: encryptCredentials({
           accessToken: token.access_token,
-          configurationId,
+          configurationId: callback.data.configurationId,
           teamId,
           userId: token.user_id ?? null,
         }),
         credentialKeyVersion: 1,
         metadata: {
           ...account.metadata,
-          configurationId,
+          configurationId: callback.data.configurationId,
+          projectSelection: configuration.projectSelection,
+          scopes: configuration.scopes,
           scopeExternalAccountId: account.externalAccountId,
         },
       });
@@ -1497,7 +1583,7 @@ export const integrationRoutes = new Hono()
       );
     } catch (error) {
       logCallbackError("Vercel", error, {
-        configurationId,
+        configurationId: callback.data.configurationId,
         organizationId: connectionState.organizationId,
       });
       return context.redirect(
@@ -1544,10 +1630,11 @@ export const integrationRoutes = new Hono()
       );
     }
 
-    const connectionState = await consumeIntegrationConnectionState(
-      "sentry",
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "sentry",
       state,
-    );
+    });
     if (!connectionState) {
       return context.redirect(
         settingsRedirect("/settings", "sentry", "error", "invalid_state"),
@@ -1644,7 +1731,11 @@ export const integrationRoutes = new Hono()
       );
     }
 
-    const connectionState = await consumeIntegrationConnectionState("slack", state);
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "slack",
+      state,
+    });
     if (!connectionState) {
       return context.redirect(
         settingsRedirect("/settings", "slack", "error", "invalid_state"),
@@ -1728,7 +1819,11 @@ export const integrationRoutes = new Hono()
       );
     }
 
-    const connectionState = await consumeIntegrationConnectionState("github", state);
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "github",
+      state,
+    });
     if (!connectionState) {
       return context.redirect(
         settingsRedirect("/settings", "github", "error", "invalid_state"),

@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
+  activeIssuePullRequestIndexPredicate,
   agentConfigVersions,
   agents,
   instanceConfiguration,
@@ -10,6 +11,16 @@ import {
   issues,
   runtimeProfiles,
 } from "./schema.js";
+
+type IssuePullRequestTransaction = Parameters<
+  Parameters<ReturnType<typeof getDatabase>["transaction"]>[0]
+>[0];
+
+const activeIssuePullRequestStatuses = [
+  "queued",
+  "creating",
+  "created",
+] as const;
 
 export class IssuePullRequestError extends Error {
   constructor(
@@ -23,6 +34,82 @@ export class IssuePullRequestError extends Error {
     super(message);
     this.name = "IssuePullRequestError";
   }
+}
+
+async function prepareIssuePullRequestWrite(
+  tx: IssuePullRequestTransaction,
+): Promise<boolean> {
+  const activeIndexResult = await tx.execute<{ available: boolean }>(sql`
+    select exists (
+      select 1
+      from pg_catalog.pg_index
+      where indexrelid = to_regclass(
+        ${"public.issue_pull_requests_active_issue_idx"}
+      )
+        and indisvalid
+        and indisunique
+    ) as available
+  `);
+  const activeIndexAvailable = activeIndexResult.rows[0]?.available === true;
+
+  // During a rolling/schema-first upgrade, a caller can briefly run before the
+  // partial unique index exists. Serialize that compatibility path, then check
+  // for an active request while holding the lock. The lock also makes this safe
+  // when it races with the migration that creates the index.
+  if (!activeIndexAvailable) {
+    await tx.execute(
+      sql`lock table ${issuePullRequests} in access exclusive mode`,
+    );
+  }
+
+  return activeIndexAvailable;
+}
+
+export async function queueAutomaticIssuePullRequests(
+  tx: IssuePullRequestTransaction,
+  input: {
+    agentConfigVersionId: string;
+    investigationId: string;
+    issueIds: string[];
+  },
+) {
+  const uniqueIssueIds = [...new Set(input.issueIds)];
+  if (uniqueIssueIds.length === 0) return [];
+
+  const activeIndexAvailable = await prepareIssuePullRequestWrite(tx);
+  const existing = await tx
+    .select({ issueId: issuePullRequests.issueId })
+    .from(issuePullRequests)
+    .where(
+      and(
+        inArray(issuePullRequests.issueId, uniqueIssueIds),
+        inArray(issuePullRequests.status, activeIssuePullRequestStatuses),
+      ),
+    );
+  const existingIssueIds = new Set(existing.map((request) => request.issueId));
+  const requestedIssueIds = uniqueIssueIds.filter(
+    (issueId) => !existingIssueIds.has(issueId),
+  );
+  if (requestedIssueIds.length === 0) return [];
+
+  const insert = tx.insert(issuePullRequests).values(
+    requestedIssueIds.map((issueId) => ({
+      issueId,
+      investigationId: input.investigationId,
+      agentConfigVersionId: input.agentConfigVersionId,
+    })),
+  );
+  return activeIndexAvailable
+    ? insert
+      .onConflictDoNothing({
+        target: issuePullRequests.issueId,
+        where: activeIssuePullRequestIndexPredicate,
+      })
+      .returning({ id: issuePullRequests.id, issueId: issuePullRequests.issueId })
+    : insert.returning({
+      id: issuePullRequests.id,
+      issueId: issuePullRequests.issueId,
+    });
 }
 
 export async function getIssuePullRequestState(
@@ -108,6 +195,8 @@ export async function queueManualIssuePullRequest(input: {
       throw new IssuePullRequestError("Issue not found", "issue_not_found");
     }
 
+    const activeIndexAvailable = await prepareIssuePullRequestWrite(tx);
+
     const existing = await tx
       .select({ id: issuePullRequests.id })
       .from(issuePullRequests)
@@ -166,15 +255,29 @@ export async function queueManualIssuePullRequest(input: {
       );
     }
 
-    const inserted = await tx
+    const insert = tx
       .insert(issuePullRequests)
       .values({
         issueId: input.issueId,
         investigationId: target.investigationId,
         agentConfigVersionId: target.agentConfigVersionId,
-      })
-      .returning({ id: issuePullRequests.id });
-    return inserted[0]!;
+      });
+    const inserted = activeIndexAvailable
+      ? await insert
+        .onConflictDoNothing({
+          target: issuePullRequests.issueId,
+          where: activeIssuePullRequestIndexPredicate,
+        })
+        .returning({ id: issuePullRequests.id })
+      : await insert.returning({ id: issuePullRequests.id });
+    const request = inserted[0];
+    if (!request) {
+      throw new IssuePullRequestError(
+        "A pull request has already been requested for this issue",
+        "already_requested",
+      );
+    }
+    return request;
   });
 }
 
@@ -235,8 +338,9 @@ export async function getIssuePullRequestForRemediation(requestId: string) {
   return { ...request, runtimeProfileId };
 }
 
-export async function markIssuePullRequestStarted(
+async function transitionIssuePullRequestToCreating(
   requestId: string,
+  acceptedStatuses: Array<"queued" | "creating">,
 ) {
   const rows = await getDatabase()
     .update(issuePullRequests)
@@ -248,7 +352,7 @@ export async function markIssuePullRequestStarted(
     .where(
       and(
         eq(issuePullRequests.id, requestId),
-        inArray(issuePullRequests.status, ["queued", "creating"]),
+        inArray(issuePullRequests.status, acceptedStatuses),
       ),
     )
     .returning({ id: issuePullRequests.id });
@@ -258,6 +362,21 @@ export async function markIssuePullRequestStarted(
       "request_not_found",
     );
   }
+}
+
+export async function claimIssuePullRequestForRemediation(
+  requestId: string,
+) {
+  return transitionIssuePullRequestToCreating(requestId, ["queued"]);
+}
+
+export async function markIssuePullRequestStarted(
+  requestId: string,
+) {
+  return transitionIssuePullRequestToCreating(requestId, [
+    "queued",
+    "creating",
+  ]);
 }
 
 export async function setIssuePullRequestSession(
@@ -406,6 +525,42 @@ export async function failIssuePullRequest(
         inArray(issuePullRequests.status, ["queued", "creating"]),
       ),
     );
+}
+
+export async function listStaleCreatingIssuePullRequests(staleBefore: Date) {
+  return getDatabase()
+    .select({ requestId: issuePullRequests.id })
+    .from(issuePullRequests)
+    .where(
+      and(
+        eq(issuePullRequests.status, "creating"),
+        lt(issuePullRequests.updatedAt, staleBefore),
+      ),
+    )
+    .limit(100);
+}
+
+export async function recoverAbandonedIssuePullRequest(
+  requestId: string,
+  staleBefore: Date,
+): Promise<boolean> {
+  const recovered = await getDatabase()
+    .update(issuePullRequests)
+    .set({
+      status: "failed",
+      failureReason: "Remediation worker stopped before recording a result",
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(issuePullRequests.id, requestId),
+        eq(issuePullRequests.status, "creating"),
+        lt(issuePullRequests.updatedAt, staleBefore),
+      ),
+    )
+    .returning({ id: issuePullRequests.id });
+  return recovered.length > 0;
 }
 
 export async function failPendingInvestigationPullRequests(

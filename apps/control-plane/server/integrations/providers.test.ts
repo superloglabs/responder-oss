@@ -36,6 +36,7 @@ import {
 import {
   exchangeVercelCode,
   getVercelAccount,
+  getVercelConfiguration,
   listVercelProjects,
   vercelInstallUrl,
 } from "./vercel.js";
@@ -152,21 +153,19 @@ describe("integration providers", () => {
       clickStackAccount({
         accessKey: "personal-access-key",
         mcpUrl: "https://clickstack.example.com/api/mcp",
-      }),
+      }, fetchMock),
     ).resolves.toEqual({
       displayName: "Production",
       externalAccountId: "https://clickstack.example.com:team-1",
       mcpUrl: "https://clickstack.example.com/api/mcp",
       teamId: "team-1",
     });
-    expect(fetchMock).toHaveBeenCalledWith(expect.any(Request), {
-      redirect: "manual",
-    });
-    const request = fetchMock.mock.calls[0]?.[0] as Request;
-    expect(request.url).toBe(
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://clickstack.example.com/api/api/v2/team",
+      expect.objectContaining({ redirect: "manual" }),
     );
-    expect(request.headers.get("authorization")).toBe(
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(requestInit.headers).get("authorization")).toBe(
       "Bearer personal-access-key",
     );
     expect(infoLog).toHaveBeenCalledWith(
@@ -179,17 +178,16 @@ describe("integration providers", () => {
   });
 
   it("logs ClickStack team lookup failures without credentials", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status: 503 })),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 503 }));
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
       clickStackAccount({
         accessKey: "personal-access-key",
         mcpUrl: "https://clickstack.example.com/api/mcp/",
-      }),
+      }, fetchMock),
     ).rejects.toThrow("Unable to load the ClickStack team");
     expect(errorLog).toHaveBeenCalledWith(
       JSON.stringify({
@@ -204,17 +202,16 @@ describe("integration providers", () => {
   });
 
   it("logs rejected ClickStack credentials without the access key", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 401 }));
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
       clickStackAccount({
         accessKey: "rejected-access-key",
         mcpUrl: "https://clickstack.example.com/api/mcp",
-      }),
+      }, fetchMock),
     ).rejects.toThrow("ClickStack rejected the Personal API Access Key");
     expect(errorLog).toHaveBeenCalledWith(
       JSON.stringify({
@@ -558,6 +555,39 @@ describe("integration providers", () => {
     const secondProjectUrl = new URL(fetchMock.mock.calls[2]![0] as URL);
     expect(secondProjectUrl.searchParams.get("teamId")).toBe("team-1");
     expect(secondProjectUrl.searchParams.get("until")).toBe("123");
+  });
+
+  it("verifies a Vercel installation identity and selected projects", async () => {
+    vi.stubEnv("VERCEL_INTEGRATION_SLUG", "responder");
+    vi.stubEnv("VERCEL_CLIENT_ID", "vercel-client");
+    vi.stubEnv("VERCEL_CLIENT_SECRET", "vercel-secret");
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        id: "icfg_1",
+        projectSelection: "selected",
+        projects: ["prj-1"],
+        scopes: ["read:deployment", "read:logs", "read:project"],
+        slug: "responder",
+        status: "ready",
+        teamId: "team-1",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getVercelConfiguration({
+        accessToken: "token",
+        configurationId: "icfg_1",
+        teamId: "team-1",
+      }),
+    ).resolves.toMatchObject({
+      id: "icfg_1",
+      projects: ["prj-1"],
+      scopes: ["read:deployment", "read:logs", "read:project"],
+    });
+    const requestUrl = new URL(fetchMock.mock.calls[0]![0] as URL);
+    expect(requestUrl.pathname).toBe("/v1/integrations/configuration/icfg_1");
+    expect(requestUrl.searchParams.get("teamId")).toBe("team-1");
   });
 
   it("connects project-scoped Vercel installations without Team read access", async () => {

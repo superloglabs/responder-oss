@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  claimIssuePullRequestForRemediation: vi.fn(),
   failIssuePullRequest: vi.fn(),
+  listStaleCreatingIssuePullRequests: vi.fn(),
+  recoverAbandonedIssuePullRequest: vi.fn(),
   getIssuePullRequestForRemediation: vi.fn(),
   getRuntimeAgentConfig: vi.fn(),
-  markIssuePullRequestStarted: vi.fn(),
   setIssuePullRequestSession: vi.fn(),
 }));
 
@@ -12,13 +14,21 @@ vi.mock("./db/investigations.js", () => ({
   getRuntimeAgentConfig: mocks.getRuntimeAgentConfig,
 }));
 vi.mock("./db/pull-requests.js", () => ({
+  claimIssuePullRequestForRemediation:
+    mocks.claimIssuePullRequestForRemediation,
   failIssuePullRequest: mocks.failIssuePullRequest,
+  listStaleCreatingIssuePullRequests:
+    mocks.listStaleCreatingIssuePullRequests,
+  recoverAbandonedIssuePullRequest:
+    mocks.recoverAbandonedIssuePullRequest,
   getIssuePullRequestForRemediation: mocks.getIssuePullRequestForRemediation,
-  markIssuePullRequestStarted: mocks.markIssuePullRequestStarted,
   setIssuePullRequestSession: mocks.setIssuePullRequestSession,
 }));
 
-import { queueIssueRemediationJob } from "./remediation-queue.js";
+import {
+  queueIssueRemediationJob,
+  recoverAbandonedIssueRemediations,
+} from "./remediation-queue.js";
 
 const requestId = "05050505-0505-4505-8505-050505050505";
 const remediation = {
@@ -54,7 +64,7 @@ describe("remediation job queue", () => {
 
   it("queues a dedicated remediation job and records its session", async () => {
     const calls: string[] = [];
-    mocks.markIssuePullRequestStarted.mockImplementationOnce(async () => {
+    mocks.claimIssuePullRequestForRemediation.mockImplementationOnce(async () => {
       calls.push("started");
     });
     const queue = {
@@ -69,7 +79,7 @@ describe("remediation job queue", () => {
     ).resolves.toEqual({ jobId: "job-id", requestId });
 
     expect(queue.send).toHaveBeenCalledWith(
-      "responder-investigations",
+      "responder-remediations-v2",
       expect.objectContaining({
         kind: "remediation",
         remediationRequestId: requestId,
@@ -77,7 +87,9 @@ describe("remediation job queue", () => {
       }),
       { singletonKey: `remediation:${requestId}` },
     );
-    expect(mocks.markIssuePullRequestStarted).toHaveBeenCalledWith(requestId);
+    expect(
+      mocks.claimIssuePullRequestForRemediation,
+    ).toHaveBeenCalledWith(requestId);
     expect(calls).toEqual(["started", "sent"]);
     expect(mocks.setIssuePullRequestSession).toHaveBeenCalledWith(
       requestId,
@@ -98,7 +110,7 @@ describe("remediation job queue", () => {
     );
   });
 
-  it("marks a request failed when its remediation details cannot be loaded", async () => {
+  it("does not mutate a request when its remediation details cannot be loaded", async () => {
     const lookupError = new Error("database unavailable");
     mocks.getIssuePullRequestForRemediation.mockRejectedValue(lookupError);
     const queue = { send: vi.fn() };
@@ -106,10 +118,7 @@ describe("remediation job queue", () => {
     await expect(
       queueIssueRemediationJob(queue, requestId),
     ).rejects.toBe(lookupError);
-    expect(mocks.failIssuePullRequest).toHaveBeenCalledWith(
-      requestId,
-      "database unavailable",
-    );
+    expect(mocks.failIssuePullRequest).not.toHaveBeenCalled();
     expect(queue.send).not.toHaveBeenCalled();
   });
 
@@ -137,7 +146,7 @@ describe("remediation job queue", () => {
     consoleError.mockRestore();
   });
 
-  it("logs a null job result before recording the request failure", async () => {
+  it("does not fail the winning request after an exclusive-queue collision", async () => {
     const calls: string[] = [];
     const consoleError = vi
       .spyOn(console, "error")
@@ -145,9 +154,6 @@ describe("remediation job queue", () => {
         const event = JSON.parse(String(message)) as { event: string };
         calls.push(event.event);
       });
-    mocks.failIssuePullRequest.mockImplementationOnce(async () => {
-      calls.push("fail");
-    });
     const queue = { send: vi.fn().mockResolvedValue(null) };
 
     await expect(
@@ -156,9 +162,140 @@ describe("remediation job queue", () => {
     expect(calls).toEqual([
       "remediation_job_not_created",
       "remediation_queue_failed",
-      "fail",
     ]);
+    expect(mocks.failIssuePullRequest).not.toHaveBeenCalled();
 
     consoleError.mockRestore();
   });
+
+  it("does not let a losing concurrent claim fail the winning request", async () => {
+    const claimError = new Error("Pull request request is no longer active");
+    mocks.claimIssuePullRequestForRemediation.mockRejectedValue(claimError);
+    const queue = { send: vi.fn() };
+
+    await expect(
+      queueIssueRemediationJob(queue, requestId),
+    ).rejects.toBe(claimError);
+    expect(queue.send).not.toHaveBeenCalled();
+    expect(mocks.failIssuePullRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("abandoned remediation recovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("recovers only stale requests without a queued or active job", async () => {
+    const activeRequestId = "05050505-0505-4505-8505-050505050505";
+    const abandonedRequestId = "06060606-0606-4606-8606-060606060606";
+    const now = new Date("2026-08-17T14:00:00.000Z");
+    mocks.listStaleCreatingIssuePullRequests.mockResolvedValue([
+      { requestId: activeRequestId },
+      { requestId: abandonedRequestId },
+    ]);
+    mocks.recoverAbandonedIssuePullRequest.mockResolvedValue(true);
+    const queue = {
+      findJobs: vi.fn(async (_name: string, options: { key: string }) =>
+        options.key === `remediation:${activeRequestId}`
+          ? [{ state: "active" as const }]
+          : [{ state: "failed" as const }]
+      ),
+    };
+
+    await expect(
+      recoverAbandonedIssueRemediations(queue, now),
+    ).resolves.toEqual([abandonedRequestId]);
+
+    const staleBefore = new Date("2026-08-17T12:00:00.000Z");
+    expect(mocks.listStaleCreatingIssuePullRequests).toHaveBeenCalledWith(
+      staleBefore,
+    );
+    expect(queue.findJobs).toHaveBeenCalledWith(
+      "responder-remediations-v2",
+      { key: `remediation:${activeRequestId}` },
+    );
+    expect(mocks.recoverAbandonedIssuePullRequest).toHaveBeenCalledExactlyOnceWith(
+      abandonedRequestId,
+      staleBefore,
+    );
+  });
+
+  it("does not report a request whose atomic stale check loses a race", async () => {
+    const requestId = "06060606-0606-4606-8606-060606060606";
+    mocks.listStaleCreatingIssuePullRequests.mockResolvedValue([{ requestId }]);
+    mocks.recoverAbandonedIssuePullRequest.mockResolvedValue(false);
+    const queue = {
+      findJobs: vi.fn().mockResolvedValue([]),
+    };
+
+    await expect(
+      recoverAbandonedIssueRemediations(
+        queue,
+        new Date("2026-08-17T14:00:00.000Z"),
+      ),
+    ).resolves.toEqual([]);
+  });
+
+  it("keeps a stale request active while its legacy queue job is live", async () => {
+    const requestId = "06060606-0606-4606-8606-060606060606";
+    mocks.listStaleCreatingIssuePullRequests.mockResolvedValue([{ requestId }]);
+    const queue = {
+      findJobs: vi.fn(async (name: string) =>
+        name === "responder-investigations"
+          ? [{ state: "active" as const }]
+          : []
+      ),
+    };
+
+    await expect(
+      recoverAbandonedIssueRemediations(
+        queue,
+        new Date("2026-08-17T14:00:00.000Z"),
+      ),
+    ).resolves.toEqual([]);
+    expect(queue.findJobs).toHaveBeenCalledWith(
+      "responder-investigations",
+      { key: `remediation:${requestId}` },
+    );
+    expect(mocks.recoverAbandonedIssuePullRequest).not.toHaveBeenCalled();
+  });
+
+  it.each(["created", "retry", "active"])(
+    "keeps a stale request with a %s job active",
+    async (state) => {
+      const requestId = "06060606-0606-4606-8606-060606060606";
+      mocks.listStaleCreatingIssuePullRequests.mockResolvedValue([{ requestId }]);
+      const queue = {
+        findJobs: vi.fn().mockResolvedValue([{ state }]),
+      };
+
+      await expect(
+        recoverAbandonedIssueRemediations(
+          queue,
+          new Date("2026-08-17T14:00:00.000Z"),
+        ),
+      ).resolves.toEqual([]);
+      expect(mocks.recoverAbandonedIssuePullRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["completed", "failed", "cancelled"])(
+    "recovers a stale request with a %s job",
+    async (state) => {
+      const requestId = "06060606-0606-4606-8606-060606060606";
+      mocks.listStaleCreatingIssuePullRequests.mockResolvedValue([{ requestId }]);
+      mocks.recoverAbandonedIssuePullRequest.mockResolvedValue(true);
+      const queue = {
+        findJobs: vi.fn().mockResolvedValue([{ state }]),
+      };
+
+      await expect(
+        recoverAbandonedIssueRemediations(
+          queue,
+          new Date("2026-08-17T14:00:00.000Z"),
+        ),
+      ).resolves.toEqual([requestId]);
+    },
+  );
 });

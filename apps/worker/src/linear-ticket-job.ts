@@ -57,6 +57,7 @@ export async function runLinearTicketJob(
           agentConfigVersionId: job.config.id,
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
+          requestId: job.requestId,
         })],
       });
       await run(agent, "Create the required Linear ticket now.", { maxTurns: 10 });

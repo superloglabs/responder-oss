@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decryptCredentials,
   encryptCredentials,
@@ -122,6 +122,10 @@ function configureGitHub() {
 }
 
 describe("integration callback routing", () => {
+  beforeEach(() => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
@@ -205,12 +209,28 @@ describe("integration callback routing", () => {
         .mockResolvedValueOnce(
           Response.json({
             access_token: "vercel-token",
-            team_id: "team-1",
+            team_id: "team_1",
             user_id: "user-1",
           }),
         )
         .mockResolvedValueOnce(
-          Response.json({ id: "team-1", name: "Acme", slug: "acme" }),
+          Response.json({
+            id: "icfg_1",
+            projectSelection: "selected",
+            projects: ["prj-1"],
+            scopes: [
+              "read:deployment",
+              "read:domain",
+              "read:logs",
+              "read:project",
+            ],
+            slug: "responder",
+            status: "ready",
+            teamId: "team_1",
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ id: "team_1", name: "Acme", slug: "acme" }),
         )
         .mockResolvedValueOnce(
           Response.json({
@@ -223,8 +243,8 @@ describe("integration callback routing", () => {
     const response = await app.request(
       "/api/integrations/vercel/callback" +
         "?code=one-time-code" +
-        "&configurationId=icfg-1" +
-        "&teamId=team-1" +
+        "&configurationId=icfg_1" +
+        "&teamId=team_1" +
         "&state=connection-state",
     );
 
@@ -237,15 +257,15 @@ describe("integration callback routing", () => {
     );
     expect(encryptCredentials).toHaveBeenCalledWith({
       accessToken: "vercel-token",
-      configurationId: "icfg-1",
-      teamId: "team-1",
+      configurationId: "icfg_1",
+      teamId: "team_1",
       userId: "user-1",
     });
     expect(upsertIntegrationAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: tenant.organizationId,
         provider: "vercel",
-        externalAccountId: "icfg-1",
+        externalAccountId: "icfg_1",
         displayName: "Acme",
         encryptedCredentials: "encrypted-credentials",
       }),
@@ -255,6 +275,107 @@ describe("integration callback routing", () => {
       "vercel_project",
       [expect.objectContaining({ externalId: "prj-1", displayName: "web" })],
     );
+    expect(consumeIntegrationConnectionState).toHaveBeenCalledWith(
+      "vercel",
+      "connection-state",
+      {
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+      },
+    );
+  });
+
+  it("authenticates and consumes a Vercel denial before returning to its initiating page", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: null,
+      metadata: {},
+    });
+
+    const response = await app.request(
+      "/api/integrations/vercel/callback" +
+        "?error=access_denied&state=connection-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=vercel&status=error&reason=cancelled",
+    );
+    expect(consumeIntegrationConnectionState).toHaveBeenCalledWith(
+      "vercel",
+      "connection-state",
+      {
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+      },
+    );
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("consumes Vercel state before rejecting malformed callback fields", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: null,
+      metadata: {},
+    });
+
+    const response = await app.request(
+      "/api/integrations/vercel/callback" +
+        "?configurationId=not-an-installation&state=connection-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=vercel&status=error&reason=invalid_callback",
+    );
+    expect(consumeIntegrationConnectionState).toHaveBeenCalledWith(
+      "vercel",
+      "connection-state",
+      {
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+      },
+    );
+  });
+
+  it("rejects a Vercel callback whose team differs from the token", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("VERCEL_INTEGRATION_SLUG", "responder");
+    vi.stubEnv("VERCEL_CLIENT_ID", "vercel-client");
+    vi.stubEnv("VERCEL_CLIENT_SECRET", "vercel-secret");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: null,
+      metadata: {},
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        access_token: "vercel-token",
+        team_id: "team_other",
+        user_id: "user-1",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request(
+      "/api/integrations/vercel/callback" +
+        "?code=one-time-code&configurationId=icfg_1" +
+        "&teamId=team_1&state=connection-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("accepts Sentry's code-less verified-install completion redirect", async () => {
@@ -334,6 +455,7 @@ describe("integration callback routing", () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
     vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
@@ -382,11 +504,125 @@ describe("integration callback routing", () => {
     expect(upsertIntegrationAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         displayName: "Example Linear",
+        externalAccountId: "linear-workspace-id",
         provider: "linear",
         status: "connected",
       }),
     );
     expect(getOrganizationIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("requires the same Responder identity to finish Linear account linking", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue({
+      ...tenant,
+      user: {
+        ...tenant.user,
+        id: "20000000-0000-4000-8000-000000000099",
+      },
+    });
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: "pkce-verifier",
+      metadata: {},
+    });
+
+    const response = await app.request(
+      "/api/integrations/linear/callback?state=linear-state&code=linear-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=linear&status=error&reason=invalid_state",
+    );
+    expect(exchangeLinearOAuthCode).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("does not consume Linear connection state without a Responder session", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue({
+      ok: false,
+      error: "Unauthorized",
+      status: 401,
+    });
+
+    const response = await app.request(
+      "/api/integrations/linear/callback?state=linear-state&code=linear-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=linear&status=error&reason=invalid_state",
+    );
+    expect(consumeIntegrationConnectionState).not.toHaveBeenCalled();
+    expect(exchangeLinearOAuthCode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "custom_mcp",
+      "/api/integrations/custom_mcp/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
+      "linear",
+      "/api/integrations/linear/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
+      "clickstack",
+      "/api/integrations/clickstack/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
+      "sentry",
+      "/api/integrations/sentry/callback?state=oauth-state&code=oauth-code" +
+        "&installationId=40000000-0000-4000-8000-000000000000&orgSlug=example",
+    ],
+    [
+      "slack",
+      "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
+      "github",
+      "/api/integrations/github/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
+      "vercel",
+      "/api/integrations/vercel/callback?state=oauth-state&code=oauth-code" +
+        "&configurationId=icfg_1",
+    ],
+  ])("rejects a %s callback completed by a different Responder identity", async (
+    provider,
+    callbackUrl,
+  ) => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: "20000000-0000-4000-8000-000000000099",
+      returnTo: "/agents/new",
+      codeVerifier: "pkce-verifier",
+      metadata: {},
+    });
+
+    const response = await app.request(callbackUrl);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      `https://responder.example/settings?integration=${provider}` +
+        "&status=error&reason=invalid_state",
+    );
+    expect(consumeIntegrationConnectionState).toHaveBeenCalledWith(
+      provider,
+      "oauth-state",
+      {
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+      },
+    );
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("offers GitHub authorization when an installation already exists", async () => {

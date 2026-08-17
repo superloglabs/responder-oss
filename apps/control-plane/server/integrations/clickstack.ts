@@ -150,9 +150,12 @@ export { CLICKSTACK_CLOUD_MCP_URL };
 export async function clickStackAccount(input: {
   accessKey: string;
   mcpUrl: string;
-}) {
+}, fetchImpl: (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response> = safeCustomMcpFetch) {
   const mcpUrl = normalizeClickStackMcpUrl(input.mcpUrl);
-  const response = await safeCustomMcpFetch(clickStackTeamUrl(mcpUrl), {
+  const response = await fetchImpl(clickStackTeamUrl(mcpUrl), {
     headers: {
       accept: "application/json",
       authorization: `Bearer ${input.accessKey}`,

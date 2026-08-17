@@ -169,19 +169,19 @@ export function investigationInstructions(input: {
     environmentVariable: string;
     allowedHosts: string[];
   }>;
-  vercelAccounts?: string[];
+  vercelAccountIds?: string[];
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
-  const vercelAccounts = input.vercelAccounts ?? [];
+  const vercelAccountIds = input.vercelAccountIds ?? [];
   const observabilityConnected =
     input.datadogConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
     input.upstashConnected ||
-    vercelAccounts.length > 0 ||
+    vercelAccountIds.length > 0 ||
     awsAccountNames.length > 0 ||
     customMcpNames.length > 0;
   return [
@@ -206,8 +206,8 @@ export function investigationInstructions(input: {
     input.linearConnected
       ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
       : null,
-    vercelAccounts.length > 0
-      ? `Use the connected read-only Vercel tools to inspect relevant projects, deployments, build and runtime logs, domains, and platform configuration. Search the Vercel API catalog before calling an operation. Never attempt to retrieve environment-variable values or other secrets. Connected Vercel accounts: ${vercelAccounts.join(", ")}.`
+    vercelAccountIds.length > 0
+      ? `Use the connected read-only Vercel tools to inspect selected projects, deployments, build and runtime logs, and project domains. Search the Vercel API catalog before calling an operation. Never attempt to retrieve environment-variable values or other secrets. Connected Vercel account IDs: ${vercelAccountIds.join(", ")}.`
       : null,
     customMcpNames.length > 0
       ? `Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: ${customMcpNames.join(", ")}.`
@@ -454,7 +454,7 @@ export async function runInvestigationAgent(
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,
       workspaceSecrets,
-      vercelAccounts: vercelConnections.map((connection) => connection.displayName),
+      vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -485,6 +485,7 @@ export async function runInvestigationAgent(
       const event = investigationTraceEventFromStream(
         streamEvent,
         environment,
+        new Date(),
       );
       if (event) await writeTrace(event);
     }

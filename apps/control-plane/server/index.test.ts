@@ -4,6 +4,7 @@ import {
   app,
   authHandlerErrorMessage,
   logAuthCallback,
+  MAX_REQUEST_BODY_BYTES,
   sessionCookieFingerprint,
 } from "./app.js";
 import {
@@ -108,6 +109,86 @@ describe("control-plane API", () => {
       service: "responder-control-plane",
       status: "ok",
     });
+  });
+
+  it("rejects oversized declared request bodies before auth parsing", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const response = await app.request("/api/auth/admin/impersonate-user", {
+      body: "{}",
+      headers: {
+        "content-length": String(MAX_REQUEST_BODY_BYTES + 1),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Request body too large",
+    });
+    expect(warning).toHaveBeenCalledWith(
+      JSON.stringify({
+        contentLength: String(MAX_REQUEST_BODY_BYTES + 1),
+        event: "request_body_too_large",
+        maxBytes: MAX_REQUEST_BODY_BYTES,
+        pathname: "/api/auth/admin/impersonate-user",
+      }),
+    );
+  });
+
+  it("accepts signed webhook payloads larger than the API body limit", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    const body = JSON.stringify({
+      padding: "x".repeat(MAX_REQUEST_BODY_BYTES),
+    });
+    const signature = `sha256=${createHmac("sha256", "webhook-secret")
+      .update(body, "utf8")
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/github", {
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "ping",
+        "x-hub-signature-256": signature,
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
+  });
+
+  it("keeps the 1 MiB streamed-body limit on non-GitHub webhooks", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_REQUEST_BODY_BYTES));
+        controller.enqueue(new Uint8Array(1));
+        controller.close();
+      },
+    });
+    const request = new Request("http://localhost/api/webhooks/slack", {
+      body,
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const response = await app.request(request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Request body too large",
+    });
+    expect(warning).toHaveBeenCalledWith(
+      JSON.stringify({
+        contentLength: null,
+        event: "request_body_too_large",
+        maxBytes: MAX_REQUEST_BODY_BYTES,
+        pathname: "/api/webhooks/slack",
+      }),
+    );
   });
 
   it("routes the GitHub App setup callback to the integration flow", async () => {

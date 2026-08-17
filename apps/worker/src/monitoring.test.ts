@@ -76,13 +76,14 @@ describe("worker error monitoring", () => {
     ).toEqual({ message: "request failed for [redacted]" });
   });
 
-  it("reports the original exception and redacts its serialized event", async () => {
+  it("preserves stack frames while removing error and event secrets", async () => {
     const monitoring = await import("./monitoring.js");
     const environment = {
       DAYTONA_API_KEY: "daytona-secret",
       NODE_ENV: "production",
       SENTRY_DSN: "https://public@example.invalid/1",
       SENTRY_RELEASE: "abc123",
+      VERCEL_CLIENT_SECRET: "vercel-client-secret",
     };
 
     const originalError = new TypeError("request failed for daytona-secret");
@@ -129,7 +130,14 @@ describe("worker error monitoring", () => {
           },
         ],
       },
-      extra: { diagnostic: "request failed for daytona-secret" },
+      environment: "production",
+      extra: {
+        accessToken: "dynamic-provider-token",
+        authorization: "Bearer dynamic-provider-token",
+        diagnostic:
+          "request failed for daytona-secret and vercel-client-secret",
+        url: "https://example.invalid/callback?access_token=dynamic-provider-token",
+      },
     });
 
     expect(serializedEvent).toEqual(
@@ -149,18 +157,125 @@ describe("worker error monitoring", () => {
             }),
           ],
         },
-        extra: { diagnostic: "request failed for [redacted]" },
+        environment: "production",
+        extra: {
+          accessToken: "[redacted]",
+          authorization: "[redacted]",
+          diagnostic: "request failed for [redacted] and [redacted]",
+          url: "https://example.invalid/callback?access_token=[redacted]",
+        },
       }),
     );
     expect(sentryMocks.scope.setContext).toHaveBeenCalledWith(
       "responder",
       expect.objectContaining({ investigationId: "investigation-1" }),
     );
-    expect(sentryMocks.captureException).toHaveBeenCalledWith(originalError);
+    const capturedError = sentryMocks.captureException.mock.calls[0]?.[0] as Error;
+    expect(capturedError).not.toBe(originalError);
+    expect(capturedError.name).toBe("TypeError");
+    expect(capturedError.message).toBe("request failed for [redacted]");
+    expect(capturedError.stack).toContain(
+      "at runInvestigation (/app/apps/worker/src/investigate.ts:10:2)",
+    );
+    expect(capturedError.stack).not.toContain("daytona-secret");
     expect(sentryMocks.flush).not.toHaveBeenCalled();
 
     await expect(monitoring.flushWorkerMonitoring()).resolves.toBe(true);
     expect(sentryMocks.flush).toHaveBeenCalledWith(2_000);
+  });
+
+  it("redacts short explicit secrets and inferred key variants", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      AUTUMN_SECRET_KEY: "autumn-value",
+      AWS_ACCESS_KEY: "access-value",
+      INTERNAL_INGEST_TOKEN: "tiny",
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+
+    await monitoring.reportWorkerException(
+      new Error("request failed for tiny, autumn-value, and access-value"),
+      { operation: "worker" },
+    );
+
+    const processor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    const event = processor({
+      extra: {
+        accessKey: "dynamic-access-key",
+        apiKey: "dynamic-api-key",
+        diagnostic:
+          "https://example.invalid/callback?client_secret=client-value&refresh-token=refresh-value&id_token=id-value&request_id=req-1",
+      },
+    });
+    const serialized = JSON.stringify(event);
+
+    expect(event).toEqual({
+      extra: {
+        accessKey: "[redacted]",
+        apiKey: "[redacted]",
+        diagnostic:
+          "https://example.invalid/callback?client_secret=[redacted]&refresh-token=[redacted]&id_token=[redacted]&request_id=req-1",
+      },
+    });
+    expect(serialized).not.toContain("client-value");
+    expect(serialized).not.toContain("refresh-value");
+    expect(serialized).not.toContain("id-value");
+
+    const capturedError = sentryMocks.captureException.mock.calls[0]?.[0] as Error;
+    expect(capturedError.message).toBe(
+      "request failed for [redacted], [redacted], and [redacted]",
+    );
+  });
+
+  it("redacts access-key query parameters while preserving diagnostics", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+
+    const processor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    const event = processor({
+      extra: {
+        diagnostic:
+          "https://example.invalid/callback?access_key=underscored-value&AcCeSs-KeY=hyphenated-value&request_id=req-1&status=failed",
+      },
+    });
+
+    expect(event).toEqual({
+      extra: {
+        diagnostic:
+          "https://example.invalid/callback?access_key=[redacted]&AcCeSs-KeY=[redacted]&request_id=req-1&status=failed",
+      },
+    });
+  });
+
+  it("redacts complete error fields before truncating them", async () => {
+    const monitoring = await import("./monitoring.js");
+    const secret = "boundary-crossing-value";
+    monitoring.initializeErrorMonitoring({
+      DAYTONA_API_KEY: secret,
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+
+    const originalError = new Error(`${"m".repeat(1_990)}${secret}`);
+    originalError.stack = [
+      `Error: ${originalError.message}`,
+      `    at operation (${"s".repeat(972)}${secret})`,
+    ].join("\n");
+    await monitoring.reportWorkerException(originalError, {
+      operation: "worker",
+    });
+
+    const capturedError = sentryMocks.captureException.mock.calls[0]?.[0] as Error;
+    expect(capturedError.message).toHaveLength(2_000);
+    expect(capturedError.message).toContain("[redacted]");
+    expect(capturedError.message).not.toContain("boundary-");
+    expect(capturedError.stack).toContain("[redacted]");
+    expect(capturedError.stack).not.toContain("boundary-");
   });
 
   it("attaches safe Slack diagnostics to delivery failures", async () => {
@@ -203,7 +318,12 @@ describe("worker error monitoring", () => {
         },
       ],
     });
-    expect(sentryMocks.captureException).toHaveBeenCalledWith(error);
+    const capturedError = sentryMocks.captureException.mock.calls[0]?.[0] as Error;
+    expect(capturedError).not.toBe(error);
+    expect(capturedError).toBeInstanceOf(Error);
+    expect(capturedError.message).toBe(
+      "Slack investigation delivery incomplete",
+    );
   });
 
   it("stores structured remediation diagnostics separately from identifiers", async () => {

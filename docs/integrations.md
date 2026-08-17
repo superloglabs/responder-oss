@@ -142,6 +142,8 @@ Responder encrypts each installation token, synchronizes only the projects
 visible to that installation, and keeps the token in the worker process. The
 investigation sandbox receives two host-side tools: one searches a generated
 catalog of safe Vercel GET operations, and one executes a selected operation.
+The callback verifies the installation identity, team, and selected-project
+set without narrowing the integration's configured read permissions.
 Regenerate the catalog from Vercel's published OpenAPI document after API
 updates with `pnpm vercel:generate-api`.
 

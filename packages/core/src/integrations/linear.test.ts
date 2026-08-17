@@ -108,6 +108,7 @@ describe("Linear OAuth", () => {
       "old-refresh-token",
     );
   });
+
 });
 
 describe("Linear ticket templates", () => {
@@ -212,5 +213,23 @@ describe("Linear issue API", () => {
       fetchImpl,
       issueId: "81e37ee3-e8cf-4806-82f1-ad81fcd24dbd",
     })).resolves.toMatchObject({ identifier: "OPS-42" });
+  });
+
+  it("rejects an executable issue URL before it can be persisted", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        issue: {
+          id: "81e37ee3-e8cf-4806-82f1-ad81fcd24dbd",
+          identifier: "OPS-42",
+          url: "javascript:alert(document.domain)",
+        },
+      },
+    }), { status: 200 }));
+
+    await expect(findLinearIssueById({
+      accessToken: "linear-token",
+      fetchImpl,
+      issueId: "81e37ee3-e8cf-4806-82f1-ad81fcd24dbd",
+    })).rejects.toThrow("Linear issue URLs must use HTTPS");
   });
 });

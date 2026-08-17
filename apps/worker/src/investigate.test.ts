@@ -178,11 +178,12 @@ describe("sandbox agent configuration", () => {
       datadogConnected: false,
       repositories: [],
       sentryConnected: false,
-      vercelAccounts: ["Acme"],
+      vercelAccountIds: ["04040404-0404-4404-8404-040404040404"],
     });
 
     expect(instructions).toContain("connected read-only Vercel tools");
     expect(instructions).toContain("Search the Vercel API catalog");
+    expect(instructions).toContain("04040404-0404-4404-8404-040404040404");
     expect(instructions).toContain("Never attempt to retrieve environment-variable values");
     expect(instructions).not.toContain("No observability data source is connected");
   });
