@@ -15,9 +15,18 @@ export async function queuePendingLinearTicketJobs(
   queue: LinearTicketJobQueue,
 ): Promise<number> {
   const requests = await listLinearTicketRequestsForQueue();
+  const versionIds = [...new Set(
+    requests.map((request) => request.agentConfigVersionId),
+  )];
+  const configs = await Promise.all(
+    versionIds.map((versionId) => getRuntimeAgentConfig(versionId)),
+  );
+  const configsByVersionId = new Map(
+    versionIds.map((versionId, index) => [versionId, configs[index]]),
+  );
   let queued = 0;
   for (const request of requests) {
-    const config = await getRuntimeAgentConfig(request.agentConfigVersionId);
+    const config = configsByVersionId.get(request.agentConfigVersionId);
     if (!config) continue;
     try {
       await queueLinearTicketJob(queue, {

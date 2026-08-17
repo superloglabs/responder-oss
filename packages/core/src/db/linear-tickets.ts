@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import {
   createLinearIssue,
   findLinearIssueById,
@@ -56,16 +56,60 @@ export async function listPendingLinearTicketRequests(input: {
 }
 
 export async function listLinearTicketRequestsForQueue(limit = 100) {
-  return getDatabase()
+  const staleBefore = new Date(Date.now() - 20 * 60 * 1_000);
+  const db = getDatabase();
+  await db
+    .update(issueLinearTickets)
+    .set({ status: "pending", updatedAt: new Date() })
+    .where(
+      and(
+        eq(issueLinearTickets.status, "creating"),
+        lt(issueLinearTickets.updatedAt, staleBefore),
+        lt(issueLinearTickets.attemptCount, 6),
+      ),
+    );
+  return db
     .select({
       agentConfigVersionId: issueLinearTickets.agentConfigVersionId,
       investigationId: issueLinearTickets.investigationId,
       requestId: issueLinearTickets.id,
     })
     .from(issueLinearTickets)
-    .where(inArray(issueLinearTickets.status, ["pending", "failed"]))
+    .where(
+      and(
+        lt(issueLinearTickets.attemptCount, 6),
+        eq(issueLinearTickets.status, "pending"),
+      ),
+    )
     .orderBy(issueLinearTickets.updatedAt)
     .limit(limit);
+}
+
+export async function failPendingLinearTicketRequest(input: {
+  agentConfigVersionId: string;
+  investigationId: string;
+  reason: string;
+  requestId: string;
+}): Promise<void> {
+  await getDatabase()
+    .update(issueLinearTickets)
+    .set({
+      attemptCount: sql`${issueLinearTickets.attemptCount} + 1`,
+      failureReason: input.reason.slice(0, 2_000),
+      status: "failed",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(issueLinearTickets.id, input.requestId),
+        eq(issueLinearTickets.investigationId, input.investigationId),
+        eq(
+          issueLinearTickets.agentConfigVersionId,
+          input.agentConfigVersionId,
+        ),
+        eq(issueLinearTickets.status, "pending"),
+      ),
+    );
 }
 
 async function getLinearTicketRequest(input: {

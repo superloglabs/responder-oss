@@ -146,9 +146,13 @@ function drainLinearTicketRequests(): Promise<void> {
   if (linearTicketDrain) return linearTicketDrain;
   linearTicketDrain = queuePendingLinearTicketJobs(linearTicketJobQueue)
     .then(() => undefined)
-    .catch((error: unknown) => reportWorkerException(error, {
-      operation: "linear_ticket",
-    }))
+    .catch((error: unknown) => {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "linear_ticket_queue_drain_failed",
+      }));
+      return reportWorkerException(error, { operation: "linear_ticket" });
+    })
     .finally(() => {
       linearTicketDrain = undefined;
     });

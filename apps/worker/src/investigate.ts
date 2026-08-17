@@ -167,7 +167,7 @@ export function investigationInstructions(input: {
       ? "Use the connected read-only Sentry tools to inspect the issue, related events, traces, and relevant historical telemetry before concluding."
       : null,
     input.linearConnected
-      ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. After submit_investigation_report saves an issue, create a requested ticket only through create_linear_ticket so Responder can record its identifier and link."
+      ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
       : null,
     customMcpNames.length > 0
       ? `Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: ${customMcpNames.join(", ")}.`

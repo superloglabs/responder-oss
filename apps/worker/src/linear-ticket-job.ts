@@ -1,10 +1,22 @@
 import { Agent, run, setDefaultOpenAIKey, setTracingDisabled } from "@openai/agents";
 import { getRuntimeLinearConnection } from "@responder/core/db/investigations";
-import { listPendingLinearTicketRequests } from "@responder/core/db/linear-tickets";
+import {
+  failPendingLinearTicketRequest,
+  listPendingLinearTicketRequests,
+} from "@responder/core/db/linear-tickets";
 import type { LinearTicketJob } from "@responder/core/jobs";
 import { linearTicketFollowupInstruction } from "@responder/core/integrations/linear";
 import { createLinearMcpServer } from "./custom-mcp.js";
 import { createLinearTicketTool } from "./linear-ticket.js";
+
+export function linearTicketAgentModel(
+  configuredModel: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return configuredModel === "instance/default"
+    ? environment.OPENAI_AGENT_MODEL?.trim() || "gpt-5.6-sol"
+    : configuredModel;
+}
 
 export async function runLinearTicketJob(
   job: LinearTicketJob,
@@ -18,43 +30,53 @@ export async function runLinearTicketJob(
   });
   const request = pending.find((candidate) => candidate.requestId === job.requestId);
   if (!request) return;
-  const connection = await getRuntimeLinearConnection(
-    job.config.id,
-    request.integrationAccountId,
-  );
-  if (!connection) throw new Error("The Linear connection is unavailable");
-  const instruction = linearTicketFollowupInstruction({ requests: [request] });
-  if (!instruction) return;
-
-  setDefaultOpenAIKey(openAiApiKey);
-  setTracingDisabled(true);
-  const server = createLinearMcpServer(connection);
   try {
-    await server.connect();
-    const agent = new Agent({
-      name: "Responder Linear ticket creator",
-      model: environment.OPENAI_MODEL?.trim() || "gpt-5.6-sol",
-      instructions: [
-        "Create the required Linear ticket for the saved investigation.",
-        instruction,
-        "Do not change any Linear data except through create_linear_ticket.",
-      ].join("\n\n"),
-      mcpServers: [server],
-      tools: [createLinearTicketTool({
-        agentConfigVersionId: job.config.id,
+    const connection = await getRuntimeLinearConnection(
+      job.config.id,
+      request.integrationAccountId,
+    );
+    if (!connection) throw new Error("The Linear connection is unavailable");
+    const instruction = linearTicketFollowupInstruction({ requests: [request] });
+    if (!instruction) return;
+
+    setDefaultOpenAIKey(openAiApiKey);
+    setTracingDisabled(true);
+    const server = createLinearMcpServer(connection);
+    try {
+      await server.connect();
+      const agent = new Agent({
+        name: "Responder Linear ticket creator",
+        model: linearTicketAgentModel(job.config.model, environment),
+        instructions: [
+          "Create the required Linear ticket for the saved investigation.",
+          instruction,
+          "Do not change any Linear data except through create_linear_ticket.",
+        ].join("\n\n"),
+        mcpServers: [server],
+        tools: [createLinearTicketTool({
+          agentConfigVersionId: job.config.id,
+          investigationId: job.investigationId,
+          organizationId: job.config.organizationId,
+        })],
+      });
+      await run(agent, "Create the required Linear ticket now.", { maxTurns: 10 });
+      const remaining = await listPendingLinearTicketRequests({
         investigationId: job.investigationId,
         organizationId: job.config.organizationId,
-      })],
-    });
-    await run(agent, "Create the required Linear ticket now.", { maxTurns: 10 });
-    const remaining = await listPendingLinearTicketRequests({
-      investigationId: job.investigationId,
-      organizationId: job.config.organizationId,
-    });
-    if (remaining.some((candidate) => candidate.requestId === job.requestId)) {
-      throw new Error("The Linear ticket was not created");
+      });
+      if (remaining.some((candidate) => candidate.requestId === job.requestId)) {
+        throw new Error("The Linear ticket was not created");
+      }
+    } finally {
+      await server.close().catch(() => undefined);
     }
-  } finally {
-    await server.close().catch(() => undefined);
+  } catch (error) {
+    await failPendingLinearTicketRequest({
+      agentConfigVersionId: job.config.id,
+      investigationId: job.investigationId,
+      reason: error instanceof Error ? error.message : String(error),
+      requestId: job.requestId,
+    });
+    throw error;
   }
 }

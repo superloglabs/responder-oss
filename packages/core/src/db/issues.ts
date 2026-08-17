@@ -162,7 +162,6 @@ export async function submitInvestigationReport(input: {
               and(
                 eq(integrationAccounts.organizationId, input.organizationId),
                 eq(integrationAccounts.provider, "linear"),
-                eq(integrationAccounts.status, "connected"),
                 inArray(
                   integrationAccounts.id,
                   investigation.contextAccountIds,
@@ -172,6 +171,9 @@ export async function submitInvestigationReport(input: {
             .limit(1)
         )[0]
       : null;
+    if (investigation.createLinearTickets && hasNewIssues && !linearAccount) {
+      throw new Error("The configured Linear connection is unavailable");
+    }
     const existingIds = input.submission.report.issues
       .filter((issue) => issue.resolution === "existing")
       .map((issue) => issue.issueId);
