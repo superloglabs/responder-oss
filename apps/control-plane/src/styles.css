@@ -4934,10 +4934,6 @@ button:disabled {
   font-weight: 600;
 }
 
-.providerMark--linear svg {
-  width: 15px;
-  height: 15px;
-}
 .providerMark.isConnected {
   border-color: var(--live);
 }
@@ -5569,21 +5565,21 @@ button:disabled {
   border-bottom: 1px solid var(--border);
 }
 
-.configurationDialog__copy {
+.configurationDialog__header > span {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
-.configurationDialog__copy strong {
+.configurationDialog__header > span strong {
   color: var(--foreground);
   font-size: 16px;
   font-weight: 500;
   line-height: 22px;
 }
 
-.configurationDialog__copy small {
+.configurationDialog__header > span small {
   color: var(--dim);
   font-size: 12px;
   line-height: 17px;
@@ -6296,12 +6292,12 @@ body:has(.appShell--create) {
   border-color: var(--ds-border-default);
 }
 
-.appShell--create .configurationDialog__copy strong,
+.appShell--create .configurationDialog__header > span strong,
 .appShell--create .repositoryConnectRow__copy strong {
   color: var(--ds-text-primary);
 }
 
-.appShell--create .configurationDialog__copy small,
+.appShell--create .configurationDialog__header > span small,
 .appShell--create .configurationDialog__footer > span,
 .appShell--create .repositoryConnectRow__copy small,
 .appShell--create .repositoryConnectList > p {

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 portless_binary="$repository_root/node_modules/.bin/portless"
 
 : "${CONTROL_PLANE_WEB_PORT:?Missing CONTROL_PLANE_WEB_PORT}"

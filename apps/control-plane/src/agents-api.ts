@@ -48,8 +48,6 @@ export interface AgentConfiguration {
   contextAccountIds: string[];
   contextResourceIds: string[];
   secretIds: string[];
-  createLinearTickets: boolean;
-  linearIssueTemplate: string;
   trigger: AgentTrigger;
   reporting: AgentReporting;
 }
@@ -63,8 +61,7 @@ export interface AgentOptions {
       | "sentry"
       | "datadog"
       | "clickstack"
-      | "custom_mcp"
-      | "linear";
+      | "custom_mcp";
     displayName: string;
     slackContextAvailable?: boolean;
   }>;
@@ -115,8 +112,7 @@ export interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "custom_mcp"
-    | "clickstack"
-    | "linear";
+    | "clickstack";
   name: string;
   description: string;
   state: "available" | "coming_soon" | "connected" | "setup_required";
@@ -209,22 +205,6 @@ export interface IssueDetailResponse {
     createdAt: string;
     completedAt: string | null;
   }>;
-  linearTicketState: {
-    requests: Array<{
-      id: string;
-      status: "pending" | "creating" | "created" | "failed";
-      teamId: string | null;
-      projectId: string | null;
-      linearIssueId: string | null;
-      linearIdentifier: string | null;
-      linearIssueUrl: string | null;
-      failureReason: string | null;
-      attemptCount: number;
-      createdAt: string;
-      updatedAt: string;
-      completedAt: string | null;
-    }>;
-  };
   pullRequestState: {
     canCreate: boolean;
     requests: Array<{

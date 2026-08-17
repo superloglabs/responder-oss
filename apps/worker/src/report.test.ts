@@ -37,10 +37,6 @@ describe("investigation report submission", () => {
     vi.mocked(submitInvestigationReport).mockResolvedValue({
       automaticPullRequestIssueIds: [],
       automaticPullRequestRequestIds: [],
-      createLinearTickets: false,
-      linearIssueTemplate: "{{description}}",
-      linearTicketRequests: [],
-      newIssues: [],
       issues: [
         {
           id: "12121212-1212-4212-8212-121212121212",
@@ -126,10 +122,6 @@ describe("investigation report submission", () => {
       automaticPullRequestRequestIds: [
         "05050505-0505-4505-8505-050505050505",
       ],
-      createLinearTickets: false,
-      linearIssueTemplate: "{{description}}",
-      linearTicketRequests: [],
-      newIssues: [],
       issues: [],
       markdown: "saved markdown",
       report: {
@@ -168,45 +160,6 @@ describe("investigation report submission", () => {
     ]);
   });
 
-  it("returns a Linear follow-up only when a new issue has a pending request", async () => {
-    vi.mocked(submitInvestigationReport).mockResolvedValue({
-      automaticPullRequestIssueIds: [],
-      automaticPullRequestRequestIds: [],
-      createLinearTickets: true,
-      linearIssueTemplate: "{{description}}",
-      linearTicketRequests: [{
-        requestId: "4614c371-a4a3-4342-a9a8-36e526377345",
-        issueId: "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9",
-        title: "Broken route",
-        description: "The route throws.",
-        severity: "SEV-2",
-      }],
-      newIssues: [],
-      issues: [],
-      markdown: "saved markdown",
-      report: {
-        schemaVersion: 1,
-        headline: "Broken route",
-        summary: "The route failed.",
-        issues: [],
-      },
-    });
-    vi.mocked(embedNewIssues).mockResolvedValue([]);
-
-    await expect(submitInvestigationReportForRun({
-      investigationId: "investigation-id",
-      organizationId: "organization-id",
-      report: {
-        schemaVersion: 1,
-        headline: "Broken route",
-        summary: "The route failed.",
-        issues: [],
-      },
-    })).resolves.toEqual(expect.objectContaining({
-      instruction: expect.stringContaining("create_linear_ticket"),
-    }));
-  });
-
   it("treats completed Slack delivery failures as warnings", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(deliverInvestigationToSlack).mockImplementation(async () => {
@@ -230,10 +183,6 @@ describe("investigation report submission", () => {
     vi.mocked(submitInvestigationReport).mockResolvedValue({
       automaticPullRequestIssueIds: [],
       automaticPullRequestRequestIds: [],
-      createLinearTickets: false,
-      linearIssueTemplate: "{{description}}",
-      linearTicketRequests: [],
-      newIssues: [],
       issues: [],
       markdown: "saved markdown",
       report: {

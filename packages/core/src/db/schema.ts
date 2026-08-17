@@ -27,7 +27,6 @@ export const integrationProvider = pgEnum("integration_provider", [
   "datadog",
   "clickstack",
   "custom_mcp",
-  "linear",
 ]);
 
 export const integrationResourceKind = pgEnum("integration_resource_kind", [
@@ -165,10 +164,6 @@ export const agentConfigVersions = pgTable(
       .$type<AgentPrMode>()
       .notNull()
       .default("disabled"),
-    createLinearTickets: boolean("create_linear_tickets").notNull().default(false),
-    linearIssueTemplate: text("linear_issue_template")
-      .notNull()
-      .default("## Responder issue\n[{{issue_id}}]({{issue_url}})\n\n## Description\n{{description}}\n\n## Evidence\n{{evidence}}\n\n## Recommended remediation\n{{remediation}}"),
     createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -539,47 +534,6 @@ export const issuePullRequests = pgTable(
       table.createdAt,
     ),
     index("issue_pull_requests_investigation_idx").on(table.investigationId),
-  ],
-);
-
-export const issueLinearTickets = pgTable(
-  "issue_linear_tickets",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    issueId: uuid("issue_id")
-      .notNull()
-      .references(() => issues.id, { onDelete: "cascade" }),
-    investigationId: uuid("investigation_id")
-      .notNull()
-      .references(() => investigations.id, { onDelete: "cascade" }),
-    agentConfigVersionId: uuid("agent_config_version_id")
-      .notNull()
-      .references(() => agentConfigVersions.id, { onDelete: "restrict" }),
-    integrationAccountId: uuid("integration_account_id")
-      .notNull()
-      .references(() => integrationAccounts.id, { onDelete: "restrict" }),
-    status: text("status")
-      .$type<"pending" | "creating" | "created" | "failed">()
-      .notNull()
-      .default("pending"),
-    teamId: text("team_id"),
-    projectId: text("project_id"),
-    linearIssueId: text("linear_issue_id"),
-    linearIdentifier: text("linear_identifier"),
-    linearIssueUrl: text("linear_issue_url"),
-    failureReason: text("failure_reason"),
-    attemptCount: integer("attempt_count").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-  },
-  (table) => [
-    uniqueIndex("issue_linear_tickets_issue_idx").on(table.issueId),
-    index("issue_linear_tickets_investigation_idx").on(table.investigationId),
-    index("issue_linear_tickets_status_created_idx").on(
-      table.status,
-      table.createdAt,
-    ),
   ],
 );
 

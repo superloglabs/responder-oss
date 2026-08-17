@@ -68,8 +68,6 @@ interface CreateDraft {
   contextAccountIds: string[];
   contextResourceIds: string[];
   workspaceSecretRecordIds: string[];
-  createLinearTickets: boolean;
-  linearIssueTemplate: string;
   instructions: string;
 }
 
@@ -88,19 +86,6 @@ const EMPTY_OPTIONS: AgentOptions = {
 
 const DEFAULT_INSTRUCTIONS =
   "Investigate the root cause, assess severity and customer impact, then post a concise summary with evidence and recommended next steps. Use connected repositories and observability tools before proposing a fix.";
-const DEFAULT_LINEAR_ISSUE_TEMPLATE = [
-  "## Responder issue",
-  "[{{issue_id}}]({{issue_url}})",
-  "",
-  "## Description",
-  "{{description}}",
-  "",
-  "## Evidence",
-  "{{evidence}}",
-  "",
-  "## Recommended remediation",
-  "{{remediation}}",
-].join("\n");
 
 const DRAFT_STORAGE_KEY = "responder:new-agent-draft";
 const DRAFT_STEP_STORAGE_KEY = "responder:new-agent-step";
@@ -253,8 +238,6 @@ function draftFromConfiguration(
     contextAccountIds: configuration.contextAccountIds,
     contextResourceIds: configuration.contextResourceIds,
     workspaceSecretRecordIds: configuration.secretIds,
-    createLinearTickets: configuration.createLinearTickets,
-    linearIssueTemplate: configuration.linearIssueTemplate,
     instructions: configuration.instructions,
   };
 }
@@ -372,12 +355,6 @@ function createInitialDraft(
       ) ??
       [],
     workspaceSecretRecordIds,
-    createLinearTickets:
-      saved.createLinearTickets ?? configured.createLinearTickets ?? false,
-    linearIssueTemplate:
-      saved.linearIssueTemplate ??
-      configured.linearIssueTemplate ??
-      DEFAULT_LINEAR_ISSUE_TEMPLATE,
     instructions:
       saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS,
   };
@@ -434,13 +411,11 @@ export function AgentCreatePage() {
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
-  const linearJustConnected = successfulConnectionReturn("linear");
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
     customMcpJustConnected ||
-    clickStackJustConnected ||
-    linearJustConnected;
+    clickStackJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [existingConfiguration, setExistingConfiguration] =
@@ -456,11 +431,10 @@ export function AgentCreatePage() {
       contextIntegrationJustConnected
         ? 3
         : () => readSavedStep(stepStorageKey),
-  );
+    );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
-  const [linearDialogOpen, setLinearDialogOpen] = useState(linearJustConnected);
   const [repositoryQuery, setRepositoryQuery] = useState("");
   const [promptStepReady, setPromptStepReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -484,18 +458,12 @@ export function AgentCreatePage() {
   useDocumentTitle(isEditing ? "Edit agent" : "Create agent");
 
   useEffect(() => {
-    if (
-      !githubDialogOpen &&
-      !linearDialogOpen &&
-      !slackContextDialogOpen &&
-      !secretDialogOpen
-    ) {
+    if (!githubDialogOpen && !slackContextDialogOpen && !secretDialogOpen) {
       return;
     }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setGithubDialogOpen(false);
-        setLinearDialogOpen(false);
         setSlackContextDialogOpen(false);
         if (!creatingSecret) {
           setSecretDialogOpen(false);
@@ -511,7 +479,6 @@ export function AgentCreatePage() {
   }, [
     creatingSecret,
     githubDialogOpen,
-    linearDialogOpen,
     secretDialogOpen,
     slackContextDialogOpen,
   ]);
@@ -577,15 +544,6 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedClickStack.id);
         }
-        const connectedLinear = accountsFor(loadedOptions, "linear")[0];
-        if (
-          linearJustConnected &&
-          connectedLinear &&
-          !loadedDraft.contextAccountIds.includes(connectedLinear.id)
-        ) {
-          loadedDraft.contextAccountIds.push(connectedLinear.id);
-          loadedDraft.createLinearTickets = true;
-        }
         setDraft(loadedDraft);
       })
       .catch((caught: unknown) => {
@@ -609,7 +567,6 @@ export function AgentCreatePage() {
     customMcpJustConnected,
     datadogJustConnected,
     draftStorageKey,
-    linearJustConnected,
   ]);
 
   useEffect(() => {
@@ -638,10 +595,6 @@ export function AgentCreatePage() {
   );
   const clickStackAccounts = useMemo(
     () => accountsFor(options, "clickstack"),
-    [options],
-  );
-  const linearAccounts = useMemo(
-    () => accountsFor(options, "linear"),
     [options],
   );
   const githubAccounts = useMemo(
@@ -726,18 +679,9 @@ export function AgentCreatePage() {
   const promptRequirement = !draft.instructions.trim()
     ? "Add an agent prompt."
     : null;
-  const selectedLinearContext = options.accounts.some(
-    (account) =>
-      account.provider === "linear" &&
-      draft.contextAccountIds.includes(account.id),
-  );
   const contextRequirement =
     draft.prMode !== "disabled" && draft.repositoryIds.length === 0
       ? "Choose at least one repository for pull request fixes."
-      : draft.createLinearTickets && !selectedLinearContext
-        ? "Add a Linear connection to create tickets."
-      : draft.createLinearTickets && !draft.linearIssueTemplate.trim()
-        ? "Add a Linear issue description template."
       : null;
   const stepRequirements: Record<CreateStep, string | null> = {
     1: inputRequirement,
@@ -839,15 +783,10 @@ export function AgentCreatePage() {
   }
 
   function toggleContextAccount(accountId: string) {
-    const removing = currentDraft.contextAccountIds.includes(accountId);
-    const isLinear = options.accounts.some(
-      (account) => account.id === accountId && account.provider === "linear",
-    );
     updateDraft({
-      contextAccountIds: removing
+      contextAccountIds: currentDraft.contextAccountIds.includes(accountId)
         ? currentDraft.contextAccountIds.filter((id) => id !== accountId)
         : [...currentDraft.contextAccountIds, accountId],
-      ...(removing && isLinear ? { createLinearTickets: false } : {}),
     });
   }
 
@@ -1048,8 +987,6 @@ export function AgentCreatePage() {
       contextAccountIds: [...contextAccountIds],
       contextResourceIds: currentDraft.contextResourceIds,
       secretIds: currentDraft.workspaceSecretRecordIds,
-      createLinearTickets: currentDraft.createLinearTickets,
-      linearIssueTemplate: currentDraft.linearIssueTemplate.trim(),
       trigger,
       reporting,
     };
@@ -1100,10 +1037,6 @@ export function AgentCreatePage() {
   const slackContextAvailable = slackAccounts.some(
     (account) => account.slackContextAvailable,
   );
-  const linearContextConnected = Boolean(
-    linearAccounts[0] &&
-      draft.contextAccountIds.includes(linearAccounts[0].id),
-  );
   const connectedContextCount =
     Number(githubAccounts.length > 0) +
     Number(sentryIncluded || sentryContextConnected) +
@@ -1112,8 +1045,7 @@ export function AgentCreatePage() {
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
-    Number(clickStackContextConnected) +
-    Number(linearContextConnected);
+    Number(clickStackContextConnected);
 
   return (
     <AppShell active="agents" density="create">
@@ -1578,7 +1510,7 @@ export function AgentCreatePage() {
                       >
                         <header className="configurationDialog__header">
                           <ProviderMark provider="slack" />
-                          <span className="configurationDialog__copy">
+                          <span>
                             <strong id="slack-context-configuration-title">
                               Configure Slack context
                             </strong>
@@ -1719,7 +1651,7 @@ export function AgentCreatePage() {
                           >
                             <header className="configurationDialog__header">
                               <ProviderMark provider="github" />
-                              <span className="configurationDialog__copy">
+                              <span>
                                 <strong id="github-configuration-title">
                                   Configure GitHub
                                 </strong>
@@ -1730,6 +1662,7 @@ export function AgentCreatePage() {
                               </span>
                               <IconButton
                                 aria-label="Close GitHub configuration"
+                                autoFocus
                                 onClick={() => setGithubDialogOpen(false)}
                                 size="small"
                                 variant="ghost"
@@ -1917,137 +1850,6 @@ export function AgentCreatePage() {
                           : "not_connected"
                     }
                   />
-                  <ContextRow
-                    action={
-                      linearContextConnected ? (
-                        <Button
-                          className="contextConfigureAction"
-                          onClick={() => setLinearDialogOpen(true)}
-                          size="small"
-                          variant="ghost"
-                        >
-                          <span>Configure</span>
-                          <CogIcon />
-                        </Button>
-                      ) : linearAccounts[0] ? (
-                        <Button
-                          onClick={() =>
-                            toggleContextAccount(linearAccounts[0]!.id)
-                          }
-                          size="small"
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("linear")}
-                          isConnecting={connectingProvider === "linear"}
-                          onClick={() => connect("linear")}
-                        />
-                      )
-                    }
-                    detail={
-                      linearAccounts[0]
-                        ? `${linearAccounts[0].displayName} · Projects and issues · ${
-                            draft.createLinearTickets
-                              ? "Automatic ticket creation"
-                              : "Context only"
-                          }`
-                        : "Projects, issues, and optional ticket creation"
-                    }
-                    label="Linear"
-                    provider="linear"
-                    status={
-                      linearContextConnected
-                        ? "connected"
-                        : linearAccounts[0]
-                          ? "available"
-                          : "not_connected"
-                    }
-                  />
-
-                  {linearDialogOpen && linearAccounts[0] ? (
-                    <div
-                      className="configurationDialogBackdrop"
-                      onMouseDown={(event) => {
-                        if (event.target === event.currentTarget) {
-                          setLinearDialogOpen(false);
-                        }
-                      }}
-                    >
-                      <section
-                        aria-labelledby="linear-configuration-title"
-                        aria-modal="true"
-                        className="configurationDialog"
-                        role="dialog"
-                      >
-                        <header className="configurationDialog__header">
-                          <ProviderMark connected provider="linear" />
-                          <span className="configurationDialog__copy">
-                            <strong id="linear-configuration-title">
-                              Configure Linear
-                            </strong>
-                            <small>
-                              Control ticket creation and the issue description.
-                            </small>
-                          </span>
-                          <IconButton
-                            aria-label="Close Linear configuration"
-                            onClick={() => setLinearDialogOpen(false)}
-                            size="small"
-                            variant="ghost"
-                          >
-                            ×
-                          </IconButton>
-                        </header>
-                        <div className="configurationDialog__body">
-                          <Checkbox
-                            checked={draft.createLinearTickets}
-                            description="After saving the Responder issue, let the agent choose the best Linear project and create a matching ticket."
-                            label="Create Linear tickets for issues"
-                            onChange={(event) =>
-                              updateDraft({
-                                createLinearTickets: event.target.checked,
-                              })
-                            }
-                          />
-                          <TextAreaField
-                            disabled={!draft.createLinearTickets}
-                            hint="Available placeholders: {{issue_id}}, {{issue_url}}, {{title}}, {{description}}, {{severity}}, {{evidence}}, {{remediation}}"
-                            label="Linear issue description template"
-                            maxLength={10_000}
-                            onChange={(event) =>
-                              updateDraft({
-                                linearIssueTemplate: event.target.value,
-                              })
-                            }
-                            rows={10}
-                            value={draft.linearIssueTemplate}
-                          />
-                        </div>
-                        <footer className="configurationDialog__footer">
-                          <Button
-                            onClick={() => {
-                              toggleContextAccount(linearAccounts[0]!.id);
-                              setLinearDialogOpen(false);
-                            }}
-                            size="small"
-                            variant="ghost"
-                          >
-                            Remove from agent
-                          </Button>
-                          <Button
-                            onClick={() => setLinearDialogOpen(false)}
-                            size="small"
-                            variant="primary"
-                          >
-                            Done
-                          </Button>
-                        </footer>
-                      </section>
-                    </div>
-                  ) : null}
                   {customMcpAccounts.map((account) => {
                     const connected = draft.contextAccountIds.includes(account.id);
                     return (
@@ -2153,7 +1955,7 @@ export function AgentCreatePage() {
                   <div className="workspaceSelectedSecretList">
                     {selectedWorkspaceSecrets.map((secret) => (
                       <div className="workspaceSelectedSecret" key={secret.id}>
-                        <span className="configurationDialog__copy">
+                        <span>
                           <strong>{secret.name}</strong>
                           <small>
                             Allowed for {secret.allowedHosts.join(", ")}
@@ -2751,8 +2553,7 @@ function ContextRow({
     | "sentry"
     | "datadog"
     | "custom_mcp"
-    | "clickstack"
-    | "linear";
+    | "clickstack";
   status: "available" | "connected" | "included" | "not_connected";
 }) {
   const statusLabel = {
