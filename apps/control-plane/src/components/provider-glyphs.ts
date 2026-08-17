@@ -11,3 +11,11 @@ export const providerGlyphs = {
 } as const;
 
 export type ProviderGlyphId = keyof typeof providerGlyphs;
+
+export function providerDisplayName(provider: string): string {
+  if (provider === "clickstack") return "ClickStack / HyperDX";
+  if (provider in providerGlyphs) {
+    return providerGlyphs[provider as ProviderGlyphId].label;
+  }
+  return provider;
+}

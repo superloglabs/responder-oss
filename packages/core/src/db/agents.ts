@@ -273,6 +273,8 @@ async function validateConfigurationResources(
         id: integrationResources.id,
         integrationAccountId: integrationResources.integrationAccountId,
         accountMetadata: integrationAccounts.metadata,
+        kind: integrationResources.kind,
+        provider: integrationAccounts.provider,
         resourceMetadata: integrationResources.metadata,
       })
       .from(integrationResources)
@@ -283,23 +285,37 @@ async function validateConfigurationResources(
       .where(
         and(
           eq(integrationAccounts.organizationId, organizationId),
-          eq(integrationAccounts.provider, "slack"),
           eq(integrationAccounts.status, "connected"),
-          eq(integrationResources.kind, "slack_channel"),
           eq(integrationResources.available, true),
           inArray(integrationResources.id, [...contextResourceIds]),
         ),
       );
-    if (contextResourceRows.length !== contextResourceIds.size) {
+    if (
+      contextResourceRows.length !== contextResourceIds.size ||
+      contextResourceRows.some(
+        (resource) =>
+          !(
+            (resource.provider === "slack" &&
+              resource.kind === "slack_channel") ||
+            (resource.provider === "vercel" &&
+              resource.kind === "vercel_project" &&
+              contextAccountIds.has(resource.integrationAccountId))
+          ),
+      )
+    ) {
       throw new AgentConfigurationError(
-        "Choose available Slack channels from this workspace",
+        "Choose available context resources from connected accounts",
         "resource_not_found",
       );
     }
+    const slackContextRows = contextResourceRows.filter(
+      (resource) => resource.provider === "slack",
+    );
     if (
       new Set(
-        contextResourceRows.map((resource) => resource.integrationAccountId),
+        slackContextRows.map((resource) => resource.integrationAccountId),
       ).size !== 1
+      && slackContextRows.length > 0
     ) {
       throw new AgentConfigurationError(
         "Choose Slack context channels from one Slack workspace",
@@ -307,13 +323,13 @@ async function validateConfigurationResources(
       );
     }
     const userScopes = new Set(
-      Array.isArray(contextResourceRows[0]?.accountMetadata.userScopes)
-        ? contextResourceRows[0].accountMetadata.userScopes.filter(
+      Array.isArray(slackContextRows[0]?.accountMetadata.userScopes)
+        ? slackContextRows[0].accountMetadata.userScopes.filter(
             (scope): scope is string => typeof scope === "string",
           )
         : [],
     );
-    const missingScope = contextResourceRows.some((resource) =>
+    const missingScope = slackContextRows.some((resource) =>
       resource.resourceMetadata.isPrivate === true
         ? !userScopes.has("groups:history")
         : !userScopes.has("channels:history"),

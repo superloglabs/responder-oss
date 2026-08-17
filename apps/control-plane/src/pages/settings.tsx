@@ -6,6 +6,7 @@ import {
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
+import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
@@ -49,18 +50,7 @@ function connectionNotice(): {
   const status = search.get("status");
   if (!provider || !status) return null;
 
-  const name =
-    provider === "github"
-      ? "GitHub"
-      : provider === "slack"
-        ? "Slack"
-        : provider === "custom_mcp"
-          ? "Custom MCP"
-          : provider === "vercel"
-            ? "Vercel"
-          : provider === "clickstack"
-            ? "ClickStack / HyperDX"
-            : provider;
+  const name = providerDisplayName(provider);
   if (status === "connected") {
     const disabledAgentCount = Number(search.get("disabled_agents"));
     if (

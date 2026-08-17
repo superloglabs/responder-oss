@@ -37,6 +37,10 @@ const operations = catalog.operations as ReadOperation[];
 const operationsById = new Map(
   operations.map((operation) => [operation.operationId, operation]),
 );
+const deploymentScopeSchema = z.object({
+  project: z.object({ id: z.string().min(1) }).optional(),
+  projectId: z.string().min(1).optional(),
+});
 
 function searchTerms(query: string): string[] {
   return query
@@ -153,9 +157,12 @@ function validateProjectScope(
     ...Object.entries(pathParameters),
     ...Object.entries(queryParameters),
   ].filter(([name]) =>
-    /^(?:project|projectId|projectIdOrName)$/iu.test(name) ||
+    /^(?:project|projectId|projectIds|projectIdOrName)$/iu.test(name) ||
     (operation.tags.includes("projects") && name === "idOrName"),
   );
+  if (operation.operationId === "getDeployments" && projectParameters.length === 0) {
+    throw new Error("Choose at least one selected Vercel project");
+  }
   for (const [, value] of projectParameters) {
     const projectIds = Array.isArray(value) ? value : [value];
     if (
@@ -181,10 +188,28 @@ export function buildVercelReadUrl(input: {
   pathParameters?: Record<string, ParameterValue>;
   queryParameters?: Record<string, ParameterValue>;
 }): URL {
-  const pathParameters = input.pathParameters ?? {};
+  const pathParameters = { ...(input.pathParameters ?? {}) };
   const queryParameters = input.queryParameters ?? {};
   const pathNames = allowedParameterNames(input.operation, "path");
   const queryNames = allowedParameterNames(input.operation, "query");
+
+  for (const parameter of input.operation.parameters.filter(
+    (candidate) => candidate.in === "path",
+  )) {
+    if (/^teamSlug$/iu.test(parameter.name)) {
+      throw new Error("Vercel team-slug path operations are not available");
+    }
+    if (/^teamId$/iu.test(parameter.name)) {
+      if (!input.connection.teamId) {
+        throw new Error("This Vercel connection is not scoped to a team");
+      }
+      const supplied = pathParameters[parameter.name];
+      if (supplied !== undefined && supplied !== input.connection.teamId) {
+        throw new Error("The Vercel team is not available to this connection");
+      }
+      pathParameters[parameter.name] = input.connection.teamId;
+    }
+  }
 
   for (const name of Object.keys(pathParameters)) {
     if (!pathNames.has(name)) throw new Error(`Unknown Vercel path parameter: ${name}`);
@@ -253,6 +278,79 @@ export function buildVercelReadUrl(input: {
   return url;
 }
 
+function deploymentIdentifier(
+  operation: ReadOperation,
+  pathParameters: Record<string, ParameterValue>,
+): string | null {
+  const entry = Object.entries(pathParameters).find(
+    ([name, value]) =>
+      typeof value === "string" &&
+      (/^deploymentId$/iu.test(name) ||
+        (operation.tags.includes("deployments") && /^(?:id|idOrUrl)$/iu.test(name))),
+  );
+  return typeof entry?.[1] === "string" ? entry[1] : null;
+}
+
+function hasProjectScopeParameter(
+  operation: ReadOperation,
+  pathParameters: Record<string, ParameterValue>,
+  queryParameters: Record<string, ParameterValue>,
+): boolean {
+  return [...Object.keys(pathParameters), ...Object.keys(queryParameters)].some(
+    (name) =>
+      /^(?:project|projectId|projectIds|projectIdOrName)$/iu.test(name) ||
+      (operation.tags.includes("projects") && name === "idOrName"),
+  );
+}
+
+async function validateDeploymentScope(input: {
+  connection: RuntimeVercelConnection;
+  operation: ReadOperation;
+  pathParameters: Record<string, ParameterValue>;
+  queryParameters: Record<string, ParameterValue>;
+}): Promise<void> {
+  if (
+    hasProjectScopeParameter(
+      input.operation,
+      input.pathParameters,
+      input.queryParameters,
+    )
+  ) {
+    return;
+  }
+  const deploymentId = deploymentIdentifier(
+    input.operation,
+    input.pathParameters,
+  );
+  if (!deploymentId) return;
+
+  const url = new URL(
+    `/v13/deployments/${encodeURIComponent(deploymentId)}`,
+    "https://api.vercel.com",
+  );
+  if (input.connection.teamId) {
+    url.searchParams.set("teamId", input.connection.teamId);
+  }
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${input.connection.accessToken}`,
+    },
+    redirect: "error",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to verify Vercel deployment scope (HTTP ${response.status})`);
+  }
+  const payload = deploymentScopeSchema.parse(
+    JSON.parse(await boundedResponseText(response)) as unknown,
+  );
+  const projectId = payload.projectId ?? payload.project?.id;
+  if (!projectId || !input.connection.projectIds.includes(projectId)) {
+    throw new Error("The Vercel deployment is not available to this connection");
+  }
+}
+
 function sanitizeVercelValue(value: unknown, accessToken: string): unknown {
   if (typeof value === "string") return value.replaceAll(accessToken, "[redacted]");
   if (Array.isArray(value)) {
@@ -307,6 +405,12 @@ export async function executeVercelRead(input: {
 }): Promise<string> {
   const operation = operationsById.get(input.operationId);
   if (!operation) throw new Error("Unknown or blocked Vercel read operation");
+  await validateDeploymentScope({
+    connection: input.connection,
+    operation,
+    pathParameters: input.pathParameters ?? {},
+    queryParameters: input.queryParameters ?? {},
+  });
   const url = buildVercelReadUrl({ ...input, operation });
   const response = await fetch(url, {
     headers: {

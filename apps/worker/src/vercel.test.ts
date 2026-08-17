@@ -68,6 +68,47 @@ describe("Vercel read tools", () => {
     ).toThrow("not available to this connection");
   });
 
+  it("rejects project arrays outside the selected project scope", () => {
+    const operation = searchVercelOperations("list deployments", 20).find(
+      ({ operationId }) => operationId === "getDeployments",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectIds: ["prj-1", "prj-other"] },
+      }),
+    ).toThrow("not available to this connection");
+  });
+
+  it("requires an explicit selected-project filter when listing deployments", () => {
+    const operation = searchVercelOperations("list deployments", 20).find(
+      ({ operationId }) => operationId === "getDeployments",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({ connection, operation: operation! }),
+    ).toThrow("Choose at least one selected Vercel project");
+  });
+
+  it("normalizes team path parameters to the connected team", () => {
+    const operation = searchVercelOperations("get a team", 20).find(
+      ({ operationId }) => operationId === "getTeam",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        pathParameters: { teamId: "attacker-team" },
+      }),
+    ).toThrow("team is not available");
+    expect(
+      buildVercelReadUrl({ connection, operation: operation! }).pathname,
+    ).toBe("/v2/teams/team-1");
+  });
+
   it("cannot redirect an operation away from Vercel's API origin", () => {
     const operation = searchVercelOperations("find project by id", 20).find(
       ({ operationId }) => operationId === "getProject",
@@ -112,6 +153,25 @@ describe("Vercel read tools", () => {
     expect(JSON.stringify(result)).not.toContain("another-token");
     expect(JSON.stringify(result)).not.toContain("postgres://secret");
     expect(JSON.stringify(result)).toContain("[redacted]");
+  });
+
+  it("verifies deployment ownership before calling deployment-scoped operations", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "dpl-1", projectId: "prj-other" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeVercelRead({
+        connection,
+        operationId: "getDeploymentEvents",
+        pathParameters: { idOrUrl: "dpl-1" },
+      }),
+    ).rejects.toThrow("deployment is not available");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(fetchMock.mock.calls[0]![0] as URL).pathname).toBe(
+      "/v13/deployments/dpl-1",
+    );
   });
 
   it("refuses operations absent from the generated read catalog", async () => {

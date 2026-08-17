@@ -36,7 +36,10 @@ import {
   RepositoryIcon,
   SearchIcon,
 } from "../components/icons";
-import type { ProviderGlyphId } from "../components/provider-glyphs";
+import {
+  providerDisplayName,
+  type ProviderGlyphId,
+} from "../components/provider-glyphs";
 import {
   Alert,
   Button,
@@ -257,6 +260,8 @@ function createInitialDraft(
   const sentryAccounts = accountsFor(options, "sentry");
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
+  const vercelProjects = resourcesOfKind(options, "vercel_project");
+  const contextResources = [...slackChannels, ...vercelProjects];
   const githubAccounts = accountsFor(options, "github");
   const firstSentryAccount =
     sentryAccounts.find((account) =>
@@ -354,10 +359,10 @@ function createInitialDraft(
       [],
     contextResourceIds:
       saved.contextResourceIds?.filter((id) =>
-        slackChannels.some((channel) => channel.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       configured.contextResourceIds?.filter((id) =>
-        slackChannels.some((channel) => channel.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       [],
     workspaceSecretRecordIds,
@@ -381,18 +386,7 @@ function connectionNotice(): {
   const status = search.get("status");
   if (!provider || !status) return null;
 
-  const name =
-    provider === "github"
-      ? "GitHub"
-      : provider === "slack"
-        ? "Slack"
-        : provider === "custom_mcp"
-          ? "Custom MCP"
-          : provider === "vercel"
-            ? "Vercel"
-          : provider === "clickstack"
-            ? "ClickStack / HyperDX"
-            : provider;
+  const name = providerDisplayName(provider);
   if (status === "connected") {
     if (provider === "slack") return null;
     return { tone: "success", message: `${name} connected. Continue setup.` };
@@ -427,6 +421,9 @@ export function AgentCreatePage() {
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const linearJustConnected = successfulConnectionReturn("linear");
   const vercelJustConnected = successfulConnectionReturn("vercel");
+  const returnedIntegrationAccountId = new URLSearchParams(
+    window.location.search,
+  ).get("integration_account_id");
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
@@ -452,6 +449,10 @@ export function AgentCreatePage() {
   );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
+  const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
+  const [vercelAccountId, setVercelAccountId] = useState(
+    returnedIntegrationAccountId ?? "",
+  );
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
   const [linearDialogOpen, setLinearDialogOpen] = useState(linearJustConnected);
   const [repositoryQuery, setRepositoryQuery] = useState("");
@@ -481,6 +482,7 @@ export function AgentCreatePage() {
       !githubDialogOpen &&
       !linearDialogOpen &&
       !slackContextDialogOpen &&
+      !vercelDialogOpen &&
       !secretDialogOpen
     ) {
       return;
@@ -490,6 +492,7 @@ export function AgentCreatePage() {
         setGithubDialogOpen(false);
         setLinearDialogOpen(false);
         setSlackContextDialogOpen(false);
+        setVercelDialogOpen(false);
         if (!creatingSecret) {
           setSecretDialogOpen(false);
           setSecretName("");
@@ -507,6 +510,7 @@ export function AgentCreatePage() {
     linearDialogOpen,
     secretDialogOpen,
     slackContextDialogOpen,
+    vercelDialogOpen,
   ]);
 
   useEffect(() => {
@@ -544,9 +548,7 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedDatadog.id);
         }
-        const connectedCustomMcpId = new URLSearchParams(
-          window.location.search,
-        ).get("integration_account_id");
+        const connectedCustomMcpId = returnedIntegrationAccountId;
         if (
           customMcpJustConnected &&
           connectedCustomMcpId &&
@@ -578,13 +580,17 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedLinear.id);
         }
-        const connectedVercel = accountsFor(loadedOptions, "vercel")[0];
         if (
           vercelJustConnected &&
-          connectedVercel &&
-          !loadedDraft.contextAccountIds.includes(connectedVercel.id)
+          returnedIntegrationAccountId &&
+          loadedOptions.accounts.some(
+            (account) =>
+              account.id === returnedIntegrationAccountId &&
+              account.provider === "vercel",
+          )
         ) {
-          loadedDraft.contextAccountIds.push(connectedVercel.id);
+          setVercelAccountId(returnedIntegrationAccountId);
+          setVercelDialogOpen(true);
         }
         setDraft(loadedDraft);
       })
@@ -610,6 +616,7 @@ export function AgentCreatePage() {
     datadogJustConnected,
     draftStorageKey,
     linearJustConnected,
+    returnedIntegrationAccountId,
     vercelJustConnected,
   ]);
 
@@ -665,6 +672,10 @@ export function AgentCreatePage() {
     () => resourcesOfKind(options, "slack_channel"),
     [options],
   );
+  const vercelProjects = useMemo(
+    () => resourcesOfKind(options, "vercel_project"),
+    [options],
+  );
 
   if (loading || !draft) {
     return (
@@ -694,6 +705,21 @@ export function AgentCreatePage() {
   const activeGithubAccount =
     githubAccounts.find((account) => account.id === draft.githubAccountId) ??
     githubAccounts[0];
+  const selectedVercelProjects = vercelProjects.filter((project) =>
+    draft.contextResourceIds.includes(project.id),
+  );
+  const activeVercelAccount =
+    vercelAccounts.find((account) => account.id === vercelAccountId) ??
+    vercelAccounts.find((account) =>
+      selectedVercelProjects.some(
+        (project) => project.integrationAccountId === account.id,
+      ),
+    ) ??
+    vercelAccounts[0];
+  const activeVercelProjects = vercelProjects.filter(
+    (project) =>
+      project.integrationAccountId === activeVercelAccount?.id,
+  );
   const githubRepositories = options.repositories.filter(
     (repository) =>
       repository.integrationAccountId === activeGithubAccount?.id,
@@ -785,8 +811,10 @@ export function AgentCreatePage() {
             )
               ? current.outputChannelResourceId
               : freshChannels[0]?.id ?? "",
-            contextResourceIds: current.contextResourceIds.filter((id) =>
-              freshChannelIds.has(id),
+            contextResourceIds: current.contextResourceIds.filter(
+              (id) =>
+                !slackChannels.some((channel) => channel.id === id) ||
+                freshChannelIds.has(id),
             ),
           };
         });
@@ -867,11 +895,43 @@ export function AgentCreatePage() {
             ...currentDraft.contextResourceIds.filter((id) => {
               const channel = slackChannels.find((item) => item.id === id);
               return (
-                channel?.integrationAccountId === resource.integrationAccountId
+                !channel ||
+                channel.integrationAccountId === resource.integrationAccountId
               );
             }),
             resourceId,
           ],
+    });
+  }
+
+  function toggleVercelProject(resourceId: string) {
+    const resource = vercelProjects.find(
+      (project) => project.id === resourceId,
+    );
+    if (!resource) return;
+
+    const selected = currentDraft.contextResourceIds.includes(resourceId);
+    const contextResourceIds = selected
+      ? currentDraft.contextResourceIds.filter((id) => id !== resourceId)
+      : [...currentDraft.contextResourceIds, resourceId];
+    const selectedAccountIds = new Set(
+      vercelProjects
+        .filter((project) => contextResourceIds.includes(project.id))
+        .map((project) => project.integrationAccountId),
+    );
+
+    updateDraft({
+      contextResourceIds,
+      contextAccountIds: [
+        ...currentDraft.contextAccountIds.filter(
+          (id) =>
+            !vercelAccounts.some((account) => account.id === id) ||
+            selectedAccountIds.has(id),
+        ),
+        ...[...selectedAccountIds].filter(
+          (id) => !currentDraft.contextAccountIds.includes(id),
+        ),
+      ],
     });
   }
 
@@ -1096,10 +1156,7 @@ export function AgentCreatePage() {
     clickStackAccounts[0] &&
       draft.contextAccountIds.includes(clickStackAccounts[0].id),
   );
-  const vercelContextConnected = Boolean(
-    vercelAccounts[0] &&
-      draft.contextAccountIds.includes(vercelAccounts[0].id),
-  );
+  const vercelContextConnected = selectedVercelProjects.length > 0;
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
     draft.contextResourceIds.includes(channel.id),
   );
@@ -1884,25 +1941,20 @@ export function AgentCreatePage() {
 
                   <ContextRow
                     action={
-                      vercelContextConnected ? (
+                      vercelAccounts.length > 0 ? (
                         <Button
+                          className="contextConfigureAction"
+                          onClick={() => {
+                            if (!vercelAccountId && activeVercelAccount) {
+                              setVercelAccountId(activeVercelAccount.id);
+                            }
+                            setVercelDialogOpen(true);
+                          }}
                           size="small"
-                          onClick={() =>
-                            toggleContextAccount(vercelAccounts[0]!.id)
-                          }
                           variant="ghost"
                         >
-                          Remove
-                        </Button>
-                      ) : vercelAccounts[0] ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(vercelAccounts[0]!.id)
-                          }
-                          variant="secondary"
-                        >
-                          Add
+                          <span>Configure</span>
+                          <CogIcon />
                         </Button>
                       ) : (
                         <ConnectButton
@@ -1913,8 +1965,14 @@ export function AgentCreatePage() {
                       )
                     }
                     detail={
-                      vercelAccounts[0]
-                        ? `${vercelAccounts[0].displayName} · Projects, deployments, domains, and logs`
+                      selectedVercelProjects.length > 0
+                        ? `${selectedVercelProjects.length} ${
+                            selectedVercelProjects.length === 1
+                              ? "project"
+                              : "projects"
+                          } selected · Deployments, domains, and logs`
+                        : vercelAccounts.length > 0
+                          ? "Choose which projects the agent may inspect"
                         : "Read-only projects, deployments, domains, and logs"
                     }
                     label="Vercel"
@@ -1922,11 +1980,97 @@ export function AgentCreatePage() {
                     status={
                       vercelContextConnected
                         ? "connected"
-                        : vercelAccounts[0]
+                        : vercelAccounts.length > 0
                           ? "available"
                           : "not_connected"
                     }
                   />
+
+                  {vercelDialogOpen && vercelAccounts.length > 0 ? (
+                    <div
+                      className="configurationDialogBackdrop"
+                      onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) {
+                          setVercelDialogOpen(false);
+                        }
+                      }}
+                    >
+                      <section
+                        aria-labelledby="vercel-context-configuration-title"
+                        aria-modal="true"
+                        className="configurationDialog"
+                        role="dialog"
+                      >
+                        <header className="configurationDialog__header">
+                          <ProviderMark provider="vercel" />
+                          <span className="configurationDialog__copy">
+                            <strong id="vercel-context-configuration-title">
+                              Configure Vercel context
+                            </strong>
+                            <small>
+                              Choose only the projects this agent may inspect.
+                            </small>
+                          </span>
+                          <IconButton
+                            aria-label="Close Vercel context configuration"
+                            autoFocus
+                            onClick={() => setVercelDialogOpen(false)}
+                            size="small"
+                            variant="ghost"
+                          >
+                            ×
+                          </IconButton>
+                        </header>
+                        <div className="configurationDialog__body">
+                          {vercelAccounts.length > 1 ? (
+                            <SelectField
+                              className="createField createField--account"
+                              label="Vercel account"
+                              onChange={setVercelAccountId}
+                              options={vercelAccounts.map((account) => ({
+                                label: account.displayName,
+                                value: account.id,
+                              }))}
+                              value={activeVercelAccount?.id ?? ""}
+                            />
+                          ) : null}
+                          <div className="projectPicker">
+                            <span>Projects</span>
+                            <div>
+                              {activeVercelProjects.length > 0 ? (
+                                activeVercelProjects.map((project) => (
+                                  <Checkbox
+                                    checked={draft.contextResourceIds.includes(
+                                      project.id,
+                                    )}
+                                    key={project.id}
+                                    label={project.displayName}
+                                    onChange={() =>
+                                      toggleVercelProject(project.id)
+                                    }
+                                  />
+                                ))
+                              ) : (
+                                <p className="workspaceSecretsEmpty">
+                                  No projects are available for this account.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <footer className="configurationDialog__footer">
+                          <span>{selectedVercelProjects.length} selected</span>
+                          <Button
+                            onClick={() => setVercelDialogOpen(false)}
+                            size="small"
+                            variant="primary"
+                          >
+                            Done
+                          </Button>
+                        </footer>
+                      </section>
+                    </div>
+                  ) : null}
 
                   <ContextRow
                     action={

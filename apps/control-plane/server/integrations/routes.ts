@@ -1232,7 +1232,10 @@ export const integrationRoutes = new Hono()
         },
       });
       return context.redirect(
-        settingsRedirect(connectionState.returnTo, "vercel", "connected"),
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "vercel", "connected"),
+          accountId,
+        ),
       );
     } catch (error) {
       logCallbackError("Vercel", error, {

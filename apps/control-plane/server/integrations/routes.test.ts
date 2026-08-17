@@ -213,7 +213,8 @@ describe("integration callback routing", () => {
     expect(response.headers.get("location")).toBe(
       "https://responder.example/agents/new" +
         "?integration=vercel" +
-        "&status=connected",
+        "&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
     );
     expect(encryptCredentials).toHaveBeenCalledWith({
       accessToken: "vercel-token",

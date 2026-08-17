@@ -916,6 +916,7 @@ export async function getRuntimeVercelConnections(
   const configRows = await getDatabase()
     .select({
       contextAccountIds: agentConfigVersions.contextAccountIds,
+      contextResourceIds: agentConfigVersions.contextResourceIds,
       organizationId: agents.organizationId,
     })
     .from(agentConfigVersions)
@@ -923,7 +924,9 @@ export async function getRuntimeVercelConnections(
     .where(eq(agentConfigVersions.id, versionId))
     .limit(1);
   const config = configRows[0];
-  if (!config?.contextAccountIds.length) return [];
+  if (!config?.contextAccountIds.length || !config.contextResourceIds.length) {
+    return [];
+  }
 
   const accountRows = await getDatabase()
     .select({
@@ -945,6 +948,7 @@ export async function getRuntimeVercelConnections(
   const accountIds = accountRows.map(({ id }) => id);
   const resourceRows = await getDatabase()
     .select({
+      id: integrationResources.id,
       integrationAccountId: integrationResources.integrationAccountId,
       externalId: integrationResources.externalId,
     })
@@ -952,6 +956,7 @@ export async function getRuntimeVercelConnections(
     .where(
       and(
         inArray(integrationResources.integrationAccountId, accountIds),
+        inArray(integrationResources.id, config.contextResourceIds),
         eq(integrationResources.kind, "vercel_project"),
         eq(integrationResources.available, true),
       ),
