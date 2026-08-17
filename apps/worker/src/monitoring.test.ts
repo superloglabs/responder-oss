@@ -59,7 +59,12 @@ describe("worker error monitoring", () => {
     };
 
     expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
-    expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
+    expect(
+      monitoring.initializeErrorMonitoring({
+        ...environment,
+        DAYTONA_API_KEY: "rotated-daytona-secret",
+      }),
+    ).toBe(true);
 
     expect(sentryMocks.init).not.toHaveBeenCalled();
     expect(sentryMocks.addEventProcessor).toHaveBeenCalledOnce();
@@ -67,7 +72,7 @@ describe("worker error monitoring", () => {
       event: Record<string, unknown>,
     ) => Record<string, unknown>;
     expect(
-      processor({ message: "request failed for daytona-secret" }),
+      processor({ message: "request failed for rotated-daytona-secret" }),
     ).toEqual({ message: "request failed for [redacted]" });
   });
 

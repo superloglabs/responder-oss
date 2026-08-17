@@ -17,6 +17,7 @@ export interface WorkerErrorContext {
 
 let errorMonitoringEnabled = false;
 let eventScrubbingConfigured = false;
+let eventScrubbingEnvironment: NodeJS.ProcessEnv = process.env;
 
 const secretEnvironmentNames = [
   "OPENAI_API_KEY",
@@ -72,18 +73,23 @@ function scrubWorkerSentryEvent(
   return event;
 }
 
+function configureEventScrubbing(environment: NodeJS.ProcessEnv): void {
+  eventScrubbingEnvironment = environment;
+  if (eventScrubbingConfigured) return;
+
+  Sentry.addEventProcessor((event) =>
+    scrubWorkerSentryEvent(event, eventScrubbingEnvironment),
+  );
+  eventScrubbingConfigured = true;
+}
+
 export function initializeErrorMonitoring(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const dsn = environment.SENTRY_DSN?.trim();
   if (!dsn) return false;
-  if (!eventScrubbingConfigured) {
-    Sentry.addEventProcessor((event) =>
-      scrubWorkerSentryEvent(event, environment),
-    );
-    eventScrubbingConfigured = true;
-  }
   if (Sentry.isInitialized()) {
+    configureEventScrubbing(environment);
     errorMonitoringEnabled = true;
     return true;
   }
@@ -97,6 +103,7 @@ export function initializeErrorMonitoring(
       sendDefaultPii: false,
       tracesSampleRate: 0,
     });
+    configureEventScrubbing(environment);
     errorMonitoringEnabled = true;
     return true;
   } catch (error) {
