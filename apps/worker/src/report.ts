@@ -6,6 +6,7 @@ import {
   investigationReportSubmissionSchema,
   type InvestigationReportSubmission,
 } from "@responder/core/investigations/report";
+import { linearTicketFollowupInstruction } from "@responder/core/integrations/linear";
 import { embedNewIssues } from "./issue-embeddings.js";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
@@ -16,6 +17,7 @@ function reportToolResult(input: {
   automaticPullRequestIssueIds: string[];
   deliveryWarnings?: string[];
   issueIds: string[];
+  linearInstruction?: string | null;
   slackMarkdown?: string;
 }) {
   return {
@@ -23,10 +25,13 @@ function reportToolResult(input: {
     automaticPullRequestIssueIds: input.automaticPullRequestIssueIds,
     deliveryWarnings: input.deliveryWarnings ?? [],
     issueIds: input.issueIds,
-    instruction:
+    instruction: [
+      "The report was saved.",
       input.automaticPullRequestIssueIds.length > 0
-        ? `The report was saved. Separate remediation jobs will handle pull request fixes for these issue IDs: ${input.automaticPullRequestIssueIds.join(", ")}. Do not modify code in this investigation.`
-        : "The report was saved.",
+        ? `Separate remediation jobs will handle pull request fixes for these issue IDs: ${input.automaticPullRequestIssueIds.join(", ")}. Do not modify code in this investigation.`
+        : null,
+      input.linearInstruction,
+    ].filter(Boolean).join("\n\n"),
     ...(input.slackMarkdown !== undefined
       ? { slackMarkdown: input.slackMarkdown }
       : {}),
@@ -83,6 +88,9 @@ export async function submitInvestigationReportForRun(input: {
     issueIds: result.issues.map((issue) => issue.id),
     automaticPullRequestIssueIds: result.automaticPullRequestIssueIds,
     slackMarkdown: result.markdown,
+    linearInstruction: linearTicketFollowupInstruction({
+      requests: result.linearTicketRequests,
+    }),
   });
 }
 

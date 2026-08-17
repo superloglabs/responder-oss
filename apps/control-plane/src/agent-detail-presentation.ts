@@ -23,6 +23,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   clickstack: "ClickStack / HyperDX",
   datadog: "Datadog",
   github: "GitHub",
+  linear: "Linear",
   sentry: "Sentry",
   slack: "Slack",
 };
@@ -149,9 +150,14 @@ function summarizeContext(
       repositoryNames.length ? repositoryNames.join(" · ") : "None"
     }`,
     eyebrow: "Agent context",
-    meta: secretNames.length
-      ? `Workspace secrets: ${secretNames.join(" · ")}`
-      : undefined,
+    meta: [
+      secretNames.length ? `Workspace secrets: ${secretNames.join(" · ")}` : null,
+      configuration.createLinearTickets
+        ? "Creates Linear tickets for new issues"
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || undefined,
     title: providers.length ? providers.join(" · ") : "No additional providers",
   };
 }

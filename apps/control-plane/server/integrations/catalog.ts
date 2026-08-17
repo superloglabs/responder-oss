@@ -5,6 +5,7 @@ export const productIntegrationIds = [
   "datadog",
   "custom_mcp",
   "clickstack",
+  "linear",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -73,6 +74,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     description: "Logs, traces, metrics, and service context through MCP.",
     implemented: true,
     requiredEnvironment: [],
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    description: "Issue and project context with optional ticket creation.",
+    implemented: true,
+    requiredEnvironment: ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
   },
 ];
 
