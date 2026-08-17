@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sentryMocks = vi.hoisted(() => ({
+  addEventProcessor: vi.fn(),
   captureException: vi.fn(),
   flush: vi.fn().mockResolvedValue(true),
   init: vi.fn(),
@@ -13,6 +14,7 @@ const sentryMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@sentry/node", () => ({
+  addEventProcessor: sentryMocks.addEventProcessor,
   captureException: sentryMocks.captureException,
   flush: sentryMocks.flush,
   init: sentryMocks.init,
@@ -26,6 +28,7 @@ vi.mock("@sentry/node", () => ({
 describe("worker error monitoring", () => {
   beforeEach(() => {
     vi.resetModules();
+    sentryMocks.addEventProcessor.mockClear();
     sentryMocks.captureException.mockClear();
     sentryMocks.flush.mockClear();
     sentryMocks.init.mockClear();
@@ -47,7 +50,33 @@ describe("worker error monitoring", () => {
     expect(sentryMocks.captureException).not.toHaveBeenCalled();
   });
 
-  it("reports a redacted exception without flushing the error path", async () => {
+  it("configures secret redaction when Sentry is already initialized", async () => {
+    sentryMocks.isInitialized.mockReturnValue(true);
+    const monitoring = await import("./monitoring.js");
+    const environment = {
+      DAYTONA_API_KEY: "daytona-secret",
+      SENTRY_DSN: "https://public@example.invalid/1",
+    };
+
+    expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
+    expect(
+      monitoring.initializeErrorMonitoring({
+        ...environment,
+        DAYTONA_API_KEY: "rotated-daytona-secret",
+      }),
+    ).toBe(true);
+
+    expect(sentryMocks.init).not.toHaveBeenCalled();
+    expect(sentryMocks.addEventProcessor).toHaveBeenCalledOnce();
+    const processor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    expect(
+      processor({ message: "request failed for rotated-daytona-secret" }),
+    ).toEqual({ message: "request failed for [redacted]" });
+  });
+
+  it("reports the original exception and redacts its serialized event", async () => {
     const monitoring = await import("./monitoring.js");
     const environment = {
       DAYTONA_API_KEY: "daytona-secret",
@@ -56,15 +85,19 @@ describe("worker error monitoring", () => {
       SENTRY_RELEASE: "abc123",
     };
 
+    const originalError = new TypeError("request failed for daytona-secret");
+    originalError.stack =
+      "TypeError: request failed for daytona-secret\n" +
+      "    at runInvestigation (/app/apps/worker/src/investigate.ts:10:2)";
+
     expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
     await monitoring.reportWorkerException(
-      new Error("request failed for daytona-secret"),
+      originalError,
       {
         investigationId: "investigation-1",
         operation: "investigation",
         organizationId: "organization-1",
       },
-      environment,
     );
 
     expect(sentryMocks.init).toHaveBeenCalledWith(
@@ -76,15 +109,54 @@ describe("worker error monitoring", () => {
         sendDefaultPii: false,
       }),
     );
+    const eventProcessor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    const serializedEvent = eventProcessor({
+      exception: {
+        values: [
+          {
+            stacktrace: {
+              frames: [
+                {
+                  context_line: "request failed for daytona-secret",
+                  filename: "/app/apps/worker/src/investigate.ts",
+                },
+              ],
+            },
+            type: "TypeError",
+            value: "request failed for daytona-secret",
+          },
+        ],
+      },
+      extra: { diagnostic: "request failed for daytona-secret" },
+    });
+
+    expect(serializedEvent).toEqual(
+      expect.objectContaining({
+        exception: {
+          values: [
+            expect.objectContaining({
+              stacktrace: {
+                frames: [
+                  expect.objectContaining({
+                    context_line: "request failed for [redacted]",
+                  }),
+                ],
+              },
+              type: "TypeError",
+              value: "request failed for [redacted]",
+            }),
+          ],
+        },
+        extra: { diagnostic: "request failed for [redacted]" },
+      }),
+    );
     expect(sentryMocks.scope.setContext).toHaveBeenCalledWith(
       "responder",
       expect.objectContaining({ investigationId: "investigation-1" }),
     );
-    expect(sentryMocks.captureException).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "request failed for [redacted]",
-      }),
-    );
+    expect(sentryMocks.captureException).toHaveBeenCalledWith(originalError);
     expect(sentryMocks.flush).not.toHaveBeenCalled();
 
     await expect(monitoring.flushWorkerMonitoring()).resolves.toBe(true);
