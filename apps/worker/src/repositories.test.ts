@@ -94,7 +94,10 @@ describe("Daytona repository checkout", () => {
       .mockResolvedValueOnce(new Response("rate limited", { status: 429 }));
     const downloadWithGit = vi
       .fn()
-      .mockResolvedValue(new Uint8Array([31, 139, 8, 0]));
+      .mockResolvedValue({
+        archive: new Uint8Array([31, 139, 8, 0]),
+        sha,
+      });
 
     await expect(
       checkoutRuntimeRepositories(session, "version-id", {
@@ -113,6 +116,38 @@ describe("Daytona repository checkout", () => {
     );
     expect(JSON.stringify(vi.mocked(session.materializeEntry).mock.calls)).not.toContain(
       "github-secret",
+    );
+  });
+
+  it("falls back to Git when branch resolution is rate limited", async () => {
+    const session = fakeSession();
+    const repository = {
+      defaultBranch: "main",
+      fullName: "example-org/example-repo",
+      installationId: 123,
+      private: true,
+    };
+    const downloadWithGit = vi.fn().mockResolvedValue({
+      archive: new Uint8Array([31, 139, 8, 0]),
+      sha,
+    });
+
+    await expect(
+      checkoutRuntimeRepositories(session, "version-id", {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        downloadWithGit,
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(new Response("rate limited", { status: 429 })),
+        getRepositories: vi.fn().mockResolvedValue([repository]),
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ repository: repository.fullName, sha }),
+    ]);
+    expect(downloadWithGit).toHaveBeenCalledWith(
+      repository,
+      "github-secret",
+      repository.defaultBranch,
     );
   });
 

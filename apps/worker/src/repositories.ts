@@ -29,8 +29,8 @@ export interface RepositoryCheckoutDependencies {
   downloadWithGit?: (
     repository: RuntimeRepository,
     accessToken: string,
-    sha: string,
-  ) => Promise<Uint8Array>;
+    ref: string,
+  ) => Promise<{ archive: Uint8Array; sha: string }>;
   fetch: typeof fetch;
   getRepositories: (versionId: string) => Promise<RuntimeRepository[]>;
 }
@@ -44,9 +44,13 @@ const defaultDependencies: RepositoryCheckoutDependencies = {
 async function downloadRepositorySnapshotWithGit(
   repository: RuntimeRepository,
   accessToken: string,
-  sha: string,
-): Promise<Uint8Array> {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "responder-repository-"));
+  ref: string,
+): Promise<{ archive: Uint8Array; sha: string }> {
+  const temporaryBase =
+    process.env.RESPONDER_REPOSITORY_TEMP_DIR ?? tmpdir();
+  const temporaryRoot = await mkdtemp(
+    join(temporaryBase, "responder-repository-"),
+  );
   const gitDirectory = join(temporaryRoot, "repository.git");
   const archivePath = join(temporaryRoot, "repository.tar.gz");
   const gitEnvironment = {
@@ -83,10 +87,19 @@ async function downloadRepositorySnapshotWithGit(
         "--quiet",
         "--depth=1",
         "origin",
-        sha,
+        ref,
       ],
       { env: gitEnvironment, timeout: 120_000 },
     );
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", gitDirectory, "rev-parse", "FETCH_HEAD"],
+      { timeout: 30_000 },
+    );
+    const sha = stdout.trim();
+    if (!/^[a-f0-9]{40}$/i.test(sha)) {
+      throw new Error("Git returned an invalid repository commit");
+    }
     await execFileAsync(
       "git",
       [
@@ -103,7 +116,7 @@ async function downloadRepositorySnapshotWithGit(
     if (archiveStats.size > maxArchiveBytes) {
       throw new Error("GitHub repository archive exceeds the 100 MB limit");
     }
-    return new Uint8Array(await readFile(archivePath));
+    return { archive: new Uint8Array(await readFile(archivePath)), sha };
   } catch (error) {
     if (
       error instanceof Error &&
@@ -112,7 +125,7 @@ async function downloadRepositorySnapshotWithGit(
       throw error;
     }
     throw new Error(
-      `Unable to download ${repository.fullName}@${sha} using Git fallback`,
+      `Unable to download ${repository.fullName}@${ref} using Git fallback`,
     );
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
@@ -220,6 +233,14 @@ async function fetchRepositorySnapshot(
     { headers, signal: AbortSignal.timeout(30_000) },
   );
   if (!commitResponse.ok) {
+    if (commitResponse.status === 429) {
+      await commitResponse.body?.cancel();
+      return downloadWithGit(
+        repository,
+        accessToken,
+        repository.defaultBranch,
+      );
+    }
     throw new Error(
       `Unable to resolve ${repository.fullName}@${repository.defaultBranch}`,
     );
@@ -237,10 +258,11 @@ async function fetchRepositorySnapshot(
   if (!archiveResponse.ok) {
     if (archiveResponse.status === 429) {
       await archiveResponse.body?.cancel();
-      return {
-        archive: await downloadWithGit(repository, accessToken, sha),
-        sha,
-      };
+      const fallback = await downloadWithGit(repository, accessToken, sha);
+      if (fallback.sha !== sha) {
+        throw new Error(`Git returned an unexpected commit for ${repository.fullName}`);
+      }
+      return fallback;
     }
     throw new Error(`Unable to download ${repository.fullName}@${sha}`);
   }
