@@ -4,14 +4,44 @@ const slackResponseSchema = z
   .object({
     ok: z.boolean(),
     error: z.string().optional(),
+    errors: z
+      .array(
+        z
+          .object({
+            code: z.string().optional(),
+            message: z.string().optional(),
+            pointer: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+    response_metadata: z
+      .object({ messages: z.array(z.string()).optional() })
+      .passthrough()
+      .optional(),
     ts: z.string().optional(),
   })
   .passthrough();
+
+function slackErrorDiagnostics(
+  response: z.infer<typeof slackResponseSchema>,
+): string[] {
+  return [
+    ...(response.errors ?? []).map((error) =>
+      [error.code, error.pointer, error.message].filter(Boolean).join(": "),
+    ),
+    ...(response.response_metadata?.messages ?? []),
+  ]
+    .filter((message) => message.trim().length > 0)
+    .slice(0, 8)
+    .map((message) => message.replaceAll(/\s+/g, " ").slice(0, 500));
+}
 
 export class SlackApiError extends Error {
   constructor(
     public readonly method: string,
     public readonly code: string,
+    public readonly diagnostics: string[] = [],
   ) {
     super(`Slack ${method} failed (${code})`);
     this.name = "SlackApiError";
@@ -38,7 +68,11 @@ async function callSlackApi(
     const code = parsed.success
       ? parsed.data.error ?? `http_${response.status}`
       : `http_${response.status}`;
-    throw new SlackApiError(method, code);
+    throw new SlackApiError(
+      method,
+      code,
+      parsed.success ? slackErrorDiagnostics(parsed.data) : [],
+    );
   }
   return parsed.data;
 }

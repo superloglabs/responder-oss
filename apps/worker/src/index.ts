@@ -252,6 +252,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
 
   let finalizingSlackCard = false;
   let lastSlackProgressAt = 0;
+  let slackProgressFailureReported = false;
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
 
   try {
@@ -271,7 +272,16 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
           payload.investigationId,
           progress.detail,
           slackTraceItems,
-        ).catch(() => undefined);
+        ).catch(async (error: unknown) => {
+          if (slackProgressFailureReported) return;
+          slackProgressFailureReported = true;
+          await reportWorkerException(error, {
+            investigationId: payload.investigationId,
+            jobId: job.id,
+            operation: "slack_delivery",
+            organizationId: payload.config.organizationId,
+          });
+        });
         if (progress.finalizing) finalizingSlackCard = true;
       },
       { jobId: job.id },
@@ -344,6 +354,18 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
           investigationId: payload.investigationId,
         }),
       );
+      await reportWorkerException(
+        new AggregateError(
+          deliveryWarnings.map((warning) => new Error(warning)),
+          "Slack investigation delivery incomplete",
+        ),
+        {
+          investigationId: payload.investigationId,
+          jobId: job.id,
+          operation: "slack_delivery",
+          organizationId: payload.config.organizationId,
+        },
+      );
     }
     console.log(
       JSON.stringify({
@@ -382,6 +404,18 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
           event: "investigation_slack_delivery_incomplete",
           investigationId: payload.investigationId,
         }),
+      );
+      await reportWorkerException(
+        new AggregateError(
+          deliveryWarnings.map((warning) => new Error(warning)),
+          "Slack investigation delivery incomplete",
+        ),
+        {
+          investigationId: payload.investigationId,
+          jobId: job.id,
+          operation: "slack_delivery",
+          organizationId: payload.config.organizationId,
+        },
       );
     }
     if (!payload.replay && investigationFailed) {

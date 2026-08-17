@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../credentials/encryption.js";
 import { recordInvestigationSlackTrace } from "../db/investigations.js";
 import { getSlackInvestigationLiveContext } from "../db/issues.js";
-import { setSlackThreadStatus, updateSlackMessage } from "./slack.js";
+import {
+  SlackApiError,
+  setSlackThreadStatus,
+  updateSlackMessage,
+} from "./slack.js";
 import {
   failInvestigationSlackCard,
   slackCardFailureMetricEvent,
@@ -20,7 +24,8 @@ vi.mock("../db/investigations.js", () => ({
 vi.mock("../db/issues.js", () => ({
   getSlackInvestigationLiveContext: vi.fn(),
 }));
-vi.mock("./slack.js", () => ({
+vi.mock("./slack.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./slack.js")>()),
   setSlackThreadStatus: vi.fn(),
   updateSlackMessage: vi.fn(),
 }));
@@ -55,6 +60,33 @@ describe("Slack live investigation card", () => {
     ).toEqual({
       error: "Slack progress failed",
       causes: ["message update failed", "status update failed"],
+    });
+  });
+
+  it("retains safe Slack validation diagnostics in structured log fields", () => {
+    expect(
+      slackErrorLogFields(
+        new AggregateError(
+          [
+            new SlackApiError("chat.update", "invalid_blocks", [
+              "must be more than 0 characters: /0/tasks/1/output",
+            ]),
+          ],
+          "Slack progress failed",
+        ),
+      ),
+    ).toEqual({
+      error: "Slack progress failed",
+      causes: ["Slack chat.update failed (invalid_blocks)"],
+      slackErrors: [
+        {
+          code: "invalid_blocks",
+          diagnostics: [
+            "must be more than 0 characters: /0/tasks/1/output",
+          ],
+          method: "chat.update",
+        },
+      ],
     });
   });
 
@@ -861,6 +893,41 @@ describe("Slack live investigation card", () => {
     expect(message.text).toBe(
       `${context.title} — Investigation complete`,
     );
+  });
+
+  it("renders empty structured tool output as valid non-empty rich text", () => {
+    const message = slackInvestigationCard({
+      agentId: context.agentId,
+      detail: "Reviewing search results.",
+      investigationId: context.investigationId,
+      status: "in_progress",
+      title: context.title,
+      traceItems: [
+        {
+          detail: JSON.stringify({ pattern: "missing" }),
+          id: "call-empty-grep",
+          output: JSON.stringify({ content: "" }),
+          status: "complete",
+          title: "grep",
+        },
+      ],
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        tasks: expect.arrayContaining([
+          expect.objectContaining({
+            output: expect.objectContaining({
+              elements: [
+                expect.objectContaining({
+                  elements: [{ text: "No output.", type: "text" }],
+                }),
+              ],
+            }),
+          }),
+        ]),
+      }),
+    ]);
   });
 
   it("moves the card to an error state and clears the spinner", async () => {

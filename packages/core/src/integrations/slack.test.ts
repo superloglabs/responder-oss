@@ -88,6 +88,39 @@ describe("Slack delivery client", () => {
     );
   });
 
+  it("retains bounded Slack validation diagnostics on API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({
+          error: "invalid_blocks",
+          ok: false,
+          response_metadata: {
+            messages: [
+              "[ERROR] must be more than 0 characters [json-pointer:/blocks/0/tasks/1/output]",
+            ],
+          },
+        }),
+      ),
+    );
+
+    const failure = updateSlackMessage({
+      accessToken: "xoxb-test",
+      blocks: [{ type: "plan" }],
+      channelId: "C123",
+      text: "Investigating",
+      timestamp: "1785500001.000200",
+    });
+
+    await expect(failure).rejects.toMatchObject({
+      code: "invalid_blocks",
+      diagnostics: [
+        "[ERROR] must be more than 0 characters [json-pointer:/blocks/0/tasks/1/output]",
+      ],
+      method: "chat.update",
+    });
+  });
+
   it("sets Slack's native rotating investigation status", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);

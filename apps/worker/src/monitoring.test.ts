@@ -162,4 +162,47 @@ describe("worker error monitoring", () => {
     await expect(monitoring.flushWorkerMonitoring()).resolves.toBe(true);
     expect(sentryMocks.flush).toHaveBeenCalledWith(2_000);
   });
+
+  it("attaches safe Slack diagnostics to delivery failures", async () => {
+    const monitoring = await import("./monitoring.js");
+    const { SlackApiError } = await import(
+      "@responder/core/integrations/slack"
+    );
+    monitoring.initializeErrorMonitoring({
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+    const error = new AggregateError(
+      [
+        new SlackApiError("chat.update", "invalid_blocks", [
+          "must be more than 0 characters: /0/tasks/1/output",
+        ]),
+      ],
+      "Slack investigation delivery incomplete",
+    );
+
+    await monitoring.reportWorkerException(error, {
+      investigationId: "investigation-1",
+      operation: "slack_delivery",
+      organizationId: "organization-1",
+    });
+
+    expect(sentryMocks.scope.setTag).toHaveBeenCalledWith(
+      "responder.operation",
+      "slack_delivery",
+    );
+    expect(sentryMocks.scope.setContext).toHaveBeenCalledWith("slack", {
+      causes: ["Slack chat.update failed (invalid_blocks)"],
+      error: "Slack investigation delivery incomplete",
+      slackErrors: [
+        {
+          code: "invalid_blocks",
+          diagnostics: [
+            "must be more than 0 characters: /0/tasks/1/output",
+          ],
+          method: "chat.update",
+        },
+      ],
+    });
+    expect(sentryMocks.captureException).toHaveBeenCalledWith(error);
+  });
 });
