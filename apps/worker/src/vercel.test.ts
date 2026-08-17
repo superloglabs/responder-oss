@@ -90,6 +90,13 @@ describe("Vercel read tools", () => {
     expect(() =>
       buildVercelReadUrl({ connection, operation: operation! }),
     ).toThrow("Choose at least one selected Vercel project");
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectIds: [] },
+      }),
+    ).toThrow("Choose at least one selected Vercel project");
   });
 
   it("normalizes team path parameters to the connected team", () => {
@@ -172,6 +179,25 @@ describe("Vercel read tools", () => {
     expect(new URL(fetchMock.mock.calls[0]![0] as URL).pathname).toBe(
       "/v13/deployments/dpl-1",
     );
+  });
+
+  it("verifies deployment ownership even with a selected project parameter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "dpl-other", projectId: "prj-other" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeVercelRead({
+        connection,
+        operationId: "getRuntimeLogs",
+        pathParameters: {
+          deploymentId: "dpl-other",
+          projectId: "prj-1",
+        },
+      }),
+    ).rejects.toThrow("deployment is not available");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("refuses operations absent from the generated read catalog", async () => {

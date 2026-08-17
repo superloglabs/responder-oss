@@ -972,6 +972,8 @@ export async function getRuntimeVercelConnections(
   return config.contextAccountIds.flatMap((accountId) => {
     const account = accountsById.get(accountId);
     if (!account?.encryptedCredentials) return [];
+    const projectIds = projectIdsByAccount.get(account.id) ?? [];
+    if (projectIds.length === 0) return [];
     const credentials = vercelCredentialsSchema.parse(
       decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
     );
@@ -979,7 +981,7 @@ export async function getRuntimeVercelConnections(
       accessToken: credentials.accessToken,
       accountId: account.id,
       displayName: account.displayName,
-      projectIds: projectIdsByAccount.get(account.id) ?? [],
+      projectIds,
       teamId: credentials.teamId,
     }];
   });
@@ -1726,9 +1728,13 @@ export async function getRuntimeSlackConnection(
     .select({
       id: integrationResources.id,
       accountId: integrationAccounts.id,
+      accountStatus: integrationAccounts.status,
+      available: integrationResources.available,
       displayName: integrationResources.displayName,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
       externalId: integrationResources.externalId,
+      kind: integrationResources.kind,
+      provider: integrationAccounts.provider,
     })
     .from(integrationResources)
     .innerJoin(
@@ -1738,20 +1744,32 @@ export async function getRuntimeSlackConnection(
     .where(
       and(
         eq(integrationAccounts.organizationId, config.organizationId),
-        eq(integrationAccounts.provider, "slack"),
-        eq(integrationAccounts.status, "connected"),
-        eq(integrationResources.kind, "slack_channel"),
-        eq(integrationResources.available, true),
         inArray(integrationResources.id, config.contextResourceIds),
       ),
     );
   if (resourceRows.length !== config.contextResourceIds.length) return null;
 
-  const accountIds = new Set(resourceRows.map((resource) => resource.accountId));
+  const slackResourceRows = resourceRows.filter(
+    (resource) =>
+      resource.provider === "slack" && resource.kind === "slack_channel",
+  );
+  if (
+    slackResourceRows.length === 0 ||
+    slackResourceRows.some(
+      (resource) =>
+        resource.accountStatus !== "connected" || !resource.available,
+    )
+  ) {
+    return null;
+  }
+
+  const accountIds = new Set(
+    slackResourceRows.map((resource) => resource.accountId),
+  );
   if (accountIds.size !== 1) {
     throw new Error("Slack context channels must belong to one workspace");
   }
-  const firstResource = resourceRows[0];
+  const firstResource = slackResourceRows[0];
   if (!firstResource?.encryptedCredentials) return null;
   const credentials = z
     .object({ userAccessToken: z.string().min(1) })
@@ -1771,11 +1789,14 @@ export async function getRuntimeSlackConnection(
   }
 
   const resourcesById = new Map(
-    resourceRows.map((resource) => [resource.id, resource]),
+    slackResourceRows.map((resource) => [resource.id, resource]),
+  );
+  const selectedSlackResourceIds = config.contextResourceIds.filter((id) =>
+    resourcesById.has(id),
   );
   return {
     accountId: firstResource.accountId,
-    channels: config.contextResourceIds.map((resourceId) => {
+    channels: selectedSlackResourceIds.map((resourceId) => {
       const resource = resourcesById.get(resourceId)!;
       return { id: resource.externalId, name: resource.displayName };
     }),
