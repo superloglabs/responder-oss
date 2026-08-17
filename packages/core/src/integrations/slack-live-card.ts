@@ -3,7 +3,11 @@ import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
 import { recordInvestigationSlackTrace } from "../db/investigations.js";
 import { getSlackInvestigationLiveContext } from "../db/issues.js";
-import { setSlackThreadStatus, updateSlackMessage } from "./slack.js";
+import {
+  SlackApiError,
+  setSlackThreadStatus,
+  updateSlackMessage,
+} from "./slack.js";
 import type { SlackInvestigationTraceItem } from "./slack-live-progress.js";
 
 const slackCredentialsSchema = z.object({
@@ -20,6 +24,15 @@ function truncate(value: string, maximum: number): string {
   return value.length > maximum
     ? `${value.slice(0, maximum - 1).trimEnd()}…`
     : value;
+}
+
+function nonEmptyText(
+  value: string,
+  maximum: number,
+  fallback: string,
+): string {
+  const rendered = truncate(value, maximum);
+  return rendered.trim().length > 0 ? rendered : fallback;
 }
 
 function investigationUrl(agentId: string, investigationId: string): string {
@@ -46,7 +59,12 @@ function richText(value: string, preformatted = false) {
     elements: [
       {
         type: preformatted ? "rich_text_preformatted" : "rich_text_section",
-        elements: [{ type: "text", text: truncate(value, 1_500) }],
+        elements: [
+          {
+            type: "text",
+            text: nonEmptyText(value, 1_500, "No content."),
+          },
+        ],
       },
     ],
   };
@@ -194,7 +212,7 @@ function objectDetails(
       },
       {
         type: "text" as const,
-        text: truncate(displayValue(value), 500),
+        text: nonEmptyText(displayValue(value), 500, "—"),
       },
     ];
   });
@@ -283,7 +301,12 @@ function preformatted(value: string, language?: string) {
       {
         type: "rich_text_preformatted",
         ...(language ? { language } : {}),
-        elements: [{ type: "text", text: truncate(value, 1_500) }],
+        elements: [
+          {
+            type: "text",
+            text: nonEmptyText(value, 1_500, "No output."),
+          },
+        ],
       },
     ],
   };
@@ -304,7 +327,7 @@ function issueLinkList(
             {
               type: "link",
               url: issueUrl(issue.id),
-              text: issue.title,
+              text: nonEmptyText(issue.title, 2_000, "Untitled issue"),
             },
           ],
         })),
@@ -454,11 +477,20 @@ function formattedTraceTask(
     }
     const details = [
       { type: "text" as const, text: "Query: ", style: { bold: true } },
-      { type: "text" as const, text: String(query ?? "") },
+      {
+        type: "text" as const,
+        text: nonEmptyText(String(query ?? ""), 1_500, "—"),
+      },
       { type: "text" as const, text: "\nFrom: ", style: { bold: true } },
-      { type: "text" as const, text: String(from ?? "") },
+      {
+        type: "text" as const,
+        text: nonEmptyText(String(from ?? ""), 1_500, "—"),
+      },
       { type: "text" as const, text: "\nTo: ", style: { bold: true } },
-      { type: "text" as const, text: String(to ?? "") },
+      {
+        type: "text" as const,
+        text: nonEmptyText(String(to ?? ""), 1_500, "—"),
+      },
       ...(Array.isArray(extraFields)
         ? [
             {
@@ -466,7 +498,10 @@ function formattedTraceTask(
               text: "\nExtra fields: ",
               style: { bold: true },
             },
-            { type: "text" as const, text: extraFields.join(", ") },
+            {
+              type: "text" as const,
+              text: nonEmptyText(extraFields.join(", "), 1_500, "—"),
+            },
           ]
         : []),
     ];
@@ -727,7 +762,7 @@ export function slackInvestigationCard(input: {
         ? "Investigation complete"
         : input.status === "error"
           ? "Investigation stopped"
-          : truncate(input.detail, 180),
+          : nonEmptyText(input.detail, 180, "Investigation in progress"),
     status: input.status,
     ...(input.status === "error" ? { output: richText(input.detail) } : {}),
     sources: [source],
@@ -824,7 +859,22 @@ async function slackInvestigationLiveContext(investigationId: string) {
 export function slackErrorLogFields(error: unknown): {
   causes?: string[];
   error: string;
+  slackErrors?: Array<{
+    code: string;
+    diagnostics: string[];
+    method: string;
+  }>;
 } {
+  const slackErrors: SlackApiError[] = [];
+  const collectSlackErrors = (value: unknown): void => {
+    if (value instanceof SlackApiError) slackErrors.push(value);
+    if (value instanceof AggregateError) {
+      for (const cause of value.errors) collectSlackErrors(cause);
+    } else if (value instanceof Error && value.cause) {
+      collectSlackErrors(value.cause);
+    }
+  };
+  collectSlackErrors(error);
   return {
     error: error instanceof Error ? error.message : String(error),
     ...(error instanceof AggregateError
@@ -832,6 +882,15 @@ export function slackErrorLogFields(error: unknown): {
           causes: error.errors.map((cause: unknown) =>
             cause instanceof Error ? cause.message : String(cause),
           ),
+      }
+      : {}),
+    ...(slackErrors.length > 0
+      ? {
+          slackErrors: slackErrors.map(({ code, diagnostics, method }) => ({
+            code,
+            diagnostics,
+            method,
+          })),
         }
       : {}),
   };

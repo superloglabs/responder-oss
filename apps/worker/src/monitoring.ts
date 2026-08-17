@@ -4,6 +4,7 @@ import {
   sentryEnvironment,
   sentryRelease,
 } from "@responder/core/observability/sentry";
+import { slackErrorLogFields } from "@responder/core/integrations/slack-live-card";
 
 export interface WorkerErrorContext {
   operation:
@@ -11,6 +12,7 @@ export interface WorkerErrorContext {
     | "linear_ticket"
     | "remediation"
     | "sandbox_cleanup"
+    | "slack_delivery"
     | "worker";
   investigationId?: string;
   jobId?: string;
@@ -132,6 +134,9 @@ export async function reportWorkerException(
     Sentry.withScope((scope) => {
       scope.setTag("responder.operation", context.operation);
       scope.setContext("responder", { ...context });
+      if (context.operation === "slack_delivery") {
+        scope.setContext("slack", slackErrorLogFields(error));
+      }
       Sentry.captureException(error);
     });
   } catch (reportingError) {

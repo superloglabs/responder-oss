@@ -159,6 +159,34 @@ function drainLinearTicketRequests(): Promise<void> {
   return linearTicketDrain;
 }
 
+async function reportIncompleteSlackDelivery(input: {
+  deliveryWarnings: string[];
+  investigationId: string;
+  jobId: string;
+  organizationId: string;
+}): Promise<void> {
+  if (input.deliveryWarnings.length === 0) return;
+  console.error(
+    JSON.stringify({
+      deliveryWarnings: input.deliveryWarnings,
+      event: "investigation_slack_delivery_incomplete",
+      investigationId: input.investigationId,
+    }),
+  );
+  await reportWorkerException(
+    new AggregateError(
+      input.deliveryWarnings.map((warning) => new Error(warning)),
+      "Slack investigation delivery incomplete",
+    ),
+    {
+      investigationId: input.investigationId,
+      jobId: input.jobId,
+      operation: "slack_delivery",
+      organizationId: input.organizationId,
+    },
+  );
+}
+
 boss.on("error", (error) => {
   console.error(
     JSON.stringify({
@@ -252,6 +280,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
 
   let finalizingSlackCard = false;
   let lastSlackProgressAt = 0;
+  let slackProgressFailureReported = false;
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
 
   try {
@@ -271,7 +300,16 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
           payload.investigationId,
           progress.detail,
           slackTraceItems,
-        ).catch(() => undefined);
+        ).catch(async (error: unknown) => {
+          if (slackProgressFailureReported) return;
+          slackProgressFailureReported = true;
+          await reportWorkerException(error, {
+            investigationId: payload.investigationId,
+            jobId: job.id,
+            operation: "slack_delivery",
+            organizationId: payload.config.organizationId,
+          });
+        });
         if (progress.finalizing) finalizingSlackCard = true;
       },
       { jobId: job.id },
@@ -336,15 +374,12 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       replay: payload.replay,
       report,
     });
-    if (deliveryWarnings.length > 0) {
-      console.error(
-        JSON.stringify({
-          deliveryWarnings,
-          event: "investigation_slack_delivery_incomplete",
-          investigationId: payload.investigationId,
-        }),
-      );
-    }
+    await reportIncompleteSlackDelivery({
+      deliveryWarnings,
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      organizationId: payload.config.organizationId,
+    });
     console.log(
       JSON.stringify({
         event: "investigation_job_complete",
@@ -375,15 +410,12 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       investigationId: payload.investigationId,
       replay: payload.replay,
     });
-    if (deliveryWarnings.length > 0) {
-      console.error(
-        JSON.stringify({
-          deliveryWarnings,
-          event: "investigation_slack_delivery_incomplete",
-          investigationId: payload.investigationId,
-        }),
-      );
-    }
+    await reportIncompleteSlackDelivery({
+      deliveryWarnings,
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      organizationId: payload.config.organizationId,
+    });
     if (!payload.replay && investigationFailed) {
       await failInvestigationSlackCard(
         payload.investigationId,
