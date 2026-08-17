@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { defaultLinearIssueTemplate } from "@responder/core/agents/config";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   type AgentConfiguration,
@@ -88,20 +89,6 @@ const EMPTY_OPTIONS: AgentOptions = {
 
 const DEFAULT_INSTRUCTIONS =
   "Investigate the root cause, assess severity and customer impact, then post a concise summary with evidence and recommended next steps. Use connected repositories and observability tools before proposing a fix.";
-const DEFAULT_LINEAR_ISSUE_TEMPLATE = [
-  "## Responder issue",
-  "[{{issue_id}}]({{issue_url}})",
-  "",
-  "## Description",
-  "{{description}}",
-  "",
-  "## Evidence",
-  "{{evidence}}",
-  "",
-  "## Recommended remediation",
-  "{{remediation}}",
-].join("\n");
-
 const DRAFT_STORAGE_KEY = "responder:new-agent-draft";
 const DRAFT_STEP_STORAGE_KEY = "responder:new-agent-step";
 const SEVERITY_OPTIONS: Array<{
@@ -168,6 +155,8 @@ function saveDraftToSessionStorage(
     prMode: draft.prMode,
     contextAccountIds: draft.contextAccountIds,
     contextResourceIds: draft.contextResourceIds,
+    createLinearTickets: draft.createLinearTickets,
+    linearIssueTemplate: draft.linearIssueTemplate,
     instructions: draft.instructions,
   };
   window.sessionStorage.setItem(key, JSON.stringify(persistedDraft));
@@ -377,7 +366,7 @@ function createInitialDraft(
     linearIssueTemplate:
       saved.linearIssueTemplate ??
       configured.linearIssueTemplate ??
-      DEFAULT_LINEAR_ISSUE_TEMPLATE,
+      defaultLinearIssueTemplate,
     instructions:
       saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS,
   };
@@ -584,7 +573,6 @@ export function AgentCreatePage() {
           !loadedDraft.contextAccountIds.includes(connectedLinear.id)
         ) {
           loadedDraft.contextAccountIds.push(connectedLinear.id);
-          loadedDraft.createLinearTickets = true;
         }
         setDraft(loadedDraft);
       })
@@ -1453,7 +1441,7 @@ export function AgentCreatePage() {
             >
               <div className="contextPanel">
                 <div className="contextToolbar">
-                  <span>
+                  <span className="configurationDialog__copy">
                     <strong>Integrations</strong>
                     <small>
                       The agent can inspect {connectedContextCount}{" "}
@@ -2132,7 +2120,7 @@ export function AgentCreatePage() {
 
               <div className="workspaceSecretsPanel">
                 <div className="contextToolbar">
-                  <span>
+                  <span className="configurationDialog__copy">
                     <strong>Workspace secrets</strong>
                     <small>
                       Selected secrets are exposed as opaque environment

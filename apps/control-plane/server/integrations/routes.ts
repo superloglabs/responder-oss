@@ -434,31 +434,13 @@ export const integrationRoutes = new Hono()
       }
     }
     if (parsedProvider.data === "linear") {
-      let accountId: string | undefined;
       try {
         const pkce = createLinearPkce();
-        accountId = await upsertIntegrationAccount({
-          organizationId: tenant.organizationId,
-          provider: "linear",
-          externalAccountId: LINEAR_MCP_URL,
-          displayName: "Linear",
-          encryptedCredentials: encryptCredentials({
-            authType: "linear_oauth_pending",
-          }),
-          credentialKeyVersion: 1,
-          metadata: {
-            authType: "linear_oauth",
-            authVersion: LINEAR_AUTH_VERSION,
-            mcpUrl: LINEAR_MCP_URL,
-          },
-          status: "pending",
-        });
         const linearState = await createIntegrationConnectionState({
           organizationId: tenant.organizationId,
           userId: tenant.user.id,
           provider: "linear",
           codeVerifier: pkce.codeVerifier,
-          metadata: { accountId },
           returnTo: context.req.query("returnTo"),
           routingUrl: integrationCallbackUrl("linear"),
         });
@@ -470,8 +452,7 @@ export const integrationRoutes = new Hono()
           }),
         );
       } catch (error) {
-        logCustomMcpError("connect", error, accountId);
-        if (accountId) await setIntegrationAccountStatus(accountId, "error");
+        logCustomMcpError("connect", error);
         return context.redirect(
           settingsRedirect(
             context.req.query("returnTo") ?? "/settings",
@@ -848,19 +829,8 @@ export const integrationRoutes = new Hono()
 
     let accountId: string | undefined;
     try {
-      accountId = z
-        .object({ accountId: z.uuid() })
-        .parse(connectionState.metadata).accountId;
       const codeVerifier = z.string().min(1).parse(connectionState.codeVerifier);
       const authorizationCode = z.string().min(1).parse(context.req.query("code"));
-      const account = await getOrganizationIntegrationAccount({
-        integrationAccountId: accountId,
-        organizationId: connectionState.organizationId,
-        provider: "linear",
-      });
-      if (!account?.encryptedCredentials || account.status !== "pending") {
-        throw new Error("The pending Linear connection was not found");
-      }
       const credentials = await exchangeLinearOAuthCode({
         authorizationCode,
         codeVerifier,
@@ -889,9 +859,7 @@ export const integrationRoutes = new Hono()
         },
         status: "connected",
       });
-      if (connectedAccountId !== accountId) {
-        throw new Error("The Linear connection account changed during OAuth");
-      }
+      accountId = connectedAccountId;
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",
@@ -910,7 +878,6 @@ export const integrationRoutes = new Hono()
       );
     } catch (error) {
       logCustomMcpError("callback", error, accountId);
-      if (accountId) await setIntegrationAccountStatus(accountId, "error");
       return context.redirect(
         settingsRedirect(
           connectionState.returnTo,

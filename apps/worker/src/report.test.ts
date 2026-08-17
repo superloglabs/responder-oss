@@ -169,6 +169,7 @@ describe("investigation report submission", () => {
   });
 
   it("returns a Linear follow-up only when a new issue has a pending request", async () => {
+    const onLinearTicketRequests = vi.fn().mockResolvedValue(undefined);
     vi.mocked(submitInvestigationReport).mockResolvedValue({
       automaticPullRequestIssueIds: [],
       automaticPullRequestRequestIds: [],
@@ -196,6 +197,7 @@ describe("investigation report submission", () => {
     await expect(submitInvestigationReportForRun({
       investigationId: "investigation-id",
       organizationId: "organization-id",
+      onLinearTicketRequests,
       report: {
         schemaVersion: 1,
         headline: "Broken route",
@@ -203,8 +205,43 @@ describe("investigation report submission", () => {
         issues: [],
       },
     })).resolves.toEqual(expect.objectContaining({
-      instruction: expect.stringContaining("create_linear_ticket"),
+      instruction: expect.stringContaining("Separate Linear ticket jobs"),
     }));
+    expect(onLinearTicketRequests).toHaveBeenCalledWith([
+      "4614c371-a4a3-4342-a9a8-36e526377345",
+    ]);
+  });
+
+  it("keeps the saved report accepted when the Linear queue is unavailable", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(submitInvestigationReport).mockResolvedValue({
+      automaticPullRequestIssueIds: [],
+      automaticPullRequestRequestIds: [],
+      createLinearTickets: true,
+      linearIssueTemplate: "{{description}}",
+      linearTicketRequests: [{
+        requestId: "4614c371-a4a3-4342-a9a8-36e526377345",
+        issueId: "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9",
+        title: "Broken route",
+        description: "The route throws.",
+        severity: "SEV-2",
+      }],
+      newIssues: [],
+      issues: [],
+      markdown: "saved markdown",
+      report: { schemaVersion: 1, headline: "Broken route", summary: "Saved.", issues: [] },
+    });
+    vi.mocked(embedNewIssues).mockResolvedValue([]);
+
+    await expect(submitInvestigationReportForRun({
+      investigationId: "investigation-id",
+      organizationId: "organization-id",
+      report: { schemaVersion: 1, headline: "Broken route", summary: "Saved.", issues: [] },
+      onLinearTicketRequests: vi.fn().mockRejectedValue(new Error("queue down")),
+    })).resolves.toEqual(expect.objectContaining({ accepted: true }));
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(
+      "linear_ticket_queue_handoff_failed",
+    ));
   });
 
   it("treats completed Slack delivery failures as warnings", async () => {

@@ -208,6 +208,7 @@ async function validateConfigurationResources(
   const accountRows = await db
     .select({
       id: integrationAccounts.id,
+      metadata: integrationAccounts.metadata,
       provider: integrationAccounts.provider,
       status: integrationAccounts.status,
     })
@@ -241,7 +242,9 @@ async function validateConfigurationResources(
       !["sentry", "datadog", "clickstack", "custom_mcp", "linear"].includes(
         account.provider,
       ) ||
-      account.status !== "connected"
+      account.status !== "connected" ||
+      (account.provider === "linear" &&
+        account.metadata.authVersion !== LINEAR_AUTH_VERSION)
     ) {
       throw new AgentConfigurationError(
         "Choose a connected context integration",

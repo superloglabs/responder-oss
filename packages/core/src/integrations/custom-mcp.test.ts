@@ -47,7 +47,7 @@ describe("custom MCP security", () => {
       client_name: "Responder",
       client_uri: "https://responder.example/",
       logo_uri:
-        "https://responder.example/superlog-pictogram-dark.svg",
+        "https://responder.example/superlog-wordmark.svg",
     });
     expect(provider.snapshot()).toMatchObject({
       clientInformation: { client_id: "client-1" },

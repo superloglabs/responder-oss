@@ -7,6 +7,7 @@ import { issueEvidenceSchema, issueSeveritySchema } from "./investigations/repor
 
 export const workerHealthQueue = "responder-worker-health";
 export const investigationQueue = "responder-investigations";
+export const linearTicketQueue = "responder-linear-tickets";
 
 export const workerHealthJobSchema = z.object({
   marker: z.string().min(1),
@@ -54,6 +55,14 @@ export const remediationJobSchema = z.object({
 });
 
 export type RemediationJob = z.infer<typeof remediationJobSchema>;
+export const linearTicketJobSchema = z.object({
+  kind: z.literal("linear_ticket"),
+  config: runtimeAgentJobConfigSchema,
+  investigationId: z.uuid(),
+  queuedAt: z.iso.datetime(),
+  requestId: z.uuid(),
+});
+export type LinearTicketJob = z.infer<typeof linearTicketJobSchema>;
 export const responderJobSchema = z.discriminatedUnion("kind", [
   investigationJobSchema,
   remediationJobSchema,
@@ -93,6 +102,14 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryBackoff: true,
       retryDelay: 30,
       retryLimit: 2,
+    }),
+    boss.createQueue(linearTicketQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 900,
+      notify: true,
+      retryBackoff: true,
+      retryDelay: 60,
+      retryLimit: 5,
     }),
   ]);
 }

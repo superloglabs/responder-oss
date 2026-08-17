@@ -33,6 +33,7 @@ export async function listPendingLinearTicketRequests(input: {
   return getDatabase()
     .select({
       requestId: issueLinearTickets.id,
+      integrationAccountId: issueLinearTickets.integrationAccountId,
       issueId: issues.id,
       title: issues.title,
       description: issues.description,
@@ -52,6 +53,19 @@ export async function listPendingLinearTicketRequests(input: {
       ),
     )
     .orderBy(issueLinearTickets.createdAt);
+}
+
+export async function listLinearTicketRequestsForQueue(limit = 100) {
+  return getDatabase()
+    .select({
+      agentConfigVersionId: issueLinearTickets.agentConfigVersionId,
+      investigationId: issueLinearTickets.investigationId,
+      requestId: issueLinearTickets.id,
+    })
+    .from(issueLinearTickets)
+    .where(inArray(issueLinearTickets.status, ["pending", "failed"]))
+    .orderBy(issueLinearTickets.updatedAt)
+    .limit(limit);
 }
 
 async function getLinearTicketRequest(input: {
@@ -150,11 +164,11 @@ export async function fulfillLinearTicketRequest(input: {
   }
 
   try {
-    const connection = await getRuntimeLinearConnection(input.agentConfigVersionId);
-    if (
-      !connection ||
-      connection.accountId !== request.integrationAccountId
-    ) {
+    const connection = await getRuntimeLinearConnection(
+      input.agentConfigVersionId,
+      request.integrationAccountId,
+    );
+    if (!connection) {
       throw new LinearTicketError(
         "The Linear connection for this request is unavailable",
         "connection_unavailable",
@@ -174,6 +188,7 @@ export async function fulfillLinearTicketRequest(input: {
             evidence: request.evidence,
           },
           issueBaseUrl: input.issueBaseUrl ??
+            process.env.RESPONDER_PUBLIC_URL ??
             process.env.BETTER_AUTH_URL ??
             "http://localhost:3000",
           template: request.linearIssueTemplate,

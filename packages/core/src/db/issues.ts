@@ -150,7 +150,10 @@ export async function submitInvestigationReport(input: {
       throw new Error("Investigation report has already been submitted");
     }
 
-    const linearAccount = investigation.createLinearTickets
+    const hasNewIssues = input.submission.report.issues.some(
+      (issue) => issue.resolution === "new",
+    );
+    const linearAccount = investigation.createLinearTickets && hasNewIssues
       ? (
           await tx
             .select({ id: integrationAccounts.id })
@@ -169,10 +172,6 @@ export async function submitInvestigationReport(input: {
             .limit(1)
         )[0]
       : null;
-    if (investigation.createLinearTickets && !linearAccount) {
-      throw new Error("The configured Linear connection is unavailable");
-    }
-
     const existingIds = input.submission.report.issues
       .filter((issue) => issue.resolution === "existing")
       .map((issue) => issue.issueId);

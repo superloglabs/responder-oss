@@ -25,7 +25,7 @@ import {
 import {
   type LinearOAuthCredentials,
   linearAccessTokenNeedsRefresh,
-  LINEAR_MCP_URL,
+  LINEAR_READONLY_MCP_URL,
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
 } from "../integrations/linear.js";
@@ -1046,6 +1046,7 @@ function mcpOAuthRedirectUrl(provider: "custom_mcp" | "linear"): string {
 async function getRuntimeMcpConnections(
   versionId: string,
   provider: "custom_mcp" | "linear",
+  selectedAccountId?: string,
 ): Promise<RuntimeCustomMcpConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -1077,7 +1078,10 @@ async function getRuntimeMcpConnections(
   const accountsById = new Map(accountRows.map((account) => [account.id, account]));
   const connections: RuntimeCustomMcpConnection[] = [];
 
-  for (const accountId of config.contextAccountIds) {
+  const providerAccountIds = selectedAccountId
+    ? [selectedAccountId]
+    : accountRows.map((account) => account.id);
+  for (const accountId of providerAccountIds) {
     const account = accountsById.get(accountId);
     if (!account?.encryptedCredentials) {
       console.error(
@@ -1156,7 +1160,7 @@ async function getRuntimeMcpConnections(
         accessToken: credentials.accessToken,
         accountId: account.id,
         displayName: account.displayName,
-        mcpUrl: LINEAR_MCP_URL,
+        mcpUrl: LINEAR_READONLY_MCP_URL,
       });
       continue;
     }
@@ -1289,8 +1293,9 @@ export function getRuntimeCustomMcpConnections(
 
 export async function getRuntimeLinearConnection(
   versionId: string,
+  accountId?: string,
 ): Promise<RuntimeCustomMcpConnection | null> {
-  return (await getRuntimeMcpConnections(versionId, "linear"))[0] ?? null;
+  return (await getRuntimeMcpConnections(versionId, "linear", accountId))[0] ?? null;
 }
 export type RuntimeClickStackConnection = {
   authType: "access_key";

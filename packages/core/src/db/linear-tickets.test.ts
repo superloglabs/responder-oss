@@ -75,7 +75,10 @@ function databaseDouble(rows: unknown[]) {
 }
 
 describe("Linear ticket requests", () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   it("allows only one Linear ticket record per Responder issue", () => {
     const index = getTableConfig(issueLinearTickets).indexes.find(
@@ -94,6 +97,7 @@ describe("Linear ticket requests", () => {
   });
 
   it("recovers a retry by looking up the stable request ID", async () => {
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     databaseDouble([request]);
     vi.mocked(getRuntimeLinearConnection).mockResolvedValue({
       accessToken: "linear-token",
@@ -120,5 +124,14 @@ describe("Linear ticket requests", () => {
       issueId: request.id,
     });
     expect(renderLinearIssueDescription).toHaveBeenCalledOnce();
+    expect(renderLinearIssueDescription).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issueBaseUrl: "https://responder.example",
+      }),
+    );
+    expect(getRuntimeLinearConnection).toHaveBeenCalledWith(
+      scope.agentConfigVersionId,
+      request.integrationAccountId,
+    );
   });
 });

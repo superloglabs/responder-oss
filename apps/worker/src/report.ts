@@ -6,7 +6,6 @@ import {
   investigationReportSubmissionSchema,
   type InvestigationReportSubmission,
 } from "@responder/core/investigations/report";
-import { linearTicketFollowupInstruction } from "@responder/core/integrations/linear";
 import { embedNewIssues } from "./issue-embeddings.js";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
@@ -17,7 +16,7 @@ function reportToolResult(input: {
   automaticPullRequestIssueIds: string[];
   deliveryWarnings?: string[];
   issueIds: string[];
-  linearInstruction?: string | null;
+  linearTicketRequestIds?: string[];
   slackMarkdown?: string;
 }) {
   return {
@@ -30,7 +29,9 @@ function reportToolResult(input: {
       input.automaticPullRequestIssueIds.length > 0
         ? `Separate remediation jobs will handle pull request fixes for these issue IDs: ${input.automaticPullRequestIssueIds.join(", ")}. Do not modify code in this investigation.`
         : null,
-      input.linearInstruction,
+      input.linearTicketRequestIds?.length
+        ? `Separate Linear ticket jobs will handle these request IDs: ${input.linearTicketRequestIds.join(", ")}.`
+        : null,
     ].filter(Boolean).join("\n\n"),
     ...(input.slackMarkdown !== undefined
       ? { slackMarkdown: input.slackMarkdown }
@@ -64,6 +65,7 @@ export async function submitInvestigationReportForRun(input: {
   report: InvestigationReportSubmission;
   environment?: NodeJS.ProcessEnv;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
+  onLinearTicketRequests?: (requestIds: string[]) => Promise<void>;
 }) {
   assertNoDaytonaSecretPlaceholders(input.report, "Investigation report");
   const newIssues = input.report.issues.filter(
@@ -84,13 +86,24 @@ export async function submitInvestigationReportForRun(input: {
   await input.onAutomaticPullRequestRequests?.(
     result.automaticPullRequestRequestIds,
   );
+  try {
+    await input.onLinearTicketRequests?.(
+      result.linearTicketRequests.map((request) => request.requestId),
+    );
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      event: "linear_ticket_queue_handoff_failed",
+      investigationId: input.investigationId,
+    }));
+  }
   return reportToolResult({
     issueIds: result.issues.map((issue) => issue.id),
     automaticPullRequestIssueIds: result.automaticPullRequestIssueIds,
     slackMarkdown: result.markdown,
-    linearInstruction: linearTicketFollowupInstruction({
-      requests: result.linearTicketRequests,
-    }),
+    linearTicketRequestIds: result.linearTicketRequests.map(
+      (request) => request.requestId,
+    ),
   });
 }
 
@@ -99,6 +112,7 @@ export function createSubmitInvestigationReportTool(input: {
   organizationId: string;
   environment?: NodeJS.ProcessEnv;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
+  onLinearTicketRequests?: (requestIds: string[]) => Promise<void>;
 }) {
   return tool({
     name: "submit_investigation_report",
@@ -112,6 +126,7 @@ export function createSubmitInvestigationReportTool(input: {
         environment: input.environment,
         onAutomaticPullRequestRequests:
           input.onAutomaticPullRequestRequests,
+        onLinearTicketRequests: input.onLinearTicketRequests,
       });
     },
   });

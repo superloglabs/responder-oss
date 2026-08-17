@@ -171,14 +171,11 @@ describe("integration callback routing", () => {
     );
   });
 
-  it("starts Linear's app OAuth flow with a tenant-scoped pending account", async () => {
+  it("starts Linear OAuth without replacing the connected account", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
     vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
-    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
-      "30000000-0000-4000-8000-000000000000",
-    );
     vi.mocked(createLinearPkce).mockReturnValue({
       codeChallenge: "pkce-challenge",
       codeVerifier: "pkce-verifier",
@@ -187,7 +184,6 @@ describe("integration callback routing", () => {
     vi.mocked(linearAuthorizeUrl).mockReturnValue(
       "https://linear.app/oauth/authorize?state=linear-state",
     );
-    vi.mocked(encryptCredentials).mockReturnValue("encrypted-linear-oauth");
 
     const response = await app.request(
       "/api/integrations/linear/start?returnTo=%2Fagents%2Fnew",
@@ -202,9 +198,6 @@ describe("integration callback routing", () => {
       userId: tenant.user.id,
       provider: "linear",
       codeVerifier: "pkce-verifier",
-      metadata: {
-        accountId: "30000000-0000-4000-8000-000000000000",
-      },
       returnTo: "/agents/new",
       routingUrl: "https://responder.example/api/integrations/linear/callback",
     });
@@ -213,6 +206,7 @@ describe("integration callback routing", () => {
       redirectUri: "https://responder.example/api/integrations/linear/callback",
       state: "linear-state",
     });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("finishes Linear app OAuth before marking the account connected", async () => {
@@ -224,15 +218,7 @@ describe("integration callback routing", () => {
       userId: tenant.user.id,
       returnTo: "/agents/new",
       codeVerifier: "pkce-verifier",
-      metadata: {
-        accountId: "30000000-0000-4000-8000-000000000000",
-      },
-    });
-    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
-      id: "30000000-0000-4000-8000-000000000000",
-      encryptedCredentials: "encrypted-pending-oauth",
       metadata: {},
-      status: "pending",
     });
     vi.mocked(exchangeLinearOAuthCode).mockResolvedValue({
       accessToken: "linear-access-token",
@@ -279,6 +265,7 @@ describe("integration callback routing", () => {
         status: "connected",
       }),
     );
+    expect(getOrganizationIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("offers GitHub authorization when an installation already exists", async () => {

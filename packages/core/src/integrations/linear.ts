@@ -155,10 +155,15 @@ export interface LinearTicketIssue {
 function evidenceMarkdown(evidence: IssueEvidence[]): string {
   return evidence
     .map((item) => {
-      const location = item.url ??
-        (item.file ? `${item.file}${item.line ? `:${item.line}` : ""}` : null);
+      const fileLocation = item.file
+        ? `${item.file}${item.line ? `:${item.line}` : ""}`
+        : null;
       return `- **${item.title}:** ${item.detail}${
-        location ? ` ([source](${location}))` : ""
+        item.url
+          ? ` ([source](${item.url}))`
+          : fileLocation
+            ? ` (${fileLocation})`
+            : ""
       }`;
     })
     .join("\n");
@@ -179,9 +184,9 @@ export function renderLinearIssueDescription(input: {
     evidence: evidenceMarkdown(input.issue.evidence),
     remediation: input.issue.remediation,
   };
-  return Object.entries(replacements).reduce(
-    (rendered, [key, value]) => rendered.replaceAll(`{{${key}}}`, value),
-    input.template,
+  return input.template.replace(
+    /{{(issue_id|issue_url|title|description|severity|evidence|remediation)}}/g,
+    (_placeholder, key: keyof typeof replacements) => replacements[key],
   );
 }
 

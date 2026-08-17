@@ -83,7 +83,7 @@ export class CustomMcpOAuthProvider implements OAuthClientProvider {
       redirect_uris: [this.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"],
       logo_uri: new URL(
-        "/superlog-pictogram-dark.svg",
+        "/superlog-wordmark.svg",
         publicOrigin,
       ).toString(),
       response_types: ["code"],

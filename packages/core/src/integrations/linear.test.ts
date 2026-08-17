@@ -112,16 +112,28 @@ describe("Linear OAuth", () => {
 
 describe("Linear ticket templates", () => {
   it("renders the final Responder ID, link, issue fields, and evidence", () => {
-    expect(
-      renderLinearIssueDescription({
-        issue,
-        issueBaseUrl: "https://responder.example",
-        template:
-          "{{issue_id}} {{issue_url}}\n{{title}}\n{{severity}}\n{{description}}\n{{evidence}}\n{{remediation}}",
-      }),
-    ).toContain(
+    const rendered = renderLinearIssueDescription({
+      issue,
+      issueBaseUrl: "https://responder.example",
+      template:
+        "{{issue_id}} {{issue_url}}\n{{title}}\n{{severity}}\n{{description}}\n{{evidence}}\n{{remediation}}",
+    });
+    expect(rendered).toContain(
       "7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9 https://responder.example/issues/7ad47787-0efa-4ce3-b1d7-2f14bcfcd4e9",
     );
+    expect(rendered).toContain(issue.title);
+    expect(rendered).toContain(issue.description);
+    expect(rendered).toContain(issue.remediation);
+    expect(rendered).toContain("src/checkout.ts:42");
+    expect(rendered).not.toContain("[source](src/checkout.ts:42)");
+  });
+
+  it("does not expand placeholders found inside issue content", () => {
+    expect(renderLinearIssueDescription({
+      issue: { ...issue, description: "Keep {{severity}} literally." },
+      issueBaseUrl: "https://responder.example",
+      template: "{{description}} — {{severity}}",
+    })).toBe("Keep {{severity}} literally. — SEV-2");
   });
 
   it("only instructs ticket creation for enabled agents with new issues", () => {

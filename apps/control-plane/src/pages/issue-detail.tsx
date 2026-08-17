@@ -61,7 +61,9 @@ export function IssueDetailPage() {
     ) ?? false;
   const hasActiveLinearTicket =
     detail?.linearTicketState.requests.some((request) =>
-      request.status === "pending" || request.status === "creating",
+      request.status === "pending" ||
+      request.status === "creating" ||
+      request.status === "failed",
     ) ?? false;
 
   useEffect(() => {

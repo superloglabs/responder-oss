@@ -12,7 +12,6 @@ import {
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
 } from "@responder/core/db/investigations";
-import { listPendingLinearTicketRequests } from "@responder/core/db/linear-tickets";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
 import {
@@ -26,12 +25,10 @@ import type {
 } from "@responder/core/db/schema";
 import type { InvestigationJob } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
-import { linearTicketFollowupInstruction } from "@responder/core/integrations/linear";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
-import { createLinearTicketTool } from "./linear-ticket.js";
 import {
   checkoutRuntimeRepositories,
   type CheckedOutRepository,
@@ -228,6 +225,7 @@ export async function runInvestigationAgent(
   onTraceEvent: (event: InvestigationTraceEvent) => Promise<void>,
   traceContext: { jobId: string },
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>,
+  onLinearTicketRequests?: (requestIds: string[]) => Promise<void>,
 ): Promise<string> {
   const investigationInput = toInvestigationInput(job.request);
   const writeTrace = async (event: InvestigationTraceEvent): Promise<void> => {
@@ -367,6 +365,7 @@ export async function runInvestigationAgent(
           organizationId: job.config.organizationId,
           environment,
           onAutomaticPullRequestRequests,
+          onLinearTicketRequests,
         });
     const issueSearchTool = createSearchExistingIssuesTool({
       organizationId: job.config.organizationId,
@@ -376,13 +375,6 @@ export async function runInvestigationAgent(
       repositories,
       session,
     });
-    const linearTicketTool = !job.replay && linearServer
-      ? createLinearTicketTool({
-          agentConfigVersionId: job.config.id,
-          investigationId: job.investigationId,
-          organizationId: job.config.organizationId,
-        })
-      : null;
     const instructions = investigationInstructions({
       agentPrompt: job.config.prompt,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
@@ -406,7 +398,6 @@ export async function runInvestigationAgent(
       tools: [
         issueSearchTool,
         reportTool,
-        ...(linearTicketTool ? [linearTicketTool] : []),
         ...repositoryInspectionTools,
       ],
     });
@@ -429,60 +420,6 @@ export async function runInvestigationAgent(
     await result.completed;
     if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
       throw new Error("OpenAI agent returned an empty report");
-    }
-    if (!job.replay && linearTicketTool && linearServer) {
-      const pending = await listPendingLinearTicketRequests({
-        investigationId: job.investigationId,
-        organizationId: job.config.organizationId,
-      });
-      const ticketInstructions = linearTicketFollowupInstruction({
-        requests: pending,
-      });
-      if (ticketInstructions) {
-        const ticketMessage =
-          "Finish the saved investigation's required Linear ticket creation now.";
-        await writeTrace(traceEvent("message.received", {
-          message: ticketMessage,
-        }));
-        const ticketAgent = new SandboxAgent({
-          name: "Responder Linear ticket creator",
-          model: config.model,
-          instructions: [
-            "This is a required ticket-creation step after an investigation report was saved.",
-            ticketInstructions,
-            "Do not submit another investigation report. Do not change any Linear data except through create_linear_ticket.",
-          ].join("\n\n"),
-          capabilities: investigationCapabilities(false),
-          mcpServers: [linearServer],
-          tools: [linearTicketTool],
-        });
-        const ticketResult = await run(ticketAgent, ticketMessage, {
-          maxTurns: 10,
-          sandbox: { session },
-          stream: true,
-        });
-        for await (const streamEvent of ticketResult) {
-          const event = investigationTraceEventFromStream(
-            streamEvent,
-            environment,
-          );
-          if (event) await writeTrace(event);
-        }
-        await ticketResult.completed;
-        const remaining = await listPendingLinearTicketRequests({
-          investigationId: job.investigationId,
-          organizationId: job.config.organizationId,
-        });
-        if (remaining.length > 0) {
-          console.error(
-            JSON.stringify({
-              event: "linear_ticket_requests_incomplete",
-              investigationId: job.investigationId,
-              requestIds: remaining.map((request) => request.requestId),
-            }),
-          );
-        }
-      }
     }
     await writeTrace(traceEvent("session.completed"));
     return redactDaytonaSecretPlaceholders(result.finalOutput.trim());
