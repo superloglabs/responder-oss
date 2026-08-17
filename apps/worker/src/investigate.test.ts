@@ -50,6 +50,24 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("identifies AWS connection failures without exposing provider errors", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        awsConnections: [{ accountId: "account-aws" }],
+        customMcpConnections: [],
+        error: new Error("request failed with temporary credentials"),
+        investigationId: "investigation-123",
+        serverName: "aws-account-aws",
+      }),
+    ).toEqual({
+      accountId: "account-aws",
+      error: "Unable to connect to AWS context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "aws-account-aws",
+    });
+  });
+
   it("requires both service keys", () => {
     expect(() => sandboxAgentConfig({})).toThrow("OPENAI_API_KEY is required");
     expect(() =>

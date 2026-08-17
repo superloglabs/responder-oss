@@ -15,7 +15,7 @@ export const AWS_MANAGED_MCP_ENDPOINT =
   "https://aws-mcp.us-east-1.api.aws/mcp";
 export const AWS_MCP_SIGNING_REGION = "us-east-1";
 
-export const awsAccountIdSchema = z.string().regex(/^\d{12}$/);
+export const awsAccountIdSchema = z.string().length(12).regex(/^\d{12}$/);
 export const awsConnectionCredentialsSchema = z.object({
   accountId: awsAccountIdSchema,
   externalId: z.string().min(32).max(256),
@@ -59,15 +59,35 @@ export function awsCloudFormationTemplate(): string {
   return cloudFormationTemplate;
 }
 
+export function awsParameterizedCloudFormationTemplate(input: {
+  externalId: string;
+  principalArn: string;
+}): string {
+  const externalId = z.string().min(32).max(256).parse(input.externalId);
+  const principalArn = z.string().regex(
+    /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/,
+  ).parse(input.principalArn);
+  return cloudFormationTemplate
+    .replace(
+      "    Description: Responder's AWS integration broker role ARN",
+      `    Description: Responder's AWS integration broker role ARN\n    Default: '${principalArn}'`,
+    )
+    .replace(
+      "    Description: Unique identifier for this Responder workspace and AWS account",
+      `    Description: Unique identifier for this Responder workspace and AWS account\n    Default: '${externalId}'`,
+    );
+}
+
 export async function createAwsCloudFormationTemplateUrl(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
   const bucket = environment.AWS_INTEGRATION_TEMPLATE_BUCKET?.trim();
   const key = environment.AWS_INTEGRATION_TEMPLATE_KEY?.trim();
-  if (!bucket || !key) return null;
+  const region = environment.AWS_INTEGRATION_TEMPLATE_REGION?.trim();
+  if (!bucket || !key || !region) return null;
 
   return getSignedUrl(
-    new S3Client({ region: environment.AWS_REGION ?? "us-east-1" }),
+    new S3Client({ region }),
     new GetObjectCommand({ Bucket: bucket, Key: key }),
     { expiresIn: 15 * 60 },
   );
@@ -76,7 +96,7 @@ export async function createAwsCloudFormationTemplateUrl(
 function isSupportedCloudFormationTemplateUrl(templateUrl: URL): boolean {
   if (templateUrl.protocol !== "https:") return false;
   return (
-    /^(?:[a-z0-9][a-z0-9.-]*\.)?s3[.-][a-z0-9-]+\.amazonaws\.com(?:\.cn)?$/.test(
+    /^(?:[a-z0-9][a-z0-9.-]*\.)?s3[.-][a-z0-9-]+\.amazonaws\.com$/.test(
       templateUrl.hostname,
     ) || templateUrl.hostname === "s3.amazonaws.com"
   );
@@ -104,6 +124,7 @@ export function awsCloudFormationQuickCreateUrl(input: {
 
 interface StsTemporaryCredentials {
   accessKeyId: string;
+  expiration: Date;
   secretAccessKey: string;
   sessionToken: string;
 }
@@ -115,12 +136,14 @@ function temporaryCredentials(
   if (
     !credentials?.AccessKeyId ||
     !credentials.SecretAccessKey ||
-    !credentials.SessionToken
+    !credentials.SessionToken ||
+    !credentials.Expiration
   ) {
     throw new Error(`AWS did not return credentials while assuming the ${stage} role`);
   }
   return {
     accessKeyId: credentials.AccessKeyId,
+    expiration: credentials.Expiration,
     secretAccessKey: credentials.SecretAccessKey,
     sessionToken: credentials.SessionToken,
   };
@@ -128,6 +151,7 @@ function temporaryCredentials(
 
 export interface AwsTemporaryCredentials {
   accessKeyId: string;
+  expiration: Date;
   secretAccessKey: string;
   sessionToken: string;
 }
@@ -172,6 +196,7 @@ export async function assumeAwsInvestigationRole(
   const customer = temporaryCredentials(customerResult.Credentials, "investigation");
   return {
     accessKeyId: customer.accessKeyId,
+    expiration: customer.expiration,
     secretAccessKey: customer.secretAccessKey,
     sessionToken: customer.sessionToken,
   };

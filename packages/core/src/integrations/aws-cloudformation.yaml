@@ -19,6 +19,21 @@ Resources:
       MaxSessionDuration: 3600
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AIOpsAssistantPolicy'
+      Policies:
+        - PolicyName: DenySecretValueAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenySecretValueAccess
+                Effect: Deny
+                Action:
+                  - kms:Decrypt
+                  - secretsmanager:GetSecretValue
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameterHistory
+                Resource: '*'
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:

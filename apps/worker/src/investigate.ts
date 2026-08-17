@@ -100,6 +100,7 @@ export function investigationTraceWriteFailure(
 }
 
 export function contextServerConnectFailureEvent(input: {
+  awsConnections?: ReadonlyArray<{ accountId: string }>;
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
   error: unknown;
   investigationId: string;
@@ -108,16 +109,22 @@ export function contextServerConnectFailureEvent(input: {
 }) {
   const accountId = input.serverName.startsWith("upstash-")
     ? input.upstashConnection?.accountId
-    : input.customMcpConnections.find(
-        (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
-      )?.accountId;
+    : input.serverName.startsWith("aws-")
+      ? input.awsConnections?.find(
+          (connection) => input.serverName === `aws-${connection.accountId}`,
+        )?.accountId
+      : input.customMcpConnections.find(
+          (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
+        )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
-    error: input.serverName.startsWith("upstash-")
-      ? "Unable to connect to Upstash context"
-      : input.error instanceof Error
-        ? input.error.message
-        : String(input.error),
+    error:
+      input.serverName.startsWith("upstash-") ||
+      input.serverName.startsWith("aws-")
+        ? `Unable to connect to ${input.serverName.startsWith("aws-") ? "AWS" : "Upstash"} context`
+        : input.error instanceof Error
+          ? input.error.message
+          : String(input.error),
     event: "context_server_connect_failed",
     investigationId: input.investigationId,
     server: input.serverName,
@@ -387,6 +394,7 @@ export async function runInvestigationAgent(
           console.error(
             JSON.stringify(
               contextServerConnectFailureEvent({
+                awsConnections,
                 customMcpConnections,
                 error,
                 investigationId: job.investigationId,
@@ -397,6 +405,9 @@ export async function runInvestigationAgent(
           );
           if (server.name.startsWith("upstash-")) {
             throw new Error("Unable to connect to Upstash context");
+          }
+          if (server.name.startsWith("aws-")) {
+            throw new Error("Unable to connect to AWS context");
           }
           throw error;
         }

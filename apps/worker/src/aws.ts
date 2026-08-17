@@ -7,7 +7,10 @@ import {
   assumeAwsInvestigationRole,
   AWS_MANAGED_MCP_ENDPOINT,
   AWS_MCP_SIGNING_REGION,
+  type AwsTemporaryCredentials,
 } from "@responder/core/integrations/aws";
+
+const AWS_CREDENTIAL_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 
 function requestQuery(url: URL): Record<string, string | string[]> {
   const query: Record<string, string | string[]> = {};
@@ -31,17 +34,50 @@ export function awsReadOnlyToolFilter(
   return Promise.resolve(annotations?.readOnlyHint === true);
 }
 
+export function createRefreshingAwsCredentialsProvider(
+  connection: RuntimeAwsConnection,
+  environment: NodeJS.ProcessEnv = process.env,
+  assume: typeof assumeAwsInvestigationRole = assumeAwsInvestigationRole,
+  now: () => number = Date.now,
+): () => Promise<AwsTemporaryCredentials> {
+  let credentials: AwsTemporaryCredentials | null = null;
+  let refresh: Promise<AwsTemporaryCredentials> | null = null;
+
+  return async () => {
+    if (
+      credentials &&
+      credentials.expiration.getTime() - AWS_CREDENTIAL_REFRESH_WINDOW_MS > now()
+    ) {
+      return credentials;
+    }
+    if (!refresh) {
+      refresh = assume(
+        {
+          accountId: connection.roleArn.split(":")[4] ?? "",
+          externalId: connection.externalId,
+          roleArn: connection.roleArn,
+        },
+        { environment, sessionName: connection.accountId },
+      )
+        .then((next) => {
+          credentials = next;
+          return next;
+        })
+        .finally(() => {
+          refresh = null;
+        });
+    }
+    return refresh;
+  };
+}
+
 export async function createAwsMcpServer(
   connection: RuntimeAwsConnection,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<MCPServerStreamableHttp> {
-  const credentials = await assumeAwsInvestigationRole(
-    {
-      accountId: connection.roleArn.split(":")[4] ?? "",
-      externalId: connection.externalId,
-      roleArn: connection.roleArn,
-    },
-    { environment, sessionName: connection.accountId },
+  const credentials = createRefreshingAwsCredentialsProvider(
+    connection,
+    environment,
   );
   const signer = new SignatureV4({
     credentials,

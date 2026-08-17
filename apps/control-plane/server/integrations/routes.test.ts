@@ -8,6 +8,7 @@ import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   getOrganizationIntegrationAccount,
+  getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
@@ -52,6 +53,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
   getOrganizationIntegrationAccount: vi.fn(),
+  getOrganizationIntegrationAccountByExternalId: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
   replaceIntegrationResources: vi.fn(),
@@ -546,6 +548,12 @@ describe("integration callback routing", () => {
       ),
     );
     expect(body.template).toContain("AIOpsAssistantPolicy");
+    expect(body.template).toContain(
+      "Default: 'arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker'",
+    );
+    expect(body.template).toContain(
+      "Default: 'responder_abcdefghijklmnopqrstuvwxyz1234567890'",
+    );
     expect(body.cloudFormationUrl).not.toContain("ngrok");
     expect(encryptCredentials).toHaveBeenCalledWith({
       accountId: "123456789012",
@@ -553,6 +561,41 @@ describe("integration callback routing", () => {
       roleArn:
         "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
     });
+  });
+
+  it("reuses an existing connected AWS role without rotating its external ID", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      encryptedCredentials: "existing-encrypted-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accountId: "123456789012",
+      externalId: "responder_existing_external_id_1234567890",
+      roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    });
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(null);
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "123456789012" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.accountId).toBe("30000000-0000-4000-8000-000000000000");
+    expect(body.template).toContain(
+      "Default: 'responder_existing_external_id_1234567890'",
+    );
+    expect(createAwsExternalId).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("keeps template download available without S3 configuration", async () => {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AWS_INVESTIGATION_ROLE_NAME,
+  awsAccountIdSchema,
   awsCloudFormationQuickCreateUrl,
   awsCloudFormationTemplate,
+  awsParameterizedCloudFormationTemplate,
   awsIntegrationPrincipalArn,
   awsInvestigationRoleArn,
 } from "./aws.js";
@@ -14,12 +16,33 @@ describe("AWS integration", () => {
     );
   });
 
+  it("rejects account IDs with trailing whitespace", () => {
+    expect(awsAccountIdSchema.safeParse("123456789012\n").success).toBe(false);
+  });
+
   it("uses the managed AIOps policy and an external-ID trust condition", () => {
     const template = awsCloudFormationTemplate();
     expect(template).toContain("aws:policy/AIOpsAssistantPolicy");
     expect(template).toContain("sts:ExternalId: !Ref ExternalId");
     expect(template).toContain("AWS: !Ref ResponderPrincipalArn");
+    expect(template).toContain("PolicyName: DenySecretValueAccess");
+    expect(template).toContain("secretsmanager:GetSecretValue");
+    expect(template).toContain("ssm:GetParametersByPath");
+    expect(template).toContain("kms:Decrypt");
     expect(template).not.toContain("Action: '*'");
+  });
+
+  it("pre-fills setup values in the downloadable template", () => {
+    const template = awsParameterizedCloudFormationTemplate({
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    });
+    expect(template).toContain(
+      "Default: 'arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker'",
+    );
+    expect(template).toContain(
+      "Default: 'responder_abcdefghijklmnopqrstuvwxyz1234567890'",
+    );
   });
 
   it("passes setup values to CloudFormation quick create", () => {
@@ -46,6 +69,18 @@ describe("AWS integration", () => {
           "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
         templateUrl:
           "https://private-preview.ngrok-free.dev/api/integrations/aws/cloudformation-template",
+      }),
+    ).toThrow("must use an Amazon S3 URL");
+  });
+
+  it("rejects S3 URLs outside the supported commercial AWS partition", () => {
+    expect(() =>
+      awsCloudFormationQuickCreateUrl({
+        externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+        principalArn:
+          "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+        templateUrl:
+          "https://responder-templates.s3.cn-north-1.amazonaws.com.cn/responder-aws-access.yaml",
       }),
     ).toThrow("must use an Amazon S3 URL");
   });

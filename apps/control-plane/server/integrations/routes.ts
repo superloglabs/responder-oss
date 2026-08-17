@@ -9,6 +9,7 @@ import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   getOrganizationIntegrationAccount,
+  getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
@@ -91,6 +92,7 @@ import {
   awsAccountIdSchema,
   awsCloudFormationQuickCreateUrl,
   awsCloudFormationTemplate,
+  awsParameterizedCloudFormationTemplate,
   awsConnectionCredentialsSchema,
   createAwsCloudFormationTemplateUrl,
   awsIntegrationPrincipalArn,
@@ -554,25 +556,42 @@ export const integrationRoutes = new Hono()
 
     try {
       const principalArn = awsIntegrationPrincipalArn();
-      const externalId = createAwsExternalId();
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId: parsed.data.accountId,
+        organizationId: tenant.organizationId,
+        provider: "aws",
+      });
+      const existingCredentials = existing?.encryptedCredentials
+        ? awsConnectionCredentialsSchema.safeParse(
+            decryptCredentials<Record<string, unknown>>(
+              existing.encryptedCredentials,
+            ),
+          )
+        : null;
+      const externalId = existingCredentials?.success
+        ? existingCredentials.data.externalId
+        : createAwsExternalId();
       const credentials = {
         accountId: parsed.data.accountId,
         externalId,
         roleArn: awsInvestigationRoleArn(parsed.data.accountId),
       };
-      const accountId = await upsertIntegrationAccount({
-        organizationId: tenant.organizationId,
-        provider: "aws",
-        externalAccountId: parsed.data.accountId,
-        displayName: `AWS · ${parsed.data.accountId}`,
-        encryptedCredentials: encryptCredentials(credentials),
-        credentialKeyVersion: 1,
-        metadata: {
-          permissionPolicy: "AIOpsAssistantPolicy",
-          roleName: "ResponderInvestigationRole",
-        },
-        status: "pending",
-      });
+      const accountId =
+        existing?.status === "connected" && existingCredentials?.success
+          ? existing.id
+          : await upsertIntegrationAccount({
+              organizationId: tenant.organizationId,
+              provider: "aws",
+              externalAccountId: parsed.data.accountId,
+              displayName: `AWS · ${parsed.data.accountId}`,
+              encryptedCredentials: encryptCredentials(credentials),
+              credentialKeyVersion: 1,
+              metadata: {
+                permissionPolicy: "AIOpsAssistantPolicy",
+                roleName: "ResponderInvestigationRole",
+              },
+              status: "pending",
+            });
       const templateUrl = await createAwsCloudFormationTemplateUrl();
       return context.json({
         accountId,
@@ -583,7 +602,10 @@ export const integrationRoutes = new Hono()
               templateUrl,
             })
           : null,
-        template: awsCloudFormationTemplate(),
+        template: awsParameterizedCloudFormationTemplate({
+          externalId,
+          principalArn,
+        }),
       });
     } catch (error) {
       logCallbackError("AWS", error, {

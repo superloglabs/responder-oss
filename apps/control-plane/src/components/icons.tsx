@@ -13,13 +13,7 @@ interface ProviderGlyphProps {
 }
 
 function AwsLogo() {
-  return (
-    <img
-      alt=""
-      className="providerGlyph__asset"
-      src="/aws-cloud-logo.svg"
-    />
-  );
+  return <span aria-hidden="true" className="providerGlyph__asset" />;
 }
 
 function ClickStackLogo() {

@@ -67,7 +67,7 @@ describe("ProviderGlyph", () => {
 
     expect(markup).toContain('aria-label="AWS"');
     expect(markup).toContain("providerGlyph--aws");
-    expect(markup).toContain('src="/aws-cloud-logo.svg"');
+    expect(markup).toContain('class="providerGlyph__asset"');
     expect(markup).not.toContain(">AWS</span>");
   });
 });

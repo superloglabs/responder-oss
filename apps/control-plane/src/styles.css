@@ -755,6 +755,8 @@ button:disabled {
 .providerGlyph--aws .providerGlyph__asset {
   width: 70%;
   height: 70%;
+  background: currentColor;
+  mask: url("/aws-cloud-logo.svg") center / contain no-repeat;
 }
 
 .socialAuth__button {

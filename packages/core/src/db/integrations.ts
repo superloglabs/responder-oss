@@ -175,6 +175,31 @@ export async function getOrganizationIntegrationAccount(input: {
   return rows[0] ?? null;
 }
 
+export async function getOrganizationIntegrationAccountByExternalId(input: {
+  externalAccountId: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+}) {
+  const rows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
+      status: integrationAccounts.status,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.externalAccountId, input.externalAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function updateIntegrationAccountCredentials(input: {
   encryptedCredentials: string;
   integrationAccountId: string;

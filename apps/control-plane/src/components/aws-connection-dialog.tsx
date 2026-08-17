@@ -106,7 +106,7 @@ export function AwsConnectionDialog({
     link.href = url;
     link.download = "responder-aws-access.yaml";
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   if (!open) return null;
