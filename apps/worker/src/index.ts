@@ -42,7 +42,10 @@ import {
   runInvestigationAgent,
   safeInvestigationError,
 } from "./investigate.js";
-import { runRemediationAgent } from "./remediate.js";
+import {
+  remediationRunDiagnostics,
+  runRemediationAgent,
+} from "./remediate.js";
 import { runLinearTicketJob } from "./linear-ticket-job.js";
 import {
   InvestigationReplayRequestProcessingError,
@@ -254,7 +257,14 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       );
     } catch (error) {
       const message = safeInvestigationError(error);
+      let diagnostics: ReturnType<typeof remediationRunDiagnostics>;
+      try {
+        diagnostics = remediationRunDiagnostics(error, process.env);
+      } catch {
+        diagnostics = undefined;
+      }
       await reportWorkerException(error, {
+        ...(diagnostics ? { diagnostics: { ...diagnostics } } : {}),
         investigationId: payload.investigationId,
         jobId: job.id,
         operation: "remediation",
@@ -264,6 +274,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       await failIssuePullRequest(payload.remediationRequestId, message);
       console.error(
         JSON.stringify({
+          ...(diagnostics ? { diagnostics } : {}),
           error: message,
           event: "remediation_job_failed",
           jobId: job.id,
