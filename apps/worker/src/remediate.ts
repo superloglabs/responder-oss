@@ -50,9 +50,12 @@ export interface RemediationRunDiagnostics {
 const maxStoredApplyPatchFailures = 10;
 
 function safeApplyPatchFailure(
-  output: string,
+  output: string | undefined,
   environment: NodeJS.ProcessEnv,
 ): string {
+  if (!output?.trim()) {
+    return "apply_patch failed without an error message";
+  }
   const safeOutput = safeInvestigationError(new Error(output), environment);
   const invalidEofContext = safeOutput.match(
     /^Invalid EOF Context(?:\s+(\d+))?(?::|$)/,
@@ -97,9 +100,6 @@ function safeApplyPatchFailure(
   }
   if (/remote editor operation failed/i.test(safeOutput)) {
     return "Remote editor operation failed";
-  }
-  if (!safeOutput.trim()) {
-    return "apply_patch failed without an error message";
   }
   return "Unclassified apply_patch failure";
 }
@@ -147,8 +147,7 @@ export function remediationRunDiagnostics(
         const operation = operations.get(item.rawItem.callId);
         const output =
           item.rawItem.output ||
-          (typeof item.output === "string" ? item.output : undefined) ||
-          "apply_patch failed without an error message";
+          (typeof item.output === "string" ? item.output : undefined);
         return [
           {
             callId: item.rawItem.callId,

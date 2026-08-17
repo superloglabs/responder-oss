@@ -257,7 +257,12 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       );
     } catch (error) {
       const message = safeInvestigationError(error);
-      const diagnostics = remediationRunDiagnostics(error, process.env);
+      let diagnostics: ReturnType<typeof remediationRunDiagnostics>;
+      try {
+        diagnostics = remediationRunDiagnostics(error, process.env);
+      } catch {
+        diagnostics = undefined;
+      }
       await reportWorkerException(error, {
         ...(diagnostics ? { diagnostics: { ...diagnostics } } : {}),
         investigationId: payload.investigationId,

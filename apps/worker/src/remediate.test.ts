@@ -97,6 +97,13 @@ describe("remediation agent", () => {
     ).toBe("Unclassified apply_patch failure");
   });
 
+  it("categorizes an empty apply_patch failure", () => {
+    expect(
+      remediationRunDiagnostics(maxTurnsError(""))?.applyPatchFailures[0]
+        ?.error,
+    ).toBe("apply_patch failed without an error message");
+  });
+
   it("ignores errors without resumable run state", () => {
     expect(remediationRunDiagnostics(new Error("failed"))).toBeUndefined();
   });
