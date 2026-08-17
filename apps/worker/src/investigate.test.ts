@@ -120,6 +120,22 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("create_linear_ticket");
   });
 
+  it("requires catalog discovery and secret avoidance for Vercel context", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      vercelAccounts: ["Acme"],
+    });
+
+    expect(instructions).toContain("connected read-only Vercel tools");
+    expect(instructions).toContain("Search the Vercel API catalog");
+    expect(instructions).toContain("Never attempt to retrieve environment-variable values");
+    expect(instructions).not.toContain("No observability data source is connected");
+  });
+
   it("explains opaque workspace secret use without exposing values", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",

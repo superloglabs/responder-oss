@@ -63,6 +63,7 @@ export interface AgentOptions {
       | "sentry"
       | "datadog"
       | "clickstack"
+      | "vercel"
       | "custom_mcp"
       | "linear";
     displayName: string;
@@ -71,7 +72,11 @@ export interface AgentOptions {
   resources: Array<{
     id: string;
     integrationAccountId: string;
-    kind: "slack_channel" | "sentry_project" | "datadog_monitor";
+    kind:
+      | "slack_channel"
+      | "sentry_project"
+      | "datadog_monitor"
+      | "vercel_project";
     externalId: string;
     displayName: string;
   }>;
@@ -114,6 +119,7 @@ export interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "vercel"
     | "custom_mcp"
     | "clickstack"
     | "linear";
@@ -175,6 +181,7 @@ export interface IssueEvidence {
     | "clickstack"
     | "github"
     | "slack"
+    | "vercel"
     | "other";
   title: string;
   detail: string;

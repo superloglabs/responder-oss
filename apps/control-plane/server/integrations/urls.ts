@@ -10,7 +10,8 @@ export function integrationCallbackUrl(
     | "github"
     | "linear"
     | "sentry"
-    | "slack",
+    | "slack"
+    | "vercel",
 ): string {
   const callbackBaseUrl =
     process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();

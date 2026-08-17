@@ -40,6 +40,28 @@ describe("investigation report", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("preserves Vercel as an evidence source", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Production deployment failed",
+      summary: "The Vercel build exited during compilation.",
+      issues: [{
+        resolution: "new",
+        title: "Vercel build failure",
+        description: "The production deployment did not compile.",
+        severity: "SEV-2",
+        remediation: "Correct the compile error and redeploy.",
+        evidence: [{
+          source: "vercel",
+          title: "Failed production deployment",
+          detail: "The build log contains a TypeScript error.",
+        }],
+      }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it("rejects linking the same canonical issue twice", () => {
     const issueId = "07070707-0707-4707-8707-070707070707";
     const parsed = investigationReportSubmissionSchema.safeParse({

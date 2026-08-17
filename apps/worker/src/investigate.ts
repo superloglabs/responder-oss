@@ -11,6 +11,7 @@ import {
   getRuntimeLinearConnection,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
+  getRuntimeVercelConnections,
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
@@ -53,6 +54,7 @@ import {
   redactDaytonaSecretPlaceholders,
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
+import { createVercelTools } from "./vercel.js";
 
 export interface SandboxAgentConfig extends DaytonaClientConfig {
   model: string;
@@ -144,14 +146,17 @@ export function investigationInstructions(input: {
     environmentVariable: string;
     allowedHosts: string[];
   }>;
+  vercelAccounts?: string[];
 }): string {
   const customMcpNames = input.customMcpNames ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
+  const vercelAccounts = input.vercelAccounts ?? [];
   const observabilityConnected =
     input.datadogConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
+    vercelAccounts.length > 0 ||
     customMcpNames.length > 0;
   return [
     input.runtimeSystemPrompt,
@@ -168,6 +173,9 @@ export function investigationInstructions(input: {
       : null,
     input.linearConnected
       ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
+      : null,
+    vercelAccounts.length > 0
+      ? `Use the connected read-only Vercel tools to inspect relevant projects, deployments, build and runtime logs, domains, and platform configuration. Search the Vercel API catalog before calling an operation. Never attempt to retrieve environment-variable values or other secrets. Connected Vercel accounts: ${vercelAccounts.join(", ")}.`
       : null,
     customMcpNames.length > 0
       ? `Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: ${customMcpNames.join(", ")}.`
@@ -260,6 +268,7 @@ export async function runInvestigationAgent(
     customMcpConnections,
     clickStackConnection,
     linearConnection,
+    vercelConnections,
     slackConnection,
     workspaceSecrets,
   ] = await Promise.all([
@@ -290,6 +299,7 @@ export async function runInvestigationAgent(
     getRuntimeCustomMcpConnections(job.config.id),
     getRuntimeClickStackConnection(job.config.id),
     getRuntimeLinearConnection(job.config.id),
+    getRuntimeVercelConnections(job.config.id),
     getRuntimeSlackConnection(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
@@ -375,6 +385,7 @@ export async function runInvestigationAgent(
       repositories,
       session,
     });
+    const vercelTools = createVercelTools(vercelConnections);
     const instructions = investigationInstructions({
       agentPrompt: job.config.prompt,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
@@ -386,6 +397,7 @@ export async function runInvestigationAgent(
       linearConnected: linearServer !== null,
       slackChannels: slackConnection?.channels,
       workspaceSecrets,
+      vercelAccounts: vercelConnections.map((connection) => connection.displayName),
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -399,6 +411,7 @@ export async function runInvestigationAgent(
         issueSearchTool,
         reportTool,
         ...repositoryInspectionTools,
+        ...vercelTools,
       ],
     });
     const result = await run(

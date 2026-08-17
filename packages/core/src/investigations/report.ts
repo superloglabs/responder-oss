@@ -10,6 +10,7 @@ export const issueEvidenceSchema = z.object({
     "clickstack",
     "github",
     "slack",
+    "vercel",
     "other",
   ]),
   title: z.string().trim().min(1).max(160),

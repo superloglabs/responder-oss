@@ -895,6 +895,98 @@ export interface RuntimeCustomMcpConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeVercelConnection {
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  projectIds: string[];
+  teamId: string | null;
+}
+
+const vercelCredentialsSchema = z.object({
+  accessToken: z.string().min(1),
+  configurationId: z.string().min(1),
+  teamId: z.string().min(1).nullable(),
+  userId: z.string().min(1).nullable(),
+});
+
+export async function getRuntimeVercelConnections(
+  versionId: string,
+): Promise<RuntimeVercelConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      contextResourceIds: agentConfigVersions.contextResourceIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length || !config.contextResourceIds.length) {
+    return [];
+  }
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "vercel"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  if (accountRows.length === 0) return [];
+
+  const accountIds = accountRows.map(({ id }) => id);
+  const resourceRows = await getDatabase()
+    .select({
+      id: integrationResources.id,
+      integrationAccountId: integrationResources.integrationAccountId,
+      externalId: integrationResources.externalId,
+    })
+    .from(integrationResources)
+    .where(
+      and(
+        inArray(integrationResources.integrationAccountId, accountIds),
+        inArray(integrationResources.id, config.contextResourceIds),
+        eq(integrationResources.kind, "vercel_project"),
+        eq(integrationResources.available, true),
+      ),
+    );
+  const projectIdsByAccount = new Map<string, string[]>();
+  for (const resource of resourceRows) {
+    const projectIds = projectIdsByAccount.get(resource.integrationAccountId) ?? [];
+    projectIds.push(resource.externalId);
+    projectIdsByAccount.set(resource.integrationAccountId, projectIds);
+  }
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+
+  return config.contextAccountIds.flatMap((accountId) => {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) return [];
+    const projectIds = projectIdsByAccount.get(account.id) ?? [];
+    if (projectIds.length === 0) return [];
+    const credentials = vercelCredentialsSchema.parse(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    return [{
+      accessToken: credentials.accessToken,
+      accountId: account.id,
+      displayName: account.displayName,
+      projectIds,
+      teamId: credentials.teamId,
+    }];
+  });
+}
+
 export function customMcpTokenRefreshFailureEvent(account: {
   displayName: string;
   errorType: string;
@@ -1636,9 +1728,13 @@ export async function getRuntimeSlackConnection(
     .select({
       id: integrationResources.id,
       accountId: integrationAccounts.id,
+      accountStatus: integrationAccounts.status,
+      available: integrationResources.available,
       displayName: integrationResources.displayName,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
       externalId: integrationResources.externalId,
+      kind: integrationResources.kind,
+      provider: integrationAccounts.provider,
     })
     .from(integrationResources)
     .innerJoin(
@@ -1648,20 +1744,32 @@ export async function getRuntimeSlackConnection(
     .where(
       and(
         eq(integrationAccounts.organizationId, config.organizationId),
-        eq(integrationAccounts.provider, "slack"),
-        eq(integrationAccounts.status, "connected"),
-        eq(integrationResources.kind, "slack_channel"),
-        eq(integrationResources.available, true),
         inArray(integrationResources.id, config.contextResourceIds),
       ),
     );
   if (resourceRows.length !== config.contextResourceIds.length) return null;
 
-  const accountIds = new Set(resourceRows.map((resource) => resource.accountId));
+  const slackResourceRows = resourceRows.filter(
+    (resource) =>
+      resource.provider === "slack" && resource.kind === "slack_channel",
+  );
+  if (
+    slackResourceRows.length === 0 ||
+    slackResourceRows.some(
+      (resource) =>
+        resource.accountStatus !== "connected" || !resource.available,
+    )
+  ) {
+    return null;
+  }
+
+  const accountIds = new Set(
+    slackResourceRows.map((resource) => resource.accountId),
+  );
   if (accountIds.size !== 1) {
     throw new Error("Slack context channels must belong to one workspace");
   }
-  const firstResource = resourceRows[0];
+  const firstResource = slackResourceRows[0];
   if (!firstResource?.encryptedCredentials) return null;
   const credentials = z
     .object({ userAccessToken: z.string().min(1) })
@@ -1681,11 +1789,14 @@ export async function getRuntimeSlackConnection(
   }
 
   const resourcesById = new Map(
-    resourceRows.map((resource) => [resource.id, resource]),
+    slackResourceRows.map((resource) => [resource.id, resource]),
+  );
+  const selectedSlackResourceIds = config.contextResourceIds.filter((id) =>
+    resourcesById.has(id),
   );
   return {
     accountId: firstResource.accountId,
-    channels: config.contextResourceIds.map((resourceId) => {
+    channels: selectedSlackResourceIds.map((resourceId) => {
       const resource = resourcesById.get(resourceId)!;
       return { id: resource.externalId, name: resource.displayName };
     }),

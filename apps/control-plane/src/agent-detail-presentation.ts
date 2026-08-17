@@ -26,6 +26,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   linear: "Linear",
   sentry: "Sentry",
   slack: "Slack",
+  vercel: "Vercel",
 };
 
 function unique(values: string[]) {
