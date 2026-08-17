@@ -23,6 +23,7 @@ import {
   normalizeClickStackMcpUrl,
 } from "../integrations/clickstack.js";
 import { SLACK_MCP_URL } from "../integrations/slack-mcp.js";
+import { parseUpstashCredentials } from "../integrations/upstash.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
 import { getDatabase } from "./client.js";
 import {
@@ -876,6 +877,13 @@ export interface RuntimeCustomMcpConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeUpstashConnection {
+  accountId: string;
+  apiKey: string;
+  displayName: string;
+  email: string;
+}
+
 export function customMcpTokenRefreshFailureEvent(account: {
   displayName: string;
   errorType: string;
@@ -1510,6 +1518,51 @@ export async function getRuntimeDatadogConnection(
     })
     .where(eq(integrationAccounts.id, accountRows[0]!.id));
   return connection(nextCredentials.accessToken);
+}
+
+export async function getRuntimeUpstashConnection(
+  versionId: string,
+): Promise<RuntimeUpstashConnection | null> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return null;
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "upstash"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    )
+    .limit(1);
+  const account = accountRows[0];
+  if (!account?.encryptedCredentials) return null;
+
+  const credentials = parseUpstashCredentials(
+    decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+  );
+  return {
+    accountId: account.id,
+    apiKey: credentials.apiKey,
+    displayName: account.displayName,
+    email: credentials.email,
+  };
 }
 
 export async function getRuntimeSlackConnection(

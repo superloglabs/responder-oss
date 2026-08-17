@@ -8,6 +8,7 @@ export const issueEvidenceSchema = z.object({
     "datadog",
     "sentry",
     "clickstack",
+    "upstash",
     "github",
     "slack",
     "other",

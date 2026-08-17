@@ -60,6 +60,7 @@ export interface AgentOptions {
       | "sentry"
       | "datadog"
       | "clickstack"
+      | "upstash"
       | "custom_mcp";
     displayName: string;
     slackContextAvailable?: boolean;
@@ -105,6 +106,7 @@ export interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "upstash"
     | "custom_mcp"
     | "clickstack";
   name: string;
@@ -163,6 +165,7 @@ export interface IssueEvidence {
     | "datadog"
     | "sentry"
     | "clickstack"
+    | "upstash"
     | "github"
     | "slack"
     | "other";

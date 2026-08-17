@@ -67,6 +67,10 @@ import {
   sentryInstallUrl,
   verifySentryInstallation,
 } from "./sentry.js";
+import {
+  upstashAccount,
+  UpstashCredentialsError,
+} from "./upstash.js";
 import { integrationCallbackUrl, settingsRedirect } from "./urls.js";
 
 const providerSchema = z.enum(productIntegrationIds);
@@ -79,6 +83,11 @@ const datadogConnectionSchema = z.object({
   applicationKey: z.string().trim().min(1).max(512),
   returnTo: z.string().max(2_048).optional(),
   site: z.string().min(1),
+});
+const upstashConnectionSchema = z.object({
+  apiKey: z.string().trim().min(1).max(4_096),
+  email: z.string().trim().email().max(320),
+  returnTo: z.string().max(2_048).optional(),
 });
 const customMcpConnectionSchema = z.discriminatedUnion("authType", [
   z.object({
@@ -334,7 +343,9 @@ export const integrationRoutes = new Hono()
           })),
           connectUrl:
             definition.implemented && configured
-              ? definition.id === "datadog" || definition.id === "clickstack"
+              ? definition.id === "datadog" ||
+                  definition.id === "clickstack" ||
+                  definition.id === "upstash"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -370,7 +381,8 @@ export const integrationRoutes = new Hono()
     }
     if (
       parsedProvider.data === "datadog" ||
-      parsedProvider.data === "clickstack"
+      parsedProvider.data === "clickstack" ||
+      parsedProvider.data === "upstash"
     ) {
       return context.json(
         { error: `Use the ${definition.name} connection endpoint` },
@@ -507,6 +519,78 @@ export const integrationRoutes = new Hono()
       logCallbackError("Datadog", error);
       return context.json(
         { error: "Unable to verify the Datadog connection" },
+        502,
+      );
+    }
+  })
+  .post("/upstash/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = upstashConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Enter your Upstash account email and API key" },
+        400,
+      );
+    }
+
+    try {
+      const account = await upstashAccount(parsed.data);
+      const accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "upstash",
+        externalAccountId: account.externalAccountId,
+        displayName: account.displayName,
+        encryptedCredentials: encryptCredentials({
+          apiKey: parsed.data.apiKey,
+          authType: "api_key",
+          email: account.externalAccountId,
+        }),
+        credentialKeyVersion: 1,
+        metadata: account.metadata,
+      });
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "upstash",
+        },
+      });
+      console.info(
+        JSON.stringify({
+          accountId,
+          event: "upstash_connected",
+          organizationId: tenant.organizationId,
+          provider: "upstash",
+        }),
+      );
+      return context.json({
+        accountId,
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(
+            parsed.data.returnTo ?? "/settings",
+            "upstash",
+            "connected",
+          ),
+          accountId,
+        ),
+      });
+    } catch (error) {
+      if (error instanceof UpstashCredentialsError) {
+        return context.json({ error: error.message }, 401);
+      }
+      logCallbackError("Upstash", error, {
+        organizationId: tenant.organizationId,
+      });
+      return context.json(
+        { error: "Unable to verify the Upstash connection" },
         502,
       );
     }

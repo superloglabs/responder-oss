@@ -27,6 +27,7 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
+import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import {
   ChevronDownIcon,
   CogIcon,
@@ -342,6 +343,8 @@ function connectionNotice(): {
         ? "Slack"
         : provider === "custom_mcp"
           ? "Custom MCP"
+          : provider === "upstash"
+            ? "Upstash"
           : provider === "clickstack"
             ? "ClickStack / HyperDX"
             : provider;
@@ -375,11 +378,13 @@ export function AgentCreatePage() {
   const returnTo = agentId ? `/agents/${agentId}/edit` : "/agents/new";
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
+  const upstashJustConnected = successfulConnectionReturn("upstash");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
+    upstashJustConnected ||
     customMcpJustConnected ||
     clickStackJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
@@ -408,6 +413,7 @@ export function AgentCreatePage() {
     useState<IntegrationSummary["id"] | null>(null);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
+  const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingSlackChannels, setRefreshingSlackChannels] = useState(false);
@@ -479,6 +485,21 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedCustomMcpId);
         }
+        const connectedUpstashId = new URLSearchParams(
+          window.location.search,
+        ).get("integration_account_id");
+        if (
+          upstashJustConnected &&
+          connectedUpstashId &&
+          loadedOptions.accounts.some(
+            (account) =>
+              account.id === connectedUpstashId &&
+              account.provider === "upstash",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(connectedUpstashId)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedUpstashId);
+        }
         const connectedClickStack = accountsFor(
           loadedOptions,
           "clickstack",
@@ -513,6 +534,7 @@ export function AgentCreatePage() {
     customMcpJustConnected,
     datadogJustConnected,
     draftStorageKey,
+    upstashJustConnected,
   ]);
 
   useEffect(() => {
@@ -537,6 +559,10 @@ export function AgentCreatePage() {
   );
   const customMcpAccounts = useMemo(
     () => accountsFor(options, "custom_mcp"),
+    [options],
+  );
+  const upstashAccounts = useMemo(
+    () => accountsFor(options, "upstash"),
     [options],
   );
   const clickStackAccounts = useMemo(
@@ -709,10 +735,15 @@ export function AgentCreatePage() {
       );
       return;
     }
-    if (provider === "datadog" || provider === "clickstack") {
+    if (
+      provider === "datadog" ||
+      provider === "clickstack" ||
+      provider === "upstash"
+    ) {
       window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
       if (provider === "datadog") setChoosingDatadogSite(true);
-      else setConnectingClickStack(true);
+      else if (provider === "clickstack") setConnectingClickStack(true);
+      else setConnectingUpstash(true);
       return;
     }
     if (provider === "custom_mcp") {
@@ -901,6 +932,10 @@ export function AgentCreatePage() {
     clickStackAccounts[0] &&
       draft.contextAccountIds.includes(clickStackAccounts[0].id),
   );
+  const upstashContextConnected = Boolean(
+    upstashAccounts[0] &&
+      draft.contextAccountIds.includes(upstashAccounts[0].id),
+  );
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
     draft.contextResourceIds.includes(channel.id),
   );
@@ -912,6 +947,7 @@ export function AgentCreatePage() {
     Number(sentryIncluded || sentryContextConnected) +
     Number(selectedSlackContextChannels.length > 0) +
     Number(datadogContextConnected) +
+    Number(upstashContextConnected) +
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -929,6 +965,12 @@ export function AgentCreatePage() {
         connectUrl={integrationFor("custom_mcp")?.connectUrl ?? ""}
         onCancel={() => setConfiguringCustomMcp(false)}
         open={configuringCustomMcp}
+        returnTo={returnTo}
+      />
+      <UpstashConnectionDialog
+        connectUrl={integrationFor("upstash")?.connectUrl ?? ""}
+        onCancel={() => setConnectingUpstash(false)}
+        open={connectingUpstash}
         returnTo={returnTo}
       />
       <ClickStackConnectionDialog
@@ -1677,6 +1719,51 @@ export function AgentCreatePage() {
 
                   <ContextRow
                     action={
+                      upstashContextConnected ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            toggleContextAccount(upstashAccounts[0]!.id)
+                          }
+                          variant="ghost"
+                        >
+                          Remove
+                        </Button>
+                      ) : upstashAccounts[0] ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            toggleContextAccount(upstashAccounts[0]!.id)
+                          }
+                          variant="secondary"
+                        >
+                          Add
+                        </Button>
+                      ) : (
+                        <ConnectButton
+                          integration={integrationFor("upstash")}
+                          isConnecting={false}
+                          onClick={() => connect("upstash")}
+                        />
+                      )
+                    }
+                    detail={
+                      upstashAccounts[0]
+                        ? `${upstashAccounts[0].displayName} · Redis, Vector, Search, QStash, and Workflow`
+                        : "Redis, Vector, Search, QStash, and Workflow"
+                    }
+                    label="Upstash"
+                    provider="upstash"
+                    status={
+                      upstashContextConnected
+                        ? "connected"
+                        : upstashAccounts[0]
+                          ? "available"
+                          : "not_connected"
+                    }
+                  />
+                  <ContextRow
+                    action={
                       datadogContextConnected ? (
                         <Button
                           size="small"
@@ -2231,6 +2318,7 @@ function ContextRow({
     | "slack"
     | "sentry"
     | "datadog"
+    | "upstash"
     | "custom_mcp"
     | "clickstack";
   status: "available" | "connected" | "included" | "not_connected";

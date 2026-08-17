@@ -6,6 +6,7 @@ export const providerGlyphs = {
   google: { label: "Google", text: "GO" },
   sentry: { label: "Sentry", text: "SE" },
   slack: { label: "Slack", text: "SL" },
+  upstash: { label: "Upstash", text: "UP" },
 } as const;
 
 export type ProviderGlyphId = keyof typeof providerGlyphs;

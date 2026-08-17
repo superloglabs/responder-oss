@@ -26,6 +26,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "sentry",
   "datadog",
   "clickstack",
+  "upstash",
   "custom_mcp",
 ]);
 

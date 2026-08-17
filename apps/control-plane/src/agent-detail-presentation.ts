@@ -25,6 +25,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   github: "GitHub",
   sentry: "Sentry",
   slack: "Slack",
+  upstash: "Upstash",
 };
 
 function unique(values: string[]) {

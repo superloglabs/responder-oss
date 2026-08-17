@@ -133,6 +133,7 @@ function humanizeToolName(value: unknown): string {
     sentry: "Sentry",
     slack: "Slack",
     superlog: "Superlog",
+    upstash: "Upstash",
   };
   const verbs = new Set([
     "create",

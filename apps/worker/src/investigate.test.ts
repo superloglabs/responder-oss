@@ -32,6 +32,24 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("identifies Upstash connection failures without exposing provider errors", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("request failed with developer-api-key"),
+        investigationId: "investigation-123",
+        serverName: "upstash-account-1",
+        upstashConnection: { accountId: "account-1" },
+      }),
+    ).toEqual({
+      accountId: "account-1",
+      error: "Unable to connect to Upstash context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "upstash-account-1",
+    });
+  });
+
   it("requires both service keys", () => {
     expect(() => sandboxAgentConfig({})).toThrow("OPENAI_API_KEY is required");
     expect(() =>
@@ -102,6 +120,21 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain(
       "Do not create, update, or delete ClickStack resources",
     );
+  });
+
+  it("uses both Upstash context layers without allowing mutations", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      upstashConnected: true,
+    });
+
+    expect(instructions).toContain("Use list_upstash_resources first");
+    expect(instructions).toContain("Workflow and QStash runtime history");
+    expect(instructions).toContain("Never create, update, delete, retry, publish");
   });
 
   it("stores the exact initial message that is sent to the agent", () => {

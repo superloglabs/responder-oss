@@ -234,7 +234,7 @@ async function validateConfigurationResources(
     const account = accountsById.get(accountId);
     if (
       !account ||
-      !["sentry", "datadog", "clickstack", "custom_mcp"].includes(
+      !["sentry", "datadog", "clickstack", "upstash", "custom_mcp"].includes(
         account.provider,
       ) ||
       account.status !== "connected"

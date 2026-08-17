@@ -5,6 +5,7 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
+import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
 import { SettingsTabs } from "../components/settings-tabs";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
@@ -23,6 +24,7 @@ interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "upstash"
     | "custom_mcp"
     | "clickstack";
   name: string;
@@ -54,6 +56,8 @@ function connectionNotice(): {
         ? "Slack"
         : provider === "custom_mcp"
           ? "Custom MCP"
+          : provider === "upstash"
+            ? "Upstash"
           : provider === "clickstack"
             ? "ClickStack / HyperDX"
             : provider;
@@ -146,7 +150,7 @@ export function SettingsPage() {
     ["github", "slack"].includes(integration.id),
   );
   const secondary = integrations.filter((integration) =>
-    ["sentry", "datadog", "custom_mcp", "clickstack"].includes(
+    ["sentry", "datadog", "upstash", "custom_mcp", "clickstack"].includes(
       integration.id,
     ),
   );
@@ -216,6 +220,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
+  const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
 
   function startConnection() {
@@ -226,6 +231,10 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
     }
     if (integration.id === "custom_mcp") {
       setConfiguringCustomMcp(true);
+      return;
+    }
+    if (integration.id === "upstash") {
+      setConnectingUpstash(true);
       return;
     }
     if (integration.id === "clickstack") {
@@ -282,6 +291,12 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConfiguringCustomMcp(false)}
         open={configuringCustomMcp}
+        returnTo="/settings"
+      />
+      <UpstashConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingUpstash(false)}
+        open={connectingUpstash}
         returnTo="/settings"
       />
       <ClickStackConnectionDialog

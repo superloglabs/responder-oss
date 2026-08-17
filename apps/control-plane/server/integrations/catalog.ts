@@ -3,6 +3,7 @@ export const productIntegrationIds = [
   "slack",
   "sentry",
   "datadog",
+  "upstash",
   "custom_mcp",
   "clickstack",
 ] as const;
@@ -57,6 +58,14 @@ export const integrationCatalog: IntegrationDefinition[] = [
     id: "datadog",
     name: "Datadog",
     description: "Monitor triggers with logs, metrics, and trace context.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "upstash",
+    name: "Upstash",
+    description:
+      "Redis, Vector, Search, QStash, and Workflow investigation context.",
     implemented: true,
     requiredEnvironment: [],
   },
