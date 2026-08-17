@@ -59,14 +59,18 @@ export function IssueDetailPage() {
     detail?.pullRequestState.requests.some((request) =>
       request.status === "queued" || request.status === "creating",
     ) ?? false;
+  const hasActiveLinearTicket =
+    detail?.linearTicketState.requests.some((request) =>
+      request.status === "pending" || request.status === "creating",
+    ) ?? false;
 
   useEffect(() => {
-    if (!issueId || !hasActivePullRequest) return;
+    if (!issueId || (!hasActivePullRequest && !hasActiveLinearTicket)) return;
     const interval = window.setInterval(() => {
       void fetchIssue(issueId).then(setDetail).catch(() => undefined);
     }, 3_000);
     return () => window.clearInterval(interval);
-  }, [hasActivePullRequest, issueId]);
+  }, [hasActiveLinearTicket, hasActivePullRequest, issueId]);
 
   useEffect(() => {
     if (!promptCopied) return;
@@ -290,6 +294,44 @@ export function IssueDetailPage() {
                         target="_blank"
                       >
                         Open pull request
+                      </a>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {detail.linearTicketState.requests.length > 0 ? (
+            <div className="issuePullRequests">
+              <header>
+                <h2>Linear tickets</h2>
+              </header>
+              <div className="issueInvestigationList">
+                {detail.linearTicketState.requests.map((request) => (
+                  <div
+                    className="issueInvestigationRow shadow-xl"
+                    key={request.id}
+                  >
+                    <span>
+                      <strong>
+                        {request.status === "created"
+                          ? request.linearIdentifier ?? request.linearIssueId
+                          : request.status === "failed"
+                            ? "Linear ticket failed"
+                            : "Creating Linear ticket…"}
+                      </strong>
+                      <small>
+                        {request.failureReason ?? formatDate(request.createdAt)}
+                      </small>
+                    </span>
+                    {request.linearIssueUrl ? (
+                      <a
+                        className="button button--secondary button--small"
+                        href={request.linearIssueUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Open Linear ticket
                       </a>
                     ) : null}
                   </div>

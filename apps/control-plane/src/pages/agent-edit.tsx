@@ -137,6 +137,8 @@ function createDefaultConfiguration(
     contextAccountIds: [],
     contextResourceIds: [],
     secretIds: [],
+    createLinearTickets: false,
+    linearIssueTemplate: "{{description}}\n\n{{evidence}}\n\n{{remediation}}",
     trigger,
     reporting,
   };
