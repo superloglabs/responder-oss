@@ -205,4 +205,44 @@ describe("worker error monitoring", () => {
     });
     expect(sentryMocks.captureException).toHaveBeenCalledWith(error);
   });
+
+  it("stores structured remediation diagnostics separately from identifiers", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+    const error = new Error("Max turns (40) exceeded");
+
+    await monitoring.reportWorkerException(error, {
+      diagnostics: {
+        applyPatchFailures: [
+          {
+            error: "Invalid Context",
+            operation: "update_file",
+            path: "/workspace/repositories/example/app/src/app.ts",
+          },
+        ],
+        completedTurns: 40,
+        maxTurns: 40,
+      },
+      operation: "remediation",
+      requestId: "request-1",
+    });
+
+    expect(sentryMocks.scope.setContext).toHaveBeenCalledWith("responder", {
+      operation: "remediation",
+      requestId: "request-1",
+    });
+    expect(sentryMocks.scope.setContext).toHaveBeenCalledWith("diagnostics", {
+      applyPatchFailures: [
+        {
+          error: "Invalid Context",
+          operation: "update_file",
+          path: "/workspace/repositories/example/app/src/app.ts",
+        },
+      ],
+      completedTurns: 40,
+      maxTurns: 40,
+    });
+  });
 });

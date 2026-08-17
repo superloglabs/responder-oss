@@ -20,6 +20,7 @@ export interface WorkerErrorContext {
   requestId?: string;
   sandboxId?: string;
   sourceInvestigationId?: string;
+  diagnostics?: Record<string, unknown>;
 }
 
 let errorMonitoringEnabled = false;
@@ -132,8 +133,12 @@ export async function reportWorkerException(
 
   try {
     Sentry.withScope((scope) => {
+      const { diagnostics, ...responderContext } = context;
       scope.setTag("responder.operation", context.operation);
-      scope.setContext("responder", { ...context });
+      scope.setContext("responder", responderContext);
+      if (diagnostics) {
+        scope.setContext("diagnostics", diagnostics);
+      }
       if (context.operation === "slack_delivery") {
         scope.setContext("slack", slackErrorLogFields(error));
       }
