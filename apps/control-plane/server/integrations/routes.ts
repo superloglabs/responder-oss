@@ -110,6 +110,16 @@ const awsVerificationSchema = z.object({
   integrationAccountId: z.uuid(),
   returnTo: z.string().max(2_048).optional(),
 });
+
+function recoverAwsConnectionCredentials(encryptedCredentials: string) {
+  try {
+    return awsConnectionCredentialsSchema.safeParse(
+      decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+    );
+  } catch {
+    return null;
+  }
+}
 const sentryCredentialsSchema = z.object({
   accessToken: z.string().min(1),
   installationId: z.uuid(),
@@ -562,11 +572,7 @@ export const integrationRoutes = new Hono()
         provider: "aws",
       });
       const existingCredentials = existing?.encryptedCredentials
-        ? awsConnectionCredentialsSchema.safeParse(
-            decryptCredentials<Record<string, unknown>>(
-              existing.encryptedCredentials,
-            ),
-          )
+        ? recoverAwsConnectionCredentials(existing.encryptedCredentials)
         : null;
       const externalId = existingCredentials?.success
         ? existingCredentials.data.externalId

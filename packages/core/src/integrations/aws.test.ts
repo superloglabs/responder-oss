@@ -28,6 +28,7 @@ describe("AWS integration", () => {
     expect(template).toContain("AWS: !Ref ResponderPrincipalArn");
     expect(template).toContain("PolicyName: DenySecretValueAccess");
     expect(template).toContain("secretsmanager:GetSecretValue");
+    expect(template).toContain("secretsmanager:BatchGetSecretValue");
     expect(template).toContain("ssm:GetParametersByPath");
     expect(template).toContain("kms:Decrypt");
     expect(template).not.toContain("Action: '*'");
@@ -82,6 +83,18 @@ describe("AWS integration", () => {
           "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
         templateUrl:
           "https://responder-templates.s3.cn-north-1.amazonaws.com.cn/responder-aws-access.yaml",
+      }),
+    ).toThrow("must use an Amazon S3 URL");
+  });
+
+  it("rejects GovCloud S3 quick-create URLs", () => {
+    expect(() =>
+      awsCloudFormationQuickCreateUrl({
+        externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+        principalArn:
+          "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+        templateUrl:
+          "https://responder-templates.s3.us-gov-west-1.amazonaws.com/responder-aws-access.yaml",
       }),
     ).toThrow("must use an Amazon S3 URL");
   });

@@ -28,6 +28,7 @@ Resources:
                 Effect: Deny
                 Action:
                   - kms:Decrypt
+                  - secretsmanager:BatchGetSecretValue
                   - secretsmanager:GetSecretValue
                   - ssm:GetParameter
                   - ssm:GetParameters

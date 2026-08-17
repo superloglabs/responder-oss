@@ -598,6 +598,45 @@ describe("integration callback routing", () => {
     expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
+  it("replaces unreadable AWS credentials so the connection can recover", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      encryptedCredentials: "unreadable-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockImplementation(() => {
+      throw new Error("Unable to decrypt credentials");
+    });
+    vi.mocked(createAwsExternalId).mockReturnValue(
+      "responder_replacement_external_id_1234567890",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("replacement-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(null);
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "123456789012" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "replacement-credentials",
+        status: "pending",
+      }),
+    );
+  });
+
   it("keeps template download available without S3 configuration", async () => {
     vi.stubEnv(
       "AWS_INTEGRATION_PRINCIPAL_ARN",
