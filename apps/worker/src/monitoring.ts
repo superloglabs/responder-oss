@@ -34,6 +34,34 @@ const secretEnvironmentNames = [
   "CREDENTIAL_ENCRYPTION_KEY",
   "INTERNAL_INGEST_TOKEN",
 ] as const;
+const secretEnvironmentName =
+  /(?:ACCESS_KEY|API_KEY|AUTH_TOKEN|CREDENTIAL|DATABASE_URL|DSN|PASSWORD|PRIVATE_KEY|SECRET(?:_KEY)?|TOKEN)$/iu;
+const secretEventKey =
+  /(?:access[_-]?key|api[_-]?key|authorization|cookie|credential|password|private[_-]?key|secret|token)|^(?:buildEnv|env|envs|environmentVariables?)$/iu;
+
+function eventSecrets(environment: NodeJS.ProcessEnv): string[] {
+  const explicitNames = new Set<string>(secretEnvironmentNames);
+  return Object.entries(environment).flatMap(([name, value]) =>
+    value &&
+    (explicitNames.has(name) ||
+      (value.length >= 8 && secretEnvironmentName.test(name)))
+      ? [value]
+      : [],
+  );
+}
+
+function redactString(value: string, secrets: readonly string[]): string {
+  return secrets
+    .reduce(
+      (redacted, secret) => redacted.replaceAll(secret, "[redacted]"),
+      value,
+    )
+    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/giu, "$1 [redacted]")
+    .replace(
+      /([?&](?:access[_-]?(?:key|token)|api[_-]?key|client[_-]?secret|id[_-]?token|password|refresh[_-]?token|secret|token)=)[^&#\s]+/giu,
+      "$1[redacted]",
+    );
+}
 
 function redactEventValue(
   value: unknown,
@@ -41,10 +69,7 @@ function redactEventValue(
   seen: WeakSet<object>,
 ): unknown {
   if (typeof value === "string") {
-    return secrets.reduce(
-      (redacted, secret) => redacted.replaceAll(secret, "[redacted]"),
-      value,
-    );
+    return redactString(value, secrets);
   }
   if (!value || typeof value !== "object" || seen.has(value)) return value;
 
@@ -58,19 +83,43 @@ function redactEventValue(
 
   const record = value as Record<string, unknown>;
   for (const [key, item] of Object.entries(record)) {
-    record[key] = redactEventValue(item, secrets, seen);
+    record[key] = secretEventKey.test(key)
+      ? "[redacted]"
+      : redactEventValue(item, secrets, seen);
   }
   return record;
+}
+
+function errorForMonitoring(
+  error: unknown,
+  secrets: readonly string[],
+): Error {
+  if (!(error instanceof Error)) {
+    return new Error("Worker operation failed with a non-Error exception");
+  }
+
+  const message = redactString(error.message, secrets).slice(0, 2_000);
+  const sanitized = new Error(message || "Worker operation failed");
+  sanitized.name = error.name;
+  if (error.stack) {
+    const frames = error.stack
+      .split("\n")
+      .slice(1)
+      .filter((line) => /^\s+at\s/u.test(line))
+      .slice(0, 100)
+      .map((line) => redactString(line, secrets).slice(0, 1_000));
+    sanitized.stack = [`${sanitized.name}: ${sanitized.message}`, ...frames].join(
+      "\n",
+    );
+  }
+  return sanitized;
 }
 
 function scrubWorkerSentryEvent(
   event: Event,
   environment: NodeJS.ProcessEnv,
 ): Event {
-  const secrets = secretEnvironmentNames.flatMap((name) => {
-    const value = environment[name];
-    return value ? [value] : [];
-  });
+  const secrets = eventSecrets(environment);
   redactEventValue(event, secrets, new WeakSet());
 
   for (const exception of event.exception?.values ?? []) {
@@ -142,7 +191,9 @@ export async function reportWorkerException(
       if (context.operation === "slack_delivery") {
         scope.setContext("slack", slackErrorLogFields(error));
       }
-      Sentry.captureException(error);
+      Sentry.captureException(
+        errorForMonitoring(error, eventSecrets(eventScrubbingEnvironment)),
+      );
     });
   } catch (reportingError) {
     console.error(

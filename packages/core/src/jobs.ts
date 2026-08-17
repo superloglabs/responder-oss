@@ -7,7 +7,10 @@ import { issueEvidenceSchema, issueSeveritySchema } from "./investigations/repor
 
 export const workerHealthQueue = "responder-worker-health";
 export const investigationQueue = "responder-investigations";
-export const linearTicketQueue = "responder-linear-tickets";
+// Version queue names when introducing a policy: createQueue intentionally
+// leaves an existing queue's policy unchanged.
+export const linearTicketQueue = "responder-linear-tickets-v2";
+export const remediationQueue = "responder-remediations-v2";
 
 export const workerHealthJobSchema = z.object({
   marker: z.string().min(1),
@@ -103,10 +106,23 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryDelay: 30,
       retryLimit: 2,
     }),
+    boss.createQueue(remediationQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 3_600,
+      notify: true,
+      policy: "exclusive",
+      // Retrying the agent could repeat PR side effects. Terminal writes are
+      // independent of monitoring, and a worker sweep reconciles abandoned rows.
+      retryLimit: 0,
+    }),
     boss.createQueue(linearTicketQueue, {
       deleteAfterSeconds: 604_800,
       expireInSeconds: 900,
       notify: true,
+      // singletonKey is enforced only by pg-boss queue policies that opt into
+      // singleton semantics. Exclusive keeps one queued or active job per
+      // Linear request key while allowing unrelated requests to run together.
+      policy: "exclusive",
       retryBackoff: true,
       retryDelay: 60,
       retryLimit: 5,

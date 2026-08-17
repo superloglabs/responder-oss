@@ -8,15 +8,17 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1106.0",
+    "@aws-sdk/client-s3": "3.1111.0",
     "@aws-sdk/client-sts": "3.1111.0",
-    "@aws-sdk/s3-request-presigner": "3.1106.0",
+    "@aws-sdk/s3-request-presigner": "3.1111.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "autumn-js": "1.2.45",
     "drizzle-orm": "0.45.2",
+    "ipaddr.js": "2.5.0",
     "pg": "8.22.0",
     "pg-boss": "12.26.3",
     "posthog-node": "^5.47.0",
+    "undici": "8.10.0",
     "zod": "4.4.3"
   }
 }

@@ -4,6 +4,8 @@ import {
   linearTicketJobSchema,
   linearTicketQueue,
   prepareWorkerQueues,
+  remediationJobSchema,
+  remediationQueue as remediationQueueName,
   type LinearTicketJob,
   type RemediationJob,
   responderJobSchema,
@@ -17,10 +19,12 @@ import {
   markInvestigationStarted,
 } from "@responder/core/db/investigations";
 import {
-  failIssuePullRequest,
   failPendingInvestigationPullRequests,
 } from "@responder/core/db/pull-requests";
-import { queueIssueRemediationJob } from "@responder/core/remediation-queue";
+import {
+  queueIssueRemediationJob,
+  recoverAbandonedIssueRemediations,
+} from "@responder/core/remediation-queue";
 import {
   queueLinearTicketJob,
   queuePendingLinearTicketJobs,
@@ -42,10 +46,6 @@ import {
   runInvestigationAgent,
   safeInvestigationError,
 } from "./investigate.js";
-import {
-  remediationRunDiagnostics,
-  runRemediationAgent,
-} from "./remediate.js";
 import { runLinearTicketJob } from "./linear-ticket-job.js";
 import {
   InvestigationReplayRequestProcessingError,
@@ -56,13 +56,14 @@ import {
   initializeErrorMonitoring,
   reportWorkerException,
 } from "./monitoring.js";
+import { processRemediationJob } from "./remediation-job.js";
+import { loadResponderSecrets } from "@responder/core/secrets";
 
-const secretsFile = process.env.RESPONDER_SECRETS_FILE;
-if (secretsFile) process.loadEnvFile(secretsFile);
+loadResponderSecrets();
 initializeErrorMonitoring();
 
 const boss = createJobBoss();
-const remediationQueue = {
+const remediationJobQueue = {
   send: (
     name: string,
     data: RemediationJob,
@@ -79,6 +80,7 @@ const linearTicketJobQueue = {
 let stopping = false;
 let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
+let remediationRecoveryDrain: Promise<void> | undefined;
 
 const replayRequestQueue = {
   send: (
@@ -162,6 +164,39 @@ function drainLinearTicketRequests(): Promise<void> {
   return linearTicketDrain;
 }
 
+function drainAbandonedRemediationRequests(): Promise<void> {
+  if (remediationRecoveryDrain) return remediationRecoveryDrain;
+  remediationRecoveryDrain = recoverAbandonedIssueRemediations(boss)
+    .then((requestIds) => {
+      if (requestIds.length === 0) return;
+      console.error(JSON.stringify({
+        event: "abandoned_remediations_recovered",
+        requestIds,
+      }));
+    })
+    .catch(async (error: unknown) => {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "abandoned_remediation_recovery_failed",
+      }));
+      await reportWorkerException(error, { operation: "remediation" }).catch(
+        (reportError: unknown) => {
+          console.error(JSON.stringify({
+            error:
+              reportError instanceof Error
+                ? reportError.message
+                : String(reportError),
+            event: "abandoned_remediation_recovery_reporting_failed",
+          }));
+        },
+      );
+    })
+    .finally(() => {
+      remediationRecoveryDrain = undefined;
+    });
+  return remediationRecoveryDrain;
+}
+
 async function reportIncompleteSlackDelivery(input: {
   deliveryWarnings: string[];
   investigationId: string;
@@ -239,50 +274,16 @@ await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
     throw error;
   }
 });
+await boss.work(remediationQueueName, { localConcurrency: 1 }, async ([job]) => {
+  const payload = remediationJobSchema.parse(job.data);
+  return processRemediationJob(job.id, payload, process.env);
+});
 await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
   const payload = responderJobSchema.parse(job.data);
   if (payload.kind === "remediation") {
-    try {
-      await runRemediationAgent(payload, process.env);
-      await failIssuePullRequest(
-        payload.remediationRequestId,
-        "Remediation finished without creating a pull request",
-      );
-      console.log(
-        JSON.stringify({
-          event: "remediation_job_complete",
-          jobId: job.id,
-          requestId: payload.remediationRequestId,
-        }),
-      );
-    } catch (error) {
-      const message = safeInvestigationError(error);
-      let diagnostics: ReturnType<typeof remediationRunDiagnostics>;
-      try {
-        diagnostics = remediationRunDiagnostics(error, process.env);
-      } catch {
-        diagnostics = undefined;
-      }
-      await reportWorkerException(error, {
-        ...(diagnostics ? { diagnostics: { ...diagnostics } } : {}),
-        investigationId: payload.investigationId,
-        jobId: job.id,
-        operation: "remediation",
-        organizationId: payload.config.organizationId,
-        requestId: payload.remediationRequestId,
-      });
-      await failIssuePullRequest(payload.remediationRequestId, message);
-      console.error(
-        JSON.stringify({
-          ...(diagnostics ? { diagnostics } : {}),
-          error: message,
-          event: "remediation_job_failed",
-          jobId: job.id,
-          requestId: payload.remediationRequestId,
-        }),
-      );
-    }
-    return { requestId: payload.remediationRequestId };
+    // Drain jobs queued by older workers while all new remediations use the
+    // versioned exclusive queue above.
+    return processRemediationJob(job.id, payload, process.env);
   }
   await markInvestigationStarted(
     payload.investigationId,
@@ -328,7 +329,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
         const queued = await Promise.allSettled(
           requestIds.map(async (requestId) => {
             const result = await queueIssueRemediationJob(
-              remediationQueue,
+              remediationJobQueue,
               requestId,
             );
             console.log(
@@ -447,6 +448,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
 
 void drainInvestigationReplayRequests();
 void drainLinearTicketRequests();
+void drainAbandonedRemediationRequests();
 const replayRequestPoller = setInterval(
   () => void drainInvestigationReplayRequests(),
   2_000,
@@ -457,6 +459,11 @@ const linearTicketPoller = setInterval(
   10_000,
 );
 linearTicketPoller.unref();
+const remediationRecoveryPoller = setInterval(
+  () => void drainAbandonedRemediationRequests(),
+  5 * 60 * 1_000,
+);
+remediationRecoveryPoller.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));
 
@@ -465,8 +472,10 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   clearInterval(replayRequestPoller);
   clearInterval(linearTicketPoller);
+  clearInterval(remediationRecoveryPoller);
   await replayRequestDrain;
   await linearTicketDrain;
+  await remediationRecoveryDrain;
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
     await boss.stop({ graceful: true, timeout: 25_000 });

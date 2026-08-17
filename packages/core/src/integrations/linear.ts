@@ -213,7 +213,13 @@ export function linearTicketFollowupInstruction(input: {
 const linearIssueSchema = z.object({
   id: z.string().min(1),
   identifier: z.string().min(1),
-  url: z.url(),
+  // This URL is persisted and later rendered as a clickable link. `z.url()`
+  // also accepts executable schemes such as `javascript:`, so constrain the
+  // upstream value before it reaches the UI.
+  url: z.url().refine(
+    (value) => new URL(value).protocol === "https:",
+    "Linear issue URLs must use HTTPS",
+  ),
 });
 
 const linearGraphqlResponseSchema = z.object({

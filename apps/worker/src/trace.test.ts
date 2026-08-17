@@ -148,6 +148,37 @@ describe("investigation trace events", () => {
     expect(JSON.stringify(event)).toContain("[secret placeholder redacted]");
   });
 
+  it("retains sanitized provider output for later debugging", () => {
+    const event = investigationTraceEventFromStream(
+      {
+        type: "run_item_stream_event",
+        name: "tool_output",
+        item: {
+          callId: "call_provider",
+          output: {
+            authorization: "Bearer hidden",
+            log: "database request timed out after 30 seconds",
+          },
+          rawItem: { status: "completed" },
+        },
+      } as never,
+      {},
+      at,
+    );
+
+    expect(event?.data).toEqual({
+      result: {
+        callId: "call_provider",
+        kind: "tool-result",
+        output: {
+          authorization: "[redacted]",
+          log: "database request timed out after 30 seconds",
+        },
+      },
+      status: "completed",
+    });
+  });
+
   it("ignores token-by-token model events", () => {
     expect(
       investigationTraceEventFromStream(

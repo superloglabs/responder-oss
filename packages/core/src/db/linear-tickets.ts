@@ -13,6 +13,16 @@ import {
   issues,
 } from "./schema.js";
 
+const retryableLinearTicketStatuses = ["pending", "failed"] as const;
+const linearTicketAttemptLimit = 6;
+
+function retryableLinearTicketRequestPredicate() {
+  return and(
+    inArray(issueLinearTickets.status, retryableLinearTicketStatuses),
+    lt(issueLinearTickets.attemptCount, linearTicketAttemptLimit),
+  );
+}
+
 export class LinearTicketError extends Error {
   constructor(
     message: string,
@@ -49,7 +59,7 @@ export async function listPendingLinearTicketRequests(input: {
       and(
         eq(issueLinearTickets.investigationId, input.investigationId),
         eq(investigations.organizationId, input.organizationId),
-        inArray(issueLinearTickets.status, ["pending", "creating", "failed"]),
+        retryableLinearTicketRequestPredicate(),
       ),
     )
     .orderBy(issueLinearTickets.createdAt);
@@ -65,7 +75,7 @@ export async function listLinearTicketRequestsForQueue(limit = 100) {
       and(
         eq(issueLinearTickets.status, "creating"),
         lt(issueLinearTickets.updatedAt, staleBefore),
-        lt(issueLinearTickets.attemptCount, 6),
+        lt(issueLinearTickets.attemptCount, linearTicketAttemptLimit),
       ),
     );
   return db
@@ -77,7 +87,7 @@ export async function listLinearTicketRequestsForQueue(limit = 100) {
     .from(issueLinearTickets)
     .where(
       and(
-        lt(issueLinearTickets.attemptCount, 6),
+        lt(issueLinearTickets.attemptCount, linearTicketAttemptLimit),
         eq(issueLinearTickets.status, "pending"),
       ),
     )
@@ -196,7 +206,7 @@ export async function fulfillLinearTicketRequest(input: {
     .where(
       and(
         eq(issueLinearTickets.id, request.id),
-        inArray(issueLinearTickets.status, ["pending", "creating", "failed"]),
+        retryableLinearTicketRequestPredicate(),
       ),
     )
     .returning({ id: issueLinearTickets.id });

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
+import { loadResponderSecrets } from "@responder/core/secrets";
 
-const secretsFile = process.env.RESPONDER_SECRETS_FILE;
-if (secretsFile) process.loadEnvFile(secretsFile);
+loadResponderSecrets();
 
 const { flushServerMonitoring, initializeServerMonitoring } = await import(
   "./monitoring.js"

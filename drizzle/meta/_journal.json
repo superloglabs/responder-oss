@@ -169,6 +169,13 @@
       "when": 1786970691972,
       "tag": "0023_black_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786974440481,
+      "tag": "0024_security_hardening",
+      "breakpoints": true
     }
   ]
 }

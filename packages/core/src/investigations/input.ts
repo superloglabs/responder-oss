@@ -7,7 +7,10 @@ export const investigationRequestSchema = z.object({
   externalEventId: z.string().min(1).max(512),
   title: z.string().min(1).max(500),
   body: z.string().min(1).max(100_000),
-  sourceUrl: z.url().optional(),
+  sourceUrl: z.url().refine(
+    (value) => ["http:", "https:"].includes(new URL(value).protocol),
+    "Investigation source URLs must use HTTP or HTTPS",
+  ).optional(),
   attributes: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
     .optional(),

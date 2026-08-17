@@ -5,13 +5,13 @@ const mocks = vi.hoisted(() => ({
   bossSend: vi.fn(),
   bossStart: vi.fn(),
   bossStop: vi.fn(),
+  claimIssuePullRequestForRemediation: vi.fn(),
   consumeInvestigation: vi.fn(),
   discardPendingInvestigation: vi.fn(),
   failInvestigation: vi.fn(),
   failIssuePullRequest: vi.fn(),
   getIssuePullRequestForRemediation: vi.fn(),
   getRuntimeAgentConfig: vi.fn(),
-  markIssuePullRequestStarted: vi.fn(),
   notifyBillingLimitReached: vi.fn(),
   prepareWorkerQueues: vi.fn(),
   setIssuePullRequestSession: vi.fn(),
@@ -33,10 +33,11 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
 }));
 
 vi.mock("../../../../packages/core/src/db/pull-requests.js", () => ({
+  claimIssuePullRequestForRemediation:
+    mocks.claimIssuePullRequestForRemediation,
   failIssuePullRequest: mocks.failIssuePullRequest,
   getIssuePullRequestForRemediation:
     mocks.getIssuePullRequestForRemediation,
-  markIssuePullRequestStarted: mocks.markIssuePullRequestStarted,
   setIssuePullRequestSession: mocks.setIssuePullRequestSession,
 }));
 
@@ -177,7 +178,7 @@ describe("investigation queue", () => {
     await expect(
       queueIssueRemediation(remediationRequest.requestId),
     ).rejects.toBe(error);
-    expect(mocks.markIssuePullRequestStarted).toHaveBeenCalledWith(
+    expect(mocks.claimIssuePullRequestForRemediation).toHaveBeenCalledWith(
       remediationRequest.requestId,
     );
     expect(mocks.failIssuePullRequest).toHaveBeenCalledWith(

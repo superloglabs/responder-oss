@@ -44,6 +44,28 @@ const vercelProjectsPageSchema = z.object({
   }).optional(),
 });
 
+const vercelConfigurationSchema = z.object({
+  deletedAt: z.number().nullish(),
+  disabledAt: z.number().nullish(),
+  id: z.string().min(1),
+  projectSelection: z.enum(["all", "selected"]),
+  projects: z.array(z.string().min(1)).optional().default([]),
+  scopes: z.array(z.string().min(1)),
+  slug: z.string().min(1),
+  status: z
+    .enum([
+      "error",
+      "onboarding",
+      "pending",
+      "ready",
+      "resumed",
+      "suspended",
+      "uninstalled",
+    ])
+    .optional(),
+  teamId: z.string().min(1).nullish(),
+});
+
 function vercelEnvironment() {
   const integrationSlug = process.env.VERCEL_INTEGRATION_SLUG;
   const clientId = process.env.VERCEL_CLIENT_ID;
@@ -226,4 +248,46 @@ export async function listVercelProjects(input: {
   }
 
   throw new Error("Vercel project pagination exceeded the safety limit");
+}
+
+export async function getVercelConfiguration(input: {
+  accessToken: string;
+  configurationId: string;
+  teamId: string | null;
+}) {
+  const { integrationSlug } = vercelEnvironment();
+  const configuration = vercelConfigurationSchema.parse(
+    await vercelGet(
+      vercelApiUrl(
+        `/v1/integrations/configuration/${encodeURIComponent(input.configurationId)}`,
+        input.teamId,
+      ),
+      input.accessToken,
+      "Unable to verify the Vercel installation",
+    ),
+  );
+  const configurationTeamId = configuration.teamId ?? null;
+  if (
+    configuration.id !== input.configurationId ||
+    configuration.slug !== integrationSlug ||
+    configurationTeamId !== input.teamId
+  ) {
+    throw new Error("The Vercel installation identity did not match");
+  }
+  if (
+    configuration.deletedAt != null ||
+    configuration.disabledAt != null ||
+    configuration.status === "error" ||
+    configuration.status === "suspended" ||
+    configuration.status === "uninstalled"
+  ) {
+    throw new Error("The Vercel installation is not active");
+  }
+  if (
+    configuration.projectSelection === "selected" &&
+    configuration.projects.length === 0
+  ) {
+    throw new Error("The Vercel installation has no selected projects");
+  }
+  return configuration;
 }

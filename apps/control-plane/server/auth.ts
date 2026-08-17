@@ -6,6 +6,7 @@ import {
   getAuthUserSupportIdentity,
   setPlatformRole,
   type AuthUserSupportIdentity,
+  type PlatformRole,
 } from "../../../packages/core/src/db/superusers.js";
 import {
   rememberedOrganizationId,
@@ -53,8 +54,18 @@ export function configuredSuperuserEmails(
   );
 }
 
+export function platformRoleForIdentity(
+  identity: Pick<AuthUserSupportIdentity, "email" | "emailVerified">,
+  superuserEmails: ReadonlySet<string>,
+): PlatformRole {
+  return identity.emailVerified &&
+    superuserEmails.has(identity.email.trim().toLowerCase())
+    ? "superuser"
+    : "user";
+}
+
 export function canImpersonateSupportUser(
-  target: AuthUserSupportIdentity | null,
+  target: Pick<AuthUserSupportIdentity, "banned" | "email" | "role"> | null,
   superuserEmails: ReadonlySet<string>,
 ): boolean {
   return Boolean(
@@ -68,11 +79,13 @@ export function canImpersonateSupportUser(
 async function synchronizeSuperuserRole(
   userId: string,
   email: string,
+  emailVerified: boolean,
   context: "session_create_before" | "user_create_after",
 ) {
-  const role = configuredSuperuserEmails().has(email.trim().toLowerCase())
-    ? "superuser"
-    : "user";
+  const role = platformRoleForIdentity(
+    { email, emailVerified },
+    configuredSuperuserEmails(),
+  );
   try {
     await setPlatformRole(userId, role);
   } catch (error) {
@@ -143,7 +156,12 @@ export function createResponderAuth() {
       user: {
         create: {
           after: async (user, context) => {
-            await synchronizeSuperuserRole(user.id, user.email, "user_create_after");
+            await synchronizeSuperuserRole(
+              user.id,
+              user.email,
+              user.emailVerified,
+              "user_create_after",
+            );
             const path = context?.path ?? "";
             const signupMethod = path.includes("google")
               ? "google"
@@ -177,6 +195,7 @@ export function createResponderAuth() {
               await synchronizeSuperuserRole(
                 session.userId,
                 identity.email,
+                identity.emailVerified,
                 "session_create_before",
               );
             }

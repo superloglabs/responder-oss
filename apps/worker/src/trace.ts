@@ -159,6 +159,7 @@ export function investigationTraceEventFromStream(
 
   if (event.name === "tool_called") {
     const callId = text(item.callId) ?? text(raw.callId) ?? text(raw.id);
+    const name = toolName(item, raw);
     return traceEvent(
       "actions.requested",
       {
@@ -167,7 +168,7 @@ export function investigationTraceEventFromStream(
             callId,
             input: safeTraceValue(toolInput(raw), environment),
             kind: "tool-call",
-            toolName: toolName(item, raw),
+            toolName: name,
           },
         ],
       },

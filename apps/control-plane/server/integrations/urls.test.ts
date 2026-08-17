@@ -26,4 +26,12 @@ describe("integration URLs", () => {
       "https://branch.responder.localhost/settings?integration=slack&status=connected",
     );
   });
+
+  it("rejects backslash-based cross-origin return paths", () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+
+    expect(settingsRedirect("/\\evil.example", "slack", "connected")).toBe(
+      "https://responder.example/settings?integration=slack&status=connected",
+    );
+  });
 });

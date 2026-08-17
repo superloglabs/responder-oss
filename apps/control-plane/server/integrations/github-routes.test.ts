@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
   consumeIntegrationConnectionState,
@@ -68,6 +68,10 @@ function configureGitHub() {
 }
 
 describe("GitHub integration routing", () => {
+  beforeEach(() => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();

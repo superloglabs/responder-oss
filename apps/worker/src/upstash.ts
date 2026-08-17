@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import {
@@ -20,6 +21,10 @@ const MCP_SCRIPT = join(
   dirname(require.resolve("@upstash/mcp-server/package.json")),
   "dist/index.js",
 );
+const UPSTASH_FETCH_GUARD = new URL(
+  "./upstash-fetch-guard.mjs",
+  import.meta.url,
+).href;
 
 export const UPSTASH_CONTEXT_MCP_TOOLS = [
   "util_timestamps_to_date",
@@ -54,17 +59,13 @@ const READ_ONLY_REDIS_COMMANDS = new Set([
   "GETRANGE",
   "HEXISTS",
   "HGET",
-  "HGETALL",
-  "HKEYS",
   "HLEN",
   "HMGET",
   "HSCAN",
   "HSTRLEN",
-  "HVALS",
   "INFO",
   "JSON.ARRLEN",
   "JSON.GET",
-  "JSON.OBJKEYS",
   "JSON.OBJLEN",
   "JSON.TYPE",
   "LINDEX",
@@ -73,12 +74,10 @@ const READ_ONLY_REDIS_COMMANDS = new Set([
   "MEMORY",
   "MGET",
   "OBJECT",
-  "PFCOUNT",
   "PTTL",
   "SCAN",
   "SCARD",
   "SISMEMBER",
-  "SMEMBERS",
   "SSCAN",
   "STRLEN",
   "TTL",
@@ -110,10 +109,147 @@ const READ_ONLY_OBJECT_SUBCOMMANDS = new Set([
   "REFCOUNT",
 ]);
 const SENSITIVE_KEY =
-  /api.?key|authorization|credential|header|password|secret|token/i;
+  /api.?key|authorization|credential|dsn|header|password|secret|token/i;
+const URI_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/giu;
 const REDACTED = "[redacted]";
 const MAX_OUTPUT_LENGTH = 100_000;
-const SAFE_RESOURCE_ID = /^[A-Za-z0-9_-]{1,500}$/;
+const MAX_REDIS_PIPELINE_BYTES = 65_536;
+const MAX_UPSTASH_CONCURRENCY = 2;
+const SAFE_RESOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,499}$/;
+const UPSTASH_LIST_LIMITS: Partial<
+  Record<string, { defaultCount: number; maximumCount: number }>
+> = {
+  qstash_dlq_list: { defaultCount: 25, maximumCount: 100 },
+  qstash_logs_list: { defaultCount: 25, maximumCount: 100 },
+  workflow_dlq_list: { defaultCount: 25, maximumCount: 100 },
+  workflow_logs_list: { defaultCount: 10, maximumCount: 10 },
+};
+const UPSTASH_STRING_LIMITS = {
+  callerIP: 500,
+  callerIp: 500,
+  cursor: 4_096,
+  failureCallbackState: 500,
+  messageId: 500,
+  queueName: 500,
+  scheduleId: 500,
+  topicName: 500,
+  url: 8_192,
+  workflowRunId: 500,
+  workflowUrl: 8_192,
+} as const;
+
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+  });
+}
+
+function isBoundedRedisRange(
+  start: number,
+  stop: number,
+  maximumSpan: number,
+): boolean {
+  const sameDirection =
+    (start >= 0 && stop >= 0) || (start < 0 && stop < 0);
+  return (
+    Number.isSafeInteger(start) &&
+    Number.isSafeInteger(stop) &&
+    sameDirection &&
+    stop >= start &&
+    stop - start < maximumSpan
+  );
+}
+
+let activeUpstashOperations = 0;
+const pendingUpstashOperations: Array<() => void> = [];
+
+async function withUpstashConcurrencyLimit<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (activeUpstashOperations >= MAX_UPSTASH_CONCURRENCY) {
+    await new Promise<void>((resolve) => pendingUpstashOperations.push(resolve));
+  } else {
+    activeUpstashOperations += 1;
+  }
+  try {
+    return await operation();
+  } finally {
+    const nextOperation = pendingUpstashOperations.shift();
+    if (nextOperation) nextOperation();
+    else activeUpstashOperations -= 1;
+  }
+}
+
+function isSensitiveUrlParameter(parameter: string): boolean {
+  const normalized = parameter.toLowerCase().replaceAll(/[^a-z0-9]+/g, "_");
+  if (
+    [
+      "access_token",
+      "api_key",
+      "authorization",
+      "code",
+      "credential",
+      "jwt",
+      "key",
+      "password",
+      "secret",
+      "session",
+      "session_id",
+      "sig",
+      "signature",
+      "token",
+    ].includes(normalized)
+  ) {
+    return true;
+  }
+  return (
+    /(?:^|_)(?:credential|password|secret|sig|signature|token)$/.test(
+      normalized,
+    ) ||
+    /(?:^|_)(?:api|private|signing|x_api)_?key$/.test(normalized)
+  );
+}
+
+function isSensitiveObjectKey(key: string): boolean {
+  if (SENSITIVE_KEY.test(key)) return true;
+  const normalized = key.toLowerCase().replaceAll(/[^a-z0-9]+/g, "_");
+  return (
+    normalized === "jwt" ||
+    /(?:private|signing)_?key$/.test(normalized) ||
+    /session_?(?:id|token)?$/.test(normalized) ||
+    /signature$/.test(normalized)
+  );
+}
+
+function sanitizedUri(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) url.username = REDACTED;
+    url.password = "";
+    if (url.hash) url.hash = REDACTED;
+    for (const key of new Set(url.searchParams.keys())) {
+      if (isSensitiveUrlParameter(key)) {
+        url.searchParams.set(key, REDACTED);
+      }
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+function sanitizedUris(value: string): string {
+  return value
+    .replace(URI_PATTERN, sanitizedUri)
+    .replace(
+      /([?&])([^=&#\s]+)=([^&#\s]*)/gu,
+      (match, separator: string, parameter: string) =>
+        isSensitiveUrlParameter(parameter)
+          ? `${separator}${parameter}=${REDACTED}`
+          : match,
+    );
+}
 
 function sanitizedString(value: string, secrets: readonly string[]): string {
   let sanitized = value;
@@ -130,8 +266,8 @@ function sanitizedString(value: string, secrets: readonly string[]): string {
       ? `${encoded.slice(0, MAX_OUTPUT_LENGTH)}\n[output truncated]`
       : encoded;
   } catch {
-    sanitized = sanitized.replace(
-      /((?:api.?key|authorization|credential|header|password|secret|token)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,}]+)/gi,
+    sanitized = sanitizedUris(sanitized).replace(
+      /((?:api.?key|authorization|credential|dsn|header|jwt|password|private[_-]?key|secret|session(?:[_-]?(?:id|token))?|signature|signing[_-]?key|token)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,}&]+)/gi,
       `$1${REDACTED}`,
     );
     return sanitized.length > MAX_OUTPUT_LENGTH
@@ -152,7 +288,7 @@ export function sanitizeUpstashOutput(
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        SENSITIVE_KEY.test(key)
+        isSensitiveObjectKey(key)
           ? REDACTED
           : sanitizeUpstashOutput(item, secrets),
       ]),
@@ -164,7 +300,11 @@ export function sanitizeUpstashOutput(
 export function validateUpstashRedisCommands(
   args: Record<string, unknown> | null,
 ): void {
-  if (!args || typeof args.database_id !== "string" || !args.database_id) {
+  if (
+    !args ||
+    typeof args.database_id !== "string" ||
+    !SAFE_RESOURCE_ID.test(args.database_id)
+  ) {
     throw new Error("A database_id is required for Redis inspection");
   }
   if ("database_rest_url" in args || "database_rest_token" in args) {
@@ -173,6 +313,15 @@ export function validateUpstashRedisCommands(
   const commands = args.commands;
   if (!Array.isArray(commands) || commands.length < 1 || commands.length > 20) {
     throw new Error("Redis inspection requires between 1 and 20 commands");
+  }
+  let encodedCommands: string;
+  try {
+    encodedCommands = JSON.stringify(commands);
+  } catch {
+    throw new Error("Redis commands have an invalid shape or size");
+  }
+  if (Buffer.byteLength(encodedCommands, "utf8") > MAX_REDIS_PIPELINE_BYTES) {
+    throw new Error("Redis inspection commands exceed the 64 KiB request limit");
   }
   for (const command of commands) {
     if (
@@ -196,12 +345,159 @@ export function validateUpstashRedisCommands(
     ) {
       throw new Error("Only read-only MEMORY subcommands are allowed");
     }
+    if (name === "MEMORY") {
+      if (subcommand === "USAGE") {
+        const samples = Number(command[4]);
+        if (
+          (command.length !== 3 && command.length !== 5) ||
+          (command.length === 5 &&
+            (command[3]?.toUpperCase() !== "SAMPLES" ||
+              !Number.isSafeInteger(samples) ||
+              samples < 1 ||
+              samples > 100))
+        ) {
+          throw new Error("MEMORY USAGE samples are limited to 100");
+        }
+      } else if (command.length !== 2) {
+        throw new Error(`MEMORY ${subcommand} does not accept arguments`);
+      }
+    }
     if (
       name === "OBJECT" &&
       (!subcommand || !READ_ONLY_OBJECT_SUBCOMMANDS.has(subcommand))
     ) {
       throw new Error("Only read-only OBJECT subcommands are allowed");
     }
+    if (name === "OBJECT" && command.length !== 3) {
+      throw new Error(`OBJECT ${subcommand} requires exactly one key`);
+    }
+    const upper = command.map((part) => part.toUpperCase());
+    const optionSearchStart =
+      name === "SCAN"
+        ? 2
+        : ["HSCAN", "SSCAN", "ZSCAN"].includes(name)
+          ? 3
+          : [
+                "LRANGE",
+                "XRANGE",
+                "XREVRANGE",
+                "ZRANGE",
+                "ZRANGEBYSCORE",
+                "ZREVRANGE",
+                "ZREVRANGEBYSCORE",
+              ].includes(name)
+            ? 4
+            : 2;
+    const boundedCount = (option: "COUNT" | "LIMIT") => {
+      const optionIndex = upper.indexOf(option, optionSearchStart);
+      if (optionIndex < 0) {
+        throw new Error(`Redis command ${name} requires a bounded ${option}`);
+      }
+      if (optionIndex !== upper.lastIndexOf(option)) {
+        throw new Error(`Redis command ${name} accepts only one ${option}`);
+      }
+      const countIndex = optionIndex + (option === "LIMIT" ? 2 : 1);
+      const count = Number(command[countIndex]);
+      if (!Number.isSafeInteger(count) || count < 1 || count > 100) {
+        throw new Error(`Redis command ${name} ${option} must be between 1 and 100`);
+      }
+      if (option === "LIMIT") {
+        const offset = Number(command[optionIndex + 1]);
+        if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10_000) {
+          throw new Error(`Redis command ${name} LIMIT offset is invalid`);
+        }
+      }
+      return optionIndex;
+    };
+    if (["SCAN", "HSCAN", "SSCAN", "ZSCAN"].includes(name)) {
+      boundedCount("COUNT");
+    }
+    let countOptionIndex: number | undefined;
+    if (["GEOSEARCH", "XRANGE", "XREVRANGE"].includes(name)) {
+      countOptionIndex = boundedCount("COUNT");
+    }
+    if (["ZRANGEBYSCORE", "ZREVRANGEBYSCORE"].includes(name)) {
+      boundedCount("LIMIT");
+    }
+    if (["LRANGE", "ZRANGE", "ZREVRANGE"].includes(name)) {
+      const usesScoreOrLexRange =
+        name !== "LRANGE" &&
+        (upper.slice(4).includes("BYSCORE") ||
+          upper.slice(4).includes("BYLEX"));
+      if (usesScoreOrLexRange) {
+        boundedCount("LIMIT");
+      } else {
+        const start = Number(command[2]);
+        const stop = Number(command[3]);
+        if (!isBoundedRedisRange(start, stop, 100)) {
+          throw new Error(`Redis command ${name} range is limited to 100 items`);
+        }
+      }
+    }
+    if (
+      name === "GEOSEARCH" &&
+      (countOptionIndex === undefined ||
+        upper[countOptionIndex + 2] !== "ANY")
+    ) {
+      throw new Error("Redis command GEOSEARCH requires COUNT with ANY");
+    }
+    if (
+      name === "XINFO" &&
+      (subcommand !== "STREAM" || command.length !== 3)
+    ) {
+      throw new Error("Only bounded XINFO STREAM inspection is allowed");
+    }
+    if (name === "GETRANGE") {
+      const start = Number(command[2]);
+      const stop = Number(command[3]);
+      if (
+        command.length !== 4 ||
+        !isBoundedRedisRange(start, stop, 65_536)
+      ) {
+        throw new Error("Redis command GETRANGE is limited to 64 KiB");
+      }
+    }
+    if (name === "BITCOUNT") {
+      const start = Number(command[2]);
+      const stop = Number(command[3]);
+      const unit = (command[4] ?? "BYTE").toUpperCase();
+      const maximumSpan = unit === "BIT" ? 65_536 * 8 : 65_536;
+      if (
+        (command.length !== 4 && command.length !== 5) ||
+        (unit !== "BYTE" && unit !== "BIT") ||
+        !isBoundedRedisRange(start, stop, maximumSpan)
+      ) {
+        throw new Error("Redis command BITCOUNT is limited to 64 KiB");
+      }
+    }
+    const maximumCollectionArguments =
+      name === "EXISTS" || name === "MGET"
+        ? 21
+        : ["GEOHASH", "GEOPOS", "HMGET", "JSON.GET", "ZMSCORE"].includes(
+              name,
+            )
+          ? 22
+          : undefined;
+    if (
+      maximumCollectionArguments !== undefined &&
+      command.length > maximumCollectionArguments
+    ) {
+      throw new Error(`Redis command ${name} is limited to 20 values`);
+    }
+  }
+}
+
+function validateUpstashFilterUrl(parameter: string, value: string): void {
+  // These are exact-match filters sent to Upstash's HTTPS API, not network
+  // destinations fetched by the worker. HTTP callback URLs are valid log data.
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`The Upstash ${parameter} is invalid`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`The Upstash ${parameter} is invalid`);
   }
 }
 
@@ -209,13 +505,16 @@ function validateUpstashMcpArgs(
   toolName: string,
   args: Record<string, unknown> | null,
 ): void {
-  if (
-    toolName.startsWith("redis_database_") &&
-    args?.database_id !== undefined &&
-    (typeof args.database_id !== "string" ||
-      !SAFE_RESOURCE_ID.test(args.database_id))
-  ) {
-    throw new Error("The Upstash database_id is invalid");
+  if (toolName.startsWith("redis_database_")) {
+    for (const parameter of ["database_id", "id"] as const) {
+      const value = args?.[parameter];
+      if (
+        value !== undefined &&
+        (typeof value !== "string" || !SAFE_RESOURCE_ID.test(value))
+      ) {
+        throw new Error(`The Upstash ${parameter} is invalid`);
+      }
+    }
   }
   if (
     (toolName === "qstash_dlq_get" || toolName === "workflow_dlq_get") &&
@@ -227,6 +526,33 @@ function validateUpstashMcpArgs(
     validateUpstashRedisCommands(args);
   }
   if (!toolName.startsWith("qstash_") && !toolName.startsWith("workflow_")) {
+    if (toolName === "util_timestamps_to_date") {
+      const timestamps = args?.timestamps;
+      if (
+        !Array.isArray(timestamps) ||
+        timestamps.length > 100 ||
+        timestamps.some(
+          (value) => typeof value !== "number" || !Number.isFinite(value),
+        )
+      ) {
+        throw new Error("Upstash timestamp conversion is limited to 100 values");
+      }
+    }
+    if (toolName === "util_dates_to_timestamps") {
+      const dates = args?.dates;
+      if (
+        !Array.isArray(dates) ||
+        dates.length > 100 ||
+        dates.some(
+          (value) =>
+            typeof value !== "string" ||
+            value.length > 100 ||
+            containsControlCharacter(value),
+        )
+      ) {
+        throw new Error("Upstash date conversion is limited to 100 values");
+      }
+    }
     return;
   }
   if (args && ("qstash_creds" in args || "local_mode_port" in args)) {
@@ -248,6 +574,46 @@ function validateUpstashMcpArgs(
   ) {
     throw new Error("QStash and Workflow list requests are limited to 100 items");
   }
+  for (const [parameter, maximum] of Object.entries(UPSTASH_STRING_LIMITS)) {
+    const value = args?.[parameter];
+    if (
+      value !== undefined &&
+      (typeof value !== "string" ||
+        value.length < 1 ||
+        value.length > maximum ||
+        containsControlCharacter(value))
+    ) {
+      throw new Error(`The Upstash ${parameter} is invalid`);
+    }
+    if (
+      typeof value === "string" &&
+      (parameter === "url" || parameter === "workflowUrl")
+    ) {
+      validateUpstashFilterUrl(parameter, value);
+    }
+  }
+}
+
+function normalizedUpstashMcpArgs(
+  toolName: string,
+  args: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const limits = UPSTASH_LIST_LIMITS[toolName];
+  if (!limits) return args;
+  const normalized = { ...(args ?? {}) };
+  const count = normalized.count ?? limits.defaultCount;
+  if (
+    typeof count !== "number" ||
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > limits.maximumCount
+  ) {
+    throw new Error(
+      `Upstash ${toolName} requests are limited to ${limits.maximumCount} items`,
+    );
+  }
+  normalized.count = count;
+  return normalized;
 }
 
 function scopeUpstashMcpTool(
@@ -279,6 +645,58 @@ function scopeUpstashMcpTool(
         enum: ["eu", "us"],
       };
     }
+    if (properties.count && typeof properties.count === "object") {
+      const limits = UPSTASH_LIST_LIMITS[item.name];
+      properties.count = {
+        ...(properties.count as Record<string, unknown>),
+        ...(limits
+          ? {
+              default: limits.defaultCount,
+              maximum: limits.maximumCount,
+            }
+          : {}),
+        minimum: 1,
+      };
+    }
+    for (const [parameter, maximum] of Object.entries(UPSTASH_STRING_LIMITS)) {
+      if (properties[parameter] && typeof properties[parameter] === "object") {
+        properties[parameter] = {
+          ...(properties[parameter] as Record<string, unknown>),
+          maxLength: maximum,
+          minLength: 1,
+          ...(parameter === "url" || parameter === "workflowUrl"
+            ? { pattern: "^https?://" }
+            : {}),
+        };
+      }
+    }
+  }
+  for (const parameter of ["database_id", "id", "dlqId"] as const) {
+    if (properties[parameter] && typeof properties[parameter] === "object") {
+      properties[parameter] = {
+        ...(properties[parameter] as Record<string, unknown>),
+        maxLength: 500,
+        minLength: 1,
+        pattern: SAFE_RESOURCE_ID.source,
+      };
+    }
+  }
+  if (item.name === "util_timestamps_to_date" && properties.timestamps) {
+    properties.timestamps = {
+      ...(properties.timestamps as Record<string, unknown>),
+      maxItems: 100,
+    };
+  }
+  if (item.name === "util_dates_to_timestamps" && properties.dates) {
+    const dates = properties.dates as Record<string, unknown>;
+    properties.dates = {
+      ...dates,
+      items: {
+        ...((dates.items as Record<string, unknown> | undefined) ?? {}),
+        maxLength: 100,
+      },
+      maxItems: 100,
+    };
   }
   const required = Array.isArray(schema.required)
     ? schema.required.filter(
@@ -364,9 +782,12 @@ export class ScopedUpstashMcpServer implements MCPServer {
     if (!UPSTASH_CONTEXT_MCP_TOOL_SET.has(toolName)) {
       throw new Error(`Upstash tool ${toolName} is not available during investigations`);
     }
-    validateUpstashMcpArgs(toolName, args);
+    const normalizedArgs = normalizedUpstashMcpArgs(toolName, args);
+    validateUpstashMcpArgs(toolName, normalizedArgs);
     try {
-      const result = await this.server.callTool(toolName, args, meta, options);
+      const result = await withUpstashConcurrencyLimit(() =>
+        this.server.callTool(toolName, normalizedArgs, meta, options),
+      );
       return sanitizeMcpResult(result, [this.connection.apiKey]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -393,6 +814,8 @@ export function createUpstashMcpServer(
       // mode. Keep the isolated child quiet so inspected Redis values never
       // reach worker logs.
       NODE_ENV: "test",
+      NODE_OPTIONS: `--max-old-space-size=128 --import=${UPSTASH_FETCH_GUARD}`,
+      RESPONDER_UPSTASH_FETCH_GUARD: "1",
       UPSTASH_API_KEY: connection.apiKey,
       UPSTASH_EMAIL: connection.email,
     },
@@ -411,37 +834,40 @@ export type UpstashCliRunner = (
   connection: RuntimeUpstashConnection,
 ) => Promise<unknown>;
 
-export const runUpstashCli: UpstashCliRunner = async (args, connection) => {
-  const output = await new Promise<string>((resolve, reject) => {
-    execFile(
-      process.execPath,
-      [CLI_SCRIPT, ...args],
-      {
-        cwd: dirname(CLI_SCRIPT),
-        encoding: "utf8",
-        env: {
-          NODE_ENV: "production",
-          NO_COLOR: "1",
-          UPSTASH_API_KEY: connection.apiKey,
-          UPSTASH_EMAIL: connection.email,
+export const runUpstashCli: UpstashCliRunner = (args, connection) =>
+  withUpstashConcurrencyLimit(async () => {
+    const output = await new Promise<string>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        [CLI_SCRIPT, ...args],
+        {
+          cwd: dirname(CLI_SCRIPT),
+          encoding: "utf8",
+          env: {
+            NODE_ENV: "production",
+            NODE_OPTIONS: `--max-old-space-size=128 --import=${UPSTASH_FETCH_GUARD}`,
+            NO_COLOR: "1",
+            RESPONDER_UPSTASH_FETCH_GUARD: "1",
+            UPSTASH_API_KEY: connection.apiKey,
+            UPSTASH_EMAIL: connection.email,
+          },
+          maxBuffer: 1_000_000,
+          timeout: 30_000,
         },
-        maxBuffer: 1_000_000,
-        timeout: 30_000,
-      },
-      (error, stdout) => {
-        if (error) reject(new Error("Upstash CLI request failed"));
-        else resolve(stdout);
-      },
-    );
+        (error, stdout) => {
+          if (error) reject(new Error("Upstash CLI request failed"));
+          else resolve(stdout);
+        },
+      );
+    });
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(output);
+    } catch {
+      parsed = output;
+    }
+    return sanitizeUpstashOutput(parsed, [connection.apiKey]);
   });
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    parsed = output;
-  }
-  return sanitizeUpstashOutput(parsed, [connection.apiKey]);
-};
 
 const resourceTypeSchema = z.enum([
   "redis",

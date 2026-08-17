@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNotNull, lte } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   integrationAccounts,
@@ -33,7 +33,16 @@ export async function createIntegrationConnectionState(input: {
     ? `responder-v1.${Buffer.from(input.routingUrl).toString("base64url")}.${nonce}`
     : nonce;
 
-  await getDatabase()
+  const database = getDatabase();
+  const expiresAt = new Date(Date.now() + CONNECTION_STATE_TTL_MS);
+
+  // Bound abandoned OAuth attempts. The unique owner/provider index keeps one
+  // live flow even when the same user starts requests concurrently, while the
+  // indexed prune prevents expired rows from accumulating across tenants.
+  await database
+    .delete(integrationConnectionStates)
+    .where(lte(integrationConnectionStates.expiresAt, new Date()));
+  await database
     .insert(integrationConnectionStates)
     .values({
       stateHash: hashConnectionState(state),
@@ -43,7 +52,22 @@ export async function createIntegrationConnectionState(input: {
       codeVerifier: input.codeVerifier,
       metadata: input.metadata ?? {},
       returnTo: input.returnTo ?? "/settings",
-      expiresAt: new Date(Date.now() + CONNECTION_STATE_TTL_MS),
+      expiresAt,
+    })
+    .onConflictDoUpdate({
+      target: [
+        integrationConnectionStates.organizationId,
+        integrationConnectionStates.userId,
+        integrationConnectionStates.provider,
+      ],
+      set: {
+        stateHash: hashConnectionState(state),
+        codeVerifier: input.codeVerifier ?? null,
+        metadata: input.metadata ?? {},
+        returnTo: input.returnTo ?? "/settings",
+        expiresAt,
+        createdAt: new Date(),
+      },
     });
 
   return state;
@@ -52,6 +76,7 @@ export async function createIntegrationConnectionState(input: {
 export async function consumeIntegrationConnectionState(
   provider: IntegrationProvider,
   state: string,
+  tenant: { organizationId: string; userId: string },
 ): Promise<{
   organizationId: string;
   userId: string;
@@ -65,6 +90,8 @@ export async function consumeIntegrationConnectionState(
       and(
         eq(integrationConnectionStates.stateHash, hashConnectionState(state)),
         eq(integrationConnectionStates.provider, provider),
+        eq(integrationConnectionStates.organizationId, tenant.organizationId),
+        eq(integrationConnectionStates.userId, tenant.userId),
         gt(integrationConnectionStates.expiresAt, new Date()),
       ),
     )

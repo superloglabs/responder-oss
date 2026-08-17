@@ -13,8 +13,20 @@ describe("custom MCP security", () => {
     "https://127.0.0.1/mcp",
     "https://10.0.0.4/mcp",
     "https://[::1]/mcp",
+    "https://[ff02::1]/mcp",
+    "https://[fec0::1]/mcp",
+    "https://[64:ff9b::a9fe:a9fe]/mcp",
+    "https://[::7f00:1]/mcp",
+    "https://[::ffff:127.0.0.1]/mcp",
+    "https://[4000::1]/mcp",
   ])("rejects private endpoint %s", async (url) => {
     await expect(validateCustomMcpUrl(url)).rejects.toThrow(/public|HTTPS/);
+  });
+
+  it("allows ordinary global-unicast IPv6 literals", async () => {
+    await expect(
+      validateCustomMcpUrl("https://[2607:f8b0:4005:805::200e]/mcp"),
+    ).resolves.toMatchObject({ protocol: "https:" });
   });
 
   it("allows local HTTP endpoints only when explicitly enabled", async () => {

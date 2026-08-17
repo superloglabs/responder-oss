@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import * as Sentry from "@sentry/hono/node";
 import { createHash } from "node:crypto";
 import { verifyBearerToken } from "../../../packages/core/src/auth/internal.js";
@@ -10,6 +11,7 @@ import {
   canImpersonateSupportUser,
   configuredSuperuserEmails,
   getAuth,
+  platformRoleForIdentity,
 } from "./auth.js";
 import { billingRoutes } from "./billing/routes.js";
 import { integrationRoutes } from "./integrations/routes.js";
@@ -22,6 +24,11 @@ import { slackWebhookRoutes } from "./webhooks/slack.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
+
+export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+// GitHub accepts webhook deliveries up to 25 MiB. Keep signed provider
+// callbacks compatible while retaining a finite in-process buffering bound.
+export const MAX_WEBHOOK_REQUEST_BODY_BYTES = 25 * 1024 * 1024;
 
 export function sessionCookieFingerprint(cookieHeader: string): string {
   const match =
@@ -80,7 +87,10 @@ async function handleAuthRequest(request: Request): Promise<Response> {
   if (
     requiresSuperuser &&
     (!sessionBefore ||
-      !configuredSuperuserEmails().has(sessionBefore.user.email.toLowerCase()))
+      platformRoleForIdentity(
+        sessionBefore.user,
+        configuredSuperuserEmails(),
+      ) !== "superuser")
   ) {
     console.info(
       JSON.stringify({
@@ -211,6 +221,36 @@ async function handleAuthRequest(request: Request): Promise<Response> {
 }
 
 const instrumentedApp = new Hono();
+function requestBodyLimit(maxSize: number) {
+  return bodyLimit({
+    maxSize,
+    onError: (context) => {
+      console.warn(
+        JSON.stringify({
+          contentLength: context.req.header("content-length") ?? null,
+          event: "request_body_too_large",
+          maxBytes: maxSize,
+          pathname: context.req.path,
+        }),
+      );
+      return context.json({ error: "Request body too large" }, 413);
+    },
+  });
+}
+
+const apiBodyLimit = requestBodyLimit(MAX_REQUEST_BODY_BYTES);
+const githubWebhookBodyLimit = requestBodyLimit(
+  MAX_WEBHOOK_REQUEST_BODY_BYTES,
+);
+const githubWebhookPaths = new Set([
+  "/api/webhooks/github",
+  "/api/webhooks/github/",
+]);
+instrumentedApp.use("*", (context, next) =>
+  githubWebhookPaths.has(context.req.path)
+    ? githubWebhookBodyLimit(context, next)
+    : apiBodyLimit(context, next),
+);
 if (Sentry.isInitialized()) {
   instrumentedApp.use(Sentry.sentry(instrumentedApp));
   instrumentedApp.use(async (_context, next) => {
@@ -239,7 +279,7 @@ export const app = instrumentedApp
     const superuserEmails = configuredSuperuserEmails();
     if (
       !session ||
-      !superuserEmails.has(session.user.email.trim().toLowerCase())
+      platformRoleForIdentity(session.user, superuserEmails) !== "superuser"
     ) {
       return context.json({ error: "Forbidden" }, 403);
     }

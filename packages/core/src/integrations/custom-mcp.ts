@@ -1,5 +1,6 @@
+import type { LookupAddress } from "node:dns";
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { Readable } from "node:stream";
 import {
   auth,
   type OAuthClientProvider,
@@ -12,10 +13,15 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import ipaddr from "ipaddr.js";
+import { Agent, fetch as undiciFetch } from "undici";
 import { z } from "zod";
 
 const MAX_REDIRECTS = 5;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
+const IPV4_COMPATIBLE_IPV6_RANGE = ipaddr.parseCIDR("::/96");
+const GLOBAL_UNICAST_IPV6_RANGE = ipaddr.parseCIDR("2000::/3");
 
 export interface StoredCustomMcpOAuthState {
   clientInformation?: OAuthClientInformationMixed;
@@ -153,46 +159,17 @@ export class CustomMcpOAuthProvider implements OAuthClientProvider {
   }
 }
 
-function ipv4IsPublic(address: string): boolean {
-  const octets = address.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet))) {
+function addressIsPublic(address: string): boolean {
+  if (!ipaddr.isValid(address)) return false;
+  const parsed = ipaddr.parse(address);
+  if (
+    parsed.kind() === "ipv6" &&
+    (parsed.match(IPV4_COMPATIBLE_IPV6_RANGE) ||
+      !parsed.match(GLOBAL_UNICAST_IPV6_RANGE))
+  ) {
     return false;
   }
-  const [a, b, c] = octets as [number, number, number, number];
-  return !(
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 0) ||
-    (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113) ||
-    a >= 224
-  );
-}
-
-function addressIsPublic(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) return ipv4IsPublic(address);
-  if (family !== 6) return false;
-
-  const normalized = address.toLowerCase();
-  if (normalized.startsWith("::ffff:")) {
-    return ipv4IsPublic(normalized.slice("::ffff:".length));
-  }
-  return !(
-    normalized === "::" ||
-    normalized === "::1" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    /^fe[89ab]/.test(normalized) ||
-    normalized.startsWith("2001:db8:")
-  );
+  return parsed.range() === "unicast";
 }
 
 function localHostname(hostname: string): boolean {
@@ -208,9 +185,21 @@ function localHostname(hostname: string): boolean {
 
 export async function validateCustomMcpUrl(
   input: string | URL,
-  options: { allowLocal?: boolean } = {},
+  options: { allowLocal?: boolean; signal?: AbortSignal } = {},
 ): Promise<URL> {
-  const url = input instanceof URL ? new URL(input) : new URL(input);
+  return (await resolveCustomMcpUrl(input, options)).url;
+}
+
+interface ResolvedCustomMcpUrl {
+  addresses: LookupAddress[];
+  url: URL;
+}
+
+async function resolveCustomMcpUrl(
+  input: string | URL,
+  options: { allowLocal?: boolean; signal?: AbortSignal } = {},
+): Promise<ResolvedCustomMcpUrl> {
+  const url = new URL(input);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
   if (url.username || url.password) {
     throw new Error("MCP URLs cannot contain credentials");
@@ -221,24 +210,161 @@ export async function validateCustomMcpUrl(
     throw new Error("MCP URLs must use HTTPS");
   }
 
-  if (localAllowed) return url;
   if (localHostname(hostname)) {
-    throw new Error("MCP URLs must use a public host");
+    if (!localAllowed) throw new Error("MCP URLs must use a public host");
   }
 
-  const literalFamily = isIP(hostname);
-  if (literalFamily) {
-    if (!addressIsPublic(hostname)) {
+  if (ipaddr.isValid(hostname)) {
+    if (!localAllowed && !addressIsPublic(hostname)) {
       throw new Error("MCP URLs must use a public host");
     }
-    return url;
+    return {
+      addresses: [
+        {
+          address: hostname,
+          family: ipaddr.parse(hostname).kind() === "ipv4" ? 4 : 6,
+        },
+      ],
+      url,
+    };
   }
 
-  const addresses = await lookup(hostname, { all: true, verbatim: true });
-  if (addresses.length === 0 || addresses.some(({ address }) => !addressIsPublic(address))) {
+  const lookupSignal = options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const addresses = await new Promise<LookupAddress[]>((resolve, reject) => {
+    const aborted = () => {
+      reject(lookupSignal.reason ?? new Error("MCP DNS lookup was aborted"));
+    };
+    if (lookupSignal.aborted) {
+      aborted();
+      return;
+    }
+    lookupSignal.addEventListener("abort", aborted, { once: true });
+    void lookup(hostname, { all: true, verbatim: true }).then(
+      (result) => {
+        lookupSignal.removeEventListener("abort", aborted);
+        resolve(result);
+      },
+      (error: unknown) => {
+        lookupSignal.removeEventListener("abort", aborted);
+        reject(error);
+      },
+    );
+  });
+  if (
+    addresses.length === 0 ||
+    (!localAllowed &&
+      addresses.some(({ address }) => !addressIsPublic(address)))
+  ) {
     throw new Error("MCP URLs must resolve only to public addresses");
   }
-  return url;
+  return {
+    addresses: addresses.map(({ address }) => ({
+      address,
+      family: ipaddr.parse(address).kind() === "ipv4" ? 4 : 6,
+    })),
+    url,
+  };
+}
+
+function pinnedAddressAgent(target: ResolvedCustomMcpUrl): Agent {
+  const expectedHostname = target.url.hostname.replace(/^\[|\]$/g, "");
+  const approvedAddresses = [...target.addresses].sort(
+    (left, right) => left.family - right.family,
+  );
+  if (approvedAddresses.length === 0) {
+    throw new Error("MCP URLs must resolve only to public addresses");
+  }
+
+  return new Agent({
+    connect: {
+      lookup(hostname, options, callback) {
+        const actualHostname = hostname.toLowerCase().replace(/\.$/, "");
+        if (actualHostname !== expectedHostname.toLowerCase().replace(/\.$/, "")) {
+          const error = new Error("MCP request hostname changed after validation");
+          Object.assign(error, { code: "EAI_FAIL" });
+          callback(error, "", 0);
+          return;
+        }
+        if (options.all) {
+          callback(null, approvedAddresses);
+          return;
+        }
+        const requestedFamily = Number(options.family) || 0;
+        const selectedAddress = requestedFamily
+          ? approvedAddresses.find(({ family }) => family === requestedFamily)
+          : approvedAddresses[0];
+        if (!selectedAddress) {
+          const error = new Error("No approved MCP address matches the requested family");
+          Object.assign(error, { code: "EAI_ADDRFAMILY" });
+          callback(error, "", 0);
+          return;
+        }
+        callback(null, selectedAddress.address, selectedAddress.family);
+      },
+      // The socket connects to the pinned address, but TLS must authenticate the
+      // hostname from the requested URL and send that hostname through SNI.
+      ...(ipaddr.isValid(expectedHostname)
+        ? {}
+        : { servername: expectedHostname }),
+    },
+    maxResponseSize: MAX_RESPONSE_BYTES,
+  });
+}
+
+async function fetchPinnedRequest(
+  request: Request,
+  dispatcher: Agent,
+): Promise<Response> {
+  const body = request.body
+    ? Readable.fromWeb(request.body as import("node:stream/web").ReadableStream)
+    : undefined;
+  const headers = new Headers(request.headers);
+  // Undici transparently decompresses response bodies. Ask the peer not to
+  // compress, then still count decoded bytes below because an untrusted server
+  // can ignore this request header.
+  headers.set("accept-encoding", "identity");
+  try {
+    const response = await undiciFetch(request.url, {
+      ...(body ? { body, duplex: "half" as const } : {}),
+      dispatcher,
+      headers,
+      method: request.method,
+      redirect: "manual",
+      signal: request.signal,
+    });
+    let decodedBytes = 0;
+    const responseBody = response.body as unknown as ReadableStream<Uint8Array> | null;
+    const limitedBody = responseBody
+      ? responseBody.pipeThrough(
+          new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              decodedBytes += chunk.byteLength;
+              if (decodedBytes > MAX_RESPONSE_BYTES) {
+                const error = new Error(
+                  `MCP response exceeds ${MAX_RESPONSE_BYTES} decoded bytes`,
+                );
+                void dispatcher.destroy(error).catch(() => undefined);
+                controller.error(error);
+                return;
+              }
+              controller.enqueue(chunk);
+            },
+          }),
+        )
+      : null;
+    // Keep the public fetch contract (including `instanceof Response`) for the
+    // MCP SDK while the underlying body remains attached to the pinned agent.
+    // The agent-level limit bounds compressed wire bytes; this stream bounds
+    // decoded bytes before JSON parsing or other buffering can amplify them.
+    return new Response(limitedBody as ReadableStream | null, {
+      headers: new Headers(response.headers as unknown as HeadersInit),
+      status: response.status,
+      statusText: response.statusText,
+    });
+  } catch (error) {
+    await dispatcher.destroy(error instanceof Error ? error : null);
+    throw error;
+  }
 }
 
 export async function safeCustomMcpFetch(
@@ -254,20 +380,33 @@ export async function safeCustomMcpFetch(
   });
   let redirects = 0;
   while (true) {
-    await validateCustomMcpUrl(request.url, {
+    const target = await resolveCustomMcpUrl(request.url, {
       allowLocal: process.env.NODE_ENV !== "production",
+      signal: request.signal,
     });
     const redirectRequest = request.clone();
-    const response = await fetch(request, { redirect: "manual" });
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const dispatcher = pinnedAddressAgent(target);
+    const response = await fetchPinnedRequest(request, dispatcher);
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      void dispatcher.close().catch(() => undefined);
+      return response;
+    }
 
     const location = response.headers.get("location");
-    if (!location) return response;
+    if (!location) {
+      void dispatcher.close().catch(() => undefined);
+      return response;
+    }
+    await response.body?.cancel();
+    await dispatcher.close();
     if (redirects >= MAX_REDIRECTS) {
       throw new Error("MCP request redirected too many times");
     }
     redirects += 1;
     const nextUrl = new URL(location, request.url);
+    if (nextUrl.origin !== new URL(request.url).origin) {
+      throw new Error("MCP requests cannot redirect to another origin");
+    }
     const switchToGet =
       response.status === 303 ||
       ((response.status === 301 || response.status === 302) && request.method === "POST");
@@ -278,11 +417,6 @@ export async function safeCustomMcpFetch(
           signal: redirectRequest.signal,
         })
       : new Request(nextUrl, redirectRequest);
-    if (nextUrl.origin !== new URL(request.url).origin) {
-      redirectedRequest.headers.delete("authorization");
-      redirectedRequest.headers.delete("cookie");
-      redirectedRequest.headers.delete("proxy-authorization");
-    }
     request = redirectedRequest;
   }
 }

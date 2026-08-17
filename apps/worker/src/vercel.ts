@@ -436,12 +436,12 @@ const parameterValueSchema = z.union([
 export function createVercelTools(connections: RuntimeVercelConnection[]) {
   if (connections.length === 0) return [];
   const accountDescription = connections
-    .map((connection) => `${connection.accountId}: ${connection.displayName}`)
+    .map((connection) => connection.accountId)
     .join(", ");
   const searchVercelApi = tool({
     name: "search_vercel_api",
     description:
-      "Search the read-only Vercel REST API catalog before making a Vercel API call. Secret, token, and environment-value operations are excluded.",
+      "Search the read-only Vercel REST API catalog before making an API call. Secret, token, and environment-value operations are excluded.",
     parameters: z.object({
       query: z.string().trim().max(500).default(""),
       limit: z.number().int().min(1).max(20).default(8),

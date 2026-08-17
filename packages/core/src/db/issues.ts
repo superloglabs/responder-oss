@@ -22,12 +22,14 @@ import {
   investigationIssues,
   investigations,
   issueLinearTickets,
-  issuePullRequests,
   issues,
   type AgentPrMode,
   type InvestigationSlackTraceItem,
 } from "./schema.js";
-import { getIssuePullRequestState } from "./pull-requests.js";
+import {
+  getIssuePullRequestState,
+  queueAutomaticIssuePullRequests,
+} from "./pull-requests.js";
 
 export interface IssueEmbedding {
   model: string;
@@ -140,7 +142,8 @@ export async function submitInvestigationReport(input: {
           eq(investigations.organizationId, input.organizationId),
         ),
       )
-      .limit(1);
+      .limit(1)
+      .for("update", { of: investigations });
     const investigation = investigationRows[0];
     if (!investigation) throw new Error("Investigation not found");
     if (
@@ -256,46 +259,14 @@ export async function submitInvestigationReport(input: {
     const candidatePullRequestIssueIds = references.map(
       (reference) => reference.issueId,
     );
-    const existingPullRequestIssueIds =
-      investigation.prMode === "always" &&
-      candidatePullRequestIssueIds.length > 0
-        ? new Set(
-            (
-              await tx
-                .select({ issueId: issuePullRequests.issueId })
-                .from(issuePullRequests)
-                .where(
-                  and(
-                    inArray(
-                      issuePullRequests.issueId,
-                      candidatePullRequestIssueIds,
-                    ),
-                    inArray(issuePullRequests.status, [
-                      "queued",
-                      "creating",
-                      "created",
-                    ]),
-                  ),
-                )
-            ).map((request) => request.issueId),
-          )
-        : new Set<string>();
-    const automaticPullRequestIssueIds = candidatePullRequestIssueIds.filter(
-      (issueId) => !existingPullRequestIssueIds.has(issueId),
-    );
     const automaticPullRequestRequests =
       investigation.prMode === "always" &&
-      automaticPullRequestIssueIds.length > 0
-        ? await tx
-            .insert(issuePullRequests)
-            .values(
-              automaticPullRequestIssueIds.map((issueId) => ({
-                issueId,
-                investigationId: input.investigationId,
-                agentConfigVersionId: investigation.agentConfigVersionId,
-              })),
-            )
-            .returning({ id: issuePullRequests.id })
+      candidatePullRequestIssueIds.length > 0
+        ? await queueAutomaticIssuePullRequests(tx, {
+            agentConfigVersionId: investigation.agentConfigVersionId,
+            investigationId: input.investigationId,
+            issueIds: candidatePullRequestIssueIds,
+          })
         : [];
     const newIssueIds = references.flatMap((reference) =>
       reference.relationship === "new" ? [reference.issueId] : [],
@@ -326,7 +297,13 @@ export async function submitInvestigationReport(input: {
         completedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(investigations.id, input.investigationId));
+      .where(
+        and(
+          eq(investigations.id, input.investigationId),
+          eq(investigations.organizationId, input.organizationId),
+          inArray(investigations.status, ["pending", "investigating"]),
+        ),
+      );
 
     return {
       report,
@@ -367,7 +344,7 @@ export async function submitInvestigationReport(input: {
       markdown,
       automaticPullRequestIssueIds:
         investigation.prMode === "always"
-          ? automaticPullRequestIssueIds
+          ? automaticPullRequestRequests.map((request) => request.issueId)
           : [],
       automaticPullRequestRequestIds: automaticPullRequestRequests.map(
         (request) => request.id,

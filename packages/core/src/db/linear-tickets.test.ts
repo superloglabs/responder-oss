@@ -1,4 +1,4 @@
-import { getTableConfig } from "drizzle-orm/pg-core";
+import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createLinearIssue,
@@ -9,6 +9,7 @@ import { getDatabase } from "./client.js";
 import { getRuntimeLinearConnection } from "./investigations.js";
 import {
   fulfillLinearTicketRequest,
+  listPendingLinearTicketRequests,
   LinearTicketError,
 } from "./linear-tickets.js";
 import { issueLinearTickets } from "./schema.js";
@@ -47,7 +48,10 @@ const request = {
   linearIssueUrl: null,
 };
 
-function databaseDouble(rows: unknown[]) {
+function databaseDouble(
+  rows: unknown[],
+  claimedRows: Array<{ id: string }> = [{ id: scope.requestId }],
+) {
   const limit = vi.fn().mockResolvedValue(rows);
   const innerJoin = vi.fn();
   const query = {
@@ -56,11 +60,15 @@ function databaseDouble(rows: unknown[]) {
   };
   innerJoin.mockReturnValue(query);
   const finalWhere = vi.fn().mockResolvedValue(undefined);
-  const returning = vi.fn().mockResolvedValue([{ id: scope.requestId }]);
+  const returning = vi.fn().mockResolvedValue(claimedRows);
+  const claimWhere = vi.fn((condition: unknown) => {
+    void condition;
+    return { returning };
+  });
   const update = vi.fn()
     .mockReturnValueOnce({
       set: vi.fn(() => ({
-        where: vi.fn(() => ({ returning })),
+        where: claimWhere,
       })),
     })
     .mockReturnValue({
@@ -72,6 +80,11 @@ function databaseDouble(rows: unknown[]) {
     })),
     update,
   } as never);
+  return { claimWhere };
+}
+
+function compiledSql(statement: unknown) {
+  return new PgDialect().sqlToQuery(statement as never);
 }
 
 describe("Linear ticket requests", () => {
@@ -98,7 +111,7 @@ describe("Linear ticket requests", () => {
 
   it("recovers a retry by looking up the stable request ID", async () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
-    databaseDouble([request]);
+    const { claimWhere } = databaseDouble([request]);
     vi.mocked(getRuntimeLinearConnection).mockResolvedValue({
       accessToken: "linear-token",
       accountId: request.integrationAccountId,
@@ -133,5 +146,56 @@ describe("Linear ticket requests", () => {
       scope.agentConfigVersionId,
       request.integrationAccountId,
     );
+    const claim = compiledSql(claimWhere.mock.calls[0]![0]);
+    expect(claim.params).toEqual([
+      request.id,
+      "pending",
+      "failed",
+      6,
+    ]);
+    expect(claim.params).not.toContain("creating");
+  });
+
+  it("does not let a concurrent worker reclaim an active request", async () => {
+    databaseDouble([request], []);
+
+    await expect(fulfillLinearTicketRequest(scope)).rejects.toEqual(
+      new LinearTicketError(
+        "Linear ticket request is no longer active",
+        "request_not_active",
+      ),
+    );
+    expect(getRuntimeLinearConnection).not.toHaveBeenCalled();
+    expect(createLinearIssue).not.toHaveBeenCalled();
+  });
+
+  it("does not expose active requests to duplicate jobs", async () => {
+    const orderBy = vi.fn().mockResolvedValue([]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { orderBy };
+    });
+    const joined = { innerJoin: vi.fn(), where };
+    joined.innerJoin.mockReturnValue(joined);
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => joined),
+      })),
+    } as never);
+
+    await expect(listPendingLinearTicketRequests({
+      investigationId: scope.investigationId,
+      organizationId: scope.organizationId,
+    })).resolves.toEqual([]);
+
+    const pending = compiledSql(where.mock.calls[0]![0]);
+    expect(pending.params).toEqual([
+      scope.investigationId,
+      scope.organizationId,
+      "pending",
+      "failed",
+      6,
+    ]);
+    expect(pending.params).not.toContain("creating");
   });
 });

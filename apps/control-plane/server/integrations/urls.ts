@@ -24,10 +24,14 @@ export function settingsRedirect(
   status: "connected" | "error" | "finishing",
   reason?: string,
 ): string {
+  const baseUrl = new URL(controlPlaneBaseUrl());
   const path = returnTo.startsWith("/") && !returnTo.startsWith("//")
     ? returnTo
     : "/settings";
-  const url = new URL(path, controlPlaneBaseUrl());
+  const candidate = new URL(path, baseUrl);
+  const url = candidate.origin === baseUrl.origin
+    ? candidate
+    : new URL("/settings", baseUrl);
   url.searchParams.set("integration", provider);
   url.searchParams.set("status", status);
   if (reason) url.searchParams.set("reason", reason);

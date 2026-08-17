@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canImpersonateSupportUser,
   configuredSuperuserEmails,
+  platformRoleForIdentity,
 } from "./auth.js";
 
 describe("configuredSuperuserEmails", () => {
@@ -39,5 +40,27 @@ describe("configuredSuperuserEmails", () => {
     expect(
       canImpersonateSupportUser(regularUser, new Set(["user@example.com"])),
     ).toBe(false);
+  });
+});
+
+describe("platformRoleForIdentity", () => {
+  const superuserEmails = new Set(["admin@example.com"]);
+
+  it("does not trust an allowlisted but unverified email address", () => {
+    expect(
+      platformRoleForIdentity(
+        { email: "admin@example.com", emailVerified: false },
+        superuserEmails,
+      ),
+    ).toBe("user");
+  });
+
+  it("grants the superuser role to a verified allowlisted identity", () => {
+    expect(
+      platformRoleForIdentity(
+        { email: " Admin@Example.com ", emailVerified: true },
+        superuserEmails,
+      ),
+    ).toBe("superuser");
   });
 });
