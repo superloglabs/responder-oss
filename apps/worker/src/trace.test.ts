@@ -129,6 +129,25 @@ describe("investigation trace events", () => {
     });
   });
 
+  it("redacts Daytona placeholders from stored output", () => {
+    const event = investigationTraceEventFromStream(
+      {
+        type: "run_item_stream_event",
+        name: "tool_output",
+        item: {
+          callId: "call_1",
+          output: { stdout: "token=dtn_secret_1234-abcd" },
+          rawItem: { status: "completed" },
+        },
+      } as never,
+      {},
+      at,
+    );
+
+    expect(JSON.stringify(event)).not.toContain("dtn_secret_1234-abcd");
+    expect(JSON.stringify(event)).toContain("[secret placeholder redacted]");
+  });
+
   it("ignores token-by-token model events", () => {
     expect(
       investigationTraceEventFromStream(

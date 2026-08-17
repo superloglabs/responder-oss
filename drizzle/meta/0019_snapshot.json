@@ -1,5 +1,5 @@
 {
-  "id": "52b4cb87-f202-4f5c-aa2f-2cfd9b571714",
+  "id": "736faf77-fcfa-4d77-91f1-f032b0cf3aa5",
   "prevId": "2380da66-ebf5-4737-84d9-874636fc57e6",
   "version": "7",
   "dialect": "postgresql",
@@ -910,6 +910,66 @@
           "columns": [
             "agent_config_version_id",
             "repository_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_version_secrets": {
+      "name": "agent_version_secrets",
+      "schema": "",
+      "columns": {
+        "agent_config_version_id": {
+          "name": "agent_config_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_secret_id": {
+          "name": "workspace_secret_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_version_secrets_agent_config_version_id_agent_config_versions_id_fk": {
+          "name": "agent_version_secrets_agent_config_version_id_agent_config_versions_id_fk",
+          "tableFrom": "agent_version_secrets",
+          "tableTo": "agent_config_versions",
+          "columnsFrom": [
+            "agent_config_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "agent_version_secrets_workspace_secret_id_workspace_secrets_id_fk": {
+          "name": "agent_version_secrets_workspace_secret_id_workspace_secrets_id_fk",
+          "tableFrom": "agent_version_secrets",
+          "tableTo": "workspace_secrets",
+          "columnsFrom": [
+            "workspace_secret_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "agent_version_secrets_agent_config_version_id_workspace_secret_id_pk": {
+          "name": "agent_version_secrets_agent_config_version_id_workspace_secret_id_pk",
+          "columns": [
+            "agent_config_version_id",
+            "workspace_secret_id"
           ]
         }
       },
@@ -2964,6 +3024,148 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.workspace_secrets": {
+      "name": "workspace_secrets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "daytona_secret_id": {
+          "name": "daytona_secret_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "daytona_secret_name": {
+          "name": "daytona_secret_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allowed_hosts": {
+          "name": "allowed_hosts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "workspace_secrets_organization_name_idx": {
+          "name": "workspace_secrets_organization_name_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "workspace_secrets_daytona_id_idx": {
+          "name": "workspace_secrets_daytona_id_idx",
+          "columns": [
+            {
+              "expression": "daytona_secret_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "workspace_secrets_daytona_name_idx": {
+          "name": "workspace_secrets_daytona_name_idx",
+          "columns": [
+            {
+              "expression": "daytona_secret_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "workspace_secrets_organization_id_organization_id_fk": {
+          "name": "workspace_secrets_organization_id_organization_id_fk",
+          "tableFrom": "workspace_secrets",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "workspace_secrets_created_by_user_id_fk": {
+          "name": "workspace_secrets_created_by_user_id_fk",
+          "tableFrom": "workspace_secrets",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -2976,7 +3178,6 @@
         "sentry",
         "datadog",
         "clickstack",
-        "upstash",
         "custom_mcp"
       ]
     },

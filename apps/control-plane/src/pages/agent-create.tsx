@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { defaultLinearIssueTemplate } from "@responder/core/agents/config";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   type AgentConfiguration,
@@ -15,6 +16,7 @@ import {
   fetchAgent,
   fetchAgentOptions,
   fetchIntegrations,
+  createWorkspaceSecret,
   refreshSlackAgentOptions,
   saveAgent,
   slackChannelLabel,
@@ -35,7 +37,10 @@ import {
   RepositoryIcon,
   SearchIcon,
 } from "../components/icons";
-import type { ProviderGlyphId } from "../components/provider-glyphs";
+import {
+  providerDisplayName,
+  type ProviderGlyphId,
+} from "../components/provider-glyphs";
 import {
   Alert,
   Button,
@@ -67,10 +72,15 @@ interface CreateDraft {
   prMode: AgentPrMode;
   contextAccountIds: string[];
   contextResourceIds: string[];
+  workspaceSecretRecordIds: string[];
+  createLinearTickets: boolean;
+  linearIssueTemplate: string;
   instructions: string;
 }
 
-type SavedCreateDraft = Partial<CreateDraft> & {
+type SavedCreateDraft = Partial<
+  Omit<CreateDraft, "workspaceSecretRecordIds">
+> & {
   postScope?: "all" | "selected";
 };
 
@@ -78,11 +88,11 @@ const EMPTY_OPTIONS: AgentOptions = {
   accounts: [],
   resources: [],
   repositories: [],
+  secrets: [],
 };
 
 const DEFAULT_INSTRUCTIONS =
   "Investigate the root cause, assess severity and customer impact, then post a concise summary with evidence and recommended next steps. Use connected repositories and observability tools before proposing a fix.";
-
 const DRAFT_STORAGE_KEY = "responder:new-agent-draft";
 const DRAFT_STEP_STORAGE_KEY = "responder:new-agent-step";
 const SEVERITY_OPTIONS: Array<{
@@ -130,6 +140,30 @@ function accountsFor(
 
 function storageKey(base: string, agentId: string | undefined): string {
   return agentId ? `${base}:${agentId}` : base;
+}
+
+function saveDraftToSessionStorage(
+  key: string,
+  draft: CreateDraft,
+): void {
+  const persistedDraft: SavedCreateDraft = {
+    inputKind: draft.inputKind,
+    sentryAccountId: draft.sentryAccountId,
+    sentryProjectResourceIds: draft.sentryProjectResourceIds,
+    slackInputResourceId: draft.slackInputResourceId,
+    outputMode: draft.outputMode,
+    outputChannelResourceId: draft.outputChannelResourceId,
+    severities: draft.severities,
+    githubAccountId: draft.githubAccountId,
+    repositoryIds: draft.repositoryIds,
+    prMode: draft.prMode,
+    contextAccountIds: draft.contextAccountIds,
+    contextResourceIds: draft.contextResourceIds,
+    createLinearTickets: draft.createLinearTickets,
+    linearIssueTemplate: draft.linearIssueTemplate,
+    instructions: draft.instructions,
+  };
+  window.sessionStorage.setItem(key, JSON.stringify(persistedDraft));
 }
 
 function readSavedDraft(key: string): SavedCreateDraft {
@@ -211,6 +245,9 @@ function draftFromConfiguration(
     prMode: configuration.prMode,
     contextAccountIds: configuration.contextAccountIds,
     contextResourceIds: configuration.contextResourceIds,
+    workspaceSecretRecordIds: configuration.secretIds,
+    createLinearTickets: configuration.createLinearTickets,
+    linearIssueTemplate: configuration.linearIssueTemplate,
     instructions: configuration.instructions,
   };
 }
@@ -224,6 +261,8 @@ function createInitialDraft(
   const sentryAccounts = accountsFor(options, "sentry");
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
+  const vercelProjects = resourcesOfKind(options, "vercel_project");
+  const contextResources = [...slackChannels, ...vercelProjects];
   const githubAccounts = accountsFor(options, "github");
   const firstSentryAccount =
     sentryAccounts.find((account) =>
@@ -243,6 +282,11 @@ function createInitialDraft(
     ) ??
     [];
   const configuredPrMode = saved.prMode ?? configured.prMode;
+  const workspaceSecretRecordIds =
+    configured.workspaceSecretRecordIds?.filter((id) =>
+      options.secrets.some((secret) => secret.id === id),
+    ) ??
+    [];
 
   return {
     inputKind: saved.inputKind ?? configured.inputKind ?? "sentry_issue",
@@ -316,12 +360,19 @@ function createInitialDraft(
       [],
     contextResourceIds:
       saved.contextResourceIds?.filter((id) =>
-        slackChannels.some((channel) => channel.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       configured.contextResourceIds?.filter((id) =>
-        slackChannels.some((channel) => channel.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       [],
+    workspaceSecretRecordIds,
+    createLinearTickets:
+      saved.createLinearTickets ?? configured.createLinearTickets ?? false,
+    linearIssueTemplate:
+      saved.linearIssueTemplate ??
+      configured.linearIssueTemplate ??
+      defaultLinearIssueTemplate,
     instructions:
       saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS,
   };
@@ -336,18 +387,7 @@ function connectionNotice(): {
   const status = search.get("status");
   if (!provider || !status) return null;
 
-  const name =
-    provider === "github"
-      ? "GitHub"
-      : provider === "slack"
-        ? "Slack"
-        : provider === "custom_mcp"
-          ? "Custom MCP"
-          : provider === "upstash"
-            ? "Upstash"
-          : provider === "clickstack"
-            ? "ClickStack / HyperDX"
-            : provider;
+  const name = providerDisplayName(provider);
   if (status === "connected") {
     if (provider === "slack") return null;
     return { tone: "success", message: `${name} connected. Continue setup.` };
@@ -381,12 +421,19 @@ export function AgentCreatePage() {
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
+  const linearJustConnected = successfulConnectionReturn("linear");
+  const vercelJustConnected = successfulConnectionReturn("vercel");
+  const returnedIntegrationAccountId = new URLSearchParams(
+    window.location.search,
+  ).get("integration_account_id");
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
     upstashJustConnected ||
+    vercelJustConnected ||
     customMcpJustConnected ||
-    clickStackJustConnected;
+    clickStackJustConnected ||
+    linearJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [existingConfiguration, setExistingConfiguration] =
@@ -402,9 +449,15 @@ export function AgentCreatePage() {
       contextIntegrationJustConnected
         ? 3
         : () => readSavedStep(stepStorageKey),
-    );
+  );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
+  const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
+  const [vercelAccountId, setVercelAccountId] = useState(
+    returnedIntegrationAccountId ?? "",
+  );
+  const [secretDialogOpen, setSecretDialogOpen] = useState(false);
+  const [linearDialogOpen, setLinearDialogOpen] = useState(linearJustConnected);
   const [repositoryQuery, setRepositoryQuery] = useState("");
   const [promptStepReady, setPromptStepReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -418,22 +471,51 @@ export function AgentCreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshingSlackChannels, setRefreshingSlackChannels] = useState(false);
   const [slackRefreshError, setSlackRefreshError] = useState<string | null>(null);
+  const [secretName, setSecretName] = useState("");
+  const [secretValue, setSecretValue] = useState("");
+  const [secretHosts, setSecretHosts] = useState("");
+  const [creatingSecret, setCreatingSecret] = useState(false);
+  const [secretError, setSecretError] = useState<string | null>(null);
   const slackRefreshInFlight = useRef<Promise<void> | null>(null);
   const connectingProviderRef = useRef<IntegrationSummary["id"] | null>(null);
   const [notice] = useState(connectionNotice);
   useDocumentTitle(isEditing ? "Edit agent" : "Create agent");
 
   useEffect(() => {
-    if (!githubDialogOpen && !slackContextDialogOpen) return;
+    if (
+      !githubDialogOpen &&
+      !linearDialogOpen &&
+      !slackContextDialogOpen &&
+      !vercelDialogOpen &&
+      !secretDialogOpen
+    ) {
+      return;
+    }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setGithubDialogOpen(false);
+        setLinearDialogOpen(false);
         setSlackContextDialogOpen(false);
+        setVercelDialogOpen(false);
+        if (!creatingSecret) {
+          setSecretDialogOpen(false);
+          setSecretName("");
+          setSecretValue("");
+          setSecretHosts("");
+          setSecretError(null);
+        }
       }
     }
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [githubDialogOpen, slackContextDialogOpen]);
+  }, [
+    creatingSecret,
+    githubDialogOpen,
+    linearDialogOpen,
+    secretDialogOpen,
+    slackContextDialogOpen,
+    vercelDialogOpen,
+  ]);
 
   useEffect(() => {
     if (activeStep !== 4 || promptStepReady) return;
@@ -470,9 +552,7 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedDatadog.id);
         }
-        const connectedCustomMcpId = new URLSearchParams(
-          window.location.search,
-        ).get("integration_account_id");
+        const connectedCustomMcpId = returnedIntegrationAccountId;
         if (
           customMcpJustConnected &&
           connectedCustomMcpId &&
@@ -511,6 +591,26 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedClickStack.id);
         }
+        const connectedLinear = accountsFor(loadedOptions, "linear")[0];
+        if (
+          linearJustConnected &&
+          connectedLinear &&
+          !loadedDraft.contextAccountIds.includes(connectedLinear.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedLinear.id);
+        }
+        if (
+          vercelJustConnected &&
+          returnedIntegrationAccountId &&
+          loadedOptions.accounts.some(
+            (account) =>
+              account.id === returnedIntegrationAccountId &&
+              account.provider === "vercel",
+          )
+        ) {
+          setVercelAccountId(returnedIntegrationAccountId);
+          setVercelDialogOpen(true);
+        }
         setDraft(loadedDraft);
       })
       .catch((caught: unknown) => {
@@ -535,11 +635,14 @@ export function AgentCreatePage() {
     datadogJustConnected,
     draftStorageKey,
     upstashJustConnected,
+    linearJustConnected,
+    returnedIntegrationAccountId,
+    vercelJustConnected,
   ]);
 
   useEffect(() => {
     if (!draft) return;
-    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    saveDraftToSessionStorage(draftStorageKey, draft);
   }, [draft, draftStorageKey]);
 
   useEffect(() => {
@@ -569,6 +672,14 @@ export function AgentCreatePage() {
     () => accountsFor(options, "clickstack"),
     [options],
   );
+  const linearAccounts = useMemo(
+    () => accountsFor(options, "linear"),
+    [options],
+  );
+  const vercelAccounts = useMemo(
+    () => accountsFor(options, "vercel"),
+    [options],
+  );
   const githubAccounts = useMemo(
     () => accountsFor(options, "github"),
     [options],
@@ -583,6 +694,10 @@ export function AgentCreatePage() {
   );
   const slackChannels = useMemo(
     () => resourcesOfKind(options, "slack_channel"),
+    [options],
+  );
+  const vercelProjects = useMemo(
+    () => resourcesOfKind(options, "vercel_project"),
     [options],
   );
 
@@ -614,6 +729,21 @@ export function AgentCreatePage() {
   const activeGithubAccount =
     githubAccounts.find((account) => account.id === draft.githubAccountId) ??
     githubAccounts[0];
+  const selectedVercelProjects = vercelProjects.filter((project) =>
+    draft.contextResourceIds.includes(project.id),
+  );
+  const activeVercelAccount =
+    vercelAccounts.find((account) => account.id === vercelAccountId) ??
+    vercelAccounts.find((account) =>
+      selectedVercelProjects.some(
+        (project) => project.integrationAccountId === account.id,
+      ),
+    ) ??
+    vercelAccounts[0];
+  const activeVercelProjects = vercelProjects.filter(
+    (project) =>
+      project.integrationAccountId === activeVercelAccount?.id,
+  );
   const githubRepositories = options.repositories.filter(
     (repository) =>
       repository.integrationAccountId === activeGithubAccount?.id,
@@ -651,9 +781,18 @@ export function AgentCreatePage() {
   const promptRequirement = !draft.instructions.trim()
     ? "Add an agent prompt."
     : null;
+  const selectedLinearContext = options.accounts.some(
+    (account) =>
+      account.provider === "linear" &&
+      draft.contextAccountIds.includes(account.id),
+  );
   const contextRequirement =
     draft.prMode !== "disabled" && draft.repositoryIds.length === 0
       ? "Choose at least one repository for pull request fixes."
+      : draft.createLinearTickets && !selectedLinearContext
+        ? "Add a Linear connection to create tickets."
+      : draft.createLinearTickets && !draft.linearIssueTemplate.trim()
+        ? "Add a Linear issue description template."
       : null;
   const stepRequirements: Record<CreateStep, string | null> = {
     1: inputRequirement,
@@ -696,8 +835,10 @@ export function AgentCreatePage() {
             )
               ? current.outputChannelResourceId
               : freshChannels[0]?.id ?? "",
-            contextResourceIds: current.contextResourceIds.filter((id) =>
-              freshChannelIds.has(id),
+            contextResourceIds: current.contextResourceIds.filter(
+              (id) =>
+                !slackChannels.some((channel) => channel.id === id) ||
+                freshChannelIds.has(id),
             ),
           };
         });
@@ -740,30 +881,35 @@ export function AgentCreatePage() {
       provider === "clickstack" ||
       provider === "upstash"
     ) {
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      saveDraftToSessionStorage(draftStorageKey, currentDraft);
       if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
       else setConnectingUpstash(true);
       return;
     }
     if (provider === "custom_mcp") {
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      saveDraftToSessionStorage(draftStorageKey, currentDraft);
       setConfiguringCustomMcp(true);
       return;
     }
     connectingProviderRef.current = provider;
     setConnectingProvider(provider);
-    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    saveDraftToSessionStorage(draftStorageKey, currentDraft);
     const separator = integration.connectUrl.includes("?") ? "&" : "?";
     const params = new URLSearchParams({ returnTo });
     window.location.assign(`${integration.connectUrl}${separator}${params}`);
   }
 
   function toggleContextAccount(accountId: string) {
+    const removing = currentDraft.contextAccountIds.includes(accountId);
+    const isLinear = options.accounts.some(
+      (account) => account.id === accountId && account.provider === "linear",
+    );
     updateDraft({
-      contextAccountIds: currentDraft.contextAccountIds.includes(accountId)
+      contextAccountIds: removing
         ? currentDraft.contextAccountIds.filter((id) => id !== accountId)
         : [...currentDraft.contextAccountIds, accountId],
+      ...(removing && isLinear ? { createLinearTickets: false } : {}),
     });
   }
 
@@ -778,12 +924,116 @@ export function AgentCreatePage() {
             ...currentDraft.contextResourceIds.filter((id) => {
               const channel = slackChannels.find((item) => item.id === id);
               return (
-                channel?.integrationAccountId === resource.integrationAccountId
+                !channel ||
+                channel.integrationAccountId === resource.integrationAccountId
               );
             }),
             resourceId,
           ],
     });
+  }
+
+  function toggleVercelProject(resourceId: string) {
+    const resource = vercelProjects.find(
+      (project) => project.id === resourceId,
+    );
+    if (!resource) return;
+
+    const selected = currentDraft.contextResourceIds.includes(resourceId);
+    const contextResourceIds = selected
+      ? currentDraft.contextResourceIds.filter((id) => id !== resourceId)
+      : [...currentDraft.contextResourceIds, resourceId];
+    const selectedAccountIds = new Set(
+      vercelProjects
+        .filter((project) => contextResourceIds.includes(project.id))
+        .map((project) => project.integrationAccountId),
+    );
+
+    updateDraft({
+      contextResourceIds,
+      contextAccountIds: [
+        ...currentDraft.contextAccountIds.filter(
+          (id) =>
+            !vercelAccounts.some((account) => account.id === id) ||
+            selectedAccountIds.has(id),
+        ),
+        ...[...selectedAccountIds].filter(
+          (id) => !currentDraft.contextAccountIds.includes(id),
+        ),
+      ],
+    });
+  }
+
+  function toggleSecret(secretId: string) {
+    updateDraft({
+      workspaceSecretRecordIds:
+        currentDraft.workspaceSecretRecordIds.includes(secretId)
+          ? currentDraft.workspaceSecretRecordIds.filter(
+              (id) => id !== secretId,
+            )
+          : [...currentDraft.workspaceSecretRecordIds, secretId],
+    });
+  }
+
+  function closeSecretDialog() {
+    if (creatingSecret) return;
+    setSecretDialogOpen(false);
+    setSecretName("");
+    setSecretValue("");
+    setSecretHosts("");
+    setSecretError(null);
+  }
+
+  async function storeSecret() {
+    const allowedHosts = [
+      ...new Set(
+        secretHosts
+          .split(/[\s,]+/u)
+          .map((host) => host.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    ];
+    if (!secretName.trim() || !secretValue || allowedHosts.length === 0) {
+      setSecretError("Add a name, value, and at least one allowed host.");
+      return;
+    }
+
+    setCreatingSecret(true);
+    setSecretError(null);
+    try {
+      const secret = await createWorkspaceSecret({
+        name: secretName.trim().toUpperCase(),
+        value: secretValue,
+        allowedHosts,
+      });
+      setOptions((current) => ({
+        ...current,
+        secrets: [...current.secrets, secret].sort((left, right) =>
+          left.name.localeCompare(right.name),
+        ),
+      }));
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              workspaceSecretRecordIds:
+                current.workspaceSecretRecordIds.includes(secret.id)
+                  ? current.workspaceSecretRecordIds
+                  : [...current.workspaceSecretRecordIds, secret.id],
+            }
+          : current,
+      );
+      setSecretName("");
+      setSecretValue("");
+      setSecretHosts("");
+      setSecretDialogOpen(false);
+    } catch (caught) {
+      setSecretError(
+        caught instanceof Error ? caught.message : "Unable to store secret",
+      );
+    } finally {
+      setCreatingSecret(false);
+    }
   }
 
   function showStep(step: CreateStep) {
@@ -891,6 +1141,9 @@ export function AgentCreatePage() {
       repositoryIds: currentDraft.repositoryIds,
       contextAccountIds: [...contextAccountIds],
       contextResourceIds: currentDraft.contextResourceIds,
+      secretIds: currentDraft.workspaceSecretRecordIds,
+      createLinearTickets: currentDraft.createLinearTickets,
+      linearIssueTemplate: currentDraft.linearIssueTemplate.trim(),
       trigger,
       reporting,
     };
@@ -936,11 +1189,19 @@ export function AgentCreatePage() {
     upstashAccounts[0] &&
       draft.contextAccountIds.includes(upstashAccounts[0].id),
   );
+  const vercelContextConnected = selectedVercelProjects.length > 0;
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
     draft.contextResourceIds.includes(channel.id),
   );
+  const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
+    draft.workspaceSecretRecordIds.includes(secret.id),
+  );
   const slackContextAvailable = slackAccounts.some(
     (account) => account.slackContextAvailable,
+  );
+  const linearContextConnected = Boolean(
+    linearAccounts[0] &&
+      draft.contextAccountIds.includes(linearAccounts[0].id),
   );
   const connectedContextCount =
     Number(githubAccounts.length > 0) +
@@ -948,10 +1209,12 @@ export function AgentCreatePage() {
     Number(selectedSlackContextChannels.length > 0) +
     Number(datadogContextConnected) +
     Number(upstashContextConnected) +
+    Number(vercelContextConnected) +
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
-    Number(clickStackContextConnected);
+    Number(clickStackContextConnected) +
+    Number(linearContextConnected);
 
   return (
     <AppShell active="agents" density="create">
@@ -1297,7 +1560,7 @@ export function AgentCreatePage() {
             >
               <div className="contextPanel">
                 <div className="contextToolbar">
-                  <span>
+                  <span className="configurationDialog__copy">
                     <strong>Integrations</strong>
                     <small>
                       The agent can inspect {connectedContextCount}{" "}
@@ -1422,7 +1685,7 @@ export function AgentCreatePage() {
                       >
                         <header className="configurationDialog__header">
                           <ProviderMark provider="slack" />
-                          <span>
+                          <span className="configurationDialog__copy">
                             <strong id="slack-context-configuration-title">
                               Configure Slack context
                             </strong>
@@ -1563,7 +1826,7 @@ export function AgentCreatePage() {
                           >
                             <header className="configurationDialog__header">
                               <ProviderMark provider="github" />
-                              <span>
+                              <span className="configurationDialog__copy">
                                 <strong id="github-configuration-title">
                                   Configure GitHub
                                 </strong>
@@ -1574,7 +1837,6 @@ export function AgentCreatePage() {
                               </span>
                               <IconButton
                                 aria-label="Close GitHub configuration"
-                                autoFocus
                                 onClick={() => setGithubDialogOpen(false)}
                                 size="small"
                                 variant="ghost"
@@ -1762,6 +2024,140 @@ export function AgentCreatePage() {
                           : "not_connected"
                     }
                   />
+
+                  <ContextRow
+                    action={
+                      vercelAccounts.length > 0 ? (
+                        <Button
+                          className="contextConfigureAction"
+                          onClick={() => {
+                            if (!vercelAccountId && activeVercelAccount) {
+                              setVercelAccountId(activeVercelAccount.id);
+                            }
+                            setVercelDialogOpen(true);
+                          }}
+                          size="small"
+                          variant="ghost"
+                        >
+                          <span>Configure</span>
+                          <CogIcon />
+                        </Button>
+                      ) : (
+                        <ConnectButton
+                          integration={integrationFor("vercel")}
+                          isConnecting={connectingProvider === "vercel"}
+                          onClick={() => connect("vercel")}
+                        />
+                      )
+                    }
+                    detail={
+                      selectedVercelProjects.length > 0
+                        ? `${selectedVercelProjects.length} ${
+                            selectedVercelProjects.length === 1
+                              ? "project"
+                              : "projects"
+                          } selected · Deployments, domains, and logs`
+                        : vercelAccounts.length > 0
+                          ? "Choose which projects the agent may inspect"
+                        : "Read-only projects, deployments, domains, and logs"
+                    }
+                    label="Vercel"
+                    provider="vercel"
+                    status={
+                      vercelContextConnected
+                        ? "connected"
+                        : vercelAccounts.length > 0
+                          ? "available"
+                          : "not_connected"
+                    }
+                  />
+
+                  {vercelDialogOpen && vercelAccounts.length > 0 ? (
+                    <div
+                      className="configurationDialogBackdrop"
+                      onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) {
+                          setVercelDialogOpen(false);
+                        }
+                      }}
+                    >
+                      <section
+                        aria-labelledby="vercel-context-configuration-title"
+                        aria-modal="true"
+                        className="configurationDialog"
+                        role="dialog"
+                      >
+                        <header className="configurationDialog__header">
+                          <ProviderMark provider="vercel" />
+                          <span className="configurationDialog__copy">
+                            <strong id="vercel-context-configuration-title">
+                              Configure Vercel context
+                            </strong>
+                            <small>
+                              Choose only the projects this agent may inspect.
+                            </small>
+                          </span>
+                          <IconButton
+                            aria-label="Close Vercel context configuration"
+                            autoFocus
+                            onClick={() => setVercelDialogOpen(false)}
+                            size="small"
+                            variant="ghost"
+                          >
+                            ×
+                          </IconButton>
+                        </header>
+                        <div className="configurationDialog__body">
+                          {vercelAccounts.length > 1 ? (
+                            <SelectField
+                              className="createField createField--account"
+                              label="Vercel account"
+                              onChange={setVercelAccountId}
+                              options={vercelAccounts.map((account) => ({
+                                label: account.displayName,
+                                value: account.id,
+                              }))}
+                              value={activeVercelAccount?.id ?? ""}
+                            />
+                          ) : null}
+                          <div className="projectPicker">
+                            <span>Projects</span>
+                            <div>
+                              {activeVercelProjects.length > 0 ? (
+                                activeVercelProjects.map((project) => (
+                                  <Checkbox
+                                    checked={draft.contextResourceIds.includes(
+                                      project.id,
+                                    )}
+                                    key={project.id}
+                                    label={project.displayName}
+                                    onChange={() =>
+                                      toggleVercelProject(project.id)
+                                    }
+                                  />
+                                ))
+                              ) : (
+                                <p className="workspaceSecretsEmpty">
+                                  No projects are available for this account.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <footer className="configurationDialog__footer">
+                          <span>{selectedVercelProjects.length} selected</span>
+                          <Button
+                            onClick={() => setVercelDialogOpen(false)}
+                            size="small"
+                            variant="primary"
+                          >
+                            Done
+                          </Button>
+                        </footer>
+                      </section>
+                    </div>
+                  ) : null}
+
                   <ContextRow
                     action={
                       datadogContextConnected ? (
@@ -1807,6 +2203,137 @@ export function AgentCreatePage() {
                           : "not_connected"
                     }
                   />
+                  <ContextRow
+                    action={
+                      linearContextConnected ? (
+                        <Button
+                          className="contextConfigureAction"
+                          onClick={() => setLinearDialogOpen(true)}
+                          size="small"
+                          variant="ghost"
+                        >
+                          <span>Configure</span>
+                          <CogIcon />
+                        </Button>
+                      ) : linearAccounts[0] ? (
+                        <Button
+                          onClick={() =>
+                            toggleContextAccount(linearAccounts[0]!.id)
+                          }
+                          size="small"
+                          variant="secondary"
+                        >
+                          Add
+                        </Button>
+                      ) : (
+                        <ConnectButton
+                          integration={integrationFor("linear")}
+                          isConnecting={connectingProvider === "linear"}
+                          onClick={() => connect("linear")}
+                        />
+                      )
+                    }
+                    detail={
+                      linearAccounts[0]
+                        ? `${linearAccounts[0].displayName} · Projects and issues · ${
+                            draft.createLinearTickets
+                              ? "Automatic ticket creation"
+                              : "Context only"
+                          }`
+                        : "Projects, issues, and optional ticket creation"
+                    }
+                    label="Linear"
+                    provider="linear"
+                    status={
+                      linearContextConnected
+                        ? "connected"
+                        : linearAccounts[0]
+                          ? "available"
+                          : "not_connected"
+                    }
+                  />
+
+                  {linearDialogOpen && linearAccounts[0] ? (
+                    <div
+                      className="configurationDialogBackdrop"
+                      onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) {
+                          setLinearDialogOpen(false);
+                        }
+                      }}
+                    >
+                      <section
+                        aria-labelledby="linear-configuration-title"
+                        aria-modal="true"
+                        className="configurationDialog"
+                        role="dialog"
+                      >
+                        <header className="configurationDialog__header">
+                          <ProviderMark connected provider="linear" />
+                          <span className="configurationDialog__copy">
+                            <strong id="linear-configuration-title">
+                              Configure Linear
+                            </strong>
+                            <small>
+                              Control ticket creation and the issue description.
+                            </small>
+                          </span>
+                          <IconButton
+                            aria-label="Close Linear configuration"
+                            onClick={() => setLinearDialogOpen(false)}
+                            size="small"
+                            variant="ghost"
+                          >
+                            ×
+                          </IconButton>
+                        </header>
+                        <div className="configurationDialog__body">
+                          <Checkbox
+                            checked={draft.createLinearTickets}
+                            description="After saving the Responder issue, let the agent choose the best Linear project and create a matching ticket."
+                            label="Create Linear tickets for issues"
+                            onChange={(event) =>
+                              updateDraft({
+                                createLinearTickets: event.target.checked,
+                              })
+                            }
+                          />
+                          <TextAreaField
+                            disabled={!draft.createLinearTickets}
+                            hint="Available placeholders: {{issue_id}}, {{issue_url}}, {{title}}, {{description}}, {{severity}}, {{evidence}}, {{remediation}}"
+                            label="Linear issue description template"
+                            maxLength={10_000}
+                            onChange={(event) =>
+                              updateDraft({
+                                linearIssueTemplate: event.target.value,
+                              })
+                            }
+                            rows={10}
+                            value={draft.linearIssueTemplate}
+                          />
+                        </div>
+                        <footer className="configurationDialog__footer">
+                          <Button
+                            onClick={() => {
+                              toggleContextAccount(linearAccounts[0]!.id);
+                              setLinearDialogOpen(false);
+                            }}
+                            size="small"
+                            variant="ghost"
+                          >
+                            Remove from agent
+                          </Button>
+                          <Button
+                            onClick={() => setLinearDialogOpen(false)}
+                            size="small"
+                            variant="primary"
+                          >
+                            Done
+                          </Button>
+                        </footer>
+                      </section>
+                    </div>
+                  ) : null}
                   {customMcpAccounts.map((account) => {
                     const connected = draft.contextAccountIds.includes(account.id);
                     return (
@@ -1887,6 +2414,197 @@ export function AgentCreatePage() {
                     }
                   />
                 </div>
+              </div>
+
+              <div className="workspaceSecretsPanel">
+                <div className="contextToolbar">
+                  <span className="configurationDialog__copy">
+                    <strong>Workspace secrets</strong>
+                    <small>
+                      Selected secrets are exposed as opaque environment
+                      variables and only resolve for allowed hosts.
+                    </small>
+                  </span>
+                  <Button
+                    onClick={() => setSecretDialogOpen(true)}
+                    size="small"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Add secret
+                  </Button>
+                </div>
+
+                {selectedWorkspaceSecrets.length > 0 ? (
+                  <div className="workspaceSelectedSecretList">
+                    {selectedWorkspaceSecrets.map((secret) => (
+                      <div className="workspaceSelectedSecret" key={secret.id}>
+                        <span className="configurationDialog__copy">
+                          <strong>{secret.name}</strong>
+                          <small>
+                            Allowed for {secret.allowedHosts.join(", ")}
+                          </small>
+                        </span>
+                        <Button
+                          onClick={() => toggleSecret(secret.id)}
+                          size="small"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="workspaceSecretsEmpty">
+                    No secrets added to this agent.
+                  </div>
+                )}
+
+                {secretDialogOpen ? (
+                  <div
+                    className="configurationDialogBackdrop"
+                    onMouseDown={(event) => {
+                      if (event.target === event.currentTarget) {
+                        closeSecretDialog();
+                      }
+                    }}
+                  >
+                    <section
+                      aria-labelledby="workspace-secret-dialog-title"
+                      aria-modal="true"
+                      className="configurationDialog workspaceSecretDialog"
+                      role="dialog"
+                    >
+                      <header className="configurationDialog__header">
+                        <div
+                          aria-hidden="true"
+                          className="workspaceSecretDialogIcon"
+                        >
+                          •••
+                        </div>
+                        <span className="configurationDialog__copy">
+                          <strong id="workspace-secret-dialog-title">
+                            Add a workspace secret
+                          </strong>
+                          <small>
+                            Select an existing secret or create a write-only one.
+                          </small>
+                        </span>
+                        <IconButton
+                          aria-label="Close workspace secret dialog"
+                          disabled={creatingSecret}
+                          onClick={closeSecretDialog}
+                          size="small"
+                          variant="ghost"
+                        >
+                          ×
+                        </IconButton>
+                      </header>
+                      <div className="configurationDialog__body">
+                        <div className="workspaceSecretDialogSection">
+                          <span className="workspaceSecretDialogSection__title">
+                            Existing workspace secrets
+                          </span>
+                          {options.secrets.length > 0 ? (
+                            <div className="workspaceSecretList">
+                              {options.secrets.map((secret) => (
+                                <Checkbox
+                                  checked={draft.workspaceSecretRecordIds.includes(
+                                    secret.id,
+                                  )}
+                                  description={`Allowed for ${secret.allowedHosts.join(", ")}`}
+                                  key={secret.id}
+                                  label={secret.name}
+                                  onChange={() => toggleSecret(secret.id)}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="workspaceSecretsEmpty">
+                              This workspace does not have any secrets yet.
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="workspaceSecretDialogSection">
+                          <span className="workspaceSecretDialogSection__title">
+                            Create a new secret
+                          </span>
+                          <div className="workspaceSecretForm">
+                            <label className="createField">
+                              <span>Environment variable</span>
+                              <input
+                                autoComplete="off"
+                                autoFocus
+                                onChange={(event) =>
+                                  setSecretName(event.target.value.toUpperCase())
+                                }
+                                placeholder="SERVICE_API_KEY"
+                                value={secretName}
+                              />
+                            </label>
+                            <label className="createField">
+                              <span>Secret value</span>
+                              <input
+                                autoComplete="new-password"
+                                onChange={(event) =>
+                                  setSecretValue(event.target.value)
+                                }
+                                placeholder="Stored once and never shown again"
+                                type="password"
+                                value={secretValue}
+                              />
+                            </label>
+                            <label className="createField workspaceSecretHosts">
+                              <span>Allowed hosts</span>
+                              <input
+                                autoComplete="off"
+                                onChange={(event) =>
+                                  setSecretHosts(event.target.value)
+                                }
+                                placeholder="api.example.com, *.example.net"
+                                value={secretHosts}
+                              />
+                            </label>
+                            <Button
+                              disabled={creatingSecret}
+                              loading={creatingSecret}
+                              onClick={() => void storeSecret()}
+                              type="button"
+                              variant="secondary"
+                            >
+                              Store and add
+                            </Button>
+                          </div>
+                          {secretError ? (
+                            <p className="workspaceSecretError" role="alert">
+                              {secretError}
+                            </p>
+                          ) : null}
+                          <p className="workspaceSecretHint">
+                            The value cannot be viewed after storage. Rotate it by
+                            creating a replacement secret.
+                          </p>
+                        </div>
+                      </div>
+                      <footer className="configurationDialog__footer">
+                        <span>
+                          {selectedWorkspaceSecrets.length} selected
+                        </span>
+                        <Button
+                          disabled={creatingSecret}
+                          onClick={closeSecretDialog}
+                          size="small"
+                          variant="primary"
+                        >
+                          Done
+                        </Button>
+                      </footer>
+                    </section>
+                  </div>
+                ) : null}
               </div>
             </CreateSection>
           ) : null}
@@ -2319,8 +3037,10 @@ function ContextRow({
     | "sentry"
     | "datadog"
     | "upstash"
+    | "vercel"
     | "custom_mcp"
-    | "clickstack";
+    | "clickstack"
+    | "linear";
   status: "available" | "connected" | "included" | "not_connected";
 }) {
   const statusLabel = {

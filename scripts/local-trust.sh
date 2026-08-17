@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repository_root"
 
 if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'; then

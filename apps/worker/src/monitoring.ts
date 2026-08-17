@@ -1,11 +1,17 @@
 import * as Sentry from "@sentry/node";
+import type { Event } from "@sentry/node";
 import {
   sentryEnvironment,
   sentryRelease,
 } from "@responder/core/observability/sentry";
 
 export interface WorkerErrorContext {
-  operation: "investigation" | "remediation" | "sandbox_cleanup" | "worker";
+  operation:
+    | "investigation"
+    | "linear_ticket"
+    | "remediation"
+    | "sandbox_cleanup"
+    | "worker";
   investigationId?: string;
   jobId?: string;
   organizationId?: string;
@@ -15,6 +21,72 @@ export interface WorkerErrorContext {
 }
 
 let errorMonitoringEnabled = false;
+let eventScrubbingConfigured = false;
+let eventScrubbingEnvironment: NodeJS.ProcessEnv = process.env;
+
+const secretEnvironmentNames = [
+  "OPENAI_API_KEY",
+  "DAYTONA_API_KEY",
+  "DATABASE_PASSWORD",
+  "CREDENTIAL_ENCRYPTION_KEY",
+  "INTERNAL_INGEST_TOKEN",
+] as const;
+
+function redactEventValue(
+  value: unknown,
+  secrets: readonly string[],
+  seen: WeakSet<object>,
+): unknown {
+  if (typeof value === "string") {
+    return secrets.reduce(
+      (redacted, secret) => redacted.replaceAll(secret, "[redacted]"),
+      value,
+    );
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      value[index] = redactEventValue(item, secrets, seen);
+    }
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const [key, item] of Object.entries(record)) {
+    record[key] = redactEventValue(item, secrets, seen);
+  }
+  return record;
+}
+
+function scrubWorkerSentryEvent(
+  event: Event,
+  environment: NodeJS.ProcessEnv,
+): Event {
+  const secrets = secretEnvironmentNames.flatMap((name) => {
+    const value = environment[name];
+    return value ? [value] : [];
+  });
+  redactEventValue(event, secrets, new WeakSet());
+
+  for (const exception of event.exception?.values ?? []) {
+    if (exception.value && exception.value.length > 2_000) {
+      exception.value = exception.value.slice(0, 2_000);
+    }
+  }
+  return event;
+}
+
+function configureEventScrubbing(environment: NodeJS.ProcessEnv): void {
+  eventScrubbingEnvironment = environment;
+  if (eventScrubbingConfigured) return;
+
+  Sentry.addEventProcessor((event) =>
+    scrubWorkerSentryEvent(event, eventScrubbingEnvironment),
+  );
+  eventScrubbingConfigured = true;
+}
 
 export function initializeErrorMonitoring(
   environment: NodeJS.ProcessEnv = process.env,
@@ -22,6 +94,7 @@ export function initializeErrorMonitoring(
   const dsn = environment.SENTRY_DSN?.trim();
   if (!dsn) return false;
   if (Sentry.isInitialized()) {
+    configureEventScrubbing(environment);
     errorMonitoringEnabled = true;
     return true;
   }
@@ -35,6 +108,7 @@ export function initializeErrorMonitoring(
       sendDefaultPii: false,
       tracesSampleRate: 0,
     });
+    configureEventScrubbing(environment);
     errorMonitoringEnabled = true;
     return true;
   } catch (error) {
@@ -48,28 +122,9 @@ export function initializeErrorMonitoring(
   }
 }
 
-function sanitizedError(
-  error: unknown,
-  environment: NodeJS.ProcessEnv,
-): Error {
-  let message = error instanceof Error ? error.message : String(error);
-  for (const name of [
-    "OPENAI_API_KEY",
-    "DAYTONA_API_KEY",
-    "DATABASE_PASSWORD",
-    "CREDENTIAL_ENCRYPTION_KEY",
-    "INTERNAL_INGEST_TOKEN",
-  ] as const) {
-    const value = environment[name];
-    if (value) message = message.replaceAll(value, "[redacted]");
-  }
-  return new Error(message.slice(0, 2_000));
-}
-
 export async function reportWorkerException(
   error: unknown,
   context: WorkerErrorContext,
-  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   if (!errorMonitoringEnabled) return;
 
@@ -77,7 +132,7 @@ export async function reportWorkerException(
     Sentry.withScope((scope) => {
       scope.setTag("responder.operation", context.operation);
       scope.setContext("responder", { ...context });
-      Sentry.captureException(sanitizedError(error, environment));
+      Sentry.captureException(error);
     });
   } catch (reportingError) {
     console.error(

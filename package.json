@@ -44,7 +44,8 @@
     "tunnel:claim": "bash scripts/local-tunnel.sh claim",
     "tunnel:release": "bash scripts/local-tunnel.sh release",
     "tunnel:status": "bash scripts/local-tunnel.sh status",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "vercel:generate-api": "node scripts/generate-vercel-read-operations.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.2",

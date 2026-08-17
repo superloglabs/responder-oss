@@ -8,8 +8,10 @@ export function integrationCallbackUrl(
     | "custom_mcp"
     | "datadog"
     | "github"
+    | "linear"
     | "sentry"
-    | "slack",
+    | "slack"
+    | "vercel",
 ): string {
   const callbackBaseUrl =
     process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();

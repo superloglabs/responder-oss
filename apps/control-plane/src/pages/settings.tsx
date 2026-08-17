@@ -7,6 +7,7 @@ import { ClickStackConnectionDialog } from "../components/clickstack-connection-
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
+import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
@@ -25,8 +26,10 @@ interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "upstash"
+    | "vercel"
     | "custom_mcp"
-    | "clickstack";
+    | "clickstack"
+    | "linear";
   name: string;
   description: string;
   state: IntegrationState;
@@ -49,18 +52,7 @@ function connectionNotice(): {
   const status = search.get("status");
   if (!provider || !status) return null;
 
-  const name =
-    provider === "github"
-      ? "GitHub"
-      : provider === "slack"
-        ? "Slack"
-        : provider === "custom_mcp"
-          ? "Custom MCP"
-          : provider === "upstash"
-            ? "Upstash"
-          : provider === "clickstack"
-            ? "ClickStack / HyperDX"
-            : provider;
+  const name = providerDisplayName(provider);
   if (status === "connected") {
     const disabledAgentCount = Number(search.get("disabled_agents"));
     if (
@@ -150,7 +142,15 @@ export function SettingsPage() {
     ["github", "slack"].includes(integration.id),
   );
   const secondary = integrations.filter((integration) =>
-    ["sentry", "datadog", "upstash", "custom_mcp", "clickstack"].includes(
+    [
+      "sentry",
+      "datadog",
+      "upstash",
+      "linear",
+      "vercel",
+      "custom_mcp",
+      "clickstack",
+    ].includes(
       integration.id,
     ),
   );

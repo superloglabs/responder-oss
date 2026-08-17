@@ -47,6 +47,9 @@ export interface AgentConfiguration {
   repositoryIds: string[];
   contextAccountIds: string[];
   contextResourceIds: string[];
+  secretIds: string[];
+  createLinearTickets: boolean;
+  linearIssueTemplate: string;
   trigger: AgentTrigger;
   reporting: AgentReporting;
 }
@@ -61,14 +64,20 @@ export interface AgentOptions {
       | "datadog"
       | "clickstack"
       | "upstash"
-      | "custom_mcp";
+      | "vercel"
+      | "custom_mcp"
+      | "linear";
     displayName: string;
     slackContextAvailable?: boolean;
   }>;
   resources: Array<{
     id: string;
     integrationAccountId: string;
-    kind: "slack_channel" | "sentry_project" | "datadog_monitor";
+    kind:
+      | "slack_channel"
+      | "sentry_project"
+      | "datadog_monitor"
+      | "vercel_project";
     externalId: string;
     displayName: string;
   }>;
@@ -78,6 +87,11 @@ export interface AgentOptions {
     fullName: string;
     defaultBranch: string;
     private: boolean;
+  }>;
+  secrets: Array<{
+    id: string;
+    name: string;
+    allowedHosts: string[];
   }>;
 }
 
@@ -107,8 +121,10 @@ export interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "upstash"
+    | "vercel"
     | "custom_mcp"
-    | "clickstack";
+    | "clickstack"
+    | "linear";
   name: string;
   description: string;
   state: "available" | "coming_soon" | "connected" | "setup_required";
@@ -168,6 +184,7 @@ export interface IssueEvidence {
     | "upstash"
     | "github"
     | "slack"
+    | "vercel"
     | "other";
   title: string;
   detail: string;
@@ -202,6 +219,22 @@ export interface IssueDetailResponse {
     createdAt: string;
     completedAt: string | null;
   }>;
+  linearTicketState: {
+    requests: Array<{
+      id: string;
+      status: "pending" | "creating" | "created" | "failed";
+      teamId: string | null;
+      projectId: string | null;
+      linearIssueId: string | null;
+      linearIdentifier: string | null;
+      linearIssueUrl: string | null;
+      failureReason: string | null;
+      attemptCount: number;
+      createdAt: string;
+      updatedAt: string;
+      completedAt: string | null;
+    }>;
+  };
   pullRequestState: {
     canCreate: boolean;
     requests: Array<{
@@ -394,6 +427,21 @@ export async function refreshSlackAgentOptions(): Promise<AgentOptions> {
   return apiJson<AgentOptions>("/api/agents/options/refresh/slack", {
     method: "POST",
   });
+}
+
+export async function createWorkspaceSecret(input: {
+  name: string;
+  value: string;
+  allowedHosts: string[];
+}): Promise<AgentOptions["secrets"][number]> {
+  const response = await apiJson<{
+    secret: AgentOptions["secrets"][number];
+  }>("/api/agents/secrets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return response.secret;
 }
 
 export async function fetchIntegrations(): Promise<IntegrationSummary[]> {

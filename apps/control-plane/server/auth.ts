@@ -21,6 +21,7 @@ import {
   adminAc as organizationAdminAc,
   memberAc as organizationMemberAc,
 } from "better-auth/plugins/organization/access";
+import { sendEmail, workspaceInvitationEmailBody } from "./email.js";
 
 export const superuserRoles = {
   superuser: superuserAc,
@@ -207,6 +208,54 @@ export function createResponderAuth() {
         roles: {
           admin: organizationAdminAc,
           member: organizationMemberAc,
+        },
+        sendInvitationEmail: async ({
+          email,
+          id,
+          invitation,
+          inviter,
+          organization,
+          role,
+        }) => {
+          const invitationUrl = new URL(
+            `/invite/${encodeURIComponent(id)}`,
+            baseURL,
+          ).toString();
+          const body = workspaceInvitationEmailBody({
+            invitationUrl,
+            inviterEmail: inviter.user.email,
+            inviterName: inviter.user.name,
+            organizationName: organization.name,
+            role,
+          });
+          try {
+            await sendEmail({
+              ...body,
+              idempotencyKey: `workspace-invitation/${id}/${new Date(
+                invitation.expiresAt,
+              ).getTime()}`,
+              subject: `You're invited to ${organization.name} in Responder`,
+              to: email,
+            });
+            console.info(
+              JSON.stringify({
+                event: "invitation_email_delivery_success",
+                invitationId: id,
+                organizationId: organization.id,
+              }),
+            );
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                errorCode:
+                  error instanceof Error ? error.constructor.name : "unknown",
+                errorMessage: authHandlerErrorMessage(error),
+                event: "invitation_email_delivery_failed",
+                invitationId: id,
+                organizationId: organization.id,
+              }),
+            );
+          }
         },
         organizationHooks: {
           afterCreateOrganization: async ({ organization, user }) => {

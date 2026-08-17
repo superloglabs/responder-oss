@@ -1,15 +1,20 @@
 import {
   Daytona,
-  DaytonaNotFoundError,
   type Sandbox,
-} from "@daytonaio/sdk";
+} from "@daytona/sdk";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import {
+  daytonaClientOptions,
+  isDaytonaNotFound,
+  type DaytonaClientConfig,
+} from "@responder/core/daytona-config";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
 
-interface DaytonaCleanupConfig {
-  daytonaApiKey: string;
-  daytonaApiUrl?: string;
-  daytonaTarget?: string;
+type DaytonaCleanupConfig = DaytonaClientConfig;
+
+export interface DaytonaSandboxSecretMount {
+  environmentVariable: string;
+  daytonaSecretName: string;
 }
 
 interface DaytonaCleanupClient {
@@ -25,12 +30,7 @@ export interface DaytonaCleanupDependencies {
 }
 
 const defaultCleanupDependencies: DaytonaCleanupDependencies = {
-  createClient: (config) =>
-    new Daytona({
-      apiKey: config.daytonaApiKey,
-      apiUrl: config.daytonaApiUrl,
-      target: config.daytonaTarget,
-    }),
+  createClient: (config) => new Daytona(daytonaClientOptions(config)),
   reportException: reportWorkerException,
   sleep: (delayMs) =>
     new Promise((resolve) => {
@@ -41,25 +41,28 @@ const defaultCleanupDependencies: DaytonaCleanupDependencies = {
 export async function configureDaytonaSandboxLifecycle(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
+  secrets: DaytonaSandboxSecretMount[] = [],
   dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
 ): Promise<void> {
   const client = dependencies.createClient(config);
   try {
     const sandbox = await client.get(session.state.sandboxId);
+    if (secrets.length > 0) {
+      await sandbox.updateSecrets(
+        Object.fromEntries(
+          secrets.map((secret) => [
+            secret.environmentVariable,
+            secret.daytonaSecretName,
+          ]),
+        ),
+      );
+      await sandbox.stop();
+      await sandbox.start();
+    }
     await sandbox.setAutoDeleteInterval(0);
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }
-}
-
-function isDaytonaNotFound(error: unknown): boolean {
-  return (
-    error instanceof DaytonaNotFoundError ||
-    (typeof error === "object" &&
-      error !== null &&
-      "statusCode" in error &&
-      error.statusCode === 404)
-  );
 }
 
 export async function closeDaytonaSandbox(

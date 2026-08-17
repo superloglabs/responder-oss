@@ -5,6 +5,8 @@ import {
   type DaytonaSandboxSession,
 } from "@openai/agents-extensions/sandbox/daytona";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
+import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
+import { daytonaClientOptions } from "@responder/core/daytona-config";
 import type { RemediationJob } from "@responder/core/jobs";
 import { renderIssueFixPrompt } from "@responder/core/investigations/report";
 import { sandboxAgentConfig } from "./investigate.js";
@@ -15,6 +17,10 @@ import {
   configureDaytonaSandboxLifecycle,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
+import {
+  redactDaytonaSecretPlaceholders,
+  workspaceSecretUsageInstructions,
+} from "./secret-safety.js";
 
 export async function runRemediationAgent(
   job: RemediationJob,
@@ -24,18 +30,17 @@ export async function runRemediationAgent(
   setDefaultOpenAIKey(config.openAiApiKey);
   setTracingDisabled(true);
   const runtimeProfile = await getRuntimeProfile(job.runtimeProfileId);
+  const workspaceSecrets = await getRuntimeWorkspaceSecrets(job.config.id);
   const client = new DaytonaSandboxClient({
-    apiKey: config.daytonaApiKey,
-    apiUrl: config.daytonaApiUrl,
+    ...daytonaClientOptions(config),
     name: `responder-remediation-${job.remediationRequestId}`,
     pauseOnExit: false,
-    target: config.daytonaTarget,
   });
   let session: DaytonaSandboxSession | null = null;
 
   try {
     session = await client.create();
-    await configureDaytonaSandboxLifecycle(session, config);
+    await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositories(
       session,
@@ -66,6 +71,7 @@ export async function runRemediationAgent(
         "Inspect the relevant code, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks.",
         `Then call create_pull_request with issue ID ${job.issue.id}. Do not finish without creating the pull request or clearly explaining why no safe code fix is possible.`,
         "Do not expose credentials or secret values. The pull request is the only allowed external change.",
+        workspaceSecretUsageInstructions(workspaceSecrets),
       ]
         .filter((instruction): instruction is string => Boolean(instruction))
         .join("\n\n"),
@@ -79,7 +85,7 @@ export async function runRemediationAgent(
     if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
       throw new Error("OpenAI agent returned an empty remediation result");
     }
-    return result.finalOutput.trim();
+    return redactDaytonaSecretPlaceholders(result.finalOutput.trim());
   } finally {
     if (session) {
       await closeDaytonaSandbox(session, config, {

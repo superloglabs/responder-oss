@@ -80,11 +80,42 @@ describe("Daytona sandbox cleanup", () => {
     await configureDaytonaSandboxLifecycle(
       harness.session,
       { daytonaApiKey: "daytona-test" },
+      [],
       harness.dependencies,
     );
 
     expect(setAutoDeleteInterval).toHaveBeenCalledWith(0);
     expect(harness.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("mounts opaque secrets and restarts before enabling stop-time deletion", async () => {
+    const harness = cleanupHarness();
+    const calls: string[] = [];
+    const sandbox = {
+      id: "sandbox-1",
+      updateSecrets: vi.fn(async () => { calls.push("update"); }),
+      stop: vi.fn(async () => { calls.push("stop"); }),
+      start: vi.fn(async () => { calls.push("start"); }),
+      setAutoDeleteInterval: vi.fn(async () => { calls.push("auto-delete"); }),
+    };
+    harness.get.mockResolvedValue(sandbox);
+
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [
+        {
+          environmentVariable: "SERVICE_API_KEY",
+          daytonaSecretName: "responder_secret_1",
+        },
+      ],
+      harness.dependencies,
+    );
+
+    expect(sandbox.updateSecrets).toHaveBeenCalledWith({
+      SERVICE_API_KEY: "responder_secret_1",
+    });
+    expect(calls).toEqual(["update", "stop", "start", "auto-delete"]);
   });
 
   it("accepts a sandbox already deleted by session close", async () => {

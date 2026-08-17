@@ -4,8 +4,10 @@ export const productIntegrationIds = [
   "sentry",
   "datadog",
   "upstash",
+  "vercel",
   "custom_mcp",
   "clickstack",
+  "linear",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -70,6 +72,17 @@ export const integrationCatalog: IntegrationDefinition[] = [
     requiredEnvironment: [],
   },
   {
+    id: "vercel",
+    name: "Vercel",
+    description: "Projects, deployments, domains, logs, and platform context.",
+    implemented: true,
+    requiredEnvironment: [
+      "VERCEL_INTEGRATION_SLUG",
+      "VERCEL_CLIENT_ID",
+      "VERCEL_CLIENT_SECRET",
+    ],
+  },
+  {
     id: "custom_mcp",
     name: "Custom MCP",
     description: "Connect any remote MCP server as investigation context.",
@@ -82,6 +95,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     description: "Logs, traces, metrics, and service context through MCP.",
     implemented: true,
     requiredEnvironment: [],
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    description: "Issue and project context with optional ticket creation.",
+    implemented: true,
+    requiredEnvironment: ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
   },
 ];
 

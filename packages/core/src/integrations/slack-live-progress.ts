@@ -149,7 +149,7 @@ function phaseForTool(tool: string): string {
   ) {
     return "Inspecting the relevant source code.";
   }
-  if (/datadog|sentry|clickstack|upstash|mcp/i.test(tool)) {
+  if (/datadog|sentry|clickstack|upstash|vercel|mcp/i.test(tool)) {
     return "Gathering telemetry and surrounding service activity.";
   }
   return "Gathering evidence for the investigation.";

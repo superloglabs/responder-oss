@@ -4,6 +4,7 @@ import {
   githubAppHeaders,
 } from "@responder/core/integrations/github";
 import { z } from "zod";
+import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
 const githubBlobSchema = z.object({ sha: z.string().min(1) });
 const githubTreeSchema = z.object({ sha: z.string().min(1) });
@@ -224,6 +225,17 @@ export async function createPullRequestFromSandbox(
     input.repositoryPath,
     input.workspaceBaseSha,
   );
+  assertNoDaytonaSecretPlaceholders(input.body, "Pull request body");
+  assertNoDaytonaSecretPlaceholders(input.title, "Pull request title");
+  for (const file of files) {
+    assertNoDaytonaSecretPlaceholders(file.path, "Changed file path");
+    if (file.content) {
+      assertNoDaytonaSecretPlaceholders(
+        file.content,
+        `Changed file ${file.path}`,
+      );
+    }
+  }
   const token = await dependencies.createInstallationToken(input.installationId);
   const apiRepository = repositoryApiPath(input.repository);
   const apiBase = `https://api.github.com/repos/${apiRepository}`;

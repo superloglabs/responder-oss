@@ -32,7 +32,7 @@ maintained separately.
 ## What it does
 
 - Watches selected Slack channels and Sentry projects for new alerts.
-- Connects GitHub, Slack, Sentry, Datadog, Upstash, ClickStack, and custom MCP
+- Connects GitHub, Slack, Sentry, Datadog, Upstash, Vercel, ClickStack, and custom MCP
   servers.
 - Investigates incidents with a versioned operator-managed runtime profile.
 - Produces structured reports, issues, Slack updates, and optional remediation
@@ -55,9 +55,10 @@ starts Postgres, applies the migrations, and creates a local example runtime
 profile. The development command prints the local HTTPS address. Open it,
 create an account, and create the first workspace.
 
-The UI and authentication flow work without provider credentials. To run an
-investigation, set `OPENAI_API_KEY` and `DAYTONA_API_KEY` in `.env.local` and
-restart the stack. See [.env.example](.env.example) for all configuration.
+The UI and authentication flow work without provider credentials. Set
+`DAYTONA_API_KEY` to store workspace secrets or run investigations, and set
+`OPENAI_API_KEY` to run investigations. Restart the stack after changing
+`.env.local`. See [.env.example](.env.example) for all configuration.
 
 Provider OAuth and webhooks require a public HTTPS origin. The local tunnel
 workflow is documented in [docs/integrations.md](docs/integrations.md).

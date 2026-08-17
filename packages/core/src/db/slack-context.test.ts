@@ -12,7 +12,7 @@ vi.mock("../credentials/encryption.js", () => ({
 const resourceOne = "10000000-0000-4000-8000-000000000001";
 const resourceTwo = "10000000-0000-4000-8000-000000000002";
 
-function databaseDouble(resources: unknown[]) {
+function databaseDouble(resources: Array<Record<string, unknown>>) {
   const configQuery = {
     from: vi.fn(),
     innerJoin: vi.fn(),
@@ -31,7 +31,15 @@ function databaseDouble(resources: unknown[]) {
   const resourceQuery = {
     from: vi.fn(),
     innerJoin: vi.fn(),
-    where: vi.fn().mockResolvedValue(resources),
+    where: vi.fn().mockResolvedValue(
+      resources.map((resource) => ({
+        accountStatus: "connected",
+        available: true,
+        kind: "slack_channel",
+        provider: "slack",
+        ...resource,
+      })),
+    ),
   };
   resourceQuery.from.mockReturnValue(resourceQuery);
   resourceQuery.innerJoin.mockReturnValue(resourceQuery);
@@ -98,6 +106,39 @@ describe("runtime Slack context", () => {
       getRuntimeSlackConnection("30000000-0000-4000-8000-000000000000"),
     ).resolves.toBeNull();
     expect(decryptCredentials).not.toHaveBeenCalled();
+  });
+
+  it("loads Slack channels when Vercel projects share the context resource set", async () => {
+    databaseDouble([
+      {
+        id: resourceOne,
+        accountId: "slack-account-1",
+        displayName: "incidents",
+        encryptedCredentials: "encrypted",
+        externalId: "C123",
+      },
+      {
+        id: resourceTwo,
+        accountId: "vercel-account-1",
+        displayName: "web",
+        encryptedCredentials: "vercel-encrypted",
+        externalId: "prj-1",
+        kind: "vercel_project",
+        provider: "vercel",
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      userAccessToken: "user-token",
+    });
+
+    await expect(
+      getRuntimeSlackConnection("30000000-0000-4000-8000-000000000000"),
+    ).resolves.toEqual({
+      accountId: "slack-account-1",
+      channels: [{ id: "C123", name: "incidents" }],
+      mcpUrl: "https://mcp.slack.com/mcp",
+      userAccessToken: "user-token",
+    });
   });
 
   it("logs the configuration version when Slack credentials are invalid", async () => {

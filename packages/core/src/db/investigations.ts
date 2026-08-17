@@ -22,6 +22,13 @@ import {
   logClickStackTokenRefreshFailure,
   normalizeClickStackMcpUrl,
 } from "../integrations/clickstack.js";
+import {
+  type LinearOAuthCredentials,
+  linearAccessTokenNeedsRefresh,
+  LINEAR_READONLY_MCP_URL,
+  parseLinearOAuthCredentials,
+  refreshLinearOAuthCredentials,
+} from "../integrations/linear.js";
 import { SLACK_MCP_URL } from "../integrations/slack-mcp.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
@@ -55,6 +62,8 @@ export interface RuntimeAgentConfig {
   model: string;
   prompt: string;
   prMode: AgentPrMode;
+  createLinearTickets: boolean;
+  linearIssueTemplate: string;
 }
 
 export interface RuntimeRepository {
@@ -284,6 +293,8 @@ export async function prepareInvestigationRetry(
         model: agentConfigVersions.model,
         prMode: agentConfigVersions.prMode,
         prompt: agentConfigVersions.prompt,
+        createLinearTickets: agentConfigVersions.createLinearTickets,
+        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
       })
       .from(investigations)
       .innerJoin(
@@ -393,6 +404,8 @@ export async function prepareInvestigationRetry(
         model: investigation.model,
         prompt: investigation.prompt,
         prMode: investigation.prMode,
+        createLinearTickets: investigation.createLinearTickets,
+        linearIssueTemplate: investigation.linearIssueTemplate,
       },
     };
   });
@@ -423,6 +436,8 @@ export async function prepareInvestigationReplay(input: {
         model: agentConfigVersions.model,
         prMode: agentConfigVersions.prMode,
         prompt: agentConfigVersions.prompt,
+        createLinearTickets: agentConfigVersions.createLinearTickets,
+        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
         title: investigations.title,
       })
       .from(investigations)
@@ -509,6 +524,8 @@ export async function prepareInvestigationReplay(input: {
         model: source.model,
         prompt: source.prompt,
         prMode: source.prMode,
+        createLinearTickets: source.createLinearTickets,
+        linearIssueTemplate: source.linearIssueTemplate,
       },
     };
   });
@@ -784,6 +801,8 @@ export async function getRuntimeAgentConfig(
       model: agentConfigVersions.model,
       prompt: agentConfigVersions.prompt,
       prMode: agentConfigVersions.prMode,
+      createLinearTickets: agentConfigVersions.createLinearTickets,
+      linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
     })
     .from(agentConfigVersions)
     .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
@@ -882,6 +901,98 @@ export interface RuntimeUpstashConnection {
   apiKey: string;
   displayName: string;
   email: string;
+}
+
+export interface RuntimeVercelConnection {
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  projectIds: string[];
+  teamId: string | null;
+}
+
+const vercelCredentialsSchema = z.object({
+  accessToken: z.string().min(1),
+  configurationId: z.string().min(1),
+  teamId: z.string().min(1).nullable(),
+  userId: z.string().min(1).nullable(),
+});
+
+export async function getRuntimeVercelConnections(
+  versionId: string,
+): Promise<RuntimeVercelConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      contextResourceIds: agentConfigVersions.contextResourceIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length || !config.contextResourceIds.length) {
+    return [];
+  }
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "vercel"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  if (accountRows.length === 0) return [];
+
+  const accountIds = accountRows.map(({ id }) => id);
+  const resourceRows = await getDatabase()
+    .select({
+      id: integrationResources.id,
+      integrationAccountId: integrationResources.integrationAccountId,
+      externalId: integrationResources.externalId,
+    })
+    .from(integrationResources)
+    .where(
+      and(
+        inArray(integrationResources.integrationAccountId, accountIds),
+        inArray(integrationResources.id, config.contextResourceIds),
+        eq(integrationResources.kind, "vercel_project"),
+        eq(integrationResources.available, true),
+      ),
+    );
+  const projectIdsByAccount = new Map<string, string[]>();
+  for (const resource of resourceRows) {
+    const projectIds = projectIdsByAccount.get(resource.integrationAccountId) ?? [];
+    projectIds.push(resource.externalId);
+    projectIdsByAccount.set(resource.integrationAccountId, projectIds);
+  }
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+
+  return config.contextAccountIds.flatMap((accountId) => {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) return [];
+    const projectIds = projectIdsByAccount.get(account.id) ?? [];
+    if (projectIds.length === 0) return [];
+    const credentials = vercelCredentialsSchema.parse(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    return [{
+      accessToken: credentials.accessToken,
+      accountId: account.id,
+      displayName: account.displayName,
+      projectIds,
+      teamId: credentials.teamId,
+    }];
+  });
 }
 
 export function customMcpTokenRefreshFailureEvent(account: {
@@ -1021,19 +1132,21 @@ export function customMcpConnectionsLoadedEvent(input: {
   };
 }
 
-function customMcpOAuthRedirectUrl(): string {
+function mcpOAuthRedirectUrl(provider: "custom_mcp" | "linear"): string {
   const baseUrl =
     process.env.RESPONDER_PUBLIC_URL ??
     process.env.BETTER_AUTH_URL ??
     "http://localhost:3000";
   return new URL(
-    "/api/integrations/custom_mcp/callback",
+    `/api/integrations/${provider}/callback`,
     baseUrl,
   ).toString();
 }
 
-export async function getRuntimeCustomMcpConnections(
+async function getRuntimeMcpConnections(
   versionId: string,
+  provider: "custom_mcp" | "linear",
+  selectedAccountId?: string,
 ): Promise<RuntimeCustomMcpConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -1057,7 +1170,7 @@ export async function getRuntimeCustomMcpConnections(
     .where(
       and(
         eq(integrationAccounts.organizationId, config.organizationId),
-        eq(integrationAccounts.provider, "custom_mcp"),
+        eq(integrationAccounts.provider, provider),
         eq(integrationAccounts.status, "connected"),
         inArray(integrationAccounts.id, config.contextAccountIds),
       ),
@@ -1065,7 +1178,10 @@ export async function getRuntimeCustomMcpConnections(
   const accountsById = new Map(accountRows.map((account) => [account.id, account]));
   const connections: RuntimeCustomMcpConnection[] = [];
 
-  for (const accountId of config.contextAccountIds) {
+  const providerAccountIds = selectedAccountId
+    ? [selectedAccountId]
+    : accountRows.map((account) => account.id);
+  for (const accountId of providerAccountIds) {
     const account = accountsById.get(accountId);
     if (!account?.encryptedCredentials) {
       console.error(
@@ -1079,9 +1195,77 @@ export async function getRuntimeCustomMcpConnections(
       );
       continue;
     }
-    const credentials = parseCustomMcpCredentials(
-      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    const decryptedCredentials = decryptCredentials<Record<string, unknown>>(
+      account.encryptedCredentials,
     );
+
+    if (provider === "linear") {
+      let credentials: LinearOAuthCredentials;
+      try {
+        credentials = parseLinearOAuthCredentials(decryptedCredentials);
+      } catch (error) {
+        console.error(
+          JSON.stringify(
+            customMcpTokenRefreshFailureEvent({
+              ...account,
+              errorType: "LegacyLinearCredentials",
+              investigationVersionId: versionId,
+            }),
+          ),
+        );
+        throw customMcpReconnectError(account, error);
+      }
+
+      if (linearAccessTokenNeedsRefresh(credentials)) {
+        try {
+          credentials = await refreshLinearOAuthCredentials({ credentials });
+        } catch (error) {
+          console.error(
+            JSON.stringify(
+              customMcpTokenRefreshFailureEvent({
+                ...account,
+                errorType: error instanceof Error ? error.name : "UnknownError",
+                investigationVersionId: versionId,
+              }),
+            ),
+          );
+          throw customMcpReconnectError(account, error);
+        }
+        const updated = await getDatabase()
+          .update(integrationAccounts)
+          .set({
+            encryptedCredentials: encryptCredentials(credentials),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(integrationAccounts.id, account.id),
+              eq(integrationAccounts.organizationId, config.organizationId),
+              eq(integrationAccounts.provider, "linear"),
+            ),
+          )
+          .returning({ id: integrationAccounts.id });
+        if (updated.length === 0) {
+          console.error(
+            JSON.stringify(
+              customMcpCredentialUpdateFailureEvent({
+                accountId: account.id,
+                investigationVersionId: versionId,
+              }),
+            ),
+          );
+        }
+      }
+      connections.push({
+        accessToken: credentials.accessToken,
+        accountId: account.id,
+        displayName: account.displayName,
+        mcpUrl: LINEAR_READONLY_MCP_URL,
+      });
+      continue;
+    }
+
+    const credentials = parseCustomMcpCredentials(decryptedCredentials);
 
     if (credentials.authType === "api_token") {
       connections.push({
@@ -1098,7 +1282,7 @@ export async function getRuntimeCustomMcpConnections(
       oauth = await refreshCustomMcpOAuth({
         mcpUrl: credentials.mcpUrl,
         oauth: credentials.oauth,
-        redirectUrl: customMcpOAuthRedirectUrl(),
+        redirectUrl: mcpOAuthRedirectUrl("custom_mcp"),
       });
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
@@ -1156,7 +1340,7 @@ export async function getRuntimeCustomMcpConnections(
           and(
             eq(integrationAccounts.id, account.id),
             eq(integrationAccounts.organizationId, config.organizationId),
-            eq(integrationAccounts.provider, "custom_mcp"),
+            eq(integrationAccounts.provider, provider),
           ),
         )
         .returning({ id: integrationAccounts.id });
@@ -1199,6 +1383,19 @@ export async function getRuntimeCustomMcpConnections(
     );
   }
   return connections;
+}
+
+export function getRuntimeCustomMcpConnections(
+  versionId: string,
+): Promise<RuntimeCustomMcpConnection[]> {
+  return getRuntimeMcpConnections(versionId, "custom_mcp");
+}
+
+export async function getRuntimeLinearConnection(
+  versionId: string,
+  accountId?: string,
+): Promise<RuntimeCustomMcpConnection | null> {
+  return (await getRuntimeMcpConnections(versionId, "linear", accountId))[0] ?? null;
 }
 export type RuntimeClickStackConnection = {
   authType: "access_key";
@@ -1584,9 +1781,13 @@ export async function getRuntimeSlackConnection(
     .select({
       id: integrationResources.id,
       accountId: integrationAccounts.id,
+      accountStatus: integrationAccounts.status,
+      available: integrationResources.available,
       displayName: integrationResources.displayName,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
       externalId: integrationResources.externalId,
+      kind: integrationResources.kind,
+      provider: integrationAccounts.provider,
     })
     .from(integrationResources)
     .innerJoin(
@@ -1596,20 +1797,32 @@ export async function getRuntimeSlackConnection(
     .where(
       and(
         eq(integrationAccounts.organizationId, config.organizationId),
-        eq(integrationAccounts.provider, "slack"),
-        eq(integrationAccounts.status, "connected"),
-        eq(integrationResources.kind, "slack_channel"),
-        eq(integrationResources.available, true),
         inArray(integrationResources.id, config.contextResourceIds),
       ),
     );
   if (resourceRows.length !== config.contextResourceIds.length) return null;
 
-  const accountIds = new Set(resourceRows.map((resource) => resource.accountId));
+  const slackResourceRows = resourceRows.filter(
+    (resource) =>
+      resource.provider === "slack" && resource.kind === "slack_channel",
+  );
+  if (
+    slackResourceRows.length === 0 ||
+    slackResourceRows.some(
+      (resource) =>
+        resource.accountStatus !== "connected" || !resource.available,
+    )
+  ) {
+    return null;
+  }
+
+  const accountIds = new Set(
+    slackResourceRows.map((resource) => resource.accountId),
+  );
   if (accountIds.size !== 1) {
     throw new Error("Slack context channels must belong to one workspace");
   }
-  const firstResource = resourceRows[0];
+  const firstResource = slackResourceRows[0];
   if (!firstResource?.encryptedCredentials) return null;
   const credentials = z
     .object({ userAccessToken: z.string().min(1) })
@@ -1629,11 +1842,14 @@ export async function getRuntimeSlackConnection(
   }
 
   const resourcesById = new Map(
-    resourceRows.map((resource) => [resource.id, resource]),
+    slackResourceRows.map((resource) => [resource.id, resource]),
+  );
+  const selectedSlackResourceIds = config.contextResourceIds.filter((id) =>
+    resourcesById.has(id),
   );
   return {
     accountId: firstResource.accountId,
-    channels: config.contextResourceIds.map((resourceId) => {
+    channels: selectedSlackResourceIds.map((resourceId) => {
       const resource = resourcesById.get(resourceId)!;
       return { id: resource.externalId, name: resource.displayName };
     }),
@@ -1787,6 +2003,8 @@ export async function beginInvestigation(
         model: agentConfigVersions.model,
         prompt: agentConfigVersions.prompt,
         prMode: agentConfigVersions.prMode,
+        createLinearTickets: agentConfigVersions.createLinearTickets,
+        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
       })
       .from(agentConfigVersions)
       .where(eq(agentConfigVersions.id, agent.activeVersionId))

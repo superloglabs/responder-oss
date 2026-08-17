@@ -21,6 +21,7 @@ import {
   integrationAccounts,
   investigationIssues,
   investigations,
+  issueLinearTickets,
   issuePullRequests,
   issues,
   type AgentPrMode,
@@ -124,6 +125,9 @@ export async function submitInvestigationReport(input: {
         status: investigations.status,
         agentConfigVersionId: investigations.agentConfigVersionId,
         prMode: agentConfigVersions.prMode,
+        contextAccountIds: agentConfigVersions.contextAccountIds,
+        createLinearTickets: agentConfigVersions.createLinearTickets,
+        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
       })
       .from(investigations)
       .innerJoin(
@@ -146,6 +150,30 @@ export async function submitInvestigationReport(input: {
       throw new Error("Investigation report has already been submitted");
     }
 
+    const hasNewIssues = input.submission.report.issues.some(
+      (issue) => issue.resolution === "new",
+    );
+    const linearAccount = investigation.createLinearTickets && hasNewIssues
+      ? (
+          await tx
+            .select({ id: integrationAccounts.id })
+            .from(integrationAccounts)
+            .where(
+              and(
+                eq(integrationAccounts.organizationId, input.organizationId),
+                eq(integrationAccounts.provider, "linear"),
+                inArray(
+                  integrationAccounts.id,
+                  investigation.contextAccountIds,
+                ),
+              ),
+            )
+            .limit(1)
+        )[0]
+      : null;
+    if (investigation.createLinearTickets && hasNewIssues && !linearAccount) {
+      throw new Error("The configured Linear connection is unavailable");
+    }
     const existingIds = input.submission.report.issues
       .filter((issue) => issue.resolution === "existing")
       .map((issue) => issue.issueId);
@@ -269,6 +297,26 @@ export async function submitInvestigationReport(input: {
             )
             .returning({ id: issuePullRequests.id })
         : [];
+    const newIssueIds = references.flatMap((reference) =>
+      reference.relationship === "new" ? [reference.issueId] : [],
+    );
+    const linearTicketRequests =
+      linearAccount && newIssueIds.length > 0
+        ? await tx
+            .insert(issueLinearTickets)
+            .values(
+              newIssueIds.map((issueId) => ({
+                issueId,
+                investigationId: input.investigationId,
+                agentConfigVersionId: investigation.agentConfigVersionId,
+                integrationAccountId: linearAccount.id,
+              })),
+            )
+            .returning({
+              requestId: issueLinearTickets.id,
+              issueId: issueLinearTickets.issueId,
+            })
+        : [];
     await tx
       .update(investigations)
       .set({
@@ -289,6 +337,33 @@ export async function submitInvestigationReport(input: {
         severity: issue.severity,
         remediation: issue.remediation,
       })),
+      newIssues: references.flatMap((reference) => {
+        if (reference.relationship !== "new") return [];
+        const issue = canonicalById.get(reference.issueId);
+        return issue
+          ? [{
+              id: issue.id,
+              title: issue.title,
+              description: issue.description,
+              severity: issue.severity,
+              remediation: issue.remediation,
+              evidence: issue.evidence,
+            }]
+          : [];
+      }),
+      linearTicketRequests: linearTicketRequests.map((request) => {
+        const issue = canonicalById.get(request.issueId);
+        if (!issue) throw new Error("Unable to resolve Linear ticket issue");
+        return {
+          requestId: request.requestId,
+          issueId: issue.id,
+          title: issue.title,
+          description: issue.description,
+          severity: issue.severity,
+        };
+      }),
+      createLinearTickets: investigation.createLinearTickets,
+      linearIssueTemplate: investigation.linearIssueTemplate,
       markdown,
       automaticPullRequestIssueIds:
         investigation.prMode === "always"
@@ -351,6 +426,25 @@ export async function getIssueDetail(
   const issue = issueRows[0];
   if (!issue) return null;
 
+  const linearTicketRequests = await db
+    .select({
+      id: issueLinearTickets.id,
+      status: issueLinearTickets.status,
+      teamId: issueLinearTickets.teamId,
+      projectId: issueLinearTickets.projectId,
+      linearIssueId: issueLinearTickets.linearIssueId,
+      linearIdentifier: issueLinearTickets.linearIdentifier,
+      linearIssueUrl: issueLinearTickets.linearIssueUrl,
+      failureReason: issueLinearTickets.failureReason,
+      attemptCount: issueLinearTickets.attemptCount,
+      createdAt: issueLinearTickets.createdAt,
+      updatedAt: issueLinearTickets.updatedAt,
+      completedAt: issueLinearTickets.completedAt,
+    })
+    .from(issueLinearTickets)
+    .where(eq(issueLinearTickets.issueId, issueId))
+    .orderBy(desc(issueLinearTickets.createdAt));
+
   const relatedInvestigations = await db
     .select({
       id: investigations.id,
@@ -380,6 +474,7 @@ export async function getIssueDetail(
   return {
     issue,
     investigations: relatedInvestigations,
+    linearTicketState: { requests: linearTicketRequests },
     pullRequestState: await getIssuePullRequestState(organizationId, issueId),
   };
 }

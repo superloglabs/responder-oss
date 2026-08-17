@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repository_root" || exit 1
 
 failures=0
@@ -106,6 +106,7 @@ check_group "GitHub App" \
 check_group "Slack App" SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET
 check_group "Sentry App" \
   SENTRY_APP_SLUG SENTRY_CLIENT_ID SENTRY_CLIENT_SECRET
+check_group "Linear App" LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET
 check_group "model execution" OPENAI_API_KEY DAYTONA_API_KEY
 
 if [[ -n "${DATADOG_WEBHOOK_SECRET:-}" ]]; then

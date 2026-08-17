@@ -1,17 +1,21 @@
 import { and, desc, eq, exists, inArray } from "drizzle-orm";
 import type { AgentConfiguration } from "../agents/config.js";
+import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
   agents,
   agentVersionRepositories,
+  agentVersionSecrets,
   integrationAccounts,
   integrationResources,
   investigations,
   repositories,
+  workspaceSecrets,
   type AgentReportConfig,
   type AgentTriggerConfig,
 } from "./schema.js";
+import { listWorkspaceSecrets } from "./workspace-secrets.js";
 
 type Provider = "github" | "slack" | "sentry" | "datadog";
 
@@ -204,6 +208,7 @@ async function validateConfigurationResources(
   const accountRows = await db
     .select({
       id: integrationAccounts.id,
+      metadata: integrationAccounts.metadata,
       provider: integrationAccounts.provider,
       status: integrationAccounts.status,
     })
@@ -234,10 +239,20 @@ async function validateConfigurationResources(
     const account = accountsById.get(accountId);
     if (
       !account ||
-      !["sentry", "datadog", "clickstack", "upstash", "custom_mcp"].includes(
+      ![
+        "sentry",
+        "datadog",
+        "clickstack",
+        "upstash",
+        "vercel",
+        "custom_mcp",
+        "linear",
+      ].includes(
         account.provider,
       ) ||
-      account.status !== "connected"
+      account.status !== "connected" ||
+      (account.provider === "linear" &&
+        account.metadata.authVersion !== LINEAR_AUTH_VERSION)
     ) {
       throw new AgentConfigurationError(
         "Choose a connected context integration",
@@ -259,6 +274,8 @@ async function validateConfigurationResources(
         id: integrationResources.id,
         integrationAccountId: integrationResources.integrationAccountId,
         accountMetadata: integrationAccounts.metadata,
+        kind: integrationResources.kind,
+        provider: integrationAccounts.provider,
         resourceMetadata: integrationResources.metadata,
       })
       .from(integrationResources)
@@ -269,23 +286,37 @@ async function validateConfigurationResources(
       .where(
         and(
           eq(integrationAccounts.organizationId, organizationId),
-          eq(integrationAccounts.provider, "slack"),
           eq(integrationAccounts.status, "connected"),
-          eq(integrationResources.kind, "slack_channel"),
           eq(integrationResources.available, true),
           inArray(integrationResources.id, [...contextResourceIds]),
         ),
       );
-    if (contextResourceRows.length !== contextResourceIds.size) {
+    if (
+      contextResourceRows.length !== contextResourceIds.size ||
+      contextResourceRows.some(
+        (resource) =>
+          !(
+            (resource.provider === "slack" &&
+              resource.kind === "slack_channel") ||
+            (resource.provider === "vercel" &&
+              resource.kind === "vercel_project" &&
+              contextAccountIds.has(resource.integrationAccountId))
+          ),
+      )
+    ) {
       throw new AgentConfigurationError(
-        "Choose available Slack channels from this workspace",
+        "Choose available context resources from connected accounts",
         "resource_not_found",
       );
     }
+    const slackContextRows = contextResourceRows.filter(
+      (resource) => resource.provider === "slack",
+    );
     if (
       new Set(
-        contextResourceRows.map((resource) => resource.integrationAccountId),
+        slackContextRows.map((resource) => resource.integrationAccountId),
       ).size !== 1
+      && slackContextRows.length > 0
     ) {
       throw new AgentConfigurationError(
         "Choose Slack context channels from one Slack workspace",
@@ -293,13 +324,13 @@ async function validateConfigurationResources(
       );
     }
     const userScopes = new Set(
-      Array.isArray(contextResourceRows[0]?.accountMetadata.userScopes)
-        ? contextResourceRows[0].accountMetadata.userScopes.filter(
+      Array.isArray(slackContextRows[0]?.accountMetadata.userScopes)
+        ? slackContextRows[0].accountMetadata.userScopes.filter(
             (scope): scope is string => typeof scope === "string",
           )
         : [],
     );
-    const missingScope = contextResourceRows.some((resource) =>
+    const missingScope = slackContextRows.some((resource) =>
       resource.resourceMetadata.isPrivate === true
         ? !userScopes.has("groups:history")
         : !userScopes.has("channels:history"),
@@ -307,6 +338,18 @@ async function validateConfigurationResources(
     if (missingScope) {
       throw new AgentConfigurationError(
         "Reconnect Slack to use selected channels as agent context",
+        "integration_not_found",
+      );
+    }
+  }
+
+  if (configuration.createLinearTickets) {
+    const selectedLinearAccounts = [...contextAccountIds].filter(
+      (accountId) => accountsById.get(accountId)?.provider === "linear",
+    );
+    if (selectedLinearAccounts.length !== 1) {
+      throw new AgentConfigurationError(
+        "Choose one connected Linear account for ticket creation",
         "integration_not_found",
       );
     }
@@ -401,6 +444,31 @@ async function validateConfigurationResources(
       );
     }
   }
+
+  const secretIds = new Set(configuration.secretIds);
+  if (secretIds.size !== configuration.secretIds.length) {
+    throw new AgentConfigurationError(
+      "Workspace secrets must be unique",
+      "resource_not_found",
+    );
+  }
+  if (secretIds.size > 0) {
+    const secretRows = await db
+      .select({ id: workspaceSecrets.id })
+      .from(workspaceSecrets)
+      .where(
+        and(
+          eq(workspaceSecrets.organizationId, organizationId),
+          inArray(workspaceSecrets.id, [...secretIds]),
+        ),
+      );
+    if (secretRows.length !== secretIds.size) {
+      throw new AgentConfigurationError(
+        "Choose workspace secrets from this workspace",
+        "resource_not_found",
+      );
+    }
+  }
 }
 
 function splitTrigger(configuration: AgentConfiguration): {
@@ -447,6 +515,8 @@ export async function createAgent(input: {
         contextResourceIds: input.configuration.contextResourceIds,
         legacyPrMode: input.configuration.prMode === "always",
         prMode: input.configuration.prMode,
+        createLinearTickets: input.configuration.createLinearTickets,
+        linearIssueTemplate: input.configuration.linearIssueTemplate,
         createdBy: input.userId,
       })
       .returning({ id: agentConfigVersions.id });
@@ -458,6 +528,15 @@ export async function createAgent(input: {
         input.configuration.repositoryIds.map((repositoryId) => ({
           agentConfigVersionId: version.id,
           repositoryId,
+        })),
+      );
+    }
+
+    if (input.configuration.secretIds.length > 0) {
+      await tx.insert(agentVersionSecrets).values(
+        input.configuration.secretIds.map((workspaceSecretId) => ({
+          agentConfigVersionId: version.id,
+          workspaceSecretId,
         })),
       );
     }
@@ -518,6 +597,8 @@ export async function updateAgent(input: {
         contextResourceIds: input.configuration.contextResourceIds,
         legacyPrMode: input.configuration.prMode === "always",
         prMode: input.configuration.prMode,
+        createLinearTickets: input.configuration.createLinearTickets,
+        linearIssueTemplate: input.configuration.linearIssueTemplate,
         createdBy: input.userId,
       })
       .returning({ id: agentConfigVersions.id });
@@ -529,6 +610,15 @@ export async function updateAgent(input: {
         input.configuration.repositoryIds.map((repositoryId) => ({
           agentConfigVersionId: version.id,
           repositoryId,
+        })),
+      );
+    }
+
+    if (input.configuration.secretIds.length > 0) {
+      await tx.insert(agentVersionSecrets).values(
+        input.configuration.secretIds.map((workspaceSecretId) => ({
+          agentConfigVersionId: version.id,
+          workspaceSecretId,
         })),
       );
     }
@@ -605,32 +695,46 @@ export async function disableAgentsWithUnavailableRepositories(
 
 export async function listAgentOptions(organizationId: string) {
   const db = getDatabase();
-  const accountRows = await db
-    .select({
-      id: integrationAccounts.id,
-      provider: integrationAccounts.provider,
-      displayName: integrationAccounts.displayName,
-      metadata: integrationAccounts.metadata,
-    })
-    .from(integrationAccounts)
-    .where(
-      and(
-        eq(integrationAccounts.organizationId, organizationId),
-        eq(integrationAccounts.status, "connected"),
+  const [accountRows, workspaceSecretRows] = await Promise.all([
+    db
+      .select({
+        id: integrationAccounts.id,
+        provider: integrationAccounts.provider,
+        displayName: integrationAccounts.displayName,
+        metadata: integrationAccounts.metadata,
+      })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.organizationId, organizationId),
+          eq(integrationAccounts.status, "connected"),
+        ),
       ),
-    );
-  const accounts = accountRows.map(({ metadata, ...account }) => ({
-    ...account,
-    slackContextAvailable:
-      account.provider === "slack" &&
-      Array.isArray(metadata.userScopes) &&
-      metadata.userScopes.includes("channels:history") &&
-      metadata.userScopes.includes("groups:history"),
+    listWorkspaceSecrets(organizationId),
+  ]);
+  const secretRows = workspaceSecretRows.map((secret) => ({
+    id: secret.id,
+    name: secret.name,
+    allowedHosts: secret.allowedHosts,
   }));
+  const accounts = accountRows
+    .filter(
+      (account) =>
+        account.provider !== "linear" ||
+        account.metadata.authVersion === LINEAR_AUTH_VERSION,
+    )
+    .map(({ metadata, ...account }) => ({
+      ...account,
+      slackContextAvailable:
+        account.provider === "slack" &&
+        Array.isArray(metadata.userScopes) &&
+        metadata.userScopes.includes("channels:history") &&
+        metadata.userScopes.includes("groups:history"),
+    }));
   const accountIds = accounts.map((account) => account.id);
 
   if (accountIds.length === 0) {
-    return { accounts: [], resources: [], repositories: [] };
+    return { accounts: [], resources: [], repositories: [], secrets: secretRows };
   }
 
   const [resources, repositoryRows] = await Promise.all([
@@ -666,7 +770,7 @@ export async function listAgentOptions(organizationId: string) {
       ),
   ]);
 
-  return { accounts, resources, repositories: repositoryRows };
+  return { accounts, resources, repositories: repositoryRows, secrets: secretRows };
 }
 
 export async function listAgents(organizationId: string) {
@@ -763,6 +867,8 @@ export async function getAgent(
       contextAccountIds: agentConfigVersions.contextAccountIds,
       contextResourceIds: agentConfigVersions.contextResourceIds,
       prMode: agentConfigVersions.prMode,
+      createLinearTickets: agentConfigVersions.createLinearTickets,
+      linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
     })
     .from(agents)
     .leftJoin(
@@ -776,7 +882,7 @@ export async function getAgent(
   const agent = rows[0];
   if (!agent) return null;
 
-  const [repositoryRows, investigationRows] = await Promise.all([
+  const [repositoryRows, secretRows, investigationRows] = await Promise.all([
     agent.versionId
       ? db
           .select({
@@ -794,6 +900,21 @@ export async function getAgent(
             eq(
               agentVersionRepositories.agentConfigVersionId,
               agent.versionId,
+            ),
+          )
+      : Promise.resolve([]),
+    agent.versionId
+      ? db
+          .select({ id: workspaceSecrets.id })
+          .from(agentVersionSecrets)
+          .innerJoin(
+            workspaceSecrets,
+            eq(workspaceSecrets.id, agentVersionSecrets.workspaceSecretId),
+          )
+          .where(
+            and(
+              eq(agentVersionSecrets.agentConfigVersionId, agent.versionId),
+              eq(workspaceSecrets.organizationId, organizationId),
             ),
           )
       : Promise.resolve([]),
@@ -829,9 +950,12 @@ export async function getAgent(
             model: agent.model,
             instructions: agent.instructions,
             prMode: agent.prMode,
+            createLinearTickets: agent.createLinearTickets,
+            linearIssueTemplate: agent.linearIssueTemplate,
             repositoryIds: repositoryRows.map((repository) => repository.id),
             contextAccountIds: agent.contextAccountIds ?? [],
             contextResourceIds: agent.contextResourceIds ?? [],
+            secretIds: secretRows.map((secret) => secret.id),
             trigger: {
               kind: agent.trigger,
               ...agent.triggerConfig,

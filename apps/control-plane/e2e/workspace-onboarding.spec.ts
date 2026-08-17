@@ -134,7 +134,19 @@ test("keeps an invitation link open while the recipient signs in", async ({
   await page.goto(`/invite/${invitationId}`);
 
   await expect(page).toHaveURL(new RegExp(`/invite/${invitationId}$`));
-  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  await expect(page.getByText("Workspace invitation")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "You're invited" })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Sign in or create an account with the invited email to join this workspace.",
+    ),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "New to Responder? Create an account" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Create your account to join" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Already have an account? Sign in" }).click();
 
   await page.getByLabel("Email").fill(user.email);
   await page.getByLabel("Password").fill("correct-horse-battery-staple");

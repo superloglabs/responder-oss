@@ -112,6 +112,28 @@ describe("Slack live investigation card", () => {
     ]);
   });
 
+  it("renders ClickStack's alert shortcode as an emoji in the plan title", () => {
+    vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
+
+    const message = slackInvestigationCard({
+      agentId: context.agentId,
+      detail: "Inspecting the alert.",
+      investigationId: context.investigationId,
+      status: "in_progress",
+      title: '*:rotating_light: Alert for "Errors"*',
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: "plan",
+        title: '🚨 Alert for "Errors"',
+      }),
+    ]);
+    expect(message.text).toBe(
+      '🚨 Alert for "Errors" — Inspecting the alert.',
+    );
+  });
+
   it("updates the task card and refreshes Slack's rotating loading state", async () => {
     vi.mocked(getSlackInvestigationLiveContext).mockResolvedValue(context);
     vi.mocked(decryptCredentials).mockReturnValue({ accessToken: "xoxb-test" });

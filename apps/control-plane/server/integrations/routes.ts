@@ -52,6 +52,15 @@ import {
 } from "./datadog.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
+  createLinearPkce,
+  exchangeLinearOAuthCode,
+  getLinearWorkspace,
+  LINEAR_AUTH_VERSION,
+  LINEAR_MCP_URL,
+  LINEAR_READONLY_MCP_URL,
+  linearAuthorizeUrl,
+} from "../../../../packages/core/src/integrations/linear.js";
+import {
   CLICKSTACK_CLOUD_MCP_URL,
   clickStackAccount,
   clickStackCloudAuthorizeUrl,
@@ -71,6 +80,12 @@ import {
   upstashAccount,
   UpstashCredentialsError,
 } from "./upstash.js";
+import {
+  exchangeVercelCode,
+  getVercelAccount,
+  listVercelProjects,
+  vercelInstallUrl,
+} from "./vercel.js";
 import { integrationCallbackUrl, settingsRedirect } from "./urls.js";
 
 const providerSchema = z.enum(productIntegrationIds);
@@ -313,7 +328,10 @@ export const integrationRoutes = new Hono()
           (account) => account.provider === definition.id,
         );
         const connectedAccounts = providerAccounts.filter(
-          (account) => account.status === "connected",
+          (account) =>
+            account.status === "connected" &&
+            (definition.id !== "linear" ||
+              account.metadata.authVersion === LINEAR_AUTH_VERSION),
         );
         const configured = integrationIsConfigured(definition);
         const resourceCount = providerAccounts.reduce(
@@ -337,7 +355,11 @@ export const integrationRoutes = new Hono()
           accounts: providerAccounts.map((account) => ({
             id: account.id,
             displayName: account.displayName,
-            status: account.status,
+            status:
+              definition.id === "linear" &&
+                account.metadata.authVersion !== LINEAR_AUTH_VERSION
+                ? "error"
+                : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
           })),
@@ -429,13 +451,45 @@ export const integrationRoutes = new Hono()
         );
       }
     }
+    if (parsedProvider.data === "linear") {
+      try {
+        const pkce = createLinearPkce();
+        const linearState = await createIntegrationConnectionState({
+          organizationId: tenant.organizationId,
+          userId: tenant.user.id,
+          provider: "linear",
+          codeVerifier: pkce.codeVerifier,
+          returnTo: context.req.query("returnTo"),
+          routingUrl: integrationCallbackUrl("linear"),
+        });
+        return context.redirect(
+          linearAuthorizeUrl({
+            codeChallenge: pkce.codeChallenge,
+            redirectUri: integrationCallbackUrl("linear"),
+            state: linearState,
+          }),
+        );
+      } catch (error) {
+        logCustomMcpError("connect", error);
+        return context.redirect(
+          settingsRedirect(
+            context.req.query("returnTo") ?? "/settings",
+            "linear",
+            "error",
+            "connection_failed",
+          ),
+        );
+      }
+    }
     const state = await createIntegrationConnectionState({
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
       provider: parsedProvider.data,
       returnTo: context.req.query("returnTo"),
       routingUrl:
-        parsedProvider.data === "github" || parsedProvider.data === "sentry"
+        parsedProvider.data === "github" ||
+        parsedProvider.data === "sentry" ||
+        parsedProvider.data === "vercel"
           ? integrationCallbackUrl(parsedProvider.data)
           : undefined,
     });
@@ -451,6 +505,9 @@ export const integrationRoutes = new Hono()
         return context.redirect(githubInstallUrl(state));
       }
       return context.redirect(githubAuthorizeUrl(state));
+    }
+    if (parsedProvider.data === "vercel") {
+      return context.redirect(vercelInstallUrl(state));
     }
 
     return context.json({ error: "Integration is not available yet" }, 501);
@@ -848,6 +905,85 @@ export const integrationRoutes = new Hono()
       );
     }
   })
+  .get("/linear/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "linear", "error", "invalid_state"),
+      );
+    }
+
+    const connectionState = await consumeIntegrationConnectionState(
+      "linear",
+      state,
+    );
+    if (!connectionState) {
+      return context.redirect(
+        settingsRedirect("/settings", "linear", "error", "invalid_state"),
+      );
+    }
+
+    let accountId: string | undefined;
+    try {
+      const codeVerifier = z.string().min(1).parse(connectionState.codeVerifier);
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const credentials = await exchangeLinearOAuthCode({
+        authorizationCode,
+        codeVerifier,
+        redirectUri: integrationCallbackUrl("linear"),
+      });
+      const workspace = await getLinearWorkspace({
+        accessToken: credentials.accessToken,
+      });
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken: credentials.accessToken,
+        mcpUrl: LINEAR_READONLY_MCP_URL,
+      });
+      const connectedAccountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "linear",
+        externalAccountId: LINEAR_MCP_URL,
+        displayName: workspace.name,
+        encryptedCredentials: encryptCredentials(credentials),
+        credentialKeyVersion: 1,
+        metadata: {
+          authType: "linear_oauth",
+          authVersion: LINEAR_AUTH_VERSION,
+          mcpUrl: LINEAR_MCP_URL,
+          toolCount,
+          workspaceId: workspace.id,
+        },
+        status: "connected",
+      });
+      accountId = connectedAccountId;
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "linear",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "linear", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "linear",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
+    }
+  })
   .post("/clickstack/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -1101,6 +1237,101 @@ export const integrationRoutes = new Hono()
           "clickstack",
           "error",
           "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/vercel/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "vercel", "error", "invalid_state"),
+      );
+    }
+    const connectionState = await consumeIntegrationConnectionState(
+      "vercel",
+      state,
+    );
+    if (!connectionState) {
+      return context.redirect(
+        settingsRedirect("/settings", "vercel", "error", "invalid_state"),
+      );
+    }
+
+    const code = context.req.query("code");
+    const configurationId = context.req.query("configurationId");
+    if (!code || !configurationId) {
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "vercel",
+          "error",
+          "cancelled",
+        ),
+      );
+    }
+
+    try {
+      const token = await exchangeVercelCode({
+        code,
+        redirectUri: integrationCallbackUrl("vercel"),
+      });
+      const teamId = token.team_id ?? context.req.query("teamId") ?? null;
+      const account = await getVercelAccount({
+        accessToken: token.access_token,
+        teamId,
+        userId: token.user_id,
+      });
+      const projects = await listVercelProjects({
+        accessToken: token.access_token,
+        teamId,
+      });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "vercel",
+        externalAccountId: configurationId,
+        displayName: account.displayName,
+        encryptedCredentials: encryptCredentials({
+          accessToken: token.access_token,
+          configurationId,
+          teamId,
+          userId: token.user_id ?? null,
+        }),
+        credentialKeyVersion: 1,
+        metadata: {
+          ...account.metadata,
+          configurationId,
+          scopeExternalAccountId: account.externalAccountId,
+        },
+      });
+      await replaceIntegrationResources(accountId, "vercel_project", projects);
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "vercel",
+          resource_count: projects.length,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "vercel", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCallbackError("Vercel", error, {
+        configurationId,
+        organizationId: connectionState.organizationId,
+      });
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "vercel",
+          "error",
+          callbackErrorReason(error),
         ),
       );
     }

@@ -33,6 +33,12 @@ import {
   SlackChannelJoinError,
   slackAuthorizeUrl,
 } from "./slack.js";
+import {
+  exchangeVercelCode,
+  getVercelAccount,
+  listVercelProjects,
+  vercelInstallUrl,
+} from "./vercel.js";
 
 describe("integration providers", () => {
   afterEach(() => {
@@ -473,6 +479,111 @@ describe("integration providers", () => {
       vi.stubEnv(key, "configured");
     }
     expect(integrationIsConfigured(slack!)).toBe(true);
+  });
+
+  it("builds a tenant-correlated Vercel installation URL", () => {
+    vi.stubEnv("VERCEL_INTEGRATION_SLUG", "responder");
+    vi.stubEnv("VERCEL_CLIENT_ID", "vercel-client");
+    vi.stubEnv("VERCEL_CLIENT_SECRET", "vercel-secret");
+
+    const url = new URL(vercelInstallUrl("state-token"));
+
+    expect(url.origin + url.pathname).toBe(
+      "https://vercel.com/integrations/responder/new",
+    );
+    expect(url.searchParams.get("state")).toBe("state-token");
+  });
+
+  it("exchanges a Vercel installation code without exposing credentials", async () => {
+    vi.stubEnv("VERCEL_INTEGRATION_SLUG", "responder");
+    vi.stubEnv("VERCEL_CLIENT_ID", "vercel-client");
+    vi.stubEnv("VERCEL_CLIENT_SECRET", "vercel-secret");
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        access_token: "vercel-access-token",
+        team_id: "team-1",
+        user_id: "user-1",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      exchangeVercelCode({
+        code: "one-time-code",
+        redirectUri: "https://responder.example/api/integrations/vercel/callback",
+      }),
+    ).resolves.toMatchObject({
+      access_token: "vercel-access-token",
+      team_id: "team-1",
+    });
+    const request = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(request[0]).toBe("https://api.vercel.com/v2/oauth/access_token");
+    expect(String(request[1].body)).toContain("client_id=vercel-client");
+    expect(String(request[1].body)).toContain("client_secret=vercel-secret");
+  });
+
+  it("loads the Vercel team and all accessible projects", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ id: "team-1", name: "Acme", slug: "acme" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          projects: [{ id: "prj-1", name: "web", framework: "nextjs" }],
+          pagination: { next: 123 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          projects: [{ id: "prj-2", name: "api", framework: null }],
+          pagination: { next: null },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getVercelAccount({ accessToken: "token", teamId: "team-1" }),
+    ).resolves.toMatchObject({
+      displayName: "Acme",
+      externalAccountId: "team-1",
+      metadata: { scope: "team", teamId: "team-1", teamSlug: "acme" },
+    });
+    await expect(
+      listVercelProjects({ accessToken: "token", teamId: "team-1" }),
+    ).resolves.toEqual([
+      expect.objectContaining({ externalId: "prj-1", displayName: "web" }),
+      expect.objectContaining({ externalId: "prj-2", displayName: "api" }),
+    ]);
+    const secondProjectUrl = new URL(fetchMock.mock.calls[2]![0] as URL);
+    expect(secondProjectUrl.searchParams.get("teamId")).toBe("team-1");
+    expect(secondProjectUrl.searchParams.get("until")).toBe("123");
+  });
+
+  it("connects project-scoped Vercel installations without Team read access", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ error: { code: "forbidden" } }, { status: 403 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          projects: [{ id: "prj-1", name: "web", framework: "nextjs" }],
+          pagination: { next: null },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getVercelAccount({ accessToken: "token", teamId: "team-1" }),
+    ).resolves.toEqual({
+      displayName: "Vercel team",
+      externalAccountId: "team-1",
+      metadata: { scope: "team", teamId: "team-1" },
+    });
+    await expect(
+      listVercelProjects({ accessToken: "token", teamId: "team-1" }),
+    ).resolves.toEqual([
+      expect.objectContaining({ externalId: "prj-1", displayName: "web" }),
+    ]);
   });
 
   it("does not require an unused webhook secret for GitHub setup", () => {

@@ -1,7 +1,7 @@
 import "@fontsource-variable/inter";
 import * as Sentry from "@sentry/react";
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app";
 import { initializeBrowserAnalytics } from "./browser-analytics";
@@ -25,7 +25,7 @@ if (!root) throw new Error("Root element is missing");
 rememberXClickId();
 initializeXPixel();
 
-createRoot(root).render(
+const application = (
   <StrictMode>
     <Sentry.ErrorBoundary
       fallback={({ eventId }) => <ApplicationError eventId={eventId} />}
@@ -37,5 +37,11 @@ createRoot(root).render(
         <App />
       </BrowserRouter>
     </Sentry.ErrorBoundary>
-  </StrictMode>,
+  </StrictMode>
 );
+
+if (root.hasChildNodes()) {
+  hydrateRoot(root, application);
+} else {
+  createRoot(root).render(application);
+}

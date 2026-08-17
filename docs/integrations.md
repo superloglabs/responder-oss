@@ -8,6 +8,29 @@ Customer installations and refreshable credentials are tenant-scoped in
 Postgres and encrypted before storage. Configure the same base64-encoded
 32-byte `CREDENTIAL_ENCRYPTION_KEY` for the control plane and worker.
 
+## Linear
+
+Create a Responder-owned Linear OAuth app with `read` and `write` scopes:
+
+- OAuth callback: `<public>/api/integrations/linear/callback`
+- Environment: `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`
+
+Add the connected Linear workspace to an agent's context to let investigations
+inspect teams, projects, and existing issues. Agent context uses Linear's
+read-only MCP endpoint. The only write path is Responder's controlled
+`create_linear_ticket` tool.
+
+When **Create Linear tickets for issues** is enabled, report submission creates
+a pending ticket request only for issues first found by that investigation.
+Recurrences do not create a request. A separate follow-up lets the agent choose
+the Linear team and optional project, creates the ticket, then stores its Linear
+ID, identifier, and URL on the Responder issue.
+
+The editable Markdown description template supports `{{issue_id}}`,
+`{{issue_url}}`, `{{title}}`, `{{description}}`, `{{severity}}`,
+`{{evidence}}`, and `{{remediation}}`. Responder renders the template before
+the controlled creation tool writes to Linear.
+
 ## Slack
 
 Configure a distributed Slack app with:
@@ -99,6 +122,28 @@ For self-hosted ClickStack, enter a public HTTPS MCP URL and a Personal API
 Access Key. Responder verifies the key against the team API and stores it in the
 encrypted tenant credential envelope. Loopback HTTP is accepted only during
 local development.
+
+## Vercel
+
+Create a Vercel Integration with:
+
+- External installation URL initiated by Responder:
+  `https://vercel.com/integrations/<VERCEL_INTEGRATION_SLUG>/new`
+- Redirect URL: `<public>/api/integrations/vercel/callback`
+- Read access for Projects, Deployments, Deployment Checks, Domains, Teams,
+  Logs, Security, and any other non-secret platform areas the investigation
+  agent should inspect
+- No write access and no environment-variable, token, secret, credential, or
+  API-key scopes
+- Environment: `VERCEL_INTEGRATION_SLUG`, `VERCEL_CLIENT_ID`, and
+  `VERCEL_CLIENT_SECRET`
+
+Responder encrypts each installation token, synchronizes only the projects
+visible to that installation, and keeps the token in the worker process. The
+investigation sandbox receives two host-side tools: one searches a generated
+catalog of safe Vercel GET operations, and one executes a selected operation.
+Regenerate the catalog from Vercel's published OpenAPI document after API
+updates with `pnpm vercel:generate-api`.
 
 ## Custom MCP servers
 
