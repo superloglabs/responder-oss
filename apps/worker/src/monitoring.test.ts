@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sentryMocks = vi.hoisted(() => ({
+  addEventProcessor: vi.fn(),
   captureException: vi.fn(),
   flush: vi.fn().mockResolvedValue(true),
   init: vi.fn(),
@@ -13,6 +14,7 @@ const sentryMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@sentry/node", () => ({
+  addEventProcessor: sentryMocks.addEventProcessor,
   captureException: sentryMocks.captureException,
   flush: sentryMocks.flush,
   init: sentryMocks.init,
@@ -26,6 +28,7 @@ vi.mock("@sentry/node", () => ({
 describe("worker error monitoring", () => {
   beforeEach(() => {
     vi.resetModules();
+    sentryMocks.addEventProcessor.mockClear();
     sentryMocks.captureException.mockClear();
     sentryMocks.flush.mockClear();
     sentryMocks.init.mockClear();
@@ -45,6 +48,27 @@ describe("worker error monitoring", () => {
 
     expect(sentryMocks.init).not.toHaveBeenCalled();
     expect(sentryMocks.captureException).not.toHaveBeenCalled();
+  });
+
+  it("configures secret redaction when Sentry is already initialized", async () => {
+    sentryMocks.isInitialized.mockReturnValue(true);
+    const monitoring = await import("./monitoring.js");
+    const environment = {
+      DAYTONA_API_KEY: "daytona-secret",
+      SENTRY_DSN: "https://public@example.invalid/1",
+    };
+
+    expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
+    expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
+
+    expect(sentryMocks.init).not.toHaveBeenCalled();
+    expect(sentryMocks.addEventProcessor).toHaveBeenCalledOnce();
+    const processor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    expect(
+      processor({ message: "request failed for daytona-secret" }),
+    ).toEqual({ message: "request failed for [redacted]" });
   });
 
   it("reports the original exception and redacts its serialized event", async () => {
@@ -80,10 +104,10 @@ describe("worker error monitoring", () => {
         sendDefaultPii: false,
       }),
     );
-    const beforeSend = sentryMocks.init.mock.calls[0]?.[0]?.beforeSend as (
+    const eventProcessor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
       event: Record<string, unknown>,
     ) => Record<string, unknown>;
-    const serializedEvent = beforeSend({
+    const serializedEvent = eventProcessor({
       exception: {
         values: [
           {

@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/node";
-import type { ErrorEvent } from "@sentry/node";
+import type { Event } from "@sentry/node";
 import {
   sentryEnvironment,
   sentryRelease,
@@ -16,6 +16,7 @@ export interface WorkerErrorContext {
 }
 
 let errorMonitoringEnabled = false;
+let eventScrubbingConfigured = false;
 
 const secretEnvironmentNames = [
   "OPENAI_API_KEY",
@@ -54,9 +55,9 @@ function redactEventValue(
 }
 
 function scrubWorkerSentryEvent(
-  event: ErrorEvent,
+  event: Event,
   environment: NodeJS.ProcessEnv,
-): ErrorEvent {
+): Event {
   const secrets = secretEnvironmentNames.flatMap((name) => {
     const value = environment[name];
     return value ? [value] : [];
@@ -76,6 +77,12 @@ export function initializeErrorMonitoring(
 ): boolean {
   const dsn = environment.SENTRY_DSN?.trim();
   if (!dsn) return false;
+  if (!eventScrubbingConfigured) {
+    Sentry.addEventProcessor((event) =>
+      scrubWorkerSentryEvent(event, environment),
+    );
+    eventScrubbingConfigured = true;
+  }
   if (Sentry.isInitialized()) {
     errorMonitoringEnabled = true;
     return true;
@@ -83,7 +90,6 @@ export function initializeErrorMonitoring(
 
   try {
     Sentry.init({
-      beforeSend: (event) => scrubWorkerSentryEvent(event, environment),
       defaultIntegrations: false,
       dsn,
       environment: sentryEnvironment(environment),
