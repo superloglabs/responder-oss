@@ -49,6 +49,61 @@ export interface RemediationRunDiagnostics {
 
 const maxStoredApplyPatchFailures = 10;
 
+function safeApplyPatchFailure(
+  output: string,
+  environment: NodeJS.ProcessEnv,
+): string {
+  const safeOutput = safeInvestigationError(new Error(output), environment);
+  const invalidEofContext = safeOutput.match(
+    /^Invalid EOF Context(?:\s+(\d+))?(?::|$)/,
+  );
+  if (invalidEofContext) {
+    return `Invalid EOF Context${invalidEofContext[1] ? ` ${invalidEofContext[1]}` : ""}`;
+  }
+
+  const invalidContext = safeOutput.match(
+    /^Invalid Context(?:\s+(\d+))?(?::|$)/,
+  );
+  if (invalidContext) {
+    return `Invalid Context${invalidContext[1] ? ` ${invalidContext[1]}` : ""}`;
+  }
+
+  if (/^Invalid Add File Line:/.test(safeOutput)) {
+    return "Invalid add-file patch line";
+  }
+  if (/^Invalid Line:/.test(safeOutput)) {
+    return "Invalid patch line";
+  }
+  if (/^Cannot create file because it already exists:/.test(safeOutput)) {
+    return "File already exists";
+  }
+  if (/^Nothing in this section/.test(safeOutput)) {
+    return "Patch section did not match";
+  }
+  if (/^applyDiff: chunk\.origIndex/.test(safeOutput)) {
+    return "Invalid patch chunk position";
+  }
+  if (/overlapping (?:patch )?chunks/i.test(safeOutput)) {
+    return "Overlapping patch chunks";
+  }
+  if (/not a regular file/i.test(safeOutput)) {
+    return "Patch target is not a regular file";
+  }
+  if (/workspace escape/i.test(safeOutput)) {
+    return "Patch target is outside the workspace";
+  }
+  if (/directory target/i.test(safeOutput)) {
+    return "Patch target is a directory";
+  }
+  if (/remote editor operation failed/i.test(safeOutput)) {
+    return "Remote editor operation failed";
+  }
+  if (!safeOutput.trim()) {
+    return "apply_patch failed without an error message";
+  }
+  return "Unclassified apply_patch failure";
+}
+
 export function remediationRunDiagnostics(
   error: unknown,
   environment: NodeJS.ProcessEnv = process.env,
@@ -57,57 +112,61 @@ export function remediationRunDiagnostics(
     return undefined;
   }
 
-  const state = error.state.toJSON();
-  const operations = new Map<
-    string,
-    {
-      operation: "create_file" | "delete_file" | "update_file";
-      path: string;
-    }
-  >();
-
-  for (const item of state.generatedItems) {
-    if (
-      item.type !== "tool_call_item" ||
-      item.rawItem.type !== "apply_patch_call"
-    ) {
-      continue;
-    }
-    operations.set(item.rawItem.callId, {
-      operation: item.rawItem.operation.type,
-      path: item.rawItem.operation.path,
-    });
-  }
-
-  const applyPatchFailures = state.generatedItems
-    .flatMap((item): RemediationApplyPatchFailure[] => {
-      if (
-        item.type !== "tool_call_output_item" ||
-        item.rawItem.type !== "apply_patch_call_output" ||
-        item.rawItem.status !== "failed"
-      ) {
-        return [];
+  try {
+    const state = error.state.toJSON();
+    const operations = new Map<
+      string,
+      {
+        operation: "create_file" | "delete_file" | "update_file";
+        path: string;
       }
-      const operation = operations.get(item.rawItem.callId);
-      const output =
-        item.rawItem.output ||
-        (typeof item.output === "string" ? item.output : undefined) ||
-        "apply_patch failed without an error message";
-      return [
-        {
-          callId: item.rawItem.callId,
-          error: safeInvestigationError(new Error(output), environment),
-          ...(operation ?? {}),
-        },
-      ];
-    })
-    .slice(-maxStoredApplyPatchFailures);
+    >();
 
-  return {
-    applyPatchFailures,
-    completedTurns: Math.max(0, state.currentTurn - 1),
-    maxTurns: state.maxTurns,
-  };
+    for (const item of state.generatedItems) {
+      if (
+        item.type !== "tool_call_item" ||
+        item.rawItem.type !== "apply_patch_call"
+      ) {
+        continue;
+      }
+      operations.set(item.rawItem.callId, {
+        operation: item.rawItem.operation.type,
+        path: item.rawItem.operation.path,
+      });
+    }
+
+    const applyPatchFailures = state.generatedItems
+      .flatMap((item): RemediationApplyPatchFailure[] => {
+        if (
+          item.type !== "tool_call_output_item" ||
+          item.rawItem.type !== "apply_patch_call_output" ||
+          item.rawItem.status !== "failed"
+        ) {
+          return [];
+        }
+        const operation = operations.get(item.rawItem.callId);
+        const output =
+          item.rawItem.output ||
+          (typeof item.output === "string" ? item.output : undefined) ||
+          "apply_patch failed without an error message";
+        return [
+          {
+            callId: item.rawItem.callId,
+            error: safeApplyPatchFailure(output, environment),
+            ...(operation ?? {}),
+          },
+        ];
+      })
+      .slice(-maxStoredApplyPatchFailures);
+
+    return {
+      applyPatchFailures,
+      completedTurns: Math.max(0, state.currentTurn - 1),
+      maxTurns: state.maxTurns,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runRemediationAgent(
