@@ -102,6 +102,28 @@ Access Key. Responder verifies the key against the team API and stores it in the
 encrypted tenant credential envelope. Loopback HTTP is accepted only during
 local development.
 
+## Vercel
+
+Create a Vercel Integration with:
+
+- External installation URL initiated by Responder:
+  `https://vercel.com/integrations/<VERCEL_INTEGRATION_SLUG>/new`
+- Redirect URL: `<public>/api/integrations/vercel/callback`
+- Read access for Projects, Deployments, Deployment Checks, Domains, Teams,
+  Logs, Security, and any other non-secret platform areas the investigation
+  agent should inspect
+- No write access and no environment-variable, token, secret, credential, or
+  API-key scopes
+- Environment: `VERCEL_INTEGRATION_SLUG`, `VERCEL_CLIENT_ID`, and
+  `VERCEL_CLIENT_SECRET`
+
+Responder encrypts each installation token, synchronizes only the projects
+visible to that installation, and keeps the token in the worker process. The
+investigation sandbox receives two host-side tools: one searches a generated
+catalog of safe Vercel GET operations, and one executes a selected operation.
+Regenerate the catalog from Vercel's published OpenAPI document after API
+updates with `pnpm vercel:generate-api`.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

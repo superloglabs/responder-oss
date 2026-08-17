@@ -13,6 +13,9 @@ describe("integration URLs", () => {
     expect(integrationCallbackUrl("slack")).toBe(
       "https://responder.ngrok.app/api/integrations/slack/callback",
     );
+    expect(integrationCallbackUrl("vercel")).toBe(
+      "https://responder.ngrok.app/api/integrations/vercel/callback",
+    );
   });
 
   it("returns users to the local worktree after a callback", () => {

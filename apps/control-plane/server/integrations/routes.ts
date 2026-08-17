@@ -76,6 +76,12 @@ import {
   sentryInstallUrl,
   verifySentryInstallation,
 } from "./sentry.js";
+import {
+  exchangeVercelCode,
+  getVercelAccount,
+  listVercelProjects,
+  vercelInstallUrl,
+} from "./vercel.js";
 import { integrationCallbackUrl, settingsRedirect } from "./urls.js";
 
 const providerSchema = z.enum(productIntegrationIds);
@@ -469,7 +475,9 @@ export const integrationRoutes = new Hono()
       provider: parsedProvider.data,
       returnTo: context.req.query("returnTo"),
       routingUrl:
-        parsedProvider.data === "github" || parsedProvider.data === "sentry"
+        parsedProvider.data === "github" ||
+        parsedProvider.data === "sentry" ||
+        parsedProvider.data === "vercel"
           ? integrationCallbackUrl(parsedProvider.data)
           : undefined,
     });
@@ -486,6 +494,10 @@ export const integrationRoutes = new Hono()
       }
       return context.redirect(githubAuthorizeUrl(state));
     }
+    if (parsedProvider.data === "vercel") {
+      return context.redirect(vercelInstallUrl(state));
+    }
+
     return context.json({ error: "Integration is not available yet" }, 501);
   })
   .post("/datadog/connect", async (context) => {
@@ -1141,6 +1153,98 @@ export const integrationRoutes = new Hono()
           "clickstack",
           "error",
           "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/vercel/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "vercel", "error", "invalid_state"),
+      );
+    }
+    const connectionState = await consumeIntegrationConnectionState(
+      "vercel",
+      state,
+    );
+    if (!connectionState) {
+      return context.redirect(
+        settingsRedirect("/settings", "vercel", "error", "invalid_state"),
+      );
+    }
+
+    const code = context.req.query("code");
+    const configurationId = context.req.query("configurationId");
+    if (!code || !configurationId) {
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "vercel",
+          "error",
+          "cancelled",
+        ),
+      );
+    }
+
+    try {
+      const token = await exchangeVercelCode({
+        code,
+        redirectUri: integrationCallbackUrl("vercel"),
+      });
+      const teamId = token.team_id ?? context.req.query("teamId") ?? null;
+      const account = await getVercelAccount({
+        accessToken: token.access_token,
+        teamId,
+        userId: token.user_id,
+      });
+      const projects = await listVercelProjects({
+        accessToken: token.access_token,
+        teamId,
+      });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "vercel",
+        externalAccountId: configurationId,
+        displayName: account.displayName,
+        encryptedCredentials: encryptCredentials({
+          accessToken: token.access_token,
+          configurationId,
+          teamId,
+          userId: token.user_id ?? null,
+        }),
+        credentialKeyVersion: 1,
+        metadata: {
+          ...account.metadata,
+          configurationId,
+          scopeExternalAccountId: account.externalAccountId,
+        },
+      });
+      await replaceIntegrationResources(accountId, "vercel_project", projects);
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "vercel",
+          resource_count: projects.length,
+        },
+      });
+      return context.redirect(
+        settingsRedirect(connectionState.returnTo, "vercel", "connected"),
+      );
+    } catch (error) {
+      logCallbackError("Vercel", error, {
+        configurationId,
+        organizationId: connectionState.organizationId,
+      });
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "vercel",
+          "error",
+          callbackErrorReason(error),
         ),
       );
     }

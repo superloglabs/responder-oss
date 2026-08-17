@@ -10,6 +10,7 @@ import {
   getOrganizationIntegrationAccount,
   getRecoverableSentryIntegrationAccount,
   listOrganizationIntegrationAccounts,
+  replaceIntegrationResources,
   setIntegrationAccountStatus,
   updateIntegrationAccountCredentials,
   upsertIntegrationAccount,
@@ -103,6 +104,7 @@ function configureGitHub() {
 
 describe("integration callback routing", () => {
   afterEach(() => {
+    vi.clearAllMocks();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -134,6 +136,105 @@ describe("integration callback routing", () => {
       returnTo: undefined,
       routingUrl: "https://responder.example/api/integrations/sentry/callback",
     });
+  });
+
+  it("starts Vercel's external installation flow with tenant state", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("VERCEL_INTEGRATION_SLUG", "responder");
+    vi.stubEnv("VERCEL_CLIENT_ID", "vercel-client");
+    vi.stubEnv("VERCEL_CLIENT_SECRET", "vercel-secret");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("routed-state");
+
+    const response = await app.request("/api/integrations/vercel/start");
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location")!);
+    expect(location.origin + location.pathname).toBe(
+      "https://vercel.com/integrations/responder/new",
+    );
+    expect(location.searchParams.get("state")).toBe("routed-state");
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      provider: "vercel",
+      returnTo: undefined,
+      routingUrl: "https://responder.example/api/integrations/vercel/callback",
+    });
+  });
+
+  it("stores a Vercel installation and synchronizes its projects", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("VERCEL_INTEGRATION_SLUG", "responder");
+    vi.stubEnv("VERCEL_CLIENT_ID", "vercel-client");
+    vi.stubEnv("VERCEL_CLIENT_SECRET", "vercel-secret");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: null,
+      metadata: {},
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            access_token: "vercel-token",
+            team_id: "team-1",
+            user_id: "user-1",
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ id: "team-1", name: "Acme", slug: "acme" }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            projects: [{ id: "prj-1", name: "web", framework: "nextjs" }],
+            pagination: { next: null },
+          }),
+        ),
+    );
+
+    const response = await app.request(
+      "/api/integrations/vercel/callback" +
+        "?code=one-time-code" +
+        "&configurationId=icfg-1" +
+        "&teamId=team-1" +
+        "&state=connection-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=vercel" +
+        "&status=connected",
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      accessToken: "vercel-token",
+      configurationId: "icfg-1",
+      teamId: "team-1",
+      userId: "user-1",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "vercel",
+        externalAccountId: "icfg-1",
+        displayName: "Acme",
+        encryptedCredentials: "encrypted-credentials",
+      }),
+    );
+    expect(replaceIntegrationResources).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "vercel_project",
+      [expect.objectContaining({ externalId: "prj-1", displayName: "web" })],
+    );
   });
 
   it("accepts Sentry's code-less verified-install completion redirect", async () => {

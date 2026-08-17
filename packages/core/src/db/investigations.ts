@@ -895,6 +895,91 @@ export interface RuntimeCustomMcpConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeVercelConnection {
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  projectIds: string[];
+  teamId: string | null;
+}
+
+const vercelCredentialsSchema = z.object({
+  accessToken: z.string().min(1),
+  configurationId: z.string().min(1),
+  teamId: z.string().min(1).nullable(),
+  userId: z.string().min(1).nullable(),
+});
+
+export async function getRuntimeVercelConnections(
+  versionId: string,
+): Promise<RuntimeVercelConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "vercel"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  if (accountRows.length === 0) return [];
+
+  const accountIds = accountRows.map(({ id }) => id);
+  const resourceRows = await getDatabase()
+    .select({
+      integrationAccountId: integrationResources.integrationAccountId,
+      externalId: integrationResources.externalId,
+    })
+    .from(integrationResources)
+    .where(
+      and(
+        inArray(integrationResources.integrationAccountId, accountIds),
+        eq(integrationResources.kind, "vercel_project"),
+        eq(integrationResources.available, true),
+      ),
+    );
+  const projectIdsByAccount = new Map<string, string[]>();
+  for (const resource of resourceRows) {
+    const projectIds = projectIdsByAccount.get(resource.integrationAccountId) ?? [];
+    projectIds.push(resource.externalId);
+    projectIdsByAccount.set(resource.integrationAccountId, projectIds);
+  }
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+
+  return config.contextAccountIds.flatMap((accountId) => {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) return [];
+    const credentials = vercelCredentialsSchema.parse(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    return [{
+      accessToken: credentials.accessToken,
+      accountId: account.id,
+      displayName: account.displayName,
+      projectIds: projectIdsByAccount.get(account.id) ?? [],
+      teamId: credentials.teamId,
+    }];
+  });
+}
+
 export function customMcpTokenRefreshFailureEvent(account: {
   displayName: string;
   errorType: string;

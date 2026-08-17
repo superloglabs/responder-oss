@@ -26,6 +26,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "sentry",
   "datadog",
   "clickstack",
+  "vercel",
   "custom_mcp",
   "linear",
 ]);
@@ -34,6 +35,7 @@ export const integrationResourceKind = pgEnum("integration_resource_kind", [
   "slack_channel",
   "sentry_project",
   "datadog_monitor",
+  "vercel_project",
 ]);
 
 export const triggerKind = pgEnum("trigger_kind", [

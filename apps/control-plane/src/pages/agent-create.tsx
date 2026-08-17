@@ -388,6 +388,8 @@ function connectionNotice(): {
         ? "Slack"
         : provider === "custom_mcp"
           ? "Custom MCP"
+          : provider === "vercel"
+            ? "Vercel"
           : provider === "clickstack"
             ? "ClickStack / HyperDX"
             : provider;
@@ -424,9 +426,11 @@ export function AgentCreatePage() {
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const linearJustConnected = successfulConnectionReturn("linear");
+  const vercelJustConnected = successfulConnectionReturn("vercel");
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
+    vercelJustConnected ||
     customMcpJustConnected ||
     clickStackJustConnected ||
     linearJustConnected;
@@ -574,6 +578,14 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedLinear.id);
         }
+        const connectedVercel = accountsFor(loadedOptions, "vercel")[0];
+        if (
+          vercelJustConnected &&
+          connectedVercel &&
+          !loadedDraft.contextAccountIds.includes(connectedVercel.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedVercel.id);
+        }
         setDraft(loadedDraft);
       })
       .catch((caught: unknown) => {
@@ -598,6 +610,7 @@ export function AgentCreatePage() {
     datadogJustConnected,
     draftStorageKey,
     linearJustConnected,
+    vercelJustConnected,
   ]);
 
   useEffect(() => {
@@ -630,6 +643,10 @@ export function AgentCreatePage() {
   );
   const linearAccounts = useMemo(
     () => accountsFor(options, "linear"),
+    [options],
+  );
+  const vercelAccounts = useMemo(
+    () => accountsFor(options, "vercel"),
     [options],
   );
   const githubAccounts = useMemo(
@@ -1079,6 +1096,10 @@ export function AgentCreatePage() {
     clickStackAccounts[0] &&
       draft.contextAccountIds.includes(clickStackAccounts[0].id),
   );
+  const vercelContextConnected = Boolean(
+    vercelAccounts[0] &&
+      draft.contextAccountIds.includes(vercelAccounts[0].id),
+  );
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
     draft.contextResourceIds.includes(channel.id),
   );
@@ -1097,6 +1118,7 @@ export function AgentCreatePage() {
     Number(sentryIncluded || sentryContextConnected) +
     Number(selectedSlackContextChannels.length > 0) +
     Number(datadogContextConnected) +
+    Number(vercelContextConnected) +
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1859,6 +1881,52 @@ export function AgentCreatePage() {
                           </section>
                         </div>
                       ) : null}
+
+                  <ContextRow
+                    action={
+                      vercelContextConnected ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            toggleContextAccount(vercelAccounts[0]!.id)
+                          }
+                          variant="ghost"
+                        >
+                          Remove
+                        </Button>
+                      ) : vercelAccounts[0] ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            toggleContextAccount(vercelAccounts[0]!.id)
+                          }
+                          variant="secondary"
+                        >
+                          Add
+                        </Button>
+                      ) : (
+                        <ConnectButton
+                          integration={integrationFor("vercel")}
+                          isConnecting={connectingProvider === "vercel"}
+                          onClick={() => connect("vercel")}
+                        />
+                      )
+                    }
+                    detail={
+                      vercelAccounts[0]
+                        ? `${vercelAccounts[0].displayName} · Projects, deployments, domains, and logs`
+                        : "Read-only projects, deployments, domains, and logs"
+                    }
+                    label="Vercel"
+                    provider="vercel"
+                    status={
+                      vercelContextConnected
+                        ? "connected"
+                        : vercelAccounts[0]
+                          ? "available"
+                          : "not_connected"
+                    }
+                  />
 
                   <ContextRow
                     action={
@@ -2738,6 +2806,7 @@ function ContextRow({
     | "slack"
     | "sentry"
     | "datadog"
+    | "vercel"
     | "custom_mcp"
     | "clickstack"
     | "linear";

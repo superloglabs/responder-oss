@@ -3,6 +3,7 @@ export const productIntegrationIds = [
   "slack",
   "sentry",
   "datadog",
+  "vercel",
   "custom_mcp",
   "clickstack",
   "linear",
@@ -60,6 +61,17 @@ export const integrationCatalog: IntegrationDefinition[] = [
     description: "Monitor triggers with logs, metrics, and trace context.",
     implemented: true,
     requiredEnvironment: [],
+  },
+  {
+    id: "vercel",
+    name: "Vercel",
+    description: "Projects, deployments, domains, logs, and platform context.",
+    implemented: true,
+    requiredEnvironment: [
+      "VERCEL_INTEGRATION_SLUG",
+      "VERCEL_CLIENT_ID",
+      "VERCEL_CLIENT_SECRET",
+    ],
   },
   {
     id: "custom_mcp",

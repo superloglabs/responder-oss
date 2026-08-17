@@ -23,6 +23,7 @@ interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "vercel"
     | "custom_mcp"
     | "clickstack"
     | "linear";
@@ -55,6 +56,8 @@ function connectionNotice(): {
         ? "Slack"
         : provider === "custom_mcp"
           ? "Custom MCP"
+          : provider === "vercel"
+            ? "Vercel"
           : provider === "clickstack"
             ? "ClickStack / HyperDX"
             : provider;
@@ -147,7 +150,14 @@ export function SettingsPage() {
     ["github", "slack"].includes(integration.id),
   );
   const secondary = integrations.filter((integration) =>
-    ["sentry", "datadog", "linear", "custom_mcp", "clickstack"].includes(
+    [
+      "sentry",
+      "datadog",
+      "linear",
+      "vercel",
+      "custom_mcp",
+      "clickstack",
+    ].includes(
       integration.id,
     ),
   );
