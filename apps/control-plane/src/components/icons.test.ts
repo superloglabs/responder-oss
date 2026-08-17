@@ -40,6 +40,17 @@ describe("ProviderGlyph", () => {
     expect(markup).not.toContain("role=");
   });
 
+  it("renders the Upstash brand mark instead of a text abbreviation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "upstash" }),
+    );
+
+    expect(markup).toContain('aria-label="Upstash"');
+    expect(markup).toContain('class="providerGlyph__logo"');
+    expect(markup).toContain("#00E9A3");
+    expect(markup).not.toContain(">UP</span>");
+  });
+
   it("keeps a text glyph for custom MCP servers", () => {
     const markup = renderToStaticMarkup(
       createElement(ProviderGlyph, { provider: "custom_mcp" }),

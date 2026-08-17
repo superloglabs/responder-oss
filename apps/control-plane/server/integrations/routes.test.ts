@@ -464,6 +464,22 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("offers the Upstash account connection endpoint", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "upstash",
+        connectUrl: "/api/integrations/upstash/connect",
+      }),
+    );
+  });
+
   it("offers custom MCP connections", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
@@ -965,6 +981,51 @@ describe("integration callback routing", () => {
         externalAccountId: "org-1",
         organizationId: tenant.organizationId,
         provider: "datadog",
+      }),
+    );
+  });
+
+  it("validates and encrypts an Upstash account API key", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json([
+        { database_id: "db-1", database_name: "production-cache" },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request("/api/integrations/upstash/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "developer-api-key",
+        email: "operator@example.com",
+        returnTo: "/agents/new",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      redirectUrl:
+        "https://responder.example/agents/new?integration=upstash&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      apiKey: "developer-api-key",
+      authType: "api_key",
+      email: "operator@example.com",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "encrypted-credentials",
+        externalAccountId: "operator@example.com",
+        organizationId: tenant.organizationId,
+        provider: "upstash",
       }),
     );
   });

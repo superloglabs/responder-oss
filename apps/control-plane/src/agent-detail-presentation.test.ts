@@ -10,6 +10,7 @@ const options: AgentOptions = {
     { id: "slack", provider: "slack", displayName: "Acme Inc." },
     { id: "sentry", provider: "sentry", displayName: "Acme Sentry" },
     { id: "datadog", provider: "datadog", displayName: "Acme Datadog" },
+    { id: "upstash", provider: "upstash", displayName: "Acme Upstash" },
   ],
   repositories: [],
   secrets: [
@@ -38,7 +39,7 @@ const options: AgentOptions = {
 };
 
 const configuration: AgentConfiguration = {
-  contextAccountIds: ["sentry", "datadog"],
+  contextAccountIds: ["sentry", "datadog", "upstash"],
   contextResourceIds: [],
   secretIds: ["service-key"],
   createLinearTickets: false,
@@ -90,7 +91,7 @@ describe("buildAgentPipelinePresentation", () => {
       eyebrow: "Input · Slack",
       title: "#prod-alerts",
     });
-    expect(presentation.context.title).toBe("Sentry · Datadog");
+    expect(presentation.context.title).toBe("Sentry · Datadog · Upstash");
     expect(presentation.context.detail).toBe(
       "GitHub repositories: acme/api · acme/web",
     );

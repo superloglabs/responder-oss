@@ -7,6 +7,7 @@ export const providerGlyphs = {
   linear: { label: "Linear", logo: "linear" },
   sentry: { label: "Sentry", logo: "sentry" },
   slack: { label: "Slack", logo: "slack" },
+  upstash: { label: "Upstash", logo: "upstash" },
   vercel: { label: "Vercel", text: "▲" },
 } as const;
 

@@ -738,6 +738,12 @@ button:disabled {
   display: block;
 }
 
+.providerMark .providerGlyph__logo,
+.integrationLogo .providerGlyph__logo {
+  width: 22px;
+  height: 22px;
+}
+
 .socialAuth__button {
   height: 42px;
   padding: 0 14px;

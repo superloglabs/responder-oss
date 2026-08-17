@@ -11,6 +11,7 @@ import {
   getRuntimeLinearConnection,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
+  getRuntimeUpstashConnection,
   getRuntimeVercelConnections,
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
@@ -50,6 +51,10 @@ import {
 } from "./trace.js";
 import { createSentryMcpServer } from "./sentry.js";
 import { createSlackMcpServer } from "./slack.js";
+import {
+  createUpstashCliTools,
+  createUpstashMcpServer,
+} from "./upstash.js";
 import {
   redactDaytonaSecretPlaceholders,
   workspaceSecretUsageInstructions,
@@ -97,13 +102,20 @@ export function contextServerConnectFailureEvent(input: {
   error: unknown;
   investigationId: string;
   serverName: string;
+  upstashConnection?: { accountId: string } | null;
 }) {
-  const accountId = input.customMcpConnections.find(
-    (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
-  )?.accountId;
+  const accountId = input.serverName.startsWith("upstash-")
+    ? input.upstashConnection?.accountId
+    : input.customMcpConnections.find(
+        (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
+      )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
-    error: input.error instanceof Error ? input.error.message : String(input.error),
+    error: input.serverName.startsWith("upstash-")
+      ? "Unable to connect to Upstash context"
+      : input.error instanceof Error
+        ? input.error.message
+        : String(input.error),
     event: "context_server_connect_failed",
     investigationId: input.investigationId,
     server: input.serverName,
@@ -142,6 +154,7 @@ export function investigationInstructions(input: {
   sentryConnected: boolean;
   linearConnected?: boolean;
   slackChannels?: Array<{ id: string; name: string }>;
+  upstashConnected?: boolean;
   workspaceSecrets?: Array<{
     environmentVariable: string;
     allowedHosts: string[];
@@ -156,6 +169,7 @@ export function investigationInstructions(input: {
     input.datadogConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
+    input.upstashConnected ||
     vercelAccounts.length > 0 ||
     customMcpNames.length > 0;
   return [
@@ -170,6 +184,9 @@ export function investigationInstructions(input: {
       : null,
     input.sentryConnected
       ? "Use the connected read-only Sentry tools to inspect the issue, related events, traces, and relevant historical telemetry before concluding."
+      : null,
+    input.upstashConnected
+      ? "Use list_upstash_resources first to locate relevant Redis, Vector, Search, QStash, or team resources, then use the read-only Upstash inspection and runtime tools for evidence. Workflow and QStash runtime history are available through the connected Upstash tools. Never create, update, delete, retry, publish, or otherwise mutate Upstash resources or data."
       : null,
     input.linearConnected
       ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
@@ -270,6 +287,7 @@ export async function runInvestigationAgent(
     linearConnection,
     vercelConnections,
     slackConnection,
+    upstashConnection,
     workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
@@ -301,6 +319,7 @@ export async function runInvestigationAgent(
     getRuntimeLinearConnection(job.config.id),
     getRuntimeVercelConnections(job.config.id),
     getRuntimeSlackConnection(job.config.id),
+    getRuntimeUpstashConnection(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
   const datadogServer = datadogConnection
@@ -319,12 +338,19 @@ export async function runInvestigationAgent(
   const slackServer = slackConnection
     ? createSlackMcpServer(slackConnection)
     : null;
+  const upstashServer = upstashConnection
+    ? createUpstashMcpServer(upstashConnection)
+    : null;
+  const upstashTools = upstashConnection
+    ? createUpstashCliTools(upstashConnection)
+    : [];
   const contextServers = [
     datadogServer,
     sentryServer,
     clickStackServer,
     linearServer,
     slackServer,
+    upstashServer,
     ...customMcpServers,
   ].filter(
     (server): server is NonNullable<typeof server> => server !== null,
@@ -351,9 +377,13 @@ export async function runInvestigationAgent(
                 error,
                 investigationId: job.investigationId,
                 serverName: server.name,
+                upstashConnection,
               }),
             ),
           );
+          if (server.name.startsWith("upstash-")) {
+            throw new Error("Unable to connect to Upstash context");
+          }
           throw error;
         }
       }),
@@ -396,6 +426,7 @@ export async function runInvestigationAgent(
       sentryConnected: sentryServer !== null,
       linearConnected: linearServer !== null,
       slackChannels: slackConnection?.channels,
+      upstashConnected: upstashServer !== null,
       workspaceSecrets,
       vercelAccounts: vercelConnections.map((connection) => connection.displayName),
     });
@@ -411,6 +442,7 @@ export async function runInvestigationAgent(
         issueSearchTool,
         reportTool,
         ...repositoryInspectionTools,
+        ...upstashTools,
         ...vercelTools,
       ],
     });

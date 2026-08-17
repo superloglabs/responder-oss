@@ -5,6 +5,7 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
+import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
@@ -24,6 +25,7 @@ interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "upstash"
     | "vercel"
     | "custom_mcp"
     | "clickstack"
@@ -143,6 +145,7 @@ export function SettingsPage() {
     [
       "sentry",
       "datadog",
+      "upstash",
       "linear",
       "vercel",
       "custom_mcp",
@@ -217,6 +220,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
+  const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
 
   function startConnection() {
@@ -227,6 +231,10 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
     }
     if (integration.id === "custom_mcp") {
       setConfiguringCustomMcp(true);
+      return;
+    }
+    if (integration.id === "upstash") {
+      setConnectingUpstash(true);
       return;
     }
     if (integration.id === "clickstack") {
@@ -283,6 +291,12 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConfiguringCustomMcp(false)}
         open={configuringCustomMcp}
+        returnTo="/settings"
+      />
+      <UpstashConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingUpstash(false)}
+        open={connectingUpstash}
         returnTo="/settings"
       />
       <ClickStackConnectionDialog

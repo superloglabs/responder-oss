@@ -14,6 +14,7 @@ import { getDatadogSite } from "../../../../packages/core/src/integrations/datad
 import {
   datadogAccount,
 } from "./datadog.js";
+import { upstashAccount } from "./upstash.js";
 import {
   clickStackAccount,
   exchangeClickStackCloudCode,
@@ -94,6 +95,50 @@ describe("integration providers", () => {
         }),
       }),
     );
+  });
+
+  it("validates an Upstash account with email and developer API key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json([
+        { database_id: "db-1", database_name: "production-cache" },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      upstashAccount({
+        apiKey: "developer-api-key",
+        email: " Operator@Example.com ",
+      }),
+    ).resolves.toEqual({
+      displayName: "operator@example.com",
+      externalAccountId: "operator@example.com",
+      metadata: { databaseCount: 1 },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.upstash.com/v2/redis/databases",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: `Basic ${Buffer.from(
+            "operator@example.com:developer-api-key",
+          ).toString("base64")}`,
+        }),
+      }),
+    );
+  });
+
+  it("rejects invalid Upstash credentials without echoing the API key", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+    );
+
+    await expect(
+      upstashAccount({
+        apiKey: "rejected-developer-api-key",
+        email: "operator@example.com",
+      }),
+    ).rejects.toThrow("Upstash rejected the account email or API key");
   });
 
   it("validates ClickStack access through the deployment team API", async () => {

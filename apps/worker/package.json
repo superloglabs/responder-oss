@@ -19,6 +19,8 @@
     "@opentelemetry/api": "1.9.1",
     "@responder/core": "workspace:*",
     "@sentry/node": "10.69.0",
+    "@upstash/cli": "1.1.1",
+    "@upstash/mcp-server": "0.2.7",
     "openai": "6.49.0",
     "tsx": "4.20.6",
     "zod": "4.4.3"

@@ -20,9 +20,10 @@
 
 # Responder
 
-Responder investigates production alerts from Sentry, Datadog, Slack, and
-connected MCP servers. It keeps tenant configuration in Postgres, queues work
-for a separate worker, and runs repository inspection in an isolated sandbox.
+Responder investigates production alerts using Sentry, Datadog, Slack,
+Upstash, and connected MCP servers. It keeps tenant configuration in Postgres,
+queues work for a separate worker, and runs repository inspection in an
+isolated sandbox.
 
 This repository contains the web application, API, worker, shared domain code,
 and database migrations. Hosted-service infrastructure and marketing pages are
@@ -31,7 +32,7 @@ maintained separately.
 ## What it does
 
 - Watches selected Slack channels and Sentry projects for new alerts.
-- Connects GitHub, Slack, Sentry, Datadog, Vercel, ClickStack, and custom MCP
+- Connects GitHub, Slack, Sentry, Datadog, Upstash, Vercel, ClickStack, and custom MCP
   servers.
 - Investigates incidents with a versioned operator-managed runtime profile.
 - Produces structured reports, issues, Slack updates, and optional remediation

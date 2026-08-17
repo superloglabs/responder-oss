@@ -26,6 +26,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   linear: "Linear",
   sentry: "Sentry",
   slack: "Slack",
+  upstash: "Upstash",
   vercel: "Vercel",
 };
 

@@ -107,6 +107,7 @@ function humanizeToolName(value: string): string {
     rum: "RUM",
     sentry: "Sentry",
     slack: "Slack",
+    upstash: "Upstash",
     slo: "SLO",
     slos: "SLOs",
     sql: "SQL",

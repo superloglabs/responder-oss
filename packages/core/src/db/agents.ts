@@ -243,6 +243,7 @@ async function validateConfigurationResources(
         "sentry",
         "datadog",
         "clickstack",
+        "upstash",
         "vercel",
         "custom_mcp",
         "linear",

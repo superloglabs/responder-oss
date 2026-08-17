@@ -92,6 +92,27 @@ Connect Datadog from Settings and choose the matching Datadog site. Alerts can
 arrive through a watched Slack channel, while investigations use Datadog's MCP
 endpoint for the connected site.
 
+## Upstash
+
+Connect Upstash from Settings with the Upstash account email and a developer
+API key. Upstash's developer API authenticates with both values, so the email
+is required even though the API key is the secret. Create a dedicated key for
+Responder and rotate or revoke it from the Upstash console when needed. No
+deployment-level Upstash environment variables are required.
+
+Responder encrypts the account credentials in the tenant credential envelope.
+During an investigation, the worker combines two read-only context layers:
+
+- fixed Upstash CLI commands list and inspect Redis, Vector, Search, QStash,
+  and team resources;
+- a filtered Upstash MCP process provides Redis inspection plus QStash and
+  Workflow logs, schedules, and dead-letter queues.
+
+The worker accepts no arbitrary CLI arguments, removes mutation tools, validates
+Redis commands against a read-only allowlist, and redacts credential-shaped
+fields from provider output. Upstash credentials stay in the worker process and
+never enter the repository investigation sandbox.
+
 ## ClickStack
 
 ClickStack Cloud uses `https://mcp.clickhouse.cloud/clickstack` with OAuth and
