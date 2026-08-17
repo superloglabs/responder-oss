@@ -16,6 +16,11 @@ import {
   upsertIntegrationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
+  createAwsCloudFormationTemplateUrl,
+  createAwsExternalId,
+  verifyAwsInvestigationRole,
+} from "../../../../packages/core/src/integrations/aws.js";
+import {
   beginCustomMcpOAuth,
   finishCustomMcpOAuth,
   parseCustomMcpCredentials,
@@ -55,6 +60,18 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   updateIntegrationAccountCredentials: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
 }));
+
+vi.mock("../../../../packages/core/src/integrations/aws.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/aws.js")
+  >();
+  return {
+    ...actual,
+    createAwsCloudFormationTemplateUrl: vi.fn(),
+    createAwsExternalId: vi.fn(),
+    verifyAwsInvestigationRole: vi.fn(),
+  };
+});
 
 vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
   beginCustomMcpOAuth: vi.fn(),
@@ -494,6 +511,117 @@ describe("integration callback routing", () => {
         connectUrl: "/api/integrations/custom-mcp/connect",
       }),
     );
+  });
+
+  it("prepares AWS quick create with a presigned S3 template", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(createAwsExternalId).mockReturnValue(
+      "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(
+      "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-aws-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "123456789012" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.accountId).toBe("30000000-0000-4000-8000-000000000000");
+    expect(body.cloudFormationUrl).toContain("#/stacks/create/review?");
+    expect(body.cloudFormationUrl).toContain(
+      encodeURIComponent(
+        "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+      ),
+    );
+    expect(body.template).toContain("AIOpsAssistantPolicy");
+    expect(body.cloudFormationUrl).not.toContain("ngrok");
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      accountId: "123456789012",
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      roleArn:
+        "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    });
+  });
+
+  it("keeps template download available without S3 configuration", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(createAwsExternalId).mockReturnValue(
+      "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(null);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-aws-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "123456789012" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      cloudFormationUrl: null,
+      template: expect.stringContaining("ResponderInvestigationRole"),
+    });
+  });
+
+  it("verifies the customer role before connecting AWS", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-aws-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accountId: "123456789012",
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      roleArn:
+        "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    });
+    vi.mocked(verifyAwsInvestigationRole).mockResolvedValue(undefined);
+    vi.mocked(setIntegrationAccountStatus).mockResolvedValue(undefined);
+
+    const response = await app.request("/api/integrations/aws/verify", {
+      body: JSON.stringify({
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+        returnTo: "/agents/new",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(verifyAwsInvestigationRole).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "123456789012" }),
+    );
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "connected",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      redirectUrl:
+        "https://responder.example/agents/new?integration=aws&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
   });
 
   it("validates and encrypts a custom MCP API token", async () => {

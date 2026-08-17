@@ -12,6 +12,16 @@ interface ProviderGlyphProps {
   provider: ProviderGlyphId;
 }
 
+function AwsLogo() {
+  return (
+    <img
+      alt=""
+      className="providerGlyph__asset"
+      src="/aws-cloud-logo.svg"
+    />
+  );
+}
+
 function ClickStackLogo() {
   return (
     <svg aria-hidden="true" focusable="false" viewBox="0 0 260 260">
@@ -151,6 +161,7 @@ function LinearLogo() {
 }
 
 const providerLogos = {
+  aws: AwsLogo,
   clickstack: ClickStackLogo,
   datadog: DatadogLogo,
   github: GithubLogo,
@@ -179,7 +190,7 @@ export function ProviderGlyph({
     <span
       aria-hidden={decorative ? true : undefined}
       aria-label={decorative ? undefined : glyph.label}
-      className={`providerGlyph${className ? ` ${className}` : ""}`}
+      className={`providerGlyph providerGlyph--${provider}${className ? ` ${className}` : ""}`}
       role={decorative ? undefined : "img"}
     >
       <ProviderGlyphContent provider={provider} />

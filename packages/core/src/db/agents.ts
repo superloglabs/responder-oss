@@ -240,6 +240,7 @@ async function validateConfigurationResources(
     if (
       !account ||
       ![
+        "aws",
         "sentry",
         "datadog",
         "clickstack",

@@ -87,8 +87,27 @@ import {
   vercelInstallUrl,
 } from "./vercel.js";
 import { integrationCallbackUrl, settingsRedirect } from "./urls.js";
+import {
+  awsAccountIdSchema,
+  awsCloudFormationQuickCreateUrl,
+  awsCloudFormationTemplate,
+  awsConnectionCredentialsSchema,
+  createAwsCloudFormationTemplateUrl,
+  awsIntegrationPrincipalArn,
+  awsInvestigationRoleArn,
+  createAwsExternalId,
+  verifyAwsInvestigationRole,
+} from "../../../../packages/core/src/integrations/aws.js";
 
 const providerSchema = z.enum(productIntegrationIds);
+const awsConnectionSchema = z.object({
+  accountId: awsAccountIdSchema,
+  returnTo: z.string().max(2_048).optional(),
+});
+const awsVerificationSchema = z.object({
+  integrationAccountId: z.uuid(),
+  returnTo: z.string().max(2_048).optional(),
+});
 const sentryCredentialsSchema = z.object({
   accessToken: z.string().min(1),
   installationId: z.uuid(),
@@ -365,7 +384,8 @@ export const integrationRoutes = new Hono()
           })),
           connectUrl:
             definition.implemented && configured
-              ? definition.id === "datadog" ||
+              ? definition.id === "aws" ||
+                  definition.id === "datadog" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash"
                 ? `/api/integrations/${definition.id}/connect`
@@ -383,6 +403,13 @@ export const integrationRoutes = new Hono()
       }),
     });
   })
+  .get("/aws/cloudformation-template", (context) =>
+    context.body(awsCloudFormationTemplate(), 200, {
+      "cache-control": "public, max-age=3600",
+      "content-disposition": 'inline; filename="responder-aws-access.yaml"',
+      "content-type": "application/yaml; charset=utf-8",
+    }),
+  )
   .get("/:provider/start", async (context) => {
     const parsedProvider = providerSchema.safeParse(context.req.param("provider"));
     if (!parsedProvider.success) {
@@ -402,6 +429,7 @@ export const integrationRoutes = new Hono()
       return context.json({ error: tenant.error }, tenant.status);
     }
     if (
+      parsedProvider.data === "aws" ||
       parsedProvider.data === "datadog" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash"
@@ -511,6 +539,124 @@ export const integrationRoutes = new Hono()
     }
 
     return context.json({ error: "Integration is not available yet" }, 501);
+  })
+  .post("/aws/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = awsConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter a 12-digit AWS account ID" }, 400);
+    }
+
+    try {
+      const principalArn = awsIntegrationPrincipalArn();
+      const externalId = createAwsExternalId();
+      const credentials = {
+        accountId: parsed.data.accountId,
+        externalId,
+        roleArn: awsInvestigationRoleArn(parsed.data.accountId),
+      };
+      const accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "aws",
+        externalAccountId: parsed.data.accountId,
+        displayName: `AWS · ${parsed.data.accountId}`,
+        encryptedCredentials: encryptCredentials(credentials),
+        credentialKeyVersion: 1,
+        metadata: {
+          permissionPolicy: "AIOpsAssistantPolicy",
+          roleName: "ResponderInvestigationRole",
+        },
+        status: "pending",
+      });
+      const templateUrl = await createAwsCloudFormationTemplateUrl();
+      return context.json({
+        accountId,
+        cloudFormationUrl: templateUrl
+          ? awsCloudFormationQuickCreateUrl({
+              externalId,
+              principalArn,
+              templateUrl,
+            })
+          : null,
+        template: awsCloudFormationTemplate(),
+      });
+    } catch (error) {
+      logCallbackError("AWS", error, {
+        organizationId: tenant.organizationId,
+        stage: "setup",
+      });
+      return context.json(
+        { error: "Unable to prepare the AWS connection" },
+        502,
+      );
+    }
+  })
+  .post("/aws/verify", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = awsVerificationSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "The AWS setup session is invalid" }, 400);
+    }
+
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: parsed.data.integrationAccountId,
+      organizationId: tenant.organizationId,
+      provider: "aws",
+    });
+    if (!account?.encryptedCredentials) {
+      return context.json({ error: "Start the AWS connection again" }, 404);
+    }
+    try {
+      const credentials = awsConnectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      await verifyAwsInvestigationRole(credentials);
+      await setIntegrationAccountStatus(account.id, "connected");
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: account.id,
+          provider: "aws",
+        },
+      });
+      return context.json({
+        accountId: account.id,
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(
+            parsed.data.returnTo ?? "/settings",
+            "aws",
+            "connected",
+          ),
+          account.id,
+        ),
+      });
+    } catch (error) {
+      await setIntegrationAccountStatus(account.id, "error");
+      logCallbackError("AWS", error, {
+        accountId: account.id,
+        organizationId: tenant.organizationId,
+        stage: "verify",
+      });
+      return context.json(
+        {
+          error:
+            "Responder could not assume the role yet. Wait for the CloudFormation stack to finish, then try again.",
+        },
+        401,
+      );
+    }
   })
   .post("/datadog/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

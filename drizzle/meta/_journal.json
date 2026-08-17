@@ -162,6 +162,13 @@
       "when": 1786965325801,
       "tag": "0022_thin_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786970691972,
+      "tag": "0023_black_loners",
+      "breakpoints": true
     }
   ]
 }

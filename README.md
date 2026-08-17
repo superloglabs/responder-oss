@@ -32,8 +32,8 @@ maintained separately.
 ## What it does
 
 - Watches selected Slack channels and Sentry projects for new alerts.
-- Connects GitHub, Slack, Sentry, Datadog, Upstash, Vercel, ClickStack, and custom MCP
-  servers.
+- Connects GitHub, Slack, Sentry, Datadog, AWS, Upstash, Vercel, ClickStack,
+  and custom MCP servers.
 - Investigates incidents with a versioned operator-managed runtime profile.
 - Produces structured reports, issues, Slack updates, and optional remediation
   pull requests.

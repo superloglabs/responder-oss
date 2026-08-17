@@ -1,4 +1,5 @@
 export const productIntegrationIds = [
+  "aws",
   "github",
   "slack",
   "sentry",
@@ -21,6 +22,13 @@ interface IntegrationDefinition {
 }
 
 export const integrationCatalog: IntegrationDefinition[] = [
+  {
+    id: "aws",
+    name: "AWS",
+    description: "Read-only infrastructure, telemetry, and service context.",
+    implemented: true,
+    requiredEnvironment: ["AWS_INTEGRATION_PRINCIPAL_ARN"],
+  },
   {
     id: "github",
     name: "GitHub",

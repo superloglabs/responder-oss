@@ -1,4 +1,5 @@
 export const providerGlyphs = {
+  aws: { label: "AWS", logo: "aws" },
   clickstack: { label: "ClickStack", logo: "clickstack" },
   custom_mcp: { label: "Custom MCP", text: "MCP" },
   datadog: { label: "Datadog", logo: "datadog" },

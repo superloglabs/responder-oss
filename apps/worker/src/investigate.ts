@@ -5,6 +5,7 @@ import {
   type DaytonaSandboxSession,
 } from "@openai/agents-extensions/sandbox/daytona";
 import {
+  getRuntimeAwsConnections,
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
   getRuntimeClickStackConnection,
@@ -27,6 +28,7 @@ import type {
 } from "@responder/core/db/schema";
 import type { InvestigationJob } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
+import { createAwsMcpServer } from "./aws.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
@@ -146,6 +148,7 @@ export function investigationCapabilities(replay: boolean) {
 
 export function investigationInstructions(input: {
   agentPrompt: string;
+  awsAccountNames?: string[];
   customMcpNames?: string[];
   datadogConnected: boolean;
   clickStackConnected: boolean;
@@ -161,6 +164,7 @@ export function investigationInstructions(input: {
   }>;
   vercelAccounts?: string[];
 }): string {
+  const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
@@ -171,11 +175,15 @@ export function investigationInstructions(input: {
     input.clickStackConnected ||
     input.upstashConnected ||
     vercelAccounts.length > 0 ||
+    awsAccountNames.length > 0 ||
     customMcpNames.length > 0;
   return [
     input.runtimeSystemPrompt,
     input.agentPrompt,
     "Investigate only the alert and context provided by Responder.",
+    awsAccountNames.length > 0
+      ? `Use the connected read-only AWS tools to inspect relevant infrastructure, configuration, telemetry, and service health before concluding. Connected AWS accounts: ${awsAccountNames.join(", ")}. Never request secret values.`
+      : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
       : null,
@@ -280,6 +288,7 @@ export async function runInvestigationAgent(
 
   const [
     runtimeProfile,
+    awsConnections,
     datadogConnection,
     sentryConnection,
     customMcpConnections,
@@ -291,6 +300,7 @@ export async function runInvestigationAgent(
     workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
+    getRuntimeAwsConnections(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
     getRuntimeSentryConnection(job.config.id, investigationInput)
       .then((connection) => {
@@ -322,6 +332,9 @@ export async function runInvestigationAgent(
     getRuntimeUpstashConnection(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
+  const awsServers = await Promise.all(
+    awsConnections.map((connection) => createAwsMcpServer(connection, environment)),
+  );
   const datadogServer = datadogConnection
     ? createDatadogMcpServer(datadogConnection)
     : null;
@@ -351,6 +364,7 @@ export async function runInvestigationAgent(
     linearServer,
     slackServer,
     upstashServer,
+    ...awsServers,
     ...customMcpServers,
   ].filter(
     (server): server is NonNullable<typeof server> => server !== null,
@@ -418,6 +432,7 @@ export async function runInvestigationAgent(
     const vercelTools = createVercelTools(vercelConnections);
     const instructions = investigationInstructions({
       agentPrompt: job.config.prompt,
+      awsAccountNames: awsConnections.map((connection) => connection.displayName),
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,

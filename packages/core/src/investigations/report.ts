@@ -5,6 +5,7 @@ export const issueSeveritySchema = z.enum(["SEV-1", "SEV-2", "SEV-3"]);
 export const issueEvidenceSchema = z.object({
   source: z.enum([
     "alert",
+    "aws",
     "datadog",
     "sentry",
     "clickstack",
