@@ -22,13 +22,6 @@ import {
   logClickStackTokenRefreshFailure,
   normalizeClickStackMcpUrl,
 } from "../integrations/clickstack.js";
-import {
-  type LinearOAuthCredentials,
-  linearAccessTokenNeedsRefresh,
-  LINEAR_MCP_URL,
-  parseLinearOAuthCredentials,
-  refreshLinearOAuthCredentials,
-} from "../integrations/linear.js";
 import { SLACK_MCP_URL } from "../integrations/slack-mcp.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
 import { getDatabase } from "./client.js";
@@ -61,8 +54,6 @@ export interface RuntimeAgentConfig {
   model: string;
   prompt: string;
   prMode: AgentPrMode;
-  createLinearTickets: boolean;
-  linearIssueTemplate: string;
 }
 
 export interface RuntimeRepository {
@@ -292,8 +283,6 @@ export async function prepareInvestigationRetry(
         model: agentConfigVersions.model,
         prMode: agentConfigVersions.prMode,
         prompt: agentConfigVersions.prompt,
-        createLinearTickets: agentConfigVersions.createLinearTickets,
-        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
       })
       .from(investigations)
       .innerJoin(
@@ -403,8 +392,6 @@ export async function prepareInvestigationRetry(
         model: investigation.model,
         prompt: investigation.prompt,
         prMode: investigation.prMode,
-        createLinearTickets: investigation.createLinearTickets,
-        linearIssueTemplate: investigation.linearIssueTemplate,
       },
     };
   });
@@ -435,8 +422,6 @@ export async function prepareInvestigationReplay(input: {
         model: agentConfigVersions.model,
         prMode: agentConfigVersions.prMode,
         prompt: agentConfigVersions.prompt,
-        createLinearTickets: agentConfigVersions.createLinearTickets,
-        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
         title: investigations.title,
       })
       .from(investigations)
@@ -523,8 +508,6 @@ export async function prepareInvestigationReplay(input: {
         model: source.model,
         prompt: source.prompt,
         prMode: source.prMode,
-        createLinearTickets: source.createLinearTickets,
-        linearIssueTemplate: source.linearIssueTemplate,
       },
     };
   });
@@ -800,8 +783,6 @@ export async function getRuntimeAgentConfig(
       model: agentConfigVersions.model,
       prompt: agentConfigVersions.prompt,
       prMode: agentConfigVersions.prMode,
-      createLinearTickets: agentConfigVersions.createLinearTickets,
-      linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
     })
     .from(agentConfigVersions)
     .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
@@ -1032,20 +1013,19 @@ export function customMcpConnectionsLoadedEvent(input: {
   };
 }
 
-function mcpOAuthRedirectUrl(provider: "custom_mcp" | "linear"): string {
+function customMcpOAuthRedirectUrl(): string {
   const baseUrl =
     process.env.RESPONDER_PUBLIC_URL ??
     process.env.BETTER_AUTH_URL ??
     "http://localhost:3000";
   return new URL(
-    `/api/integrations/${provider}/callback`,
+    "/api/integrations/custom_mcp/callback",
     baseUrl,
   ).toString();
 }
 
-async function getRuntimeMcpConnections(
+export async function getRuntimeCustomMcpConnections(
   versionId: string,
-  provider: "custom_mcp" | "linear",
 ): Promise<RuntimeCustomMcpConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -1069,7 +1049,7 @@ async function getRuntimeMcpConnections(
     .where(
       and(
         eq(integrationAccounts.organizationId, config.organizationId),
-        eq(integrationAccounts.provider, provider),
+        eq(integrationAccounts.provider, "custom_mcp"),
         eq(integrationAccounts.status, "connected"),
         inArray(integrationAccounts.id, config.contextAccountIds),
       ),
@@ -1091,77 +1071,9 @@ async function getRuntimeMcpConnections(
       );
       continue;
     }
-    const decryptedCredentials = decryptCredentials<Record<string, unknown>>(
-      account.encryptedCredentials,
+    const credentials = parseCustomMcpCredentials(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
     );
-
-    if (provider === "linear") {
-      let credentials: LinearOAuthCredentials;
-      try {
-        credentials = parseLinearOAuthCredentials(decryptedCredentials);
-      } catch (error) {
-        console.error(
-          JSON.stringify(
-            customMcpTokenRefreshFailureEvent({
-              ...account,
-              errorType: "LegacyLinearCredentials",
-              investigationVersionId: versionId,
-            }),
-          ),
-        );
-        throw customMcpReconnectError(account, error);
-      }
-
-      if (linearAccessTokenNeedsRefresh(credentials)) {
-        try {
-          credentials = await refreshLinearOAuthCredentials({ credentials });
-        } catch (error) {
-          console.error(
-            JSON.stringify(
-              customMcpTokenRefreshFailureEvent({
-                ...account,
-                errorType: error instanceof Error ? error.name : "UnknownError",
-                investigationVersionId: versionId,
-              }),
-            ),
-          );
-          throw customMcpReconnectError(account, error);
-        }
-        const updated = await getDatabase()
-          .update(integrationAccounts)
-          .set({
-            encryptedCredentials: encryptCredentials(credentials),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(integrationAccounts.id, account.id),
-              eq(integrationAccounts.organizationId, config.organizationId),
-              eq(integrationAccounts.provider, "linear"),
-            ),
-          )
-          .returning({ id: integrationAccounts.id });
-        if (updated.length === 0) {
-          console.error(
-            JSON.stringify(
-              customMcpCredentialUpdateFailureEvent({
-                accountId: account.id,
-                investigationVersionId: versionId,
-              }),
-            ),
-          );
-        }
-      }
-      connections.push({
-        accessToken: credentials.accessToken,
-        accountId: account.id,
-        displayName: account.displayName,
-        mcpUrl: LINEAR_MCP_URL,
-      });
-      continue;
-    }
-
-    const credentials = parseCustomMcpCredentials(decryptedCredentials);
 
     if (credentials.authType === "api_token") {
       connections.push({
@@ -1178,7 +1090,7 @@ async function getRuntimeMcpConnections(
       oauth = await refreshCustomMcpOAuth({
         mcpUrl: credentials.mcpUrl,
         oauth: credentials.oauth,
-        redirectUrl: mcpOAuthRedirectUrl("custom_mcp"),
+        redirectUrl: customMcpOAuthRedirectUrl(),
       });
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
@@ -1236,7 +1148,7 @@ async function getRuntimeMcpConnections(
           and(
             eq(integrationAccounts.id, account.id),
             eq(integrationAccounts.organizationId, config.organizationId),
-            eq(integrationAccounts.provider, provider),
+            eq(integrationAccounts.provider, "custom_mcp"),
           ),
         )
         .returning({ id: integrationAccounts.id });
@@ -1279,18 +1191,6 @@ async function getRuntimeMcpConnections(
     );
   }
   return connections;
-}
-
-export function getRuntimeCustomMcpConnections(
-  versionId: string,
-): Promise<RuntimeCustomMcpConnection[]> {
-  return getRuntimeMcpConnections(versionId, "custom_mcp");
-}
-
-export async function getRuntimeLinearConnection(
-  versionId: string,
-): Promise<RuntimeCustomMcpConnection | null> {
-  return (await getRuntimeMcpConnections(versionId, "linear"))[0] ?? null;
 }
 export type RuntimeClickStackConnection = {
   authType: "access_key";
@@ -1834,8 +1734,6 @@ export async function beginInvestigation(
         model: agentConfigVersions.model,
         prompt: agentConfigVersions.prompt,
         prMode: agentConfigVersions.prMode,
-        createLinearTickets: agentConfigVersions.createLinearTickets,
-        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
       })
       .from(agentConfigVersions)
       .where(eq(agentConfigVersions.id, agent.activeVersionId))

@@ -44,9 +44,6 @@ types. `drizzle/` contains the ordered schema history.
   request body. Retries are deduplicated with provider-specific keys.
 - Remote MCP destinations must use HTTPS and resolve to public addresses.
   Redirects are revalidated and authorization is not forwarded across origins.
-- Linear context uses its read-only MCP endpoint. Ticket creation goes through
-  a separate controlled tool that records a stable request before writing and
-  stores the resulting Linear identifier and link.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
   the sandbox; the service materializes only the selected repository content.
 - Tenant trace responses omit the initial composed runtime instructions. The
@@ -58,9 +55,9 @@ Agent configuration and runtime profiles are immutable versions. An
 investigation pins both versions when it is created, so later configuration
 changes cannot alter a queued or replayed run.
 
-Postgres and pg-boss hold investigation, remediation, and follow-up work.
-Delivery may be at least once, so handlers use idempotency keys and state
-transitions rather than assuming a job runs exactly once.
+Postgres and pg-boss hold investigation and remediation jobs. Delivery may be
+at least once, so handlers use idempotency keys and state transitions rather
+than assuming a job runs exactly once.
 
 ## Deployment contract
 

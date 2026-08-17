@@ -26,19 +26,6 @@ describe("agent configuration", () => {
     expect(parsed.data?.contextAccountIds).toEqual([]);
     expect(parsed.data?.contextResourceIds).toEqual([]);
     expect(parsed.data?.secretIds).toEqual([]);
-    expect(parsed.data?.createLinearTickets).toBe(false);
-    expect(parsed.data?.linearIssueTemplate).toContain("{{issue_id}}");
-  });
-
-  it("requires a non-empty Linear template when ticket settings are supplied", () => {
-    const parsed = agentConfigurationSchema.safeParse({
-      ...baseConfiguration,
-      createLinearTickets: true,
-      linearIssueTemplate: "   ",
-    });
-
-    expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.path).toEqual(["linearIssueTemplate"]);
   });
 
   it("requires a repository when remediation is enabled", () => {

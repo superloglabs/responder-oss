@@ -43,12 +43,6 @@ describe("custom MCP security", () => {
 
     expect(provider.state()).toBe("state");
     expect(provider.codeVerifier()).toBe("verifier");
-    expect(provider.clientMetadata).toMatchObject({
-      client_name: "Responder",
-      client_uri: "https://responder.example/",
-      logo_uri:
-        "https://responder.example/superlog-pictogram-dark.svg",
-    });
     expect(provider.snapshot()).toMatchObject({
       clientInformation: { client_id: "client-1" },
       tokens: { access_token: "access" },

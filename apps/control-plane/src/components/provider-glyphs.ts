@@ -4,7 +4,6 @@ export const providerGlyphs = {
   datadog: { label: "Datadog", logo: "datadog" },
   github: { label: "GitHub", logo: "github" },
   google: { label: "Google", logo: "google" },
-  linear: { label: "Linear", logo: "linear" },
   sentry: { label: "Sentry", logo: "sentry" },
   slack: { label: "Slack", logo: "slack" },
 } as const;

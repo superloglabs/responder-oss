@@ -3,19 +3,6 @@ import { z } from "zod";
 const integrationAccountId = z.uuid("Choose a connected account");
 const externalResourceId = z.string().trim().min(1);
 const reportSeverity = z.enum(["SEV-1", "SEV-2", "SEV-3"]);
-export const defaultLinearIssueTemplate = [
-  "## Responder issue",
-  "[{{issue_id}}]({{issue_url}})",
-  "",
-  "## Description",
-  "{{description}}",
-  "",
-  "## Evidence",
-  "{{evidence}}",
-  "",
-  "## Recommended remediation",
-  "{{remediation}}",
-].join("\n");
 export const agentPrModeSchema = z
   .union([z.enum(["disabled", "manual", "always"]), z.boolean()])
   .transform((mode) =>
@@ -75,25 +62,10 @@ export const agentConfigurationSchema = z
     contextAccountIds: z.array(z.uuid()).max(20).default([]),
     contextResourceIds: z.array(z.uuid()).max(100).default([]),
     secretIds: z.array(z.uuid()).max(20).default([]),
-    createLinearTickets: z.boolean().default(false),
-    linearIssueTemplate: z
-      .string()
-      .max(10_000)
-      .default(defaultLinearIssueTemplate),
     trigger: agentTriggerSchema,
     reporting: agentReportingSchema,
   })
   .superRefine((configuration, context) => {
-    if (
-      configuration.createLinearTickets &&
-      !configuration.linearIssueTemplate.trim()
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Linear issue template is required",
-        path: ["linearIssueTemplate"],
-      });
-    }
     if (
       configuration.prMode !== "disabled" &&
       configuration.repositoryIds.length === 0
