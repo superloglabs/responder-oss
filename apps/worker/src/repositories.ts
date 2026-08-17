@@ -218,6 +218,31 @@ async function readResponseWithLimit(
   return archive;
 }
 
+function shouldUseGitFallback(response: Response): boolean {
+  return (
+    response.status === 429 ||
+    response.status >= 500 ||
+    (response.status === 403 &&
+      (response.headers.has("retry-after") ||
+        response.headers.get("x-ratelimit-remaining") === "0"))
+  );
+}
+
+async function downloadExactSnapshotWithGit(
+  repository: RuntimeRepository,
+  accessToken: string,
+  sha: string,
+  downloadWithGit: NonNullable<
+    RepositoryCheckoutDependencies["downloadWithGit"]
+  >,
+): Promise<{ archive: Uint8Array; sha: string }> {
+  const fallback = await downloadWithGit(repository, accessToken, sha);
+  if (fallback.sha !== sha) {
+    throw new Error(`Git returned an unexpected commit for ${repository.fullName}`);
+  }
+  return fallback;
+}
+
 async function fetchRepositorySnapshot(
   repository: RuntimeRepository,
   accessToken: string,
@@ -228,12 +253,17 @@ async function fetchRepositorySnapshot(
 ): Promise<{ archive: Uint8Array; sha: string }> {
   const headers = githubAppHeaders(accessToken);
   const branch = encodeURIComponent(repository.defaultBranch);
-  const commitResponse = await fetchImpl(
-    `https://api.github.com/repos/${repository.fullName}/commits/${branch}`,
-    { headers, signal: AbortSignal.timeout(30_000) },
-  );
+  let commitResponse: Response;
+  try {
+    commitResponse = await fetchImpl(
+      `https://api.github.com/repos/${repository.fullName}/commits/${branch}`,
+      { headers, signal: AbortSignal.timeout(30_000) },
+    );
+  } catch {
+    return downloadWithGit(repository, accessToken, repository.defaultBranch);
+  }
   if (!commitResponse.ok) {
-    if (commitResponse.status === 429) {
+    if (shouldUseGitFallback(commitResponse)) {
       await commitResponse.body?.cancel();
       return downloadWithGit(
         repository,
@@ -251,18 +281,29 @@ async function fetchRepositorySnapshot(
     throw new Error(`GitHub returned an invalid commit for ${repository.fullName}`);
   }
 
-  const archiveResponse = await fetchImpl(
-    `https://api.github.com/repos/${repository.fullName}/tarball/${sha}`,
-    { headers, signal: AbortSignal.timeout(60_000) },
-  );
+  let archiveResponse: Response;
+  try {
+    archiveResponse = await fetchImpl(
+      `https://api.github.com/repos/${repository.fullName}/tarball/${sha}`,
+      { headers, signal: AbortSignal.timeout(60_000) },
+    );
+  } catch {
+    return downloadExactSnapshotWithGit(
+      repository,
+      accessToken,
+      sha,
+      downloadWithGit,
+    );
+  }
   if (!archiveResponse.ok) {
-    if (archiveResponse.status === 429) {
+    if (shouldUseGitFallback(archiveResponse)) {
       await archiveResponse.body?.cancel();
-      const fallback = await downloadWithGit(repository, accessToken, sha);
-      if (fallback.sha !== sha) {
-        throw new Error(`Git returned an unexpected commit for ${repository.fullName}`);
-      }
-      return fallback;
+      return downloadExactSnapshotWithGit(
+        repository,
+        accessToken,
+        sha,
+        downloadWithGit,
+      );
     }
     throw new Error(`Unable to download ${repository.fullName}@${sha}`);
   }
