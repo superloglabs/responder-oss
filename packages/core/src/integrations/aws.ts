@@ -99,11 +99,11 @@ export async function createAwsCloudFormationTemplateUrl(
 
 function isSupportedCloudFormationTemplateUrl(templateUrl: URL): boolean {
   if (templateUrl.protocol !== "https:") return false;
-  return (
-    /^(?:[a-z0-9][a-z0-9.-]*\.)?s3[.-](?!us-gov-)[a-z0-9-]+\.amazonaws\.com$/.test(
-      templateUrl.hostname,
-    ) || templateUrl.hostname === "s3.amazonaws.com"
-  );
+  if (templateUrl.hostname === "s3.amazonaws.com") return true;
+  const region = templateUrl.hostname.match(
+    /^(?:[a-z0-9][a-z0-9.-]*\.)?s3[.-]([a-z0-9-]+)\.amazonaws\.com$/,
+  )?.[1];
+  return region !== undefined && AWS_COMMERCIAL_REGION_PATTERN.test(region);
 }
 
 export function awsCloudFormationQuickCreateUrl(input: {

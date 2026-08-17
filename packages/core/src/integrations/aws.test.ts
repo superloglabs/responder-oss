@@ -99,6 +99,18 @@ describe("AWS integration", () => {
     ).toThrow("must use an Amazon S3 URL");
   });
 
+  it("rejects isolated-partition S3 quick-create URLs", () => {
+    expect(() =>
+      awsCloudFormationQuickCreateUrl({
+        externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+        principalArn:
+          "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+        templateUrl:
+          "https://responder-templates.s3.us-iso-east-1.amazonaws.com/responder-aws-access.yaml",
+      }),
+    ).toThrow("must use an Amazon S3 URL");
+  });
+
   it("requires a valid broker role ARN", () => {
     expect(() => awsIntegrationPrincipalArn({})).toThrow(
       "AWS account connections are not configured",
