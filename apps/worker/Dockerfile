@@ -3,6 +3,10 @@ FROM node:24-bookworm-slim
 ENV NODE_ENV=production
 ENV TSX_DISABLE_CACHE=1
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN corepack enable
 
 WORKDIR /app

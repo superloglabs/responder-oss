@@ -75,6 +75,47 @@ describe("Daytona repository checkout", () => {
     );
   });
 
+  it("falls back to an exact Git fetch when the archive host rate limits", async () => {
+    const session = fakeSession();
+    const repository = {
+      defaultBranch: "main",
+      fullName: "example-org/example-repo",
+      installationId: 123,
+      private: true,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sha }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }));
+    const downloadWithGit = vi
+      .fn()
+      .mockResolvedValue(new Uint8Array([31, 139, 8, 0]));
+
+    await expect(
+      checkoutRuntimeRepositories(session, "version-id", {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        downloadWithGit,
+        fetch: fetchMock,
+        getRepositories: vi.fn().mockResolvedValue([repository]),
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ repository: repository.fullName, sha }),
+    ]);
+    expect(downloadWithGit).toHaveBeenCalledWith(
+      repository,
+      "github-secret",
+      sha,
+    );
+    expect(JSON.stringify(vi.mocked(session.materializeEntry).mock.calls)).not.toContain(
+      "github-secret",
+    );
+  });
+
   it("rejects repository names that could escape the workspace", () => {
     expect(() => repositoryWorkspacePath("superlog/../../secret")).toThrow(
       "Invalid GitHub repository name",

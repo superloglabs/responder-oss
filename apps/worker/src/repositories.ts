@@ -1,4 +1,9 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   getRuntimeRepositories,
   type RuntimeRepository,
@@ -9,6 +14,7 @@ import {
 } from "@responder/core/integrations/github";
 const maxArchiveBytes = 100 * 1024 * 1024;
 const workspaceRoot = "/home/daytona/workspace";
+const execFileAsync = promisify(execFile);
 
 export interface CheckedOutRepository {
   branch: string;
@@ -20,6 +26,11 @@ export interface CheckedOutRepository {
 
 export interface RepositoryCheckoutDependencies {
   createInstallationToken: (installationId: number) => Promise<string>;
+  downloadWithGit?: (
+    repository: RuntimeRepository,
+    accessToken: string,
+    sha: string,
+  ) => Promise<Uint8Array>;
   fetch: typeof fetch;
   getRepositories: (versionId: string) => Promise<RuntimeRepository[]>;
 }
@@ -29,6 +40,84 @@ const defaultDependencies: RepositoryCheckoutDependencies = {
   fetch,
   getRepositories: getRuntimeRepositories,
 };
+
+async function downloadRepositorySnapshotWithGit(
+  repository: RuntimeRepository,
+  accessToken: string,
+  sha: string,
+): Promise<Uint8Array> {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "responder-repository-"));
+  const gitDirectory = join(temporaryRoot, "repository.git");
+  const archivePath = join(temporaryRoot, "repository.tar.gz");
+  const gitEnvironment = {
+    ...process.env,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.extraHeader",
+    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${accessToken}`,
+    GIT_TERMINAL_PROMPT: "0",
+  };
+
+  try {
+    await mkdir(gitDirectory);
+    await execFileAsync("git", ["-C", gitDirectory, "init", "--bare", "--quiet"], {
+      timeout: 30_000,
+    });
+    await execFileAsync(
+      "git",
+      [
+        "-C",
+        gitDirectory,
+        "remote",
+        "add",
+        "origin",
+        `https://github.com/${repository.fullName}.git`,
+      ],
+      { timeout: 30_000 },
+    );
+    await execFileAsync(
+      "git",
+      [
+        "-C",
+        gitDirectory,
+        "fetch",
+        "--quiet",
+        "--depth=1",
+        "origin",
+        sha,
+      ],
+      { env: gitEnvironment, timeout: 120_000 },
+    );
+    await execFileAsync(
+      "git",
+      [
+        "-C",
+        gitDirectory,
+        "archive",
+        "--format=tar.gz",
+        `--output=${archivePath}`,
+        "FETCH_HEAD",
+      ],
+      { timeout: 120_000 },
+    );
+    const archiveStats = await stat(archivePath);
+    if (archiveStats.size > maxArchiveBytes) {
+      throw new Error("GitHub repository archive exceeds the 100 MB limit");
+    }
+    return new Uint8Array(await readFile(archivePath));
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "GitHub repository archive exceeds the 100 MB limit"
+    ) {
+      throw error;
+    }
+    throw new Error(
+      `Unable to download ${repository.fullName}@${sha} using Git fallback`,
+    );
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+}
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -120,6 +209,9 @@ async function fetchRepositorySnapshot(
   repository: RuntimeRepository,
   accessToken: string,
   fetchImpl: typeof fetch,
+  downloadWithGit: NonNullable<
+    RepositoryCheckoutDependencies["downloadWithGit"]
+  >,
 ): Promise<{ archive: Uint8Array; sha: string }> {
   const headers = githubAppHeaders(accessToken);
   const branch = encodeURIComponent(repository.defaultBranch);
@@ -143,6 +235,13 @@ async function fetchRepositorySnapshot(
     { headers, signal: AbortSignal.timeout(60_000) },
   );
   if (!archiveResponse.ok) {
+    if (archiveResponse.status === 429) {
+      await archiveResponse.body?.cancel();
+      return {
+        archive: await downloadWithGit(repository, accessToken, sha),
+        sha,
+      };
+    }
     throw new Error(`Unable to download ${repository.fullName}@${sha}`);
   }
   return { archive: await readResponseWithLimit(archiveResponse), sha };
@@ -171,6 +270,7 @@ export async function checkoutRuntimeRepositories(
       repository,
       token,
       dependencies.fetch,
+      dependencies.downloadWithGit ?? downloadRepositorySnapshotWithGit,
     );
     const [owner, name] = safeRepositoryParts(repository.fullName);
     const destination = repositoryWorkspacePath(repository.fullName);
