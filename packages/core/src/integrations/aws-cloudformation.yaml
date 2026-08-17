@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Read-only AWS investigation access for Responder
+Parameters:
+  ResponderPrincipalArn:
+    Type: String
+    Description: Responder's AWS integration broker role ARN
+    AllowedPattern: '^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+  ExternalId:
+    Type: String
+    Description: Unique identifier for this Responder workspace and AWS account
+    MinLength: 32
+    MaxLength: 256
+Resources:
+  InvestigationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ResponderInvestigationRole
+      Description: Read-only access used by Responder incident investigations
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AIOpsAssistantPolicy
+      Policies:
+        - PolicyName: DenySecretValueAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenySecretValueAccess
+                Effect: Deny
+                Action:
+                  - kms:Decrypt
+                  - secretsmanager:BatchGetSecretValue
+                  - secretsmanager:GetSecretValue
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameterHistory
+                Resource: '*'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref ResponderPrincipalArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+Outputs:
+  RoleArn:
+    Description: Role Responder assumes for investigations
+    Value: !GetAtt InvestigationRole.Arn
+  PermissionPolicy:
+    Description: AWS-managed read-only investigation policy
+    Value: AIOpsAssistantPolicy

@@ -145,6 +145,33 @@ catalog of safe Vercel GET operations, and one executes a selected operation.
 Regenerate the catalog from Vercel's published OpenAPI document after API
 updates with `pnpm vercel:generate-api`.
 
+## AWS
+
+AWS is optional read-only context for investigations. A workspace owner enters
+the 12-digit AWS account ID, reviews the generated CloudFormation stack, and
+verifies the connection after the stack reaches `CREATE_COMPLETE`.
+
+The stack creates a fixed `ResponderInvestigationRole` protected by the
+deployment broker ARN and a unique external ID. It attaches AWS-managed
+`AIOpsAssistantPolicy`, which applies account-wide and does not restrict
+regions. An explicit deny prevents the role from retrieving Secrets Manager
+values, SSM parameters, or decrypting KMS ciphertext. Responder obtains and
+automatically refreshes temporary credentials through STS; it never asks for or
+stores customer access keys. The managed AWS MCP client exposes only tools
+explicitly annotated read-only. This integration currently supports the
+commercial AWS partition (`arn:aws`) only.
+
+Production deployments should store the generic template in a private S3
+bucket and configure `AWS_INTEGRATION_TEMPLATE_BUCKET` and
+`AWS_INTEGRATION_TEMPLATE_KEY`, plus the bucket's region in
+`AWS_INTEGRATION_TEMPLATE_REGION`. The control plane generates a short-lived
+presigned S3 URL for CloudFormation Quick Create. Without those values, the UI
+offers a pre-filled template as a file download for manual upload.
+
+Self-hosted deployments must also set `AWS_INTEGRATION_PRINCIPAL_ARN` to a
+stable broker role that the runtime can assume. The broker must allow
+`sts:AssumeRole` only on customer roles named `ResponderInvestigationRole`.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

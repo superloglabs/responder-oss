@@ -22,6 +22,7 @@ import {
   logClickStackTokenRefreshFailure,
   normalizeClickStackMcpUrl,
 } from "../integrations/clickstack.js";
+import { awsConnectionCredentialsSchema } from "../integrations/aws.js";
 import {
   type LinearOAuthCredentials,
   linearAccessTokenNeedsRefresh,
@@ -1130,6 +1131,62 @@ export function customMcpConnectionsLoadedEvent(input: {
     event: "custom_mcp_connections_loaded",
     investigationVersionId: input.investigationVersionId,
   };
+}
+
+export interface RuntimeAwsConnection {
+  accountId: string;
+  displayName: string;
+  externalId: string;
+  roleArn: string;
+}
+
+export async function getRuntimeAwsConnections(
+  versionId: string,
+): Promise<RuntimeAwsConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "aws"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeAwsConnection[] = [];
+
+  for (const accountId of config.contextAccountIds) {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) continue;
+    const credentials = awsConnectionCredentialsSchema.parse(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    connections.push({
+      accountId: account.id,
+      displayName: account.displayName,
+      externalId: credentials.externalId,
+      roleArn: credentials.roleArn,
+    });
+  }
+  return connections;
 }
 
 function mcpOAuthRedirectUrl(provider: "custom_mcp" | "linear"): string {

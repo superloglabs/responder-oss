@@ -58,6 +58,7 @@ export interface AgentOptions {
   accounts: Array<{
     id: string;
     provider:
+      | "aws"
       | "github"
       | "slack"
       | "sentry"
@@ -116,6 +117,7 @@ export interface AgentListItem {
 
 export interface IntegrationSummary {
   id:
+    | "aws"
     | "github"
     | "slack"
     | "sentry"
@@ -178,6 +180,7 @@ export interface InvestigationTraceEvent {
 export interface IssueEvidence {
   source:
     | "alert"
+    | "aws"
     | "datadog"
     | "sentry"
     | "clickstack"

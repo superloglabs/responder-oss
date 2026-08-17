@@ -19,6 +19,7 @@ export interface AgentPipelinePresentation {
 }
 
 const providerLabels: Record<AgentOptions["accounts"][number]["provider"], string> = {
+  aws: "AWS",
   custom_mcp: "MCP",
   clickstack: "ClickStack / HyperDX",
   datadog: "Datadog",

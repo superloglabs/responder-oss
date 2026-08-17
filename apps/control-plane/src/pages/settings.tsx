@@ -4,6 +4,7 @@ import {
   DatadogConnectionDialog,
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
+import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
@@ -21,6 +22,7 @@ type IntegrationState =
 
 interface IntegrationSummary {
   id:
+    | "aws"
     | "github"
     | "slack"
     | "sentry"
@@ -143,6 +145,7 @@ export function SettingsPage() {
   );
   const secondary = integrations.filter((integration) =>
     [
+      "aws",
       "sentry",
       "datadog",
       "upstash",
@@ -222,6 +225,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
+  const [connectingAws, setConnectingAws] = useState(false);
 
   function startConnection() {
     if (!actionUrl || isConnecting) return;
@@ -239,6 +243,10 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
     }
     if (integration.id === "clickstack") {
       setConnectingClickStack(true);
+      return;
+    }
+    if (integration.id === "aws") {
+      setConnectingAws(true);
       return;
     }
     setChoosingDatadogSite(false);
@@ -303,6 +311,12 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
         open={connectingClickStack}
+        returnTo="/settings"
+      />
+      <AwsConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingAws(false)}
+        open={connectingAws}
         returnTo="/settings"
       />
     </>

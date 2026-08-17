@@ -744,6 +744,22 @@ button:disabled {
   height: 22px;
 }
 
+.providerGlyph__asset {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  object-fit: contain;
+}
+
+.providerGlyph--aws .providerGlyph__asset {
+  width: 70%;
+  height: 70%;
+  background: currentColor;
+  -webkit-mask: url("/aws-cloud-logo.svg") center / contain no-repeat;
+  mask: url("/aws-cloud-logo.svg") center / contain no-repeat;
+}
+
 .socialAuth__button {
   height: 42px;
   padding: 0 14px;
@@ -4623,6 +4639,10 @@ button:disabled {
 
 .siteDialog__form .siteDialog__footer {
   margin-top: 5px;
+}
+
+.siteDialog__footer--wrap {
+  flex-wrap: wrap;
 }
 
 @media (max-width: 520px) {

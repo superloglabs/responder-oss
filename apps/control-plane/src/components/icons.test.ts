@@ -59,4 +59,15 @@ describe("ProviderGlyph", () => {
     expect(markup).toContain(">MCP</span>");
     expect(markup).not.toContain("<svg");
   });
+
+  it("renders the official AWS mark instead of a text abbreviation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "aws" }),
+    );
+
+    expect(markup).toContain('aria-label="AWS"');
+    expect(markup).toContain("providerGlyph--aws");
+    expect(markup).toContain('class="providerGlyph__asset"');
+    expect(markup).not.toContain(">AWS</span>");
+  });
 });

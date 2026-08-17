@@ -28,6 +28,7 @@ import {
   DatadogConnectionDialog,
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
+import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import {
@@ -423,6 +424,7 @@ export function AgentCreatePage() {
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const linearJustConnected = successfulConnectionReturn("linear");
   const vercelJustConnected = successfulConnectionReturn("vercel");
+  const awsJustConnected = successfulConnectionReturn("aws");
   const returnedIntegrationAccountId = new URLSearchParams(
     window.location.search,
   ).get("integration_account_id");
@@ -433,7 +435,8 @@ export function AgentCreatePage() {
     vercelJustConnected ||
     customMcpJustConnected ||
     clickStackJustConnected ||
-    linearJustConnected;
+    linearJustConnected ||
+    awsJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [existingConfiguration, setExistingConfiguration] =
@@ -468,6 +471,7 @@ export function AgentCreatePage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
+  const [connectingAws, setConnectingAws] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingSlackChannels, setRefreshingSlackChannels] = useState(false);
   const [slackRefreshError, setSlackRefreshError] = useState<string | null>(null);
@@ -611,6 +615,17 @@ export function AgentCreatePage() {
           setVercelAccountId(returnedIntegrationAccountId);
           setVercelDialogOpen(true);
         }
+        const connectedAwsId = returnedIntegrationAccountId;
+        if (
+          awsJustConnected &&
+          connectedAwsId &&
+          loadedOptions.accounts.some(
+            (account) => account.id === connectedAwsId && account.provider === "aws",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(connectedAwsId)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedAwsId);
+        }
         setDraft(loadedDraft);
       })
       .catch((caught: unknown) => {
@@ -630,6 +645,7 @@ export function AgentCreatePage() {
     };
   }, [
     agentId,
+    awsJustConnected,
     clickStackJustConnected,
     customMcpJustConnected,
     datadogJustConnected,
@@ -654,6 +670,10 @@ export function AgentCreatePage() {
 
   const sentryAccounts = useMemo(
     () => accountsFor(options, "sentry"),
+    [options],
+  );
+  const awsAccounts = useMemo(
+    () => accountsFor(options, "aws"),
     [options],
   );
   const datadogAccounts = useMemo(
@@ -877,12 +897,14 @@ export function AgentCreatePage() {
       return;
     }
     if (
+      provider === "aws" ||
       provider === "datadog" ||
       provider === "clickstack" ||
       provider === "upstash"
     ) {
       saveDraftToSessionStorage(draftStorageKey, currentDraft);
-      if (provider === "datadog") setChoosingDatadogSite(true);
+      if (provider === "aws") setConnectingAws(true);
+      else if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
       else setConnectingUpstash(true);
       return;
@@ -1213,6 +1235,9 @@ export function AgentCreatePage() {
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    awsAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     Number(clickStackContextConnected) +
     Number(linearContextConnected);
 
@@ -1240,6 +1265,12 @@ export function AgentCreatePage() {
         connectUrl={integrationFor("clickstack")?.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
         open={connectingClickStack}
+        returnTo={returnTo}
+      />
+      <AwsConnectionDialog
+        connectUrl={integrationFor("aws")?.connectUrl ?? ""}
+        onCancel={() => setConnectingAws(false)}
+        open={connectingAws}
         returnTo={returnTo}
       />
       <section className="createAgentHeading">
@@ -1979,6 +2010,40 @@ export function AgentCreatePage() {
                         </div>
                       ) : null}
 
+                  {awsAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    return (
+                      <ContextRow
+                        action={
+                          <Button
+                            size="small"
+                            onClick={() => toggleContextAccount(account.id)}
+                            variant={connected ? "ghost" : "secondary"}
+                          >
+                            {connected ? "Remove" : "Add"}
+                          </Button>
+                        }
+                        detail="Infrastructure, telemetry, configuration, and service health"
+                        key={account.id}
+                        label={account.displayName}
+                        provider="aws"
+                        status={connected ? "connected" : "available"}
+                      />
+                    );
+                  })}
+                  <ContextRow
+                    action={
+                      <ConnectButton
+                        integration={integrationFor("aws")}
+                        isConnecting={false}
+                        onClick={() => connect("aws")}
+                      />
+                    }
+                    detail="Read-only access through an IAM role"
+                    label="AWS account"
+                    provider="aws"
+                    status="not_connected"
+                  />
                   <ContextRow
                     action={
                       upstashContextConnected ? (
@@ -3032,6 +3097,7 @@ function ContextRow({
   detail: string;
   label: string;
   provider:
+    | "aws"
     | "github"
     | "slack"
     | "sentry"

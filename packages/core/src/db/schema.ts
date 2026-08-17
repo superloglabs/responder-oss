@@ -21,6 +21,7 @@ import type {
 import { organization, user } from "./auth-schema.js";
 
 export const integrationProvider = pgEnum("integration_provider", [
+  "aws",
   "github",
   "slack",
   "sentry",
