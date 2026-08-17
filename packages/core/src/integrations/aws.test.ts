@@ -23,6 +23,7 @@ describe("AWS integration", () => {
   it("uses the managed AIOps policy and an external-ID trust condition", () => {
     const template = awsCloudFormationTemplate();
     expect(template).toContain("aws:policy/AIOpsAssistantPolicy");
+    expect(template).not.toContain("AWS::Partition");
     expect(template).toContain("sts:ExternalId: !Ref ExternalId");
     expect(template).toContain("AWS: !Ref ResponderPrincipalArn");
     expect(template).toContain("PolicyName: DenySecretValueAccess");

@@ -18,7 +18,7 @@ Resources:
       Description: Read-only access used by Responder incident investigations
       MaxSessionDuration: 3600
       ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AIOpsAssistantPolicy'
+        - arn:aws:iam::aws:policy/AIOpsAssistantPolicy
       Policies:
         - PolicyName: DenySecretValueAccess
           PolicyDocument:
