@@ -5,7 +5,12 @@ import {
 } from "@responder/core/observability/sentry";
 
 export interface WorkerErrorContext {
-  operation: "investigation" | "remediation" | "sandbox_cleanup" | "worker";
+  operation:
+    | "investigation"
+    | "linear_ticket"
+    | "remediation"
+    | "sandbox_cleanup"
+    | "worker";
   investigationId?: string;
   jobId?: string;
   organizationId?: string;

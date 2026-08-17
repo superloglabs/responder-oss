@@ -76,10 +76,16 @@ export class CustomMcpOAuthProvider implements OAuthClientProvider {
   }
 
   get clientMetadata(): OAuthClientMetadata {
+    const publicOrigin = new URL("/", this.redirectUrl);
     return {
       client_name: "Responder",
+      client_uri: publicOrigin.toString(),
       redirect_uris: [this.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"],
+      logo_uri: new URL(
+        "/superlog-wordmark.svg",
+        publicOrigin,
+      ).toString(),
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     };

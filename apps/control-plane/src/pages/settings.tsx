@@ -24,7 +24,8 @@ interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "custom_mcp"
-    | "clickstack";
+    | "clickstack"
+    | "linear";
   name: string;
   description: string;
   state: IntegrationState;
@@ -146,7 +147,7 @@ export function SettingsPage() {
     ["github", "slack"].includes(integration.id),
   );
   const secondary = integrations.filter((integration) =>
-    ["sentry", "datadog", "custom_mcp", "clickstack"].includes(
+    ["sentry", "datadog", "linear", "custom_mcp", "clickstack"].includes(
       integration.id,
     ),
   );

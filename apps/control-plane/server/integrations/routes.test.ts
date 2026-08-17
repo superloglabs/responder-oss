@@ -21,6 +21,12 @@ import {
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import {
+  createLinearPkce,
+  exchangeLinearOAuthCode,
+  getLinearWorkspace,
+  linearAuthorizeUrl,
+} from "../../../../packages/core/src/integrations/linear.js";
 import { getActiveTenant } from "../tenant.js";
 import {
   customMcpConnectionMetricEvent,
@@ -58,6 +64,16 @@ vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
   ),
   validateCustomMcpUrl: vi.fn(),
   verifyCustomMcpConnection: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
+  createLinearPkce: vi.fn(),
+  exchangeLinearOAuthCode: vi.fn(),
+  getLinearWorkspace: vi.fn(),
+  LINEAR_AUTH_VERSION: "linear_oauth_v1",
+  LINEAR_MCP_URL: "https://mcp.linear.app/mcp",
+  LINEAR_READONLY_MCP_URL: "https://mcp.linear.app/mcp/readonly",
+  linearAuthorizeUrl: vi.fn(),
 }));
 
 vi.mock("../tenant.js", () => ({
@@ -153,6 +169,103 @@ describe("integration callback routing", () => {
         configurationUrl: "/api/integrations/github/start?mode=install",
       }),
     );
+  });
+
+  it("starts Linear OAuth without replacing the connected account", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(createLinearPkce).mockReturnValue({
+      codeChallenge: "pkce-challenge",
+      codeVerifier: "pkce-verifier",
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("linear-state");
+    vi.mocked(linearAuthorizeUrl).mockReturnValue(
+      "https://linear.app/oauth/authorize?state=linear-state",
+    );
+
+    const response = await app.request(
+      "/api/integrations/linear/start?returnTo=%2Fagents%2Fnew",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://linear.app/oauth/authorize?state=linear-state",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      provider: "linear",
+      codeVerifier: "pkce-verifier",
+      returnTo: "/agents/new",
+      routingUrl: "https://responder.example/api/integrations/linear/callback",
+    });
+    expect(linearAuthorizeUrl).toHaveBeenCalledWith({
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://responder.example/api/integrations/linear/callback",
+      state: "linear-state",
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("finishes Linear app OAuth before marking the account connected", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: "pkce-verifier",
+      metadata: {},
+    });
+    vi.mocked(exchangeLinearOAuthCode).mockResolvedValue({
+      accessToken: "linear-access-token",
+      authType: "linear_oauth",
+      expiresAt: Date.now() + 86_400_000,
+      mcpUrl: "https://mcp.linear.app/mcp",
+      refreshToken: "linear-refresh-token",
+      scope: "read write",
+      tokenType: "Bearer",
+    });
+    vi.mocked(getLinearWorkspace).mockResolvedValue({
+      id: "linear-workspace-id",
+      name: "Example Linear",
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(12);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-connected-oauth");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/linear/callback?state=linear-state&code=linear-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=linear&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(exchangeLinearOAuthCode).toHaveBeenCalledWith({
+      authorizationCode: "linear-code",
+      codeVerifier: "pkce-verifier",
+      redirectUri: "https://responder.example/api/integrations/linear/callback",
+    });
+    expect(verifyCustomMcpConnection).toHaveBeenCalledWith({
+      accessToken: "linear-access-token",
+      mcpUrl: "https://mcp.linear.app/mcp/readonly",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "Example Linear",
+        provider: "linear",
+        status: "connected",
+      }),
+    );
+    expect(getOrganizationIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("offers GitHub authorization when an installation already exists", async () => {

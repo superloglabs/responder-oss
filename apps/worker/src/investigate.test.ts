@@ -107,6 +107,19 @@ describe("sandbox agent configuration", () => {
     );
   });
 
+  it("leaves Linear ticket creation to the separate queued job", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      linearConnected: true,
+      repositories: [],
+      sentryConnected: false,
+    });
+    expect(instructions).toContain("queues a separate job");
+    expect(instructions).not.toContain("create_linear_ticket");
+  });
+
   it("explains opaque workspace secret use without exposing values", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",

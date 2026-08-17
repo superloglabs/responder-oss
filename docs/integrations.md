@@ -8,6 +8,29 @@ Customer installations and refreshable credentials are tenant-scoped in
 Postgres and encrypted before storage. Configure the same base64-encoded
 32-byte `CREDENTIAL_ENCRYPTION_KEY` for the control plane and worker.
 
+## Linear
+
+Create a Responder-owned Linear OAuth app with `read` and `write` scopes:
+
+- OAuth callback: `<public>/api/integrations/linear/callback`
+- Environment: `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`
+
+Add the connected Linear workspace to an agent's context to let investigations
+inspect teams, projects, and existing issues. Agent context uses Linear's
+read-only MCP endpoint. The only write path is Responder's controlled
+`create_linear_ticket` tool.
+
+When **Create Linear tickets for issues** is enabled, report submission creates
+a pending ticket request only for issues first found by that investigation.
+Recurrences do not create a request. A separate follow-up lets the agent choose
+the Linear team and optional project, creates the ticket, then stores its Linear
+ID, identifier, and URL on the Responder issue.
+
+The editable Markdown description template supports `{{issue_id}}`,
+`{{issue_url}}`, `{{title}}`, `{{description}}`, `{{severity}}`,
+`{{evidence}}`, and `{{remediation}}`. Responder renders the template before
+the controlled creation tool writes to Linear.
+
 ## Slack
 
 Configure a distributed Slack app with:

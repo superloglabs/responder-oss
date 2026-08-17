@@ -1,7 +1,10 @@
 import {
   createJobBoss,
   investigationQueue,
+  linearTicketJobSchema,
+  linearTicketQueue,
   prepareWorkerQueues,
+  type LinearTicketJob,
   type RemediationJob,
   responderJobSchema,
   workerHealthJobSchema,
@@ -18,6 +21,10 @@ import {
   failPendingInvestigationPullRequests,
 } from "@responder/core/db/pull-requests";
 import { queueIssueRemediationJob } from "@responder/core/remediation-queue";
+import {
+  queueLinearTicketJob,
+  queuePendingLinearTicketJobs,
+} from "@responder/core/linear-ticket-queue";
 import {
   failInvestigationSlackCard,
   updateInvestigationSlackProgress,
@@ -36,6 +43,7 @@ import {
   safeInvestigationError,
 } from "./investigate.js";
 import { runRemediationAgent } from "./remediate.js";
+import { runLinearTicketJob } from "./linear-ticket-job.js";
 import {
   InvestigationReplayRequestProcessingError,
   processNextInvestigationReplayRequest,
@@ -58,8 +66,16 @@ const remediationQueue = {
     options: { singletonKey: string },
   ) => boss.send(name, data, options),
 };
+const linearTicketJobQueue = {
+  send: (
+    name: string,
+    data: LinearTicketJob,
+    options: { singletonKey: string },
+  ) => boss.send(name, data, options),
+};
 let stopping = false;
 let replayRequestDrain: Promise<void> | undefined;
+let linearTicketDrain: Promise<void> | undefined;
 
 const replayRequestQueue = {
   send: (
@@ -126,6 +142,23 @@ function drainInvestigationReplayRequests(): Promise<void> {
   return replayRequestDrain;
 }
 
+function drainLinearTicketRequests(): Promise<void> {
+  if (linearTicketDrain) return linearTicketDrain;
+  linearTicketDrain = queuePendingLinearTicketJobs(linearTicketJobQueue)
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "linear_ticket_queue_drain_failed",
+      }));
+      return reportWorkerException(error, { operation: "linear_ticket" });
+    })
+    .finally(() => {
+      linearTicketDrain = undefined;
+    });
+  return linearTicketDrain;
+}
+
 boss.on("error", (error) => {
   console.error(
     JSON.stringify({
@@ -153,6 +186,27 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
   );
 
   return { marker: payload.marker, processedAt };
+});
+await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
+  const payload = linearTicketJobSchema.parse(job.data);
+  try {
+    await runLinearTicketJob(payload, process.env);
+    console.log(JSON.stringify({
+      event: "linear_ticket_job_complete",
+      jobId: job.id,
+      requestId: payload.requestId,
+    }));
+    return { requestId: payload.requestId };
+  } catch (error) {
+    await reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      operation: "linear_ticket",
+      organizationId: payload.config.organizationId,
+      requestId: payload.requestId,
+    });
+    throw error;
+  }
 });
 await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
   const payload = responderJobSchema.parse(job.data);
@@ -261,6 +315,21 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
           }),
         );
       },
+      async (requestIds) => {
+        await Promise.all(requestIds.map(async (requestId) => {
+          const result = await queueLinearTicketJob(linearTicketJobQueue, {
+            config: payload.config,
+            investigationId: payload.investigationId,
+            requestId,
+          });
+          console.log(JSON.stringify({
+            event: "linear_ticket_queued",
+            investigationId: payload.investigationId,
+            jobId: result.jobId,
+            requestId,
+          }));
+        }));
+      },
     );
     const deliveryWarnings = await completeInvestigationRun({
       investigationId: payload.investigationId,
@@ -334,11 +403,17 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
 });
 
 void drainInvestigationReplayRequests();
+void drainLinearTicketRequests();
 const replayRequestPoller = setInterval(
   () => void drainInvestigationReplayRequests(),
   2_000,
 );
 replayRequestPoller.unref();
+const linearTicketPoller = setInterval(
+  () => void drainLinearTicketRequests(),
+  10_000,
+);
+linearTicketPoller.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));
 
@@ -346,7 +421,9 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   clearInterval(replayRequestPoller);
+  clearInterval(linearTicketPoller);
   await replayRequestDrain;
+  await linearTicketDrain;
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
     await boss.stop({ graceful: true, timeout: 25_000 });

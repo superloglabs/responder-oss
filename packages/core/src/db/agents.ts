@@ -1,5 +1,6 @@
 import { and, desc, eq, exists, inArray } from "drizzle-orm";
 import type { AgentConfiguration } from "../agents/config.js";
+import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -207,6 +208,7 @@ async function validateConfigurationResources(
   const accountRows = await db
     .select({
       id: integrationAccounts.id,
+      metadata: integrationAccounts.metadata,
       provider: integrationAccounts.provider,
       status: integrationAccounts.status,
     })
@@ -237,10 +239,12 @@ async function validateConfigurationResources(
     const account = accountsById.get(accountId);
     if (
       !account ||
-      !["sentry", "datadog", "clickstack", "custom_mcp"].includes(
+      !["sentry", "datadog", "clickstack", "custom_mcp", "linear"].includes(
         account.provider,
       ) ||
-      account.status !== "connected"
+      account.status !== "connected" ||
+      (account.provider === "linear" &&
+        account.metadata.authVersion !== LINEAR_AUTH_VERSION)
     ) {
       throw new AgentConfigurationError(
         "Choose a connected context integration",
@@ -310,6 +314,18 @@ async function validateConfigurationResources(
     if (missingScope) {
       throw new AgentConfigurationError(
         "Reconnect Slack to use selected channels as agent context",
+        "integration_not_found",
+      );
+    }
+  }
+
+  if (configuration.createLinearTickets) {
+    const selectedLinearAccounts = [...contextAccountIds].filter(
+      (accountId) => accountsById.get(accountId)?.provider === "linear",
+    );
+    if (selectedLinearAccounts.length !== 1) {
+      throw new AgentConfigurationError(
+        "Choose one connected Linear account for ticket creation",
         "integration_not_found",
       );
     }
@@ -475,6 +491,8 @@ export async function createAgent(input: {
         contextResourceIds: input.configuration.contextResourceIds,
         legacyPrMode: input.configuration.prMode === "always",
         prMode: input.configuration.prMode,
+        createLinearTickets: input.configuration.createLinearTickets,
+        linearIssueTemplate: input.configuration.linearIssueTemplate,
         createdBy: input.userId,
       })
       .returning({ id: agentConfigVersions.id });
@@ -555,6 +573,8 @@ export async function updateAgent(input: {
         contextResourceIds: input.configuration.contextResourceIds,
         legacyPrMode: input.configuration.prMode === "always",
         prMode: input.configuration.prMode,
+        createLinearTickets: input.configuration.createLinearTickets,
+        linearIssueTemplate: input.configuration.linearIssueTemplate,
         createdBy: input.userId,
       })
       .returning({ id: agentConfigVersions.id });
@@ -673,14 +693,20 @@ export async function listAgentOptions(organizationId: string) {
     name: secret.name,
     allowedHosts: secret.allowedHosts,
   }));
-  const accounts = accountRows.map(({ metadata, ...account }) => ({
-    ...account,
-    slackContextAvailable:
-      account.provider === "slack" &&
-      Array.isArray(metadata.userScopes) &&
-      metadata.userScopes.includes("channels:history") &&
-      metadata.userScopes.includes("groups:history"),
-  }));
+  const accounts = accountRows
+    .filter(
+      (account) =>
+        account.provider !== "linear" ||
+        account.metadata.authVersion === LINEAR_AUTH_VERSION,
+    )
+    .map(({ metadata, ...account }) => ({
+      ...account,
+      slackContextAvailable:
+        account.provider === "slack" &&
+        Array.isArray(metadata.userScopes) &&
+        metadata.userScopes.includes("channels:history") &&
+        metadata.userScopes.includes("groups:history"),
+    }));
   const accountIds = accounts.map((account) => account.id);
 
   if (accountIds.length === 0) {
@@ -817,6 +843,8 @@ export async function getAgent(
       contextAccountIds: agentConfigVersions.contextAccountIds,
       contextResourceIds: agentConfigVersions.contextResourceIds,
       prMode: agentConfigVersions.prMode,
+      createLinearTickets: agentConfigVersions.createLinearTickets,
+      linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
     })
     .from(agents)
     .leftJoin(
@@ -898,6 +926,8 @@ export async function getAgent(
             model: agent.model,
             instructions: agent.instructions,
             prMode: agent.prMode,
+            createLinearTickets: agent.createLinearTickets,
+            linearIssueTemplate: agent.linearIssueTemplate,
             repositoryIds: repositoryRows.map((repository) => repository.id),
             contextAccountIds: agent.contextAccountIds ?? [],
             contextResourceIds: agent.contextResourceIds ?? [],

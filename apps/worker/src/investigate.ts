@@ -8,6 +8,7 @@ import {
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
   getRuntimeClickStackConnection,
+  getRuntimeLinearConnection,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
 } from "@responder/core/db/investigations";
@@ -25,7 +26,7 @@ import type {
 import type { InvestigationJob } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
 import { createDatadogMcpServer } from "./datadog.js";
-import { createCustomMcpServer } from "./custom-mcp.js";
+import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
 import {
@@ -137,6 +138,7 @@ export function investigationInstructions(input: {
   repositories: CheckedOutRepository[];
   runtimeSystemPrompt?: string | null;
   sentryConnected: boolean;
+  linearConnected?: boolean;
   slackChannels?: Array<{ id: string; name: string }>;
   workspaceSecrets?: Array<{
     environmentVariable: string;
@@ -163,6 +165,9 @@ export function investigationInstructions(input: {
       : null,
     input.sentryConnected
       ? "Use the connected read-only Sentry tools to inspect the issue, related events, traces, and relevant historical telemetry before concluding."
+      : null,
+    input.linearConnected
+      ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
       : null,
     customMcpNames.length > 0
       ? `Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: ${customMcpNames.join(", ")}.`
@@ -220,6 +225,7 @@ export async function runInvestigationAgent(
   onTraceEvent: (event: InvestigationTraceEvent) => Promise<void>,
   traceContext: { jobId: string },
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>,
+  onLinearTicketRequests?: (requestIds: string[]) => Promise<void>,
 ): Promise<string> {
   const investigationInput = toInvestigationInput(job.request);
   const writeTrace = async (event: InvestigationTraceEvent): Promise<void> => {
@@ -253,6 +259,7 @@ export async function runInvestigationAgent(
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
+    linearConnection,
     slackConnection,
     workspaceSecrets,
   ] = await Promise.all([
@@ -282,6 +289,7 @@ export async function runInvestigationAgent(
       }),
     getRuntimeCustomMcpConnections(job.config.id),
     getRuntimeClickStackConnection(job.config.id),
+    getRuntimeLinearConnection(job.config.id),
     getRuntimeSlackConnection(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
@@ -295,6 +303,9 @@ export async function runInvestigationAgent(
   const clickStackServer = clickStackConnection
     ? createClickStackMcpServer(clickStackConnection)
     : null;
+  const linearServer = linearConnection
+    ? createLinearMcpServer(linearConnection)
+    : null;
   const slackServer = slackConnection
     ? createSlackMcpServer(slackConnection)
     : null;
@@ -302,6 +313,7 @@ export async function runInvestigationAgent(
     datadogServer,
     sentryServer,
     clickStackServer,
+    linearServer,
     slackServer,
     ...customMcpServers,
   ].filter(
@@ -353,6 +365,7 @@ export async function runInvestigationAgent(
           organizationId: job.config.organizationId,
           environment,
           onAutomaticPullRequestRequests,
+          onLinearTicketRequests,
         });
     const issueSearchTool = createSearchExistingIssuesTool({
       organizationId: job.config.organizationId,
@@ -370,6 +383,7 @@ export async function runInvestigationAgent(
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
+      linearConnected: linearServer !== null,
       slackChannels: slackConnection?.channels,
       workspaceSecrets,
     });
@@ -381,7 +395,11 @@ export async function runInvestigationAgent(
       instructions,
       capabilities: investigationCapabilities(job.replay),
       mcpServers: contextServers,
-      tools: [issueSearchTool, reportTool, ...repositoryInspectionTools],
+      tools: [
+        issueSearchTool,
+        reportTool,
+        ...repositoryInspectionTools,
+      ],
     });
     const result = await run(
       agent,
