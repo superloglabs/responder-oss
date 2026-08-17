@@ -8,6 +8,7 @@ describe("ProviderGlyph", () => {
     ["clickstack", "ClickStack", "CS"],
     ["datadog", "Datadog", "DD"],
     ["github", "GitHub", "GH"],
+    ["linear", "Linear", "LI"],
     ["sentry", "Sentry", "SE"],
     ["slack", "Slack", "SL"],
   ] as const)(

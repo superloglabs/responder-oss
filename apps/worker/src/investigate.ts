@@ -8,9 +8,11 @@ import {
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
   getRuntimeClickStackConnection,
+  getRuntimeLinearConnection,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
 } from "@responder/core/db/investigations";
+import { listPendingLinearTicketRequests } from "@responder/core/db/linear-tickets";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
 import {
@@ -24,10 +26,12 @@ import type {
 } from "@responder/core/db/schema";
 import type { InvestigationJob } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
+import { linearTicketFollowupInstruction } from "@responder/core/integrations/linear";
 import { createDatadogMcpServer } from "./datadog.js";
-import { createCustomMcpServer } from "./custom-mcp.js";
+import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
+import { createLinearTicketTool } from "./linear-ticket.js";
 import {
   checkoutRuntimeRepositories,
   type CheckedOutRepository,
@@ -137,6 +141,7 @@ export function investigationInstructions(input: {
   repositories: CheckedOutRepository[];
   runtimeSystemPrompt?: string | null;
   sentryConnected: boolean;
+  linearConnected?: boolean;
   slackChannels?: Array<{ id: string; name: string }>;
   workspaceSecrets?: Array<{
     environmentVariable: string;
@@ -163,6 +168,9 @@ export function investigationInstructions(input: {
       : null,
     input.sentryConnected
       ? "Use the connected read-only Sentry tools to inspect the issue, related events, traces, and relevant historical telemetry before concluding."
+      : null,
+    input.linearConnected
+      ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. After submit_investigation_report saves an issue, create a requested ticket only through create_linear_ticket so Responder can record its identifier and link."
       : null,
     customMcpNames.length > 0
       ? `Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: ${customMcpNames.join(", ")}.`
@@ -253,6 +261,7 @@ export async function runInvestigationAgent(
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
+    linearConnection,
     slackConnection,
     workspaceSecrets,
   ] = await Promise.all([
@@ -282,6 +291,7 @@ export async function runInvestigationAgent(
       }),
     getRuntimeCustomMcpConnections(job.config.id),
     getRuntimeClickStackConnection(job.config.id),
+    getRuntimeLinearConnection(job.config.id),
     getRuntimeSlackConnection(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
@@ -295,6 +305,9 @@ export async function runInvestigationAgent(
   const clickStackServer = clickStackConnection
     ? createClickStackMcpServer(clickStackConnection)
     : null;
+  const linearServer = linearConnection
+    ? createLinearMcpServer(linearConnection)
+    : null;
   const slackServer = slackConnection
     ? createSlackMcpServer(slackConnection)
     : null;
@@ -302,6 +315,7 @@ export async function runInvestigationAgent(
     datadogServer,
     sentryServer,
     clickStackServer,
+    linearServer,
     slackServer,
     ...customMcpServers,
   ].filter(
@@ -362,6 +376,13 @@ export async function runInvestigationAgent(
       repositories,
       session,
     });
+    const linearTicketTool = !job.replay && linearServer
+      ? createLinearTicketTool({
+          agentConfigVersionId: job.config.id,
+          investigationId: job.investigationId,
+          organizationId: job.config.organizationId,
+        })
+      : null;
     const instructions = investigationInstructions({
       agentPrompt: job.config.prompt,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
@@ -370,6 +391,7 @@ export async function runInvestigationAgent(
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
+      linearConnected: linearServer !== null,
       slackChannels: slackConnection?.channels,
       workspaceSecrets,
     });
@@ -381,7 +403,12 @@ export async function runInvestigationAgent(
       instructions,
       capabilities: investigationCapabilities(job.replay),
       mcpServers: contextServers,
-      tools: [issueSearchTool, reportTool, ...repositoryInspectionTools],
+      tools: [
+        issueSearchTool,
+        reportTool,
+        ...(linearTicketTool ? [linearTicketTool] : []),
+        ...repositoryInspectionTools,
+      ],
     });
     const result = await run(
       agent,
@@ -402,6 +429,60 @@ export async function runInvestigationAgent(
     await result.completed;
     if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
       throw new Error("OpenAI agent returned an empty report");
+    }
+    if (!job.replay && linearTicketTool && linearServer) {
+      const pending = await listPendingLinearTicketRequests({
+        investigationId: job.investigationId,
+        organizationId: job.config.organizationId,
+      });
+      const ticketInstructions = linearTicketFollowupInstruction({
+        requests: pending,
+      });
+      if (ticketInstructions) {
+        const ticketMessage =
+          "Finish the saved investigation's required Linear ticket creation now.";
+        await writeTrace(traceEvent("message.received", {
+          message: ticketMessage,
+        }));
+        const ticketAgent = new SandboxAgent({
+          name: "Responder Linear ticket creator",
+          model: config.model,
+          instructions: [
+            "This is a required ticket-creation step after an investigation report was saved.",
+            ticketInstructions,
+            "Do not submit another investigation report. Do not change any Linear data except through create_linear_ticket.",
+          ].join("\n\n"),
+          capabilities: investigationCapabilities(false),
+          mcpServers: [linearServer],
+          tools: [linearTicketTool],
+        });
+        const ticketResult = await run(ticketAgent, ticketMessage, {
+          maxTurns: 10,
+          sandbox: { session },
+          stream: true,
+        });
+        for await (const streamEvent of ticketResult) {
+          const event = investigationTraceEventFromStream(
+            streamEvent,
+            environment,
+          );
+          if (event) await writeTrace(event);
+        }
+        await ticketResult.completed;
+        const remaining = await listPendingLinearTicketRequests({
+          investigationId: job.investigationId,
+          organizationId: job.config.organizationId,
+        });
+        if (remaining.length > 0) {
+          console.error(
+            JSON.stringify({
+              event: "linear_ticket_requests_incomplete",
+              investigationId: job.investigationId,
+              requestIds: remaining.map((request) => request.requestId),
+            }),
+          );
+        }
+      }
     }
     await writeTrace(traceEvent("session.completed"));
     return redactDaytonaSecretPlaceholders(result.finalOutput.trim());

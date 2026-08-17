@@ -8,6 +8,7 @@ export function integrationCallbackUrl(
     | "custom_mcp"
     | "datadog"
     | "github"
+    | "linear"
     | "sentry"
     | "slack",
 ): string {

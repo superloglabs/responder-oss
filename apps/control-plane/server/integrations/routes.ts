@@ -52,6 +52,15 @@ import {
 } from "./datadog.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
+  createLinearPkce,
+  exchangeLinearOAuthCode,
+  getLinearWorkspace,
+  LINEAR_AUTH_VERSION,
+  LINEAR_MCP_URL,
+  LINEAR_READONLY_MCP_URL,
+  linearAuthorizeUrl,
+} from "../../../../packages/core/src/integrations/linear.js";
+import {
   CLICKSTACK_CLOUD_MCP_URL,
   clickStackAccount,
   clickStackCloudAuthorizeUrl,
@@ -304,7 +313,10 @@ export const integrationRoutes = new Hono()
           (account) => account.provider === definition.id,
         );
         const connectedAccounts = providerAccounts.filter(
-          (account) => account.status === "connected",
+          (account) =>
+            account.status === "connected" &&
+            (definition.id !== "linear" ||
+              account.metadata.authVersion === LINEAR_AUTH_VERSION),
         );
         const configured = integrationIsConfigured(definition);
         const resourceCount = providerAccounts.reduce(
@@ -328,7 +340,11 @@ export const integrationRoutes = new Hono()
           accounts: providerAccounts.map((account) => ({
             id: account.id,
             displayName: account.displayName,
-            status: account.status,
+            status:
+              definition.id === "linear" &&
+                account.metadata.authVersion !== LINEAR_AUTH_VERSION
+                ? "error"
+                : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
           })),
@@ -417,6 +433,55 @@ export const integrationRoutes = new Hono()
         );
       }
     }
+    if (parsedProvider.data === "linear") {
+      let accountId: string | undefined;
+      try {
+        const pkce = createLinearPkce();
+        accountId = await upsertIntegrationAccount({
+          organizationId: tenant.organizationId,
+          provider: "linear",
+          externalAccountId: LINEAR_MCP_URL,
+          displayName: "Linear",
+          encryptedCredentials: encryptCredentials({
+            authType: "linear_oauth_pending",
+          }),
+          credentialKeyVersion: 1,
+          metadata: {
+            authType: "linear_oauth",
+            authVersion: LINEAR_AUTH_VERSION,
+            mcpUrl: LINEAR_MCP_URL,
+          },
+          status: "pending",
+        });
+        const linearState = await createIntegrationConnectionState({
+          organizationId: tenant.organizationId,
+          userId: tenant.user.id,
+          provider: "linear",
+          codeVerifier: pkce.codeVerifier,
+          metadata: { accountId },
+          returnTo: context.req.query("returnTo"),
+          routingUrl: integrationCallbackUrl("linear"),
+        });
+        return context.redirect(
+          linearAuthorizeUrl({
+            codeChallenge: pkce.codeChallenge,
+            redirectUri: integrationCallbackUrl("linear"),
+            state: linearState,
+          }),
+        );
+      } catch (error) {
+        logCustomMcpError("connect", error, accountId);
+        if (accountId) await setIntegrationAccountStatus(accountId, "error");
+        return context.redirect(
+          settingsRedirect(
+            context.req.query("returnTo") ?? "/settings",
+            "linear",
+            "error",
+            "connection_failed",
+          ),
+        );
+      }
+    }
     const state = await createIntegrationConnectionState({
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
@@ -440,7 +505,6 @@ export const integrationRoutes = new Hono()
       }
       return context.redirect(githubAuthorizeUrl(state));
     }
-
     return context.json({ error: "Integration is not available yet" }, 501);
   })
   .post("/datadog/connect", async (context) => {
@@ -758,6 +822,99 @@ export const integrationRoutes = new Hono()
         settingsRedirect(
           connectionState?.returnTo ?? "/settings",
           "custom_mcp",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/linear/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "linear", "error", "invalid_state"),
+      );
+    }
+
+    const connectionState = await consumeIntegrationConnectionState(
+      "linear",
+      state,
+    );
+    if (!connectionState) {
+      return context.redirect(
+        settingsRedirect("/settings", "linear", "error", "invalid_state"),
+      );
+    }
+
+    let accountId: string | undefined;
+    try {
+      accountId = z
+        .object({ accountId: z.uuid() })
+        .parse(connectionState.metadata).accountId;
+      const codeVerifier = z.string().min(1).parse(connectionState.codeVerifier);
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "linear",
+      });
+      if (!account?.encryptedCredentials || account.status !== "pending") {
+        throw new Error("The pending Linear connection was not found");
+      }
+      const credentials = await exchangeLinearOAuthCode({
+        authorizationCode,
+        codeVerifier,
+        redirectUri: integrationCallbackUrl("linear"),
+      });
+      const workspace = await getLinearWorkspace({
+        accessToken: credentials.accessToken,
+      });
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken: credentials.accessToken,
+        mcpUrl: LINEAR_READONLY_MCP_URL,
+      });
+      const connectedAccountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "linear",
+        externalAccountId: LINEAR_MCP_URL,
+        displayName: workspace.name,
+        encryptedCredentials: encryptCredentials(credentials),
+        credentialKeyVersion: 1,
+        metadata: {
+          authType: "linear_oauth",
+          authVersion: LINEAR_AUTH_VERSION,
+          mcpUrl: LINEAR_MCP_URL,
+          toolCount,
+          workspaceId: workspace.id,
+        },
+        status: "connected",
+      });
+      if (connectedAccountId !== accountId) {
+        throw new Error("The Linear connection account changed during OAuth");
+      }
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "linear",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "linear", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId) await setIntegrationAccountStatus(accountId, "error");
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "linear",
           "error",
           context.req.query("error") ? "cancelled" : "connection_failed",
         ),
