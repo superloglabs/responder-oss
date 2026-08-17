@@ -2186,7 +2186,7 @@ export function AgentCreatePage() {
                         >
                           •••
                         </div>
-                        <span>
+                        <span className="configurationDialog__copy">
                           <strong id="workspace-secret-dialog-title">
                             Add a workspace secret
                           </strong>
