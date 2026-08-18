@@ -277,6 +277,26 @@ export async function getRecoverableSentryIntegrationAccount(
   return rows[0] ?? null;
 }
 
+export async function listConnectedSentryIntegrationAccounts(
+  organizationId: string,
+) {
+  return getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, organizationId),
+        eq(integrationAccounts.provider, "sentry"),
+        eq(integrationAccounts.status, "connected"),
+        isNotNull(integrationAccounts.encryptedCredentials),
+      ),
+    );
+}
+
 export async function listConnectedIntegrationAccountCredentials(
   organizationId: string,
   provider: IntegrationProvider,

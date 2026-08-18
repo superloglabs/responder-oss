@@ -420,6 +420,12 @@ body:has(.appShell--investigation) {
   display: none;
 }
 
+.appShell--settings .connectedBadge--warning {
+  border-color: #66542d;
+  background: var(--ds-surface-base);
+  color: var(--ds-warning);
+}
+
 .appShell--settings .integrationCard__body strong {
   color: var(--ds-text-primary);
   font-size: 16px;

@@ -10,6 +10,7 @@ import {
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
+  listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
   setIntegrationAccountStatus,
@@ -55,6 +56,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   getOrganizationIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccountByExternalId: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
+  listConnectedSentryIntegrationAccounts: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
   replaceIntegrationResources: vi.fn(),
   replaceRepositories: vi.fn(),
@@ -159,6 +161,172 @@ describe("integration callback routing", () => {
       returnTo: undefined,
       routingUrl: "https://responder.example/api/integrations/sentry/callback",
     });
+  });
+
+  it("starts a fresh Sentry authorization when reconnecting", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("fresh-state");
+
+    const response = await app.request(
+      "/api/integrations/sentry/start?mode=reconnect",
+    );
+
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).searchParams.get("state"))
+      .toBe("fresh-state");
+    expect(getRecoverableSentryIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("falls back to fresh Sentry authorization when an old retry fails", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(getRecoverableSentryIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "broken-credentials",
+      externalAccountId: "40000000-0000-4000-8000-000000000000",
+      metadata: { organizationSlug: "example" },
+    });
+    vi.mocked(decryptCredentials).mockImplementation(() => {
+      throw new Error("cannot decrypt");
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("fresh-state");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/sentry/start");
+
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).searchParams.get("state"))
+      .toBe("fresh-state");
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "error",
+    );
+  });
+
+  it("checks a connected Sentry account against the live projects API", async () => {
+    vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        encryptedCredentials: "encrypted-credentials",
+        metadata: { organizationSlug: "example" },
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "sentry-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "sentry-refresh-token",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json([
+          { id: "1", name: "Backend", platform: "node", slug: "backend" },
+        ]),
+      ),
+    );
+
+    const response = await app.request("/api/integrations/sentry/check", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      accounts: [
+        {
+          id: "30000000-0000-4000-8000-000000000000",
+          resourceCount: 1,
+          status: "working",
+        },
+      ],
+    });
+    expect(replaceIntegrationResources).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "sentry_project",
+      [
+        {
+          displayName: "Backend",
+          externalId: "1",
+          metadata: {
+            organizationSlug: "example",
+            platform: "node",
+            slug: "backend",
+          },
+        },
+      ],
+    );
+  });
+
+  it("marks a Sentry account for reconnect after a live authorization failure", async () => {
+    vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        encryptedCredentials: "encrypted-credentials",
+        metadata: { organizationSlug: "example" },
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "expired-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "expired-refresh-token",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/sentry/check", {
+      method: "POST",
+    });
+
+    expect(await response.json()).toEqual({
+      accounts: [
+        {
+          id: "30000000-0000-4000-8000-000000000000",
+          status: "needs_reconnect",
+        },
+      ],
+    });
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "error",
+    );
+  });
+
+  it("does not mark a Sentry account broken during a temporary API failure", async () => {
+    vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        encryptedCredentials: "encrypted-credentials",
+        metadata: { organizationSlug: "example" },
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "sentry-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "sentry-refresh-token",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/sentry/check", {
+      method: "POST",
+    });
+
+    expect(await response.json()).toEqual({
+      accounts: [
+        {
+          id: "30000000-0000-4000-8000-000000000000",
+          status: "unavailable",
+        },
+      ],
+    });
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
   });
 
   it("starts Vercel's external installation flow with tenant state", async () => {
@@ -650,6 +818,35 @@ describe("integration callback routing", () => {
         id: "github",
         connectUrl: "/api/integrations/github/start",
         configurationUrl: "/api/integrations/github/start?mode=install",
+      }),
+    );
+  });
+
+  it("offers a fresh Sentry reconnect when an account already exists", async () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        provider: "sentry",
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+        displayName: "example",
+        status: "error",
+        metadata: { organizationSlug: "example" },
+        updatedAt: new Date("2026-08-18T08:38:21Z"),
+        resourceCount: 2,
+      },
+    ]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "sentry",
+        connectUrl: "/api/integrations/sentry/start?mode=reconnect",
       }),
     );
   });

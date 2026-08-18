@@ -1572,6 +1572,10 @@ export async function getRuntimeSentryConnection(
           integrationAccountId: account.id,
         }),
       );
+      await getDatabase()
+        .update(integrationAccounts)
+        .set({ status: "error", updatedAt: new Date() })
+        .where(eq(integrationAccounts.id, account.id));
       throw new Error("Unable to refresh Sentry access");
     }
     const refreshed = sentryAuthorizationSchema.parse(await response.json());
@@ -1585,6 +1589,7 @@ export async function getRuntimeSentryConnection(
       .update(integrationAccounts)
       .set({
         encryptedCredentials: encryptCredentials(credentials),
+        status: "connected",
         updatedAt: new Date(),
       })
       .where(eq(integrationAccounts.id, account.id));

@@ -37,12 +37,33 @@ interface IntegrationSummary {
   state: IntegrationState;
   accountCount: number;
   resourceCount: number;
+  accounts: Array<{
+    id: string;
+    displayName: string;
+    status: "connected" | "error" | "pending";
+    resourceCount: number;
+    updatedAt: string;
+  }>;
   connectUrl: string | null;
   configurationUrl: string | null;
 }
 
 interface IntegrationResponse {
   integrations: IntegrationSummary[];
+}
+
+type SentryHealth =
+  | "checking"
+  | "working"
+  | "needs_reconnect"
+  | "unavailable";
+
+interface SentryCheckResponse {
+  accounts: Array<{
+    id: string;
+    resourceCount?: number;
+    status: Exclude<SentryHealth, "checking">;
+  }>;
 }
 
 function connectionNotice(): {
@@ -92,6 +113,7 @@ export function SettingsPage() {
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sentryHealth, setSentryHealth] = useState<SentryHealth | null>(null);
   const [notice] = useState(connectionNotice);
   const isFinishingSentryConnection =
     new URLSearchParams(window.location.search).get("integration") === "sentry" &&
@@ -101,6 +123,32 @@ export function SettingsPage() {
     let active = true;
     let retryTimer: number | undefined;
     let retryCount = 0;
+    let sentryCheckStarted = false;
+
+    function checkSentryConnection() {
+      sentryCheckStarted = true;
+      setSentryHealth("checking");
+      void fetch("/api/integrations/sentry/check", { method: "POST" })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("Unable to check Sentry");
+          return (await response.json()) as SentryCheckResponse;
+        })
+        .then((response) => {
+          if (!active) return;
+          const statuses = response.accounts.map((account) => account.status);
+          setSentryHealth(
+            statuses.includes("needs_reconnect")
+              ? "needs_reconnect"
+              : statuses.includes("unavailable") || statuses.length === 0
+                ? "unavailable"
+                : "working",
+          );
+          loadIntegrations();
+        })
+        .catch(() => {
+          if (active) setSentryHealth("unavailable");
+        });
+    }
 
     function loadIntegrations() {
       void fetch("/api/integrations")
@@ -111,10 +159,16 @@ export function SettingsPage() {
       .then((response) => {
         if (!active) return;
         setIntegrations(response.integrations);
-        const sentryConnected = response.integrations.some(
-          (integration) =>
-            integration.id === "sentry" && integration.state === "connected",
+        const sentry = response.integrations.find(
+          (integration) => integration.id === "sentry",
         );
+        const sentryConnected = sentry?.state === "connected";
+        if (sentry?.accounts.some((account) => account.status === "error")) {
+          setSentryHealth("needs_reconnect");
+        }
+        if (sentryConnected && !sentryCheckStarted) {
+          checkSentryConnection();
+        }
         if (isFinishingSentryConnection && !sentryConnected && retryCount < 8) {
           retryCount += 1;
           retryTimer = window.setTimeout(loadIntegrations, 750);
@@ -187,12 +241,20 @@ export function SettingsPage() {
           <div className="integrationRows">
             <div className="integrationRow integrationRow--featured">
               {featured.map((integration) => (
-                <IntegrationCard integration={integration} key={integration.id} />
+                <IntegrationCard
+                  integration={integration}
+                  key={integration.id}
+                  sentryHealth={sentryHealth}
+                />
               ))}
             </div>
             <div className="integrationRow">
               {secondary.map((integration) => (
-                <IntegrationCard integration={integration} key={integration.id} />
+                <IntegrationCard
+                  integration={integration}
+                  key={integration.id}
+                  sentryHealth={sentryHealth}
+                />
               ))}
             </div>
           </div>
@@ -202,7 +264,37 @@ export function SettingsPage() {
   );
 }
 
-function integrationDetail(integration: IntegrationSummary): string {
+function displayedSentryHealth(
+  integration: IntegrationSummary,
+  health: SentryHealth | null,
+): SentryHealth | null {
+  if (integration.id !== "sentry") return null;
+  if (integration.accounts.some((account) => account.status === "error")) {
+    return "needs_reconnect";
+  }
+  return health ?? (integration.state === "connected" ? "checking" : null);
+}
+
+function integrationDetail(
+  integration: IntegrationSummary,
+  sentryHealth: SentryHealth | null,
+): string {
+  const health = displayedSentryHealth(integration, sentryHealth);
+  if (health === "checking") return "Checking the connection…";
+  if (health === "working") {
+    const projectLabel = integration.resourceCount === 1 ? "project" : "projects";
+    return `Connection works · ${integration.resourceCount} ${projectLabel}`;
+  }
+  if (health === "needs_reconnect") {
+    const failedCount = Math.max(
+      1,
+      integration.accounts.filter((account) => account.status === "error").length,
+    );
+    return failedCount === 1
+      ? "1 connection failed · Select to reconnect"
+      : `${failedCount} connections failed · Select to reconnect`;
+  }
+  if (health === "unavailable") return "Could not verify the connection right now";
   if (integration.state === "connected") {
     const accountLabel = integration.accountCount === 1 ? "account" : "accounts";
     const resourceLabel = integration.resourceCount === 1 ? "resource" : "resources";
@@ -217,8 +309,15 @@ function integrationDetail(integration: IntegrationSummary): string {
   return integration.description;
 }
 
-function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
+function IntegrationCard({
+  integration,
+  sentryHealth,
+}: {
+  integration: IntegrationSummary;
+  sentryHealth: SentryHealth | null;
+}) {
   const actionUrl = integrationActionUrl(integration);
+  const health = displayedSentryHealth(integration, sentryHealth);
   const canConnect = Boolean(actionUrl);
   const [isConnecting, setIsConnecting] = useState(false);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
@@ -271,7 +370,15 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
             decorative
             provider={integration.id}
           />
-          {integration.state === "connected" ? (
+          {health === "needs_reconnect" ? (
+            <span className="connectedBadge connectedBadge--warning">Reconnect</span>
+          ) : health === "unavailable" ? (
+            <span className="connectedBadge connectedBadge--muted">Not verified</span>
+          ) : health === "checking" ? (
+            <span className="connectedBadge connectedBadge--muted">Checking</span>
+          ) : health === "working" ? (
+            <span className="connectedBadge">Working</span>
+          ) : integration.state === "connected" ? (
             <span className="connectedBadge">Connected</span>
           ) : integration.state === "coming_soon" ? (
             <span className="connectedBadge connectedBadge--muted">Coming next</span>
@@ -279,7 +386,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
         </span>
         <span className="integrationCard__body">
           <strong>{integration.name}</strong>
-          <small>{integrationDetail(integration)}</small>
+          <small>{integrationDetail(integration, sentryHealth)}</small>
         </span>
         <span className="integrationCard__arrow">
           {isConnecting ? (

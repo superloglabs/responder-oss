@@ -5,8 +5,18 @@ const sentryAuthorizationSchema = z.object({
   token: z.string().min(1),
   refreshToken: z.string().min(1),
   dateCreated: z.string().optional(),
-  expiresAt: z.string().optional(),
+  expiresAt: z.string().nullable().optional(),
 });
+
+export class SentryApiError extends Error {
+  constructor(
+    message: string,
+    readonly httpStatus: number,
+  ) {
+    super(message);
+    this.name = "SentryApiError";
+  }
+}
 
 const sentryProjectSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
@@ -56,7 +66,34 @@ export async function exchangeSentryGrant(input: {
     },
   );
   if (!response.ok) {
-    throw new Error(`Sentry authorization failed with HTTP ${response.status}`);
+    throw new SentryApiError("Sentry authorization failed", response.status);
+  }
+  return sentryAuthorizationSchema.parse(await response.json());
+}
+
+export async function refreshSentryGrant(input: {
+  installationId: string;
+  refreshToken: string;
+}) {
+  const { clientId, clientSecret } = sentryEnvironment();
+  const response = await fetch(
+    `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(input.installationId)}/authorizations/`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: input.refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw new SentryApiError("Unable to refresh Sentry access", response.status);
   }
   return sentryAuthorizationSchema.parse(await response.json());
 }
@@ -94,7 +131,7 @@ export async function listSentryProjects(
       },
     });
     if (!response.ok) {
-      throw new Error(`Unable to list Sentry projects (HTTP ${response.status})`);
+      throw new SentryApiError("Unable to list Sentry projects", response.status);
     }
     projects.push(...z.array(sentryProjectSchema).parse(await response.json()));
     nextUrl = nextSentryPage(response.headers.get("link"));
@@ -127,6 +164,6 @@ export async function verifySentryInstallation(
     },
   );
   if (!response.ok) {
-    throw new Error(`Unable to verify Sentry installation (HTTP ${response.status})`);
+    throw new SentryApiError("Unable to verify Sentry installation", response.status);
   }
 }
