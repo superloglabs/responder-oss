@@ -18,6 +18,7 @@ import {
   setIntegrationAccountStatus,
   updateIntegrationAccountCredentials,
   upsertIntegrationAccount,
+  withLockedIntegrationAccountCredentials,
 } from "../../../../packages/core/src/db/integrations.js";
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
@@ -77,6 +78,7 @@ import {
   listSentryProjects,
   refreshSentryGrant,
   SentryApiError,
+  sentryErrorNeedsReconnect,
   sentryInstallUrl,
   verifySentryInstallation,
 } from "./sentry.js";
@@ -394,7 +396,7 @@ async function retrySentrySetup(organizationId: string): Promise<{
   try {
     const credentials = await getFreshSentryCredentials({
       accountId: account.id,
-      encryptedCredentials: account.encryptedCredentials,
+      allowedStatuses: ["connected", "error", "pending"],
       organizationId,
     });
     const organizationSlug = getSentryOrganizationSlug(account.metadata);
@@ -413,42 +415,48 @@ async function retrySentrySetup(organizationId: string): Promise<{
 
 async function getFreshSentryCredentials(input: {
   accountId: string;
-  encryptedCredentials: string;
+  allowedStatuses?: Array<"connected" | "error" | "pending">;
   organizationId: string;
 }) {
-  let credentials: z.infer<typeof sentryCredentialsSchema>;
-  try {
-    credentials = sentryCredentialsSchema.parse(
-      decryptCredentials<Record<string, unknown>>(input.encryptedCredentials),
-    );
-  } catch {
-    throw new StoredSentryConnectionError();
-  }
-  const expiresAt = credentials.expiresAt
-    ? Date.parse(credentials.expiresAt)
-    : Number.POSITIVE_INFINITY;
-  if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
-    return credentials;
-  }
-
-  const authorization = await refreshSentryGrant({
-    installationId: credentials.installationId,
-    refreshToken: credentials.refreshToken,
-  });
-  credentials = {
-    accessToken: authorization.token,
-    expiresAt: authorization.expiresAt ?? null,
-    installationId: credentials.installationId,
-    refreshToken: authorization.refreshToken,
-  };
-  const updated = await updateIntegrationAccountCredentials({
-    encryptedCredentials: encryptCredentials(credentials),
+  const credentials = await withLockedIntegrationAccountCredentials({
+    allowedStatuses: input.allowedStatuses ?? ["connected"],
     integrationAccountId: input.accountId,
     organizationId: input.organizationId,
+    operation: async (encryptedCredentials) => {
+      let current: z.infer<typeof sentryCredentialsSchema>;
+      try {
+        current = sentryCredentialsSchema.parse(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+      } catch {
+        throw new StoredSentryConnectionError();
+      }
+      const expiresAt = current.expiresAt
+        ? Date.parse(current.expiresAt)
+        : Number.POSITIVE_INFINITY;
+      if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+        return { value: current };
+      }
+
+      const authorization = await refreshSentryGrant({
+        installationId: current.installationId,
+        refreshToken: current.refreshToken,
+      });
+      const refreshed = {
+        accessToken: authorization.token,
+        expiresAt: authorization.expiresAt ?? null,
+        installationId: current.installationId,
+        refreshToken: authorization.refreshToken,
+      };
+      return {
+        encryptedCredentials: encryptCredentials(refreshed),
+        status: "connected" as const,
+        value: refreshed,
+      };
+    },
     provider: "sentry",
-    status: "connected",
   });
-  if (!updated) throw new Error("Sentry connection was not updated");
+  if (!credentials) throw new StoredSentryConnectionError();
   return credentials;
 }
 
@@ -551,7 +559,6 @@ export const integrationRoutes = new Hono()
           }
           const credentials = await getFreshSentryCredentials({
             accountId: account.id,
-            encryptedCredentials: account.encryptedCredentials,
             organizationId: tenant.organizationId,
           });
           const organizationSlug = getSentryOrganizationSlug(account.metadata);
@@ -573,8 +580,7 @@ export const integrationRoutes = new Hono()
         } catch (error) {
           const needsReconnect =
             error instanceof StoredSentryConnectionError ||
-            (error instanceof SentryApiError &&
-              (error.httpStatus === 401 || error.httpStatus === 403));
+            sentryErrorNeedsReconnect(error);
           if (needsReconnect) {
             await setIntegrationAccountStatus(account.id, "error");
           }

@@ -122,11 +122,23 @@ export function SettingsPage() {
   useEffect(() => {
     let active = true;
     let retryTimer: number | undefined;
+    let sentryRetryTimer: number | undefined;
     let retryCount = 0;
+    let sentryCheckAttempts = 0;
     let sentryCheckStarted = false;
+
+    function retrySentryCheck() {
+      if (sentryCheckAttempts >= 2 || sentryRetryTimer !== undefined) return;
+      sentryCheckStarted = false;
+      sentryRetryTimer = window.setTimeout(() => {
+        sentryRetryTimer = undefined;
+        if (active) loadIntegrations();
+      }, 2_000);
+    }
 
     function checkSentryConnection() {
       sentryCheckStarted = true;
+      sentryCheckAttempts += 1;
       setSentryHealth("checking");
       void fetch("/api/integrations/sentry/check", { method: "POST" })
         .then(async (response) => {
@@ -136,17 +148,22 @@ export function SettingsPage() {
         .then((response) => {
           if (!active) return;
           const statuses = response.accounts.map((account) => account.status);
-          setSentryHealth(
-            statuses.includes("needs_reconnect")
-              ? "needs_reconnect"
-              : statuses.includes("unavailable") || statuses.length === 0
-                ? "unavailable"
-                : "working",
-          );
-          loadIntegrations();
+          if (statuses.includes("needs_reconnect")) {
+            setSentryHealth("needs_reconnect");
+            loadIntegrations();
+          } else if (statuses.includes("unavailable") || statuses.length === 0) {
+            setSentryHealth("unavailable");
+            retrySentryCheck();
+          } else {
+            setSentryHealth("working");
+            loadIntegrations();
+          }
         })
         .catch(() => {
-          if (active) setSentryHealth("unavailable");
+          if (active) {
+            setSentryHealth("unavailable");
+            retrySentryCheck();
+          }
         });
     }
 
@@ -191,6 +208,9 @@ export function SettingsPage() {
     return () => {
       active = false;
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      if (sentryRetryTimer !== undefined) {
+        window.clearTimeout(sentryRetryTimer);
+      }
     };
   }, [isFinishingSentryConnection]);
 

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const SENTRY_REQUEST_TIMEOUT_MS = 10_000;
+
 const sentryAuthorizationSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
   token: z.string().min(1),
@@ -12,10 +14,18 @@ export class SentryApiError extends Error {
   constructor(
     message: string,
     readonly httpStatus: number,
+    readonly operation: "authorization" | "installation" | "projects",
   ) {
     super(message);
     this.name = "SentryApiError";
   }
+}
+
+export function sentryErrorNeedsReconnect(error: unknown): boolean {
+  return error instanceof SentryApiError &&
+    (error.httpStatus === 401 ||
+      error.httpStatus === 403 ||
+      (error.operation === "authorization" && error.httpStatus === 400));
 }
 
 const sentryProjectSchema = z.object({
@@ -53,6 +63,7 @@ export async function exchangeSentryGrant(input: {
     `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(input.installationId)}/authorizations/`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
       headers: {
         accept: "application/json",
         "content-type": "application/json",
@@ -66,7 +77,11 @@ export async function exchangeSentryGrant(input: {
     },
   );
   if (!response.ok) {
-    throw new SentryApiError("Sentry authorization failed", response.status);
+    throw new SentryApiError(
+      "Sentry authorization failed",
+      response.status,
+      "authorization",
+    );
   }
   return sentryAuthorizationSchema.parse(await response.json());
 }
@@ -80,6 +95,7 @@ export async function refreshSentryGrant(input: {
     `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(input.installationId)}/authorizations/`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
       headers: {
         accept: "application/json",
         "content-type": "application/json",
@@ -93,7 +109,11 @@ export async function refreshSentryGrant(input: {
     },
   );
   if (!response.ok) {
-    throw new SentryApiError("Unable to refresh Sentry access", response.status);
+    throw new SentryApiError(
+      "Unable to refresh Sentry access",
+      response.status,
+      "authorization",
+    );
   }
   return sentryAuthorizationSchema.parse(await response.json());
 }
@@ -129,9 +149,14 @@ export async function listSentryProjects(
         accept: "application/json",
         authorization: `Bearer ${accessToken}`,
       },
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
-      throw new SentryApiError("Unable to list Sentry projects", response.status);
+      throw new SentryApiError(
+        "Unable to list Sentry projects",
+        response.status,
+        "projects",
+      );
     }
     projects.push(...z.array(sentryProjectSchema).parse(await response.json()));
     nextUrl = nextSentryPage(response.headers.get("link"));
@@ -156,6 +181,7 @@ export async function verifySentryInstallation(
     `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(installationId)}/`,
     {
       method: "PUT",
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -164,6 +190,10 @@ export async function verifySentryInstallation(
     },
   );
   if (!response.ok) {
-    throw new SentryApiError("Unable to verify Sentry installation", response.status);
+    throw new SentryApiError(
+      "Unable to verify Sentry installation",
+      response.status,
+      "installation",
+    );
   }
 }

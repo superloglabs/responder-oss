@@ -7,6 +7,7 @@ import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
   upsertIntegrationAccount,
+  withLockedIntegrationAccountCredentials,
 } from "./integrations.js";
 import {
   integrationAccounts,
@@ -84,6 +85,49 @@ describe("integration account tenancy", () => {
     });
 
     await expect(upsertIntegrationAccount(account)).resolves.toBe("account-1");
+    expect(updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it("serializes rotating credential updates with an account row lock", async () => {
+    const forUpdate = vi.fn().mockResolvedValue([
+      { encryptedCredentials: "old-credentials", status: "connected" },
+    ]);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => ({ for: forUpdate })),
+          })),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({ where: updateWhere })),
+      })),
+    };
+    vi.mocked(getDatabase).mockReturnValue({
+      transaction: vi.fn(async (operation) => operation(tx as never)),
+    } as never);
+    const operation = vi.fn().mockResolvedValue({
+      encryptedCredentials: "new-credentials",
+      status: "connected",
+      value: "refreshed",
+    });
+
+    await expect(
+      withLockedIntegrationAccountCredentials({
+        allowedStatuses: ["connected"],
+        integrationAccountId: "account-1",
+        operation,
+        organizationId: account.organizationId,
+        provider: "sentry",
+      }),
+    ).resolves.toBe("refreshed");
+
+    expect(forUpdate).toHaveBeenCalledWith("update", {
+      of: integrationAccounts,
+    });
+    expect(operation).toHaveBeenCalledWith("old-credentials");
     expect(updateWhere).toHaveBeenCalledOnce();
   });
 

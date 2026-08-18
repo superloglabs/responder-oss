@@ -253,6 +253,60 @@ export async function updateIntegrationAccountCredentials(input: {
   return updated.length > 0;
 }
 
+export async function withLockedIntegrationAccountCredentials<T>(input: {
+  allowedStatuses: Array<"connected" | "error" | "pending">;
+  integrationAccountId: string;
+  operation: (encryptedCredentials: string) => Promise<{
+    encryptedCredentials?: string;
+    status?: "connected" | "error" | "pending";
+    value: T;
+  }>;
+  organizationId: string;
+  provider: IntegrationProvider;
+}): Promise<T | null> {
+  return getDatabase().transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        encryptedCredentials: integrationAccounts.encryptedCredentials,
+        status: integrationAccounts.status,
+      })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.id, input.integrationAccountId),
+          eq(integrationAccounts.organizationId, input.organizationId),
+          eq(integrationAccounts.provider, input.provider),
+        ),
+      )
+      .limit(1)
+      .for("update", { of: integrationAccounts });
+    const account = rows[0];
+    if (
+      !account?.encryptedCredentials ||
+      !input.allowedStatuses.includes(
+        account.status as "connected" | "error" | "pending",
+      )
+    ) {
+      return null;
+    }
+
+    const result = await input.operation(account.encryptedCredentials);
+    if (result.encryptedCredentials || result.status) {
+      await tx
+        .update(integrationAccounts)
+        .set({
+          ...(result.encryptedCredentials
+            ? { encryptedCredentials: result.encryptedCredentials }
+            : {}),
+          ...(result.status ? { status: result.status } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(integrationAccounts.id, input.integrationAccountId));
+    }
+    return result.value;
+  });
+}
+
 export async function getRecoverableSentryIntegrationAccount(
   organizationId: string,
 ) {

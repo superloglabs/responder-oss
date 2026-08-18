@@ -16,6 +16,7 @@ import {
   setIntegrationAccountStatus,
   updateIntegrationAccountCredentials,
   upsertIntegrationAccount,
+  withLockedIntegrationAccountCredentials,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
   createAwsCloudFormationTemplateUrl,
@@ -63,6 +64,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   setIntegrationAccountStatus: vi.fn(),
   updateIntegrationAccountCredentials: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
+  withLockedIntegrationAccountCredentials: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/integrations/aws.js", async (importOriginal) => {
@@ -126,6 +128,12 @@ function configureGitHub() {
 describe("integration callback routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(withLockedIntegrationAccountCredentials).mockImplementation(
+      async (input) => {
+        const result = await input.operation("encrypted-credentials");
+        return result.value;
+      },
+    );
   });
 
   afterEach(() => {
