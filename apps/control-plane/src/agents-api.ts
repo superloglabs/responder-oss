@@ -132,6 +132,13 @@ export interface IntegrationSummary {
   state: "available" | "coming_soon" | "connected" | "setup_required";
   accountCount: number;
   resourceCount: number;
+  accounts?: Array<{
+    id: string;
+    displayName: string;
+    status: "connected" | "error" | "pending";
+    resourceCount: number;
+    updatedAt: string;
+  }>;
   connectUrl: string | null;
   configurationUrl: string | null;
 }

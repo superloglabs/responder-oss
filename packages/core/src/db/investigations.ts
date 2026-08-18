@@ -55,6 +55,7 @@ import {
   type AgentPrMode,
 } from "./schema.js";
 import { getInvestigationIssueDetails } from "./issues.js";
+import { withIntegrationAccountCredentialLease } from "./integrations.js";
 
 export interface RuntimeAgentConfig {
   id: string;
@@ -1478,6 +1479,13 @@ const sentryAuthorizationSchema = z.object({
   expiresAt: z.string().nullable().optional(),
 });
 
+class SentryRefreshError extends Error {
+  constructor(readonly httpStatus: number) {
+    super("Unable to refresh Sentry access");
+    this.name = "SentryRefreshError";
+  }
+}
+
 const sentryTriggerConfigSchema = z.object({
   integrationAccountId: z.uuid(),
   projectIds: z.array(z.string().min(1)),
@@ -1548,46 +1556,80 @@ export async function getRuntimeSentryConnection(
     if (!clientId || !clientSecret) {
       throw new Error("Sentry App credentials are not configured");
     }
-    const response = await fetch(
-      `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(credentials.installationId)}/authorizations/`,
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          grant_type: "refresh_token",
-          refresh_token: credentials.refreshToken,
-          client_id: clientId,
-          client_secret: clientSecret,
-        }),
-      },
-    );
-    if (!response.ok) {
+    try {
+      const refreshedCredentials =
+        await withIntegrationAccountCredentialLease({
+          allowedStatuses: ["connected"],
+          integrationAccountId: account.id,
+          operation: async (encryptedCredentials) => {
+            const current = sentryCredentialsSchema.parse(
+              decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+            );
+            const currentExpiresAt = current.expiresAt
+              ? Date.parse(current.expiresAt)
+              : Number.POSITIVE_INFINITY;
+            if (
+              Number.isFinite(currentExpiresAt) &&
+              currentExpiresAt > Date.now() + 60_000
+            ) {
+              return { value: current };
+            }
+
+            const response = await fetch(
+              `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(current.installationId)}/authorizations/`,
+              {
+                method: "POST",
+                headers: {
+                  accept: "application/json",
+                  "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                  grant_type: "refresh_token",
+                  refresh_token: current.refreshToken,
+                  client_id: clientId,
+                  client_secret: clientSecret,
+                }),
+                signal: AbortSignal.timeout(10_000),
+              },
+            );
+            if (!response.ok) throw new SentryRefreshError(response.status);
+            const refreshed = sentryAuthorizationSchema.parse(
+              await response.json(),
+            );
+            const nextCredentials = {
+              accessToken: refreshed.token,
+              refreshToken: refreshed.refreshToken,
+              expiresAt: refreshed.expiresAt ?? null,
+              installationId: current.installationId,
+            };
+            return {
+              encryptedCredentials: encryptCredentials(nextCredentials),
+              status: "connected" as const,
+              value: nextCredentials,
+            };
+          },
+          organizationId: config.organizationId,
+          provider: "sentry",
+          statusOnError: (error) =>
+            error instanceof SentryRefreshError &&
+              [400, 401, 403].includes(error.httpStatus)
+              ? "error"
+              : undefined,
+        });
+      if (!refreshedCredentials) return null;
+      credentials = refreshedCredentials;
+    } catch (error) {
       console.error(
         JSON.stringify({
           event: "sentry_token_refresh_failed",
-          httpStatus: response.status,
+          ...(error instanceof SentryRefreshError
+            ? { httpStatus: error.httpStatus }
+            : {}),
           integrationAccountId: account.id,
         }),
       );
       throw new Error("Unable to refresh Sentry access");
     }
-    const refreshed = sentryAuthorizationSchema.parse(await response.json());
-    credentials = {
-      accessToken: refreshed.token,
-      refreshToken: refreshed.refreshToken,
-      expiresAt: refreshed.expiresAt ?? null,
-      installationId: credentials.installationId,
-    };
-    await getDatabase()
-      .update(integrationAccounts)
-      .set({
-        encryptedCredentials: encryptCredentials(credentials),
-        updatedAt: new Date(),
-      })
-      .where(eq(integrationAccounts.id, account.id));
   }
 
   let projectSlug: string | undefined;

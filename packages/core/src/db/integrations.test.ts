@@ -6,7 +6,9 @@ import { getDatabase } from "./client.js";
 import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
+  IntegrationAccountCredentialSupersededError,
   upsertIntegrationAccount,
+  withIntegrationAccountCredentialLease,
 } from "./integrations.js";
 import {
   integrationAccounts,
@@ -85,6 +87,71 @@ describe("integration account tenancy", () => {
 
     await expect(upsertIntegrationAccount(account)).resolves.toBe("account-1");
     expect(updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it("serializes rotating credential updates without holding a transaction", async () => {
+    const returning = vi
+      .fn()
+      .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
+      .mockResolvedValueOnce([{ id: "account-1" }]);
+    const where = vi.fn(() => ({ returning }));
+    const database = {
+      transaction: vi.fn(),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({ where })),
+      })),
+    };
+    vi.mocked(getDatabase).mockReturnValue(database as never);
+    const operation = vi.fn().mockResolvedValue({
+      encryptedCredentials: "new-credentials",
+      status: "connected",
+      value: "refreshed",
+    });
+
+    await expect(
+      withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: "account-1",
+        operation,
+        organizationId: account.organizationId,
+        provider: "sentry",
+      }),
+    ).resolves.toBe("refreshed");
+
+    expect(database.transaction).not.toHaveBeenCalled();
+    expect(database.update).toHaveBeenCalledTimes(2);
+    expect(operation).toHaveBeenCalledWith("old-credentials");
+    expect(where).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not overwrite a connection that changes during a failed refresh", async () => {
+    const returning = vi
+      .fn()
+      .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
+      .mockResolvedValueOnce([]);
+    const set = vi.fn(() => ({
+      where: vi.fn(() => ({ returning })),
+    }));
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: "account-1",
+        operation: async () => {
+          throw new Error("refresh rejected");
+        },
+        organizationId: account.organizationId,
+        provider: "sentry",
+        statusOnError: () => "error",
+      }),
+    ).rejects.toBeInstanceOf(IntegrationAccountCredentialSupersededError);
+
+    expect(set).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "error" }),
+    );
   });
 
   it("returns a newly connected GitHub account", async () => {
