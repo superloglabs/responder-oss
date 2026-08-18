@@ -16,9 +16,10 @@ import {
   replaceIntegrationResources,
   replaceRepositories,
   setIntegrationAccountStatus,
+  setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
   upsertIntegrationAccount,
-  withLockedIntegrationAccountCredentials,
+  withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
@@ -137,6 +138,13 @@ class StoredSentryConnectionError extends Error {
   constructor() {
     super("Stored Sentry connection is invalid");
     this.name = "StoredSentryConnectionError";
+  }
+}
+
+class SentryConnectionChangedError extends Error {
+  constructor() {
+    super("Sentry connection changed during refresh");
+    this.name = "SentryConnectionChangedError";
   }
 }
 
@@ -393,22 +401,35 @@ async function retrySentrySetup(organizationId: string): Promise<{
 } | null> {
   const account = await getRecoverableSentryIntegrationAccount(organizationId);
   if (!account?.encryptedCredentials) return null;
+  let expectedEncryptedCredentials = account.encryptedCredentials;
   try {
-    const credentials = await getFreshSentryCredentials({
+    const fresh = await getFreshSentryCredentials({
       accountId: account.id,
       allowedStatuses: ["connected", "error", "pending"],
       organizationId,
     });
+    expectedEncryptedCredentials = fresh.encryptedCredentials;
     const organizationSlug = getSentryOrganizationSlug(account.metadata);
     const resourceCount = await completeSentrySetup({
-      accessToken: credentials.accessToken,
+      accessToken: fresh.credentials.accessToken,
       accountId: account.id,
-      installationId: credentials.installationId,
+      installationId: fresh.credentials.installationId,
       organizationSlug,
     });
     return { accountId: account.id, resourceCount };
   } catch (error) {
-    await setIntegrationAccountStatus(account.id, "error");
+    if (
+      error instanceof StoredSentryConnectionError ||
+      sentryErrorNeedsReconnect(error)
+    ) {
+      await setIntegrationAccountStatusIfCredentialsMatch({
+        encryptedCredentials: expectedEncryptedCredentials,
+        integrationAccountId: account.id,
+        organizationId,
+        provider: "sentry",
+        status: "error",
+      });
+    }
     throw error;
   }
 }
@@ -418,7 +439,7 @@ async function getFreshSentryCredentials(input: {
   allowedStatuses?: Array<"connected" | "error" | "pending">;
   organizationId: string;
 }) {
-  const credentials = await withLockedIntegrationAccountCredentials({
+  const fresh = await withIntegrationAccountCredentialLease({
     allowedStatuses: input.allowedStatuses ?? ["connected"],
     integrationAccountId: input.accountId,
     organizationId: input.organizationId,
@@ -435,7 +456,9 @@ async function getFreshSentryCredentials(input: {
         ? Date.parse(current.expiresAt)
         : Number.POSITIVE_INFINITY;
       if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
-        return { value: current };
+        return {
+          value: { credentials: current, encryptedCredentials },
+        };
       }
 
       const authorization = await refreshSentryGrant({
@@ -448,16 +471,25 @@ async function getFreshSentryCredentials(input: {
         installationId: current.installationId,
         refreshToken: authorization.refreshToken,
       };
+      const refreshedEncryptedCredentials = encryptCredentials(refreshed);
       return {
-        encryptedCredentials: encryptCredentials(refreshed),
+        encryptedCredentials: refreshedEncryptedCredentials,
         status: "connected" as const,
-        value: refreshed,
+        value: {
+          credentials: refreshed,
+          encryptedCredentials: refreshedEncryptedCredentials,
+        },
       };
     },
     provider: "sentry",
+    statusOnError: (error) =>
+      error instanceof StoredSentryConnectionError ||
+        sentryErrorNeedsReconnect(error)
+        ? "error"
+        : undefined,
   });
-  if (!credentials) throw new StoredSentryConnectionError();
-  return credentials;
+  if (!fresh) throw new SentryConnectionChangedError();
+  return fresh;
 }
 
 export const integrationRoutes = new Hono()
@@ -553,17 +585,19 @@ export const integrationRoutes = new Hono()
     );
     const checkedAccounts = await Promise.all(
       accounts.map(async (account) => {
+        let expectedEncryptedCredentials = account.encryptedCredentials;
         try {
           if (!account.encryptedCredentials) {
             throw new StoredSentryConnectionError();
           }
-          const credentials = await getFreshSentryCredentials({
+          const fresh = await getFreshSentryCredentials({
             accountId: account.id,
             organizationId: tenant.organizationId,
           });
+          expectedEncryptedCredentials = fresh.encryptedCredentials;
           const organizationSlug = getSentryOrganizationSlug(account.metadata);
           const projects = await listSentryProjects(
-            credentials.accessToken,
+            fresh.credentials.accessToken,
             organizationSlug,
           );
           await replaceIntegrationResources(
@@ -571,7 +605,13 @@ export const integrationRoutes = new Hono()
             "sentry_project",
             projects,
           );
-          await setIntegrationAccountStatus(account.id, "connected");
+          await setIntegrationAccountStatusIfCredentialsMatch({
+            encryptedCredentials: expectedEncryptedCredentials,
+            integrationAccountId: account.id,
+            organizationId: tenant.organizationId,
+            provider: "sentry",
+            status: "connected",
+          });
           return {
             id: account.id,
             resourceCount: projects.length,
@@ -582,7 +622,15 @@ export const integrationRoutes = new Hono()
             error instanceof StoredSentryConnectionError ||
             sentryErrorNeedsReconnect(error);
           if (needsReconnect) {
-            await setIntegrationAccountStatus(account.id, "error");
+            if (expectedEncryptedCredentials) {
+              await setIntegrationAccountStatusIfCredentialsMatch({
+                encryptedCredentials: expectedEncryptedCredentials,
+                integrationAccountId: account.id,
+                organizationId: tenant.organizationId,
+                provider: "sentry",
+                status: "error",
+              });
+            }
           }
           console.error(
             JSON.stringify({

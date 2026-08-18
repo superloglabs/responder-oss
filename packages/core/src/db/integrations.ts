@@ -1,5 +1,5 @@
-import { createHash, randomBytes } from "node:crypto";
-import { and, count, eq, gt, inArray, isNotNull, lte } from "drizzle-orm";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { and, count, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   integrationAccounts,
@@ -253,7 +253,19 @@ export async function updateIntegrationAccountCredentials(input: {
   return updated.length > 0;
 }
 
-export async function withLockedIntegrationAccountCredentials<T>(input: {
+const CREDENTIAL_REFRESH_LEASE_KEY = "credentialRefreshLease";
+const CREDENTIAL_REFRESH_LEASE_MS = 15_000;
+const CREDENTIAL_REFRESH_WAIT_ATTEMPTS = 100;
+const CREDENTIAL_REFRESH_WAIT_MS = 100;
+
+export class IntegrationAccountCredentialSupersededError extends Error {
+  constructor() {
+    super("Integration credentials changed during refresh");
+    this.name = "IntegrationAccountCredentialSupersededError";
+  }
+}
+
+export async function withIntegrationAccountCredentialLease<T>(input: {
   allowedStatuses: Array<"connected" | "error" | "pending">;
   integrationAccountId: string;
   operation: (encryptedCredentials: string) => Promise<{
@@ -263,48 +275,149 @@ export async function withLockedIntegrationAccountCredentials<T>(input: {
   }>;
   organizationId: string;
   provider: IntegrationProvider;
+  statusOnError?: (
+    error: unknown,
+  ) => "connected" | "error" | "pending" | undefined;
 }): Promise<T | null> {
-  return getDatabase().transaction(async (tx) => {
-    const rows = await tx
-      .select({
-        encryptedCredentials: integrationAccounts.encryptedCredentials,
-        status: integrationAccounts.status,
+  const db = getDatabase();
+  const leaseId = randomUUID();
+
+  for (
+    let attempt = 0;
+    attempt < CREDENTIAL_REFRESH_WAIT_ATTEMPTS;
+    attempt += 1
+  ) {
+    const leaseStartedAt = new Date();
+    const staleBefore = new Date(
+      leaseStartedAt.getTime() - CREDENTIAL_REFRESH_LEASE_MS,
+    );
+    const rows = await db
+      .update(integrationAccounts)
+      .set({
+        metadata: sql`jsonb_set(
+          ${integrationAccounts.metadata},
+          '{credentialRefreshLease}',
+          ${JSON.stringify({ id: leaseId })}::jsonb,
+          true
+        )`,
+        updatedAt: leaseStartedAt,
       })
-      .from(integrationAccounts)
       .where(
         and(
           eq(integrationAccounts.id, input.integrationAccountId),
           eq(integrationAccounts.organizationId, input.organizationId),
           eq(integrationAccounts.provider, input.provider),
+          inArray(integrationAccounts.status, input.allowedStatuses),
+          isNotNull(integrationAccounts.encryptedCredentials),
+          or(
+            sql`${integrationAccounts.metadata} -> ${CREDENTIAL_REFRESH_LEASE_KEY} IS NULL`,
+            lte(integrationAccounts.updatedAt, staleBefore),
+          ),
         ),
       )
-      .limit(1)
-      .for("update", { of: integrationAccounts });
+      .returning({
+        encryptedCredentials: integrationAccounts.encryptedCredentials,
+      });
     const account = rows[0];
-    if (
-      !account?.encryptedCredentials ||
-      !input.allowedStatuses.includes(
-        account.status as "connected" | "error" | "pending",
-      )
-    ) {
-      return null;
+    if (!account?.encryptedCredentials) {
+      const current = await getOrganizationIntegrationAccount({
+        integrationAccountId: input.integrationAccountId,
+        organizationId: input.organizationId,
+        provider: input.provider,
+      });
+      if (
+        !current?.encryptedCredentials ||
+        !input.allowedStatuses.includes(
+          current.status as "connected" | "error" | "pending",
+        )
+      ) {
+        return null;
+      }
+      if (attempt === CREDENTIAL_REFRESH_WAIT_ATTEMPTS - 1) return null;
+      await new Promise((resolve) => {
+        setTimeout(resolve, CREDENTIAL_REFRESH_WAIT_MS);
+      });
+      continue;
     }
 
-    const result = await input.operation(account.encryptedCredentials);
-    if (result.encryptedCredentials || result.status) {
-      await tx
+    try {
+      const result = await input.operation(account.encryptedCredentials);
+      const updated = await db
         .update(integrationAccounts)
         .set({
           ...(result.encryptedCredentials
             ? { encryptedCredentials: result.encryptedCredentials }
             : {}),
           ...(result.status ? { status: result.status } : {}),
+          metadata: sql`${integrationAccounts.metadata} - ${CREDENTIAL_REFRESH_LEASE_KEY}`,
           updatedAt: new Date(),
         })
-        .where(eq(integrationAccounts.id, input.integrationAccountId));
+        .where(
+          and(
+            eq(integrationAccounts.id, input.integrationAccountId),
+            eq(integrationAccounts.organizationId, input.organizationId),
+            eq(integrationAccounts.provider, input.provider),
+            eq(
+              integrationAccounts.encryptedCredentials,
+              account.encryptedCredentials,
+            ),
+            sql`${integrationAccounts.metadata} -> ${CREDENTIAL_REFRESH_LEASE_KEY} ->> 'id' = ${leaseId}`,
+          ),
+        )
+        .returning({ id: integrationAccounts.id });
+      return updated.length > 0 ? result.value : null;
+    } catch (error) {
+      const failureStatus = input.statusOnError?.(error);
+      const released = await db
+        .update(integrationAccounts)
+        .set({
+          ...(failureStatus ? { status: failureStatus } : {}),
+          metadata: sql`${integrationAccounts.metadata} - ${CREDENTIAL_REFRESH_LEASE_KEY}`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(integrationAccounts.id, input.integrationAccountId),
+            eq(integrationAccounts.organizationId, input.organizationId),
+            eq(integrationAccounts.provider, input.provider),
+            eq(
+              integrationAccounts.encryptedCredentials,
+              account.encryptedCredentials,
+            ),
+            sql`${integrationAccounts.metadata} -> ${CREDENTIAL_REFRESH_LEASE_KEY} ->> 'id' = ${leaseId}`,
+          ),
+        )
+        .returning({ id: integrationAccounts.id });
+      if (released.length === 0) {
+        throw new IntegrationAccountCredentialSupersededError();
+      }
+      throw error;
     }
-    return result.value;
-  });
+  }
+
+  return null;
+}
+
+export async function setIntegrationAccountStatusIfCredentialsMatch(input: {
+  encryptedCredentials: string;
+  integrationAccountId: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+  status: "connected" | "error" | "pending";
+}): Promise<boolean> {
+  const updated = await getDatabase()
+    .update(integrationAccounts)
+    .set({ status: input.status, updatedAt: new Date() })
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        eq(integrationAccounts.encryptedCredentials, input.encryptedCredentials),
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return updated.length > 0;
 }
 
 export async function getRecoverableSentryIntegrationAccount(

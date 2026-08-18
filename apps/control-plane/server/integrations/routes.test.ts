@@ -14,9 +14,10 @@ import {
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
   setIntegrationAccountStatus,
+  setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
   upsertIntegrationAccount,
-  withLockedIntegrationAccountCredentials,
+  withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
   createAwsCloudFormationTemplateUrl,
@@ -62,9 +63,10 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   replaceIntegrationResources: vi.fn(),
   replaceRepositories: vi.fn(),
   setIntegrationAccountStatus: vi.fn(),
+  setIntegrationAccountStatusIfCredentialsMatch: vi.fn(),
   updateIntegrationAccountCredentials: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
-  withLockedIntegrationAccountCredentials: vi.fn(),
+  withIntegrationAccountCredentialLease: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/integrations/aws.js", async (importOriginal) => {
@@ -128,7 +130,7 @@ function configureGitHub() {
 describe("integration callback routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
-    vi.mocked(withLockedIntegrationAccountCredentials).mockImplementation(
+    vi.mocked(withIntegrationAccountCredentialLease).mockImplementation(
       async (input) => {
         const result = await input.operation("encrypted-credentials");
         return result.value;
@@ -210,10 +212,13 @@ describe("integration callback routing", () => {
     expect(response.status).toBe(302);
     expect(new URL(response.headers.get("location")!).searchParams.get("state"))
       .toBe("fresh-state");
-    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
-      "30000000-0000-4000-8000-000000000000",
-      "error",
-    );
+    expect(setIntegrationAccountStatusIfCredentialsMatch).toHaveBeenCalledWith({
+      encryptedCredentials: "broken-credentials",
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "sentry",
+      status: "error",
+    });
   });
 
   it("checks a connected Sentry account against the live projects API", async () => {
@@ -299,10 +304,13 @@ describe("integration callback routing", () => {
         },
       ],
     });
-    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
-      "30000000-0000-4000-8000-000000000000",
-      "error",
-    );
+    expect(setIntegrationAccountStatusIfCredentialsMatch).toHaveBeenCalledWith({
+      encryptedCredentials: "encrypted-credentials",
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "sentry",
+      status: "error",
+    });
   });
 
   it("does not mark a Sentry account broken during a temporary API failure", async () => {
@@ -334,7 +342,7 @@ describe("integration callback routing", () => {
         },
       ],
     });
-    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+    expect(setIntegrationAccountStatusIfCredentialsMatch).not.toHaveBeenCalled();
   });
 
   it("starts Vercel's external installation flow with tenant state", async () => {

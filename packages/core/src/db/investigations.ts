@@ -55,7 +55,7 @@ import {
   type AgentPrMode,
 } from "./schema.js";
 import { getInvestigationIssueDetails } from "./issues.js";
-import { withLockedIntegrationAccountCredentials } from "./integrations.js";
+import { withIntegrationAccountCredentialLease } from "./integrations.js";
 
 export interface RuntimeAgentConfig {
   id: string;
@@ -1558,7 +1558,7 @@ export async function getRuntimeSentryConnection(
     }
     try {
       const refreshedCredentials =
-        await withLockedIntegrationAccountCredentials({
+        await withIntegrationAccountCredentialLease({
           allowedStatuses: ["connected"],
           integrationAccountId: account.id,
           operation: async (encryptedCredentials) => {
@@ -1610,6 +1610,11 @@ export async function getRuntimeSentryConnection(
           },
           organizationId: config.organizationId,
           provider: "sentry",
+          statusOnError: (error) =>
+            error instanceof SentryRefreshError &&
+              [400, 401, 403].includes(error.httpStatus)
+              ? "error"
+              : undefined,
         });
       if (!refreshedCredentials) return null;
       credentials = refreshedCredentials;
@@ -1623,15 +1628,6 @@ export async function getRuntimeSentryConnection(
           integrationAccountId: account.id,
         }),
       );
-      if (
-        error instanceof SentryRefreshError &&
-        [400, 401, 403].includes(error.httpStatus)
-      ) {
-        await getDatabase()
-          .update(integrationAccounts)
-          .set({ status: "error", updatedAt: new Date() })
-          .where(eq(integrationAccounts.id, account.id));
-      }
       throw new Error("Unable to refresh Sentry access");
     }
   }
