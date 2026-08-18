@@ -14,6 +14,7 @@ import {
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
+  replaceIntegrationResourcesIfCredentialsMatch,
   replaceRepositories,
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
@@ -382,16 +383,30 @@ function withIntegrationAccountId(url: string, accountId: string): string {
 async function completeSentrySetup(input: {
   accessToken: string;
   accountId: string;
+  expectedEncryptedCredentials?: string;
   installationId: string;
+  organizationId?: string;
   organizationSlug: string;
 }): Promise<number> {
   const projects = await listSentryProjects(
     input.accessToken,
     input.organizationSlug,
   );
-  await replaceIntegrationResources(input.accountId, "sentry_project", projects);
   await verifySentryInstallation(input.accessToken, input.installationId);
-  await setIntegrationAccountStatus(input.accountId, "connected");
+  if (input.expectedEncryptedCredentials && input.organizationId) {
+    const updated = await replaceIntegrationResourcesIfCredentialsMatch({
+      encryptedCredentials: input.expectedEncryptedCredentials,
+      integrationAccountId: input.accountId,
+      kind: "sentry_project",
+      organizationId: input.organizationId,
+      provider: "sentry",
+      resources: projects,
+    });
+    if (!updated) throw new SentryConnectionChangedError();
+  } else {
+    await replaceIntegrationResources(input.accountId, "sentry_project", projects);
+    await setIntegrationAccountStatus(input.accountId, "connected");
+  }
   return projects.length;
 }
 
@@ -413,7 +428,9 @@ async function retrySentrySetup(organizationId: string): Promise<{
     const resourceCount = await completeSentrySetup({
       accessToken: fresh.credentials.accessToken,
       accountId: account.id,
+      expectedEncryptedCredentials,
       installationId: fresh.credentials.installationId,
+      organizationId,
       organizationSlug,
     });
     return { accountId: account.id, resourceCount };
@@ -600,18 +617,15 @@ export const integrationRoutes = new Hono()
             fresh.credentials.accessToken,
             organizationSlug,
           );
-          await replaceIntegrationResources(
-            account.id,
-            "sentry_project",
-            projects,
-          );
-          await setIntegrationAccountStatusIfCredentialsMatch({
+          const updated = await replaceIntegrationResourcesIfCredentialsMatch({
             encryptedCredentials: expectedEncryptedCredentials,
             integrationAccountId: account.id,
+            kind: "sentry_project",
             organizationId: tenant.organizationId,
             provider: "sentry",
-            status: "connected",
+            resources: projects,
           });
+          if (!updated) throw new SentryConnectionChangedError();
           return {
             id: account.id,
             resourceCount: projects.length,

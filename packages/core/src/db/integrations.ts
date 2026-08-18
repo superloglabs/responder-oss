@@ -490,6 +490,79 @@ export interface SyncedIntegrationResource {
   metadata?: Record<string, unknown>;
 }
 
+export async function replaceIntegrationResourcesIfCredentialsMatch(input: {
+  encryptedCredentials: string;
+  integrationAccountId: string;
+  kind: IntegrationResourceKind;
+  organizationId: string;
+  provider: IntegrationProvider;
+  resources: SyncedIntegrationResource[];
+}): Promise<boolean> {
+  return getDatabase().transaction(async (tx) => {
+    const accounts = await tx
+      .select({ id: integrationAccounts.id })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.id, input.integrationAccountId),
+          eq(integrationAccounts.organizationId, input.organizationId),
+          eq(integrationAccounts.provider, input.provider),
+          eq(
+            integrationAccounts.encryptedCredentials,
+            input.encryptedCredentials,
+          ),
+        ),
+      )
+      .limit(1)
+      .for("update", { of: integrationAccounts });
+    if (!accounts[0]) return false;
+
+    await tx
+      .update(integrationResources)
+      .set({ available: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(
+            integrationResources.integrationAccountId,
+            input.integrationAccountId,
+          ),
+          eq(integrationResources.kind, input.kind),
+        ),
+      );
+
+    for (const resource of input.resources) {
+      await tx
+        .insert(integrationResources)
+        .values({
+          integrationAccountId: input.integrationAccountId,
+          kind: input.kind,
+          externalId: resource.externalId,
+          displayName: resource.displayName,
+          metadata: resource.metadata ?? {},
+        })
+        .onConflictDoUpdate({
+          target: [
+            integrationResources.integrationAccountId,
+            integrationResources.kind,
+            integrationResources.externalId,
+          ],
+          set: {
+            displayName: resource.displayName,
+            available: true,
+            metadata: resource.metadata ?? {},
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    await tx
+      .update(integrationAccounts)
+      .set({ status: "connected", updatedAt: new Date() })
+      .where(eq(integrationAccounts.id, input.integrationAccountId));
+    return true;
+  });
+}
+
 export async function getSlackChannelConnection(input: {
   organizationId: string;
   integrationAccountId: string;

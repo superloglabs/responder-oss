@@ -13,6 +13,7 @@ import {
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
+  replaceIntegrationResourcesIfCredentialsMatch,
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
@@ -61,6 +62,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   listConnectedSentryIntegrationAccounts: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
   replaceIntegrationResources: vi.fn(),
+  replaceIntegrationResourcesIfCredentialsMatch: vi.fn(),
   replaceRepositories: vi.fn(),
   setIntegrationAccountStatus: vi.fn(),
   setIntegrationAccountStatusIfCredentialsMatch: vi.fn(),
@@ -130,6 +132,9 @@ function configureGitHub() {
 describe("integration callback routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(replaceIntegrationResourcesIfCredentialsMatch).mockResolvedValue(
+      true,
+    );
     vi.mocked(withIntegrationAccountCredentialLease).mockImplementation(
       async (input) => {
         const result = await input.operation("encrypted-credentials");
@@ -258,10 +263,13 @@ describe("integration callback routing", () => {
         },
       ],
     });
-    expect(replaceIntegrationResources).toHaveBeenCalledWith(
-      "30000000-0000-4000-8000-000000000000",
-      "sentry_project",
-      [
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith({
+      encryptedCredentials: "encrypted-credentials",
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      kind: "sentry_project",
+      organizationId: tenant.organizationId,
+      provider: "sentry",
+      resources: [
         {
           displayName: "Backend",
           externalId: "1",
@@ -272,7 +280,48 @@ describe("integration callback routing", () => {
           },
         },
       ],
+    });
+  });
+
+  it("discards a Sentry check superseded by reconnect", async () => {
+    vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        encryptedCredentials: "encrypted-credentials",
+        metadata: { organizationSlug: "example" },
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "sentry-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "sentry-refresh-token",
+    });
+    vi.mocked(replaceIntegrationResourcesIfCredentialsMatch).mockResolvedValue(
+      false,
     );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json([
+          { id: "1", name: "Backend", platform: "node", slug: "backend" },
+        ]),
+      ),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/sentry/check", {
+      method: "POST",
+    });
+
+    expect(await response.json()).toEqual({
+      accounts: [
+        {
+          id: "30000000-0000-4000-8000-000000000000",
+          status: "unavailable",
+        },
+      ],
+    });
   });
 
   it("marks a Sentry account for reconnect after a live authorization failure", async () => {
