@@ -1,5 +1,7 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
-import { readFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   checkoutRuntimeRepositories,
@@ -323,6 +325,58 @@ describe("Daytona repository checkout", () => {
         uploadArchive: uploadArchive(),
       }),
     ).rejects.toThrow("GitHub repository archive exceeds the 4 bytes limit");
+  });
+
+  it("stops Git archive generation as soon as the disk-safety limit is crossed", async () => {
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "responder-git-limit-test-"),
+    );
+    const binDirectory = join(temporaryDirectory, "bin");
+    const gitPath = join(binDirectory, "git");
+    const completionMarker = join(temporaryDirectory, "archive-completed");
+    await mkdir(binDirectory);
+    await writeFile(
+      gitPath,
+      [
+        "#!/bin/sh",
+        "case \" $* \" in",
+        "  *\" rev-parse \"*) printf '%s\\n' \"$RESPONDER_TEST_GIT_SHA\" ;;",
+        "  *\" archive \"*)",
+        "    printf '12345'",
+        "    sleep 1",
+        "    : > \"$RESPONDER_TEST_GIT_COMPLETED\"",
+        "    printf '6789'",
+        "    ;;",
+        "esac",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    vi.stubEnv("PATH", `${binDirectory}:${process.env.PATH ?? ""}`);
+    vi.stubEnv("RESPONDER_TEST_GIT_SHA", sha);
+    vi.stubEnv("RESPONDER_TEST_GIT_COMPLETED", completionMarker);
+
+    try {
+      await expect(
+        checkoutRuntimeRepositories(fakeSession(), "version-id", {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: vi.fn<typeof fetch>().mockRejectedValue(new Error("offline")),
+          getRepositories: vi.fn().mockResolvedValue([
+            {
+              defaultBranch: "main",
+              fullName: "example-org/git-fallback-repo",
+              installationId: 123,
+              private: true,
+            },
+          ]),
+          maxArchiveBytes: 4,
+          temporaryDirectory,
+        }),
+      ).rejects.toThrow("GitHub repository archive exceeds the 4 bytes limit");
+      await expect(access(completionMarker)).rejects.toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
   });
 
   it("rejects repository names that could escape the workspace", () => {

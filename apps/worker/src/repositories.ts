@@ -1,8 +1,8 @@
 import { Daytona } from "@daytona/sdk";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdtemp, mkdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -58,6 +58,29 @@ function repositoryArchiveLimit(
   return limit;
 }
 
+async function writeStreamWithLimit(
+  source: Readable,
+  archivePath: string,
+  limit: number,
+): Promise<void> {
+  let byteLength = 0;
+  const limiter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      byteLength += chunk.byteLength;
+      if (byteLength > limit) {
+        callback(new RepositoryArchiveLimitError(limit));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  await pipeline(
+    source,
+    limiter,
+    createWriteStream(archivePath, { flags: "wx" }),
+  );
+}
+
 export interface CheckedOutRepository {
   branch: string;
   path: string;
@@ -91,6 +114,52 @@ const defaultDependencies: RepositoryCheckoutDependencies = {
   fetch,
   getRepositories: getRuntimeRepositories,
 };
+
+async function writeGitArchiveWithLimit(
+  gitDirectory: string,
+  archivePath: string,
+  archiveLimitBytes: number,
+): Promise<void> {
+  const archiveProcess = spawn(
+    "git",
+    ["-C", gitDirectory, "archive", "--format=tar.gz", "FETCH_HEAD"],
+    {
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: repositoryDownloadTimeoutMs,
+    },
+  );
+  const completed = new Promise<void>((resolve, reject) => {
+    archiveProcess.once("error", reject);
+    archiveProcess.once("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `Git archive exited with ${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}`,
+        ),
+      );
+    });
+  });
+  const writeArchive = writeStreamWithLimit(
+    archiveProcess.stdout,
+    archivePath,
+    archiveLimitBytes,
+  );
+
+  try {
+    await Promise.all([completed, writeArchive]);
+  } catch (error) {
+    archiveProcess.stdout.destroy();
+    if (archiveProcess.exitCode === null && archiveProcess.signalCode === null) {
+      archiveProcess.kill("SIGKILL");
+    }
+    await Promise.allSettled([completed, writeArchive]);
+    throw error;
+  }
+}
 
 async function downloadRepositorySnapshotWithGit(
   repository: RuntimeRepository,
@@ -148,22 +217,11 @@ async function downloadRepositorySnapshotWithGit(
     if (!/^[a-f0-9]{40}$/i.test(sha)) {
       throw new Error("Git returned an invalid repository commit");
     }
-    await execFileAsync(
-      "git",
-      [
-        "-C",
-        gitDirectory,
-        "archive",
-        "--format=tar.gz",
-        `--output=${archivePath}`,
-        "FETCH_HEAD",
-      ],
-      { timeout: repositoryDownloadTimeoutMs },
+    await writeGitArchiveWithLimit(
+      gitDirectory,
+      archivePath,
+      archiveLimitBytes,
     );
-    const archiveStats = await stat(archivePath);
-    if (archiveStats.size > archiveLimitBytes) {
-      throw new RepositoryArchiveLimitError(archiveLimitBytes);
-    }
     return { sha };
   } catch (error) {
     if (error instanceof RepositoryArchiveLimitError) throw error;
@@ -252,22 +310,10 @@ async function writeResponseWithLimit(
     throw new RepositoryArchiveLimitError(limit);
   }
   if (!response.body) throw new Error("GitHub returned an empty archive");
-
-  let byteLength = 0;
-  const limiter = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      byteLength += chunk.byteLength;
-      if (byteLength > limit) {
-        callback(new RepositoryArchiveLimitError(limit));
-        return;
-      }
-      callback(null, chunk);
-    },
-  });
-  await pipeline(
+  await writeStreamWithLimit(
     Readable.from(response.body as AsyncIterable<Uint8Array>),
-    limiter,
-    createWriteStream(archivePath, { flags: "wx" }),
+    archivePath,
+    limit,
   );
 }
 
