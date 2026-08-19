@@ -48,7 +48,9 @@ types. `drizzle/` contains the ordered schema history.
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
-  the sandbox; the service materializes only the selected repository content.
+  the sandbox; the service streams selected repository snapshots through
+  bounded worker scratch storage and into the isolated workspace without
+  buffering the complete archive in worker memory.
 - Tenant trace responses omit the initial composed runtime instructions. The
   raw stored trace retains them for an operator's private diagnostics.
 
