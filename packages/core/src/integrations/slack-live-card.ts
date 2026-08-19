@@ -122,6 +122,7 @@ function humanizeToolName(value: string): string {
     sentry: "Sentry",
     slack: "Slack",
     upstash: "Upstash",
+    langfuse: "Langfuse",
     slo: "SLO",
     slos: "SLOs",
     sql: "SQL",

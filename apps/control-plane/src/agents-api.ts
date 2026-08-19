@@ -65,6 +65,7 @@ export interface AgentOptions {
       | "datadog"
       | "clickstack"
       | "upstash"
+      | "langfuse"
       | "vercel"
       | "custom_mcp"
       | "linear";
@@ -123,6 +124,7 @@ export interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "upstash"
+    | "langfuse"
     | "vercel"
     | "custom_mcp"
     | "clickstack"
@@ -192,6 +194,7 @@ export interface IssueEvidence {
     | "sentry"
     | "clickstack"
     | "upstash"
+    | "langfuse"
     | "github"
     | "slack"
     | "vercel"

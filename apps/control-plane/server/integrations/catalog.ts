@@ -5,6 +5,7 @@ export const productIntegrationIds = [
   "sentry",
   "datadog",
   "upstash",
+  "langfuse",
   "vercel",
   "custom_mcp",
   "clickstack",
@@ -76,6 +77,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     name: "Upstash",
     description:
       "Redis, Vector, Search, QStash, and Workflow investigation context.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "langfuse",
+    name: "Langfuse",
+    description: "Traces, observations, scores, metrics, prompts, and alerts.",
     implemented: true,
     requiredEnvironment: [],
   },

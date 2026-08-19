@@ -29,6 +29,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "datadog",
   "clickstack",
   "upstash",
+  "langfuse",
   "vercel",
   "custom_mcp",
   "linear",

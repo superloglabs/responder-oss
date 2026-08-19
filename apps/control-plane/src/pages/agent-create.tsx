@@ -31,6 +31,7 @@ import { ClickStackConnectionDialog } from "../components/clickstack-connection-
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
+import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import {
   ChevronDownIcon,
   CogIcon,
@@ -420,6 +421,7 @@ export function AgentCreatePage() {
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const upstashJustConnected = successfulConnectionReturn("upstash");
+  const langfuseJustConnected = successfulConnectionReturn("langfuse");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const linearJustConnected = successfulConnectionReturn("linear");
@@ -432,6 +434,7 @@ export function AgentCreatePage() {
     githubJustConnected ||
     datadogJustConnected ||
     upstashJustConnected ||
+    langfuseJustConnected ||
     vercelJustConnected ||
     customMcpJustConnected ||
     clickStackJustConnected ||
@@ -470,6 +473,7 @@ export function AgentCreatePage() {
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
+  const [connectingLangfuse, setConnectingLangfuse] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -584,6 +588,18 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedUpstashId);
         }
+        if (
+          langfuseJustConnected &&
+          returnedIntegrationAccountId &&
+          loadedOptions.accounts.some(
+            (account) =>
+              account.id === returnedIntegrationAccountId &&
+              account.provider === "langfuse",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(returnedIntegrationAccountId)
+        ) {
+          loadedDraft.contextAccountIds.push(returnedIntegrationAccountId);
+        }
         const connectedClickStack = accountsFor(
           loadedOptions,
           "clickstack",
@@ -651,6 +667,7 @@ export function AgentCreatePage() {
     datadogJustConnected,
     draftStorageKey,
     upstashJustConnected,
+    langfuseJustConnected,
     linearJustConnected,
     returnedIntegrationAccountId,
     vercelJustConnected,
@@ -686,6 +703,10 @@ export function AgentCreatePage() {
   );
   const upstashAccounts = useMemo(
     () => accountsFor(options, "upstash"),
+    [options],
+  );
+  const langfuseAccounts = useMemo(
+    () => accountsFor(options, "langfuse"),
     [options],
   );
   const clickStackAccounts = useMemo(
@@ -900,12 +921,14 @@ export function AgentCreatePage() {
       provider === "aws" ||
       provider === "datadog" ||
       provider === "clickstack" ||
-      provider === "upstash"
+      provider === "upstash" ||
+      provider === "langfuse"
     ) {
       saveDraftToSessionStorage(draftStorageKey, currentDraft);
       if (provider === "aws") setConnectingAws(true);
       else if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
+      else if (provider === "langfuse") setConnectingLangfuse(true);
       else setConnectingUpstash(true);
       return;
     }
@@ -1231,6 +1254,9 @@ export function AgentCreatePage() {
     Number(selectedSlackContextChannels.length > 0) +
     Number(datadogContextConnected) +
     Number(upstashContextConnected) +
+    langfuseAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     Number(vercelContextConnected) +
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
@@ -1259,6 +1285,12 @@ export function AgentCreatePage() {
         connectUrl={integrationFor("upstash")?.connectUrl ?? ""}
         onCancel={() => setConnectingUpstash(false)}
         open={connectingUpstash}
+        returnTo={returnTo}
+      />
+      <LangfuseConnectionDialog
+        connectUrl={integrationFor("langfuse")?.connectUrl ?? ""}
+        onCancel={() => setConnectingLangfuse(false)}
+        open={connectingLangfuse}
         returnTo={returnTo}
       />
       <ClickStackConnectionDialog
@@ -2088,6 +2120,41 @@ export function AgentCreatePage() {
                           ? "available"
                           : "not_connected"
                     }
+                  />
+
+                  {langfuseAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    return (
+                      <ContextRow
+                        action={
+                          <Button
+                            size="small"
+                            onClick={() => toggleContextAccount(account.id)}
+                            variant={connected ? "ghost" : "secondary"}
+                          >
+                            {connected ? "Remove" : "Add"}
+                          </Button>
+                        }
+                        detail="Traces, observations, scores, metrics, prompts, and alerts"
+                        key={account.id}
+                        label={account.displayName}
+                        provider="langfuse"
+                        status={connected ? "connected" : "available"}
+                      />
+                    );
+                  })}
+                  <ContextRow
+                    action={
+                      <ConnectButton
+                        integration={integrationFor("langfuse")}
+                        isConnecting={false}
+                        onClick={() => connect("langfuse")}
+                      />
+                    }
+                    detail="Connect another project with read-only investigation tools"
+                    label="Langfuse project"
+                    provider="langfuse"
+                    status="not_connected"
                   />
 
                   <ContextRow
@@ -3103,6 +3170,7 @@ function ContextRow({
     | "sentry"
     | "datadog"
     | "upstash"
+    | "langfuse"
     | "vercel"
     | "custom_mcp"
     | "clickstack"

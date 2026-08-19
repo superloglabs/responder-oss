@@ -6,6 +6,7 @@ export const providerGlyphs = {
   github: { label: "GitHub", logo: "github" },
   google: { label: "Google", logo: "google" },
   linear: { label: "Linear", logo: "linear" },
+  langfuse: { label: "Langfuse", text: "LF" },
   sentry: { label: "Sentry", logo: "sentry" },
   slack: { label: "Slack", logo: "slack" },
   upstash: { label: "Upstash", logo: "upstash" },

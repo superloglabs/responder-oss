@@ -15,6 +15,7 @@ import {
   datadogAccount,
 } from "./datadog.js";
 import { upstashAccount } from "./upstash.js";
+import { langfuseProject } from "./langfuse.js";
 import {
   clickStackAccount,
   exchangeClickStackCloudCode,
@@ -140,6 +141,70 @@ describe("integration providers", () => {
         email: "operator@example.com",
       }),
     ).rejects.toThrow("Upstash rejected the account email or API key");
+  });
+
+  it("validates Langfuse project keys and captures project identity", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        data: [
+          {
+            id: "project-1",
+            name: "Production",
+            organization: { id: "org-1", name: "Example" },
+          },
+        ],
+      }),
+    );
+    const verifyMcp = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      langfuseProject(
+        {
+          baseUrl: "https://cloud.langfuse.com/",
+          publicKey: "pk-lf-public",
+          secretKey: "sk-lf-secret",
+        },
+        { fetch: fetchMock, verifyMcp },
+      ),
+    ).resolves.toEqual({
+      baseUrl: "https://cloud.langfuse.com",
+      displayName: "Example / Production",
+      externalAccountId: "https://cloud.langfuse.com:project-1",
+      metadata: {
+        baseUrl: "https://cloud.langfuse.com",
+        organizationId: "org-1",
+        organizationName: "Example",
+        projectId: "project-1",
+        projectName: "Production",
+      },
+      projectId: "project-1",
+    });
+    expect(verifyMcp).toHaveBeenCalledWith({
+      baseUrl: "https://cloud.langfuse.com",
+      publicKey: "pk-lf-public",
+      secretKey: "sk-lf-secret",
+    });
+    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("authorization"))
+      .toBe(
+        `Basic ${Buffer.from("pk-lf-public:sk-lf-secret").toString("base64")}`,
+      );
+  });
+
+  it("rejects invalid Langfuse project keys without echoing the secret", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 401 }),
+    );
+
+    await expect(
+      langfuseProject(
+        {
+          baseUrl: "https://cloud.langfuse.com",
+          publicKey: "pk-lf-rejected",
+          secretKey: "sk-lf-rejected-secret",
+        },
+        { fetch: fetchMock, verifyMcp: vi.fn() },
+      ),
+    ).rejects.toThrow("Langfuse rejected the project public key or secret key");
   });
 
   it("validates ClickStack access through the deployment team API", async () => {

@@ -60,6 +60,16 @@ describe("ProviderGlyph", () => {
     expect(markup).not.toContain("<svg");
   });
 
+  it("renders a compact Langfuse text glyph", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "langfuse" }),
+    );
+
+    expect(markup).toContain('aria-label="Langfuse"');
+    expect(markup).toContain(">LF</span>");
+    expect(markup).not.toContain("<svg");
+  });
+
   it("renders the official AWS mark instead of a text abbreviation", () => {
     const markup = renderToStaticMarkup(
       createElement(ProviderGlyph, { provider: "aws" }),

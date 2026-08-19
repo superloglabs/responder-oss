@@ -47,6 +47,9 @@ types. `drizzle/` contains the ordered schema history.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.
+- Langfuse context uses encrypted project-scoped API keys outside the sandbox.
+  The worker connects to the project's MCP endpoint through the protected remote
+  fetch boundary and exposes only an exact read-only tool allowlist.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
   the sandbox; the service materializes only the selected repository content.
 - Tenant trace responses omit the initial composed runtime instructions. The
