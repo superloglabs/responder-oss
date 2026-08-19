@@ -2,6 +2,7 @@ import { MaxTurnsExceededError } from "@openai/agents";
 import { describe, expect, it } from "vitest";
 import {
   remediationApplyPatchPathInstruction,
+  remediationFailureMechanismInstruction,
   remediationMaxTurns,
   remediationRunDiagnostics,
 } from "./remediate.js";
@@ -69,6 +70,16 @@ describe("remediation agent", () => {
     expect(remediationApplyPatchPathInstruction).toContain(
       "Repository-relative paths",
     );
+  });
+
+  it("requires an extremely simple failure mechanism", () => {
+    expect(remediationFailureMechanismInstruction).toContain(
+      "what failed and why",
+    );
+    expect(remediationFailureMechanismInstruction).toContain(
+      "anyone can understand at a glance",
+    );
+    expect(remediationFailureMechanismInstruction).toContain("no jargon");
   });
 
   it("retains a safe apply_patch failure category without raw output", () => {

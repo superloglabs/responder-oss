@@ -401,7 +401,9 @@ export async function getExecutableIssuePullRequest(input: {
       requestId: issuePullRequests.id,
       issueTitle: issues.title,
       issueDescription: issues.description,
+      issueEvidence: issues.evidence,
       issueRemediation: issues.remediation,
+      investigationInput: investigations.input,
       status: issuePullRequests.status,
     })
     .from(issuePullRequests)
