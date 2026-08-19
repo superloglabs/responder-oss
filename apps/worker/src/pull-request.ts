@@ -8,6 +8,9 @@ import {
   markIssuePullRequestCreated,
   markIssuePullRequestStarted,
 } from "@responder/core/db/pull-requests";
+import type { InvestigationInput } from "@responder/core/db/schema";
+import type { IssueEvidence } from "@responder/core/investigations/report";
+import { responderIssueUrl as buildResponderIssueUrl } from "@responder/core/responder-urls";
 import { z } from "zod";
 import {
   buildPullRequestBody,
@@ -26,6 +29,42 @@ const checkedOutRepositoriesSchema = z.object({
   ),
 });
 
+export function responderIssueUrl(
+  issueId: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const origin = environment.RESPONDER_APP_URL ?? environment.BETTER_AUTH_URL;
+  if (!origin) return undefined;
+  try {
+    return buildResponderIssueUrl(issueId, origin);
+  } catch {
+    return undefined;
+  }
+}
+
+export function sentryIssueUrl(
+  input: InvestigationInput,
+  evidence: IssueEvidence[],
+): string | undefined {
+  const candidates = [
+    ...(input.provider === "sentry" && input.sourceUrl ? [input.sourceUrl] : []),
+    ...evidence.flatMap((item) =>
+      item.source === "sentry" && item.url ? [item.url] : [],
+    ),
+  ];
+  return candidates.find((candidate) => {
+    try {
+      const url = new URL(candidate);
+      return (
+        ["http:", "https:"].includes(url.protocol) &&
+        url.pathname.split("/").includes("issues")
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function createPullRequestTool(input: {
   agentConfigVersionId: string;
   investigationId: string;
@@ -40,6 +79,14 @@ export function createPullRequestTool(input: {
     parameters: z.object({
       issueId: z.uuid(),
       repository: z.string().min(1),
+      failureMechanism: z
+        .string()
+        .trim()
+        .min(1)
+        .max(1_000)
+        .describe(
+          "In one or two very short sentences, explain what failed and why. Use extremely simple language that anyone can understand at a glance. Use no jargon, acronyms, code names, or implementation details.",
+        ),
       summary: z.string().trim().min(1).max(4_000),
       testing: z.string().trim().min(1).max(2_000),
     }),
@@ -83,7 +130,12 @@ export function createPullRequestTool(input: {
             baseBranch: checkout.branch,
             baseSha: checkout.sha,
             body: buildPullRequestBody({
-              issue: request.issueDescription,
+              failureMechanism: requestedPullRequest.failureMechanism,
+              responderIssueUrl: responderIssueUrl(requestedPullRequest.issueId),
+              sentryIssueUrl: sentryIssueUrl(
+                request.investigationInput,
+                [...request.issueEvidence, ...request.investigationEvidence],
+              ),
               summary: requestedPullRequest.summary,
               testing: requestedPullRequest.testing,
             }),

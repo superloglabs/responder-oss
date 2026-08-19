@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
+import { responderIssueUrl } from "../responder-urls.js";
 import {
   getSlackInvestigationDeliveryContext,
   type SlackInvestigationDeliveryContext,
@@ -83,7 +84,7 @@ export function slackIssueMessage(
 ): { blocks: unknown[]; text: string } {
   const recurrence = issue.relationship === "recurrence" ? " · Recurrence" : "";
   const text = `${issue.severity} — ${issue.title}${recurrence}\n${issue.description}`;
-  const issueUrl = `${responderAppUrl()}/issues/${encodeURIComponent(issue.id)}`;
+  const issueUrl = responderIssueUrl(issue.id, responderAppUrl());
   const blockText = truncateSlackBlock(
     [
       `*${issue.severity} — ${escapeSlack(issue.title)}*${recurrence}`,

@@ -64,15 +64,24 @@ function pullRequestSection(heading: string, content: string): string {
 }
 
 export function buildPullRequestBody(input: {
-  issue: string;
+  failureMechanism: string;
+  responderIssueUrl?: string;
+  sentryIssueUrl?: string;
   summary: string;
   testing: string;
 }): string {
+  const issueLinks = [
+    input.responderIssueUrl
+      ? `[Responder issue](<${input.responderIssueUrl}>)`
+      : null,
+    input.sentryIssueUrl ? `[Sentry issue](<${input.sentryIssueUrl}>)` : null,
+  ].filter((link): link is string => Boolean(link));
   return [
     pullRequestSection("Summary", input.summary),
     "",
     "## Issue",
-    input.issue.trim(),
+    input.failureMechanism.trim(),
+    ...(issueLinks.length > 0 ? ["", issueLinks.join(" · ")] : []),
     "",
     pullRequestSection("Testing", input.testing),
   ].join("\n");

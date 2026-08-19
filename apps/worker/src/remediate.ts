@@ -33,6 +33,8 @@ import {
 export const remediationMaxTurns = 40;
 export const remediationApplyPatchPathInstruction =
   "When using apply_patch, use the full absolute checkout path shown above. Repository-relative paths are resolved from the workspace root and may target the wrong location.";
+export const remediationFailureMechanismInstruction =
+  "For the pull request failure mechanism, explain what failed and why in one or two very short sentences. Use extremely simple language that anyone can understand at a glance. Use no jargon, acronyms, code names, or implementation details.";
 
 export interface RemediationApplyPatchFailure {
   callId: string;
@@ -216,6 +218,7 @@ export async function runRemediationAgent(
         ),
         remediationApplyPatchPathInstruction,
         "Inspect the relevant code, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks.",
+        remediationFailureMechanismInstruction,
         `Then call create_pull_request with issue ID ${job.issue.id}. Do not finish without creating the pull request or clearly explaining why no safe code fix is possible.`,
         "Do not expose credentials or secret values. The pull request is the only allowed external change.",
         workspaceSecretUsageInstructions(workspaceSecrets),

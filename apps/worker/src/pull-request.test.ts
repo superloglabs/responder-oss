@@ -6,7 +6,11 @@ import {
   markIssuePullRequestCreated,
 } from "@responder/core/db/pull-requests";
 import { createPullRequestFromSandbox } from "./github-pull-request.js";
-import { createPullRequestTool } from "./pull-request.js";
+import {
+  createPullRequestTool,
+  responderIssueUrl,
+  sentryIssueUrl,
+} from "./pull-request.js";
 
 vi.mock("@responder/core/db/investigations", () => ({
   getRuntimeRepositories: vi.fn(),
@@ -50,7 +54,23 @@ describe("pull request tool", () => {
       requestId,
       issueTitle: "Broken route",
       issueDescription: "The route throws.",
+      issueEvidence: [],
+      investigationEvidence: [
+        {
+          source: "sentry",
+          title: "Broken route",
+          detail: "The route throws.",
+          url: "https://example.sentry.io/issues/42/",
+        },
+      ],
       issueRemediation: "Handle the missing value.",
+      investigationInput: {
+        provider: "slack",
+        externalEventId: "thread-1",
+        title: "Broken route",
+        body: "The route throws.",
+        sourceUrl: "https://slack.com/archives/C1/p1",
+      },
       status: "creating",
     });
     vi.mocked(getRuntimeRepositories).mockResolvedValue([
@@ -81,6 +101,8 @@ describe("pull request tool", () => {
         JSON.stringify({
           issueId,
           repository: "acme/service",
+          failureMechanism:
+            "A missing value made the page stop loading.",
           summary: "Handle the unchecked value.",
           testing: "Added a regression test.",
         }),
@@ -101,5 +123,56 @@ describe("pull request tool", () => {
       pullRequestNumber: 17,
       pullRequestUrl: "https://github.com/acme/service/pull/17",
     });
+    expect(createPullRequestFromSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(
+          "[Sentry issue](<https://example.sentry.io/issues/42/>)",
+        ),
+      }),
+      session,
+    );
+  });
+
+  it("builds a Responder issue URL only when an app origin is configured", () => {
+    expect(
+      responderIssueUrl("issue 1", {
+        RESPONDER_APP_URL: "https://responder.example/base",
+      }),
+    ).toBe("https://responder.example/base/issues/issue%201");
+    expect(responderIssueUrl("issue-1", {})).toBeUndefined();
+  });
+
+  it("prefers a Sentry-triggered issue URL and falls back to issue evidence", () => {
+    expect(
+      sentryIssueUrl(
+        {
+          provider: "sentry",
+          externalEventId: "42",
+          title: "Broken route",
+          body: "The route throws.",
+          sourceUrl: "https://example.sentry.io/issues/42/",
+        },
+        [],
+      ),
+    ).toBe("https://example.sentry.io/issues/42/");
+    expect(
+      sentryIssueUrl(
+        {
+          provider: "slack",
+          externalEventId: "thread-1",
+          title: "Broken route",
+          body: "The route throws.",
+          sourceUrl: "https://slack.com/archives/C1/p1",
+        },
+        [
+          {
+            source: "sentry",
+            title: "Broken route",
+            detail: "The route throws.",
+            url: "https://example.sentry.io/issues/43/",
+          },
+        ],
+      ),
+    ).toBe("https://example.sentry.io/issues/43/");
   });
 });
