@@ -403,6 +403,7 @@ export async function getExecutableIssuePullRequest(input: {
       issueDescription: issues.description,
       issueEvidence: issues.evidence,
       issueRemediation: issues.remediation,
+      investigationEvidence: investigationIssues.evidence,
       investigationInput: investigations.input,
       status: issuePullRequests.status,
     })
@@ -411,6 +412,16 @@ export async function getExecutableIssuePullRequest(input: {
     .innerJoin(
       investigations,
       eq(investigations.id, issuePullRequests.investigationId),
+    )
+    .innerJoin(
+      investigationIssues,
+      and(
+        eq(investigationIssues.issueId, issuePullRequests.issueId),
+        eq(
+          investigationIssues.investigationId,
+          issuePullRequests.investigationId,
+        ),
+      ),
     )
     .where(
       and(

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
+import { responderIssueUrl } from "../responder-urls.js";
 import { recordInvestigationSlackTrace } from "../db/investigations.js";
 import { getSlackInvestigationLiveContext } from "../db/issues.js";
 import {
@@ -35,22 +36,17 @@ function nonEmptyText(
   return rendered.trim().length > 0 ? rendered : fallback;
 }
 
-function investigationUrl(agentId: string, investigationId: string): string {
-  const origin = (
+function responderAppUrl(): string {
+  return (
     process.env.RESPONDER_APP_URL ??
     process.env.BETTER_AUTH_URL ??
     "http://localhost:3000"
   ).replace(/\/$/, "");
-  return `${origin}/agents/${encodeURIComponent(agentId)}/investigations/${encodeURIComponent(investigationId)}`;
 }
 
-function issueUrl(issueId: string): string {
-  const origin = (
-    process.env.RESPONDER_APP_URL ??
-    process.env.BETTER_AUTH_URL ??
-    "http://localhost:3000"
-  ).replace(/\/$/, "");
-  return `${origin}/issues/${encodeURIComponent(issueId)}`;
+function investigationUrl(agentId: string, investigationId: string): string {
+  const origin = responderAppUrl();
+  return `${origin}/agents/${encodeURIComponent(agentId)}/investigations/${encodeURIComponent(investigationId)}`;
 }
 
 function richText(value: string, preformatted = false) {
@@ -326,7 +322,7 @@ function issueLinkList(
           elements: [
             {
               type: "link",
-              url: issueUrl(issue.id),
+              url: responderIssueUrl(issue.id, responderAppUrl()),
               text: nonEmptyText(issue.title, 2_000, "Untitled issue"),
             },
           ],

@@ -10,6 +10,7 @@ import {
 } from "@responder/core/db/pull-requests";
 import type { InvestigationInput } from "@responder/core/db/schema";
 import type { IssueEvidence } from "@responder/core/investigations/report";
+import { responderIssueUrl as buildResponderIssueUrl } from "@responder/core/responder-urls";
 import { z } from "zod";
 import {
   buildPullRequestBody,
@@ -35,8 +36,7 @@ export function responderIssueUrl(
   const origin = environment.RESPONDER_APP_URL ?? environment.BETTER_AUTH_URL;
   if (!origin) return undefined;
   try {
-    const url = new URL(`/issues/${encodeURIComponent(issueId)}`, origin);
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : undefined;
+    return buildResponderIssueUrl(issueId, origin);
   } catch {
     return undefined;
   }
@@ -134,7 +134,7 @@ export function createPullRequestTool(input: {
               responderIssueUrl: responderIssueUrl(requestedPullRequest.issueId),
               sentryIssueUrl: sentryIssueUrl(
                 request.investigationInput,
-                request.issueEvidence,
+                [...request.issueEvidence, ...request.investigationEvidence],
               ),
               summary: requestedPullRequest.summary,
               testing: requestedPullRequest.testing,

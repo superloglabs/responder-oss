@@ -54,7 +54,8 @@ describe("pull request tool", () => {
       requestId,
       issueTitle: "Broken route",
       issueDescription: "The route throws.",
-      issueEvidence: [
+      issueEvidence: [],
+      investigationEvidence: [
         {
           source: "sentry",
           title: "Broken route",
@@ -64,11 +65,11 @@ describe("pull request tool", () => {
       ],
       issueRemediation: "Handle the missing value.",
       investigationInput: {
-        provider: "sentry",
-        externalEventId: "42",
+        provider: "slack",
+        externalEventId: "thread-1",
         title: "Broken route",
         body: "The route throws.",
-        sourceUrl: "https://example.sentry.io/issues/42/",
+        sourceUrl: "https://slack.com/archives/C1/p1",
       },
       status: "creating",
     });
@@ -137,7 +138,7 @@ describe("pull request tool", () => {
       responderIssueUrl("issue 1", {
         RESPONDER_APP_URL: "https://responder.example/base",
       }),
-    ).toBe("https://responder.example/issues/issue%201");
+    ).toBe("https://responder.example/base/issues/issue%201");
     expect(responderIssueUrl("issue-1", {})).toBeUndefined();
   });
 
