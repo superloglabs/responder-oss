@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   bossSend: vi.fn(),
   bossStart: vi.fn(),
   bossStop: vi.fn(),
+  captureAnalyticsEvent: vi.fn(),
   claimIssuePullRequestForRemediation: vi.fn(),
   consumeInvestigation: vi.fn(),
   discardPendingInvestigation: vi.fn(),
@@ -15,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   notifyBillingLimitReached: vi.fn(),
   prepareWorkerQueues: vi.fn(),
   setIssuePullRequestSession: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/analytics.js", () => ({
+  captureAnalyticsEvent: mocks.captureAnalyticsEvent,
 }));
 
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
@@ -111,6 +116,7 @@ describe("investigation queue", () => {
       nextResetAt: null,
     });
     mocks.bossStart.mockResolvedValue(undefined);
+    mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.prepareWorkerQueues.mockResolvedValue(undefined);
     mocks.notifyBillingLimitReached.mockResolvedValue(undefined);
     mocks.getIssuePullRequestForRemediation.mockResolvedValue(
@@ -136,6 +142,7 @@ describe("investigation queue", () => {
     });
     expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
     expect(mocks.bossSend).not.toHaveBeenCalled();
+    expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 
   it("checks the monthly limit and adds a new job", async () => {
@@ -153,6 +160,19 @@ describe("investigation queue", () => {
       expect.objectContaining({ investigationId: created.investigationId }),
       { singletonKey: created.investigationId },
     );
+    expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith({
+      distinctId: `investigation:${created.investigationId}`,
+      event: "investigation created",
+      organizationId: created.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_config_version_id: created.config.id,
+        agent_id: created.config.agentId,
+        investigation_id: created.investigationId,
+        is_replay: false,
+        provider: request.provider,
+      },
+    });
   });
 
   it("removes an unstarted investigation when the monthly limit is reached", async () => {
@@ -169,6 +189,7 @@ describe("investigation queue", () => {
       created.investigationId,
     );
     expect(mocks.bossSend).not.toHaveBeenCalled();
+    expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 
   it("fails a remediation request when the queue cannot start", async () => {

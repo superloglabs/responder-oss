@@ -1,3 +1,4 @@
+import { captureAnalyticsEvent } from "@responder/core/analytics";
 import {
   claimInvestigationReplayRequest,
   completeInvestigationReplayRequest,
@@ -40,6 +41,22 @@ export async function processNextInvestigationReplayRequest(
   try {
     try {
       const replay = await prepareInvestigationReplayRequest(request);
+      if (replay.created) {
+        await captureAnalyticsEvent({
+          distinctId: `investigation:${replay.investigationId}`,
+          event: "investigation created",
+          organizationId: replay.config.organizationId,
+          properties: {
+            $process_person_profile: false,
+            agent_config_version_id: replay.config.id,
+            agent_id: replay.config.agentId,
+            investigation_id: replay.investigationId,
+            is_replay: true,
+            provider: replay.input.provider,
+            source_investigation_id: request.sourceInvestigationId,
+          },
+        });
+      }
       if (replay.replayStatus === "resolved") {
         await completeInvestigationReplayRequest(replay.investigationId);
         return true;
