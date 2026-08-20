@@ -10,6 +10,7 @@ import {
   getRuntimeDatadogConnection,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
+  getRuntimeLangfuseConnections,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
   getRuntimeUpstashConnection,
@@ -32,6 +33,7 @@ import { createAwsMcpServer } from "./aws.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
+import { createLangfuseMcpServer } from "./langfuse.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
 import {
   checkoutRuntimeRepositories,
@@ -102,29 +104,40 @@ export function investigationTraceWriteFailure(
 export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
+  langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
   investigationId: string;
   serverName: string;
   upstashConnection?: { accountId: string } | null;
 }) {
+  const protectedProvider = input.serverName.startsWith("aws-")
+    ? "AWS"
+    : input.serverName.startsWith("langfuse-")
+      ? "Langfuse"
+      : input.serverName.startsWith("upstash-")
+        ? "Upstash"
+        : null;
   const accountId = input.serverName.startsWith("upstash-")
     ? input.upstashConnection?.accountId
     : input.serverName.startsWith("aws-")
       ? input.awsConnections?.find(
           (connection) => input.serverName === `aws-${connection.accountId}`,
         )?.accountId
-      : input.customMcpConnections.find(
-          (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
-        )?.accountId;
+      : input.serverName.startsWith("langfuse-")
+        ? input.langfuseConnections?.find(
+            (connection) =>
+              input.serverName === `langfuse-${connection.accountId}`,
+          )?.accountId
+        : input.customMcpConnections.find(
+            (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
+          )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
-    error:
-      input.serverName.startsWith("upstash-") ||
-      input.serverName.startsWith("aws-")
-        ? `Unable to connect to ${input.serverName.startsWith("aws-") ? "AWS" : "Upstash"} context`
-        : input.error instanceof Error
-          ? input.error.message
-          : String(input.error),
+    error: protectedProvider
+      ? `Unable to connect to ${protectedProvider} context`
+      : input.error instanceof Error
+        ? input.error.message
+        : String(input.error),
     event: "context_server_connect_failed",
     investigationId: input.investigationId,
     server: input.serverName,
@@ -164,6 +177,7 @@ export function investigationInstructions(input: {
   runtimeSystemPrompt?: string | null;
   sentryConnected: boolean;
   linearConnected?: boolean;
+  langfuseProjectNames?: string[];
   slackChannels?: Array<{ id: string; name: string }>;
   upstashConnected?: boolean;
   workspaceSecrets?: Array<{
@@ -174,6 +188,7 @@ export function investigationInstructions(input: {
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
+  const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
   const vercelAccountIds = input.vercelAccountIds ?? [];
@@ -182,6 +197,7 @@ export function investigationInstructions(input: {
     input.sentryConnected ||
     input.clickStackConnected ||
     input.upstashConnected ||
+    langfuseProjectNames.length > 0 ||
     vercelAccountIds.length > 0 ||
     awsAccountNames.length > 0 ||
     customMcpNames.length > 0;
@@ -206,6 +222,9 @@ export function investigationInstructions(input: {
       : null,
     input.upstashConnected
       ? "Use list_upstash_resources first to locate relevant Redis, Vector, Search, QStash, or team resources, then use the read-only Upstash inspection and runtime tools for evidence. Workflow and QStash runtime history are available through the connected Upstash tools. Never create, update, delete, retry, publish, or otherwise mutate Upstash resources or data."
+      : null,
+    langfuseProjectNames.length > 0
+      ? `Use the connected read-only Langfuse tools to inspect relevant traces, observations, scores, metrics, prompts, and alerts before concluding. Start with bounded observation or metric searches, then inspect specific observations for evidence. Never create or modify Langfuse prompts, scores, datasets, annotations, alerts, or other resources. Connected Langfuse projects: ${langfuseProjectNames.join(", ")}.`
       : null,
     input.linearConnected
       ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
@@ -308,6 +327,7 @@ export async function runInvestigationAgent(
     vercelConnections,
     slackConnection,
     upstashConnection,
+    langfuseConnections,
     workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
@@ -341,6 +361,7 @@ export async function runInvestigationAgent(
     getRuntimeVercelConnections(job.config.id),
     getRuntimeSlackConnection(job.config.id),
     getRuntimeUpstashConnection(job.config.id),
+    getRuntimeLangfuseConnections(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
   const awsServers = await Promise.all(
@@ -368,6 +389,7 @@ export async function runInvestigationAgent(
   const upstashTools = upstashConnection
     ? createUpstashCliTools(upstashConnection)
     : [];
+  const langfuseServers = langfuseConnections.map(createLangfuseMcpServer);
   const contextServers = [
     datadogServer,
     sentryServer,
@@ -375,6 +397,7 @@ export async function runInvestigationAgent(
     linearServer,
     slackServer,
     upstashServer,
+    ...langfuseServers,
     ...awsServers,
     ...customMcpServers,
   ].filter(
@@ -402,6 +425,7 @@ export async function runInvestigationAgent(
                 customMcpConnections,
                 error,
                 investigationId: job.investigationId,
+                langfuseConnections,
                 serverName: server.name,
                 upstashConnection,
               }),
@@ -412,6 +436,9 @@ export async function runInvestigationAgent(
           }
           if (server.name.startsWith("aws-")) {
             throw new Error("Unable to connect to AWS context");
+          }
+          if (server.name.startsWith("langfuse-")) {
+            throw new Error("Unable to connect to Langfuse context");
           }
           throw error;
         }
@@ -458,6 +485,9 @@ export async function runInvestigationAgent(
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
       linearConnected: linearServer !== null,
+      langfuseProjectNames: langfuseConnections.map(
+        (connection) => connection.displayName,
+      ),
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,
       workspaceSecrets,

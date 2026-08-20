@@ -68,6 +68,24 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("identifies Langfuse connection failures without exposing project keys", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("request failed with sk-lf-secret"),
+        investigationId: "investigation-123",
+        langfuseConnections: [{ accountId: "account-langfuse" }],
+        serverName: "langfuse-account-langfuse",
+      }),
+    ).toEqual({
+      accountId: "account-langfuse",
+      error: "Unable to connect to Langfuse context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "langfuse-account-langfuse",
+    });
+  });
+
   it("requires both service keys", () => {
     expect(() => sandboxAgentConfig({})).toThrow("OPENAI_API_KEY is required");
     expect(() =>
@@ -156,6 +174,22 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("Use list_upstash_resources first");
     expect(instructions).toContain("Workflow and QStash runtime history");
     expect(instructions).toContain("Never create, update, delete, retry, publish");
+  });
+
+  it("keeps Langfuse project context read-only", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      langfuseProjectNames: ["Example / Production"],
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("connected read-only Langfuse tools");
+    expect(instructions).toContain("Example / Production");
+    expect(instructions).toContain("Never create or modify Langfuse");
+    expect(instructions).not.toContain("No observability data source is connected");
   });
 
   it("leaves Linear ticket creation to the separate queued job", () => {

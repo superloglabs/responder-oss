@@ -21,7 +21,7 @@
 # Responder
 
 Responder investigates production alerts using Sentry, Datadog, Slack,
-Upstash, and connected MCP servers. It keeps tenant configuration in Postgres,
+Upstash, Langfuse, and connected MCP servers. It keeps tenant configuration in Postgres,
 queues work for a separate worker, and runs repository inspection in an
 isolated sandbox.
 
@@ -32,7 +32,7 @@ maintained separately.
 ## What it does
 
 - Watches selected Slack channels and Sentry projects for new alerts.
-- Connects GitHub, Slack, Sentry, Datadog, AWS, Upstash, Vercel, ClickStack,
+- Connects GitHub, Slack, Sentry, Datadog, AWS, Upstash, Langfuse, Vercel, ClickStack,
   and custom MCP servers.
 - Investigates incidents with a versioned operator-managed runtime profile.
 - Produces structured reports, issues, Slack updates, and optional remediation
@@ -52,8 +52,9 @@ pnpm local:dev
 
 The setup command installs dependencies, generates a gitignored `.env.local`,
 starts Postgres, applies the migrations, and creates a local example runtime
-profile. The development command prints the local HTTPS address. Open it,
-create an account, and create the first workspace.
+profile. The development command prints the local HTTPS address and, when a
+public tunnel is configured, claims it for the current worktree. Open the
+dashboard, create an account, and create the first workspace.
 
 The UI and authentication flow work without provider credentials. Set
 `DAYTONA_API_KEY` to store workspace secrets or run investigations, and set

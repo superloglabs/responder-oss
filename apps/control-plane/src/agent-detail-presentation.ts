@@ -25,6 +25,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   datadog: "Datadog",
   github: "GitHub",
   linear: "Linear",
+  langfuse: "Langfuse",
   sentry: "Sentry",
   slack: "Slack",
   upstash: "Upstash",

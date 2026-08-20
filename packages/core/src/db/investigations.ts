@@ -32,6 +32,7 @@ import {
 } from "../integrations/linear.js";
 import { SLACK_MCP_URL } from "../integrations/slack-mcp.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
+import { parseLangfuseCredentials } from "../integrations/langfuse.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
 import { getDatabase } from "./client.js";
 import {
@@ -903,6 +904,15 @@ export interface RuntimeUpstashConnection {
   apiKey: string;
   displayName: string;
   email: string;
+}
+
+export interface RuntimeLangfuseConnection {
+  accountId: string;
+  baseUrl: string;
+  displayName: string;
+  projectId: string;
+  publicKey: string;
+  secretKey: string;
 }
 
 export interface RuntimeVercelConnection {
@@ -1859,6 +1869,56 @@ export async function getRuntimeUpstashConnection(
     displayName: account.displayName,
     email: credentials.email,
   };
+}
+
+export async function getRuntimeLangfuseConnections(
+  versionId: string,
+): Promise<RuntimeLangfuseConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "langfuse"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeLangfuseConnection[] = [];
+  for (const accountId of config.contextAccountIds) {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) continue;
+    const credentials = parseLangfuseCredentials(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    connections.push({
+      accountId: account.id,
+      baseUrl: credentials.baseUrl,
+      displayName: account.displayName,
+      projectId: credentials.projectId,
+      publicKey: credentials.publicKey,
+      secretKey: credentials.secretKey,
+    });
+  }
+  return connections;
 }
 
 export async function getRuntimeSlackConnection(

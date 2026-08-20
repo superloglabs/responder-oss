@@ -38,6 +38,7 @@ import {
   getLinearWorkspace,
   linearAuthorizeUrl,
 } from "../../../../packages/core/src/integrations/linear.js";
+import { langfuseProject } from "./langfuse.js";
 import { getActiveTenant } from "../tenant.js";
 import {
   customMcpConnectionMetricEvent,
@@ -103,6 +104,14 @@ vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
   LINEAR_READONLY_MCP_URL: "https://mcp.linear.app/mcp/readonly",
   linearAuthorizeUrl: vi.fn(),
 }));
+
+vi.mock("./langfuse.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./langfuse.js")>();
+  return {
+    ...actual,
+    langfuseProject: vi.fn(),
+  };
+});
 
 vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
@@ -997,6 +1006,22 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("offers the Langfuse project connection endpoint", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "langfuse",
+        connectUrl: "/api/integrations/langfuse/connect",
+      }),
+    );
+  });
+
   it("offers custom MCP connections", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
@@ -1734,6 +1759,61 @@ describe("integration callback routing", () => {
         externalAccountId: "operator@example.com",
         organizationId: tenant.organizationId,
         provider: "upstash",
+      }),
+    );
+  });
+
+  it("validates and encrypts Langfuse project keys", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(langfuseProject).mockResolvedValue({
+      baseUrl: "https://cloud.langfuse.com",
+      displayName: "Example / Production",
+      externalAccountId: "https://cloud.langfuse.com:project-1",
+      metadata: {
+        baseUrl: "https://cloud.langfuse.com",
+        organizationId: "org-1",
+        organizationName: "Example",
+        projectId: "project-1",
+        projectName: "Production",
+      },
+      projectId: "project-1",
+    });
+
+    const response = await app.request("/api/integrations/langfuse/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        baseUrl: "https://cloud.langfuse.com",
+        publicKey: "pk-lf-public",
+        returnTo: "/agents/new",
+        secretKey: "sk-lf-secret",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      redirectUrl:
+        "https://responder.example/agents/new?integration=langfuse&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      authType: "basic",
+      baseUrl: "https://cloud.langfuse.com",
+      projectId: "project-1",
+      publicKey: "pk-lf-public",
+      secretKey: "sk-lf-secret",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "encrypted-credentials",
+        externalAccountId: "https://cloud.langfuse.com:project-1",
+        organizationId: tenant.organizationId,
+        provider: "langfuse",
       }),
     );
   });

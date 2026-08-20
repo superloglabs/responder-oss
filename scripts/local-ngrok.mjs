@@ -5,7 +5,8 @@ import { clearInterval, setInterval } from "node:timers";
 
 const host = "127.0.0.1";
 const controlPort = Number(process.env.RESPONDER_NGROK_CONTROL_PORT ?? 4101);
-const routerUrl = "http://127.0.0.1:4100";
+const routerPort = Number(process.env.RESPONDER_CALLBACK_BRIDGE_PORT ?? 4100);
+const routerUrl = `http://127.0.0.1:${routerPort}`;
 const relayMarker = "responder-local-ngrok-v1";
 const monitorInterval = Number(
   process.env.RESPONDER_NGROK_POLL_INTERVAL ?? 2_000,

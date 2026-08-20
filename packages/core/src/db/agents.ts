@@ -245,6 +245,7 @@ async function validateConfigurationResources(
         "datadog",
         "clickstack",
         "upstash",
+        "langfuse",
         "vercel",
         "custom_mcp",
         "linear",

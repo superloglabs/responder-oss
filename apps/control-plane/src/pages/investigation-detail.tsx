@@ -130,6 +130,7 @@ function humanizeToolName(value: unknown): string {
   const providerNames: Record<string, string> = {
     datadog: "Datadog",
     github: "GitHub",
+    langfuse: "Langfuse",
     sentry: "Sentry",
     slack: "Slack",
     superlog: "Superlog",

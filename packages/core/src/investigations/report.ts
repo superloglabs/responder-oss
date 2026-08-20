@@ -10,6 +10,7 @@ export const issueEvidenceSchema = z.object({
     "sentry",
     "clickstack",
     "upstash",
+    "langfuse",
     "github",
     "slack",
     "vercel",

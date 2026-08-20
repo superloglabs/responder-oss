@@ -89,6 +89,10 @@ import {
   UpstashCredentialsError,
 } from "./upstash.js";
 import {
+  langfuseProject,
+  LangfuseCredentialsError,
+} from "./langfuse.js";
+import {
   exchangeVercelCode,
   getVercelAccount,
   getVercelConfiguration,
@@ -166,6 +170,12 @@ const upstashConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4_096),
   email: z.string().trim().email().max(320),
   returnTo: z.string().max(2_048).optional(),
+});
+const langfuseConnectionSchema = z.object({
+  baseUrl: z.string().trim().url().max(2_048),
+  publicKey: z.string().trim().min(1).max(512),
+  returnTo: z.string().max(2_048).optional(),
+  secretKey: z.string().trim().min(1).max(4_096),
 });
 const customMcpConnectionSchema = z.discriminatedUnion("authType", [
   z.object({
@@ -566,7 +576,8 @@ export const integrationRoutes = new Hono()
               ? definition.id === "aws" ||
                   definition.id === "datadog" ||
                   definition.id === "clickstack" ||
-                  definition.id === "upstash"
+                  definition.id === "upstash" ||
+                  definition.id === "langfuse"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -692,7 +703,8 @@ export const integrationRoutes = new Hono()
       parsedProvider.data === "aws" ||
       parsedProvider.data === "datadog" ||
       parsedProvider.data === "clickstack" ||
-      parsedProvider.data === "upstash"
+      parsedProvider.data === "upstash" ||
+      parsedProvider.data === "langfuse"
     ) {
       return context.json(
         { error: `Use the ${definition.name} connection endpoint` },
@@ -1065,6 +1077,81 @@ export const integrationRoutes = new Hono()
       });
       return context.json(
         { error: "Unable to verify the Upstash connection" },
+        502,
+      );
+    }
+  })
+  .post("/langfuse/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = langfuseConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Enter the Langfuse deployment URL and project API keys" },
+        400,
+      );
+    }
+
+    try {
+      const project = await langfuseProject(parsed.data);
+      const accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "langfuse",
+        externalAccountId: project.externalAccountId,
+        displayName: project.displayName,
+        encryptedCredentials: encryptCredentials({
+          authType: "basic",
+          baseUrl: project.baseUrl,
+          projectId: project.projectId,
+          publicKey: parsed.data.publicKey,
+          secretKey: parsed.data.secretKey,
+        }),
+        credentialKeyVersion: 1,
+        metadata: project.metadata,
+      });
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "langfuse",
+        },
+      });
+      console.info(
+        JSON.stringify({
+          accountId,
+          event: "langfuse_connected",
+          organizationId: tenant.organizationId,
+          projectId: project.projectId,
+          provider: "langfuse",
+        }),
+      );
+      return context.json({
+        accountId,
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(
+            parsed.data.returnTo ?? "/settings",
+            "langfuse",
+            "connected",
+          ),
+          accountId,
+        ),
+      });
+    } catch (error) {
+      if (error instanceof LangfuseCredentialsError) {
+        return context.json({ error: error.message }, 401);
+      }
+      logCallbackError("Langfuse", error, {
+        organizationId: tenant.organizationId,
+      });
+      return context.json(
+        { error: "Unable to verify the Langfuse connection" },
         502,
       );
     }

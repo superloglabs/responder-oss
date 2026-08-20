@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -34,6 +35,39 @@ function temporaryGitRepository() {
   const directory = temporaryDirectory();
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
   return directory;
+}
+
+function nestedGitRepository(parent, name) {
+  const directory = join(parent, name);
+  mkdirSync(directory);
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  return directory;
+}
+
+function inWorkingDirectory(directory, operation) {
+  const previous = process.cwd();
+  process.chdir(directory);
+  try {
+    return operation();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+function targetFile(workspace) {
+  return inWorkingDirectory(workspace, () => callbackTargetFile());
+}
+
+function writeTarget(workspace, target) {
+  return inWorkingDirectory(workspace, () => writeCallbackTarget(target));
+}
+
+function readTarget(workspace) {
+  return inWorkingDirectory(workspace, () => readCallbackTarget());
+}
+
+function clearTarget(workspace) {
+  return inWorkingDirectory(workspace, () => clearCallbackTarget());
 }
 
 async function listen(server, host = "127.0.0.1") {
@@ -78,35 +112,58 @@ afterEach(() => {
 describe("local callback routing", () => {
   it("stores a shared loopback target atomically", () => {
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace);
+    const storedTargetFile = targetFile(workspace);
 
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: "http://127.0.0.1:4321",
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
     );
 
-    expect(targetFile).toBe(
+    expect(storedTargetFile).toBe(
       join(
         realpathSync(workspace),
         ".git/responder/callback-target.json",
       ),
     );
-    expect(readCallbackTarget(workspace)).toEqual({
+    expect(readTarget(workspace)).toEqual({
       origin: "http://127.0.0.1:4321",
       workspace: "/tmp/worktree",
       updatedAt: "2026-07-31T00:00:00.000Z",
     });
-    expect(JSON.parse(readFileSync(targetFile, "utf8"))).toMatchObject({
+    expect(JSON.parse(readFileSync(storedTargetFile, "utf8"))).toMatchObject({
       origin: "http://127.0.0.1:4321",
     });
-    expect(statSync(targetFile).mode & 0o777).toBe(0o600);
+    expect(statSync(storedTargetFile).mode & 0o777).toBe(0o600);
 
-    clearCallbackTarget(workspace);
-    expect(readCallbackTarget(workspace)).toBeNull();
+    clearTarget(workspace);
+    expect(readTarget(workspace)).toBeNull();
+  });
+
+  it("shares a callback target across nested repositories in one workspace root", () => {
+    const sharedRoot = temporaryGitRepository();
+    const firstWorkspace = nestedGitRepository(sharedRoot, "first");
+    const secondWorkspace = nestedGitRepository(sharedRoot, "second");
+
+    writeTarget(
+      firstWorkspace,
+      {
+        origin: "http://127.0.0.1:4321",
+        workspace: firstWorkspace,
+        updatedAt: "2026-07-31T00:00:00.000Z",
+      },
+    );
+
+    expect(targetFile(secondWorkspace)).toBe(
+      join(realpathSync(sharedRoot), ".git/responder/callback-target.json"),
+    );
+    expect(readTarget(secondWorkspace)).toMatchObject({
+      origin: "http://127.0.0.1:4321",
+      workspace: firstWorkspace,
+    });
   });
 
   it("rejects non-loopback and credentialed targets", () => {
@@ -129,7 +186,7 @@ describe("local callback routing", () => {
     });
     const controlPlanePort = await listen(controlPlane);
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace);
+    const storedTargetFile = targetFile(workspace);
     const selection = spawn(
       process.execPath,
       [targetScript, "use"],
@@ -146,7 +203,7 @@ describe("local callback routing", () => {
     try {
       const [exitCode] = await once(selection, "exit");
       expect(exitCode).toBe(0);
-      expect(JSON.parse(readFileSync(targetFile, "utf8"))).toMatchObject({
+      expect(JSON.parse(readFileSync(storedTargetFile, "utf8"))).toMatchObject({
         origin: `http://127.0.0.1:${controlPlanePort}`,
         workspace: realpathSync(workspace),
       });
@@ -158,14 +215,14 @@ describe("local callback routing", () => {
 
   it("releases only the current worktree's claim", async () => {
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace);
-    writeCallbackTarget(
+    const storedTargetFile = targetFile(workspace);
+    writeTarget(
+      workspace,
       {
         origin: "http://127.0.0.1:4321",
         workspace: realpathSync(workspace),
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
     );
     const release = spawn(
       process.execPath,
@@ -179,7 +236,28 @@ describe("local callback routing", () => {
 
     const [exitCode] = await once(release, "exit");
     expect(exitCode).toBe(0);
-    expect(() => readFileSync(targetFile, "utf8")).toThrow();
+    expect(() => readFileSync(storedTargetFile, "utf8")).toThrow();
+  });
+
+  it("keeps retrying a watched claim when local setup is incomplete", async () => {
+    const workspace = temporaryGitRepository();
+    const selection = spawn(
+      process.execPath,
+      [targetScript, "claim", "--wait", "--watch"],
+      {
+        cwd: workspace,
+        env: { ...process.env, CONTROL_PLANE_WEB_PORT: "" },
+        stdio: "ignore",
+      },
+    );
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(selection.exitCode).toBeNull();
+    } finally {
+      selection.kill("SIGTERM");
+      await once(selection, "exit");
+    }
   });
 
   it("proxies methods, paths, bodies, and query strings to the selection", async () => {
@@ -208,13 +286,13 @@ describe("local callback routing", () => {
     await new Promise((resolve) => portReservation.close(resolve));
 
     const workspace = temporaryGitRepository();
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: `http://127.0.0.1:${upstreamPort}`,
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
     );
 
     const bridge = startBridge(bridgePort, workspace);
@@ -247,6 +325,44 @@ describe("local callback routing", () => {
     }
   });
 
+  it("redirects browser OAuth callbacks to the selected local origin", async () => {
+    const portReservation = createServer();
+    const bridgePort = await listen(portReservation);
+    await new Promise((resolve) => portReservation.close(resolve));
+    const workspace = temporaryGitRepository();
+    writeTarget(
+      workspace,
+      {
+        origin: "http://127.0.0.1:4321",
+        workspace: "/tmp/worktree",
+        updatedAt: "2026-07-31T00:00:00.000Z",
+      },
+    );
+    const bridge = startBridge(bridgePort, workspace);
+
+    try {
+      await waitForBridge(bridgePort);
+      const response = await fetch(
+        `http://127.0.0.1:${bridgePort}/api/integrations/slack/callback` +
+          "?code=oauth-code&state=oauth-state",
+        { redirect: "manual" },
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("location")).toBe(
+        "http://127.0.0.1:4321/api/integrations/slack/callback" +
+          "?code=oauth-code&state=oauth-state",
+      );
+    } finally {
+      bridge.kill("SIGTERM");
+      await Promise.race([
+        once(bridge, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 1_000)),
+      ]);
+    }
+  });
+
   it("routes a GitHub setup fallback through the claimed worktree", async () => {
     const upstream = createServer((request, response) => {
       response.end("ok");
@@ -256,13 +372,13 @@ describe("local callback routing", () => {
     const bridgePort = await listen(portReservation);
     await new Promise((resolve) => portReservation.close(resolve));
     const workspace = temporaryGitRepository();
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: `http://127.0.0.1:${upstreamPort}`,
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
     );
     const bridge = startBridge(bridgePort, workspace);
 
@@ -326,7 +442,7 @@ describe("local callback routing", () => {
         `http://127.0.0.1:${bridgePort}/__responder_callback_bridge`,
       );
       expect(health.headers.get("x-responder-callback-router")).toBe(
-        "responder-local-callback-router-v2",
+        "responder-local-callback-router-v3",
       );
     } finally {
       bridge.kill("SIGTERM");

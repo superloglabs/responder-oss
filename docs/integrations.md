@@ -120,6 +120,26 @@ Redis commands against a read-only allowlist, and redacts credential-shaped
 fields from provider output. Upstash credentials stay in the worker process and
 never enter the repository investigation sandbox.
 
+## Langfuse
+
+Connect Langfuse from Settings with a project public key and secret key. Choose
+the matching Langfuse Cloud region or enter the origin of a self-hosted Langfuse
+v4 deployment. Each key pair belongs to one Langfuse project, and an agent may
+select more than one connected project. No deployment-level Langfuse environment
+variables are required.
+
+Langfuse currently authenticates its Public API and MCP server with project API
+keys rather than delegated OAuth. Responder verifies the project identity and
+required observation tools before encrypting the key pair in the tenant
+credential envelope.
+
+During an investigation, the worker connects to Langfuse's Streamable HTTP MCP
+endpoint and exposes a fixed read-only allowlist for observations, scores,
+metrics, prompts, and alerts. New upstream tools are unavailable until reviewed.
+Responder bounds unscoped observation searches to the latest 24 hours, limits
+result sizes and concurrency, redacts credential-shaped output, and keeps the
+project keys outside the repository investigation sandbox.
+
 ## ClickStack
 
 ClickStack Cloud uses `https://mcp.clickhouse.cloud/clickstack` with OAuth and
@@ -208,18 +228,21 @@ origin in the gitignored `.env.tunnel.local` file of your main checkout:
 RESPONDER_NGROK_URL=https://responder-dev.ngrok-free.dev
 ```
 
-Start the complete stack, then explicitly route the shared tunnel to this
-worktree:
+Start the complete stack. Startup waits for the dashboard to become healthy,
+then automatically routes the shared tunnel to this worktree:
 
 ```bash
 pnpm local:dev
-pnpm tunnel:claim
 pnpm tunnel:status
 ```
 
 Use the tunnel origin for the provider URLs above. A tunnel claim is
-machine-global and last-claim-wins. Release it when finished:
+machine-global and last-start-wins. Stopping the development command releases
+its claim unless another worktree has claimed the tunnel in the meantime. The
+manual claim and release commands remain available when changing the selected
+worktree without restarting it:
 
 ```bash
+pnpm tunnel:claim
 pnpm tunnel:release
 ```

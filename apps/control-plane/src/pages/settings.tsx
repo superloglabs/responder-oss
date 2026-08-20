@@ -7,6 +7,7 @@ import { ClickStackConnectionDialog } from "../components/clickstack-connection-
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
+import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
@@ -28,6 +29,7 @@ interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "upstash"
+    | "langfuse"
     | "vercel"
     | "custom_mcp"
     | "clickstack"
@@ -223,6 +225,7 @@ export function SettingsPage() {
       "sentry",
       "datadog",
       "upstash",
+      "langfuse",
       "linear",
       "vercel",
       "custom_mcp",
@@ -343,6 +346,7 @@ function IntegrationCard({
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
+  const [connectingLangfuse, setConnectingLangfuse] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
 
@@ -358,6 +362,10 @@ function IntegrationCard({
     }
     if (integration.id === "upstash") {
       setConnectingUpstash(true);
+      return;
+    }
+    if (integration.id === "langfuse") {
+      setConnectingLangfuse(true);
       return;
     }
     if (integration.id === "clickstack") {
@@ -432,6 +440,12 @@ function IntegrationCard({
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConnectingUpstash(false)}
         open={connectingUpstash}
+        returnTo="/settings"
+      />
+      <LangfuseConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingLangfuse(false)}
+        open={connectingLangfuse}
         returnTo="/settings"
       />
       <ClickStackConnectionDialog
