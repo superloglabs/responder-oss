@@ -95,12 +95,12 @@ describe("product analytics", () => {
     await expect(
       captureAnalyticsEvent({
         distinctId: "organization:organization-1",
-        event: "investigation started",
+        event: "investigation created",
         organizationId: "organization-1",
       }),
     ).resolves.toBeUndefined();
     expect(consoleError).toHaveBeenCalledWith(
-      "Unable to capture investigation started analytics event: offline",
+      "Unable to capture investigation created analytics event: offline",
     );
 
     consoleError.mockRestore();
