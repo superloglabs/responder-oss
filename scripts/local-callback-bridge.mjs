@@ -11,8 +11,17 @@ const monitorInterval = Number(
   process.env.RESPONDER_CALLBACK_BRIDGE_POLL_INTERVAL ?? 2_000,
 );
 const callbackPath = "/github/install/callback";
+const browserOAuthCallbackPaths = new Set([
+  "/api/integrations/clickstack/callback",
+  "/api/integrations/custom_mcp/callback",
+  "/api/integrations/github/callback",
+  "/api/integrations/linear/callback",
+  "/api/integrations/sentry/callback",
+  "/api/integrations/slack/callback",
+  "/api/integrations/vercel/callback",
+]);
 const bridgeMarker = "responder-local-callback-bridge-v1";
-const routerMarker = "responder-local-callback-router-v2";
+const routerMarker = "responder-local-callback-router-v3";
 let relayMonitor;
 
 function forwardedHeaders(headers, target) {
@@ -95,6 +104,16 @@ function fallbackCallbackUrl() {
     : null;
 }
 
+function browserOAuthCallbackUrl(incoming, method) {
+  if (method !== "GET" || !browserOAuthCallbackPaths.has(incoming.pathname)) {
+    return null;
+  }
+  const selectedTarget = readCallbackTarget();
+  return selectedTarget
+    ? new URL(incoming.pathname + incoming.search, selectedTarget.origin)
+    : null;
+}
+
 const server = createServer((request, response) => {
   const incoming = new URL(request.url ?? "/", `http://${host}:${port}`);
   if (incoming.pathname === "/__responder_callback_bridge") {
@@ -104,6 +123,18 @@ const server = createServer((request, response) => {
       "x-responder-callback-router": routerMarker,
     });
     response.end("ok");
+    return;
+  }
+  const localBrowserCallback = browserOAuthCallbackUrl(
+    incoming,
+    request.method,
+  );
+  if (localBrowserCallback) {
+    response.writeHead(302, {
+      "cache-control": "no-store",
+      location: localBrowserCallback.toString(),
+    });
+    response.end();
     return;
   }
   if (incoming.pathname !== callbackPath) {

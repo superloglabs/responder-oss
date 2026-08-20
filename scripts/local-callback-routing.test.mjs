@@ -279,6 +279,45 @@ describe("local callback routing", () => {
     }
   });
 
+  it("redirects browser OAuth callbacks to the selected local origin", async () => {
+    const portReservation = createServer();
+    const bridgePort = await listen(portReservation);
+    await new Promise((resolve) => portReservation.close(resolve));
+    const workspace = temporaryGitRepository();
+    writeCallbackTarget(
+      {
+        origin: "http://127.0.0.1:4321",
+        workspace: "/tmp/worktree",
+        updatedAt: "2026-07-31T00:00:00.000Z",
+      },
+      workspace,
+      isolatedEnvironment,
+    );
+    const bridge = startBridge(bridgePort, workspace);
+
+    try {
+      await waitForBridge(bridgePort);
+      const response = await fetch(
+        `http://127.0.0.1:${bridgePort}/api/integrations/slack/callback` +
+          "?code=oauth-code&state=oauth-state",
+        { redirect: "manual" },
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("location")).toBe(
+        "http://127.0.0.1:4321/api/integrations/slack/callback" +
+          "?code=oauth-code&state=oauth-state",
+      );
+    } finally {
+      bridge.kill("SIGTERM");
+      await Promise.race([
+        once(bridge, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 1_000)),
+      ]);
+    }
+  });
+
   it("routes a GitHub setup fallback through the claimed worktree", async () => {
     const upstream = createServer((request, response) => {
       response.end("ok");
@@ -359,7 +398,7 @@ describe("local callback routing", () => {
         `http://127.0.0.1:${bridgePort}/__responder_callback_bridge`,
       );
       expect(health.headers.get("x-responder-callback-router")).toBe(
-        "responder-local-callback-router-v2",
+        "responder-local-callback-router-v3",
       );
     } finally {
       bridge.kill("SIGTERM");
