@@ -29,7 +29,11 @@ import type {
 } from "@responder/core/db/schema";
 import type { InvestigationJob } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
-import { createAwsMcpServer } from "./aws.js";
+import {
+  createAwsMcpServer,
+  loadAwsAlarmSkillContext,
+} from "./aws.js";
+import { createAwsInspectionTools } from "./aws-inspection-tools.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
@@ -75,7 +79,11 @@ export function safeInvestigationError(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
   let message =
-    error instanceof Error ? error.message : "Investigation agent failed";
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "Investigation agent failed";
   for (const name of ["OPENAI_API_KEY", "DAYTONA_API_KEY"] as const) {
     const value = environment[name];
     if (value) message = message.replaceAll(value, "[redacted]");
@@ -170,6 +178,7 @@ export function investigationInstructions(input: {
   agentPrompt: string;
   awsAlarmTriggered?: boolean;
   awsAccountNames?: string[];
+  awsSkillContext?: string;
   customMcpNames?: string[];
   datadogConnected: boolean;
   clickStackConnected: boolean;
@@ -210,6 +219,12 @@ export function investigationInstructions(input: {
       : null,
     input.awsAlarmTriggered && awsAccountNames.length > 0
       ? "This investigation was triggered by an AWS alarm forwarded through Slack. Locate the exact CloudWatch alarm by its normalized name and region first. Inspect its current configuration, state history, metric data, affected resource, and relevant logs around the transition. Treat the Slack notification as a pointer, not as proof of root cause."
+      : null,
+    input.awsSkillContext
+      ? `Use the following AWS investigation guides when planning service-specific inspection:\n\n${input.awsSkillContext}`
+      : null,
+    awsAccountNames.length > 0
+      ? "Prefer the typed aws_inspect_cloudwatch_alarm, aws_inspect_cloudwatch_metric, aws_query_cloudwatch_logs, aws_inspect_sqs_queue, and aws_inspect_lambda_function tools for AWS evidence. If aws___run_script is necessary, use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and inspect every nested api_calls result. An outer success status does not mean the nested AWS calls succeeded; retry failed nested calls with corrected operation names."
       : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
@@ -291,6 +306,9 @@ export async function runInvestigationAgent(
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>,
 ): Promise<string> {
   const investigationInput = toInvestigationInput(job.request);
+  const awsAlarmTriggered =
+    investigationInput.provider === "slack" &&
+    investigationInput.attributes?.slackAlertProvider === "aws";
   const writeTrace = async (event: InvestigationTraceEvent): Promise<void> => {
     try {
       await onTraceEvent(event);
@@ -444,6 +462,21 @@ export async function runInvestigationAgent(
         }
       }),
     );
+    let awsSkillContext = "";
+    if (awsAlarmTriggered && awsServers[0]) {
+      const loadedSkills = await loadAwsAlarmSkillContext(awsServers[0]);
+      awsSkillContext = loadedSkills.content;
+      for (const failure of loadedSkills.failures) {
+        console.error(
+          JSON.stringify({
+            error: safeInvestigationError(failure.error, environment),
+            event: "aws_investigation_skill_load_failed",
+            investigationId: job.investigationId,
+            skillName: failure.skillName,
+          }),
+        );
+      }
+    }
     session = await client.create();
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     await prepareDaytonaSandbox(session);
@@ -472,12 +505,17 @@ export async function runInvestigationAgent(
       session,
     });
     const vercelTools = createVercelTools(vercelConnections);
+    const awsInspectionTools = createAwsInspectionTools(awsConnections, {
+      environment,
+    });
     const instructions = investigationInstructions({
       agentPrompt: job.config.prompt,
-      awsAlarmTriggered:
-        investigationInput.provider === "slack" &&
-        investigationInput.attributes?.slackAlertProvider === "aws",
-      awsAccountNames: awsConnections.map((connection) => connection.displayName),
+      awsAlarmTriggered,
+      awsAccountNames: awsConnections.map(
+        (connection) =>
+          `${connection.displayName} (${connection.roleArn.split(":")[4] ?? "unknown"})`,
+      ),
+      awsSkillContext,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,
@@ -504,6 +542,7 @@ export async function runInvestigationAgent(
       tools: [
         issueSearchTool,
         reportTool,
+        ...awsInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,
         ...vercelTools,

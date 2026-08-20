@@ -17,6 +17,10 @@ export const AWS_MCP_SIGNING_REGION = "us-east-1";
 const AWS_COMMERCIAL_REGION_PATTERN =
   /^(?:af|ap|ca|eu|il|me|mx|sa|us)-(?!gov-|iso)[a-z]+(?:-[a-z]+)?-\d$/;
 
+export function isAwsCommercialRegion(region: string): boolean {
+  return AWS_COMMERCIAL_REGION_PATTERN.test(region);
+}
+
 export const awsAccountIdSchema = z.string().length(12).regex(/^\d{12}$/);
 export const awsConnectionCredentialsSchema = z.object({
   accountId: awsAccountIdSchema,
@@ -86,7 +90,7 @@ export async function createAwsCloudFormationTemplateUrl(
   const bucket = environment.AWS_INTEGRATION_TEMPLATE_BUCKET?.trim();
   const key = environment.AWS_INTEGRATION_TEMPLATE_KEY?.trim();
   const region = environment.AWS_INTEGRATION_TEMPLATE_REGION?.trim();
-  if (!bucket || !key || !region || !AWS_COMMERCIAL_REGION_PATTERN.test(region)) {
+  if (!bucket || !key || !region || !isAwsCommercialRegion(region)) {
     return null;
   }
 
@@ -103,7 +107,7 @@ function isSupportedCloudFormationTemplateUrl(templateUrl: URL): boolean {
   const region = templateUrl.hostname.match(
     /^(?:[a-z0-9][a-z0-9.-]*\.)?s3[.-]([a-z0-9-]+)\.amazonaws\.com$/,
   )?.[1];
-  return region !== undefined && AWS_COMMERCIAL_REGION_PATTERN.test(region);
+  return region !== undefined && isAwsCommercialRegion(region);
 }
 
 export function awsCloudFormationQuickCreateUrl(input: {

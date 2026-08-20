@@ -7,6 +7,7 @@ import {
   awsParameterizedCloudFormationTemplate,
   awsIntegrationPrincipalArn,
   awsInvestigationRoleArn,
+  isAwsCommercialRegion,
 } from "./aws.js";
 
 describe("AWS integration", () => {
@@ -18,6 +19,13 @@ describe("AWS integration", () => {
 
   it("rejects account IDs with trailing whitespace", () => {
     expect(awsAccountIdSchema.safeParse("123456789012\n").success).toBe(false);
+  });
+
+  it("recognizes only regions in the commercial AWS partition", () => {
+    expect(isAwsCommercialRegion("eu-west-3")).toBe(true);
+    expect(isAwsCommercialRegion("cn-north-1")).toBe(false);
+    expect(isAwsCommercialRegion("us-gov-west-1")).toBe(false);
+    expect(isAwsCommercialRegion("us-iso-east-1")).toBe(false);
   });
 
   it("uses the managed AIOps policy and an external-ID trust condition", () => {

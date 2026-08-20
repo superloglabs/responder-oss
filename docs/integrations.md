@@ -195,12 +195,12 @@ supports the commercial AWS partition (`arn:aws`) only.
 AWS context does not receive native EventBridge or SNS webhooks. CloudWatch
 alarms can trigger an Agent when Amazon Q Developer in chat applications
 forwards the alarm to a watched Slack channel; the selected AWS account remains
-the read-only investigation context.
-
-AWS context does not receive native EventBridge or SNS webhooks. CloudWatch
-alarms can trigger an Agent when Amazon Q Developer in chat applications
-forwards the alarm to a watched Slack channel; the selected AWS account remains
-the read-only investigation context.
+the read-only investigation context. AWS alarm investigations preload the
+CloudWatch, messaging, and serverless investigation guides. Typed read-only
+tools cover CloudWatch alarm configuration and history, metrics, Logs Insights,
+SQS queue attributes, and Lambda configuration and event source mappings. The
+managed sandboxed script runner remains available for other read-only AWS API
+calls.
 
 Production deployments should store the generic template in a private S3
 bucket and configure `AWS_INTEGRATION_TEMPLATE_BUCKET` and

@@ -20,6 +20,17 @@ const AWS_MCP_IAM_GUARDED_TOOLS = new Set([
   "run_script",
 ]);
 
+export const AWS_ALARM_SKILL_NAMES = [
+  "aws-observability",
+  "aws-messaging-and-streaming",
+  "aws-serverless",
+] as const;
+
+export interface AwsAlarmSkillContext {
+  content: string;
+  failures: Array<{ error: string; skillName: string }>;
+}
+
 function requestQuery(url: URL): Record<string, string | string[]> {
   const query: Record<string, string | string[]> = {};
   for (const [key, value] of url.searchParams) {
@@ -82,6 +93,81 @@ export function createRefreshingAwsCredentialsProvider(
         });
     }
     return refresh;
+  };
+}
+
+function managedSkillContent(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  for (const item of content) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      !("type" in item) ||
+      item.type !== "text" ||
+      !("text" in item) ||
+      typeof item.text !== "string"
+    ) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(item.text) as {
+        content?: { skill_content?: unknown };
+        skill_content?: unknown;
+      };
+      const skillContent =
+        parsed.content?.skill_content ?? parsed.skill_content;
+      if (typeof skillContent === "string") return skillContent;
+    } catch {
+      if (item.text.trim()) return item.text;
+    }
+  }
+  return null;
+}
+
+function managedToolError(content: unknown): string {
+  if (!Array.isArray(content)) return "AWS skill retrieval failed";
+  const text = content.flatMap((item) =>
+    item &&
+    typeof item === "object" &&
+    "type" in item &&
+    item.type === "text" &&
+    "text" in item &&
+    typeof item.text === "string"
+      ? [item.text]
+      : []
+  ).join("\n");
+  return text || "AWS skill retrieval failed";
+}
+
+export async function loadAwsAlarmSkillContext(
+  server: Pick<MCPServerStreamableHttp, "callTool">,
+): Promise<AwsAlarmSkillContext> {
+  const loaded = await Promise.all(
+    AWS_ALARM_SKILL_NAMES.map(async (skillName) => {
+      try {
+        const result = await server.callTool(
+          "aws___retrieve_skill",
+          { skill_name: skillName },
+        );
+        if (result.isError) throw new Error(managedToolError(result));
+        const content = managedSkillContent(result);
+        if (!content) throw new Error("AWS skill returned no readable content");
+        return { content: `## ${skillName}\n\n${content}`, skillName };
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : String(error),
+          skillName,
+        };
+      }
+    }),
+  );
+  return {
+    content: loaded
+      .flatMap((result) => result.content ? [result.content] : [])
+      .join("\n\n"),
+    failures: loaded.flatMap((result) =>
+      result.error ? [{ error: result.error, skillName: result.skillName }] : []
+    ),
   };
 }
 
