@@ -18,7 +18,7 @@ echo "API:       ${PORTLESS_URL%/}/api"
 echo "Worker:    queue consumer (no HTTP port)"
 if [[ -n "${RESPONDER_PUBLIC_URL:-}" ]]; then
   echo "Webhooks:  ${RESPONDER_PUBLIC_URL%/}"
-  echo "Tunnel:    unclaimed (run pnpm tunnel:claim in this worktree)"
+  echo "Tunnel:    claiming this worktree on startup"
 fi
 
 if [[ -z "${OPENAI_API_KEY:-}" || -z "${DAYTONA_API_KEY:-}" ]]; then

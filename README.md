@@ -52,8 +52,9 @@ pnpm local:dev
 
 The setup command installs dependencies, generates a gitignored `.env.local`,
 starts Postgres, applies the migrations, and creates a local example runtime
-profile. The development command prints the local HTTPS address. Open it,
-create an account, and create the first workspace.
+profile. The development command prints the local HTTPS address and, when a
+public tunnel is configured, claims it for the current worktree. Open the
+dashboard, create an account, and create the first workspace.
 
 The UI and authentication flow work without provider credentials. Set
 `DAYTONA_API_KEY` to store workspace secrets or run investigations, and set

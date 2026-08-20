@@ -23,6 +23,7 @@ const temporaryDirectories = [];
 const repositoryRoot = process.cwd();
 const bridgeScript = join(repositoryRoot, "scripts/local-callback-bridge.mjs");
 const targetScript = join(repositoryRoot, "scripts/local-callback-target.mjs");
+const isolatedEnvironment = { ...process.env, CONDUCTOR_ROOT_PATH: "" };
 
 function temporaryDirectory() {
   const directory = mkdtempSync(join(tmpdir(), "responder-callbacks-"));
@@ -61,7 +62,7 @@ function startBridge(port, workspace, stdio = "ignore") {
   return spawn(process.execPath, [bridgeScript], {
     cwd: workspace,
     env: {
-      ...process.env,
+      ...isolatedEnvironment,
       RESPONDER_CALLBACK_BRIDGE_POLL_INTERVAL: "25",
       RESPONDER_CALLBACK_BRIDGE_PORT: String(port),
     },
@@ -78,7 +79,7 @@ afterEach(() => {
 describe("local callback routing", () => {
   it("stores a shared loopback target atomically", () => {
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace);
+    const targetFile = callbackTargetFile(workspace, isolatedEnvironment);
 
     writeCallbackTarget(
       {
@@ -87,6 +88,7 @@ describe("local callback routing", () => {
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
       workspace,
+      isolatedEnvironment,
     );
 
     expect(targetFile).toBe(
@@ -95,7 +97,7 @@ describe("local callback routing", () => {
         ".git/responder/callback-target.json",
       ),
     );
-    expect(readCallbackTarget(workspace)).toEqual({
+    expect(readCallbackTarget(workspace, isolatedEnvironment)).toEqual({
       origin: "http://127.0.0.1:4321",
       workspace: "/tmp/worktree",
       updatedAt: "2026-07-31T00:00:00.000Z",
@@ -105,8 +107,36 @@ describe("local callback routing", () => {
     });
     expect(statSync(targetFile).mode & 0o777).toBe(0o600);
 
-    clearCallbackTarget(workspace);
-    expect(readCallbackTarget(workspace)).toBeNull();
+    clearCallbackTarget(workspace, isolatedEnvironment);
+    expect(readCallbackTarget(workspace, isolatedEnvironment)).toBeNull();
+  });
+
+  it("shares a callback target across nested repositories in one workspace root", () => {
+    const sharedRoot = temporaryGitRepository();
+    const firstWorkspace = temporaryGitRepository();
+    const secondWorkspace = temporaryGitRepository();
+    const environment = {
+      ...isolatedEnvironment,
+      CONDUCTOR_ROOT_PATH: sharedRoot,
+    };
+
+    writeCallbackTarget(
+      {
+        origin: "http://127.0.0.1:4321",
+        workspace: firstWorkspace,
+        updatedAt: "2026-07-31T00:00:00.000Z",
+      },
+      firstWorkspace,
+      environment,
+    );
+
+    expect(callbackTargetFile(secondWorkspace, environment)).toBe(
+      join(realpathSync(sharedRoot), ".git/responder/callback-target.json"),
+    );
+    expect(readCallbackTarget(secondWorkspace, environment)).toMatchObject({
+      origin: "http://127.0.0.1:4321",
+      workspace: firstWorkspace,
+    });
   });
 
   it("rejects non-loopback and credentialed targets", () => {
@@ -129,14 +159,14 @@ describe("local callback routing", () => {
     });
     const controlPlanePort = await listen(controlPlane);
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace);
+    const targetFile = callbackTargetFile(workspace, isolatedEnvironment);
     const selection = spawn(
       process.execPath,
       [targetScript, "use"],
       {
         cwd: workspace,
         env: {
-          ...process.env,
+          ...isolatedEnvironment,
           CONTROL_PLANE_WEB_PORT: String(controlPlanePort),
         },
         stdio: "ignore",
@@ -158,7 +188,7 @@ describe("local callback routing", () => {
 
   it("releases only the current worktree's claim", async () => {
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace);
+    const targetFile = callbackTargetFile(workspace, isolatedEnvironment);
     writeCallbackTarget(
       {
         origin: "http://127.0.0.1:4321",
@@ -166,13 +196,14 @@ describe("local callback routing", () => {
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
       workspace,
+      isolatedEnvironment,
     );
     const release = spawn(
       process.execPath,
       [targetScript, "release"],
       {
         cwd: workspace,
-        env: process.env,
+        env: isolatedEnvironment,
         stdio: "ignore",
       },
     );
@@ -215,6 +246,7 @@ describe("local callback routing", () => {
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
       workspace,
+      isolatedEnvironment,
     );
 
     const bridge = startBridge(bridgePort, workspace);
@@ -263,6 +295,7 @@ describe("local callback routing", () => {
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
       workspace,
+      isolatedEnvironment,
     );
     const bridge = startBridge(bridgePort, workspace);
 

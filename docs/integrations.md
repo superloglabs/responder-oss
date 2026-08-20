@@ -216,18 +216,21 @@ origin in the gitignored `.env.tunnel.local` file of your main checkout:
 RESPONDER_NGROK_URL=https://responder-dev.ngrok-free.dev
 ```
 
-Start the complete stack, then explicitly route the shared tunnel to this
-worktree:
+Start the complete stack. Startup waits for the dashboard to become healthy,
+then automatically routes the shared tunnel to this worktree:
 
 ```bash
 pnpm local:dev
-pnpm tunnel:claim
 pnpm tunnel:status
 ```
 
 Use the tunnel origin for the provider URLs above. A tunnel claim is
-machine-global and last-claim-wins. Release it when finished:
+machine-global and last-start-wins. Stopping the development command releases
+its claim unless another worktree has claimed the tunnel in the meantime. The
+manual claim and release commands remain available when changing the selected
+worktree without restarting it:
 
 ```bash
+pnpm tunnel:claim
 pnpm tunnel:release
 ```
