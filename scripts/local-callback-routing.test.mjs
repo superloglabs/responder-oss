@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -23,7 +24,6 @@ const temporaryDirectories = [];
 const repositoryRoot = process.cwd();
 const bridgeScript = join(repositoryRoot, "scripts/local-callback-bridge.mjs");
 const targetScript = join(repositoryRoot, "scripts/local-callback-target.mjs");
-const isolatedEnvironment = { ...process.env, CONDUCTOR_ROOT_PATH: "" };
 
 function temporaryDirectory() {
   const directory = mkdtempSync(join(tmpdir(), "responder-callbacks-"));
@@ -35,6 +35,39 @@ function temporaryGitRepository() {
   const directory = temporaryDirectory();
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
   return directory;
+}
+
+function nestedGitRepository(parent, name) {
+  const directory = join(parent, name);
+  mkdirSync(directory);
+  execFileSync("git", ["init", "--quiet"], { cwd: directory });
+  return directory;
+}
+
+function inWorkingDirectory(directory, operation) {
+  const previous = process.cwd();
+  process.chdir(directory);
+  try {
+    return operation();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+function targetFile(workspace) {
+  return inWorkingDirectory(workspace, () => callbackTargetFile());
+}
+
+function writeTarget(workspace, target) {
+  return inWorkingDirectory(workspace, () => writeCallbackTarget(target));
+}
+
+function readTarget(workspace) {
+  return inWorkingDirectory(workspace, () => readCallbackTarget());
+}
+
+function clearTarget(workspace) {
+  return inWorkingDirectory(workspace, () => clearCallbackTarget());
 }
 
 async function listen(server, host = "127.0.0.1") {
@@ -62,7 +95,7 @@ function startBridge(port, workspace, stdio = "ignore") {
   return spawn(process.execPath, [bridgeScript], {
     cwd: workspace,
     env: {
-      ...isolatedEnvironment,
+      ...process.env,
       RESPONDER_CALLBACK_BRIDGE_POLL_INTERVAL: "25",
       RESPONDER_CALLBACK_BRIDGE_PORT: String(port),
     },
@@ -79,61 +112,55 @@ afterEach(() => {
 describe("local callback routing", () => {
   it("stores a shared loopback target atomically", () => {
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace, isolatedEnvironment);
+    const storedTargetFile = targetFile(workspace);
 
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: "http://127.0.0.1:4321",
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
-      isolatedEnvironment,
     );
 
-    expect(targetFile).toBe(
+    expect(storedTargetFile).toBe(
       join(
         realpathSync(workspace),
         ".git/responder/callback-target.json",
       ),
     );
-    expect(readCallbackTarget(workspace, isolatedEnvironment)).toEqual({
+    expect(readTarget(workspace)).toEqual({
       origin: "http://127.0.0.1:4321",
       workspace: "/tmp/worktree",
       updatedAt: "2026-07-31T00:00:00.000Z",
     });
-    expect(JSON.parse(readFileSync(targetFile, "utf8"))).toMatchObject({
+    expect(JSON.parse(readFileSync(storedTargetFile, "utf8"))).toMatchObject({
       origin: "http://127.0.0.1:4321",
     });
-    expect(statSync(targetFile).mode & 0o777).toBe(0o600);
+    expect(statSync(storedTargetFile).mode & 0o777).toBe(0o600);
 
-    clearCallbackTarget(workspace, isolatedEnvironment);
-    expect(readCallbackTarget(workspace, isolatedEnvironment)).toBeNull();
+    clearTarget(workspace);
+    expect(readTarget(workspace)).toBeNull();
   });
 
   it("shares a callback target across nested repositories in one workspace root", () => {
     const sharedRoot = temporaryGitRepository();
-    const firstWorkspace = temporaryGitRepository();
-    const secondWorkspace = temporaryGitRepository();
-    const environment = {
-      ...isolatedEnvironment,
-      CONDUCTOR_ROOT_PATH: sharedRoot,
-    };
+    const firstWorkspace = nestedGitRepository(sharedRoot, "first");
+    const secondWorkspace = nestedGitRepository(sharedRoot, "second");
 
-    writeCallbackTarget(
+    writeTarget(
+      firstWorkspace,
       {
         origin: "http://127.0.0.1:4321",
         workspace: firstWorkspace,
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      firstWorkspace,
-      environment,
     );
 
-    expect(callbackTargetFile(secondWorkspace, environment)).toBe(
+    expect(targetFile(secondWorkspace)).toBe(
       join(realpathSync(sharedRoot), ".git/responder/callback-target.json"),
     );
-    expect(readCallbackTarget(secondWorkspace, environment)).toMatchObject({
+    expect(readTarget(secondWorkspace)).toMatchObject({
       origin: "http://127.0.0.1:4321",
       workspace: firstWorkspace,
     });
@@ -159,14 +186,14 @@ describe("local callback routing", () => {
     });
     const controlPlanePort = await listen(controlPlane);
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace, isolatedEnvironment);
+    const storedTargetFile = targetFile(workspace);
     const selection = spawn(
       process.execPath,
       [targetScript, "use"],
       {
         cwd: workspace,
         env: {
-          ...isolatedEnvironment,
+          ...process.env,
           CONTROL_PLANE_WEB_PORT: String(controlPlanePort),
         },
         stdio: "ignore",
@@ -176,7 +203,7 @@ describe("local callback routing", () => {
     try {
       const [exitCode] = await once(selection, "exit");
       expect(exitCode).toBe(0);
-      expect(JSON.parse(readFileSync(targetFile, "utf8"))).toMatchObject({
+      expect(JSON.parse(readFileSync(storedTargetFile, "utf8"))).toMatchObject({
         origin: `http://127.0.0.1:${controlPlanePort}`,
         workspace: realpathSync(workspace),
       });
@@ -188,29 +215,28 @@ describe("local callback routing", () => {
 
   it("releases only the current worktree's claim", async () => {
     const workspace = temporaryGitRepository();
-    const targetFile = callbackTargetFile(workspace, isolatedEnvironment);
-    writeCallbackTarget(
+    const storedTargetFile = targetFile(workspace);
+    writeTarget(
+      workspace,
       {
         origin: "http://127.0.0.1:4321",
         workspace: realpathSync(workspace),
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
-      isolatedEnvironment,
     );
     const release = spawn(
       process.execPath,
       [targetScript, "release"],
       {
         cwd: workspace,
-        env: isolatedEnvironment,
+        env: process.env,
         stdio: "ignore",
       },
     );
 
     const [exitCode] = await once(release, "exit");
     expect(exitCode).toBe(0);
-    expect(() => readFileSync(targetFile, "utf8")).toThrow();
+    expect(() => readFileSync(storedTargetFile, "utf8")).toThrow();
   });
 
   it("proxies methods, paths, bodies, and query strings to the selection", async () => {
@@ -239,14 +265,13 @@ describe("local callback routing", () => {
     await new Promise((resolve) => portReservation.close(resolve));
 
     const workspace = temporaryGitRepository();
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: `http://127.0.0.1:${upstreamPort}`,
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
-      isolatedEnvironment,
     );
 
     const bridge = startBridge(bridgePort, workspace);
@@ -284,14 +309,13 @@ describe("local callback routing", () => {
     const bridgePort = await listen(portReservation);
     await new Promise((resolve) => portReservation.close(resolve));
     const workspace = temporaryGitRepository();
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: "http://127.0.0.1:4321",
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
-      isolatedEnvironment,
     );
     const bridge = startBridge(bridgePort, workspace);
 
@@ -327,14 +351,13 @@ describe("local callback routing", () => {
     const bridgePort = await listen(portReservation);
     await new Promise((resolve) => portReservation.close(resolve));
     const workspace = temporaryGitRepository();
-    writeCallbackTarget(
+    writeTarget(
+      workspace,
       {
         origin: `http://127.0.0.1:${upstreamPort}`,
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
       },
-      workspace,
-      isolatedEnvironment,
     );
     const bridge = startBridge(bridgePort, workspace);
 

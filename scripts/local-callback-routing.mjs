@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -12,19 +14,29 @@ import process from "node:process";
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-function callbackStateRepository(cwd, environment) {
-  return environment.CONDUCTOR_ROOT_PATH?.trim() || cwd;
+function outermostGitRepository() {
+  let directory = realpathSync(process.cwd());
+  let repository = null;
+
+  while (true) {
+    if (existsSync(join(directory, ".git"))) repository = directory;
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+
+  if (!repository) {
+    throw new Error("Local callback routing requires a Git repository.");
+  }
+  return repository;
 }
 
-export function callbackTargetFile(
-  cwd = process.cwd(),
-  environment = process.env,
-) {
+export function callbackTargetFile() {
   const gitCommonDirectory = execFileSync(
     "git",
     ["rev-parse", "--path-format=absolute", "--git-common-dir"],
     {
-      cwd: callbackStateRepository(cwd, environment),
+      cwd: outermostGitRepository(),
       encoding: "utf8",
     },
   ).trim();
@@ -61,13 +73,10 @@ export function validCallbackTarget(value) {
   }
 }
 
-export function readCallbackTarget(
-  cwd = process.cwd(),
-  environment = process.env,
-) {
+export function readCallbackTarget() {
   try {
     return validCallbackTarget(
-      JSON.parse(readFileSync(callbackTargetFile(cwd, environment), "utf8")),
+      JSON.parse(readFileSync(callbackTargetFile(), "utf8")),
     );
   } catch (error) {
     if (error?.code === "ENOENT") return null;
@@ -75,15 +84,11 @@ export function readCallbackTarget(
   }
 }
 
-export function writeCallbackTarget(
-  target,
-  cwd = process.cwd(),
-  environment = process.env,
-) {
+export function writeCallbackTarget(target) {
   const validTarget = validCallbackTarget(target);
   if (!validTarget) throw new Error("Refusing to store an invalid callback target.");
 
-  const targetFile = callbackTargetFile(cwd, environment);
+  const targetFile = callbackTargetFile();
   const temporaryFile = join(
     dirname(targetFile),
     `.${basename(targetFile)}.${randomBytes(8).toString("hex")}.tmp`,
@@ -103,9 +108,6 @@ export function writeCallbackTarget(
   return validTarget;
 }
 
-export function clearCallbackTarget(
-  cwd = process.cwd(),
-  environment = process.env,
-) {
-  rmSync(callbackTargetFile(cwd, environment), { force: true });
+export function clearCallbackTarget() {
+  rmSync(callbackTargetFile(), { force: true });
 }
