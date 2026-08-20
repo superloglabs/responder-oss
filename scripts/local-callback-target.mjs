@@ -11,6 +11,7 @@ const waitForHealth = process.argv.includes("--wait");
 const keepWatching = process.argv.includes("--watch");
 const healthPollInterval = 500;
 const healthTimeout = 60_000;
+const claimRetryInterval = 5_000;
 
 function localWebPort() {
   if (process.env.CONTROL_PLANE_WEB_PORT) {
@@ -109,6 +110,19 @@ async function useCurrentWorkspace() {
   if (keepWatching) watchCurrentWorkspace(target.workspace);
 }
 
+async function keepClaimingCurrentWorkspace() {
+  while (true) {
+    try {
+      await useCurrentWorkspace();
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`${message} Retrying the tunnel claim.\n`);
+      await new Promise((resolve) => setTimeout(resolve, claimRetryInterval));
+    }
+  }
+}
+
 function releaseCurrentWorkspace() {
   const target = readCallbackTarget();
   if (!target) {
@@ -145,7 +159,8 @@ async function printStatus() {
 
 try {
   if (command === "use" || command === "claim") {
-    await useCurrentWorkspace();
+    if (keepWatching) await keepClaimingCurrentWorkspace();
+    else await useCurrentWorkspace();
   } else if (command === "status") {
     await printStatus();
   } else if (command === "release") {

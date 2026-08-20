@@ -61,7 +61,15 @@ async function withLangfuseConcurrencyLimit<T>(
 function sanitizedString(value: string, secrets: readonly string[]): string {
   let sanitized = value;
   for (const secret of secrets) {
-    if (secret.length >= 8) sanitized = sanitized.replaceAll(secret, REDACTED);
+    if (secret.length > 0) sanitized = sanitized.replaceAll(secret, REDACTED);
+  }
+  try {
+    const parsed = JSON.parse(sanitized) as unknown;
+    if (parsed && typeof parsed === "object") {
+      sanitized = JSON.stringify(sanitizeLangfuseOutput(parsed, secrets));
+    }
+  } catch {
+    // Most text content is not serialized JSON.
   }
   return sanitized.length > MAX_OUTPUT_LENGTH
     ? `${sanitized.slice(0, MAX_OUTPUT_LENGTH)}\n[output truncated]`

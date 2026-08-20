@@ -82,6 +82,17 @@ describe("Langfuse investigation context", () => {
     ).toEqual({ nested: "value [redacted]", token: "[redacted]" });
   });
 
+  it("redacts short secrets and sensitive fields inside serialized JSON", () => {
+    expect(
+      sanitizeLangfuseOutput(
+        JSON.stringify({ nested: { apiKey: "provider-key" }, value: "key=abc" }),
+        ["abc"],
+      ),
+    ).toBe(
+      JSON.stringify({ nested: { apiKey: "[redacted]" }, value: "key=[redacted]" }),
+    );
+  });
+
   it("filters tool discovery and rejects direct write calls", async () => {
     const server = new ScopedLangfuseMcpServer(fakeServer(), connection);
     await expect(server.listTools()).resolves.toEqual([

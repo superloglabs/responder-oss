@@ -239,6 +239,27 @@ describe("local callback routing", () => {
     expect(() => readFileSync(storedTargetFile, "utf8")).toThrow();
   });
 
+  it("keeps retrying a watched claim when local setup is incomplete", async () => {
+    const workspace = temporaryGitRepository();
+    const selection = spawn(
+      process.execPath,
+      [targetScript, "claim", "--wait", "--watch"],
+      {
+        cwd: workspace,
+        env: { ...process.env, CONTROL_PLANE_WEB_PORT: "" },
+        stdio: "ignore",
+      },
+    );
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(selection.exitCode).toBeNull();
+    } finally {
+      selection.kill("SIGTERM");
+      await once(selection, "exit");
+    }
+  });
+
   it("proxies methods, paths, bodies, and query strings to the selection", async () => {
     const upstream = createServer((request, response) => {
       let body = "";
