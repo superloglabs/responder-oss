@@ -124,6 +124,21 @@ function managedSkillContent(content: unknown): string | null {
   return null;
 }
 
+function managedToolError(content: unknown): string {
+  if (!Array.isArray(content)) return "AWS skill retrieval failed";
+  const text = content.flatMap((item) =>
+    item &&
+    typeof item === "object" &&
+    "type" in item &&
+    item.type === "text" &&
+    "text" in item &&
+    typeof item.text === "string"
+      ? [item.text]
+      : []
+  ).join("\n");
+  return text || "AWS skill retrieval failed";
+}
+
 export async function loadAwsAlarmSkillContext(
   server: Pick<MCPServerStreamableHttp, "callTool">,
 ): Promise<AwsAlarmSkillContext> {
@@ -134,6 +149,7 @@ export async function loadAwsAlarmSkillContext(
           "aws___retrieve_skill",
           { skill_name: skillName },
         );
+        if (result.isError) throw new Error(managedToolError(result));
         const content = managedSkillContent(result);
         if (!content) throw new Error("AWS skill returned no readable content");
         return { content: `## ${skillName}\n\n${content}`, skillName };

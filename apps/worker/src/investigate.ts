@@ -79,7 +79,11 @@ export function safeInvestigationError(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
   let message =
-    error instanceof Error ? error.message : "Investigation agent failed";
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "Investigation agent failed";
   for (const name of ["OPENAI_API_KEY", "DAYTONA_API_KEY"] as const) {
     const value = environment[name];
     if (value) message = message.replaceAll(value, "[redacted]");

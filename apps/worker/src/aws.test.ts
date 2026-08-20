@@ -158,4 +158,26 @@ describe("AWS alarm skill loading", () => {
       },
     ]);
   });
+
+  it("reports MCP error results instead of treating them as guide text", async () => {
+    const callTool = vi.fn().mockImplementation(
+      (_toolName: string, input: { skill_name: string }) => {
+        const result = [
+          { text: `failed to load ${input.skill_name}`, type: "text" },
+        ];
+        Object.assign(result, { isError: true });
+        return Promise.resolve(result);
+      },
+    );
+
+    const result = await loadAwsAlarmSkillContext({ callTool } as never);
+
+    expect(result.content).toBe("");
+    expect(result.failures).toEqual(
+      AWS_ALARM_SKILL_NAMES.map((skillName) => ({
+        error: `failed to load ${skillName}`,
+        skillName,
+      })),
+    );
+  });
 });

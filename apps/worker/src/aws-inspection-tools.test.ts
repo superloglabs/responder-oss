@@ -249,4 +249,22 @@ describe("typed AWS inspection tools", () => {
       "Specify accountId when more than one AWS account is connected",
     );
   });
+
+  it("rejects regions outside the connected commercial AWS partition", async () => {
+    const clients = fakeClients();
+    const tool = inspectionTool(
+      "aws_inspect_sqs_queue",
+      clients,
+    );
+
+    await expect(tool.invoke(
+      undefined as never,
+      JSON.stringify({ queueName: "orders-dlq", region: "cn-north-1" }),
+    )).resolves.toContain("Invalid JSON input for tool");
+    await expect(tool.invoke(
+      undefined as never,
+      JSON.stringify({ queueName: "orders-dlq", region: "us-gov-west-1" }),
+    )).resolves.toContain("Invalid JSON input for tool");
+    expect(clients.getQueueUrl).not.toHaveBeenCalled();
+  });
 });

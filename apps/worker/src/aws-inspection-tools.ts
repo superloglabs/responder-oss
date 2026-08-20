@@ -40,6 +40,7 @@ import {
 } from "@aws-sdk/client-sqs";
 import { tool } from "@openai/agents";
 import type { RuntimeAwsConnection } from "@responder/core/db/investigations";
+import { isAwsCommercialRegion } from "@responder/core/integrations/aws";
 import { z } from "zod";
 import { createRefreshingAwsCredentialsProvider } from "./aws.js";
 
@@ -164,7 +165,7 @@ const regionParameter = z
   .trim()
   .min(3)
   .max(64)
-  .regex(/^[a-z0-9-]+$/u)
+  .refine(isAwsCommercialRegion, "Region must use the commercial AWS partition")
   .describe("AWS region, for example eu-west-1");
 const timestampParameter = z.iso.datetime({ offset: true });
 

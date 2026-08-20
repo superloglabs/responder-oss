@@ -329,4 +329,12 @@ describe("sandbox agent configuration", () => {
       type: "instructions.configured",
     });
   });
+
+  it("preserves and redacts string failures", () => {
+    expect(
+      safeInvestigationError("AWS guide failed after openai-secret", {
+        OPENAI_API_KEY: "openai-secret",
+      }),
+    ).toBe("AWS guide failed after [redacted]");
+  });
 });
