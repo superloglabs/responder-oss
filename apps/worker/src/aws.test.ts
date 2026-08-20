@@ -30,6 +30,30 @@ describe("AWS MCP tool filtering", () => {
       false,
     );
   });
+
+  it("exposes the IAM-guarded script runner and task polling tools", async () => {
+    await expect(
+      awsReadOnlyToolFilter({}, { name: "aws___run_script" }),
+    ).resolves.toBe(true);
+    await expect(
+      awsReadOnlyToolFilter({}, {
+        annotations: { readOnlyHint: false },
+        name: "aws___get_tasks",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      awsReadOnlyToolFilter({}, { name: "run_script" }),
+    ).resolves.toBe(true);
+  });
+
+  it("keeps other generic AWS execution tools hidden", async () => {
+    await expect(
+      awsReadOnlyToolFilter({}, { name: "aws___call_aws" }),
+    ).resolves.toBe(false);
+    await expect(
+      awsReadOnlyToolFilter({}, { name: "aws___get_presigned_url" }),
+    ).resolves.toBe(false);
+  });
 });
 
 describe("AWS credential refresh", () => {
