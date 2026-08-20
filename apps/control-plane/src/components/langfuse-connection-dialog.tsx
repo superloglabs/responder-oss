@@ -10,6 +10,22 @@ const LANGFUSE_DEPLOYMENTS = [
 
 type LangfuseDeployment = (typeof LANGFUSE_DEPLOYMENTS)[number]["id"];
 
+function safeDeploymentUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password
+    ) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function LangfuseConnectionDialog({
   connectUrl,
   open,
@@ -75,6 +91,13 @@ export function LangfuseConnectionDialog({
 
   if (!open) return null;
 
+  const selectedDeployment = LANGFUSE_DEPLOYMENTS.find(
+    (item) => item.id === deployment,
+  )!;
+  const deploymentUrl = safeDeploymentUrl(
+    deployment === "self_hosted" ? selfHostedUrl : selectedDeployment.baseUrl,
+  );
+
   return (
     <div
       className="siteDialogBackdrop"
@@ -131,7 +154,17 @@ export function LangfuseConnectionDialog({
           ) : null}
           <ol className="siteDialog__instructions">
             <li>Open the Langfuse project you want the Agent to inspect.</li>
-            <li>Open <strong>Project Settings → API Keys</strong>.</li>
+            <li>
+              Open{" "}
+              {deploymentUrl ? (
+                <a href={deploymentUrl} rel="noreferrer" target="_blank">
+                  Project Settings → API Keys
+                </a>
+              ) : (
+                <strong>Project Settings → API Keys</strong>
+              )}
+              .
+            </li>
             <li>Create a dedicated key pair and paste both values below.</li>
           </ol>
           <label className="siteDialog__field">
