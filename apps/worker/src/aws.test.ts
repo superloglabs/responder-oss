@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  AWS_ALARM_SKILL_NAMES,
   awsReadOnlyToolFilter,
   createRefreshingAwsCredentialsProvider,
+  loadAwsAlarmSkillContext,
 } from "./aws.js";
 
 const connection = {
@@ -103,6 +105,57 @@ describe("AWS credential refresh", () => {
     await expect(Promise.all([first, second])).resolves.toEqual([
       credentials,
       credentials,
+    ]);
+  });
+});
+
+describe("AWS alarm skill loading", () => {
+  it("loads each service guide into the agent context", async () => {
+    const callTool = vi.fn().mockImplementation(
+      (_toolName: string, input: { skill_name: string }) =>
+        Promise.resolve([
+          {
+            text: JSON.stringify({
+              content: { skill_content: `guide for ${input.skill_name}` },
+            }),
+            type: "text",
+          },
+        ]),
+    );
+
+    const result = await loadAwsAlarmSkillContext({ callTool } as never);
+
+    expect(result.failures).toEqual([]);
+    expect(result.content).toContain("guide for aws-observability");
+    expect(result.content).toContain("guide for aws-messaging-and-streaming");
+    expect(result.content).toContain("guide for aws-serverless");
+    expect(callTool).toHaveBeenCalledTimes(AWS_ALARM_SKILL_NAMES.length);
+    expect(callTool).toHaveBeenNthCalledWith(
+      1,
+      "aws___retrieve_skill",
+      { skill_name: "aws-observability" },
+    );
+  });
+
+  it("keeps available guides when one guide fails", async () => {
+    const callTool = vi.fn().mockImplementation(
+      (_toolName: string, input: { skill_name: string }) =>
+        input.skill_name === "aws-messaging-and-streaming"
+          ? Promise.reject(new Error("temporarily unavailable"))
+          : Promise.resolve([
+              { text: `guide for ${input.skill_name}`, type: "text" },
+            ]),
+    );
+
+    const result = await loadAwsAlarmSkillContext({ callTool } as never);
+
+    expect(result.content).toContain("guide for aws-observability");
+    expect(result.content).toContain("guide for aws-serverless");
+    expect(result.failures).toEqual([
+      {
+        error: "temporarily unavailable",
+        skillName: "aws-messaging-and-streaming",
+      },
     ]);
   });
 });

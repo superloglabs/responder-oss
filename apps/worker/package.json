@@ -13,6 +13,10 @@
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "5.2.0",
+    "@aws-sdk/client-cloudwatch": "3.1111.0",
+    "@aws-sdk/client-cloudwatch-logs": "3.1111.0",
+    "@aws-sdk/client-lambda": "3.1111.0",
+    "@aws-sdk/client-sqs": "3.1111.0",
     "@daytona/sdk": "0.203.0",
     "@daytonaio/sdk": "npm:@daytona/sdk@0.203.0",
     "@openai/agents": "0.14.2",

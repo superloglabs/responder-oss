@@ -249,6 +249,7 @@ describe("sandbox agent configuration", () => {
       agentPrompt: "Inspect the reported failure.",
       awsAlarmTriggered: true,
       awsAccountNames: ["AWS · 123456789012"],
+      awsSkillContext: "# AWS Observability\nInspect alarm history.",
       clickStackConnected: false,
       datadogConnected: false,
       repositories: [],
@@ -260,6 +261,11 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("Never request secret values");
     expect(instructions).toContain("Locate the exact CloudWatch alarm");
     expect(instructions).toContain("Treat the Slack notification as a pointer");
+    expect(instructions).toContain("aws_inspect_cloudwatch_alarm");
+    expect(instructions).toContain("top-level await instead of asyncio.run");
+    expect(instructions).toContain("exact PascalCase AWS API operation names");
+    expect(instructions).toContain("outer success status");
+    expect(instructions).toContain("# AWS Observability");
   });
 
   it("stores the exact initial message that is sent to the agent", () => {
