@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getIssuePullRequestForRemediation: vi.fn(),
   getRuntimeAgentConfig: vi.fn(),
   notifyBillingLimitReached: vi.fn(),
+  prepareInvestigationRetry: vi.fn(),
   prepareWorkerQueues: vi.fn(),
   setIssuePullRequestSession: vi.fn(),
 }));
@@ -35,6 +36,7 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   discardPendingInvestigation: mocks.discardPendingInvestigation,
   failInvestigation: mocks.failInvestigation,
   getRuntimeAgentConfig: mocks.getRuntimeAgentConfig,
+  prepareInvestigationRetry: mocks.prepareInvestigationRetry,
 }));
 
 vi.mock("../../../../packages/core/src/db/pull-requests.js", () => ({
@@ -65,6 +67,7 @@ vi.mock("../../../../packages/core/src/jobs.js", async (importOriginal) => {
 import {
   closeInvestigationQueue,
   queueInvestigation,
+  queueInvestigationRetry,
   queueIssueRemediation,
 } from "./queue.js";
 
@@ -119,6 +122,12 @@ describe("investigation queue", () => {
     mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.prepareWorkerQueues.mockResolvedValue(undefined);
     mocks.notifyBillingLimitReached.mockResolvedValue(undefined);
+    mocks.prepareInvestigationRetry.mockResolvedValue({
+      config: created.config,
+      input: request,
+      investigationId: created.investigationId,
+      runtimeProfileId: created.runtimeProfileId,
+    });
     mocks.getIssuePullRequestForRemediation.mockResolvedValue(
       remediationRequest,
     );
@@ -189,6 +198,20 @@ describe("investigation queue", () => {
       created.investigationId,
     );
     expect(mocks.bossSend).not.toHaveBeenCalled();
+    expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not count a retry as a newly created investigation", async () => {
+    await expect(
+      queueInvestigationRetry(created.investigationId),
+    ).resolves.toEqual({
+      investigationId: created.investigationId,
+      jobId: "21212121-2121-4121-8121-212121212121",
+    });
+
+    expect(mocks.prepareInvestigationRetry).toHaveBeenCalledWith(
+      created.investigationId,
+    );
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 
