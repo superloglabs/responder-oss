@@ -18,6 +18,7 @@ import {
   logSlackAcknowledgementFailure,
   slackCopyPromptResponse,
   slackAlertProvider,
+  slackAwsAlarm,
   slackMessageBody,
   slackPullRequestQueuedResponse,
   shouldIgnoreResolvedSlackAlert,
@@ -28,6 +29,24 @@ import {
 } from "./webhooks/sentry.js";
 import { startSlackIssueRemediation } from "./issues/remediation.js";
 import { queueInvestigation } from "./investigations/queue.js";
+
+const slackWebhookMocks = vi.hoisted(() => ({
+  findAgentsForSlackEvent: vi.fn(),
+  getSlackChannelConnection: vi.fn(),
+}));
+
+vi.mock("../../../packages/core/src/db/agents.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  findAgentsForSlackEvent: slackWebhookMocks.findAgentsForSlackEvent,
+}));
+
+vi.mock(
+  "../../../packages/core/src/db/integrations.js",
+  async (importOriginal) => ({
+    ...(await importOriginal()),
+    getSlackChannelConnection: slackWebhookMocks.getSlackChannelConnection,
+  }),
+);
 
 vi.mock("./issues/remediation.js", () => ({
   startIssueRemediation: vi.fn(),
@@ -49,6 +68,7 @@ vi.mock("./investigations/queue.js", () => ({
 
 describe("control-plane API", () => {
   afterEach(() => {
+    vi.clearAllMocks();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -519,11 +539,37 @@ describe("control-plane API", () => {
       expectedProvider: "app",
       subtype: undefined,
     },
+    {
+      name: "AWS CloudWatch alarm notification",
+      body: [
+        "The alarm productUpdateWebhook-DlqAlarm changed state to ALARM: Threshold Crossed.",
+        "https://eu-west-1.console.aws.amazon.com/cloudwatch/home?region=eu-west-1#alarmsV2:alarm/productUpdateWebhook-DlqAlarm",
+        "There are failed messages in the productUpdateWebhook dead letter queue.",
+      ].join("\n"),
+      botName: "AWS Alarm notification",
+      expectedProvider: "aws",
+      subtype: "bot_message",
+    },
+    {
+      name: "rich AWS RDS alarm card",
+      body: [
+        "🚨 CRITICAL: Freeable Memory",
+        "DB Instance: dialog-monolith-production-encrypteddatabasecluster",
+        "Condition: Freeable Memory < 500 MiB for 3 consecutive periods",
+        "Reason: Threshold Crossed: 3 datapoints were less than the threshold.",
+        "Alarm Details",
+        "https://eu-west-1.console.aws.amazon.com/cloudwatch/home?region=eu-west-1#alarmsV2:alarm/dialog-monolith-freeable-memory",
+      ].join("\n"),
+      botName: "AWS Alarm notification",
+      expectedProvider: "aws",
+      subtype: "bot_message",
+    },
   ])("accepts the observed $name shape", (shape) => {
+    const isThreadBroadcast = shape.subtype === "thread_broadcast";
     const provider = slackAlertProvider({
       body: shape.body,
-      botAppId: shape.subtype ? undefined : "A-APP",
-      botId: shape.subtype ? undefined : "B-BOT",
+      botAppId: isThreadBroadcast ? undefined : "A-APP",
+      botId: isThreadBroadcast ? undefined : "B-BOT",
       botName: shape.botName,
       subtype: shape.subtype,
     });
@@ -537,6 +583,135 @@ describe("control-plane API", () => {
         shouldIgnoreResolvedSlackAlert(provider, shape.body, shape.botName),
       ).toBe(false);
     }
+  });
+
+  it("normalizes the exact AWS alarm identity and region", () => {
+    const body = [
+      "The alarm productUpdateWebhook-DlqAlarm changed state to ALARM: Threshold Crossed.",
+      "<https://eu-west-1.console.aws.amazon.com/cloudwatch/home?region=eu-west-1#alarmsV2:alarm/productUpdateWebhook-DlqAlarm|see the alarm>",
+    ].join("\n");
+
+    expect(
+      slackAwsAlarm({ body, senderName: "AWS Alarm notification" }),
+    ).toEqual({
+      alarmName: "productUpdateWebhook-DlqAlarm",
+      consoleUrl:
+        "https://eu-west-1.console.aws.amazon.com/cloudwatch/home?region=eu-west-1#alarmsV2:alarm/productUpdateWebhook-DlqAlarm",
+      region: "eu-west-1",
+      state: "ALARM",
+    });
+  });
+
+  it("queues an AWS alarm posted by an app in a watched Slack channel", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    slackWebhookMocks.findAgentsForSlackEvent.mockResolvedValueOnce([
+      {
+        agentId: "17171717-1717-4717-8717-171717171717",
+        integrationAccountId: "04040404-0404-4404-8404-040404040404",
+        organizationId: "03030303-0303-4303-8303-030303030303",
+        trigger: "slack_channel",
+      },
+    ]);
+    slackWebhookMocks.getSlackChannelConnection.mockResolvedValueOnce(null);
+    vi.mocked(queueInvestigation).mockResolvedValueOnce({
+      investigationId: "01010101-0101-4101-8101-010101010101",
+      jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
+    });
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvAwsAlarm",
+      event: {
+        type: "message",
+        subtype: "bot_message",
+        bot_id: "B-AWS",
+        bot_profile: {
+          app_id: "A-AWS",
+          name: "AWS Alarm notification",
+        },
+        channel: "C123",
+        ts: "1700000005.000001",
+        text: [
+          "The alarm responder-aws-alarm-e2e-lambda-errors changed state to ALARM: Threshold Crossed.",
+          "https://eu-west-3.console.aws.amazon.com/cloudwatch/home?region=eu-west-3#alarmsV2:alarm/responder-aws-alarm-e2e-lambda-errors",
+        ].join("\n"),
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      matchedAgents: 1,
+      ok: true,
+    });
+    expect(queueInvestigation).toHaveBeenCalledWith({
+      agentId: "17171717-1717-4717-8717-171717171717",
+      attributes: {
+        awsAlarmName: "responder-aws-alarm-e2e-lambda-errors",
+        awsAlarmRegion: "eu-west-3",
+        awsAlarmState: "ALARM",
+        awsAlarmUrl:
+          "https://eu-west-3.console.aws.amazon.com/cloudwatch/home?region=eu-west-3#alarmsV2:alarm/responder-aws-alarm-e2e-lambda-errors",
+        channelId: "C123",
+        slackAlertProvider: "aws",
+        slackEventId: "EvAwsAlarm",
+        teamId: "T123",
+        threadTimestamp: "1700000005.000001",
+        timestamp: "1700000005.000001",
+      },
+      body: expect.stringContaining("changed state to ALARM"),
+      externalEventId:
+        "EvAwsAlarm:17171717-1717-4717-8717-171717171717",
+      provider: "slack",
+      sourceUrl: "https://slack.com/archives/C123/p1700000005000001",
+      title: expect.stringContaining("responder-aws-alarm-e2e-lambda-errors"),
+    });
+  });
+
+  it("ignores AWS alarm recovery and unrelated Amazon Q messages", () => {
+    const recovery = [
+      "The alarm checkout-errors changed state to OK: Threshold Crossed.",
+      "https://eu-west-3.console.aws.amazon.com/cloudwatch/home?region=eu-west-3#alarmsV2:alarm/checkout-errors",
+    ].join("\n");
+    const provider = slackAlertProvider({
+      body: recovery,
+      botAppId: "A-AWS",
+      botId: "B-AWS",
+      botName: "AWS Alarm notification",
+    });
+
+    expect(provider).toBe("aws");
+    expect(
+      shouldIgnoreResolvedSlackAlert(
+        provider!,
+        recovery,
+        "AWS Alarm notification",
+      ),
+    ).toBe(true);
+    expect(
+      slackAlertProvider({
+        body: "AWS deployment completed successfully.",
+        botAppId: "A-AWS",
+        botId: "B-AWS",
+        botName: "Amazon Q",
+      }),
+    ).toBeNull();
   });
 
   it("ignores human messages in a watched channel", async () => {
@@ -784,6 +959,7 @@ describe("control-plane API", () => {
     const body = "✅ Alert: error rate is above its threshold";
 
     expect(shouldIgnoreResolvedSlackAlert("app", body)).toBe(true);
+    expect(shouldIgnoreResolvedSlackAlert("aws", body, "AWS")).toBe(true);
     expect(shouldIgnoreResolvedSlackAlert("datadog", body)).toBe(false);
     expect(shouldIgnoreResolvedSlackAlert("sentry", body)).toBe(false);
   });
