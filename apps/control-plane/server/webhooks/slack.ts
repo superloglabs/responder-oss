@@ -230,13 +230,95 @@ export function isSentryIssueAlert(
   );
 }
 
-type SlackAlertProvider = "app" | "datadog" | "sentry";
+type SlackAlertProvider = "app" | "aws" | "datadog" | "sentry";
+
+export type SlackAwsAlarm = {
+  alarmName?: string;
+  consoleUrl?: string;
+  region?: string;
+  state: "ALARM" | "INSUFFICIENT_DATA" | "OK";
+};
+
+function slackMessageUrls(body: string): string[] {
+  return body.match(/https:\/\/[^\s>|)]+/giu) ?? [];
+}
+
+function cloudWatchAlarmUrl(body: string): URL | null {
+  for (const candidate of slackMessageUrls(body)) {
+    try {
+      const url = new URL(candidate);
+      if (
+        /^(?:[a-z0-9-]+\.)?console\.aws\.amazon\.com$/iu.test(url.hostname) &&
+        url.pathname === "/cloudwatch/home" &&
+        /alarmsV2:alarm\//iu.test(url.hash)
+      ) {
+        return url;
+      }
+    } catch {
+      // Ignore malformed URLs extracted from message formatting.
+    }
+  }
+  return null;
+}
+
+function alarmNameFromUrl(url: URL): string | undefined {
+  try {
+    const hash = decodeURIComponent(url.hash);
+    const marker = "alarmsV2:alarm/";
+    const markerIndex = hash.toLowerCase().indexOf(marker.toLowerCase());
+    if (markerIndex === -1) return undefined;
+    const alarmName = hash.slice(markerIndex + marker.length).trim();
+    return alarmName || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function slackAwsAlarm(input: {
+  body: string;
+  senderName?: string;
+}): SlackAwsAlarm | null {
+  const senderName = input.senderName?.trim() ?? "";
+  const isAwsSender = /\b(?:amazon\s+q|aws)\b/iu.test(senderName);
+  const consoleUrl = cloudWatchAlarmUrl(input.body);
+  if (!isAwsSender && !consoleUrl) return null;
+
+  const stateMatch = input.body.match(
+    /\b(?:changed state to|state:)\s*(ALARM|OK|INSUFFICIENT_DATA)\b/iu,
+  );
+  const criticalAlarm =
+    /^(?:\s*(?:🚨|:rotating_light:)\s*)?\**CRITICAL\b/imu.test(input.body) &&
+    (/\bAlarm Details\b/iu.test(input.body) || consoleUrl !== null);
+  const state = stateMatch?.[1]?.toUpperCase() ??
+    (criticalAlarm ? "ALARM" : undefined);
+  if (state !== "ALARM" && state !== "OK" && state !== "INSUFFICIENT_DATA") {
+    return null;
+  }
+
+  const alarmNameMatch = input.body.match(
+    /\bThe alarm\s+(.+?)\s+changed state to\s+(?:ALARM|OK|INSUFFICIENT_DATA)\b/iu,
+  );
+  const region = consoleUrl?.searchParams.get("region") ??
+    consoleUrl?.hostname.match(/^([a-z0-9-]+)\.console\.aws\.amazon\.com$/iu)?.[1];
+  const alarmName = alarmNameMatch?.[1]?.trim() ||
+    (consoleUrl ? alarmNameFromUrl(consoleUrl) : undefined);
+
+  return {
+    ...(alarmName ? { alarmName } : {}),
+    ...(consoleUrl ? { consoleUrl: consoleUrl.toString() } : {}),
+    ...(region ? { region } : {}),
+    state,
+  };
+}
 
 export function shouldIgnoreResolvedSlackAlert(
   alertProvider: SlackAlertProvider,
   body: string,
   senderName?: string,
 ): boolean {
+  if (alertProvider === "aws") {
+    return slackAwsAlarm({ body, senderName })?.state !== "ALARM";
+  }
   return (
     alertProvider === "app" &&
     (isResolvedSlackAlert(body) ||
@@ -275,6 +357,9 @@ export function slackAlertProvider(input: {
   if (!isAppMessage && !isThreadBroadcast) return null;
 
   const senderName = input.botName?.trim() || input.username?.trim();
+  if (isAppMessage && slackAwsAlarm({ body: input.body, senderName })) {
+    return "aws";
+  }
   if (senderName) {
     if (/\bdatadog\b/i.test(senderName)) return "datadog";
     if (/\bsentry\b/i.test(senderName)) return "sentry";
@@ -300,6 +385,8 @@ function parseJson(value: string): unknown {
 
 async function forwardSlackEvent(input: {
   agentId: string;
+  alertProvider: SlackAlertProvider | null;
+  awsAlarm: SlackAwsAlarm | null;
   body: string;
   channelId: string;
   eventId: string;
@@ -315,6 +402,19 @@ async function forwardSlackEvent(input: {
     body: input.body,
     sourceUrl: `https://slack.com/archives/${input.channelId}/p${input.timestamp.replace(".", "")}`,
     attributes: {
+      ...(input.alertProvider
+        ? { slackAlertProvider: input.alertProvider }
+        : {}),
+      ...(input.awsAlarm?.alarmName
+        ? { awsAlarmName: input.awsAlarm.alarmName }
+        : {}),
+      ...(input.awsAlarm?.consoleUrl
+        ? { awsAlarmUrl: input.awsAlarm.consoleUrl }
+        : {}),
+      ...(input.awsAlarm?.region
+        ? { awsAlarmRegion: input.awsAlarm.region }
+        : {}),
+      ...(input.awsAlarm ? { awsAlarmState: input.awsAlarm.state } : {}),
       channelId: input.channelId,
       slackEventId: input.eventId,
       teamId: input.teamId,
@@ -645,8 +745,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   }
 
   const body = slackMessageBody(event);
-  let alertProvider: "app" | "datadog" | "sentry" | null = null;
+  let alertProvider: SlackAlertProvider | null = null;
+  let awsAlarm: SlackAwsAlarm | null = null;
   if (event.type === "message") {
+    const senderName = event.bot_profile?.name ?? event.username;
     alertProvider = slackAlertProvider({
       body,
       botAppId: event.app_id ?? event.bot_profile?.app_id,
@@ -674,11 +776,14 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         reason: "unsupported_alert_sender",
       });
     }
+    if (alertProvider === "aws") {
+      awsAlarm = slackAwsAlarm({ body, senderName });
+    }
     if (
       shouldIgnoreResolvedSlackAlert(
         alertProvider,
         body,
-        event.bot_profile?.name ?? event.username,
+        senderName,
       )
     ) {
       console.info(
@@ -733,7 +838,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         reason: "datadog_recovery",
       });
     }
-    if (alertProvider === "app") {
+    if (alertProvider === "app" || alertProvider === "aws") {
       logAcceptedSlackAppAlert({
         botAppId: event.app_id ?? event.bot_profile?.app_id ?? null,
         botId: event.bot_id ?? null,
@@ -757,6 +862,8 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     matches.map(async (match) => {
       const result = await forwardSlackEvent({
         agentId: match.agentId,
+        alertProvider,
+        awsAlarm,
         body,
         channelId: event.channel,
         eventId: callback.data.event_id,

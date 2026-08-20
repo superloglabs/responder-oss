@@ -18,6 +18,34 @@ export const investigationRequestSchema = z.object({
 
 export type InvestigationRequest = z.infer<typeof investigationRequestSchema>;
 
+function stringAttribute(
+  input: InvestigationInput,
+  name: string,
+): string | null {
+  const value = input.attributes?.[name];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function awsAlarmPromptContext(input: InvestigationInput): string[] {
+  if (
+    input.provider !== "slack" ||
+    stringAttribute(input, "slackAlertProvider") !== "aws"
+  ) {
+    return [];
+  }
+  const alarmName = stringAttribute(input, "awsAlarmName");
+  const state = stringAttribute(input, "awsAlarmState");
+  const region = stringAttribute(input, "awsAlarmRegion");
+  const alarmUrl = stringAttribute(input, "awsAlarmUrl");
+  return [
+    "AWS alarm context:",
+    alarmName ? `Alarm: ${alarmName}` : null,
+    state ? `State: ${state}` : null,
+    region ? `Region: ${region}` : null,
+    alarmUrl ? `Alarm details: ${alarmUrl}` : null,
+  ].filter((line): line is string => line !== null);
+}
+
 export function toInvestigationInput(request: InvestigationRequest): InvestigationInput {
   return {
     provider: request.provider,
@@ -30,11 +58,13 @@ export function toInvestigationInput(request: InvestigationRequest): Investigati
 }
 
 export function investigationPrompt(input: InvestigationInput): string {
+  const awsAlarmContext = awsAlarmPromptContext(input);
   return [
     `# ${input.provider} event`,
     "",
     `Title: ${input.title}`,
     input.sourceUrl ? `Source: ${input.sourceUrl}` : null,
+    ...(awsAlarmContext.length > 0 ? ["", ...awsAlarmContext] : []),
     "",
     input.body,
   ]

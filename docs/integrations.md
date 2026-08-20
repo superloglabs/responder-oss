@@ -50,6 +50,13 @@ Enable Slack's hosted MCP server in the app's agent settings if the app is
 eligible to use it. Reconnect existing installations after changing scopes.
 Private channels require the bot to be invited.
 
+Watched channels accept app-authored CloudWatch alarm notifications from AWS
+and Amazon Q Developer in chat applications. Responder starts investigations
+only for `ALARM` notifications, normalizes the alarm name, region, state, and
+CloudWatch link when present, and ignores `OK` and `INSUFFICIENT_DATA`
+notifications. Add the matching AWS account as Agent context so the worker can
+inspect the exact alarm, metric history, affected resource, and related logs.
+
 ## Sentry
 
 Create a public Sentry integration with:
@@ -162,6 +169,11 @@ automatically refreshes temporary credentials through STS; it never asks for or
 stores customer access keys. The managed AWS MCP client exposes only tools
 explicitly annotated read-only. This integration currently supports the
 commercial AWS partition (`arn:aws`) only.
+
+AWS context does not receive native EventBridge or SNS webhooks. CloudWatch
+alarms can trigger an Agent when Amazon Q Developer in chat applications
+forwards the alarm to a watched Slack channel; the selected AWS account remains
+the read-only investigation context.
 
 Production deployments should store the generic template in a private S3
 bucket and configure `AWS_INTEGRATION_TEMPLATE_BUCKET` and

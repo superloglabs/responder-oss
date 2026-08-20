@@ -42,6 +42,10 @@ types. `drizzle/` contains the ordered schema history.
   that key.
 - Slack, GitHub, and Sentry webhook signatures are checked against the untouched
   request body. Retries are deduplicated with provider-specific keys.
+- App-authored CloudWatch `ALARM` notifications in watched Slack channels use
+  the existing Slack trigger. The control plane normalizes available alarm
+  identity and location fields, ignores recovery states, and the worker uses
+  only AWS accounts selected on the pinned Agent version as read-only context.
 - Remote MCP destinations must use HTTPS and resolve to public addresses.
   Redirects are revalidated and authorization is not forwarded across origins.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through

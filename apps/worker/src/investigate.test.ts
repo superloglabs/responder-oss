@@ -213,6 +213,7 @@ describe("sandbox agent configuration", () => {
   it("keeps AWS investigation access read-only", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",
+      awsAlarmTriggered: true,
       awsAccountNames: ["AWS · 123456789012"],
       clickStackConnected: false,
       datadogConnected: false,
@@ -223,6 +224,8 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("connected read-only AWS tools");
     expect(instructions).toContain("AWS · 123456789012");
     expect(instructions).toContain("Never request secret values");
+    expect(instructions).toContain("Locate the exact CloudWatch alarm");
+    expect(instructions).toContain("Treat the Slack notification as a pointer");
   });
 
   it("stores the exact initial message that is sent to the agent", () => {

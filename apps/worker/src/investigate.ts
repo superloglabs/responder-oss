@@ -155,6 +155,7 @@ export function investigationCapabilities(replay: boolean) {
 
 export function investigationInstructions(input: {
   agentPrompt: string;
+  awsAlarmTriggered?: boolean;
   awsAccountNames?: string[];
   customMcpNames?: string[];
   datadogConnected: boolean;
@@ -190,6 +191,9 @@ export function investigationInstructions(input: {
     "Investigate only the alert and context provided by Responder.",
     awsAccountNames.length > 0
       ? `Use the connected read-only AWS tools to inspect relevant infrastructure, configuration, telemetry, and service health before concluding. Connected AWS accounts: ${awsAccountNames.join(", ")}. Never request secret values.`
+      : null,
+    input.awsAlarmTriggered && awsAccountNames.length > 0
+      ? "This investigation was triggered by an AWS alarm forwarded through Slack. Locate the exact CloudWatch alarm by its normalized name and region first. Inspect its current configuration, state history, metric data, affected resource, and relevant logs around the transition. Treat the Slack notification as a pointer, not as proof of root cause."
       : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
@@ -443,6 +447,9 @@ export async function runInvestigationAgent(
     const vercelTools = createVercelTools(vercelConnections);
     const instructions = investigationInstructions({
       agentPrompt: job.config.prompt,
+      awsAlarmTriggered:
+        investigationInput.provider === "slack" &&
+        investigationInput.attributes?.slackAlertProvider === "aws",
       awsAccountNames: awsConnections.map((connection) => connection.displayName),
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
