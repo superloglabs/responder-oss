@@ -11,6 +11,14 @@ import {
 } from "@responder/core/integrations/aws";
 
 const AWS_CREDENTIAL_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
+const AWS_MCP_IAM_GUARDED_TOOLS = new Set([
+  "aws___get_tasks",
+  "aws___run_script",
+  // The managed server currently returns fully qualified names. Keep the raw
+  // variants compatible with MCP clients that apply the namespace later.
+  "get_tasks",
+  "run_script",
+]);
 
 function requestQuery(url: URL): Record<string, string | string[]> {
   const query: Record<string, string | string[]> = {};
@@ -29,9 +37,15 @@ export function awsReadOnlyToolFilter(
   _context: unknown,
   tool: unknown,
 ): Promise<boolean> {
-  const annotations = (tool as { annotations?: { readOnlyHint?: boolean } })
-    .annotations;
-  return Promise.resolve(annotations?.readOnlyHint === true);
+  const candidate = tool as {
+    annotations?: { readOnlyHint?: boolean };
+    name?: string;
+  };
+  return Promise.resolve(
+    candidate.annotations?.readOnlyHint === true ||
+      (candidate.name !== undefined &&
+        AWS_MCP_IAM_GUARDED_TOOLS.has(candidate.name)),
+  );
 }
 
 export function createRefreshingAwsCredentialsProvider(

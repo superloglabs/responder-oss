@@ -186,9 +186,16 @@ deployment broker ARN and a unique external ID. It attaches AWS-managed
 regions. An explicit deny prevents the role from retrieving Secrets Manager
 values, SSM parameters, or decrypting KMS ciphertext. Responder obtains and
 automatically refreshes temporary credentials through STS; it never asks for or
-stores customer access keys. The managed AWS MCP client exposes only tools
-explicitly annotated read-only. This integration currently supports the
-commercial AWS partition (`arn:aws`) only.
+stores customer access keys. The managed AWS MCP client exposes tools explicitly
+annotated read-only, plus AWS's sandboxed script runner and task polling tools.
+The role's read-only policy and explicit secret-value denies remain the
+authorization boundary for script-runner API calls. This integration currently
+supports the commercial AWS partition (`arn:aws`) only.
+
+AWS context does not receive native EventBridge or SNS webhooks. CloudWatch
+alarms can trigger an Agent when Amazon Q Developer in chat applications
+forwards the alarm to a watched Slack channel; the selected AWS account remains
+the read-only investigation context.
 
 AWS context does not receive native EventBridge or SNS webhooks. CloudWatch
 alarms can trigger an Agent when Amazon Q Developer in chat applications
