@@ -118,10 +118,15 @@ describe("typed AWS inspection tools", () => {
       fakeClients({ getMetricData }),
     );
 
+    expect(tool.parameters).toMatchObject({
+      properties: { dimensions: { type: "array" } },
+      required: expect.arrayContaining(["dimensions"]),
+    });
+
     await expect(tool.invoke(
       undefined as never,
       JSON.stringify({
-        dimensions: { QueueName: "orders-dlq" },
+        dimensions: [{ name: "QueueName", value: "orders-dlq" }],
         endTime: "2026-08-20T12:10:00Z",
         metricName: "ApproximateNumberOfMessagesVisible",
         namespace: "AWS/SQS",
