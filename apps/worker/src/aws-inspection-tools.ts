@@ -263,7 +263,12 @@ export function createAwsInspectionTools(
       "Read bounded CloudWatch metric datapoints for one namespace, metric, statistic, and set of dimensions. Use alarm output to supply the exact metric identity.",
     parameters: z.object({
       accountId: accountIdParameter,
-      dimensions: z.record(z.string().min(1), z.string()).default({}),
+      dimensions: z.array(
+        z.object({
+          name: z.string().trim().min(1).max(255),
+          value: z.string().max(1_024),
+        }),
+      ).max(30).default([]),
       endTime: timestampParameter,
       metricName: z.string().trim().min(1).max(255),
       namespace: z.string().trim().min(1).max(255),
@@ -289,9 +294,10 @@ export function createAwsInspectionTools(
             Id: "metric",
             MetricStat: {
               Metric: {
-                Dimensions: Object.entries(input.dimensions).map(
-                  ([Name, Value]) => ({ Name, Value }),
-                ),
+                Dimensions: input.dimensions.map(({ name, value }) => ({
+                  Name: name,
+                  Value: value,
+                })),
                 MetricName: input.metricName,
                 Namespace: input.namespace,
               },
