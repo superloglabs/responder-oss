@@ -28,6 +28,7 @@ interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "axiom"
     | "upstash"
     | "langfuse"
     | "vercel"
@@ -224,6 +225,7 @@ export function SettingsPage() {
       "aws",
       "sentry",
       "datadog",
+      "axiom",
       "upstash",
       "langfuse",
       "linear",

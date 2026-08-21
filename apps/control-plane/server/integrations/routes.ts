@@ -19,6 +19,7 @@ import {
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
+  updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -56,6 +57,10 @@ import {
   DatadogCredentialsError,
 } from "./datadog.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
+import {
+  AXIOM_MCP_URL,
+  parseAxiomCredentials,
+} from "../../../../packages/core/src/integrations/axiom.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -212,6 +217,7 @@ const vercelCallbackSchema = z.object({
 });
 
 type BrowserOAuthProvider =
+  | "axiom"
   | "clickstack"
   | "custom_mcp"
   | "github"
@@ -776,6 +782,77 @@ export const integrationRoutes = new Hono()
         );
       }
     }
+    if (parsedProvider.data === "axiom") {
+      let accountId: string | undefined;
+      let preserveExistingAccount = false;
+      try {
+        const existing = await getOrganizationIntegrationAccountByExternalId({
+          externalAccountId: AXIOM_MCP_URL,
+          organizationId: tenant.organizationId,
+          provider: "axiom",
+        });
+        preserveExistingAccount = Boolean(existing);
+        accountId =
+          existing?.id ??
+          (await upsertIntegrationAccount({
+            organizationId: tenant.organizationId,
+            provider: "axiom",
+            externalAccountId: AXIOM_MCP_URL,
+            displayName: "Axiom",
+            encryptedCredentials: encryptCredentials({
+              authType: "oauth",
+              mcpUrl: AXIOM_MCP_URL,
+              oauth: {},
+            }),
+            credentialKeyVersion: 1,
+            metadata: { authType: "oauth", mcpUrl: AXIOM_MCP_URL },
+            status: "pending",
+          }));
+        const connectionState = await createIntegrationConnectionState({
+          organizationId: tenant.organizationId,
+          userId: tenant.user.id,
+          provider: "axiom",
+          codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
+          returnTo: context.req.query("returnTo"),
+          routingUrl: integrationCallbackUrl("axiom"),
+        });
+        const oauthResult = await beginCustomMcpOAuth({
+          connectionState,
+          mcpUrl: AXIOM_MCP_URL,
+          redirectUrl: integrationCallbackUrl("axiom"),
+        });
+        const updated = await updateIntegrationConnectionStateMetadata({
+          metadata: {
+            encryptedCredentials: encryptCredentials({
+              authType: "oauth",
+              mcpUrl: AXIOM_MCP_URL,
+              oauth: oauthResult.oauth,
+            }),
+          },
+          organizationId: tenant.organizationId,
+          provider: "axiom",
+          state: connectionState,
+          userId: tenant.user.id,
+        });
+        if (!updated) throw new Error("The Axiom OAuth state was not updated");
+        return context.redirect(oauthResult.authorizationUrl);
+      } catch (error) {
+        logCustomMcpError("connect", error, accountId);
+        if (accountId && !preserveExistingAccount) {
+          await setIntegrationAccountStatus(accountId, "error").catch(
+            () => undefined,
+          );
+        }
+        return context.redirect(
+          settingsRedirect(
+            context.req.query("returnTo") ?? "/settings",
+            "axiom",
+            "error",
+            "connection_failed",
+          ),
+        );
+      }
+    }
     const state = await createIntegrationConnectionState({
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
@@ -1006,6 +1083,112 @@ export const integrationRoutes = new Hono()
       return context.json(
         { error: "Unable to verify the Datadog connection" },
         502,
+      );
+    }
+  })
+  .get("/axiom/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "axiom", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    let preserveExistingAccount = false;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "axiom",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "axiom", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({
+          accountId: z.uuid(),
+          preserveExistingAccount: z.boolean().default(false),
+        })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      preserveExistingAccount = callbackState.preserveExistingAccount;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "axiom",
+      });
+      if (!account || (!preserveExistingAccount && account.status !== "pending")) {
+        throw new Error("The pending Axiom connection was not found");
+      }
+      const pendingCredentials = z
+        .object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const credentials = parseAxiomCredentials(
+        decryptCredentials<Record<string, unknown>>(
+          pendingCredentials.encryptedCredentials,
+        ),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("axiom"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Axiom OAuth access token is missing");
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const updated = await updateIntegrationAccountCredentials({
+        encryptedCredentials: encryptCredentials({
+          authType: "oauth",
+          mcpUrl: credentials.mcpUrl,
+          oauth,
+        }),
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "axiom",
+        status: "connected",
+      });
+      if (!updated) throw new Error("The Axiom connection was not updated");
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "axiom",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "axiom", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId && !preserveExistingAccount) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "axiom",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
       );
     }
   })

@@ -99,6 +99,21 @@ Connect Datadog from Settings and choose the matching Datadog site. Alerts can
 arrive through a watched Slack channel, while investigations use Datadog's MCP
 endpoint for the connected site.
 
+## Axiom
+
+Connect Axiom from Settings through the hosted MCP server's browser OAuth flow.
+Responder stores the OAuth session encrypted, refreshes it outside the sandbox,
+and exposes only an explicit allowlist of read-only Axiom tools to investigation
+runs. Dashboard, monitor, and notifier mutation tools are blocked.
+
+Axiom is investigation context rather than an alert source. Use a watched Slack
+channel as the agent input, then add Axiom under Context so the investigation can
+query relevant logs, traces, metrics, dashboards, and monitor history.
+
+The hosted Axiom MCP endpoint routes query results through US infrastructure.
+Review Axiom's data-routing and query-cost controls before enabling it for
+sensitive or high-volume datasets.
+
 ## Upstash
 
 Connect Upstash from Settings with the Upstash account email and a developer

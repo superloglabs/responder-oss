@@ -17,6 +17,7 @@ import {
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
+  updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -68,6 +69,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   setIntegrationAccountStatus: vi.fn(),
   setIntegrationAccountStatusIfCredentialsMatch: vi.fn(),
   updateIntegrationAccountCredentials: vi.fn(),
+  updateIntegrationConnectionStateMetadata: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
   withIntegrationAccountCredentialLease: vi.fn(),
 }));
@@ -807,6 +809,10 @@ describe("integration callback routing", () => {
 
   it.each([
     [
+      "axiom",
+      "/api/integrations/axiom/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
       "custom_mcp",
       "/api/integrations/custom_mcp/callback?state=oauth-state&code=oauth-code",
     ],
@@ -986,6 +992,22 @@ describe("integration callback routing", () => {
       expect.objectContaining({
         id: "datadog",
         connectUrl: "/api/integrations/datadog/connect",
+      }),
+    );
+  });
+
+  it("offers the Axiom OAuth connection endpoint", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "axiom",
+        connectUrl: "/api/integrations/axiom/start",
       }),
     );
   });
@@ -1716,6 +1738,154 @@ describe("integration callback routing", () => {
         provider: "datadog",
       }),
     );
+  });
+
+  it("starts Axiom hosted MCP OAuth", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue(
+      null as never,
+    );
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://axiom.example/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/axiom/start?returnTo=%2Fagents%2Fnew",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://axiom.example/authorize",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: false,
+      }),
+      organizationId: tenant.organizationId,
+      provider: "axiom",
+      returnTo: "/agents/new",
+      routingUrl: "https://responder.example/api/integrations/axiom/callback",
+      userId: tenant.user.id,
+    });
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: "https://mcp.axiom.co/mcp",
+      redirectUrl: "https://responder.example/api/integrations/axiom/callback",
+    });
+    expect(updateIntegrationConnectionStateMetadata).toHaveBeenCalledWith({
+      metadata: { encryptedCredentials: "encrypted-credentials" },
+      organizationId: tenant.organizationId,
+      provider: "axiom",
+      state: "oauth-state",
+      userId: tenant.user.id,
+    });
+  });
+
+  it("keeps a connected Axiom account active while reconnecting", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "working-credentials",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockRejectedValue(new Error("OAuth failed"));
+
+    const response = await app.request("/api/integrations/axiom/start");
+
+    expect(response.status).toBe(302);
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(updateIntegrationAccountCredentials).not.toHaveBeenCalled();
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it("finishes Axiom OAuth and stores the encrypted MCP session", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: false,
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "encrypted-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: "https://mcp.axiom.co/mcp",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(18);
+    vi.mocked(encryptCredentials).mockReturnValue("updated-credentials");
+    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/axiom/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=axiom&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(finishCustomMcpOAuth).toHaveBeenCalledWith({
+      authorizationCode: "oauth-code",
+      mcpUrl: "https://mcp.axiom.co/mcp",
+      oauth: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://responder.example/api/integrations/axiom/callback",
+    });
+    expect(updateIntegrationAccountCredentials).toHaveBeenCalledWith({
+      encryptedCredentials: "updated-credentials",
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "axiom",
+      status: "connected",
+    });
+  });
+
+  it("does not disable a connected Axiom account when reconnect is cancelled", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: true,
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+
+    const response = await app.request(
+      "/api/integrations/axiom/callback?state=oauth-state&error=access_denied",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=axiom&status=error&reason=cancelled",
+    );
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
   });
 
   it("validates and encrypts an Upstash account API key", async () => {

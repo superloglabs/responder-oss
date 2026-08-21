@@ -420,6 +420,7 @@ export function AgentCreatePage() {
   const returnTo = agentId ? `/agents/${agentId}/edit` : "/agents/new";
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
+  const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
@@ -433,6 +434,7 @@ export function AgentCreatePage() {
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
+    axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
     vercelJustConnected ||
@@ -560,6 +562,14 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedDatadog.id);
         }
+        const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
+        if (
+          axiomJustConnected &&
+          connectedAxiom &&
+          !loadedDraft.contextAccountIds.includes(connectedAxiom.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedAxiom.id);
+        }
         const connectedCustomMcpId = returnedIntegrationAccountId;
         if (
           customMcpJustConnected &&
@@ -661,6 +671,7 @@ export function AgentCreatePage() {
     };
   }, [
     agentId,
+    axiomJustConnected,
     awsJustConnected,
     clickStackJustConnected,
     customMcpJustConnected,
@@ -695,6 +706,10 @@ export function AgentCreatePage() {
   );
   const datadogAccounts = useMemo(
     () => accountsFor(options, "datadog"),
+    [options],
+  );
+  const axiomAccounts = useMemo(
+    () => accountsFor(options, "axiom"),
     [options],
   );
   const customMcpAccounts = useMemo(
@@ -1226,6 +1241,10 @@ export function AgentCreatePage() {
     datadogAccounts[0] &&
       draft.contextAccountIds.includes(datadogAccounts[0].id),
   );
+  const axiomContextConnected = Boolean(
+    axiomAccounts[0] &&
+      draft.contextAccountIds.includes(axiomAccounts[0].id),
+  );
   const clickStackContextConnected = Boolean(
     clickStackAccounts[0] &&
       draft.contextAccountIds.includes(clickStackAccounts[0].id),
@@ -1253,6 +1272,7 @@ export function AgentCreatePage() {
     Number(sentryIncluded || sentryContextConnected) +
     Number(selectedSlackContextChannels.length > 0) +
     Number(datadogContextConnected) +
+    Number(axiomContextConnected) +
     Number(upstashContextConnected) +
     langfuseAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
@@ -2337,6 +2357,51 @@ export function AgentCreatePage() {
                   />
                   <ContextRow
                     action={
+                      axiomContextConnected ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            toggleContextAccount(axiomAccounts[0]!.id)
+                          }
+                          variant="ghost"
+                        >
+                          Remove
+                        </Button>
+                      ) : axiomAccounts[0] ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            toggleContextAccount(axiomAccounts[0]!.id)
+                          }
+                          variant="secondary"
+                        >
+                          Add
+                        </Button>
+                      ) : (
+                        <ConnectButton
+                          integration={integrationFor("axiom")}
+                          isConnecting={connectingProvider === "axiom"}
+                          onClick={() => connect("axiom")}
+                        />
+                      )
+                    }
+                    detail={
+                      axiomAccounts[0]
+                        ? `${axiomAccounts[0].displayName} · Logs, traces, metrics, and monitor history`
+                        : "Logs, traces, metrics, and monitor history"
+                    }
+                    label="Axiom"
+                    provider="axiom"
+                    status={
+                      axiomContextConnected
+                        ? "connected"
+                        : axiomAccounts[0]
+                          ? "available"
+                          : "not_connected"
+                    }
+                  />
+                  <ContextRow
+                    action={
                       linearContextConnected ? (
                         <Button
                           className="contextConfigureAction"
@@ -3169,6 +3234,7 @@ function ContextRow({
     | "slack"
     | "sentry"
     | "datadog"
+    | "axiom"
     | "upstash"
     | "langfuse"
     | "vercel"

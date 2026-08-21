@@ -4,6 +4,7 @@ export function controlPlaneBaseUrl(): string {
 
 export function integrationCallbackUrl(
   provider:
+    | "axiom"
     | "clickstack"
     | "custom_mcp"
     | "datadog"

@@ -117,6 +117,7 @@ describe("local callback routing", () => {
     writeTarget(
       workspace,
       {
+        browserOrigin: "https://responder.test",
         origin: "http://127.0.0.1:4321",
         workspace: "/tmp/worktree",
         updatedAt: "2026-07-31T00:00:00.000Z",
@@ -130,11 +131,13 @@ describe("local callback routing", () => {
       ),
     );
     expect(readTarget(workspace)).toEqual({
+      browserOrigin: "https://responder.test",
       origin: "http://127.0.0.1:4321",
       workspace: "/tmp/worktree",
       updatedAt: "2026-07-31T00:00:00.000Z",
     });
     expect(JSON.parse(readFileSync(storedTargetFile, "utf8"))).toMatchObject({
+      browserOrigin: "https://responder.test",
       origin: "http://127.0.0.1:4321",
     });
     expect(statSync(storedTargetFile).mode & 0o777).toBe(0o600);
@@ -173,6 +176,12 @@ describe("local callback routing", () => {
     expect(
       validCallbackTarget({ origin: "http://user:pass@localhost:4321" }),
     ).toBeNull();
+    expect(
+      validCallbackTarget({
+        browserOrigin: "http://responder.example",
+        origin: "http://localhost:4321",
+      }),
+    ).toBeNull();
   });
 
   it("selects the current worktree only after its health check passes", async () => {
@@ -194,7 +203,9 @@ describe("local callback routing", () => {
         cwd: workspace,
         env: {
           ...process.env,
+          BETTER_AUTH_URL: `http://127.0.0.1:${controlPlanePort}`,
           CONTROL_PLANE_WEB_PORT: String(controlPlanePort),
+          PORTLESS_URL: "https://responder.test",
         },
         stdio: "ignore",
       },
@@ -204,6 +215,7 @@ describe("local callback routing", () => {
       const [exitCode] = await once(selection, "exit");
       expect(exitCode).toBe(0);
       expect(JSON.parse(readFileSync(storedTargetFile, "utf8"))).toMatchObject({
+        browserOrigin: "https://responder.test",
         origin: `http://127.0.0.1:${controlPlanePort}`,
         workspace: realpathSync(workspace),
       });
@@ -219,6 +231,7 @@ describe("local callback routing", () => {
     writeTarget(
       workspace,
       {
+        browserOrigin: "https://responder.test",
         origin: "http://127.0.0.1:4321",
         workspace: realpathSync(workspace),
         updatedAt: "2026-07-31T00:00:00.000Z",
@@ -325,7 +338,49 @@ describe("local callback routing", () => {
     }
   });
 
-  it("redirects browser OAuth callbacks to the selected local origin", async () => {
+  it.each(["axiom", "slack"])(
+    "redirects %s OAuth callbacks to the configured browser origin",
+    async (provider) => {
+      const portReservation = createServer();
+      const bridgePort = await listen(portReservation);
+      await new Promise((resolve) => portReservation.close(resolve));
+      const workspace = temporaryGitRepository();
+      writeTarget(
+        workspace,
+        {
+          browserOrigin: "https://responder.test",
+          origin: "http://127.0.0.1:4321",
+          workspace: "/tmp/worktree",
+          updatedAt: "2026-07-31T00:00:00.000Z",
+        },
+      );
+      const bridge = startBridge(bridgePort, workspace);
+
+      try {
+        await waitForBridge(bridgePort);
+        const response = await fetch(
+          `http://127.0.0.1:${bridgePort}/api/integrations/${provider}/callback` +
+            "?code=oauth-code&state=oauth-state",
+          { redirect: "manual" },
+        );
+
+        expect(response.status).toBe(302);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("location")).toBe(
+          `https://responder.test/api/integrations/${provider}/callback` +
+            "?code=oauth-code&state=oauth-state",
+        );
+      } finally {
+        bridge.kill("SIGTERM");
+        await Promise.race([
+          once(bridge, "exit"),
+          new Promise((resolve) => setTimeout(resolve, 1_000)),
+        ]);
+      }
+    },
+  );
+
+  it("falls back to the local origin for an OAuth callback without a browser origin", async () => {
     const portReservation = createServer();
     const bridgePort = await listen(portReservation);
     await new Promise((resolve) => portReservation.close(resolve));
@@ -343,15 +398,14 @@ describe("local callback routing", () => {
     try {
       await waitForBridge(bridgePort);
       const response = await fetch(
-        `http://127.0.0.1:${bridgePort}/api/integrations/slack/callback` +
+        `http://127.0.0.1:${bridgePort}/api/integrations/axiom/callback` +
           "?code=oauth-code&state=oauth-state",
         { redirect: "manual" },
       );
 
       expect(response.status).toBe(302);
-      expect(response.headers.get("cache-control")).toBe("no-store");
       expect(response.headers.get("location")).toBe(
-        "http://127.0.0.1:4321/api/integrations/slack/callback" +
+        "http://127.0.0.1:4321/api/integrations/axiom/callback" +
           "?code=oauth-code&state=oauth-state",
       );
     } finally {

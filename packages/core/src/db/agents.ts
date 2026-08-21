@@ -17,7 +17,7 @@ import {
 } from "./schema.js";
 import { listWorkspaceSecrets } from "./workspace-secrets.js";
 
-type Provider = "github" | "slack" | "sentry" | "datadog";
+type Provider = "github" | "slack" | "sentry" | "datadog" | "axiom";
 
 export class AgentConfigurationError extends Error {
   constructor(
@@ -243,6 +243,7 @@ async function validateConfigurationResources(
         "aws",
         "sentry",
         "datadog",
+        "axiom",
         "clickstack",
         "upstash",
         "langfuse",

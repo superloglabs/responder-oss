@@ -7,6 +7,7 @@ import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
+  updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
 } from "./integrations.js";
@@ -182,6 +183,40 @@ describe("integration account tenancy", () => {
     expect(query.params).toEqual([
       createHash("sha256").update("oauth-state").digest("hex"),
       "linear",
+      account.organizationId,
+      "20000000-0000-4000-8000-000000000000",
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
+  });
+
+  it("updates OAuth metadata only for the live tenant-owned connection state", async () => {
+    const returning = vi.fn().mockResolvedValue([{ stateHash: "state-hash" }]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { returning };
+    });
+    const set = vi.fn(() => ({ where }));
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      updateIntegrationConnectionStateMetadata({
+        metadata: { encryptedCredentials: "encrypted-credentials" },
+        organizationId: account.organizationId,
+        provider: "axiom",
+        state: "oauth-state",
+        userId: "20000000-0000-4000-8000-000000000000",
+      }),
+    ).resolves.toBe(true);
+
+    expect(set).toHaveBeenCalledWith({
+      metadata: { encryptedCredentials: "encrypted-credentials" },
+    });
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.params).toEqual([
+      createHash("sha256").update("oauth-state").digest("hex"),
+      "axiom",
       account.organizationId,
       "20000000-0000-4000-8000-000000000000",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),

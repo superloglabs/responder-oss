@@ -12,6 +12,7 @@ const monitorInterval = Number(
 );
 const callbackPath = "/github/install/callback";
 const browserOAuthCallbackPaths = new Set([
+  "/api/integrations/axiom/callback",
   "/api/integrations/clickstack/callback",
   "/api/integrations/custom_mcp/callback",
   "/api/integrations/github/callback",
@@ -109,9 +110,11 @@ function browserOAuthCallbackUrl(incoming, method) {
     return null;
   }
   const selectedTarget = readCallbackTarget();
-  return selectedTarget
-    ? new URL(incoming.pathname + incoming.search, selectedTarget.origin)
-    : null;
+  if (!selectedTarget) return null;
+  return new URL(
+    incoming.pathname + incoming.search,
+    selectedTarget.browserOrigin ?? selectedTarget.origin,
+  );
 }
 
 const server = createServer((request, response) => {
