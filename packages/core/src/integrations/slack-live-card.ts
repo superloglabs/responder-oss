@@ -112,6 +112,7 @@ function humanizeToolName(value: string): string {
   const replacements: Record<string, string> = {
     ai: "AI",
     apm: "APM",
+    axiom: "Axiom",
     clickstack: "ClickStack",
     datadog: "Datadog",
     dsn: "DSN",

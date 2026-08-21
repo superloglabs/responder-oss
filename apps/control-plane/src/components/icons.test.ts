@@ -5,6 +5,7 @@ import { ProviderGlyph } from "./icons";
 
 describe("ProviderGlyph", () => {
   it.each([
+    ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],
     ["datadog", "Datadog", "DD"],
     ["github", "GitHub", "GH"],

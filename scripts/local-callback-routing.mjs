@@ -61,7 +61,23 @@ export function validCallbackTarget(value) {
       return null;
     }
 
+    const browserOrigin = value.browserOrigin
+      ? new URL(value.browserOrigin)
+      : null;
+    if (
+      browserOrigin &&
+      (browserOrigin.protocol !== "https:" ||
+        browserOrigin.pathname !== "/" ||
+        browserOrigin.search ||
+        browserOrigin.hash ||
+        browserOrigin.username ||
+        browserOrigin.password)
+    ) {
+      return null;
+    }
+
     return {
+      ...(browserOrigin ? { browserOrigin: browserOrigin.origin } : {}),
       origin: origin.origin,
       workspace:
         typeof value.workspace === "string" ? value.workspace : "unknown",

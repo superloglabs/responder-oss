@@ -128,6 +128,7 @@ function humanizeToolName(value: unknown): string {
     .filter(Boolean)
     .map((word) => word.toLowerCase());
   const providerNames: Record<string, string> = {
+    axiom: "Axiom",
     datadog: "Datadog",
     github: "GitHub",
     langfuse: "Langfuse",

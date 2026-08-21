@@ -16,6 +16,17 @@ function AwsLogo() {
   return <span aria-hidden="true" className="providerGlyph__asset" />;
 }
 
+function AxiomLogo() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 13 11">
+      <path
+        d="M12.118 7.269 9.645 2.962a.8.8 0 0 0-.621-.36H7.48c-.359 0-.506-.255-.327-.566L8 .566A.377.377 0 0 0 7.673 0H5.519a.8.8 0 0 0-.622.36L.712 7.6a.8.8 0 0 0 0 .719l1.076 1.865c.18.31.474.311.654 0l.842-1.448c.18-.31.474-.31.653 0l.763 1.322a.8.8 0 0 0 .622.36H10.3a.8.8 0 0 0 .622-.36l1.195-2.07a.8.8 0 0 0 .002-.72m-3.34-.207c.178.311.03.566-.328.566H4.579c-.36 0-.506-.254-.327-.565L6.19 3.708c.179-.311.472-.311.652 0z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function ClickStackLogo() {
   return (
     <svg aria-hidden="true" focusable="false" viewBox="0 0 260 260">
@@ -193,6 +204,7 @@ function LangfuseLogo() {
 
 const providerLogos = {
   aws: AwsLogo,
+  axiom: AxiomLogo,
   clickstack: ClickStackLogo,
   datadog: DatadogLogo,
   github: GithubLogo,

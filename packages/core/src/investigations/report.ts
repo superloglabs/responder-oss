@@ -7,6 +7,7 @@ export const issueEvidenceSchema = z.object({
     "alert",
     "aws",
     "datadog",
+    "axiom",
     "sentry",
     "clickstack",
     "upstash",
