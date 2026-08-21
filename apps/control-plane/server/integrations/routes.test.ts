@@ -17,6 +17,7 @@ import {
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
+  updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -68,6 +69,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   setIntegrationAccountStatus: vi.fn(),
   setIntegrationAccountStatusIfCredentialsMatch: vi.fn(),
   updateIntegrationAccountCredentials: vi.fn(),
+  updateIntegrationConnectionStateMetadata: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
   withIntegrationAccountCredentialLease: vi.fn(),
 }));
@@ -1741,6 +1743,9 @@ describe("integration callback routing", () => {
   it("starts Axiom hosted MCP OAuth", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue(
+      null as never,
+    );
     vi.mocked(upsertIntegrationAccount).mockResolvedValue(
       "30000000-0000-4000-8000-000000000000",
     );
@@ -1749,7 +1754,7 @@ describe("integration callback routing", () => {
       authorizationUrl: "https://axiom.example/authorize",
       oauth: { codeVerifier: "pkce-verifier" },
     });
-    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
 
     const response = await app.request(
       "/api/integrations/axiom/start?returnTo=%2Fagents%2Fnew",
@@ -1762,6 +1767,7 @@ describe("integration callback routing", () => {
     expect(createIntegrationConnectionState).toHaveBeenCalledWith({
       codeVerifier: JSON.stringify({
         accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: false,
       }),
       organizationId: tenant.organizationId,
       provider: "axiom",
@@ -1774,6 +1780,32 @@ describe("integration callback routing", () => {
       mcpUrl: "https://mcp.axiom.co/mcp",
       redirectUrl: "https://responder.example/api/integrations/axiom/callback",
     });
+    expect(updateIntegrationConnectionStateMetadata).toHaveBeenCalledWith({
+      metadata: { encryptedCredentials: "encrypted-credentials" },
+      organizationId: tenant.organizationId,
+      provider: "axiom",
+      state: "oauth-state",
+      userId: tenant.user.id,
+    });
+  });
+
+  it("keeps a connected Axiom account active while reconnecting", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "working-credentials",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockRejectedValue(new Error("OAuth failed"));
+
+    const response = await app.request("/api/integrations/axiom/start");
+
+    expect(response.status).toBe(302);
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(updateIntegrationAccountCredentials).not.toHaveBeenCalled();
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
   });
 
   it("finishes Axiom OAuth and stores the encrypted MCP session", async () => {
@@ -1784,8 +1816,9 @@ describe("integration callback routing", () => {
       returnTo: "/agents/new",
       codeVerifier: JSON.stringify({
         accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: false,
       }),
-      metadata: {},
+      metadata: { encryptedCredentials: "pending-credentials" },
     });
     vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
       id: "30000000-0000-4000-8000-000000000000",
@@ -1828,6 +1861,31 @@ describe("integration callback routing", () => {
       provider: "axiom",
       status: "connected",
     });
+  });
+
+  it("does not disable a connected Axiom account when reconnect is cancelled", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: true,
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+
+    const response = await app.request(
+      "/api/integrations/axiom/callback?state=oauth-state&error=access_denied",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=axiom&status=error&reason=cancelled",
+    );
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
   });
 
   it("validates and encrypts an Upstash account API key", async () => {

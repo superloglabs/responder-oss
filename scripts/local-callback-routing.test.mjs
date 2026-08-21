@@ -339,7 +339,7 @@ describe("local callback routing", () => {
   });
 
   it.each(["axiom", "slack"])(
-    "redirects %s OAuth callbacks to the selected local origin",
+    "redirects %s OAuth callbacks to the configured browser origin",
     async (provider) => {
       const portReservation = createServer();
       const bridgePort = await listen(portReservation);
@@ -379,6 +379,43 @@ describe("local callback routing", () => {
       }
     },
   );
+
+  it("falls back to the local origin for an OAuth callback without a browser origin", async () => {
+    const portReservation = createServer();
+    const bridgePort = await listen(portReservation);
+    await new Promise((resolve) => portReservation.close(resolve));
+    const workspace = temporaryGitRepository();
+    writeTarget(
+      workspace,
+      {
+        origin: "http://127.0.0.1:4321",
+        workspace: "/tmp/worktree",
+        updatedAt: "2026-07-31T00:00:00.000Z",
+      },
+    );
+    const bridge = startBridge(bridgePort, workspace);
+
+    try {
+      await waitForBridge(bridgePort);
+      const response = await fetch(
+        `http://127.0.0.1:${bridgePort}/api/integrations/axiom/callback` +
+          "?code=oauth-code&state=oauth-state",
+        { redirect: "manual" },
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe(
+        "http://127.0.0.1:4321/api/integrations/axiom/callback" +
+          "?code=oauth-code&state=oauth-state",
+      );
+    } finally {
+      bridge.kill("SIGTERM");
+      await Promise.race([
+        once(bridge, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 1_000)),
+      ]);
+    }
+  });
 
   it("routes a GitHub setup fallback through the claimed worktree", async () => {
     const upstream = createServer((request, response) => {

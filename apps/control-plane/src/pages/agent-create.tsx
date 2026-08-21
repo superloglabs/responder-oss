@@ -434,6 +434,7 @@ export function AgentCreatePage() {
   const contextIntegrationJustConnected =
     githubJustConnected ||
     datadogJustConnected ||
+    axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
     vercelJustConnected ||

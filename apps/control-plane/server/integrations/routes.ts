@@ -19,6 +19,7 @@ import {
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
+  updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -783,26 +784,35 @@ export const integrationRoutes = new Hono()
     }
     if (parsedProvider.data === "axiom") {
       let accountId: string | undefined;
+      let preserveExistingAccount = false;
       try {
-        accountId = await upsertIntegrationAccount({
+        const existing = await getOrganizationIntegrationAccountByExternalId({
+          externalAccountId: AXIOM_MCP_URL,
           organizationId: tenant.organizationId,
           provider: "axiom",
-          externalAccountId: AXIOM_MCP_URL,
-          displayName: "Axiom",
-          encryptedCredentials: encryptCredentials({
-            authType: "oauth",
-            mcpUrl: AXIOM_MCP_URL,
-            oauth: {},
-          }),
-          credentialKeyVersion: 1,
-          metadata: { authType: "oauth", mcpUrl: AXIOM_MCP_URL },
-          status: "pending",
         });
+        preserveExistingAccount = Boolean(existing);
+        accountId =
+          existing?.id ??
+          (await upsertIntegrationAccount({
+            organizationId: tenant.organizationId,
+            provider: "axiom",
+            externalAccountId: AXIOM_MCP_URL,
+            displayName: "Axiom",
+            encryptedCredentials: encryptCredentials({
+              authType: "oauth",
+              mcpUrl: AXIOM_MCP_URL,
+              oauth: {},
+            }),
+            credentialKeyVersion: 1,
+            metadata: { authType: "oauth", mcpUrl: AXIOM_MCP_URL },
+            status: "pending",
+          }));
         const connectionState = await createIntegrationConnectionState({
           organizationId: tenant.organizationId,
           userId: tenant.user.id,
           provider: "axiom",
-          codeVerifier: JSON.stringify({ accountId }),
+          codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
           returnTo: context.req.query("returnTo"),
           routingUrl: integrationCallbackUrl("axiom"),
         });
@@ -811,22 +821,24 @@ export const integrationRoutes = new Hono()
           mcpUrl: AXIOM_MCP_URL,
           redirectUrl: integrationCallbackUrl("axiom"),
         });
-        const updated = await updateIntegrationAccountCredentials({
-          encryptedCredentials: encryptCredentials({
-            authType: "oauth",
-            mcpUrl: AXIOM_MCP_URL,
-            oauth: oauthResult.oauth,
-          }),
-          integrationAccountId: accountId,
+        const updated = await updateIntegrationConnectionStateMetadata({
+          metadata: {
+            encryptedCredentials: encryptCredentials({
+              authType: "oauth",
+              mcpUrl: AXIOM_MCP_URL,
+              oauth: oauthResult.oauth,
+            }),
+          },
           organizationId: tenant.organizationId,
           provider: "axiom",
-          status: "pending",
+          state: connectionState,
+          userId: tenant.user.id,
         });
-        if (!updated) throw new Error("The Axiom connection was not updated");
+        if (!updated) throw new Error("The Axiom OAuth state was not updated");
         return context.redirect(oauthResult.authorizationUrl);
       } catch (error) {
         logCustomMcpError("connect", error, accountId);
-        if (accountId) {
+        if (accountId && !preserveExistingAccount) {
           await setIntegrationAccountStatus(accountId, "error").catch(
             () => undefined,
           );
@@ -1086,6 +1098,7 @@ export const integrationRoutes = new Hono()
       ReturnType<typeof consumeIntegrationConnectionState>
     > = null;
     let accountId: string | undefined;
+    let preserveExistingAccount = false;
     try {
       connectionState = await consumeBrowserOAuthConnectionState({
         headers: context.req.raw.headers,
@@ -1097,20 +1110,30 @@ export const integrationRoutes = new Hono()
           settingsRedirect("/settings", "axiom", "error", "invalid_state"),
         );
       }
-      accountId = z
-        .object({ accountId: z.uuid() })
-        .parse(JSON.parse(connectionState.codeVerifier ?? "null")).accountId;
+      const callbackState = z
+        .object({
+          accountId: z.uuid(),
+          preserveExistingAccount: z.boolean().default(false),
+        })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      preserveExistingAccount = callbackState.preserveExistingAccount;
       const authorizationCode = z.string().min(1).parse(context.req.query("code"));
       const account = await getOrganizationIntegrationAccount({
         integrationAccountId: accountId,
         organizationId: connectionState.organizationId,
         provider: "axiom",
       });
-      if (!account?.encryptedCredentials || account.status !== "pending") {
+      if (!account || (!preserveExistingAccount && account.status !== "pending")) {
         throw new Error("The pending Axiom connection was not found");
       }
+      const pendingCredentials = z
+        .object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
       const credentials = parseAxiomCredentials(
-        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+        decryptCredentials<Record<string, unknown>>(
+          pendingCredentials.encryptedCredentials,
+        ),
       );
       const oauth = await finishCustomMcpOAuth({
         authorizationCode,
@@ -1154,7 +1177,7 @@ export const integrationRoutes = new Hono()
       );
     } catch (error) {
       logCustomMcpError("callback", error, accountId);
-      if (accountId) {
+      if (accountId && !preserveExistingAccount) {
         await setIntegrationAccountStatus(accountId, "error").catch(
           () => undefined,
         );
