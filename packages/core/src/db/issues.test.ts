@@ -178,6 +178,11 @@ describe("issue text search", () => {
 
     const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
     expect(query.sql).toContain('"issues"."root_cause" ilike');
-    expect(query.sql).toContain('"issues"."timeline"::text ilike');
+    expect(query.sql).toContain(
+      'jsonb_array_elements("issues"."timeline") as timeline_entry',
+    );
+    expect(query.sql).toContain("timeline_entry->>'title' ilike");
+    expect(query.sql).toContain("timeline_entry->>'description' ilike");
+    expect(query.sql).not.toContain('"issues"."timeline"::text ilike');
   });
 });

@@ -120,7 +120,12 @@ export async function searchIssuesByText(
           ilike(issues.title, pattern),
           ilike(issues.description, pattern),
           ilike(issues.rootCause, pattern),
-          sql`${issues.timeline}::text ilike ${pattern}`,
+          sql`exists (
+            select 1
+            from jsonb_array_elements(${issues.timeline}) as timeline_entry
+            where timeline_entry->>'title' ilike ${pattern}
+              or timeline_entry->>'description' ilike ${pattern}
+          )`,
           ilike(issues.remediation, pattern),
         ),
       ),
