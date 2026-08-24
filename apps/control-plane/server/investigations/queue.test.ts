@@ -11,11 +11,13 @@ const mocks = vi.hoisted(() => ({
   discardPendingInvestigation: vi.fn(),
   failInvestigation: vi.fn(),
   failIssuePullRequest: vi.fn(),
+  finalizeInvestigationReservation: vi.fn(),
   getIssuePullRequestForRemediation: vi.fn(),
   getRuntimeAgentConfig: vi.fn(),
   notifyBillingLimitReached: vi.fn(),
   prepareInvestigationRetry: vi.fn(),
   prepareWorkerQueues: vi.fn(),
+  reserveInvestigation: vi.fn(),
   setIssuePullRequestSession: vi.fn(),
 }));
 
@@ -25,6 +27,8 @@ vi.mock("../../../../packages/core/src/analytics.js", () => ({
 
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
   consumeInvestigation: mocks.consumeInvestigation,
+  finalizeInvestigationReservation: mocks.finalizeInvestigationReservation,
+  reserveInvestigation: mocks.reserveInvestigation,
 }));
 
 vi.mock("../../../../packages/core/src/billing/notifications.js", () => ({
@@ -118,10 +122,17 @@ describe("investigation queue", () => {
       configured: false,
       nextResetAt: null,
     });
+    mocks.reserveInvestigation.mockResolvedValue({
+      allowed: true,
+      configured: true,
+      nextResetAt: null,
+      reservationId: "rerun-reservation-1",
+    });
     mocks.bossStart.mockResolvedValue(undefined);
     mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.prepareWorkerQueues.mockResolvedValue(undefined);
     mocks.notifyBillingLimitReached.mockResolvedValue(undefined);
+    mocks.finalizeInvestigationReservation.mockResolvedValue(undefined);
     mocks.prepareInvestigationRetry.mockResolvedValue({
       config: created.config,
       input: request,
@@ -201,18 +212,115 @@ describe("investigation queue", () => {
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 
-  it("does not count a retry as a newly created investigation", async () => {
+  it("charges and enqueues a rerun with its refreshed configuration", async () => {
     await expect(
-      queueInvestigationRetry(created.investigationId),
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
     ).resolves.toEqual({
       investigationId: created.investigationId,
       jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
     });
 
+    expect(mocks.reserveInvestigation).toHaveBeenCalledWith(
+      created.config.organizationId,
+      created.investigationId,
+    );
     expect(mocks.prepareInvestigationRetry).toHaveBeenCalledWith(
       created.investigationId,
     );
+    expect(mocks.finalizeInvestigationReservation).toHaveBeenCalledWith(
+      "rerun-reservation-1",
+      "confirm",
+    );
+    expect(
+      mocks.finalizeInvestigationReservation.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.bossSend.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.bossSend).toHaveBeenCalledWith(
+      "responder-investigations",
+      expect.objectContaining({ config: created.config }),
+      expect.any(Object),
+    );
+    expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith({
+      distinctId: `investigation:${created.investigationId}`,
+      event: "investigation rerun",
+      organizationId: created.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_config_version_id: created.config.id,
+        agent_id: created.config.agentId,
+        investigation_id: created.investigationId,
+        provider: request.provider,
+      },
+    });
+  });
+
+  it("leaves a finished investigation untouched when rerun billing is blocked", async () => {
+    mocks.reserveInvestigation.mockResolvedValue({
+      allowed: false,
+      configured: true,
+      nextResetAt: 1_800_000_000,
+      reservationId: null,
+    });
+
+    await expect(
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
+    ).resolves.toEqual({ kind: "blocked" });
+
+    expect(mocks.notifyBillingLimitReached).toHaveBeenCalledWith(
+      created.config.organizationId,
+      1_800_000_000,
+    );
+    expect(mocks.prepareInvestigationRetry).not.toHaveBeenCalled();
+    expect(mocks.bossSend).not.toHaveBeenCalled();
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("releases a reserved rerun that loses the terminal-state claim", async () => {
+    const error = new Error("Only finished investigations can be retried");
+    mocks.prepareInvestigationRetry.mockRejectedValue(error);
+
+    await expect(
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
+    ).rejects.toBe(error);
+
+    expect(mocks.finalizeInvestigationReservation).toHaveBeenCalledWith(
+      "rerun-reservation-1",
+      "release",
+    );
+    expect(mocks.bossSend).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue a rerun when its billing reservation cannot be confirmed", async () => {
+    mocks.finalizeInvestigationReservation.mockRejectedValueOnce(
+      new Error("billing unavailable"),
+    );
+
+    await expect(
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
+    ).rejects.toThrow("Billing service unavailable");
+
+    expect(mocks.failInvestigation).toHaveBeenCalledWith(
+      created.investigationId,
+      "Unable to confirm investigation rerun billing",
+    );
+    expect(mocks.finalizeInvestigationReservation).toHaveBeenNthCalledWith(
+      2,
+      "rerun-reservation-1",
+      "release",
+    );
+    expect(mocks.bossSend).not.toHaveBeenCalled();
   });
 
   it("fails a remediation request when the queue cannot start", async () => {

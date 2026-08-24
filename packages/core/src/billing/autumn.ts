@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Autumn, type Customer } from "autumn-js";
 
 export const INVESTIGATIONS_FEATURE_ID = "responder_investigations";
@@ -26,6 +27,10 @@ export interface InvestigationAccess {
   allowed: boolean;
   configured: boolean;
   nextResetAt: number | null;
+}
+
+export interface InvestigationReservationAccess extends InvestigationAccess {
+  reservationId: string | null;
 }
 
 let autumnClient: Autumn | undefined;
@@ -72,21 +77,33 @@ export async function consumeInvestigation(
   investigationId: string,
 ): Promise<InvestigationAccess> {
   if (!billingIsEnabled()) {
-    return { allowed: true, configured: false, nextResetAt: null };
+    return {
+      allowed: true,
+      configured: false,
+      nextResetAt: null,
+    };
   }
   const client = getAutumnClient();
   if (!client) {
     if (process.env.NODE_ENV === "production") {
       throw new Error("AUTUMN_SECRET_KEY is required in production");
     }
-    return { allowed: true, configured: false, nextResetAt: null };
+    return {
+      allowed: true,
+      configured: false,
+      nextResetAt: null,
+    };
   }
 
   const customer = await getOrCreateCustomer(client, organizationId);
   if (customer.id === null) {
     // Autumn's SDK fails open during a provider outage. Preserve that behavior so
     // incident response is not taken down by the billing system.
-    return { allowed: true, configured: true, nextResetAt: null };
+    return {
+      allowed: true,
+      configured: true,
+      nextResetAt: null,
+    };
   }
 
   const result = await client.check({
@@ -102,6 +119,86 @@ export async function consumeInvestigation(
     configured: true,
     nextResetAt: result.balance?.nextResetAt ?? null,
   };
+}
+
+const investigationReservationLifetimeMs = 5 * 60 * 1000;
+
+export async function reserveInvestigation(
+  organizationId: string,
+  investigationId: string,
+): Promise<InvestigationReservationAccess> {
+  if (!billingIsEnabled()) {
+    return {
+      allowed: true,
+      configured: false,
+      nextResetAt: null,
+      reservationId: null,
+    };
+  }
+  const client = getAutumnClient();
+  if (!client) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTUMN_SECRET_KEY is required in production");
+    }
+    return {
+      allowed: true,
+      configured: false,
+      nextResetAt: null,
+      reservationId: null,
+    };
+  }
+
+  const customer = await getOrCreateCustomer(client, organizationId);
+  if (customer.id === null) {
+    return {
+      allowed: true,
+      configured: true,
+      nextResetAt: null,
+      reservationId: null,
+    };
+  }
+
+  const reservationId = `investigation-rerun:${randomUUID()}`;
+  // An expiring provider-side lock makes abandoned or failed rerun claims
+  // self-releasing even if this process cannot send a release request.
+  const result = await client.check({
+    customerId: organizationId,
+    featureId: INVESTIGATIONS_FEATURE_ID,
+    requiredBalance: 1,
+    sendEvent: true,
+    properties: { investigationId },
+    lock: {
+      enabled: true,
+      expiresAt: Date.now() + investigationReservationLifetimeMs,
+      lockId: reservationId,
+    },
+  });
+
+  return {
+    allowed: result.allowed,
+    configured: true,
+    nextResetAt: result.balance?.nextResetAt ?? null,
+    reservationId: result.allowed ? reservationId : null,
+  };
+}
+
+export async function finalizeInvestigationReservation(
+  reservationId: string,
+  action: "confirm" | "release",
+): Promise<void> {
+  if (!billingIsEnabled()) return;
+  await requireAutumnClient().balances.finalize(
+    {
+      action,
+      lockId: reservationId,
+    },
+    {
+      retries: {
+        strategy: "backoff",
+        retryConnectionErrors: true,
+      },
+    },
+  );
 }
 
 export function summarizeBillingCustomer(customer: Customer): BillingSummary {

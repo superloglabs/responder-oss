@@ -11,6 +11,7 @@ export interface AnalyticsEvent {
     | "agent created"
     | "integration connected"
     | "investigation created"
+    | "investigation rerun"
     | "organization created"
     | "pr merged"
     | "pr opened"

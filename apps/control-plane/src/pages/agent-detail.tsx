@@ -19,7 +19,6 @@ import {
   fetchAgent,
   fetchAgentOptions,
   relativeTime,
-  retryInvestigation,
   setAgentEnabled,
 } from "../agents-api";
 import {
@@ -30,7 +29,6 @@ import { AppShell } from "../components/app-shell";
 import { AgentDetailSkeleton } from "../components/screen-skeletons";
 import {
   Badge,
-  Button,
   DataTable,
   Panel,
   Switch,
@@ -310,28 +308,8 @@ export function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryError, setRetryError] = useState<string | null>(null);
-  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [updatingEnabled, setUpdatingEnabled] = useState(false);
   useDocumentTitle(agent?.name ?? "Agent");
-
-  async function retry(investigationId: string) {
-    if (!agentId || retryingId) return;
-    setRetryError(null);
-    setRetryingId(investigationId);
-    try {
-      await retryInvestigation(agentId, investigationId);
-      setAgent(await fetchAgent(agentId));
-    } catch (caught: unknown) {
-      setRetryError(
-        caught instanceof Error
-          ? caught.message
-          : "Unable to retry investigation",
-      );
-    } finally {
-      setRetryingId(null);
-    }
-  }
 
   async function updateEnabled(enabled: boolean) {
     if (!agentId || !agent || updatingEnabled || enabled === agent.enabled) return;
@@ -432,25 +410,6 @@ export function AgentDetailPage() {
       ),
     },
     {
-      align: "right",
-      header: "Action",
-      key: "action",
-      render: (investigation) =>
-        investigation.status === "failed" ? (
-          <Button
-            aria-label={`Retry ${investigation.title}`}
-            disabled={retryingId !== null && retryingId !== investigation.id}
-            loading={retryingId === investigation.id}
-            onClick={() => void retry(investigation.id)}
-            size="small"
-            variant="secondary"
-          >
-            Retry
-          </Button>
-        ) : null,
-      width: "96px",
-    },
-    {
       header: "Status",
       key: "status",
       render: (investigation) => (
@@ -526,7 +485,6 @@ export function AgentDetailPage() {
           <h2 id="investigation-title">Investigations</h2>
           <span>{agent.investigations.length} total</span>
         </header>
-        {retryError ? <p className="formError">{retryError}</p> : null}
         <DataTable
           aria-label="Agent investigations"
           columns={investigationColumns}

@@ -1,4 +1,8 @@
-import { consumeInvestigation } from "../../../../packages/core/src/billing/autumn.js";
+import {
+  consumeInvestigation,
+  finalizeInvestigationReservation,
+  reserveInvestigation,
+} from "../../../../packages/core/src/billing/autumn.js";
 import { notifyBillingLimitReached } from "../../../../packages/core/src/billing/notifications.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import {
@@ -21,6 +25,10 @@ import {
 type QueueResult =
   | { kind: "blocked" }
   | { investigationId: string; kind: "duplicate" }
+  | { investigationId: string; jobId: string; kind: "queued" };
+
+type RetryQueueResult =
+  | { kind: "blocked" }
   | { investigationId: string; jobId: string; kind: "queued" };
 
 let boss: ReturnType<typeof createJobBoss> | undefined;
@@ -124,8 +132,81 @@ export async function queueInvestigation(
   }
 }
 
-export async function queueInvestigationRetry(investigationId: string) {
-  const result = await prepareInvestigationRetry(investigationId);
+export async function queueInvestigationRetry(input: {
+  investigationId: string;
+  organizationId: string;
+}): Promise<RetryQueueResult> {
+  let reservation: Awaited<ReturnType<typeof reserveInvestigation>>;
+  try {
+    reservation = await reserveInvestigation(
+      input.organizationId,
+      input.investigationId,
+    );
+    if (!reservation.allowed) {
+      await notifyBillingLimitReached(
+        input.organizationId,
+        reservation.nextResetAt,
+      ).catch((error: unknown) => {
+        console.error("Unable to send billing limit notifications", error);
+      });
+      return { kind: "blocked" };
+    }
+  } catch (error) {
+    console.error("Unable to reserve investigation rerun", error);
+    throw new Error("Billing service unavailable", { cause: error });
+  }
+
+  let result: Awaited<ReturnType<typeof prepareInvestigationRetry>>;
+  try {
+    result = await prepareInvestigationRetry(input.investigationId);
+  } catch (error) {
+    if (reservation.reservationId) {
+      await finalizeInvestigationReservation(
+        reservation.reservationId,
+        "release",
+      ).catch((releaseError: unknown) => {
+        // The provider automatically releases this reservation at expiry.
+        console.error("Unable to release investigation rerun", releaseError);
+      });
+    }
+    throw error;
+  }
+
+  if (reservation.reservationId) {
+    try {
+      await finalizeInvestigationReservation(
+        reservation.reservationId,
+        "confirm",
+      );
+    } catch (error) {
+      await finalizeInvestigationReservation(
+        reservation.reservationId,
+        "release",
+      ).catch((releaseError: unknown) => {
+        // The provider automatically releases this reservation at expiry.
+        console.error("Unable to release investigation rerun", releaseError);
+      });
+      await failInvestigation(
+        result.investigationId,
+        "Unable to confirm investigation rerun billing",
+      );
+      console.error("Unable to meter investigation rerun", error);
+      throw new Error("Billing service unavailable", { cause: error });
+    }
+  }
+
+  await captureAnalyticsEvent({
+    distinctId: `investigation:${result.investigationId}`,
+    event: "investigation rerun",
+    organizationId: result.config.organizationId,
+    properties: {
+      $process_person_profile: false,
+      agent_config_version_id: result.config.id,
+      agent_id: result.config.agentId,
+      investigation_id: result.investigationId,
+      provider: result.input.provider,
+    },
+  });
   try {
     const jobId = await (await getBoss()).send(
       investigationQueue,
@@ -152,7 +233,11 @@ export async function queueInvestigationRetry(investigationId: string) {
       { singletonKey: `retry:${result.investigationId}:${Date.now()}` },
     );
     if (!jobId) throw new Error("The investigation retry job was not created");
-    return { investigationId: result.investigationId, jobId };
+    return {
+      investigationId: result.investigationId,
+      jobId,
+      kind: "queued",
+    };
   } catch (error) {
     await failInvestigation(
       result.investigationId,

@@ -16,6 +16,7 @@ activity can be separated from other products sharing the PostHog project.
 | `agent created` | A new agent and its initial configuration are persisted | `agent_id`, `trigger_kind`, `model`, `enabled`, `pr_mode` |
 | `prompt copied` | A user clicks **Copy prompt** in Slack | `issue_id`, `issue_found`, `team_id`, `channel_id`, `surface` |
 | `investigation created` | A new investigation or replay is persisted and accepted for processing | `investigation_id`, `agent_id`, `provider`, `is_replay`, `source_investigation_id` |
+| `investigation rerun` | A finished investigation is accepted for another run with the active Agent configuration | `investigation_id`, `agent_id`, `agent_config_version_id`, `provider` |
 
 Events associated with a workspace include `organization_id` and the PostHog
 `organization` group. Authenticated events use the Better Auth user ID as their
