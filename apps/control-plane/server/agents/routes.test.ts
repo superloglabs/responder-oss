@@ -23,7 +23,7 @@ import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
 } from "./daytona-secrets.js";
-import { agentRoutes } from "./routes.js";
+import { agentRoutes, workspaceSecretInputSchema } from "./routes.js";
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
   decryptCredentials: vi.fn(),
@@ -193,6 +193,19 @@ describe("workspace secrets", () => {
     expect(response.status).toBe(400);
     expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
   });
+
+  it.each(["DAYTONA_API_KEY", "OPENAI_API_KEY", "RESPONDER_API_KEY"])(
+    "allows the standard credential environment variable %s",
+    (name) => {
+      expect(
+        workspaceSecretInputSchema.safeParse({
+          name,
+          value: "never-store-this",
+          allowedHosts: ["api.example.com"],
+        }).success,
+      ).toBe(true);
+    },
+  );
 
   it("does not overwrite a workspace secret or send its new value", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
