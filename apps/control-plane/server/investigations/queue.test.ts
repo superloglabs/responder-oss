@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   notifyBillingLimitReached: vi.fn(),
   prepareInvestigationRetry: vi.fn(),
   prepareWorkerQueues: vi.fn(),
+  refundInvestigation: vi.fn(),
   setIssuePullRequestSession: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ vi.mock("../../../../packages/core/src/analytics.js", () => ({
 
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
   consumeInvestigation: mocks.consumeInvestigation,
+  refundInvestigation: mocks.refundInvestigation,
 }));
 
 vi.mock("../../../../packages/core/src/billing/notifications.js", () => ({
@@ -116,12 +118,14 @@ describe("investigation queue", () => {
     mocks.consumeInvestigation.mockResolvedValue({
       allowed: true,
       configured: false,
+      consumed: true,
       nextResetAt: null,
     });
     mocks.bossStart.mockResolvedValue(undefined);
     mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.prepareWorkerQueues.mockResolvedValue(undefined);
     mocks.notifyBillingLimitReached.mockResolvedValue(undefined);
+    mocks.refundInvestigation.mockResolvedValue(undefined);
     mocks.prepareInvestigationRetry.mockResolvedValue({
       config: created.config,
       input: request,
@@ -220,6 +224,11 @@ describe("investigation queue", () => {
     expect(mocks.prepareInvestigationRetry).toHaveBeenCalledWith(
       created.investigationId,
     );
+    expect(mocks.bossSend).toHaveBeenCalledWith(
+      "responder-investigations",
+      expect.objectContaining({ config: created.config }),
+      expect.any(Object),
+    );
     expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith({
       distinctId: `investigation:${created.investigationId}`,
       event: "investigation rerun",
@@ -238,6 +247,7 @@ describe("investigation queue", () => {
     mocks.consumeInvestigation.mockResolvedValue({
       allowed: false,
       configured: true,
+      consumed: false,
       nextResetAt: 1_800_000_000,
     });
 
@@ -255,6 +265,24 @@ describe("investigation queue", () => {
     expect(mocks.prepareInvestigationRetry).not.toHaveBeenCalled();
     expect(mocks.bossSend).not.toHaveBeenCalled();
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("refunds a metered rerun that loses the terminal-state claim", async () => {
+    const error = new Error("Only finished investigations can be retried");
+    mocks.prepareInvestigationRetry.mockRejectedValue(error);
+
+    await expect(
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
+    ).rejects.toBe(error);
+
+    expect(mocks.refundInvestigation).toHaveBeenCalledWith(
+      created.config.organizationId,
+      created.investigationId,
+    );
+    expect(mocks.bossSend).not.toHaveBeenCalled();
   });
 
   it("fails a remediation request when the queue cannot start", async () => {

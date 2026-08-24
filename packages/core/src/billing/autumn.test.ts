@@ -30,6 +30,7 @@ describe("Autumn billing", () => {
     ).resolves.toEqual({
       allowed: true,
       configured: false,
+      consumed: false,
       nextResetAt: null,
     });
   });
@@ -87,6 +88,7 @@ describe("Autumn billing", () => {
     ).resolves.toEqual({
       allowed: true,
       configured: false,
+      consumed: false,
       nextResetAt: null,
     });
   });

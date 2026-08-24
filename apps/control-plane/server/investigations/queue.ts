@@ -1,4 +1,7 @@
-import { consumeInvestigation } from "../../../../packages/core/src/billing/autumn.js";
+import {
+  consumeInvestigation,
+  refundInvestigation,
+} from "../../../../packages/core/src/billing/autumn.js";
 import { notifyBillingLimitReached } from "../../../../packages/core/src/billing/notifications.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import {
@@ -132,6 +135,7 @@ export async function queueInvestigationRetry(input: {
   investigationId: string;
   organizationId: string;
 }): Promise<RetryQueueResult> {
+  let metered = false;
   try {
     const access = await consumeInvestigation(
       input.organizationId,
@@ -146,12 +150,26 @@ export async function queueInvestigationRetry(input: {
       });
       return { kind: "blocked" };
     }
+    metered = access.consumed;
   } catch (error) {
     console.error("Unable to meter investigation rerun", error);
     throw new Error("Billing service unavailable", { cause: error });
   }
 
-  const result = await prepareInvestigationRetry(input.investigationId);
+  let result: Awaited<ReturnType<typeof prepareInvestigationRetry>>;
+  try {
+    result = await prepareInvestigationRetry(input.investigationId);
+  } catch (error) {
+    if (metered) {
+      await refundInvestigation(
+        input.organizationId,
+        input.investigationId,
+      ).catch((refundError: unknown) => {
+        console.error("Unable to refund investigation rerun", refundError);
+      });
+    }
+    throw error;
+  }
   await captureAnalyticsEvent({
     distinctId: `investigation:${result.investigationId}`,
     event: "investigation rerun",

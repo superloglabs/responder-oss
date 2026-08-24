@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { getDatabase } from "./client.js";
 import {
+  investigationIssues,
+  investigationTraceEvents,
+  issues,
+} from "./schema.js";
+import {
   customMcpCredentialUpdateFailureEvent,
   customMcpConnectionsLoadedEvent,
   customMcpRuntimeAccountSkippedEvent,
@@ -101,7 +106,9 @@ describe("investigation retry", () => {
       investigationId: "investigation-1",
       runtimeProfileId: "active-runtime",
     });
-    expect(tx.delete).toHaveBeenCalledTimes(2);
+    expect(tx.delete).toHaveBeenNthCalledWith(1, investigationIssues);
+    expect(tx.delete).toHaveBeenNthCalledWith(2, investigationTraceEvents);
+    expect(tx.delete).not.toHaveBeenCalledWith(issues);
     expect(set).toHaveBeenCalledWith(expect.objectContaining({
       agentConfigVersionId: "active-config",
       runtimeProfileId: "active-runtime",

@@ -25,6 +25,7 @@ export interface BillingSummary {
 export interface InvestigationAccess {
   allowed: boolean;
   configured: boolean;
+  consumed: boolean;
   nextResetAt: number | null;
 }
 
@@ -72,21 +73,36 @@ export async function consumeInvestigation(
   investigationId: string,
 ): Promise<InvestigationAccess> {
   if (!billingIsEnabled()) {
-    return { allowed: true, configured: false, nextResetAt: null };
+    return {
+      allowed: true,
+      configured: false,
+      consumed: false,
+      nextResetAt: null,
+    };
   }
   const client = getAutumnClient();
   if (!client) {
     if (process.env.NODE_ENV === "production") {
       throw new Error("AUTUMN_SECRET_KEY is required in production");
     }
-    return { allowed: true, configured: false, nextResetAt: null };
+    return {
+      allowed: true,
+      configured: false,
+      consumed: false,
+      nextResetAt: null,
+    };
   }
 
   const customer = await getOrCreateCustomer(client, organizationId);
   if (customer.id === null) {
     // Autumn's SDK fails open during a provider outage. Preserve that behavior so
     // incident response is not taken down by the billing system.
-    return { allowed: true, configured: true, nextResetAt: null };
+    return {
+      allowed: true,
+      configured: true,
+      consumed: false,
+      nextResetAt: null,
+    };
   }
 
   const result = await client.check({
@@ -100,8 +116,26 @@ export async function consumeInvestigation(
   return {
     allowed: result.allowed,
     configured: true,
+    consumed: result.allowed,
     nextResetAt: result.balance?.nextResetAt ?? null,
   };
+}
+
+export async function refundInvestigation(
+  organizationId: string,
+  investigationId: string,
+): Promise<void> {
+  if (!billingIsEnabled()) return;
+  const client = requireAutumnClient();
+  await client.track({
+    customerId: organizationId,
+    featureId: INVESTIGATIONS_FEATURE_ID,
+    value: -1,
+    properties: {
+      investigationId,
+      reason: "rerun_not_started",
+    },
+  });
 }
 
 export function summarizeBillingCustomer(customer: Customer): BillingSummary {
