@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   captureAnalyticsEvent: vi.fn(),
@@ -45,12 +45,7 @@ function signedActionRequest(payload: unknown) {
 }
 
 describe("Slack actions", () => {
-  afterEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-  });
-
-  it("shows an issue prompt in the thread containing the button", async () => {
+  beforeEach(() => {
     vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
     mocks.getIssueForSlackAction.mockResolvedValue({
       id: "07070707-0707-4707-8707-070707070707",
@@ -65,7 +60,14 @@ describe("Slack actions", () => {
     mocks.decryptCredentials.mockReturnValue({ accessToken: "xoxb-test" });
     mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.postSlackEphemeralMessage.mockResolvedValue("1785500002.000300");
+  });
 
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("shows an issue prompt in the thread containing the button", async () => {
     const response = await signedActionRequest({
       type: "block_actions",
       team: { id: "T123" },
@@ -90,6 +92,34 @@ describe("Slack actions", () => {
         accessToken: "xoxb-test",
         channelId: "C123",
         threadTimestamp: "1785500000.000100",
+        userId: "U123",
+      }),
+    );
+  });
+
+  it("shows an issue prompt in the channel for a top-level button", async () => {
+    const response = await signedActionRequest({
+      type: "block_actions",
+      team: { id: "T123" },
+      channel: { id: "C123" },
+      user: { id: "U123" },
+      response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
+      message: {},
+      actions: [
+        {
+          action_id: "copy_issue_prompt",
+          value: "07070707-0707-4707-8707-070707070707",
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(mocks.postSlackEphemeralMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "xoxb-test",
+        channelId: "C123",
+        threadTimestamp: undefined,
         userId: "U123",
       }),
     );
