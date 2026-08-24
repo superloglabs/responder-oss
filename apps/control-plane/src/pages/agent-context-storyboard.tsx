@@ -444,8 +444,15 @@ function ResourceConfigurationDialog({
   setSelectedResources: (next: Set<string>) => void;
 }) {
   const integration = INTEGRATIONS.find((candidate) => candidate.id === kind)!;
-  const [selectedAccount, setSelectedAccount] = useState<"acme" | "labs">("acme");
   const allOptions = RESOURCE_OPTIONS[kind];
+  const initiallySelectedAccount =
+    allOptions.find(
+      (resource) =>
+        resource.account && selectedResources.has(resource.id),
+    )?.account ?? "acme";
+  const [selectedAccount, setSelectedAccount] = useState<"acme" | "labs">(
+    initiallySelectedAccount,
+  );
   const options = allOptions.filter(
     (resource) => !resource.account || resource.account === selectedAccount,
   );
