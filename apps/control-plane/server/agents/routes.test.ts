@@ -11,6 +11,8 @@ import {
 } from "../../../../packages/core/src/db/integrations.js";
 import {
   getInvestigationDetail,
+  getInvestigationForRetry,
+  investigationCanBeRetried,
   listInvestigationTraceEvents,
 } from "../../../../packages/core/src/db/investigations.js";
 import {
@@ -18,6 +20,7 @@ import {
   findWorkspaceSecretByName,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
 import { getActiveTenant } from "../tenant.js";
+import { queueInvestigationRetry } from "../investigations/queue.js";
 import { listSlackChannels } from "../integrations/slack.js";
 import {
   createDaytonaWorkspaceSecret,
@@ -108,6 +111,99 @@ const tenant = {
     email: "test@example.com",
   },
 };
+
+describe("investigation reruns", () => {
+  const agentId = "30000000-0000-4000-8000-000000000000";
+  const investigationId = "40000000-0000-4000-8000-000000000000";
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("queues a finished investigation for its active workspace", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getInvestigationForRetry).mockResolvedValue({
+      id: investigationId,
+      input: {
+        body: "Original alert",
+        externalEventId: "event-1",
+        provider: "sentry",
+        title: "Production error",
+      },
+      status: "resolved",
+    });
+    vi.mocked(investigationCanBeRetried).mockReturnValue(true);
+    vi.mocked(queueInvestigationRetry).mockResolvedValue({
+      investigationId,
+      jobId: "job-1",
+      kind: "queued",
+    });
+
+    const response = await app.request(
+      `/api/agents/${agentId}/investigations/${investigationId}/retry`,
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      investigationId,
+      sessionId: "openai-daytona:job-1",
+    });
+    expect(queueInvestigationRetry).toHaveBeenCalledWith({
+      investigationId,
+      organizationId: tenant.organizationId,
+    });
+  });
+
+  it("returns the billing limit without starting the rerun", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getInvestigationForRetry).mockResolvedValue({
+      id: investigationId,
+      input: {
+        body: "Original alert",
+        externalEventId: "event-1",
+        provider: "sentry",
+        title: "Production error",
+      },
+      status: "resolved",
+    });
+    vi.mocked(investigationCanBeRetried).mockReturnValue(true);
+    vi.mocked(queueInvestigationRetry).mockResolvedValue({ kind: "blocked" });
+
+    const response = await app.request(
+      `/api/agents/${agentId}/investigations/${investigationId}/retry`,
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toEqual({
+      error: "Monthly investigation allowance exhausted",
+    });
+  });
+
+  it("does not rerun active investigations", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getInvestigationForRetry).mockResolvedValue({
+      id: investigationId,
+      input: {
+        body: "Original alert",
+        externalEventId: "event-1",
+        provider: "sentry",
+        title: "Production error",
+      },
+      status: "investigating",
+    });
+    vi.mocked(investigationCanBeRetried).mockReturnValue(false);
+
+    const response = await app.request(
+      `/api/agents/${agentId}/investigations/${investigationId}/retry`,
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(409);
+    expect(queueInvestigationRetry).not.toHaveBeenCalled();
+  });
+});
 
 describe("workspace secrets", () => {
   afterEach(() => {

@@ -67,6 +67,14 @@ Agent configuration and runtime profiles are immutable versions. An
 investigation pins both versions when it is created, so later configuration
 changes cannot alter a queued or replayed run.
 
+A workspace member can rerun a finished investigation from its detail page.
+The rerun reuses the original provider input but replaces the investigation's
+report and trace with a run against the Agent's active configuration, the active
+runtime profile, current provider data, and current repository heads. Previous
+issue records remain available after their investigation links are replaced.
+Reruns consume the normal investigation allowance and use normal delivery and
+external-action behavior.
+
 Postgres and pg-boss hold investigation, remediation, and follow-up work.
 Delivery may be at least once, so handlers use idempotency keys and state
 transitions rather than assuming a job runs exactly once.

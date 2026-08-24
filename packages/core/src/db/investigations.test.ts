@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { getDatabase } from "./client.js";
 import {
   customMcpCredentialUpdateFailureEvent,
   customMcpConnectionsLoadedEvent,
@@ -8,8 +9,13 @@ import {
   customMcpTokenRefreshSuccessEvent,
   customMcpReconnectError,
   investigationCanBeRetried,
+  prepareInvestigationRetry,
   replayReportMarkdownUpdate,
 } from "./investigations.js";
+
+vi.mock("./client.js", () => ({
+  getDatabase: vi.fn(),
+}));
 
 describe("investigation retry", () => {
   it("allows terminal investigations to run again", () => {
@@ -20,6 +26,86 @@ describe("investigation retry", () => {
   it("does not allow a duplicate run while work is active", () => {
     expect(investigationCanBeRetried("pending")).toBe(false);
     expect(investigationCanBeRetried("investigating")).toBe(false);
+  });
+
+  it("switches to the active agent configuration without deleting old issues", async () => {
+    const sourceInput = {
+      agentId: "agent-1",
+      body: "Original alert",
+      externalEventId: "event-1",
+      provider: "sentry" as const,
+      title: "Production error",
+    };
+    const investigationQuery = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{
+        agentId: "agent-1",
+        configId: "active-config",
+        createLinearTickets: true,
+        id: "investigation-1",
+        input: sourceInput,
+        linearIssueTemplate: "Current template",
+        model: "current-model",
+        organizationId: "organization-1",
+        prMode: "always",
+        prompt: "Current instructions",
+        status: "resolved",
+      }]),
+    };
+    investigationQuery.from.mockReturnValue(investigationQuery);
+    investigationQuery.innerJoin.mockReturnValue(investigationQuery);
+    investigationQuery.where.mockReturnValue(investigationQuery);
+    const profileQuery = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{ id: "active-runtime" }]),
+    };
+    profileQuery.from.mockReturnValue(profileQuery);
+    profileQuery.innerJoin.mockReturnValue(profileQuery);
+    profileQuery.where.mockReturnValue(profileQuery);
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(investigationQuery)
+      .mockReturnValueOnce(profileQuery);
+    const deleteWhere = vi.fn().mockResolvedValue([]);
+    const set = vi.fn(() => ({
+      where: vi.fn(() => ({
+        returning: vi.fn().mockResolvedValue([{ id: "investigation-1" }]),
+      })),
+    }));
+    const tx = {
+      delete: vi.fn(() => ({ where: deleteWhere })),
+      select,
+      update: vi.fn(() => ({ set })),
+    };
+    const transaction = vi.fn(async (callback) => callback(tx));
+    vi.mocked(getDatabase).mockReturnValue({ transaction } as never);
+
+    await expect(
+      prepareInvestigationRetry("investigation-1"),
+    ).resolves.toEqual({
+      config: {
+        agentId: "agent-1",
+        createLinearTickets: true,
+        id: "active-config",
+        linearIssueTemplate: "Current template",
+        model: "current-model",
+        organizationId: "organization-1",
+        prMode: "always",
+        prompt: "Current instructions",
+      },
+      input: sourceInput,
+      investigationId: "investigation-1",
+      runtimeProfileId: "active-runtime",
+    });
+    expect(tx.delete).toHaveBeenCalledTimes(2);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      agentConfigVersionId: "active-config",
+      runtimeProfileId: "active-runtime",
+    }));
   });
 });
 

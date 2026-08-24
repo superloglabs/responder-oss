@@ -23,6 +23,10 @@ type QueueResult =
   | { investigationId: string; kind: "duplicate" }
   | { investigationId: string; jobId: string; kind: "queued" };
 
+type RetryQueueResult =
+  | { kind: "blocked" }
+  | { investigationId: string; jobId: string; kind: "queued" };
+
 let boss: ReturnType<typeof createJobBoss> | undefined;
 let bossStart: Promise<ReturnType<typeof createJobBoss>> | undefined;
 
@@ -124,8 +128,42 @@ export async function queueInvestigation(
   }
 }
 
-export async function queueInvestigationRetry(investigationId: string) {
-  const result = await prepareInvestigationRetry(investigationId);
+export async function queueInvestigationRetry(input: {
+  investigationId: string;
+  organizationId: string;
+}): Promise<RetryQueueResult> {
+  try {
+    const access = await consumeInvestigation(
+      input.organizationId,
+      input.investigationId,
+    );
+    if (!access.allowed) {
+      await notifyBillingLimitReached(
+        input.organizationId,
+        access.nextResetAt,
+      ).catch((error: unknown) => {
+        console.error("Unable to send billing limit notifications", error);
+      });
+      return { kind: "blocked" };
+    }
+  } catch (error) {
+    console.error("Unable to meter investigation rerun", error);
+    throw new Error("Billing service unavailable", { cause: error });
+  }
+
+  const result = await prepareInvestigationRetry(input.investigationId);
+  await captureAnalyticsEvent({
+    distinctId: `investigation:${result.investigationId}`,
+    event: "investigation rerun",
+    organizationId: result.config.organizationId,
+    properties: {
+      $process_person_profile: false,
+      agent_config_version_id: result.config.id,
+      agent_id: result.config.agentId,
+      investigation_id: result.investigationId,
+      provider: result.input.provider,
+    },
+  });
   try {
     const jobId = await (await getBoss()).send(
       investigationQueue,
@@ -152,7 +190,11 @@ export async function queueInvestigationRetry(investigationId: string) {
       { singletonKey: `retry:${result.investigationId}:${Date.now()}` },
     );
     if (!jobId) throw new Error("The investigation retry job was not created");
-    return { investigationId: result.investigationId, jobId };
+    return {
+      investigationId: result.investigationId,
+      jobId,
+      kind: "queued",
+    };
   } catch (error) {
     await failInvestigation(
       result.investigationId,

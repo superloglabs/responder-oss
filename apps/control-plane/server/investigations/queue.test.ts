@@ -201,17 +201,59 @@ describe("investigation queue", () => {
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 
-  it("does not count a retry as a newly created investigation", async () => {
+  it("charges and enqueues a rerun with its refreshed configuration", async () => {
     await expect(
-      queueInvestigationRetry(created.investigationId),
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
     ).resolves.toEqual({
       investigationId: created.investigationId,
       jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
     });
 
+    expect(mocks.consumeInvestigation).toHaveBeenCalledWith(
+      created.config.organizationId,
+      created.investigationId,
+    );
     expect(mocks.prepareInvestigationRetry).toHaveBeenCalledWith(
       created.investigationId,
     );
+    expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith({
+      distinctId: `investigation:${created.investigationId}`,
+      event: "investigation rerun",
+      organizationId: created.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_config_version_id: created.config.id,
+        agent_id: created.config.agentId,
+        investigation_id: created.investigationId,
+        provider: request.provider,
+      },
+    });
+  });
+
+  it("leaves a finished investigation untouched when rerun billing is blocked", async () => {
+    mocks.consumeInvestigation.mockResolvedValue({
+      allowed: false,
+      configured: true,
+      nextResetAt: 1_800_000_000,
+    });
+
+    await expect(
+      queueInvestigationRetry({
+        investigationId: created.investigationId,
+        organizationId: created.config.organizationId,
+      }),
+    ).resolves.toEqual({ kind: "blocked" });
+
+    expect(mocks.notifyBillingLimitReached).toHaveBeenCalledWith(
+      created.config.organizationId,
+      1_800_000_000,
+    );
+    expect(mocks.prepareInvestigationRetry).not.toHaveBeenCalled();
+    expect(mocks.bossSend).not.toHaveBeenCalled();
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 

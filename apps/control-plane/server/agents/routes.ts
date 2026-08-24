@@ -453,7 +453,16 @@ export const agentRoutes = new Hono()
     }
 
     try {
-      const retry = await queueInvestigationRetry(investigation.id);
+      const retry = await queueInvestigationRetry({
+        investigationId: investigation.id,
+        organizationId: tenant.organizationId,
+      });
+      if (retry.kind === "blocked") {
+        return context.json(
+          { error: "Monthly investigation allowance exhausted" },
+          402,
+        );
+      }
       return context.json(
         {
           investigationId: retry.investigationId,
@@ -464,7 +473,7 @@ export const agentRoutes = new Hono()
     } catch (error) {
       return context.json(
         {
-          error: error instanceof Error ? error.message : "Unable to retry investigation",
+          error: error instanceof Error ? error.message : "Unable to rerun investigation",
         },
         502,
       );

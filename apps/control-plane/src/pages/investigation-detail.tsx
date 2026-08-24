@@ -239,7 +239,7 @@ export function InvestigationDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   useDocumentTitle(detail?.investigation.title ?? "Investigation");
 
   async function load() {
@@ -248,9 +248,9 @@ export function InvestigationDetailPage() {
     setDetail(loaded);
   }
 
-  async function retry() {
-    if (!agentId || !investigationId || retrying) return;
-    setRetrying(true);
+  async function rerun() {
+    if (!agentId || !investigationId || rerunning) return;
+    setRerunning(true);
     setError(null);
     try {
       await retryInvestigation(agentId, investigationId);
@@ -259,10 +259,10 @@ export function InvestigationDetailPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Unable to retry investigation",
+          : "Unable to rerun investigation",
       );
     } finally {
-      setRetrying(false);
+      setRerunning(false);
     }
   }
 
@@ -397,9 +397,21 @@ export function InvestigationDetailPage() {
           </Link>
           <div className="investigationHero__title">
             <h1>{investigation.title}</h1>
-            {showHeroStatus ? (
-              <Badge tone={status.tone}>{status.label}</Badge>
-            ) : null}
+            <div className="investigationHero__actions">
+              {showHeroStatus ? (
+                <Badge tone={status.tone}>{status.label}</Badge>
+              ) : null}
+              {!isLive && !investigation.isReplay ? (
+                <Button
+                  loading={rerunning}
+                  onClick={() => void rerun()}
+                  size="small"
+                  variant="secondary"
+                >
+                  Rerun with current configuration
+                </Button>
+              ) : null}
+            </div>
           </div>
           <p>
             {triggerContext(investigation.input)} · Started{" "}
@@ -441,16 +453,6 @@ export function InvestigationDetailPage() {
                         "Responder could not complete this investigation."}
                     </p>
                   </div>
-                  {!investigation.isReplay ? (
-                    <Button
-                      loading={retrying}
-                      onClick={() => void retry()}
-                      size="small"
-                      variant="secondary"
-                    >
-                      Retry investigation
-                    </Button>
-                  ) : null}
                 </div>
               </Panel>
             </section>

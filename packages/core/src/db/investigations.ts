@@ -46,7 +46,6 @@ import {
   investigationReplayRequests,
   investigationTraceEvents,
   investigations,
-  issues,
   repositories,
   runtimeProfiles,
   webhookReceipts,
@@ -301,10 +300,13 @@ export async function prepareInvestigationRetry(
       })
       .from(investigations)
       .innerJoin(
-        agentConfigVersions,
-        eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+        agents,
+        eq(agents.id, investigations.agentId),
       )
-      .innerJoin(agents, eq(agents.id, investigations.agentId))
+      .innerJoin(
+        agentConfigVersions,
+        eq(agentConfigVersions.id, agents.activeVersionId),
+      )
       .where(eq(investigations.id, investigationId))
       .limit(1);
     const investigation = rows[0];
@@ -334,34 +336,9 @@ export async function prepareInvestigationRetry(
     const activeProfile = activeProfiles[0];
     if (!activeProfile) throw new InstanceRuntimeProfileError();
 
-    const previousLinks = await tx
-      .select({
-        issueId: investigationIssues.issueId,
-        relationship: investigationIssues.relationship,
-      })
-      .from(investigationIssues)
-      .where(eq(investigationIssues.investigationId, investigationId));
     await tx
       .delete(investigationIssues)
       .where(eq(investigationIssues.investigationId, investigationId));
-    for (const link of previousLinks) {
-      if (link.relationship !== "new") continue;
-      const remainingLinks = await tx
-        .select({ issueId: investigationIssues.issueId })
-        .from(investigationIssues)
-        .where(eq(investigationIssues.issueId, link.issueId))
-        .limit(1);
-      if (remainingLinks.length === 0) {
-        await tx
-          .delete(issues)
-          .where(
-            and(
-              eq(issues.id, link.issueId),
-              eq(issues.organizationId, investigation.organizationId),
-            ),
-          );
-      }
-    }
 
     await tx
       .delete(investigationTraceEvents)
@@ -370,12 +347,14 @@ export async function prepareInvestigationRetry(
     const reset = await tx
       .update(investigations)
       .set({
+        agentConfigVersionId: investigation.configId,
         status: "pending",
         finding: null,
         structuredReport: null,
         reportMarkdown: null,
         eveSessionId: null,
         failureReason: null,
+        slackTraceItems: [],
         startedAt: null,
         completedAt: null,
         runtimeProfileId: activeProfile.id,
