@@ -20,7 +20,7 @@ describe("agent draft persistence", () => {
     const workspaceSecretRecordIds = workspaceSecretRecordIdsForDraft(
       OPTIONS,
       {
-        workspaceSecretRecordIds: ["secret-1", "deleted-secret"],
+        workspaceSecretNames: ["STATUS_API_TOKEN", "DELETED_API_TOKEN"],
       },
       {},
     );
@@ -29,8 +29,8 @@ describe("agent draft persistence", () => {
     } as CreateDraft;
 
     expect(workspaceSecretRecordIds).toEqual(["secret-1"]);
-    expect(draftForSessionStorage(draft).workspaceSecretRecordIds).toEqual([
-      "secret-1",
+    expect(draftForSessionStorage(draft, OPTIONS).workspaceSecretNames).toEqual([
+      "STATUS_API_TOKEN",
     ]);
   });
 });

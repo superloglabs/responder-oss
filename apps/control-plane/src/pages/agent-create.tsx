@@ -169,8 +169,9 @@ function storageKey(base: string, agentId: string | undefined): string {
 function saveDraftToSessionStorage(
   key: string,
   draft: CreateDraft,
+  options: AgentOptions,
 ): void {
-  const persistedDraft = draftForSessionStorage(draft);
+  const persistedDraft = draftForSessionStorage(draft, options);
   window.sessionStorage.setItem(key, JSON.stringify(persistedDraft));
 }
 
@@ -770,8 +771,8 @@ export function AgentCreatePage() {
 
   useEffect(() => {
     if (!draft) return;
-    saveDraftToSessionStorage(draftStorageKey, draft);
-  }, [draft, draftStorageKey]);
+    saveDraftToSessionStorage(draftStorageKey, draft, options);
+  }, [draft, draftStorageKey, options]);
 
   useEffect(() => {
     window.sessionStorage.setItem(
@@ -1029,7 +1030,7 @@ export function AgentCreatePage() {
       provider === "upstash" ||
       provider === "langfuse"
     ) {
-      saveDraftToSessionStorage(draftStorageKey, currentDraft);
+      saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       if (provider === "aws") setConnectingAws(true);
       else if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
@@ -1038,13 +1039,13 @@ export function AgentCreatePage() {
       return;
     }
     if (provider === "custom_mcp") {
-      saveDraftToSessionStorage(draftStorageKey, currentDraft);
+      saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       setConfiguringCustomMcp(true);
       return;
     }
     connectingProviderRef.current = provider;
     setConnectingProvider(provider);
-    saveDraftToSessionStorage(draftStorageKey, currentDraft);
+    saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
     const separator = connectionUrl.includes("?") ? "&" : "?";
     const params = new URLSearchParams({ returnTo });
     window.location.assign(`${connectionUrl}${separator}${params}`);

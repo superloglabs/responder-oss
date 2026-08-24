@@ -23,11 +23,17 @@ export interface CreateDraft {
   instructions: string;
 }
 
-export type SavedCreateDraft = Partial<CreateDraft> & {
+export type SavedCreateDraft = Partial<
+  Omit<CreateDraft, "workspaceSecretRecordIds">
+> & {
   postScope?: "all" | "selected";
+  workspaceSecretNames?: string[];
 };
 
-export function draftForSessionStorage(draft: CreateDraft): SavedCreateDraft {
+export function draftForSessionStorage(
+  draft: CreateDraft,
+  options: Pick<AgentOptions, "secrets">,
+): SavedCreateDraft {
   return {
     inputKind: draft.inputKind,
     sentryAccountId: draft.sentryAccountId,
@@ -41,7 +47,9 @@ export function draftForSessionStorage(draft: CreateDraft): SavedCreateDraft {
     prMode: draft.prMode,
     contextAccountIds: draft.contextAccountIds,
     contextResourceIds: draft.contextResourceIds,
-    workspaceSecretRecordIds: draft.workspaceSecretRecordIds,
+    workspaceSecretNames: options.secrets
+      .filter((secret) => draft.workspaceSecretRecordIds.includes(secret.id))
+      .map((secret) => secret.name),
     createLinearTickets: draft.createLinearTickets,
     linearIssueTemplate: draft.linearIssueTemplate,
     instructions: draft.instructions,
@@ -53,10 +61,13 @@ export function workspaceSecretRecordIdsForDraft(
   saved: SavedCreateDraft,
   configured: Partial<CreateDraft>,
 ): string[] {
-  const selectedIds =
-    saved.workspaceSecretRecordIds ?? configured.workspaceSecretRecordIds;
+  if (saved.workspaceSecretNames) {
+    return options.secrets
+      .filter((secret) => saved.workspaceSecretNames?.includes(secret.name))
+      .map((secret) => secret.id);
+  }
 
-  return selectedIds?.filter((id) =>
+  return configured.workspaceSecretRecordIds?.filter((id) =>
     options.secrets.some((secret) => secret.id === id),
   ) ?? [];
 }
