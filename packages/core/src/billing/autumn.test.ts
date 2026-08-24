@@ -3,6 +3,7 @@ import type { Customer } from "autumn-js";
 import {
   consumeInvestigation,
   getBillingSummary,
+  reserveInvestigation,
   summarizeBillingCustomer,
 } from "./autumn.js";
 
@@ -30,8 +31,15 @@ describe("Autumn billing", () => {
     ).resolves.toEqual({
       allowed: true,
       configured: false,
-      consumed: false,
       nextResetAt: null,
+    });
+    await expect(
+      reserveInvestigation("organization-1", "investigation-1"),
+    ).resolves.toEqual({
+      allowed: true,
+      configured: false,
+      nextResetAt: null,
+      reservationId: null,
     });
   });
 
@@ -88,7 +96,6 @@ describe("Autumn billing", () => {
     ).resolves.toEqual({
       allowed: true,
       configured: false,
-      consumed: false,
       nextResetAt: null,
     });
   });

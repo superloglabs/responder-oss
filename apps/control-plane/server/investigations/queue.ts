@@ -1,6 +1,7 @@
 import {
   consumeInvestigation,
-  refundInvestigation,
+  finalizeInvestigationReservation,
+  reserveInvestigation,
 } from "../../../../packages/core/src/billing/autumn.js";
 import { notifyBillingLimitReached } from "../../../../packages/core/src/billing/notifications.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
@@ -135,24 +136,23 @@ export async function queueInvestigationRetry(input: {
   investigationId: string;
   organizationId: string;
 }): Promise<RetryQueueResult> {
-  let metered = false;
+  let reservation: Awaited<ReturnType<typeof reserveInvestigation>>;
   try {
-    const access = await consumeInvestigation(
+    reservation = await reserveInvestigation(
       input.organizationId,
       input.investigationId,
     );
-    if (!access.allowed) {
+    if (!reservation.allowed) {
       await notifyBillingLimitReached(
         input.organizationId,
-        access.nextResetAt,
+        reservation.nextResetAt,
       ).catch((error: unknown) => {
         console.error("Unable to send billing limit notifications", error);
       });
       return { kind: "blocked" };
     }
-    metered = access.consumed;
   } catch (error) {
-    console.error("Unable to meter investigation rerun", error);
+    console.error("Unable to reserve investigation rerun", error);
     throw new Error("Billing service unavailable", { cause: error });
   }
 
@@ -160,16 +160,34 @@ export async function queueInvestigationRetry(input: {
   try {
     result = await prepareInvestigationRetry(input.investigationId);
   } catch (error) {
-    if (metered) {
-      await refundInvestigation(
-        input.organizationId,
-        input.investigationId,
-      ).catch((refundError: unknown) => {
-        console.error("Unable to refund investigation rerun", refundError);
+    if (reservation.reservationId) {
+      await finalizeInvestigationReservation(
+        reservation.reservationId,
+        "release",
+      ).catch((releaseError: unknown) => {
+        // The provider automatically releases this reservation at expiry.
+        console.error("Unable to release investigation rerun", releaseError);
       });
     }
     throw error;
   }
+
+  if (reservation.reservationId) {
+    try {
+      await finalizeInvestigationReservation(
+        reservation.reservationId,
+        "confirm",
+      );
+    } catch (error) {
+      await failInvestigation(
+        result.investigationId,
+        "Unable to confirm investigation rerun billing",
+      );
+      console.error("Unable to meter investigation rerun", error);
+      throw new Error("Billing service unavailable", { cause: error });
+    }
+  }
+
   await captureAnalyticsEvent({
     distinctId: `investigation:${result.investigationId}`,
     event: "investigation rerun",
