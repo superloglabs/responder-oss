@@ -7,6 +7,10 @@ import {
 
 type Investigation = IssueDetailResponse["investigations"][number];
 type EvidenceSource = IssueEvidence["source"];
+type RowStatus =
+  | Investigation["status"]
+  | IssueDetailResponse["pullRequestState"]["requests"][number]["status"]
+  | IssueDetailResponse["linearTicketState"]["requests"][number]["status"];
 
 /** Labels that read better here than the shared provider name. */
 const evidenceSourceLabelOverrides: Partial<Record<EvidenceSource, string>> = {
@@ -52,6 +56,14 @@ export function investigationStatusTone(
   if (status === "failed") return "failed";
   if (status === "investigating") return "active";
   return "pending";
+}
+
+/**
+ * The accessible name of a row's status dot. Colour alone carries the status
+ * visually, so the dot needs a label for anyone who cannot see it.
+ */
+export function rowStatusLabel(status: RowStatus): string {
+  return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
 }
 
 export function evidenceSourceGlyph(

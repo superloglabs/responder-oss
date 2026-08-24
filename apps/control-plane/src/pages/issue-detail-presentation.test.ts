@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { IssueDetailResponse, IssueEvidence } from "../agents-api";
 import {
   evidenceSourceGlyph,
+  rowStatusLabel,
   evidenceSourceLabel,
   investigationCountLabel,
   investigationStatusTone,
@@ -168,5 +169,20 @@ describe("issueParagraphs", () => {
 
   it("keeps single newlines inside a paragraph", () => {
     expect(issueParagraphs("One\ntwo")).toEqual(["One\ntwo"]);
+  });
+});
+
+describe("rowStatusLabel", () => {
+  it("names every investigation status", () => {
+    expect(rowStatusLabel("pending")).toBe("Pending");
+    expect(rowStatusLabel("investigating")).toBe("Investigating");
+    expect(rowStatusLabel("resolved")).toBe("Resolved");
+    expect(rowStatusLabel("failed")).toBe("Failed");
+  });
+
+  it("names every pull request and Linear ticket status", () => {
+    expect(rowStatusLabel("queued")).toBe("Queued");
+    expect(rowStatusLabel("creating")).toBe("Creating");
+    expect(rowStatusLabel("created")).toBe("Created");
   });
 });

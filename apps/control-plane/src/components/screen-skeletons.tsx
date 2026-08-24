@@ -168,6 +168,13 @@ export function IssueDetailSkeleton() {
               </div>
             ))}
           </div>
+          {/* Copy prompt and Archive always render; Create pull request depends
+              on the repository, which is not known until the issue loads. */}
+          <div className="issueRail__actions">
+            {[0, 1].map((index) => (
+              <Skeleton className="screenSkeleton__railAction" key={index} />
+            ))}
+          </div>
         </div>
       </div>
     </LoadingRegion>

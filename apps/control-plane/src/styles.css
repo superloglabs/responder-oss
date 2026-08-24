@@ -3527,6 +3527,12 @@ button:disabled {
   margin-bottom: 5px;
 }
 
+.screenSkeleton__railAction.dsSkeleton {
+  width: 100%;
+  height: 36px;
+  border-radius: var(--ds-radius-pill);
+}
+
 .screenSkeleton__linkedItems > .screenSkeleton__cardTitle {
   margin-bottom: 4px;
 }

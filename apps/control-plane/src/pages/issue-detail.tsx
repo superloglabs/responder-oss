@@ -30,6 +30,7 @@ import {
   originatingAgentName,
   primaryEvidenceSource,
   relationshipLabel,
+  rowStatusLabel,
 } from "./issue-detail-presentation";
 
 const severityBars = { "SEV-1": 3, "SEV-2": 2, "SEV-3": 1 } as const;
@@ -229,7 +230,9 @@ export function IssueDetailPage() {
                   to={`/agents/${investigation.agentId}/investigations/${investigation.id}`}
                 >
                   <span
+                    aria-label={rowStatusLabel(investigation.status)}
                     className={`issueLine__status issueLine__status--${investigationStatusTone(investigation.status)}`}
+                    role="img"
                   >
                     <StatusDotIcon />
                   </span>
@@ -255,6 +258,7 @@ export function IssueDetailPage() {
               {pullRequests.map((request) => (
                 <div className="issueLine issueLine--stacked" key={request.id}>
                   <span
+                    aria-label={rowStatusLabel(request.status)}
                     className={`issueLine__status issueLine__status--${
                       request.status === "created"
                         ? "resolved"
@@ -262,6 +266,7 @@ export function IssueDetailPage() {
                           ? "failed"
                           : "pending"
                     }`}
+                    role="img"
                   >
                     <PullRequestIcon />
                   </span>
@@ -298,11 +303,13 @@ export function IssueDetailPage() {
               {linearTickets.map((request) => (
                 <div className="issueLine issueLine--stacked" key={request.id}>
                   <span
+                    aria-label={rowStatusLabel(request.status)}
                     className={`issueLine__status${
                       request.status === "failed"
                         ? " issueLine__status--failed"
                         : ""
                     }`}
+                    role="img"
                   >
                     <ProviderGlyph decorative provider="linear" />
                   </span>
