@@ -6,6 +6,7 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   "aws",
   "sentry",
   "datadog",
+  "axiom",
   "clickstack",
   "upstash",
   "langfuse",

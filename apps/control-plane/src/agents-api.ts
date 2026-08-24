@@ -63,6 +63,7 @@ export interface AgentOptions {
       | "slack"
       | "sentry"
       | "datadog"
+      | "axiom"
       | "clickstack"
       | "upstash"
       | "langfuse"
@@ -123,6 +124,7 @@ export interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "axiom"
     | "upstash"
     | "langfuse"
     | "vercel"
@@ -191,6 +193,7 @@ export interface IssueEvidence {
     | "alert"
     | "aws"
     | "datadog"
+    | "axiom"
     | "sentry"
     | "clickstack"
     | "upstash"
@@ -338,13 +341,37 @@ export interface InvestigationDetailResponse {
   traceError: string | null;
 }
 
+export function apiErrorMessage(body: unknown, status: number): string {
+  if (body && typeof body === "object") {
+    const errorBody = body as Record<string, unknown>;
+    if (Array.isArray(errorBody.issues)) {
+      const issueMessages = [
+        ...new Set(
+          errorBody.issues.flatMap((issue) => {
+            if (!issue || typeof issue !== "object") return [];
+            const message = (issue as Record<string, unknown>).message;
+            return typeof message === "string" && message.trim()
+              ? [message.trim()]
+              : [];
+          }),
+        ),
+      ];
+      if (issueMessages.length > 0) return issueMessages.join(". ");
+    }
+
+    if (typeof errorBody.error === "string" && errorBody.error.trim()) {
+      return errorBody.error;
+    }
+  }
+
+  return `Request failed (${status})`;
+}
+
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  const body = (await response.json().catch(() => null)) as
-    | (T & { error?: string })
-    | null;
+  const body = (await response.json().catch(() => null)) as T | null;
   if (!response.ok) {
-    throw new Error(body?.error ?? `Request failed (${response.status})`);
+    throw new Error(apiErrorMessage(body, response.status));
   }
   return body as T;
 }

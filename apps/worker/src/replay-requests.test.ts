@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InvestigationRetryError } from "@responder/core/db/investigations";
 
 const mocks = vi.hoisted(() => ({
+  captureAnalyticsEvent: vi.fn(),
   claim: vi.fn(),
   complete: vi.fn(),
   failInvestigation: vi.fn(),
@@ -9,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   markQueued: vi.fn(),
   prepare: vi.fn(),
   release: vi.fn(),
+}));
+
+vi.mock("@responder/core/analytics", () => ({
+  captureAnalyticsEvent: mocks.captureAnalyticsEvent,
 }));
 
 vi.mock("@responder/core/db/investigations", async (importOriginal) => {
@@ -64,6 +69,7 @@ const replay = {
 describe("admin replay request processor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.claim.mockResolvedValue(request);
     mocks.prepare.mockResolvedValue(replay);
     mocks.release.mockResolvedValue({ failed: false });
@@ -86,6 +92,20 @@ describe("admin replay request processor", () => {
       { singletonKey: `replay:${request.replayInvestigationId}` },
     );
     expect(mocks.markQueued).toHaveBeenCalledWith(request.id);
+    expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith({
+      distinctId: `investigation:${request.replayInvestigationId}`,
+      event: "investigation created",
+      organizationId: replay.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_config_version_id: replay.config.id,
+        agent_id: replay.config.agentId,
+        investigation_id: request.replayInvestigationId,
+        is_replay: true,
+        provider: replay.input.provider,
+        source_investigation_id: request.sourceInvestigationId,
+      },
+    });
   });
 
   it("does nothing when the inbox is empty", async () => {
@@ -176,6 +196,7 @@ describe("admin replay request processor", () => {
       processNextInvestigationReplayRequest(queue),
     ).resolves.toBe(true);
     expect(mocks.markQueued).toHaveBeenCalledWith(request.id);
+    expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
     expect(mocks.release).not.toHaveBeenCalled();
   });
 });

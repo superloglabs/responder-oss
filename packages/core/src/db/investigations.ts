@@ -892,6 +892,11 @@ export interface RuntimeSentryConnection {
   projectSlug?: string;
 }
 
+export interface RuntimeAxiomConnection {
+  accessToken: string;
+  mcpUrl: string;
+}
+
 export interface RuntimeCustomMcpConnection {
   accessToken: string;
   accountId: string;
@@ -1200,7 +1205,7 @@ export async function getRuntimeAwsConnections(
   return connections;
 }
 
-function mcpOAuthRedirectUrl(provider: "custom_mcp" | "linear"): string {
+function mcpOAuthRedirectUrl(provider: "axiom" | "custom_mcp" | "linear"): string {
   const baseUrl =
     process.env.RESPONDER_PUBLIC_URL ??
     process.env.BETTER_AUTH_URL ??
@@ -1213,7 +1218,7 @@ function mcpOAuthRedirectUrl(provider: "custom_mcp" | "linear"): string {
 
 async function getRuntimeMcpConnections(
   versionId: string,
-  provider: "custom_mcp" | "linear",
+  provider: "axiom" | "custom_mcp" | "linear",
   selectedAccountId?: string,
 ): Promise<RuntimeCustomMcpConnection[]> {
   const configRows = await getDatabase()
@@ -1350,7 +1355,7 @@ async function getRuntimeMcpConnections(
       oauth = await refreshCustomMcpOAuth({
         mcpUrl: credentials.mcpUrl,
         oauth: credentials.oauth,
-        redirectUrl: mcpOAuthRedirectUrl("custom_mcp"),
+        redirectUrl: mcpOAuthRedirectUrl(provider),
       });
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
@@ -1824,6 +1829,15 @@ export async function getRuntimeDatadogConnection(
     })
     .where(eq(integrationAccounts.id, accountRows[0]!.id));
   return connection(nextCredentials.accessToken);
+}
+
+export async function getRuntimeAxiomConnection(
+  versionId: string,
+): Promise<RuntimeAxiomConnection | null> {
+  const [connection] = await getRuntimeMcpConnections(versionId, "axiom");
+  return connection
+    ? { accessToken: connection.accessToken, mcpUrl: connection.mcpUrl }
+    : null;
 }
 
 export async function getRuntimeUpstashConnection(

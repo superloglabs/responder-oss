@@ -1,5 +1,6 @@
 import { consumeInvestigation } from "../../../../packages/core/src/billing/autumn.js";
 import { notifyBillingLimitReached } from "../../../../packages/core/src/billing/notifications.js";
+import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import {
   beginInvestigation,
   discardPendingInvestigation,
@@ -77,6 +78,20 @@ export async function queueInvestigation(
     console.error("Unable to meter investigation", error);
     throw new Error("Billing service unavailable", { cause: error });
   }
+
+  await captureAnalyticsEvent({
+    distinctId: `investigation:${result.investigationId}`,
+    event: "investigation created",
+    organizationId: result.config.organizationId,
+    properties: {
+      $process_person_profile: false,
+      agent_config_version_id: result.config.id,
+      agent_id: result.config.agentId,
+      investigation_id: result.investigationId,
+      is_replay: false,
+      provider: input.provider,
+    },
+  });
 
   try {
     const jobId = await (await getBoss()).send(

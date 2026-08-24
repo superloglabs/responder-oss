@@ -15,7 +15,7 @@ activity can be separated from other products sharing the PostHog project.
 | `integration connected` | An OAuth callback finishes and resources are synced | `provider`, `integration_account_id`, `resource_count` |
 | `agent created` | A new agent and its initial configuration are persisted | `agent_id`, `trigger_kind`, `model`, `enabled`, `pr_mode` |
 | `prompt copied` | A user clicks **Copy prompt** in Slack | `issue_id`, `issue_found`, `team_id`, `channel_id`, `surface` |
-| `investigation started` | A new or retried investigation starts its runtime session | `investigation_id`, `agent_id`, `provider`, `is_retry` |
+| `investigation created` | A new investigation or replay is persisted and accepted for processing | `investigation_id`, `agent_id`, `provider`, `is_replay`, `source_investigation_id` |
 
 Events associated with a workspace include `organization_id` and the PostHog
 `organization` group. Authenticated events use the Better Auth user ID as their

@@ -86,6 +86,7 @@ const CONTEXT_PROVIDER_METADATA: Record<
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
   datadog: { category: "Observability", searchTerms: "apm logs monitors" },
+  axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
   clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
   langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
   github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
@@ -465,6 +466,7 @@ export function AgentCreatePage() {
   const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
+  const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
@@ -480,6 +482,7 @@ export function AgentCreatePage() {
     slackJustConnected ||
     githubJustConnected ||
     datadogJustConnected ||
+    axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
     vercelJustConnected ||
@@ -659,6 +662,14 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedDatadog.id);
         }
+        const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
+        if (
+          axiomJustConnected &&
+          connectedAxiom &&
+          !loadedDraft.contextAccountIds.includes(connectedAxiom.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedAxiom.id);
+        }
         const connectedCustomMcpId = returnedIntegrationAccountId;
         if (
           customMcpJustConnected &&
@@ -778,6 +789,7 @@ export function AgentCreatePage() {
     };
   }, [
     agentId,
+    axiomJustConnected,
     awsJustConnected,
     clickStackJustConnected,
     customMcpJustConnected,
@@ -815,6 +827,10 @@ export function AgentCreatePage() {
   );
   const datadogAccounts = useMemo(
     () => accountsFor(options, "datadog"),
+    [options],
+  );
+  const axiomAccounts = useMemo(
+    () => accountsFor(options, "axiom"),
     [options],
   );
   const customMcpAccounts = useMemo(
@@ -1429,6 +1445,9 @@ export function AgentCreatePage() {
     ).length +
     Number(selectedSlackContextChannels.length > 0) +
     datadogAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    axiomAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
     upstashAccounts.filter((account) =>
@@ -2379,6 +2398,26 @@ export function AgentCreatePage() {
                       />
                     );
                   })}
+                  {axiomAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = axiomAccounts.length > 1 ? account.displayName : "Axiom";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Logs, traces, metrics, and monitor history`}
+                        key={account.id}
+                        label={label}
+                        provider="axiom"
+                      />
+                    );
+                  })}
                   {linearAccounts.map((account) => {
                     const connected = draft.contextAccountIds.includes(account.id);
                     const label = linearAccounts.length > 1 ? account.displayName : "Linear";
@@ -3298,6 +3337,7 @@ function ContextRow({
     | "slack"
     | "sentry"
     | "datadog"
+    | "axiom"
     | "upstash"
     | "langfuse"
     | "vercel"

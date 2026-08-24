@@ -6,6 +6,7 @@ import {
 } from "@openai/agents-extensions/sandbox/daytona";
 import {
   getRuntimeAwsConnections,
+  getRuntimeAxiomConnection,
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
   getRuntimeClickStackConnection,
@@ -34,6 +35,7 @@ import {
   loadAwsAlarmSkillContext,
 } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
+import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
@@ -180,6 +182,7 @@ export function investigationInstructions(input: {
   awsAccountNames?: string[];
   awsSkillContext?: string;
   customMcpNames?: string[];
+  axiomConnected?: boolean;
   datadogConnected: boolean;
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
@@ -203,6 +206,7 @@ export function investigationInstructions(input: {
   const vercelAccountIds = input.vercelAccountIds ?? [];
   const observabilityConnected =
     input.datadogConnected ||
+    input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
     input.upstashConnected ||
@@ -228,6 +232,9 @@ export function investigationInstructions(input: {
       : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
+      : null,
+    input.axiomConnected
+      ? "Use the connected read-only Axiom tools to inspect telemetry relevant to the Slack alert, including logs, traces, metrics, and surrounding service activity, before concluding. Never create, update, or delete Axiom resources."
       : null,
     input.clickStackConnected
       ? "Use the connected ClickStack tools to inspect relevant logs, traces, metrics, and surrounding service activity before concluding. Do not create, update, or delete ClickStack resources during an investigation."
@@ -337,6 +344,7 @@ export async function runInvestigationAgent(
   const [
     runtimeProfile,
     awsConnections,
+    axiomConnection,
     datadogConnection,
     sentryConnection,
     customMcpConnections,
@@ -350,6 +358,7 @@ export async function runInvestigationAgent(
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
+    getRuntimeAxiomConnection(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
     getRuntimeSentryConnection(job.config.id, investigationInput)
       .then((connection) => {
@@ -388,6 +397,9 @@ export async function runInvestigationAgent(
   const datadogServer = datadogConnection
     ? createDatadogMcpServer(datadogConnection)
     : null;
+  const axiomServer = axiomConnection
+    ? createAxiomMcpServer(axiomConnection)
+    : null;
   const sentryServer = sentryConnection
     ? createSentryMcpServer(sentryConnection)
     : null;
@@ -409,6 +421,7 @@ export async function runInvestigationAgent(
     : [];
   const langfuseServers = langfuseConnections.map(createLangfuseMcpServer);
   const contextServers = [
+    axiomServer,
     datadogServer,
     sentryServer,
     clickStackServer,
@@ -516,6 +529,7 @@ export async function runInvestigationAgent(
           `${connection.displayName} (${connection.roleArn.split(":")[4] ?? "unknown"})`,
       ),
       awsSkillContext,
+      axiomConnected: axiomServer !== null,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,

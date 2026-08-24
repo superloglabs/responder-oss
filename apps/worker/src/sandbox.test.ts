@@ -105,7 +105,7 @@ describe("Daytona sandbox cleanup", () => {
       { daytonaApiKey: "daytona-test" },
       [
         {
-          environmentVariable: "SERVICE_API_KEY",
+          environmentVariable: "DAYTONA_API_KEY",
           daytonaSecretName: "responder_secret_1",
         },
       ],
@@ -113,7 +113,7 @@ describe("Daytona sandbox cleanup", () => {
     );
 
     expect(sandbox.updateSecrets).toHaveBeenCalledWith({
-      SERVICE_API_KEY: "responder_secret_1",
+      DAYTONA_API_KEY: "responder_secret_1",
     });
     expect(calls).toEqual(["update", "stop", "start", "auto-delete"]);
   });

@@ -183,6 +183,7 @@ describe("Slack delivery client", () => {
       blocks: [{ type: "markdown", text: "```markdown\nFix it\n```" }],
       channelId: "C123",
       text: "Investigation prompt",
+      threadTimestamp: "1785500000.000100",
       userId: "U123",
     });
 
@@ -193,6 +194,7 @@ describe("Slack delivery client", () => {
           blocks: [{ type: "markdown", text: "```markdown\nFix it\n```" }],
           channel: "C123",
           text: "Investigation prompt",
+          thread_ts: "1785500000.000100",
           user: "U123",
         }),
       }),

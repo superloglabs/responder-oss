@@ -32,6 +32,24 @@ function currentWorkspace() {
   return realpathSync(process.cwd());
 }
 
+function localBrowserOrigin() {
+  for (const candidate of [
+    process.env.PORTLESS_URL,
+    process.env.BETTER_AUTH_URL,
+  ]) {
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === "https:" && url.origin + "/" === url.href) {
+        return url.origin;
+      }
+    } catch {
+      // Ignore malformed optional origins; target validation remains strict.
+    }
+  }
+  return undefined;
+}
+
 function printPublicEndpoints() {
   const publicUrl = process.env.RESPONDER_PUBLIC_URL?.replace(/\/$/, "");
   if (!publicUrl) return;
@@ -43,6 +61,7 @@ function printPublicEndpoints() {
   process.stdout.write(`  GitHub setup:    ${publicUrl}/github/install/callback\n`);
   process.stdout.write(`  Sentry callback: ${publicUrl}/api/integrations/sentry/callback\n`);
   process.stdout.write(`  Sentry webhook:  ${publicUrl}/api/webhooks/sentry\n`);
+  process.stdout.write(`  Axiom OAuth:     ${publicUrl}/api/integrations/axiom/callback\n`);
   process.stdout.write(`  ClickStack OAuth: ${publicUrl}/api/integrations/clickstack/callback\n`);
 }
 
@@ -96,6 +115,7 @@ async function useCurrentWorkspace() {
 
   const previous = readCallbackTarget();
   const target = writeCallbackTarget({
+    browserOrigin: localBrowserOrigin(),
     origin,
     workspace: currentWorkspace(),
     updatedAt: new Date().toISOString(),

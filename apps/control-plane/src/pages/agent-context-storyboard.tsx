@@ -96,6 +96,13 @@ const INTEGRATIONS: StoryboardIntegration[] = [
   },
   {
     category: "Observability",
+    description: "Logs, traces, metrics, and monitor history",
+    id: "axiom",
+    name: "Axiom",
+    searchTerms: "logs traces metrics monitoring observability",
+  },
+  {
+    category: "Observability",
     description: "Logs, traces, dashboards, and service health",
     id: "clickstack",
     name: "ClickStack / HyperDX",

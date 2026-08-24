@@ -38,8 +38,10 @@ async function mockApplicationApis(page: Page) {
   await page.route("**/api/agents", (route) =>
     route.fulfill({ json: { agents: [] } }),
   );
-  await page.route("**/api/agents/options", (route) =>
-    route.fulfill({ json: { accounts: [], resources: [], repositories: [] } }),
+  await page.route(/\/api\/agents\/options(?:\/refresh\/slack)?$/, (route) =>
+    route.fulfill({
+      json: { accounts: [], resources: [], repositories: [], secrets: [] },
+    }),
   );
   await page.route("**/api/integrations", (route) =>
     route.fulfill({ json: { integrations: [] } }),
@@ -102,6 +104,104 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/agents\/new$/);
   await expect(page.getByRole("heading", { name: "Create agent" })).toBeVisible();
+});
+
+test("shows specific workspace secret validation issues", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(organization.id) });
+      return;
+    }
+
+    if (path.endsWith("/organization/list")) {
+      await route.fulfill({ json: [organization] });
+      return;
+    }
+
+    if (path.endsWith("/organization/get-full-organization")) {
+      await route.fulfill({ json: organization });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+  const agentOptions = {
+    accounts: [
+      {
+        id: "slack-account-1",
+        provider: "slack",
+        displayName: "Acme Slack",
+        slackContextAvailable: true,
+      },
+    ],
+    resources: [
+      {
+        id: "slack-channel-1",
+        integrationAccountId: "slack-account-1",
+        kind: "slack_channel",
+        externalId: "C123",
+        displayName: "incidents",
+      },
+    ],
+    repositories: [],
+    secrets: [],
+  };
+  await page.route(/\/api\/agents\/options(?:\/refresh\/slack)?$/, (route) =>
+    route.fulfill({ json: agentOptions }),
+  );
+  await page.route("**/api/agents/secrets", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      name: "PATH",
+      value: "write-only-value",
+      allowedHosts: ["https://api.example.com/path"],
+    });
+    await route.fulfill({
+      status: 400,
+      json: {
+        error: "Invalid workspace secret",
+        issues: [
+          {
+            code: "custom",
+            path: ["name"],
+            message:
+              "PATH controls the sandbox runtime; choose a credential-specific environment variable name",
+          },
+          {
+            code: "invalid_format",
+            path: ["allowedHosts", 0],
+            message: "Use a hostname without a scheme, path, or port",
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto("/agents/new");
+  await page.getByText("Alert in a Slack channel", { exact: true }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agent context" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Add secret" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Add a workspace secret",
+  });
+  await dialog.getByLabel("Environment variable").fill("PATH");
+  await dialog.getByLabel("Secret value").fill("write-only-value");
+  await dialog
+    .getByLabel("Allowed hosts")
+    .fill("https://api.example.com/path");
+  await dialog.getByRole("button", { name: "Store and add" }).click();
+
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "PATH controls the sandbox runtime; choose a credential-specific environment variable name. Use a hostname without a scheme, path, or port",
+  );
 });
 
 test("keeps an invitation link open while the recipient signs in", async ({

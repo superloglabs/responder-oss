@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { workspaceSecrets } from "./schema.js";
-import { isWorkspaceSecretEnvironmentVariableName } from "../workspace-secret-names.js";
+import {
+  isWorkspaceSecretEnvironmentVariableName,
+  workspaceSecretEnvironmentVariableNameReservation,
+} from "../workspace-secret-names.js";
 
 describe("workspace secret storage", () => {
   it("stores only workspace-scoped Daytona metadata, never plaintext", () => {
@@ -57,9 +60,16 @@ describe("workspace secret storage", () => {
 
 describe("workspace secret environment variable names", () => {
   it("allows application credential names", () => {
-    expect(isWorkspaceSecretEnvironmentVariableName("SERVICE_API_KEY")).toBe(
-      true,
-    );
+    for (const name of [
+      "SERVICE_API_KEY",
+      "DAYTONA_API_KEY",
+      "OPENAI_API_KEY",
+      "RESPONDER_API_KEY",
+      "GIT_TOKEN",
+      "NPM_CONFIG_TOKEN",
+    ]) {
+      expect(isWorkspaceSecretEnvironmentVariableName(name)).toBe(true);
+    }
   });
 
   it.each([
@@ -72,8 +82,15 @@ describe("workspace secret environment variable names", () => {
     "PERL5OPT",
     "RUBYOPT",
     "DYLD_INSERT_LIBRARIES",
-    "OPENAI_API_KEY",
   ])("rejects runtime control variable %s", (name) => {
     expect(isWorkspaceSecretEnvironmentVariableName(name)).toBe(false);
+  });
+
+  it("explains reserved runtime controls", () => {
+    expect(
+      workspaceSecretEnvironmentVariableNameReservation("PATH"),
+    ).toBe(
+      "PATH controls the sandbox runtime; choose a credential-specific environment variable name",
+    );
   });
 });

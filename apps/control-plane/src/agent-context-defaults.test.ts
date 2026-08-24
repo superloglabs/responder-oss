@@ -5,6 +5,7 @@ import { defaultAgentContext } from "./agent-context-defaults";
 const OPTIONS: AgentOptions = {
   accounts: [
     { id: "sentry-1", provider: "sentry", displayName: "Production" },
+    { id: "axiom-1", provider: "axiom", displayName: "Production" },
     { id: "aws-1", provider: "aws", displayName: "Production" },
     { id: "aws-2", provider: "aws", displayName: "Staging" },
     {
@@ -54,7 +55,7 @@ const OPTIONS: AgentOptions = {
 describe("defaultAgentContext", () => {
   it("enables every direct connection and a safe initial scope for resource providers", () => {
     expect(defaultAgentContext(OPTIONS)).toEqual({
-      contextAccountIds: ["sentry-1", "aws-1", "aws-2", "vercel-1"],
+      contextAccountIds: ["sentry-1", "axiom-1", "aws-1", "aws-2", "vercel-1"],
       contextResourceIds: ["slack-channel-1", "vercel-project-1"],
       repositoryIds: ["repository-1"],
     });
