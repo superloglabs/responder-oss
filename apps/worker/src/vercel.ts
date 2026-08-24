@@ -432,6 +432,31 @@ const parameterValueSchema = z.union([
   z.boolean(),
   z.array(z.union([z.string(), z.number(), z.boolean()])),
 ]);
+const parameterEntrySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe("Exact parameter name returned by search_vercel_api"),
+  value: parameterValueSchema.describe(
+    "Parameter value using the type returned by search_vercel_api",
+  ),
+});
+
+function parameterEntriesToRecord(
+  entries: Array<z.infer<typeof parameterEntrySchema>>,
+  location: "path" | "query",
+): Record<string, ParameterValue> {
+  const parameters = Object.create(null) as Record<string, ParameterValue>;
+  for (const { name, value } of entries) {
+    if (Object.hasOwn(parameters, name)) {
+      throw new Error(`Duplicate Vercel ${location} parameter: ${name}`);
+    }
+    parameters[name] = value;
+  }
+  return parameters;
+}
 
 export function createVercelTools(connections: RuntimeVercelConnection[]) {
   if (connections.length === 0) return [];
@@ -458,16 +483,29 @@ export function createVercelTools(connections: RuntimeVercelConnection[]) {
     description: `Execute one operation returned by search_vercel_api. Only generated GET operations are accepted. Connected accounts: ${accountDescription}`,
     parameters: z.object({
       accountId: z.string().uuid().optional(),
-      operationId: z.string().trim().min(1).max(200),
-      pathParameters: z.record(z.string(), parameterValueSchema).default({}),
-      queryParameters: z.record(z.string(), parameterValueSchema).default({}),
+      operationId: z
+        .string()
+        .trim()
+        .min(1)
+        .max(200)
+        .describe("Exact operation ID returned by search_vercel_api"),
+      pathParameters: z
+        .array(parameterEntrySchema)
+        .max(30)
+        .default([])
+        .describe("Path parameters returned for the selected operation"),
+      queryParameters: z
+        .array(parameterEntrySchema)
+        .max(30)
+        .default([])
+        .describe("Query parameters returned for the selected operation"),
     }),
     async execute({ accountId, operationId, pathParameters, queryParameters }) {
       return executeVercelRead({
         connection: selectedConnection(connections, accountId),
         operationId,
-        pathParameters,
-        queryParameters,
+        pathParameters: parameterEntriesToRecord(pathParameters, "path"),
+        queryParameters: parameterEntriesToRecord(queryParameters, "query"),
       });
     },
   });
