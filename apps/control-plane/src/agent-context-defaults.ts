@@ -31,16 +31,22 @@ export function defaultAgentContext(options: AgentOptions): DefaultAgentContext 
   const firstVercelProject = options.resources.find(
     (resource) => resource.kind === "vercel_project",
   );
+  const directContextAccountIds = [
+    ...new Set(
+      options.accounts
+        .filter((account) => DIRECT_CONTEXT_PROVIDERS.has(account.provider))
+        .map((account) => account.id),
+    ),
+  ];
+  const contextAccountIds = firstVercelProject
+    ? [
+        ...directContextAccountIds.slice(0, 19),
+        firstVercelProject.integrationAccountId,
+      ]
+    : directContextAccountIds.slice(0, 20);
 
   return {
-    contextAccountIds: [
-      ...new Set([
-        ...options.accounts
-          .filter((account) => DIRECT_CONTEXT_PROVIDERS.has(account.provider))
-          .map((account) => account.id),
-        ...(firstVercelProject ? [firstVercelProject.integrationAccountId] : []),
-      ]),
-    ].slice(0, 20),
+    contextAccountIds,
     contextResourceIds: [
       ...(firstSlackChannel ? [firstSlackChannel.id] : []),
       ...(firstVercelProject ? [firstVercelProject.id] : []),

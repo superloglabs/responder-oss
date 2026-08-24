@@ -76,4 +76,36 @@ describe("defaultAgentContext", () => {
       repositoryIds: [],
     });
   });
+
+  it("reserves an account slot for a default Vercel project", () => {
+    const directAccounts: AgentOptions["accounts"] = Array.from(
+      { length: 20 },
+      (_, index) => ({
+        id: `aws-${index + 1}`,
+        provider: "aws",
+        displayName: `AWS ${index + 1}`,
+      }),
+    );
+    const defaults = defaultAgentContext({
+      accounts: [
+        ...directAccounts,
+        { id: "vercel-1", provider: "vercel", displayName: "Acme" },
+      ],
+      resources: [
+        {
+          id: "vercel-project-1",
+          integrationAccountId: "vercel-1",
+          kind: "vercel_project",
+          externalId: "project-1",
+          displayName: "dashboard",
+        },
+      ],
+      repositories: [],
+      secrets: [],
+    });
+
+    expect(defaults.contextAccountIds).toHaveLength(20);
+    expect(defaults.contextAccountIds).toContain("vercel-1");
+    expect(defaults.contextResourceIds).toEqual(["vercel-project-1"]);
+  });
 });

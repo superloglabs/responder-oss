@@ -2658,7 +2658,7 @@ export function AgentCreatePage() {
                     </div>
                     <footer className="configurationDialog__footer">
                       <Button
-                        onClick={() => navigate("/settings/integrations")}
+                        onClick={() => navigate("/settings")}
                         size="small"
                         type="button"
                         variant="secondary"

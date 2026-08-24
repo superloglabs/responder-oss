@@ -330,7 +330,10 @@ const SCENARIOS: Record<StoryboardScenario, ScenarioDefinition> = {
 
 const SCENARIO_ORDER = Object.keys(SCENARIOS) as StoryboardScenario[];
 
-const RESOURCE_OPTIONS: Record<ConfigurationKind, Array<{ description?: string; id: string; label: string }>> = {
+const RESOURCE_OPTIONS: Record<
+  ConfigurationKind,
+  Array<{ account?: "acme" | "labs"; description?: string; id: string; label: string }>
+> = {
   slack: [
     { id: "slack-incidents", label: "#incidents" },
     { id: "slack-platform", label: "#platform-alerts" },
@@ -338,18 +341,50 @@ const RESOURCE_OPTIONS: Record<ConfigurationKind, Array<{ description?: string; 
     { id: "slack-security", label: "#security" },
   ],
   github: [
-    { description: "Private · main", id: "github-responder", label: "responder" },
-    { description: "Private · main", id: "github-api", label: "api" },
-    { description: "Private · trunk", id: "github-infra", label: "infrastructure" },
-    { description: "Public · main", id: "github-sdk", label: "sdk" },
+    { account: "acme", description: "Private · main", id: "github-responder", label: "responder" },
+    { account: "acme", description: "Private · main", id: "github-api", label: "api" },
+    { account: "labs", description: "Private · trunk", id: "github-infra", label: "infrastructure" },
+    { account: "labs", description: "Public · main", id: "github-sdk", label: "sdk" },
   ],
   vercel: [
-    { id: "vercel-dashboard", label: "dashboard" },
-    { id: "vercel-docs", label: "docs" },
-    { id: "vercel-status", label: "status-page" },
+    { account: "acme", id: "vercel-dashboard", label: "dashboard" },
+    { account: "acme", id: "vercel-docs", label: "docs" },
+    { account: "labs", id: "vercel-status", label: "status-page" },
   ],
   linear: [],
 };
+
+const SCENARIO_SELECTED_RESOURCE_IDS: Record<
+  StoryboardScenario,
+  string[]
+> = {
+  empty: [],
+  connected: [],
+  mixed: [
+    "slack-incidents",
+    "slack-platform",
+    "slack-customer",
+    "github-responder",
+    "github-api",
+  ],
+  multiple: [],
+  scoped: [
+    "slack-incidents",
+    "slack-platform",
+    "slack-customer",
+    "github-responder",
+    "github-api",
+    "vercel-dashboard",
+    "vercel-docs",
+  ],
+  attention: [],
+  async: [],
+  secrets: ["github-responder", "github-api"],
+};
+
+function selectedResourcesForScenario(scenario: StoryboardScenario): Set<string> {
+  return new Set(SCENARIO_SELECTED_RESOURCE_IDS[scenario]);
+}
 
 function SearchIcon() {
   return (
@@ -409,7 +444,11 @@ function ResourceConfigurationDialog({
   setSelectedResources: (next: Set<string>) => void;
 }) {
   const integration = INTEGRATIONS.find((candidate) => candidate.id === kind)!;
-  const options = RESOURCE_OPTIONS[kind];
+  const [selectedAccount, setSelectedAccount] = useState<"acme" | "labs">("acme");
+  const allOptions = RESOURCE_OPTIONS[kind];
+  const options = allOptions.filter(
+    (resource) => !resource.account || resource.account === selectedAccount,
+  );
   const selectedForProvider = options.filter((resource) => selectedResources.has(resource.id)).length;
   const [ticketCreation, setTicketCreation] = useState(false);
   const [prMode, setPrMode] = useState<"manual" | "always">("manual");
@@ -418,6 +457,13 @@ function ResourceConfigurationDialog({
     const next = new Set(selectedResources);
     if (next.has(resourceId)) next.delete(resourceId);
     else next.add(resourceId);
+    setSelectedResources(next);
+  }
+
+  function selectAccount(account: "acme" | "labs") {
+    setSelectedAccount(account);
+    const next = new Set(selectedResources);
+    for (const resource of allOptions) next.delete(resource.id);
     setSelectedResources(next);
   }
 
@@ -460,7 +506,12 @@ function ResourceConfigurationDialog({
           {kind === "github" || kind === "vercel" ? (
             <label className="contextStoryboardDialogSelect">
               <span>{kind === "github" ? "Organization" : "Vercel account"}</span>
-              <select defaultValue="acme">
+              <select
+                onChange={(event) =>
+                  selectAccount(event.target.value as "acme" | "labs")
+                }
+                value={selectedAccount}
+              >
                 <option value="acme">Acme production</option>
                 <option value="labs">Acme labs</option>
               </select>
@@ -665,7 +716,7 @@ export function AgentContextStoryboardPage() {
   const [announcement, setAnnouncement] = useState("");
   const [configurationOpen, setConfigurationOpen] = useState<ConnectionInstance | null>(null);
   const [selectedResources, setSelectedResources] = useState(
-    new Set(["slack-incidents", "slack-platform", "slack-customer", "github-responder", "github-api"]),
+    () => selectedResourcesForScenario("mixed"),
   );
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -690,6 +741,7 @@ export function AgentContextStoryboardPage() {
     setQuery("");
     setAnnouncement("");
     setConfigurationOpen(null);
+    setSelectedResources(selectedResourcesForScenario(nextScenario));
   }
 
   function updateInstance(connectionId: string, status: ConnectionStatus) {
@@ -712,9 +764,17 @@ export function AgentContextStoryboardPage() {
     const label = MULTI_INSTANCE_PROVIDERS.has(integration.id) && existing.length > 0
       ? `New ${integration.id === "langfuse" ? "project" : integration.id === "aws" ? "account" : "MCP server"} ${nextNumber}`
       : integration.name;
+    const configuration =
+      integration.id === "github" ||
+      integration.id === "linear" ||
+      integration.id === "slack" ||
+      integration.id === "vercel"
+        ? integration.id
+        : undefined;
     setInstances((current) => [
       ...current,
       instance(integration.id, "enabled", {
+        configuration,
         id: `${integration.id}-story-${nextNumber}`,
         label,
         detail: integration.description,
