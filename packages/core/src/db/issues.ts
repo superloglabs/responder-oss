@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   or,
+  sql,
 } from "drizzle-orm";
 import type {
   InvestigationReportSubmission,
@@ -118,6 +119,8 @@ export async function searchIssuesByText(
         or(
           ilike(issues.title, pattern),
           ilike(issues.description, pattern),
+          ilike(issues.rootCause, pattern),
+          sql`${issues.timeline}::text ilike ${pattern}`,
           ilike(issues.remediation, pattern),
         ),
       ),

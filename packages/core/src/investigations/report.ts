@@ -2,6 +2,10 @@ import { z } from "zod";
 
 export const issueSeveritySchema = z.enum(["SEV-1", "SEV-2", "SEV-3"]);
 
+const sentenceSegmenter = new Intl.Segmenter("en", {
+  granularity: "sentence",
+});
+
 function oneSentenceSchema(maxLength: number, description: string) {
   return z
     .string()
@@ -9,7 +13,7 @@ function oneSentenceSchema(maxLength: number, description: string) {
     .min(1)
     .max(maxLength)
     .refine(
-      (value) => (value.match(/[.!?](?=\s|$)/gu) ?? []).length <= 1,
+      (value) => [...sentenceSegmenter.segment(value)].length <= 1,
       "Must contain at most one sentence",
     )
     .describe(description);

@@ -80,7 +80,30 @@ describe("investigation report", () => {
     expect(parsed.success).toBe(true);
   });
 
-  it("rejects multi-sentence root causes and timeline entries", () => {
+  it("accepts a one-sentence root cause containing an abbreviation", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Production deployment failed",
+      summary: "The build exited during compilation.",
+      issues: [{
+        resolution: "new",
+        title: "Vercel build failure",
+        description: "The production deployment did not compile.",
+        rootCause: "A source change, e.g. the removed type guard, introduced a compile error.",
+        timeline: [{
+          title: "Deployment started",
+          description: "Vercel started the build.",
+        }],
+        severity: "SEV-2",
+        remediation: "Correct the compile error and redeploy.",
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects a multi-sentence root cause", () => {
     const parsed = investigationReportSubmissionSchema.safeParse({
       schemaVersion: 1,
       headline: "Production deployment failed",
@@ -90,6 +113,29 @@ describe("investigation report", () => {
         title: "Vercel build failure",
         description: "The production deployment did not compile.",
         rootCause: "The code did not compile. A type was wrong.",
+        timeline: [{
+          title: "Deployment started",
+          description: "Vercel started the build.",
+        }],
+        severity: "SEV-2",
+        remediation: "Correct the compile error and redeploy.",
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects a multi-sentence timeline entry", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Production deployment failed",
+      summary: "The build exited during compilation.",
+      issues: [{
+        resolution: "new",
+        title: "Vercel build failure",
+        description: "The production deployment did not compile.",
+        rootCause: "A source change introduced a TypeScript compile error.",
         timeline: [{
           title: "Deployment started. Compilation failed.",
           description: "Vercel started the build.",
