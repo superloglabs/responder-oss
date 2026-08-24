@@ -44,6 +44,8 @@ function serializeIssue<T extends number | null>(
     | "id"
     | "title"
     | "description"
+    | "rootCause"
+    | "timeline"
     | "severity"
     | "remediation"
     | "evidence"
@@ -55,6 +57,8 @@ function serializeIssue<T extends number | null>(
     id: issue.id,
     title: issue.title,
     description: issue.description,
+    rootCause: issue.rootCause,
+    timeline: issue.timeline,
     severity: issue.severity,
     remediation: issue.remediation,
     evidence: issue.evidence,

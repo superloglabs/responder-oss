@@ -3,7 +3,11 @@ import { z } from "zod";
 import { databaseConnectionString } from "./db/client.js";
 import { investigationRequestSchema } from "./investigations/input.js";
 import { agentPrModeSchema } from "./agents/config.js";
-import { issueEvidenceSchema, issueSeveritySchema } from "./investigations/report.js";
+import {
+  issueEvidenceSchema,
+  issueSeveritySchema,
+  issueTimelineEntrySchema,
+} from "./investigations/report.js";
 
 export const workerHealthQueue = "responder-worker-health";
 export const investigationQueue = "responder-investigations";
@@ -48,6 +52,8 @@ export const remediationJobSchema = z.object({
     id: z.uuid(),
     title: z.string().min(1),
     description: z.string().min(1),
+    rootCause: z.string().default(""),
+    timeline: z.array(issueTimelineEntrySchema).default([]),
     severity: issueSeveritySchema,
     remediation: z.string().min(1),
     evidence: z.array(issueEvidenceSchema),

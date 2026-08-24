@@ -17,6 +17,11 @@ const payload: RemediationJob = {
     id: "10101010-1010-4010-8010-101010101010",
     title: "Broken route",
     description: "The route throws.",
+    rootCause: "A code change removed the missing-value guard.",
+    timeline: [{
+      title: "Request reached the route",
+      description: "The request reached the route without the required value.",
+    }],
     severity: "SEV-2",
     remediation: "Handle the missing value.",
     evidence: [],

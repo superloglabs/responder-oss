@@ -101,6 +101,8 @@ export async function queueIssueRemediationJob(
           id: remediation.issueId,
           title: remediation.issueTitle,
           description: remediation.issueDescription,
+          rootCause: remediation.issueRootCause,
+          timeline: remediation.issueTimeline,
           severity: remediation.issueSeverity,
           remediation: remediation.issueRemediation,
           evidence: remediation.issueEvidence,

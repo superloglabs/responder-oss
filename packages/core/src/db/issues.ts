@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   or,
+  sql,
 } from "drizzle-orm";
 import type {
   InvestigationReportSubmission,
@@ -44,11 +45,19 @@ export interface PreparedInvestigationReportSubmission {
 export function issueEmbeddingText(issue: {
   title: string;
   description: string;
+  rootCause?: string;
+  timeline?: Array<{ title: string; description: string }>;
   remediation?: string;
 }): string {
   return [
     `Title: ${issue.title}`,
     `Description: ${issue.description}`,
+    issue.rootCause ? `Root cause: ${issue.rootCause}` : null,
+    issue.timeline?.length
+      ? `Timeline:\n${issue.timeline
+          .map((entry) => `- ${entry.title}: ${entry.description}`)
+          .join("\n")}`
+      : null,
     issue.remediation ? `Remediation: ${issue.remediation}` : null,
   ]
     .filter((value): value is string => Boolean(value))
@@ -64,6 +73,8 @@ export async function listIssueSearchCandidates(
       id: issues.id,
       title: issues.title,
       description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
       evidence: issues.evidence,
@@ -93,6 +104,8 @@ export async function searchIssuesByText(
       id: issues.id,
       title: issues.title,
       description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
       evidence: issues.evidence,
@@ -106,6 +119,13 @@ export async function searchIssuesByText(
         or(
           ilike(issues.title, pattern),
           ilike(issues.description, pattern),
+          ilike(issues.rootCause, pattern),
+          sql`exists (
+            select 1
+            from jsonb_array_elements(${issues.timeline}) as timeline_entry
+            where timeline_entry->>'title' ilike ${pattern}
+              or timeline_entry->>'description' ilike ${pattern}
+          )`,
           ilike(issues.remediation, pattern),
         ),
       ),
@@ -219,6 +239,8 @@ export async function submitInvestigationReport(input: {
           organizationId: input.organizationId,
           title: submittedIssue.title,
           description: submittedIssue.description,
+          rootCause: submittedIssue.rootCause,
+          timeline: submittedIssue.timeline,
           severity: submittedIssue.severity,
           remediation: submittedIssue.remediation,
           evidence: submittedIssue.evidence,
@@ -311,6 +333,8 @@ export async function submitInvestigationReport(input: {
         id: issue.id,
         title: issue.title,
         description: issue.description,
+        rootCause: issue.rootCause,
+        timeline: issue.timeline,
         severity: issue.severity,
         remediation: issue.remediation,
       })),
@@ -322,6 +346,8 @@ export async function submitInvestigationReport(input: {
               id: issue.id,
               title: issue.title,
               description: issue.description,
+              rootCause: issue.rootCause,
+              timeline: issue.timeline,
               severity: issue.severity,
               remediation: issue.remediation,
               evidence: issue.evidence,
@@ -362,6 +388,8 @@ export async function listIssues(
       id: issues.id,
       title: issues.title,
       description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
       archivedAt: issues.archivedAt,
@@ -389,6 +417,8 @@ export async function getIssueDetail(
       id: issues.id,
       title: issues.title,
       description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
       evidence: issues.evidence,
@@ -486,6 +516,8 @@ export async function getIssueForSlackAction(input: {
       id: issues.id,
       title: issues.title,
       description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
       evidence: issues.evidence,
@@ -513,6 +545,8 @@ export async function getInvestigationIssueDetails(investigationId: string) {
       id: issues.id,
       title: issues.title,
       description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
       relationship: investigationIssues.relationship,
@@ -536,6 +570,8 @@ export interface SlackInvestigationDeliveryContext {
     id: string;
     title: string;
     description: string;
+    rootCause: string;
+    timeline: Array<{ title: string; description: string }>;
     severity: "SEV-1" | "SEV-2" | "SEV-3";
     remediation: string;
     relationship: "new" | "recurrence";

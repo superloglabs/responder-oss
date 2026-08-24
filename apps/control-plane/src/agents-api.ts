@@ -214,6 +214,8 @@ export interface IssueListItem {
   id: string;
   title: string;
   description: string;
+  rootCause: string;
+  timeline: Array<{ title: string; description: string }>;
   severity: "SEV-1" | "SEV-2" | "SEV-3";
   remediation: string;
   archivedAt: string | null;

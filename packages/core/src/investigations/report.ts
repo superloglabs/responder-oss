@@ -2,6 +2,33 @@ import { z } from "zod";
 
 export const issueSeveritySchema = z.enum(["SEV-1", "SEV-2", "SEV-3"]);
 
+const sentenceSegmenter = new Intl.Segmenter("en", {
+  granularity: "sentence",
+});
+
+function oneSentenceSchema(maxLength: number, description: string) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .max(maxLength)
+    .refine(
+      (value) => [...sentenceSegmenter.segment(value)].length <= 1,
+      "Must contain at most one sentence",
+    )
+    .describe(description);
+}
+
+export const issueTimelineEntrySchema = z.object({
+  title: oneSentenceSchema(160, "Short title for this timeline step."),
+  description: oneSentenceSchema(
+    500,
+    "One-sentence description of what happened in this timeline step.",
+  ),
+});
+
+export type IssueTimelineEntry = z.infer<typeof issueTimelineEntrySchema>;
+
 export const issueEvidenceSchema = z.object({
   source: z.enum([
     "alert",
@@ -47,6 +74,15 @@ const newIssueSubmissionSchema = z.object({
     .min(1)
     .max(8_000)
     .describe("Issue description."),
+  rootCause: oneSentenceSchema(
+    500,
+    "One sentence naming the code, environment, or infrastructure change that caused the issue.",
+  ),
+  timeline: z
+    .array(issueTimelineEntrySchema)
+    .min(1)
+    .max(30)
+    .describe("Ordered events that explain how the issue unfolded."),
   severity: issueSeveritySchema,
   remediation: z
     .string()
@@ -116,6 +152,8 @@ export interface ReportIssue {
   id: string;
   title: string;
   description: string;
+  rootCause: string;
+  timeline: IssueTimelineEntry[];
   severity: "SEV-1" | "SEV-2" | "SEV-3";
   remediation: string;
 }
@@ -123,6 +161,7 @@ export interface ReportIssue {
 export function renderIssueFixPrompt(
   issue: ReportIssue & { evidence: IssueEvidence[] },
 ): string {
+  const timeline = issue.timeline ?? [];
   const evidence = issue.evidence
     .map((item) => {
       const location = item.file
@@ -136,6 +175,16 @@ export function renderIssueFixPrompt(
     "",
     `Issue: ${issue.title}`,
     `Description: ${issue.description}`,
+    ...(issue.rootCause ? [`Root cause: ${issue.rootCause}`] : []),
+    ...(timeline.length > 0
+      ? [
+          "Timeline:",
+          ...timeline.map(
+            (entry, index) =>
+              `${index + 1}. ${entry.title}: ${entry.description}`,
+          ),
+        ]
+      : []),
     `Severity: ${issue.severity}`,
     `Remediation: ${issue.remediation}`,
     ...(evidence ? ["", "Evidence:", evidence] : []),
@@ -166,9 +215,22 @@ export function renderInvestigationReportMarkdown(
       if (!issue) return null;
       const recurrence =
         reference.relationship === "recurrence" ? " · Recurrence" : "";
+      const timeline = issue.timeline ?? [];
       return [
         `• *${issue.severity} — ${escapeSlack(issue.title)}*${recurrence}`,
         escapeSlack(issue.description),
+        ...(issue.rootCause
+          ? [`  _Root cause:_ ${escapeSlack(issue.rootCause)}`]
+          : []),
+        ...(timeline.length > 0
+          ? [
+              "  _Timeline:_",
+              ...timeline.map(
+                (entry, index) =>
+                  `  ${index + 1}. *${escapeSlack(entry.title)}* — ${escapeSlack(entry.description)}`,
+              ),
+            ]
+          : []),
         `  _Remediation:_ ${escapeSlack(issue.remediation).replaceAll("\n", "\n  ")}`,
       ].join("\n");
     });

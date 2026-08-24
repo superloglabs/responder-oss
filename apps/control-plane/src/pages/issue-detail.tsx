@@ -208,6 +208,29 @@ export function IssueDetailPage() {
             ))}
           </div>
 
+          <section className="issueSection">
+            <h2 className="issueSection__title">Root cause</h2>
+            <p className="issueSection__copy">
+              {issue.rootCause || "Not recorded."}
+            </p>
+          </section>
+
+          <section className="issueSection">
+            <h2 className="issueSection__title">Timeline</h2>
+            {issue.timeline.length > 0 ? (
+              <ol className="issueTimeline">
+                {issue.timeline.map((entry, index) => (
+                  <li key={`${entry.title}-${index}`}>
+                    <strong>{entry.title}</strong>
+                    <p>{entry.description}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="issueSection__copy">Not recorded.</p>
+            )}
+          </section>
+
           <section className="issueCallout">
             <h2>Remediation</h2>
             <p>{issue.remediation}</p>

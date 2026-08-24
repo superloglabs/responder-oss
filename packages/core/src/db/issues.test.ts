@@ -1,6 +1,7 @@
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDatabase } from "./client.js";
-import { submitInvestigationReport } from "./issues.js";
+import { searchIssuesByText, submitInvestigationReport } from "./issues.js";
 import { queueAutomaticIssuePullRequests } from "./pull-requests.js";
 import { investigations } from "./schema.js";
 
@@ -152,5 +153,36 @@ describe("automatic pull requests from investigation reports", () => {
     ).rejects.toThrow("Investigation report has already been submitted");
     expect(tx.insert).not.toHaveBeenCalled();
     expect(queueAutomaticIssuePullRequests).not.toHaveBeenCalled();
+  });
+});
+
+describe("issue text search", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("searches root causes and timeline entries", async () => {
+    const limit = vi.fn().mockResolvedValue([]);
+    const orderBy = vi.fn(() => ({ limit }));
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { orderBy };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where })),
+      })),
+    } as never);
+
+    await searchIssuesByText(organizationId, "installation", 10);
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.sql).toContain('"issues"."root_cause" ilike');
+    expect(query.sql).toContain(
+      'jsonb_array_elements("issues"."timeline") as timeline_entry',
+    );
+    expect(query.sql).toContain("timeline_entry->>'title' ilike");
+    expect(query.sql).toContain("timeline_entry->>'description' ilike");
+    expect(query.sql).not.toContain('"issues"."timeline"::text ilike');
   });
 });

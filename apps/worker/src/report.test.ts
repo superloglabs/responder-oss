@@ -46,6 +46,11 @@ describe("investigation report submission", () => {
           id: "12121212-1212-4212-8212-121212121212",
           title: "Broken route",
           description: "The route throws.",
+          rootCause: "A code change removed the missing-value guard.",
+          timeline: [{
+            title: "Request reached the route",
+            description: "The request reached the route without the required value.",
+          }],
           severity: "SEV-2",
           remediation: "Handle the missing value.",
         },
@@ -72,6 +77,11 @@ describe("investigation report submission", () => {
           resolution: "new" as const,
           title: "Broken route",
           description: "The route throws.",
+          rootCause: "A code change removed the missing-value guard.",
+          timeline: [{
+            title: "Request reached the route",
+            description: "The request reached the route without the required value.",
+          }],
           severity: "SEV-2" as const,
           remediation: "Handle the missing value.",
           evidence: [
@@ -367,6 +377,11 @@ describe("investigation report submission", () => {
           resolution: "new" as const,
           title: "New regression",
           description: "A new path fails.",
+          rootCause: "A code change left the new path without input validation.",
+          timeline: [{
+            title: "Request used the new path",
+            description: "The request reached the new path with unchecked input.",
+          }],
           severity: "SEV-2" as const,
           remediation: "Handle the new path.",
           evidence: [
