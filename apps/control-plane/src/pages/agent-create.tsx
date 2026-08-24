@@ -11,7 +11,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   type AgentConfiguration,
   type AgentOptions,
-  type AgentPrMode,
   type IntegrationSummary,
   fetchAgent,
   fetchAgentOptions,
@@ -55,10 +54,15 @@ import {
   TextAreaField,
 } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
+import {
+  draftForSessionStorage,
+  workspaceSecretRecordIdsForDraft,
+  type CreateDraft,
+  type OutputMode,
+  type SavedCreateDraft,
+  type Severity,
+} from "./agent-create-draft";
 
-type InputKind = "sentry_issue" | "slack_channel";
-type OutputMode = "thread" | "output_channel";
-type Severity = "SEV-1" | "SEV-2" | "SEV-3";
 type CreateStep = 1 | 2 | 3 | 4;
 type ContextCategory =
   | "Observability"
@@ -103,31 +107,6 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "custom_mcp",
   "langfuse",
 ]);
-
-interface CreateDraft {
-  inputKind: InputKind;
-  sentryAccountId: string;
-  sentryProjectResourceIds: string[];
-  slackInputResourceId: string;
-  outputMode: OutputMode;
-  outputChannelResourceId: string;
-  severities: Severity[];
-  githubAccountId: string;
-  repositoryIds: string[];
-  prMode: AgentPrMode;
-  contextAccountIds: string[];
-  contextResourceIds: string[];
-  workspaceSecretRecordIds: string[];
-  createLinearTickets: boolean;
-  linearIssueTemplate: string;
-  instructions: string;
-}
-
-type SavedCreateDraft = Partial<
-  Omit<CreateDraft, "workspaceSecretRecordIds">
-> & {
-  postScope?: "all" | "selected";
-};
 
 const EMPTY_OPTIONS: AgentOptions = {
   accounts: [],
@@ -190,24 +169,9 @@ function storageKey(base: string, agentId: string | undefined): string {
 function saveDraftToSessionStorage(
   key: string,
   draft: CreateDraft,
+  options: AgentOptions,
 ): void {
-  const persistedDraft: SavedCreateDraft = {
-    inputKind: draft.inputKind,
-    sentryAccountId: draft.sentryAccountId,
-    sentryProjectResourceIds: draft.sentryProjectResourceIds,
-    slackInputResourceId: draft.slackInputResourceId,
-    outputMode: draft.outputMode,
-    outputChannelResourceId: draft.outputChannelResourceId,
-    severities: draft.severities,
-    githubAccountId: draft.githubAccountId,
-    repositoryIds: draft.repositoryIds,
-    prMode: draft.prMode,
-    contextAccountIds: draft.contextAccountIds,
-    contextResourceIds: draft.contextResourceIds,
-    createLinearTickets: draft.createLinearTickets,
-    linearIssueTemplate: draft.linearIssueTemplate,
-    instructions: draft.instructions,
-  };
+  const persistedDraft = draftForSessionStorage(draft, options);
   window.sessionStorage.setItem(key, JSON.stringify(persistedDraft));
 }
 
@@ -328,11 +292,11 @@ function createInitialDraft(
     ) ??
     defaultContext.repositoryIds;
   const configuredPrMode = saved.prMode ?? configured.prMode;
-  const workspaceSecretRecordIds =
-    configured.workspaceSecretRecordIds?.filter((id) =>
-      options.secrets.some((secret) => secret.id === id),
-    ) ??
-    [];
+  const workspaceSecretRecordIds = workspaceSecretRecordIdsForDraft(
+    options,
+    saved,
+    configured,
+  );
 
   return {
     inputKind: saved.inputKind ?? configured.inputKind ?? "sentry_issue",
@@ -807,8 +771,8 @@ export function AgentCreatePage() {
 
   useEffect(() => {
     if (!draft) return;
-    saveDraftToSessionStorage(draftStorageKey, draft);
-  }, [draft, draftStorageKey]);
+    saveDraftToSessionStorage(draftStorageKey, draft, options);
+  }, [draft, draftStorageKey, options]);
 
   useEffect(() => {
     window.sessionStorage.setItem(
@@ -1066,7 +1030,7 @@ export function AgentCreatePage() {
       provider === "upstash" ||
       provider === "langfuse"
     ) {
-      saveDraftToSessionStorage(draftStorageKey, currentDraft);
+      saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       if (provider === "aws") setConnectingAws(true);
       else if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
@@ -1075,13 +1039,13 @@ export function AgentCreatePage() {
       return;
     }
     if (provider === "custom_mcp") {
-      saveDraftToSessionStorage(draftStorageKey, currentDraft);
+      saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       setConfiguringCustomMcp(true);
       return;
     }
     connectingProviderRef.current = provider;
     setConnectingProvider(provider);
-    saveDraftToSessionStorage(draftStorageKey, currentDraft);
+    saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
     const separator = connectionUrl.includes("?") ? "&" : "?";
     const params = new URLSearchParams({ returnTo });
     window.location.assign(`${connectionUrl}${separator}${params}`);
