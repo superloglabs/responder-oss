@@ -56,7 +56,9 @@ function requiredSecret(key, encoding = "hex") {
   return randomBytes(32).toString(encoding);
 }
 
-const workspaceSlug = slug(basename(workspacePath)) || "local";
+const workspaceSlug =
+  slug(process.env.CONDUCTOR_WORKSPACE_NAME || basename(workspacePath)) ||
+  "local";
 const updates = new Map([
   ["RESPONDER_WORKSPACE_PATH", shellValue(workspacePath)],
   ["RESPONDER_WORKSPACE_SLUG", workspaceSlug],

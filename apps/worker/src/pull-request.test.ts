@@ -54,6 +54,11 @@ describe("pull request tool", () => {
       requestId,
       issueTitle: "Broken route",
       issueDescription: "The route throws.",
+      issueRootCause: "A code change removed the missing-value guard.",
+      issueTimeline: [{
+        title: "Request reached the route",
+        description: "The request reached the route without the required value.",
+      }],
       issueEvidence: [],
       investigationEvidence: [
         {

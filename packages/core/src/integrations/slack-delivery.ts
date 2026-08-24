@@ -83,13 +83,33 @@ export function slackIssueMessage(
   canCreatePullRequest = false,
 ): { blocks: unknown[]; text: string } {
   const recurrence = issue.relationship === "recurrence" ? " · Recurrence" : "";
-  const text = `${issue.severity} — ${issue.title}${recurrence}\n${issue.description}`;
+  const timelineEntries = issue.timeline ?? [];
+  const timeline = timelineEntries
+    .map((entry, index) => `${index + 1}. ${entry.title} — ${entry.description}`)
+    .join("\n");
+  const text = [
+    `${issue.severity} — ${issue.title}${recurrence}`,
+    issue.description,
+    issue.rootCause ? `Root cause: ${issue.rootCause}` : null,
+    timeline ? `Timeline:\n${timeline}` : null,
+  ].filter((value): value is string => Boolean(value)).join("\n\n");
   const issueUrl = responderIssueUrl(issue.id, responderAppUrl());
   const blockText = truncateSlackBlock(
     [
       `*${issue.severity} — ${escapeSlack(issue.title)}*${recurrence}`,
       escapeSlack(issue.description),
-    ].join("\n\n"),
+      issue.rootCause
+        ? `*Root cause*\n${escapeSlack(issue.rootCause)}`
+        : null,
+      timelineEntries.length > 0
+        ? `*Timeline*\n${timelineEntries
+            .map(
+              (entry, index) =>
+                `${index + 1}. *${escapeSlack(entry.title)}* — ${escapeSlack(entry.description)}`,
+            )
+            .join("\n")}`
+        : null,
+    ].filter((value): value is string => Boolean(value)).join("\n\n"),
   );
   return {
     text,

@@ -278,6 +278,7 @@ export function investigationInstructions(input: {
     "Do not expose credentials or secret values.",
     workspaceSecretUsageInstructions(workspaceSecrets),
     "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
+    "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
     "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
     "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
     "Clearly say when the available evidence is insufficient.",

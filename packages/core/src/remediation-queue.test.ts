@@ -36,6 +36,11 @@ const remediation = {
   issueId: "10101010-1010-4010-8010-101010101010",
   issueTitle: "Broken route",
   issueDescription: "The route throws.",
+  issueRootCause: "A code change removed the missing-value guard.",
+  issueTimeline: [{
+    title: "Request reached the route",
+    description: "The request reached the route without the required value.",
+  }],
   issueSeverity: "SEV-2" as const,
   issueRemediation: "Handle the missing value.",
   issueEvidence: [],

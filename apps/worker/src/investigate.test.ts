@@ -144,6 +144,9 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("remediation, when enabled, runs separately");
     expect(instructions).not.toContain("call create_pull_request");
     expect(instructions).toContain("posts the report to Slack");
+    expect(instructions).toContain(
+      "Do not include actions performed by Responder during the investigation in an issue timeline",
+    );
   });
 
   it("keeps ClickStack investigation access read-only", () => {

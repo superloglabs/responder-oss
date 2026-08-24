@@ -17,6 +17,7 @@ import {
 import type {
   InvestigationReportSubmission,
   IssueEvidence,
+  IssueTimelineEntry,
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import { organization, user } from "./auth-schema.js";
@@ -501,6 +502,8 @@ export const issues = pgTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     description: text("description").notNull(),
+    rootCause: text("root_cause").notNull().default(""),
+    timeline: jsonb("timeline").$type<IssueTimelineEntry[]>().notNull().default([]),
     severity: severity("severity").notNull(),
     remediation: text("remediation").notNull(),
     evidence: jsonb("evidence").$type<IssueEvidence[]>().notNull().default([]),

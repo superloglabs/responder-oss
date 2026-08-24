@@ -63,11 +63,13 @@ describe("local environment generation", () => {
         "",
       ].join("\n"),
     );
+    const environment = { ...process.env };
+    delete environment.CONDUCTOR_WORKSPACE_NAME;
 
     execFileSync(
       process.execPath,
       [environmentScript, "22000"],
-      { cwd: workspace },
+      { cwd: workspace, env: environment },
     );
 
     const values = environmentValues(readFileSync(environmentFile, "utf8"));
@@ -87,5 +89,26 @@ describe("local environment generation", () => {
     expect(values.get("INTERNAL_INGEST_TOKEN")).toMatch(/^[a-f0-9]{64}$/);
     expect(statSync(environmentFile).mode & 0o777).toBe(0o600);
     expect(readFileSync(sentinelFile, "utf8")).toBe("unchanged\n");
+  });
+
+  it("uses the Conductor workspace name for nested application checkouts", () => {
+    const directory = temporaryDirectory();
+    const workspace = join(directory, "hosted-worktree", "open-core");
+    mkdirSync(workspace, { recursive: true });
+
+    execFileSync(
+      process.execPath,
+      [environmentScript, "23000"],
+      {
+        cwd: workspace,
+        env: { ...process.env, CONDUCTOR_WORKSPACE_NAME: "Dushanbe" },
+      },
+    );
+
+    const values = environmentValues(
+      readFileSync(join(workspace, ".env.local"), "utf8"),
+    );
+    expect(values.get("RESPONDER_PORTLESS_NAME")).toBe("responder.dushanbe");
+    expect(values.get("COMPOSE_PROJECT_NAME")).toBe("responder-dushanbe");
   });
 });

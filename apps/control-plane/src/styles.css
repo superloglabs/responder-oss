@@ -7659,6 +7659,64 @@ body:has(.appShell--create) {
   padding-left: 10px;
 }
 
+.issueSection__copy {
+  margin: 0;
+  padding: 10px;
+  color: var(--issueBody);
+  font-size: 14.5px;
+  line-height: 23px;
+  white-space: pre-wrap;
+}
+
+.issueTimeline {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  counter-reset: issue-timeline;
+}
+
+.issueTimeline li {
+  position: relative;
+  min-height: 44px;
+  padding: 10px 10px 10px 44px;
+  border-radius: 6px;
+  counter-increment: issue-timeline;
+}
+
+.issueTimeline li::before {
+  content: counter(issue-timeline);
+  position: absolute;
+  top: 11px;
+  left: 10px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--issueHairline);
+  border-radius: 999px;
+  color: var(--issueMuted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.issueTimeline strong {
+  display: block;
+  color: var(--issueText);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.issueTimeline p {
+  margin: 3px 0 0;
+  color: var(--issueMuted);
+  font-size: 13.5px;
+  line-height: 21px;
+}
+
 .evidenceList {
   margin: 0;
   padding: 0;
