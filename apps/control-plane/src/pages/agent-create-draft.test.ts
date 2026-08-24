@@ -12,6 +12,11 @@ const OPTIONS = {
       name: "STATUS_API_TOKEN",
       allowedHosts: ["status.example.com"],
     },
+    {
+      id: "secret-2",
+      name: "STATUS_API_TOKEN",
+      allowedHosts: ["other.example.com"],
+    },
   ],
 };
 
@@ -32,5 +37,22 @@ describe("agent draft persistence", () => {
     expect(draftForSessionStorage(draft, OPTIONS).workspaceSecretNames).toEqual([
       "STATUS_API_TOKEN",
     ]);
+  });
+
+  it("restores and migrates a valid ID from a legacy session draft", () => {
+    const workspaceSecretRecordIds = workspaceSecretRecordIdsForDraft(
+      OPTIONS,
+      { workspaceSecretRecordIds: ["secret-1", "deleted-secret"] },
+      {},
+    );
+    const draft = { workspaceSecretRecordIds } as CreateDraft;
+
+    expect(workspaceSecretRecordIds).toEqual(["secret-1"]);
+    expect(draftForSessionStorage(draft, OPTIONS)).toMatchObject({
+      workspaceSecretNames: ["STATUS_API_TOKEN"],
+    });
+    expect(draftForSessionStorage(draft, OPTIONS)).not.toHaveProperty(
+      "workspaceSecretRecordIds",
+    );
   });
 });

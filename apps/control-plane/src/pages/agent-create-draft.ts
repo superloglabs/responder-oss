@@ -27,6 +27,7 @@ export type SavedCreateDraft = Partial<
   Omit<CreateDraft, "workspaceSecretRecordIds">
 > & {
   postScope?: "all" | "selected";
+  workspaceSecretRecordIds?: string[];
   workspaceSecretNames?: string[];
 };
 
@@ -62,9 +63,16 @@ export function workspaceSecretRecordIdsForDraft(
   configured: Partial<CreateDraft>,
 ): string[] {
   if (saved.workspaceSecretNames) {
-    return options.secrets
-      .filter((secret) => saved.workspaceSecretNames?.includes(secret.name))
-      .map((secret) => secret.id);
+    return [...new Set(saved.workspaceSecretNames)].flatMap((name) => {
+      const secret = options.secrets.find((candidate) => candidate.name === name);
+      return secret ? [secret.id] : [];
+    });
+  }
+
+  if (saved.workspaceSecretRecordIds) {
+    return saved.workspaceSecretRecordIds.filter((id) =>
+      options.secrets.some((secret) => secret.id === id),
+    );
   }
 
   return configured.workspaceSecretRecordIds?.filter((id) =>
