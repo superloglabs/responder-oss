@@ -179,6 +179,13 @@ export async function queueInvestigationRetry(input: {
         "confirm",
       );
     } catch (error) {
+      await finalizeInvestigationReservation(
+        reservation.reservationId,
+        "release",
+      ).catch((releaseError: unknown) => {
+        // The provider automatically releases this reservation at expiry.
+        console.error("Unable to release investigation rerun", releaseError);
+      });
       await failInvestigation(
         result.investigationId,
         "Unable to confirm investigation rerun billing",

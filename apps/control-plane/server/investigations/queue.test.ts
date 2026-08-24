@@ -300,7 +300,7 @@ describe("investigation queue", () => {
   });
 
   it("does not enqueue a rerun when its billing reservation cannot be confirmed", async () => {
-    mocks.finalizeInvestigationReservation.mockRejectedValue(
+    mocks.finalizeInvestigationReservation.mockRejectedValueOnce(
       new Error("billing unavailable"),
     );
 
@@ -314,6 +314,11 @@ describe("investigation queue", () => {
     expect(mocks.failInvestigation).toHaveBeenCalledWith(
       created.investigationId,
       "Unable to confirm investigation rerun billing",
+    );
+    expect(mocks.finalizeInvestigationReservation).toHaveBeenNthCalledWith(
+      2,
+      "rerun-reservation-1",
+      "release",
     );
     expect(mocks.bossSend).not.toHaveBeenCalled();
   });
