@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { AuthGate } from "./components/auth-gate";
 import { AgentDetailPage } from "./pages/agent-detail";
 import { AgentCreatePage } from "./pages/agent-create";
+import { AgentContextStoryboardPage } from "./pages/agent-context-storyboard";
 import { AgentsPage } from "./pages/agents";
 import { BillingPage } from "./pages/billing";
 import { DesignLibraryPage } from "./pages/design-library";
@@ -48,7 +49,13 @@ export function App() {
         path={blogArticlePath}
       />
       {import.meta.env.DEV ? (
-        <Route element={<DesignLibraryPage />} path="/_design" />
+        <>
+          <Route element={<DesignLibraryPage />} path="/_design" />
+          <Route
+            element={<AgentContextStoryboardPage />}
+            path="/_storyboards/agent-context"
+          />
+        </>
       ) : null}
       <Route element={<ProtectedApp />}>
         <Route element={<Navigate replace to="/agents" />} path="/app" />
