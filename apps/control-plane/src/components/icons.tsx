@@ -395,3 +395,96 @@ export function CogIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function SeverityIcon({
+  filled = 3,
+  ...props
+}: IconProps & { filled?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="12"
+      viewBox="0 0 16 16"
+      width="12"
+      {...props}
+    >
+      {[
+        { x: 2.4, y: 9.4, height: 4.2 },
+        { x: 6.6, y: 6.2, height: 7.4 },
+        { x: 10.8, y: 3, height: 10.6 },
+      ].map((bar, index) => (
+        <rect
+          fill="currentColor"
+          fillOpacity={index < filled ? 1 : 0.28}
+          height={bar.height}
+          key={bar.x}
+          rx="0.8"
+          width="2.8"
+          x={bar.x}
+          y={bar.y}
+        />
+      ))}
+    </svg>
+  );
+}
+
+export function StatusDotIcon(props: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="14"
+      viewBox="0 0 16 16"
+      width="14"
+      {...props}
+    >
+      <circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M8 8V4.9"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+export function PullRequestIcon(props: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="14"
+      viewBox="0 0 16 16"
+      width="14"
+      {...props}
+    >
+      <circle cx="4.4" cy="4" r="1.9" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="4.4" cy="12" r="1.9" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="11.6" cy="6.2" r="1.9" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M4.4 5.9v4.2M11.6 8.1v.6c0 1.5-1.2 2.7-2.7 2.7H6.3"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+export function SignalIcon(props: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="12"
+      viewBox="0 0 16 16"
+      width="12"
+      {...props}
+    >
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="8" cy="8" fill="currentColor" r="1.8" />
+    </svg>
+  );
+}

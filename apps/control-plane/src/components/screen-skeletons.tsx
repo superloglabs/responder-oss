@@ -128,39 +128,54 @@ export function AgentDetailSkeleton() {
 export function IssueDetailSkeleton() {
   return (
     <LoadingRegion className="screenSkeleton screenSkeleton--issue" label="Loading issue…">
-      <section className="issueDetailHeading screenSkeleton__detailHeading">
-        <div className="screenSkeleton__headingCopy">
-          <Skeleton className="screenSkeleton__back" style={{ width: "104px" }} />
-          <Skeleton className="screenSkeleton__badge" style={{ width: "54px" }} />
-          <Skeleton className="screenSkeleton__title" style={{ width: "min(560px, 72vw)" }} />
-          <Skeleton style={{ width: "210px" }} />
-        </div>
-        <div className="screenSkeleton__actions">
-          <Skeleton className="screenSkeleton__button screenSkeleton__button--small" />
-          <Skeleton className="screenSkeleton__button screenSkeleton__button--small" />
-        </div>
-      </section>
+      <div className="issueDetail">
+        <div className="issueDetail__main screenSkeleton__detailHeading">
+          <div className="issueHeader">
+            <Skeleton className="screenSkeleton__back" style={{ width: "72px" }} />
+            <Skeleton className="screenSkeleton__badge" style={{ width: "260px" }} />
+            <Skeleton className="screenSkeleton__title" style={{ width: "min(560px, 72vw)" }} />
+          </div>
 
-      <div className="issueDetailContent">
-        <section className="issueDefinition screenSkeleton__issueDefinition">
-          {["68%", "82%", "74%"].map((width, index) => (
-            <article className="issueDefinitionCard screenSkeleton__contentCard" key={index}>
-              <Skeleton className="screenSkeleton__cardTitle" style={{ width: index === 2 ? "82px" : "116px" }} />
-              <Skeleton style={{ width }} />
-              <Skeleton style={{ width: index === 2 ? "62%" : "92%" }} />
-              <Skeleton style={{ width: "48%" }} />
-            </article>
-          ))}
-        </section>
-        <section className="issueInvestigations screenSkeleton__linkedItems">
-          <Skeleton className="screenSkeleton__cardTitle" style={{ width: "112px" }} />
-          {Array.from({ length: 3 }, (_, index) => (
-            <div className="screenSkeleton__linkedRow" key={index}>
-              <Skeleton style={{ width: `${64 + index * 7}%` }} />
-              <Skeleton style={{ width: "46%" }} />
+          <div className="issueProse">
+            {["94%", "88%", "62%"].map((width) => (
+              <Skeleton key={width} style={{ width }} />
+            ))}
+          </div>
+
+          <div className="issueCallout">
+            <Skeleton className="screenSkeleton__cardTitle" style={{ width: "104px" }} />
+            <Skeleton style={{ width: "90%" }} />
+            <Skeleton style={{ width: "54%" }} />
+          </div>
+
+          {["82px", "112px"].map((titleWidth, section) => (
+            <div className="issueSection screenSkeleton__linkedItems" key={titleWidth}>
+              <Skeleton className="screenSkeleton__cardTitle" style={{ width: titleWidth }} />
+              {Array.from({ length: 3 }, (_, index) => (
+                <div className="screenSkeleton__linkedRow" key={index}>
+                  <Skeleton style={{ width: `${52 + ((index + section) % 3) * 12}%` }} />
+                </div>
+              ))}
             </div>
           ))}
-        </section>
+        </div>
+
+        <div className="issueRail">
+          <div className="issueRail__group">
+            {["68px", "128px", "104px", "96px"].map((width) => (
+              <div className="issueRail__row" key={width}>
+                <Skeleton style={{ width }} />
+              </div>
+            ))}
+          </div>
+          {/* Copy prompt and Archive always render; Create pull request depends
+              on the repository, which is not known until the issue loads. */}
+          <div className="issueRail__actions">
+            {[0, 1].map((index) => (
+              <Skeleton className="screenSkeleton__railAction" key={index} />
+            ))}
+          </div>
+        </div>
       </div>
     </LoadingRegion>
   );
