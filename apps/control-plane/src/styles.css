@@ -602,6 +602,876 @@ body:has(.appShell--investigation) {
   }
 }
 
+/* Interactive exploration for the agent-context setup step. */
+.contextStoryboardPage {
+  min-height: 100vh;
+  padding: 40px clamp(24px, 5vw, 72px) 64px;
+  background: var(--ds-canvas);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+}
+
+.contextStoryboardHeader {
+  width: min(1180px, 100%);
+  margin: 0 auto 42px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.contextStoryboardEyebrow {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.contextStoryboardHeader h1 {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 42px;
+  letter-spacing: -0.03em;
+}
+
+.contextStoryboardHeader p,
+.contextStoryboardSectionHeader p,
+.contextStoryboardCatalogHeader p,
+.contextStoryboardCategory > header p,
+.contextStoryboardEmpty p,
+.contextStoryboardNoResults p {
+  margin: 0;
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.contextStoryboardHeader > div:first-child > p {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.contextStoryboardScenarioPicker {
+  width: min(330px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contextStoryboardScenarioPicker > span,
+.contextStoryboardScenarioPicker > small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+}
+
+.contextStoryboardScenarioPicker select,
+.contextStoryboardDialogSelect select,
+.contextStoryboardDialogSelect input,
+.contextStoryboardSecretForm input,
+.contextStoryboardLinearConfig textarea {
+  width: 100%;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  outline: 0;
+  background: var(--ds-canvas);
+  color: var(--ds-text-primary);
+  font: inherit;
+}
+
+.contextStoryboardScenarioPicker select {
+  height: 40px;
+  padding: 0 34px 0 11px;
+}
+
+.contextStoryboardScenarioPicker select:focus,
+.contextStoryboardDialogSelect select:focus,
+.contextStoryboardDialogSelect input:focus,
+.contextStoryboardSecretForm input:focus,
+.contextStoryboardLinearConfig textarea:focus {
+  border-color: var(--ds-border-strong);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 5%);
+}
+
+.contextStoryboardLayout {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  align-items: start;
+  gap: 34px;
+}
+
+.contextStoryboardSteps {
+  position: sticky;
+  top: 32px;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.contextStoryboardStep {
+  min-height: 72px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: var(--ds-radius-medium);
+  color: var(--ds-text-disabled);
+}
+
+.contextStoryboardStep > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: 999px;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.contextStoryboardStep > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contextStoryboardStep strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.contextStoryboardStep small {
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextStoryboardStep.isCurrent {
+  background: var(--ds-surface-base);
+  color: var(--ds-text-primary);
+}
+
+.contextStoryboardStep.isCurrent > span {
+  border-color: var(--ds-text-primary);
+  box-shadow: inset 0 0 0 3px var(--ds-surface-base);
+  background: var(--ds-text-primary);
+  color: var(--ds-canvas);
+}
+
+.contextStoryboardStep.isComplete > span {
+  border-color: #33452f;
+  background: #11190f;
+  color: var(--ds-positive);
+}
+
+.contextStoryboardCanvas {
+  min-width: 0;
+}
+
+.contextStoryboardPanel.dsPanel {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  border: 0;
+  border-radius: var(--ds-radius-large);
+  background: var(--ds-surface-base);
+}
+
+.contextStoryboardSection {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.contextStoryboardSection + .contextStoryboardSection {
+  padding-top: 34px;
+  border-top: 1px solid var(--ds-border-default);
+}
+
+.contextStoryboardSectionHeader,
+.contextStoryboardCatalogHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.contextStoryboardSectionHeader h2,
+.contextStoryboardCatalogHeader h2 {
+  margin: 0 0 3px;
+  color: var(--ds-text-primary);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.contextStoryboardConnectedList {
+  overflow: hidden;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.contextStoryboardConnectedRow {
+  min-height: 72px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, auto);
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--ds-border-default);
+}
+
+.contextStoryboardConnectedRow:last-child {
+  border-bottom: 0;
+}
+
+.contextStoryboardIdentity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.contextStoryboardProvider.providerGlyph {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-canvas);
+  color: var(--ds-text-primary);
+  font-size: 10px;
+}
+
+.contextStoryboardIdentity > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.contextStoryboardIdentity strong,
+.contextStoryboardIdentity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextStoryboardRowAction {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.contextStoryboardScopedActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.contextStoryboardScopedActions .dsIconButton {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-secondary);
+}
+
+.contextStoryboardSampleLabel .dsSpinner {
+  width: 13px;
+  height: 13px;
+}
+
+.contextStoryboardIdentity strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.contextStoryboardIdentity small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.contextStoryboardToggle {
+  min-width: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.contextStoryboardToggle[aria-checked="true"] {
+  color: var(--ds-positive);
+}
+
+.contextStoryboardToggle > i {
+  width: 34px;
+  height: 20px;
+  padding: 2px;
+  display: block;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: 999px;
+  background: var(--ds-canvas);
+  transition: background-color var(--ds-duration-fast) ease;
+}
+
+.contextStoryboardToggle > i > i {
+  width: 14px;
+  height: 14px;
+  display: block;
+  border-radius: 50%;
+  background: var(--ds-text-muted);
+  transition: transform var(--ds-duration-fast) ease;
+}
+
+.contextStoryboardToggle[aria-checked="true"] > i {
+  border-color: #3f5738;
+  background: #1b2a17;
+}
+
+.contextStoryboardToggle[aria-checked="true"] > i > i {
+  background: var(--ds-positive);
+  transform: translateX(14px);
+}
+
+.contextStoryboardEmpty,
+.contextStoryboardNoResults {
+  min-height: 108px;
+  padding: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border: 1px dashed var(--ds-border-strong);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.contextStoryboardEmpty > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-small);
+  color: var(--ds-text-muted);
+  font-size: 18px;
+}
+
+.contextStoryboardEmpty strong,
+.contextStoryboardNoResults strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.contextStoryboardSearch {
+  width: min(310px, 45%);
+  height: 40px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-canvas);
+  color: var(--ds-text-muted);
+}
+
+.contextStoryboardSearch:focus-within {
+  border-color: var(--ds-border-strong);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 5%);
+}
+
+.contextStoryboardSearch input {
+  min-width: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.contextStoryboardSearch button {
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-muted);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.contextStoryboardCatalog,
+.contextStoryboardCategory {
+  display: flex;
+  flex-direction: column;
+}
+
+.contextStoryboardCatalog {
+  gap: 30px;
+}
+
+.contextStoryboardCategory {
+  gap: 11px;
+}
+
+.contextStoryboardCategory > header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.contextStoryboardCategory h3 {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.contextStoryboardCategory > header p {
+  font-size: 11px;
+}
+
+.contextStoryboardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.contextStoryboardCard {
+  min-width: 0;
+  min-height: 84px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+  transition:
+    border-color var(--ds-duration-fast) ease,
+    background-color var(--ds-duration-fast) ease;
+}
+
+.contextStoryboardCard:hover {
+  border-color: var(--ds-border-strong);
+  background: var(--ds-surface-hover);
+}
+
+.contextStoryboardCard .contextStoryboardIdentity {
+  flex: 1 1 auto;
+}
+
+.contextStoryboardCardFooter {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.contextStoryboardCardFooter .dsButton--ghost {
+  color: var(--ds-positive);
+}
+
+.contextStoryboardNoResults {
+  flex-direction: column;
+  text-align: center;
+}
+
+.contextStoryboardActions {
+  min-height: 80px;
+  padding: 8px 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.contextStoryboardActions > span {
+  margin-right: auto;
+  color: var(--ds-positive);
+  font-size: 12px;
+}
+
+.contextStoryboardSampleSection {
+  padding-top: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid var(--ds-border-default);
+}
+
+.contextStoryboardSampleSection > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.contextStoryboardSampleSection > header h2 {
+  margin: 0 0 3px;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.contextStoryboardSampleSection > header p {
+  margin: 0;
+  flex: 1 1 auto;
+  color: var(--ds-text-muted);
+  font-size: 12px;
+}
+
+.contextStoryboardSampleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.contextStoryboardSampleGrid article {
+  min-width: 0;
+  min-height: 188px;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.contextStoryboardSampleGrid article > strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.contextStoryboardSampleGrid article > small {
+  min-height: 32px;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.contextStoryboardSampleGrid article > :last-child {
+  margin-top: auto;
+}
+
+.contextStoryboardSampleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ds-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.contextStoryboardSecretList {
+  overflow: hidden;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.contextStoryboardSecretList > div {
+  min-height: 66px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--ds-border-default);
+}
+
+.contextStoryboardSecretList > div:last-child {
+  border-bottom: 0;
+}
+
+.contextStoryboardSecretList span,
+.contextStoryboardSecretForm label,
+.contextStoryboardLinearConfig label,
+.contextStoryboardDialogSelect {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.contextStoryboardSecretList strong {
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.contextStoryboardSecretList small,
+.contextStoryboardSecretForm label > span,
+.contextStoryboardLinearConfig label > span,
+.contextStoryboardDialogSelect > span {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+}
+
+.contextStoryboardSecretForm {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.contextStoryboardSecretForm input {
+  height: 38px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.contextStoryboardSecretForm input[aria-invalid="true"] {
+  border-color: var(--ds-warning);
+}
+
+.contextStoryboardSecretForm p {
+  grid-column: 3 / -1;
+  margin: -4px 0 0;
+  color: var(--ds-warning);
+  font-size: 10px;
+}
+
+.contextStoryboardConfiguration.configurationDialog {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.contextStoryboardDialogSelect select,
+.contextStoryboardDialogSelect input {
+  height: 38px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.contextStoryboardConnectionSummary {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+}
+
+.contextStoryboardConnectionSummary span,
+.contextStoryboardConnectionSummary small {
+  color: var(--ds-text-muted);
+  font-size: 10px;
+}
+
+.contextStoryboardConnectionSummary strong {
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.contextStoryboardResourceList,
+.contextStoryboardLinearConfig {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.contextStoryboardResourceList {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.contextStoryboardLinearConfig textarea {
+  padding: 10px;
+  resize: vertical;
+  font-family: var(--ds-font-mono);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.contextStoryboardDialogSetting {
+  padding-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid var(--ds-border-default);
+}
+
+.contextStoryboardDialogSetting > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.contextStoryboardDialogSetting strong {
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.contextStoryboardDialogSetting small {
+  color: var(--ds-text-muted);
+  font-size: 10px;
+}
+
+@media (max-width: 860px) {
+  .contextStoryboardHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .contextStoryboardScenarioPicker {
+    align-items: flex-start;
+  }
+
+  .contextStoryboardLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .contextStoryboardSteps {
+    position: static;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .contextStoryboardStep {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .contextStoryboardStep small {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .contextStoryboardPage {
+    padding: 24px 18px 40px;
+  }
+
+  .contextStoryboardHeader {
+    margin-bottom: 28px;
+  }
+
+  .contextStoryboardScenarioPicker {
+    width: 100%;
+  }
+
+  .contextStoryboardPanel.dsPanel {
+    padding: 20px;
+  }
+
+  .contextStoryboardSectionHeader,
+  .contextStoryboardCatalogHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .contextStoryboardSearch {
+    width: 100%;
+  }
+
+  .contextStoryboardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .contextStoryboardCategory > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .contextStoryboardConnectedRow {
+    align-items: flex-start;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .contextStoryboardIdentity {
+    grid-column: 1 / -1;
+  }
+
+  .contextStoryboardRowAction {
+    justify-content: flex-start;
+  }
+
+  .contextStoryboardScopedActions {
+    justify-content: flex-start;
+  }
+
+  .contextStoryboardToggle {
+    min-width: 0;
+    padding-left: 49px;
+  }
+
+  .contextStoryboardActions > span {
+    display: none;
+  }
+
+  .contextStoryboardSampleSection > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .contextStoryboardSampleGrid,
+  .contextStoryboardSecretForm {
+    grid-template-columns: 1fr;
+  }
+
+  .contextStoryboardSecretForm p {
+    grid-column: auto;
+  }
+
+  .contextStoryboardDialogSetting {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -5322,11 +6192,192 @@ button:disabled {
   border-radius: 8px;
 }
 
+.contextIntegrationsEmpty {
+  min-height: 88px;
+  padding: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--ds-border-strong);
+  border-radius: var(--ds-radius-medium);
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.contextList > .contextIntegrationsEmpty {
+  border: 0;
+  border-radius: 0;
+}
+
+.contextIntegrationCatalog {
+  padding-top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  border-top: 1px solid var(--ds-border-default);
+}
+
+.contextIntegrationCatalog__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.contextIntegrationCatalog__header .configurationDialog__copy strong {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.contextIntegrationSearch {
+  width: min(310px, 45%);
+  height: 40px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-canvas);
+  color: var(--ds-text-muted);
+}
+
+.contextIntegrationSearch:focus-within {
+  border-color: var(--ds-border-strong);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 5%);
+}
+
+.contextIntegrationSearch input {
+  min-width: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.contextIntegrationSearch button {
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-muted);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.contextIntegrationCategories,
+.contextIntegrationCategory {
+  display: flex;
+  flex-direction: column;
+}
+
+.contextIntegrationCategories {
+  gap: 26px;
+}
+
+.contextIntegrationCategory {
+  gap: 10px;
+}
+
+.contextIntegrationCategory > header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.contextIntegrationCategory > header strong {
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.contextIntegrationCategory > header small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+}
+
+.contextIntegrationGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.contextIntegrationCard {
+  min-width: 0;
+  min-height: 84px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.contextIntegrationCard__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.contextIntegrationCard__copy strong,
+.contextIntegrationCard__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextIntegrationCard__copy strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.contextIntegrationCard__copy small {
+  color: var(--ds-text-muted);
+  font-size: 10px;
+}
+
+.contextIntegrationCard footer {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.contextConnectionSummary {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+}
+
+.contextConnectionSummary span,
+.contextConnectionSummary small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+}
+
+.contextConnectionSummary strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .contextRow {
   min-height: 68px;
   padding: 16px;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 110px 104px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   border-bottom: 1px solid var(--border);
@@ -5367,30 +6418,61 @@ button:disabled {
   white-space: nowrap;
 }
 
-.contextStatus {
-  width: 110px;
-  color: var(--live);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  text-align: right;
-}
-
-.contextStatus.isMuted {
-  color: var(--dim);
-  font-weight: 400;
-}
-
 .contextRow__action {
-  width: 104px;
+  width: auto;
   display: flex;
   justify-content: flex-end;
 }
 
-.contextRow__action .button,
-.contextRow__action .miniButton,
-.contextAutomatic {
-  width: 100px;
+.contextIntegrationControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.contextIntegrationControls > .dsIconButton {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-muted);
+}
+
+.contextIntegrationToggle {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.contextIntegrationToggle > i {
+  width: 34px;
+  height: 20px;
+  padding: 2px;
+  display: block;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-canvas);
+}
+
+.contextIntegrationToggle > i > i {
+  width: 14px;
+  height: 14px;
+  display: block;
+  border-radius: 50%;
+  background: var(--ds-text-muted);
+  transition: transform var(--ds-duration-fast) ease;
+}
+
+.contextIntegrationToggle[aria-checked="true"] > i {
+  border-color: #3f5738;
+  background: #1b2a17;
+}
+
+.contextIntegrationToggle[aria-checked="true"] > i > i {
+  background: var(--ds-positive);
+  transform: translateX(14px);
 }
 
 .workspaceSecretsPanel {
@@ -5533,38 +6615,6 @@ button:disabled {
 
 .workspaceSecretError {
   color: var(--danger);
-}
-
-.contextAutomatic {
-  color: var(--dim);
-  font-size: 12px;
-  line-height: 16px;
-  text-align: right;
-}
-
-.contextConfigureAction {
-  padding: 4px 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  border: 0;
-  background: transparent;
-  color: var(--secondary);
-  font-size: 12px;
-  line-height: 16px;
-  cursor: pointer;
-}
-
-.contextConfigureAction svg {
-  display: block;
-  flex: 0 0 auto;
-  color: var(--dim);
-}
-
-.contextConfigureAction:hover,
-.contextConfigureAction:hover svg {
-  color: var(--foreground);
 }
 
 .configurationDialogBackdrop {
@@ -6266,9 +7316,7 @@ body:has(.appShell--create) {
 
 .appShell--create .requiredOutput__label small,
 .appShell--create .contextToolbar small,
-.appShell--create .contextRow__copy > small,
-.appShell--create .contextAutomatic,
-.appShell--create .contextStatus.isMuted {
+.appShell--create .contextRow__copy > small {
   color: var(--ds-text-muted);
 }
 
@@ -6298,18 +7346,8 @@ body:has(.appShell--create) {
   color: var(--ds-text-secondary);
 }
 
-.appShell--create .contextStatus {
-  color: var(--ds-positive);
-}
-
-.appShell--create .contextRow__action .dsButton,
-.appShell--create .contextAutomatic {
-  width: 104px;
-}
-
-.appShell--create .contextConfigureAction.dsButton {
-  padding-inline: 8px;
-  justify-content: flex-end;
+.appShell--create .contextIntegrationControls > .dsIconButton {
+  width: 30px;
 }
 
 .appShell--create .configurationDialog {
@@ -7469,9 +8507,24 @@ a.issueLine:focus-visible {
   }
 
   .contextToolbar,
-  .contextSettingRow {
+  .contextSettingRow,
+  .contextIntegrationCatalog__header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .contextIntegrationSearch {
+    width: 100%;
+  }
+
+  .contextIntegrationGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .contextIntegrationCategory > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
   }
 
   .contextRow {
@@ -7479,19 +8532,9 @@ a.issueLine:focus-visible {
     grid-template-columns: 34px minmax(0, 1fr);
   }
 
-  .contextStatus {
-    width: auto;
-    grid-column: 2;
-    text-align: left;
-  }
-
   .contextRow__action {
     width: auto;
     grid-column: 2;
-    justify-content: flex-start;
-  }
-
-  .contextConfigureAction {
     justify-content: flex-start;
   }
 
@@ -7703,16 +8746,6 @@ a.issueLine:focus-visible {
   .appShell--create .contextSettingRow .dsSegmentedControl,
   .appShell--create .createAgentActions .dsButton {
     width: 100%;
-  }
-
-  .appShell--create .contextRow__action .dsButton,
-  .appShell--create .contextAutomatic {
-    width: auto;
-  }
-
-  .appShell--create .contextConfigureAction.dsButton {
-    width: fit-content;
-    padding-left: 0;
   }
 
   .appShell--create .promptField textarea {

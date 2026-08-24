@@ -21,7 +21,7 @@ import {
   saveAgent,
   slackChannelLabel,
 } from "../agents-api";
-import { slackContextConnectionStatus } from "../agent-create-presentation";
+import { defaultAgentContext } from "../agent-context-defaults";
 import { AppShell } from "../components/app-shell";
 import { AgentSetupSkeleton } from "../components/screen-skeletons";
 import {
@@ -60,6 +60,49 @@ type InputKind = "sentry_issue" | "slack_channel";
 type OutputMode = "thread" | "output_channel";
 type Severity = "SEV-1" | "SEV-2" | "SEV-3";
 type CreateStep = 1 | 2 | 3 | 4;
+type ContextCategory =
+  | "Observability"
+  | "Code & deployment"
+  | "Communication & workflow"
+  | "Data & infrastructure";
+
+const CONTEXT_CATEGORY_ORDER: ContextCategory[] = [
+  "Observability",
+  "Code & deployment",
+  "Communication & workflow",
+  "Data & infrastructure",
+];
+
+const CONTEXT_CATEGORY_DESCRIPTIONS: Record<ContextCategory, string> = {
+  Observability: "Errors, logs, traces, and service health",
+  "Code & deployment": "Source code, releases, and runtime changes",
+  "Communication & workflow": "Team conversations and incident follow-up",
+  "Data & infrastructure": "Cloud resources, databases, and custom tools",
+};
+
+const CONTEXT_PROVIDER_METADATA: Record<
+  IntegrationSummary["id"],
+  { category: ContextCategory; searchTerms: string }
+> = {
+  sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
+  datadog: { category: "Observability", searchTerms: "apm logs monitors" },
+  axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
+  clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
+  langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
+  github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
+  vercel: { category: "Code & deployment", searchTerms: "deployments projects hosting" },
+  slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
+  linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
+  aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
+  upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
+  custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
+};
+
+const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
+  "aws",
+  "custom_mcp",
+  "langfuse",
+]);
 
 interface CreateDraft {
   inputKind: InputKind;
@@ -260,6 +303,7 @@ function createInitialDraft(
   configuration: AgentConfiguration | null,
 ): CreateDraft {
   const configured = draftFromConfiguration(options, configuration);
+  const defaultContext = defaultAgentContext(options);
   const sentryAccounts = accountsFor(options, "sentry");
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
@@ -282,7 +326,7 @@ function createInitialDraft(
     configured.repositoryIds?.filter((id) =>
       options.repositories.some((repository) => repository.id === id),
     ) ??
-    [];
+    defaultContext.repositoryIds;
   const configuredPrMode = saved.prMode ?? configured.prMode;
   const workspaceSecretRecordIds =
     configured.workspaceSecretRecordIds?.filter((id) =>
@@ -359,7 +403,7 @@ function createInitialDraft(
       configured.contextAccountIds?.filter((id) =>
         options.accounts.some((account) => account.id === id),
       ) ??
-      [],
+      defaultContext.contextAccountIds,
     contextResourceIds:
       saved.contextResourceIds?.filter((id) =>
         contextResources.some((resource) => resource.id === id),
@@ -367,7 +411,7 @@ function createInitialDraft(
       configured.contextResourceIds?.filter((id) =>
         contextResources.some((resource) => resource.id === id),
       ) ??
-      [],
+      defaultContext.contextResourceIds,
     workspaceSecretRecordIds,
     createLinearTickets:
       saved.createLinearTickets ?? configured.createLinearTickets ?? false,
@@ -418,6 +462,8 @@ export function AgentCreatePage() {
   const draftStorageKey = storageKey(DRAFT_STORAGE_KEY, agentId);
   const stepStorageKey = storageKey(DRAFT_STEP_STORAGE_KEY, agentId);
   const returnTo = agentId ? `/agents/${agentId}/edit` : "/agents/new";
+  const sentryJustConnected = successfulConnectionReturn("sentry");
+  const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const axiomJustConnected = successfulConnectionReturn("axiom");
@@ -432,6 +478,8 @@ export function AgentCreatePage() {
     window.location.search,
   ).get("integration_account_id");
   const contextIntegrationJustConnected =
+    sentryJustConnected ||
+    slackJustConnected ||
     githubJustConnected ||
     datadogJustConnected ||
     axiomJustConnected ||
@@ -466,7 +514,14 @@ export function AgentCreatePage() {
   );
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
   const [linearDialogOpen, setLinearDialogOpen] = useState(linearJustConnected);
+  const [linearAccountId, setLinearAccountId] = useState(
+    linearJustConnected ? returnedIntegrationAccountId ?? "" : "",
+  );
   const [repositoryQuery, setRepositoryQuery] = useState("");
+  const [integrationQuery, setIntegrationQuery] = useState("");
+  const [connectionSettingsOpen, setConnectionSettingsOpen] = useState<
+    AgentOptions["accounts"][number] | null
+  >(null);
   const [promptStepReady, setPromptStepReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -497,6 +552,7 @@ export function AgentCreatePage() {
       !linearDialogOpen &&
       !slackContextDialogOpen &&
       !vercelDialogOpen &&
+      !connectionSettingsOpen &&
       !secretDialogOpen
     ) {
       return;
@@ -507,6 +563,7 @@ export function AgentCreatePage() {
         setLinearDialogOpen(false);
         setSlackContextDialogOpen(false);
         setVercelDialogOpen(false);
+        setConnectionSettingsOpen(null);
         if (!creatingSecret) {
           setSecretDialogOpen(false);
           setSecretName("");
@@ -520,6 +577,7 @@ export function AgentCreatePage() {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [
     creatingSecret,
+    connectionSettingsOpen,
     githubDialogOpen,
     linearDialogOpen,
     secretDialogOpen,
@@ -551,6 +609,48 @@ export function AgentCreatePage() {
           readSavedDraft(draftStorageKey),
           loadedConfiguration,
         );
+        const connectedSentry = accountsFor(loadedOptions, "sentry")[0];
+        if (
+          sentryJustConnected &&
+          connectedSentry &&
+          !loadedDraft.contextAccountIds.includes(connectedSentry.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedSentry.id);
+        }
+        const connectedSlackAccount = accountsFor(loadedOptions, "slack").find(
+          (account) => account.slackContextAvailable,
+        );
+        const connectedSlackChannel = resourcesOfKind(
+          loadedOptions,
+          "slack_channel",
+        ).find(
+          (channel) =>
+            channel.integrationAccountId === connectedSlackAccount?.id,
+        );
+        if (
+          slackJustConnected &&
+          connectedSlackChannel &&
+          !loadedDraft.contextResourceIds.some((id) =>
+            loadedOptions.resources.some(
+              (resource) => resource.id === id && resource.kind === "slack_channel",
+            ),
+          )
+        ) {
+          loadedDraft.contextResourceIds.push(connectedSlackChannel.id);
+        }
+        const connectedGithubRepository = loadedOptions.repositories.find(
+          (repository) =>
+            !returnedIntegrationAccountId ||
+            repository.integrationAccountId === returnedIntegrationAccountId,
+        );
+        if (
+          githubJustConnected &&
+          connectedGithubRepository &&
+          loadedDraft.repositoryIds.length === 0
+        ) {
+          loadedDraft.repositoryIds.push(connectedGithubRepository.id);
+          loadedDraft.prMode = "manual";
+        }
         const connectedDatadog = accountsFor(
           loadedOptions,
           "datadog",
@@ -638,6 +738,24 @@ export function AgentCreatePage() {
               account.provider === "vercel",
           )
         ) {
+          const firstConnectedProject = resourcesOfKind(
+            loadedOptions,
+            "vercel_project",
+          ).find(
+            (project) =>
+              project.integrationAccountId === returnedIntegrationAccountId,
+          );
+          if (
+            firstConnectedProject &&
+            !loadedDraft.contextResourceIds.includes(firstConnectedProject.id)
+          ) {
+            loadedDraft.contextResourceIds.push(firstConnectedProject.id);
+            if (
+              !loadedDraft.contextAccountIds.includes(returnedIntegrationAccountId)
+            ) {
+              loadedDraft.contextAccountIds.push(returnedIntegrationAccountId);
+            }
+          }
           setVercelAccountId(returnedIntegrationAccountId);
           setVercelDialogOpen(true);
         }
@@ -677,10 +795,13 @@ export function AgentCreatePage() {
     customMcpJustConnected,
     datadogJustConnected,
     draftStorageKey,
+    githubJustConnected,
     upstashJustConnected,
     langfuseJustConnected,
     linearJustConnected,
     returnedIntegrationAccountId,
+    sentryJustConnected,
+    slackJustConnected,
     vercelJustConnected,
   ]);
 
@@ -785,6 +906,9 @@ export function AgentCreatePage() {
   const activeGithubAccount =
     githubAccounts.find((account) => account.id === draft.githubAccountId) ??
     githubAccounts[0];
+  const activeLinearAccount =
+    linearAccounts.find((account) => account.id === linearAccountId) ??
+    linearAccounts[0];
   const selectedVercelProjects = vercelProjects.filter((project) =>
     draft.contextResourceIds.includes(project.id),
   );
@@ -924,7 +1048,10 @@ export function AgentCreatePage() {
     if (connectingProviderRef.current) return;
 
     const integration = integrationFor(provider);
-    if (!integration?.connectUrl) {
+    const connectionUrl = integration?.state === "connected"
+      ? integration.configurationUrl ?? integration.connectUrl
+      : integration?.connectUrl;
+    if (!integration || !connectionUrl) {
       setError(
         integration?.state === "coming_soon"
           ? `${integration.name} connection support is coming soon.`
@@ -955,9 +1082,9 @@ export function AgentCreatePage() {
     connectingProviderRef.current = provider;
     setConnectingProvider(provider);
     saveDraftToSessionStorage(draftStorageKey, currentDraft);
-    const separator = integration.connectUrl.includes("?") ? "&" : "?";
+    const separator = connectionUrl.includes("?") ? "&" : "?";
     const params = new URLSearchParams({ returnTo });
-    window.location.assign(`${integration.connectUrl}${separator}${params}`);
+    window.location.assign(`${connectionUrl}${separator}${params}`);
   }
 
   function toggleContextAccount(accountId: string) {
@@ -1021,6 +1148,83 @@ export function AgentCreatePage() {
           (id) => !currentDraft.contextAccountIds.includes(id),
         ),
       ],
+    });
+  }
+
+  function toggleSlackContextIntegration() {
+    const selectedSlackIds = new Set(
+      slackChannels
+        .filter((channel) => currentDraft.contextResourceIds.includes(channel.id))
+        .map((channel) => channel.id),
+    );
+    if (selectedSlackIds.size > 0) {
+      updateDraft({
+        contextResourceIds: currentDraft.contextResourceIds.filter(
+          (id) => !selectedSlackIds.has(id),
+        ),
+      });
+      return;
+    }
+
+    const firstAccount = slackAccounts.find((account) => account.slackContextAvailable);
+    const firstChannel = slackChannels.find(
+      (channel) => channel.integrationAccountId === firstAccount?.id,
+    );
+    if (!firstChannel) {
+      setSlackContextDialogOpen(true);
+      void refreshSlackChannels();
+      return;
+    }
+    updateDraft({
+      contextResourceIds: [...currentDraft.contextResourceIds, firstChannel.id],
+    });
+  }
+
+  function toggleGithubContextIntegration() {
+    if (currentDraft.repositoryIds.length > 0) {
+      updateDraft({ repositoryIds: [], prMode: "disabled" });
+      return;
+    }
+    const firstRepository = options.repositories[0];
+    if (!firstRepository) {
+      setGithubDialogOpen(true);
+      return;
+    }
+    updateDraft({ repositoryIds: [firstRepository.id], prMode: "manual" });
+  }
+
+  function toggleVercelContextIntegration() {
+    const selectedVercelIds = new Set(
+      vercelProjects
+        .filter((project) => currentDraft.contextResourceIds.includes(project.id))
+        .map((project) => project.id),
+    );
+    if (selectedVercelIds.size > 0) {
+      const vercelAccountIds = new Set(vercelAccounts.map((account) => account.id));
+      updateDraft({
+        contextAccountIds: currentDraft.contextAccountIds.filter(
+          (id) => !vercelAccountIds.has(id),
+        ),
+        contextResourceIds: currentDraft.contextResourceIds.filter(
+          (id) => !selectedVercelIds.has(id),
+        ),
+      });
+      return;
+    }
+
+    const firstProject = vercelProjects[0];
+    if (!firstProject) {
+      setVercelDialogOpen(true);
+      return;
+    }
+    setVercelAccountId(firstProject.integrationAccountId);
+    updateDraft({
+      contextAccountIds: currentDraft.contextAccountIds.includes(
+        firstProject.integrationAccountId,
+      )
+        ? currentDraft.contextAccountIds
+        : [...currentDraft.contextAccountIds, firstProject.integrationAccountId],
+      contextResourceIds: [...currentDraft.contextResourceIds, firstProject.id],
     });
   }
 
@@ -1183,10 +1387,6 @@ export function AgentCreatePage() {
       trigger.kind === "sentry_issue"
         ? "Sentry error"
         : slackChannelLabel(selectedSlackInput!.displayName);
-    const contextAccountIds = new Set(currentDraft.contextAccountIds);
-    if (trigger.kind === "sentry_issue") {
-      contextAccountIds.add(trigger.integrationAccountId);
-    }
     const configuration: AgentConfiguration = {
       name: existingConfiguration?.name ?? `${inputLabel} responder`,
       description:
@@ -1199,7 +1399,7 @@ export function AgentCreatePage() {
       enabled: existingConfiguration?.enabled ?? true,
       prMode: currentDraft.prMode,
       repositoryIds: currentDraft.repositoryIds,
-      contextAccountIds: [...contextAccountIds],
+      contextAccountIds: currentDraft.contextAccountIds,
       contextResourceIds: currentDraft.contextResourceIds,
       secretIds: currentDraft.workspaceSecretRecordIds,
       createLinearTickets: currentDraft.createLinearTickets,
@@ -1231,28 +1431,6 @@ export function AgentCreatePage() {
   const sentryConnected = sentryProjects.length > 0;
   const slackConnected = slackChannels.length > 0;
   const outputChannelSelected = effectiveOutputMode === "output_channel";
-  const sentryIncluded =
-    draft.inputKind === "sentry_issue" && Boolean(activeSentryAccount);
-  const sentryContextConnected = Boolean(
-    sentryAccounts[0] &&
-      draft.contextAccountIds.includes(sentryAccounts[0].id),
-  );
-  const datadogContextConnected = Boolean(
-    datadogAccounts[0] &&
-      draft.contextAccountIds.includes(datadogAccounts[0].id),
-  );
-  const axiomContextConnected = Boolean(
-    axiomAccounts[0] &&
-      draft.contextAccountIds.includes(axiomAccounts[0].id),
-  );
-  const clickStackContextConnected = Boolean(
-    clickStackAccounts[0] &&
-      draft.contextAccountIds.includes(clickStackAccounts[0].id),
-  );
-  const upstashContextConnected = Boolean(
-    upstashAccounts[0] &&
-      draft.contextAccountIds.includes(upstashAccounts[0].id),
-  );
   const vercelContextConnected = selectedVercelProjects.length > 0;
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
     draft.contextResourceIds.includes(channel.id),
@@ -1260,20 +1438,21 @@ export function AgentCreatePage() {
   const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
     draft.workspaceSecretRecordIds.includes(secret.id),
   );
-  const slackContextAvailable = slackAccounts.some(
-    (account) => account.slackContextAvailable,
-  );
-  const linearContextConnected = Boolean(
-    linearAccounts[0] &&
-      draft.contextAccountIds.includes(linearAccounts[0].id),
-  );
   const connectedContextCount =
-    Number(githubAccounts.length > 0) +
-    Number(sentryIncluded || sentryContextConnected) +
+    Number(draft.repositoryIds.length > 0) +
+    sentryAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     Number(selectedSlackContextChannels.length > 0) +
-    Number(datadogContextConnected) +
-    Number(axiomContextConnected) +
-    Number(upstashContextConnected) +
+    datadogAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    axiomAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    upstashAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     langfuseAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1284,8 +1463,25 @@ export function AgentCreatePage() {
     awsAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
-    Number(clickStackContextConnected) +
-    Number(linearContextConnected);
+    clickStackAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    linearAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length;
+  const normalizedIntegrationQuery = integrationQuery.trim().toLocaleLowerCase();
+  const visibleContextIntegrations = integrations.filter((integration) => {
+    if (
+      integration.accountCount > 0 &&
+      !MULTI_ACCOUNT_CONTEXT_PROVIDERS.has(integration.id)
+    ) {
+      return false;
+    }
+    const metadata = CONTEXT_PROVIDER_METADATA[integration.id];
+    return `${integration.name} ${integration.description} ${metadata.category} ${metadata.searchTerms}`
+      .toLocaleLowerCase()
+      .includes(normalizedIntegrationQuery);
+  });
 
   return (
     <AppShell active="agents" density="create">
@@ -1638,13 +1834,13 @@ export function AgentCreatePage() {
 
           {activeStep === 3 ? (
             <CreateSection
-              description="Connect tools first. Configure capabilities when they become available."
+              description="Choose the integrations and resources this agent can use."
               title="Agent context"
             >
               <div className="contextPanel">
                 <div className="contextToolbar">
                   <span className="configurationDialog__copy">
-                    <strong>Integrations</strong>
+                    <strong>Connected integrations</strong>
                     <small>
                       The agent can inspect {connectedContextCount}{" "}
                       {connectedContextCount === 1 ? "source" : "sources"}.
@@ -1653,103 +1849,58 @@ export function AgentCreatePage() {
                 </div>
 
                 <div className="contextList">
-                  <ContextRow
-                    action={
-                      sentryIncluded ? (
-                        <span className="contextAutomatic">Automatic</span>
-                      ) : sentryContextConnected ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(sentryAccounts[0]!.id)
-                          }
-                          variant="ghost"
-                        >
-                          Remove
-                        </Button>
-                      ) : sentryAccounts[0] ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(sentryAccounts[0]!.id)
-                          }
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("sentry")}
-                          isConnecting={connectingProvider === "sentry"}
-                          onClick={() => connect("sentry")}
-                        />
-                      )
-                    }
-                    detail={
-                      sentryIncluded
-                        ? "Issue, event, and trace context from the trigger"
-                        : sentryAccounts[0]
-                          ? `${sentryAccounts[0].displayName} · Issues, events, and traces`
-                          : "Issues, events, and traces"
-                    }
-                    label="Sentry"
-                    provider="sentry"
-                    status={
-                      sentryIncluded
-                        ? "included"
-                        : sentryContextConnected
-                          ? "connected"
-                          : sentryAccounts[0]
-                            ? "available"
-                            : "not_connected"
-                    }
-                  />
+                  {options.accounts.length === 0 ? (
+                    <div className="contextIntegrationsEmpty">
+                      No integrations connected yet. Add one below.
+                    </div>
+                  ) : null}
+                  {sentryAccounts.map((account) => {
+                    const enabled = draft.contextAccountIds.includes(account.id);
+                    const label = sentryAccounts.length > 1 ? account.displayName : "Sentry";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={enabled}
+                            label={label}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Issues, events, and traces`}
+                        key={account.id}
+                        label={label}
+                        provider="sentry"
+                      />
+                    );
+                  })}
 
-                  <ContextRow
-                    action={
-                      slackContextAvailable ? (
-                        <Button
-                          className="contextConfigureAction"
-                          onClick={() => {
+                  {slackAccounts.length > 0 ? (
+                    <ContextRow
+                      action={
+                        <ContextIntegrationControls
+                          enabled={selectedSlackContextChannels.length > 0}
+                          label="Slack"
+                          onConfigure={() => {
                             setSlackContextDialogOpen(true);
                             void refreshSlackChannels();
                           }}
-                          size="small"
-                          variant="ghost"
-                        >
-                          <span>Configure</span>
-                          <CogIcon />
-                        </Button>
-                      ) : (
-                        <Button
-                          loading={connectingProvider === "slack"}
-                          onClick={() => connect("slack")}
-                          size="small"
-                          variant="primary"
-                        >
-                          {slackAccounts.length > 0 ? "Reconnect" : "Connect"}
-                        </Button>
-                      )
-                    }
-                    detail={
-                      selectedSlackContextChannels.length > 0
-                        ? `${selectedSlackContextChannels.length} ${
-                            selectedSlackContextChannels.length === 1
-                              ? "channel"
-                              : "channels"
-                          } selected · Read-only message and thread history`
-                        : "Read-only message and thread history from selected channels"
-                    }
-                    label="Slack"
-                    provider="slack"
-                    status={
-                      slackContextConnectionStatus({
-                        available: slackContextAvailable,
-                        selectedChannelCount:
-                          selectedSlackContextChannels.length,
-                      })
-                    }
-                  />
+                          onToggle={toggleSlackContextIntegration}
+                        />
+                      }
+                      detail={
+                        selectedSlackContextChannels.length > 0
+                          ? `${selectedSlackContextChannels.length} ${
+                              selectedSlackContextChannels.length === 1
+                                ? "channel"
+                                : "channels"
+                            } selected · Read-only message and thread history`
+                          : `${slackAccounts[0]!.displayName} · Choose channels for read-only history`
+                      }
+                      label="Slack"
+                      provider="slack"
+                    />
+                  ) : null}
 
                   {slackContextDialogOpen ? (
                     <div
@@ -1850,25 +2001,15 @@ export function AgentCreatePage() {
                     </div>
                   ) : null}
 
-                  <ContextRow
+                  {githubAccounts.length > 0 ? (
+                    <ContextRow
                     action={
-                      githubAccounts.length > 0 ? (
-                        <Button
-                          className="contextConfigureAction"
-                          onClick={() => setGithubDialogOpen(true)}
-                          size="small"
-                          variant="ghost"
-                        >
-                          <span>Configure</span>
-                          <CogIcon />
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("github")}
-                          isConnecting={connectingProvider === "github"}
-                          onClick={() => connect("github")}
-                        />
-                      )
+                      <ContextIntegrationControls
+                        enabled={draft.repositoryIds.length > 0}
+                        label="GitHub"
+                        onConfigure={() => setGithubDialogOpen(true)}
+                        onToggle={toggleGithubContextIntegration}
+                      />
                     }
                     detail={
                       githubAccounts.length > 0
@@ -1887,10 +2028,8 @@ export function AgentCreatePage() {
                     }
                     label="GitHub"
                     provider="github"
-                    status={
-                      githubAccounts.length > 0 ? "connected" : "not_connected"
-                    }
                   />
+                  ) : null}
 
                       {githubDialogOpen && activeGithubAccount ? (
                         <div
@@ -2067,140 +2206,75 @@ export function AgentCreatePage() {
                     return (
                       <ContextRow
                         action={
-                          <Button
-                            size="small"
-                            onClick={() => toggleContextAccount(account.id)}
-                            variant={connected ? "ghost" : "secondary"}
-                          >
-                            {connected ? "Remove" : "Add"}
-                          </Button>
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
                         }
                         detail="Infrastructure, telemetry, configuration, and service health"
                         key={account.id}
                         label={account.displayName}
                         provider="aws"
-                        status={connected ? "connected" : "available"}
                       />
                     );
                   })}
-                  <ContextRow
-                    action={
-                      <ConnectButton
-                        integration={integrationFor("aws")}
-                        isConnecting={false}
-                        onClick={() => connect("aws")}
+                  {upstashAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = upstashAccounts.length > 1 ? account.displayName : "Upstash";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Redis, Vector, Search, QStash, and Workflow`}
+                        key={account.id}
+                        label={label}
+                        provider="upstash"
                       />
-                    }
-                    detail="Read-only access through an IAM role"
-                    label="AWS account"
-                    provider="aws"
-                    status="not_connected"
-                  />
-                  <ContextRow
-                    action={
-                      upstashContextConnected ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(upstashAccounts[0]!.id)
-                          }
-                          variant="ghost"
-                        >
-                          Remove
-                        </Button>
-                      ) : upstashAccounts[0] ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(upstashAccounts[0]!.id)
-                          }
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("upstash")}
-                          isConnecting={false}
-                          onClick={() => connect("upstash")}
-                        />
-                      )
-                    }
-                    detail={
-                      upstashAccounts[0]
-                        ? `${upstashAccounts[0].displayName} · Redis, Vector, Search, QStash, and Workflow`
-                        : "Redis, Vector, Search, QStash, and Workflow"
-                    }
-                    label="Upstash"
-                    provider="upstash"
-                    status={
-                      upstashContextConnected
-                        ? "connected"
-                        : upstashAccounts[0]
-                          ? "available"
-                          : "not_connected"
-                    }
-                  />
+                    );
+                  })}
 
                   {langfuseAccounts.map((account) => {
                     const connected = draft.contextAccountIds.includes(account.id);
                     return (
                       <ContextRow
                         action={
-                          <Button
-                            size="small"
-                            onClick={() => toggleContextAccount(account.id)}
-                            variant={connected ? "ghost" : "secondary"}
-                          >
-                            {connected ? "Remove" : "Add"}
-                          </Button>
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
                         }
                         detail="Traces, observations, scores, metrics, prompts, and alerts"
                         key={account.id}
                         label={account.displayName}
                         provider="langfuse"
-                        status={connected ? "connected" : "available"}
                       />
                     );
                   })}
-                  <ContextRow
-                    action={
-                      <ConnectButton
-                        integration={integrationFor("langfuse")}
-                        isConnecting={false}
-                        onClick={() => connect("langfuse")}
-                      />
-                    }
-                    detail="Connect another project with read-only investigation tools"
-                    label="Langfuse project"
-                    provider="langfuse"
-                    status="not_connected"
-                  />
 
-                  <ContextRow
+                  {vercelAccounts.length > 0 ? (
+                    <ContextRow
                     action={
-                      vercelAccounts.length > 0 ? (
-                        <Button
-                          className="contextConfigureAction"
-                          onClick={() => {
-                            if (!vercelAccountId && activeVercelAccount) {
-                              setVercelAccountId(activeVercelAccount.id);
-                            }
-                            setVercelDialogOpen(true);
-                          }}
-                          size="small"
-                          variant="ghost"
-                        >
-                          <span>Configure</span>
-                          <CogIcon />
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("vercel")}
-                          isConnecting={connectingProvider === "vercel"}
-                          onClick={() => connect("vercel")}
-                        />
-                      )
+                      <ContextIntegrationControls
+                        enabled={vercelContextConnected}
+                        label="Vercel"
+                        onConfigure={() => {
+                          if (!vercelAccountId && activeVercelAccount) {
+                            setVercelAccountId(activeVercelAccount.id);
+                          }
+                          setVercelDialogOpen(true);
+                        }}
+                        onToggle={toggleVercelContextIntegration}
+                      />
                     }
                     detail={
                       selectedVercelProjects.length > 0
@@ -2215,14 +2289,8 @@ export function AgentCreatePage() {
                     }
                     label="Vercel"
                     provider="vercel"
-                    status={
-                      vercelContextConnected
-                        ? "connected"
-                        : vercelAccounts.length > 0
-                          ? "available"
-                          : "not_connected"
-                    }
                   />
+                  ) : null}
 
                   {vercelDialogOpen && vercelAccounts.length > 0 ? (
                     <div
@@ -2310,147 +2378,75 @@ export function AgentCreatePage() {
                     </div>
                   ) : null}
 
-                  <ContextRow
-                    action={
-                      datadogContextConnected ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(datadogAccounts[0]!.id)
-                          }
-                          variant="ghost"
-                        >
-                          Remove
-                        </Button>
-                      ) : datadogAccounts[0] ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(datadogAccounts[0]!.id)
-                          }
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("datadog")}
-                          isConnecting={connectingProvider === "datadog"}
-                          onClick={() => connect("datadog")}
-                        />
-                      )
-                    }
-                    detail={
-                      datadogAccounts[0]
-                        ? `${datadogAccounts[0].displayName} · Logs, traces, monitors, and service health`
-                        : "Logs, traces, monitors, and service health"
-                    }
-                    label="Datadog"
-                    provider="datadog"
-                    status={
-                      datadogContextConnected
-                        ? "connected"
-                        : datadogAccounts[0]
-                          ? "available"
-                          : "not_connected"
-                    }
-                  />
-                  <ContextRow
-                    action={
-                      axiomContextConnected ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(axiomAccounts[0]!.id)
-                          }
-                          variant="ghost"
-                        >
-                          Remove
-                        </Button>
-                      ) : axiomAccounts[0] ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(axiomAccounts[0]!.id)
-                          }
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("axiom")}
-                          isConnecting={connectingProvider === "axiom"}
-                          onClick={() => connect("axiom")}
-                        />
-                      )
-                    }
-                    detail={
-                      axiomAccounts[0]
-                        ? `${axiomAccounts[0].displayName} · Logs, traces, metrics, and monitor history`
-                        : "Logs, traces, metrics, and monitor history"
-                    }
-                    label="Axiom"
-                    provider="axiom"
-                    status={
-                      axiomContextConnected
-                        ? "connected"
-                        : axiomAccounts[0]
-                          ? "available"
-                          : "not_connected"
-                    }
-                  />
-                  <ContextRow
-                    action={
-                      linearContextConnected ? (
-                        <Button
-                          className="contextConfigureAction"
-                          onClick={() => setLinearDialogOpen(true)}
-                          size="small"
-                          variant="ghost"
-                        >
-                          <span>Configure</span>
-                          <CogIcon />
-                        </Button>
-                      ) : linearAccounts[0] ? (
-                        <Button
-                          onClick={() =>
-                            toggleContextAccount(linearAccounts[0]!.id)
-                          }
-                          size="small"
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("linear")}
-                          isConnecting={connectingProvider === "linear"}
-                          onClick={() => connect("linear")}
-                        />
-                      )
-                    }
-                    detail={
-                      linearAccounts[0]
-                        ? `${linearAccounts[0].displayName} · Projects and issues · ${
-                            draft.createLinearTickets
-                              ? "Automatic ticket creation"
-                              : "Context only"
-                          }`
-                        : "Projects, issues, and optional ticket creation"
-                    }
-                    label="Linear"
-                    provider="linear"
-                    status={
-                      linearContextConnected
-                        ? "connected"
-                        : linearAccounts[0]
-                          ? "available"
-                          : "not_connected"
-                    }
-                  />
+                  {datadogAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = datadogAccounts.length > 1 ? account.displayName : "Datadog";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Logs, traces, monitors, and service health`}
+                        key={account.id}
+                        label={label}
+                        provider="datadog"
+                      />
+                    );
+                  })}
+                  {axiomAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = axiomAccounts.length > 1 ? account.displayName : "Axiom";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Logs, traces, metrics, and monitor history`}
+                        key={account.id}
+                        label={label}
+                        provider="axiom"
+                      />
+                    );
+                  })}
+                  {linearAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = linearAccounts.length > 1 ? account.displayName : "Linear";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => {
+                              setLinearAccountId(account.id);
+                              setLinearDialogOpen(true);
+                            }}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Projects and issues · ${
+                          draft.createLinearTickets
+                            ? "Automatic ticket creation"
+                            : "Context only"
+                        }`}
+                        key={account.id}
+                        label={label}
+                        provider="linear"
+                      />
+                    );
+                  })}
 
-                  {linearDialogOpen && linearAccounts[0] ? (
+                  {linearDialogOpen && activeLinearAccount ? (
                     <div
                       className="configurationDialogBackdrop"
                       onMouseDown={(event) => {
@@ -2466,7 +2462,7 @@ export function AgentCreatePage() {
                         role="dialog"
                       >
                         <header className="configurationDialog__header">
-                          <ProviderMark connected provider="linear" />
+                          <ProviderMark provider="linear" />
                           <span className="configurationDialog__copy">
                             <strong id="linear-configuration-title">
                               Configure Linear
@@ -2510,16 +2506,7 @@ export function AgentCreatePage() {
                           />
                         </div>
                         <footer className="configurationDialog__footer">
-                          <Button
-                            onClick={() => {
-                              toggleContextAccount(linearAccounts[0]!.id);
-                              setLinearDialogOpen(false);
-                            }}
-                            size="small"
-                            variant="ghost"
-                          >
-                            Remove from agent
-                          </Button>
+                          <span>{activeLinearAccount.displayName}</span>
                           <Button
                             onClick={() => setLinearDialogOpen(false)}
                             size="small"
@@ -2536,82 +2523,199 @@ export function AgentCreatePage() {
                     return (
                       <ContextRow
                         action={
-                          <Button
-                            size="small"
-                            onClick={() => toggleContextAccount(account.id)}
-                            variant={connected ? "ghost" : "secondary"}
-                          >
-                            {connected ? "Remove" : "Add"}
-                          </Button>
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
                         }
                         detail="Remote tools exposed by this MCP server"
                         key={account.id}
                         label={account.displayName}
                         provider="custom_mcp"
-                        status={connected ? "connected" : "available"}
                       />
                     );
                   })}
-                  <ContextRow
-                    action={
-                      <ConnectButton
-                        integration={integrationFor("custom_mcp")}
-                        isConnecting={false}
-                        onClick={() => connect("custom_mcp")}
+                  {clickStackAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = clickStackAccounts.length > 1
+                      ? account.displayName
+                      : "ClickStack / HyperDX";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Logs, traces, metrics, and service health`}
+                        key={account.id}
+                        label={label}
+                        provider="clickstack"
                       />
-                    }
-                    detail="API token or OAuth 2.0"
-                    label="Custom MCP"
-                    provider="custom_mcp"
-                    status="not_connected"
-                  />
-                  <ContextRow
-                    action={
-                      clickStackContextConnected ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(clickStackAccounts[0]!.id)
-                          }
-                          variant="ghost"
-                        >
-                          Remove
-                        </Button>
-                      ) : clickStackAccounts[0] ? (
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            toggleContextAccount(clickStackAccounts[0]!.id)
-                          }
-                          variant="secondary"
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <ConnectButton
-                          integration={integrationFor("clickstack")}
-                          isConnecting={connectingProvider === "clickstack"}
-                          onClick={() => connect("clickstack")}
-                        />
-                      )
-                    }
-                    detail={
-                      clickStackAccounts[0]
-                        ? `${clickStackAccounts[0].displayName} · Logs, traces, metrics, and service health`
-                        : "Logs, traces, metrics, and service health"
-                    }
-                    label="ClickStack / HyperDX"
-                    provider="clickstack"
-                    status={
-                      clickStackContextConnected
-                        ? "connected"
-                        : clickStackAccounts[0]
-                          ? "available"
-                          : "not_connected"
-                    }
-                  />
+                    );
+                  })}
                 </div>
+
+                <section
+                  aria-labelledby="add-context-integration-title"
+                  className="contextIntegrationCatalog"
+                >
+                  <header className="contextIntegrationCatalog__header">
+                    <span className="configurationDialog__copy">
+                      <strong id="add-context-integration-title">Add integration</strong>
+                      <small>Browse by category or search by the context you need.</small>
+                    </span>
+                    <label className="contextIntegrationSearch">
+                      <SearchIcon />
+                      <span className="srOnly">Search integrations</span>
+                      <input
+                        onChange={(event) => setIntegrationQuery(event.target.value)}
+                        placeholder="Search integrations…"
+                        type="search"
+                        value={integrationQuery}
+                      />
+                      {integrationQuery ? (
+                        <button
+                          aria-label="Clear integration search"
+                          onClick={() => setIntegrationQuery("")}
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </label>
+                  </header>
+
+                  {visibleContextIntegrations.length > 0 ? (
+                    <div className="contextIntegrationCategories">
+                      {CONTEXT_CATEGORY_ORDER.map((category) => {
+                        const categoryIntegrations = visibleContextIntegrations.filter(
+                          (integration) =>
+                            CONTEXT_PROVIDER_METADATA[integration.id].category === category,
+                        );
+                        if (categoryIntegrations.length === 0) return null;
+                        return (
+                          <section className="contextIntegrationCategory" key={category}>
+                            <header>
+                              <strong>{category}</strong>
+                              <small>{CONTEXT_CATEGORY_DESCRIPTIONS[category]}</small>
+                            </header>
+                            <div className="contextIntegrationGrid">
+                              {categoryIntegrations.map((integration) => {
+                                const adding = connectingProvider === integration.id;
+                                const unavailable =
+                                  integration.state === "coming_soon" ||
+                                  integration.state === "setup_required";
+                                return (
+                                  <article className="contextIntegrationCard" key={integration.id}>
+                                    <ProviderMark provider={integration.id} />
+                                    <span className="contextIntegrationCard__copy">
+                                      <strong>{integration.name}</strong>
+                                      <small>{integration.description}</small>
+                                    </span>
+                                    <footer>
+                                      <Button
+                                        disabled={unavailable}
+                                        loading={adding}
+                                        onClick={() => connect(integration.id)}
+                                        size="small"
+                                        type="button"
+                                        variant="primary"
+                                      >
+                                        {integration.state === "coming_soon"
+                                          ? "Coming soon"
+                                          : integration.state === "setup_required"
+                                            ? "Setup required"
+                                            : "Add"}
+                                      </Button>
+                                    </footer>
+                                  </article>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="contextIntegrationsEmpty">
+                      No integrations match “{integrationQuery}”.
+                    </div>
+                  )}
+                </section>
               </div>
+
+              {connectionSettingsOpen ? (
+                <div
+                  className="configurationDialogBackdrop"
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) {
+                      setConnectionSettingsOpen(null);
+                    }
+                  }}
+                >
+                  <section
+                    aria-labelledby="context-connection-settings-title"
+                    aria-modal="true"
+                    className="configurationDialog"
+                    role="dialog"
+                  >
+                    <header className="configurationDialog__header">
+                      <ProviderMark provider={connectionSettingsOpen.provider} />
+                      <span className="configurationDialog__copy">
+                        <strong id="context-connection-settings-title">
+                          Configure {connectionSettingsOpen.displayName}
+                        </strong>
+                        <small>
+                          {providerDisplayName(connectionSettingsOpen.provider)} connection
+                        </small>
+                      </span>
+                      <IconButton
+                        aria-label="Close integration configuration"
+                        onClick={() => setConnectionSettingsOpen(null)}
+                        size="small"
+                        type="button"
+                        variant="ghost"
+                      >
+                        ×
+                      </IconButton>
+                    </header>
+                    <div className="configurationDialog__body">
+                      <div className="contextConnectionSummary">
+                        <span>Connected account</span>
+                        <strong>{connectionSettingsOpen.displayName}</strong>
+                        <small>
+                          This integration is enabled as a whole. Manage credentials and
+                          provider access from integration settings.
+                        </small>
+                      </div>
+                    </div>
+                    <footer className="configurationDialog__footer">
+                      <Button
+                        onClick={() => navigate("/settings")}
+                        size="small"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Manage integration
+                      </Button>
+                      <Button
+                        onClick={() => setConnectionSettingsOpen(null)}
+                        size="small"
+                        type="button"
+                        variant="primary"
+                      >
+                        Done
+                      </Button>
+                    </footer>
+                  </section>
+                </div>
+              ) : null}
 
               <div className="workspaceSecretsPanel">
                 <div className="contextToolbar">
@@ -3223,7 +3327,6 @@ function ContextRow({
   detail,
   label,
   provider,
-  status,
 }: {
   action: ReactNode;
   detail: string;
@@ -3241,63 +3344,51 @@ function ContextRow({
     | "custom_mcp"
     | "clickstack"
     | "linear";
-  status: "available" | "connected" | "included" | "not_connected";
 }) {
-  const statusLabel = {
-    available: "Available",
-    connected: "",
-    included: "Included",
-    not_connected: "Not connected",
-  }[status];
-
   return (
     <div className="contextRow">
-      <ProviderMark
-        connected={status === "connected" || status === "included"}
-        provider={provider}
-      />
+      <ProviderMark provider={provider} />
       <span className="contextRow__copy">
         <strong>{label}</strong>
         <small>{detail}</small>
       </span>
-      <small
-        className={`contextStatus ${
-          status === "available" || status === "not_connected" ? "isMuted" : ""
-        }`}
-      >
-        {statusLabel}
-      </small>
       <span className="contextRow__action">{action}</span>
     </div>
   );
 }
 
-function ConnectButton({
-  integration,
-  isConnecting,
-  onClick,
+function ContextIntegrationControls({
+  enabled,
+  label,
+  onConfigure,
+  onToggle,
 }: {
-  integration: IntegrationSummary | undefined;
-  isConnecting: boolean;
-  onClick: () => void;
+  enabled: boolean;
+  label: string;
+  onConfigure: () => void;
+  onToggle: () => void;
 }) {
-  const comingSoon = integration?.state === "coming_soon";
-  const setupRequired = integration?.state === "setup_required";
   return (
-    <Button
-      disabled={comingSoon || isConnecting}
-      loading={isConnecting}
-      onClick={onClick}
-      size="small"
-      variant="primary"
-    >
-      {isConnecting
-        ? "Connecting…"
-        : comingSoon
-          ? "Coming soon"
-          : setupRequired
-            ? "Setup required"
-            : "Connect"}
-    </Button>
+    <div className="contextIntegrationControls">
+      <IconButton
+        aria-label={`Configure ${label}`}
+        onClick={onConfigure}
+        size="small"
+        type="button"
+        variant="ghost"
+      >
+        <CogIcon />
+      </IconButton>
+      <button
+        aria-checked={enabled}
+        aria-label={`${enabled ? "Disable" : "Enable"} ${label} for this agent`}
+        className="contextIntegrationToggle"
+        onClick={onToggle}
+        role="switch"
+        type="button"
+      >
+        <i aria-hidden="true"><i /></i>
+      </button>
+    </div>
   );
 }
