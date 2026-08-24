@@ -90,6 +90,7 @@ const slackBlockActionsSchema = z.object({
     .object({
       blocks: z.array(z.unknown()).optional(),
       text: z.string().optional(),
+      thread_ts: z.string().min(1).optional(),
     })
     .optional(),
   actions: z.array(
@@ -1001,6 +1002,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         blocks: promptResponse.blocks,
         channelId: action.data.channel.id,
         text: promptResponse.text,
+        threadTimestamp: action.data.message?.thread_ts,
         userId: action.data.user.id,
       });
       return context.json({ ok: true });

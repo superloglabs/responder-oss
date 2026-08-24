@@ -170,12 +170,14 @@ export async function postSlackEphemeralMessage(input: {
   blocks: unknown[];
   channelId: string;
   text: string;
+  threadTimestamp?: string;
   userId: string;
 }): Promise<string | null> {
   const response = await callSlackApi(input.accessToken, "chat.postEphemeral", {
     blocks: input.blocks,
     channel: input.channelId,
     text: input.text,
+    ...(input.threadTimestamp ? { thread_ts: input.threadTimestamp } : {}),
     user: input.userId,
   });
   return response.ts ?? null;
