@@ -39,7 +39,9 @@ async function mockApplicationApis(page: Page) {
     route.fulfill({ json: { agents: [] } }),
   );
   await page.route("**/api/agents/options", (route) =>
-    route.fulfill({ json: { accounts: [], resources: [], repositories: [] } }),
+    route.fulfill({
+      json: { accounts: [], resources: [], repositories: [], secrets: [] },
+    }),
   );
   await page.route("**/api/integrations", (route) =>
     route.fulfill({ json: { integrations: [] } }),
@@ -102,6 +104,77 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/agents\/new$/);
   await expect(page.getByRole("heading", { name: "Create agent" })).toBeVisible();
+});
+
+test("shows specific workspace secret validation issues", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem("responder:new-agent-step", "3");
+  });
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(organization.id) });
+      return;
+    }
+
+    if (path.endsWith("/organization/list")) {
+      await route.fulfill({ json: [organization] });
+      return;
+    }
+
+    if (path.endsWith("/organization/get-full-organization")) {
+      await route.fulfill({ json: organization });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+  await page.route("**/api/agents/secrets", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      name: "PATH",
+      value: "write-only-value",
+      allowedHosts: ["https://api.example.com/path"],
+    });
+    await route.fulfill({
+      status: 400,
+      json: {
+        error: "Invalid workspace secret",
+        issues: [
+          {
+            code: "custom",
+            path: ["name"],
+            message:
+              "PATH controls the sandbox runtime; choose a credential-specific environment variable name",
+          },
+          {
+            code: "invalid_format",
+            path: ["allowedHosts", 0],
+            message: "Use a hostname without a scheme, path, or port",
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto("/agents/new");
+  await page.getByRole("button", { name: "Add secret" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Add a workspace secret",
+  });
+  await dialog.getByLabel("Environment variable").fill("PATH");
+  await dialog.getByLabel("Secret value").fill("write-only-value");
+  await dialog
+    .getByLabel("Allowed hosts")
+    .fill("https://api.example.com/path");
+  await dialog.getByRole("button", { name: "Store and add" }).click();
+
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "PATH controls the sandbox runtime; choose a credential-specific environment variable name. Use a hostname without a scheme, path, or port",
+  );
 });
 
 test("keeps an invitation link open while the recipient signs in", async ({

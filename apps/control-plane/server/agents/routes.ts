@@ -29,7 +29,7 @@ import {
   createWorkspaceSecretRecord,
   findWorkspaceSecretByName,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
-import { isWorkspaceSecretEnvironmentVariableName } from "../../../../packages/core/src/workspace-secret-names.js";
+import { workspaceSecretEnvironmentVariableNameReservation } from "../../../../packages/core/src/workspace-secret-names.js";
 import type { InvestigationTraceEvent } from "../../../../packages/core/src/db/schema.js";
 import {
   joinSlackChannel,
@@ -73,10 +73,12 @@ export const workspaceSecretInputSchema = z.object({
       /^[A-Z_][A-Z0-9_]*$/,
       "Use an uppercase environment variable name",
     )
-    .refine(
-      isWorkspaceSecretEnvironmentVariableName,
-      "Choose a non-system environment variable name",
-    ),
+    .superRefine((name, context) => {
+      const reservation = workspaceSecretEnvironmentVariableNameReservation(name);
+      if (reservation) {
+        context.addIssue({ code: "custom", message: reservation });
+      }
+    }),
   value: z.string().min(1, "Secret value is required").max(65_536),
   allowedHosts: z
     .array(secretHostSchema)
