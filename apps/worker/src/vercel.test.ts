@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildVercelReadUrl,
+  createVercelTools,
   executeVercelRead,
   searchVercelOperations,
 } from "./vercel.js";
@@ -34,6 +35,70 @@ describe("Vercel read tools", () => {
         }),
       ]),
     );
+  });
+
+  it("exposes strict-compatible parameter arrays and converts them internally", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: "prj-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const callTool = createVercelTools([connection]).find(
+      ({ name }) => name === "call_vercel_api",
+    )!;
+
+    expect(callTool.parameters).toMatchObject({
+      properties: {
+        pathParameters: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              value: expect.any(Object),
+            },
+            required: ["name", "value"],
+            additionalProperties: false,
+          },
+        },
+        queryParameters: { type: "array" },
+      },
+      required: expect.arrayContaining(["pathParameters", "queryParameters"]),
+      additionalProperties: false,
+    });
+
+    await callTool.invoke(
+      undefined as never,
+      JSON.stringify({
+        accountId: connection.accountId,
+        operationId: "getProject",
+        pathParameters: [{ name: "idOrName", value: "prj-1" }],
+        queryParameters: [{ name: "teamId", value: "attacker-team" }],
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = new URL(fetchMock.mock.calls[0]![0] as URL);
+    expect(requestedUrl.pathname).toBe("/v9/projects/prj-1");
+    expect(requestedUrl.searchParams.get("teamId")).toBe("team-1");
+  });
+
+  it("rejects duplicate model-supplied parameter names", async () => {
+    const callTool = createVercelTools([connection]).find(
+      ({ name }) => name === "call_vercel_api",
+    )!;
+
+    await expect(
+      callTool.invoke(
+        undefined as never,
+        JSON.stringify({
+          accountId: connection.accountId,
+          operationId: "getProject",
+          pathParameters: [
+            { name: "idOrName", value: "prj-1" },
+            { name: "idOrName", value: "prj-other" },
+          ],
+          queryParameters: [],
+        }),
+      ),
+    ).resolves.toContain("Duplicate Vercel path parameter: idOrName");
   });
 
   it("builds a fixed-origin, team-scoped project request", () => {
