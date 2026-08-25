@@ -73,6 +73,28 @@ describe("Daytona sandbox preparation", () => {
       }),
     );
   });
+
+  it("reports sandbox preparation command failures", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: abc123\nProcess exited with code 1\nOutput:\npython3 unavailable\n",
+      ),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
+      "Unable to install git, Python 3, and ripgrep in Daytona: python3 unavailable",
+    );
+  });
+
+  it("rejects sandbox output without a successful exit marker", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue("unexpected output"),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
+      "Unable to install git, Python 3, and ripgrep in Daytona",
+    );
+  });
 });
 
 describe("Daytona sandbox cleanup", () => {
