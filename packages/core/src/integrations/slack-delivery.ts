@@ -373,7 +373,7 @@ async function deliverOutputChannel(
 
 export async function deliverInvestigationToSlack(
   investigationId: string,
-  deliveryRunId: string = investigationId,
+  deliveryRunId: string,
 ): Promise<string[]> {
   const context = await getSlackInvestigationDeliveryContext(investigationId);
   if (!context) return [];

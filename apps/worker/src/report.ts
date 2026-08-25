@@ -41,7 +41,7 @@ function reportToolResult(input: {
 
 export async function deliverCompletedInvestigationWithWarnings(
   investigationId: string,
-  deliveryRunId: string = investigationId,
+  deliveryRunId: string,
 ): Promise<string[]> {
   try {
     return await deliverInvestigationToSlack(investigationId, deliveryRunId);

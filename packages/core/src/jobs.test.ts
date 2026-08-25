@@ -4,6 +4,7 @@ import {
   investigationJobSchema,
   investigationQueue,
   linearTicketQueue,
+  migrateLegacyInvestigationHeartbeats,
   prepareWorkerQueues,
   pullRequestReviewJobSchema,
   pullRequestReviewQueue,
@@ -14,6 +15,51 @@ import {
 } from "./jobs.js";
 
 describe("background jobs", () => {
+  it("migrates queued legacy investigations without reclassifying active work", async () => {
+    const executeSql = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "job-id" }] });
+
+    await migrateLegacyInvestigationHeartbeats({
+      getDb: () => ({ executeSql }),
+    } as never, {
+      handoffWaitMs: 0,
+      now: () => 0,
+    });
+
+    expect(executeSql).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("state IN ('created', 'retry')"),
+      [investigationQueue, 60],
+    );
+    expect(executeSql).toHaveBeenCalledTimes(2);
+    expect(executeSql.mock.calls.flat().join("\n")).not.toContain(
+      "heartbeat_on = now()",
+    );
+  });
+
+  it("waits for the old worker to hand active legacy work back", async () => {
+    const executeSql = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "job-id" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    await migrateLegacyInvestigationHeartbeats({
+      getDb: () => ({ executeSql }),
+    } as never, {
+      handoffWaitMs: 1,
+      now: vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(0),
+      wait,
+    });
+
+    expect(wait).toHaveBeenCalledWith(1_000);
+    expect(executeSql).toHaveBeenCalledTimes(4);
+  });
+
   it("uses a stable worker health queue name", () => {
     expect(workerHealthQueue).toBe("responder-worker-health");
     expect(investigationQueue).toBe("responder-investigations");
