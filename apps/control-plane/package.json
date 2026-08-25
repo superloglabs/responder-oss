@@ -22,7 +22,7 @@
     "@pierre/diffs": "1.2.5",
     "@responder/core": "workspace:*",
     "@sentry/hono": "10.69.0",
-    "@sentry/node": "10.69.0",
+    "@sentry/node": "10.70.0",
     "@sentry/react": "10.69.0",
     "@xyflow/react": "^12.11.2",
     "better-auth": "1.6.25",
