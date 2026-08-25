@@ -210,14 +210,16 @@ export async function runRemediationAgent(
       instructions: [
         runtimeProfile?.systemPrompt,
         job.config.prompt,
-        renderIssueFixPrompt(job.issue),
+        renderIssueFixPrompt(job.issue, job.selectedRemediation),
         "The selected repositories are already checked out:",
         ...repositories.map(
           (repository) =>
             `- ${repository.repository}: ${repository.path} (${repository.branch} at ${repository.sha})`,
         ),
         remediationApplyPatchPathInstruction,
-        "Inspect the relevant code, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks.",
+        job.selectedRemediation?.type === "code_change"
+          ? "Use the proposed diff as the starting point. Verify it against the current checkout, adjust it when needed, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks."
+          : "Inspect the relevant code, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks.",
         remediationFailureMechanismInstruction,
         `Then call create_pull_request with issue ID ${job.issue.id}. Do not finish without creating the pull request or clearly explaining why no safe code fix is possible.`,
         "Do not expose credentials or secret values. The pull request is the only allowed external change.",
@@ -228,10 +230,14 @@ export async function runRemediationAgent(
       capabilities: Capabilities.default(),
       tools: [pullRequestTool],
     });
-    const result = await run(agent, renderIssueFixPrompt(job.issue), {
-      maxTurns: remediationMaxTurns,
-      sandbox: { session },
-    });
+    const result = await run(
+      agent,
+      renderIssueFixPrompt(job.issue, job.selectedRemediation),
+      {
+        maxTurns: remediationMaxTurns,
+        sandbox: { session },
+      },
+    );
     if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
       throw new Error("OpenAI agent returned an empty remediation result");
     }

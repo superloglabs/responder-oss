@@ -10,6 +10,7 @@ import { getActiveTenant } from "../tenant.js";
 import { startIssueRemediation } from "./remediation.js";
 
 const updateIssueSchema = z.object({ archived: z.boolean() });
+const createPullRequestSchema = z.object({ remediationId: z.uuid() });
 
 export const issueRoutes = new Hono()
   .get("/", async (context) => {
@@ -42,11 +43,19 @@ export const issueRoutes = new Hono()
       return context.json({ error: tenant.error }, tenant.status);
     }
 
+    const parsed = createPullRequestSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Invalid code remediation" }, 400);
+    }
+
     let result;
     try {
       result = await startIssueRemediation({
         issueId: context.req.param("issueId"),
         organizationId: tenant.organizationId,
+        remediationId: parsed.data.remediationId,
       });
     } catch (error) {
       if (error instanceof IssuePullRequestError) {

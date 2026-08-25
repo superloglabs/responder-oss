@@ -117,7 +117,10 @@ describe("issue embeddings", () => {
           {
             title: "Broken route",
             description: "The route throws.",
-            remediation: "Handle the missing value.",
+            remediations: [{
+              title: "Handle the missing value",
+              description: "Handle the missing value.",
+            }],
           },
         ],
         { OPENAI_API_KEY: "test-key" },

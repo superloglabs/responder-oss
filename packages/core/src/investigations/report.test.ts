@@ -13,6 +13,15 @@ const evidence = {
   line: 9,
 };
 
+function externalRemediation(description: string) {
+  return [{
+    type: "external_action" as const,
+    title: "Correct the deployment",
+    description,
+    agentPrompt: `Apply this remediation: ${description}`,
+  }];
+}
+
 describe("investigation report", () => {
   it("renders a copy-ready issue remediation prompt", () => {
     const prompt = renderIssueFixPrompt({
@@ -53,6 +62,65 @@ describe("investigation report", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("accepts code and external remediation options for a new issue", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Route and deployment need remediation",
+      summary: "The route needs a guard and the deployment needs a restart.",
+      issues: [{
+        resolution: "new",
+        title: "Missing route guard",
+        description: "The route reads an optional value without checking it.",
+        rootCause: "A route change removed the optional-value guard.",
+        timeline: [{
+          title: "Request reached the route",
+          description: "The request reached the route without the optional value.",
+        }],
+        severity: "SEV-2",
+        remediations: [
+          {
+            type: "code_change",
+            title: "Restore the route guard",
+            description: "Return early when the optional value is absent.",
+            diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1,2 @@\n+if (!value) return;\n use(value);",
+          },
+          {
+            type: "external_action",
+            title: "Restart the deployment",
+            description: "Restart the deployment after the fix is merged.",
+            agentPrompt: "Restart the production deployment after confirming the route fix is live.",
+          },
+        ],
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("requires at least one remediation option for every new issue", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Route needs remediation",
+      summary: "The route needs a guard.",
+      issues: [{
+        resolution: "new",
+        title: "Missing route guard",
+        description: "The route reads an optional value without checking it.",
+        rootCause: "A route change removed the optional-value guard.",
+        timeline: [{
+          title: "Request reached the route",
+          description: "The request reached the route without the optional value.",
+        }],
+        severity: "SEV-2",
+        remediations: [],
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("preserves Vercel as an evidence source", () => {
     const parsed = investigationReportSubmissionSchema.safeParse({
       schemaVersion: 1,
@@ -68,7 +136,7 @@ describe("investigation report", () => {
           description: "Vercel started compiling the production deployment.",
         }],
         severity: "SEV-2",
-        remediation: "Correct the compile error and redeploy.",
+        remediations: externalRemediation("Correct the compile error and redeploy."),
         evidence: [{
           source: "vercel",
           title: "Failed production deployment",
@@ -95,7 +163,7 @@ describe("investigation report", () => {
           description: "Vercel started the build.",
         }],
         severity: "SEV-2",
-        remediation: "Correct the compile error and redeploy.",
+        remediations: externalRemediation("Correct the compile error and redeploy."),
         evidence: [evidence],
       }],
     });
@@ -118,7 +186,7 @@ describe("investigation report", () => {
           description: "Vercel started the build.",
         }],
         severity: "SEV-2",
-        remediation: "Correct the compile error and redeploy.",
+        remediations: externalRemediation("Correct the compile error and redeploy."),
         evidence: [evidence],
       }],
     });
@@ -141,7 +209,7 @@ describe("investigation report", () => {
           description: "Vercel started the build.",
         }],
         severity: "SEV-2",
-        remediation: "Correct the compile error and redeploy.",
+        remediations: externalRemediation("Correct the compile error and redeploy."),
         evidence: [evidence],
       }],
     });

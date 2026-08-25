@@ -1,5 +1,9 @@
 import { getRuntimeAgentConfig } from "./db/investigations.js";
-import { getIssuePullRequestForReview } from "./db/pull-requests.js";
+import {
+  appendIssuePullRequestActivity,
+  getIssuePullRequestForReview,
+  pullRequestActivityEvent,
+} from "./db/pull-requests.js";
 import {
   pullRequestReviewQueue,
   type PullRequestReviewJob,
@@ -18,6 +22,14 @@ export async function queuePullRequestReviewJob(
   input: {
     installationId: number;
     pullRequestNumber: number;
+    reviewComment: {
+      author: string;
+      body: string;
+      id: number;
+      line: number | null;
+      path: string;
+      url: string;
+    };
     repositoryFullName: string;
   },
 ) {
@@ -26,6 +38,19 @@ export async function queuePullRequestReviewJob(
 
   const config = await getRuntimeAgentConfig(review.agentConfigVersionId);
   if (!config) throw new Error("Agent configuration is unavailable");
+
+  await appendIssuePullRequestActivity({
+    event: pullRequestActivityEvent("review.comment.received", {
+      author: input.reviewComment.author,
+      body: input.reviewComment.body,
+      commentId: input.reviewComment.id,
+      line: input.reviewComment.line,
+      path: input.reviewComment.path,
+      url: input.reviewComment.url,
+    }),
+    externalKey: `github-review-comment:${input.reviewComment.id}`,
+    requestId: review.requestId,
+  });
 
   const jobId = await queue.send(
     pullRequestReviewQueue,
@@ -55,6 +80,14 @@ export async function queuePullRequestReviewJob(
     },
     { singletonKey: `pull-request-review:${review.requestId}` },
   );
+
+  if (jobId) {
+    await appendIssuePullRequestActivity({
+      event: pullRequestActivityEvent("review.job.queued", { jobId }),
+      externalKey: `review-job:${jobId}:queued`,
+      requestId: review.requestId,
+    });
+  }
 
   return {
     matched: true as const,

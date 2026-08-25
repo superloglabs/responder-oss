@@ -7,7 +7,10 @@ import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
 import { recordInvestigationSlackMessage } from "../../../../packages/core/src/db/investigations.js";
 import { getIssueForSlackAction } from "../../../../packages/core/src/db/issues.js";
-import { IssuePullRequestError } from "../../../../packages/core/src/db/pull-requests.js";
+import {
+  IssuePullRequestError,
+  registerIssuePullRequestSlackMessage,
+} from "../../../../packages/core/src/db/pull-requests.js";
 import { renderIssueFixPrompt } from "../../../../packages/core/src/investigations/report.js";
 import {
   addSlackReaction,
@@ -21,6 +24,12 @@ import {
   slackInvestigationCard,
 } from "../../../../packages/core/src/integrations/slack-live-card.js";
 import { reconcileCompletedInvestigationSlackCard } from "../../../../packages/core/src/integrations/slack-delivery.js";
+import {
+  parseSlackRemediationActionValue,
+  refreshIssuePullRequestSlackMessages,
+  slackIssuePullRequestMessage,
+  type SlackIssuePullRequestCard,
+} from "../../../../packages/core/src/integrations/slack-remediations.js";
 import { startSlackIssueRemediation } from "../issues/remediation.js";
 import { queueInvestigation } from "../investigations/queue.js";
 
@@ -90,6 +99,7 @@ const slackBlockActionsSchema = z.object({
     .object({
       blocks: z.array(z.unknown()).optional(),
       text: z.string().optional(),
+      ts: z.string().min(1).optional(),
       thread_ts: z.string().min(1).optional(),
     })
     .optional(),
@@ -625,64 +635,14 @@ export function slackCopyPromptResponse(prompt: string | null) {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function slackPullRequestQueuedResponse(
-  message:
-    | {
-        blocks?: unknown[];
-        text?: string;
-      }
-    | undefined,
+  card: SlackIssuePullRequestCard,
 ) {
-  if (!message?.blocks) {
-    return {
-      response_type: "ephemeral" as const,
-      replace_original: false,
-      text: "Pull request creation started.",
-    };
-  }
-
-  let removedButton = false;
-  const blocks = message.blocks.flatMap((block) => {
-    if (!isRecord(block) || block.type !== "actions") return [block];
-    const elements = Array.isArray(block.elements)
-      ? block.elements.filter((element) => {
-          const isPullRequestButton =
-            isRecord(element) &&
-            element.action_id === "create_issue_pull_request";
-          removedButton ||= isPullRequestButton;
-          return !isPullRequestButton;
-        })
-      : [];
-    return elements.length > 0 ? [{ ...block, elements }] : [];
-  });
-
-  if (!removedButton) {
-    return {
-      response_type: "ephemeral" as const,
-      replace_original: false,
-      text: "Pull request creation started.",
-    };
-  }
-
+  const message = slackIssuePullRequestMessage(card);
   return {
     replace_original: true,
-    text: message.text ?? "Pull request creation started.",
-    blocks: [
-      ...blocks,
-      {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: "Pull request creation started. Follow progress in the issue.",
-          },
-        ],
-      },
-    ],
+    text: message.text,
+    blocks: message.blocks,
   };
 }
 
@@ -935,18 +895,38 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     (item) => item.action_id === "create_issue_pull_request",
   );
   if (pullRequestAction?.value) {
+    const selection = parseSlackRemediationActionValue(
+      pullRequestAction.value,
+    );
     try {
       const result = await startSlackIssueRemediation({
-        issueId: pullRequestAction.value,
+        issueId: selection?.issueId ?? pullRequestAction.value,
+        ...(selection ? { remediationId: selection.remediationId } : {}),
         teamId: action.data.team.id,
       });
       const response = result.ok === true
-        ? slackPullRequestQueuedResponse(action.data.message)
+        ? slackPullRequestQueuedResponse(result.card)
         : slackPullRequestErrorResponse(result.error);
       await sendSlackActionResponse(
         action.data.response_url,
         response,
       );
+      if (result.ok && action.data.message?.ts) {
+        try {
+          await registerIssuePullRequestSlackMessage({
+            channelId: action.data.channel.id,
+            integrationAccountId: result.integrationAccountId,
+            messageTimestamp: action.data.message.ts,
+            requestId: result.requestId,
+          });
+          await refreshIssuePullRequestSlackMessages(result.requestId);
+        } catch (error) {
+          console.error(
+            "Unable to register Slack pull request status card",
+            error,
+          );
+        }
+      }
     } catch (error) {
       const message =
         error instanceof IssuePullRequestError
@@ -966,8 +946,11 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   );
   if (!copyAction?.value) return context.json({ ok: true });
 
+  const copySelection = parseSlackRemediationActionValue(copyAction.value);
+  const copyIssueId = copySelection?.issueId ?? copyAction.value;
+
   const issue = await getIssueForSlackAction({
-    issueId: copyAction.value,
+    issueId: copyIssueId,
     teamId: action.data.team.id,
   });
   await captureAnalyticsEvent({
@@ -978,12 +961,21 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       $process_person_profile: false,
       channel_id: action.data.channel.id,
       issue_found: Boolean(issue),
-      issue_id: copyAction.value,
+      issue_id: copyIssueId,
       surface: "slack",
       team_id: action.data.team.id,
     },
   });
-  const prompt = issue ? renderIssueFixPrompt(issue) : null;
+  const externalRemediation = issue?.remediations?.find(
+    (remediation) =>
+      remediation.type === "external_action" &&
+      (!copySelection || remediation.id === copySelection.remediationId),
+  );
+  const prompt = issue
+    ? externalRemediation?.type === "external_action"
+      ? externalRemediation.agentPrompt
+      : renderIssueFixPrompt(issue)
+    : null;
   const promptResponse = slackCopyPromptResponse(prompt);
   if (
     issue?.encryptedCredentials &&

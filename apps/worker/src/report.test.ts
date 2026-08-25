@@ -53,6 +53,7 @@ describe("investigation report submission", () => {
           }],
           severity: "SEV-2",
           remediation: "Handle the missing value.",
+          remediations: [],
         },
       ],
       markdown: "saved markdown",
@@ -83,7 +84,12 @@ describe("investigation report submission", () => {
             description: "The request reached the route without the required value.",
           }],
           severity: "SEV-2" as const,
-          remediation: "Handle the missing value.",
+          remediations: [{
+            type: "external_action" as const,
+            title: "Handle the missing value",
+            description: "Handle the missing value.",
+            agentPrompt: "Update the route to handle the missing value safely.",
+          }],
           evidence: [
             {
               source: "github" as const,
@@ -383,7 +389,12 @@ describe("investigation report submission", () => {
             description: "The request reached the new path with unchecked input.",
           }],
           severity: "SEV-2" as const,
-          remediation: "Handle the new path.",
+          remediations: [{
+            type: "external_action" as const,
+            title: "Handle the new path",
+            description: "Handle the new path.",
+            agentPrompt: "Update the new path to validate its input.",
+          }],
           evidence: [
             {
               source: "github" as const,

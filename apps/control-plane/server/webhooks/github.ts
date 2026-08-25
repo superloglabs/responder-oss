@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
+import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { Hono } from "hono";
 import { z } from "zod";
 import { queuePullRequestReview } from "../investigations/queue.js";
@@ -21,8 +22,16 @@ const pullRequestReviewCommentEventSchema = z.object({
   action: z.string(),
   comment: z.object({
     id: z.number().int().positive(),
+    body: z.string().max(65_536),
+    html_url: z.string().url(),
     in_reply_to_id: z.number().int().positive().optional(),
-    user: z.object({ type: z.string() }),
+    line: z.number().int().positive().nullable().optional(),
+    original_line: z.number().int().positive().nullable().optional(),
+    path: z.string().min(1).max(4_096),
+    user: z.object({
+      login: z.string().min(1),
+      type: z.string(),
+    }),
   }),
   installation: z.object({ id: z.number().int().positive() }),
   pull_request: z.object({ number: z.number().int().positive() }),
@@ -95,6 +104,15 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
     const queued = await queuePullRequestReview({
       installationId: parsed.data.installation.id,
       pullRequestNumber: parsed.data.pull_request.number,
+      reviewComment: {
+        author: parsed.data.comment.user.login,
+        body: parsed.data.comment.body,
+        id: parsed.data.comment.id,
+        line:
+          parsed.data.comment.line ?? parsed.data.comment.original_line ?? null,
+        path: parsed.data.comment.path,
+        url: parsed.data.comment.html_url,
+      },
       repositoryFullName: parsed.data.repository.full_name,
     });
     if (!queued.matched) {
@@ -138,6 +156,7 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
   if (!merged) {
     return context.json({ ok: true, matched: false });
   }
+  await refreshIssuePullRequestSlackMessages(merged.requestId);
 
   console.info(
     JSON.stringify({

@@ -261,6 +261,14 @@ export async function queueIssueRemediation(requestId: string) {
 export async function queuePullRequestReview(input: {
   installationId: number;
   pullRequestNumber: number;
+  reviewComment: {
+    author: string;
+    body: string;
+    id: number;
+    line: number | null;
+    path: string;
+    url: string;
+  };
   repositoryFullName: string;
 }) {
   return queuePullRequestReviewJob(

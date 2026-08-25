@@ -1,12 +1,16 @@
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import type { IssuePullRequestActivityEvent } from "./schema.js";
 import { getDatabase } from "./client.js";
 import {
   activeIssuePullRequestIndexPredicate,
   agentConfigVersions,
   agents,
   instanceConfiguration,
+  integrationAccounts,
   investigationIssues,
   investigations,
+  issuePullRequestActivities,
+  issuePullRequestSlackMessages,
   issuePullRequests,
   issues,
   runtimeProfiles,
@@ -28,6 +32,7 @@ export class IssuePullRequestError extends Error {
     public readonly code:
       | "issue_not_found"
       | "not_available"
+      | "remediation_not_found"
       | "already_requested"
       | "request_not_found",
   ) {
@@ -70,10 +75,20 @@ export async function queueAutomaticIssuePullRequests(
   input: {
     agentConfigVersionId: string;
     investigationId: string;
-    issueIds: string[];
+    remediations: Array<{ issueId: string; remediationId: string }>;
   },
 ) {
-  const uniqueIssueIds = [...new Set(input.issueIds)];
+  const uniqueRemediations = [
+    ...new Map(
+      input.remediations.map((remediation) => [
+        remediation.issueId,
+        remediation,
+      ]),
+    ).values(),
+  ];
+  const uniqueIssueIds = uniqueRemediations.map(
+    (remediation) => remediation.issueId,
+  );
   if (uniqueIssueIds.length === 0) return [];
 
   const activeIndexAvailable = await prepareIssuePullRequestWrite(tx);
@@ -87,16 +102,17 @@ export async function queueAutomaticIssuePullRequests(
       ),
     );
   const existingIssueIds = new Set(existing.map((request) => request.issueId));
-  const requestedIssueIds = uniqueIssueIds.filter(
-    (issueId) => !existingIssueIds.has(issueId),
+  const requestedRemediations = uniqueRemediations.filter(
+    (remediation) => !existingIssueIds.has(remediation.issueId),
   );
-  if (requestedIssueIds.length === 0) return [];
+  if (requestedRemediations.length === 0) return [];
 
   const insert = tx.insert(issuePullRequests).values(
-    requestedIssueIds.map((issueId) => ({
-      issueId,
+    requestedRemediations.map((remediation) => ({
+      issueId: remediation.issueId,
       investigationId: input.investigationId,
       agentConfigVersionId: input.agentConfigVersionId,
+      remediationId: remediation.remediationId,
     })),
   );
   return activeIndexAvailable
@@ -121,6 +137,7 @@ export async function getIssuePullRequestState(
     db
       .select({
         id: issuePullRequests.id,
+        remediationId: issuePullRequests.remediationId,
         repositoryFullName: issuePullRequests.repositoryFullName,
         status: issuePullRequests.status,
         branch: issuePullRequests.branch,
@@ -166,23 +183,159 @@ export async function getIssuePullRequestState(
       .limit(1),
   ]);
 
+  const activityRows = requests.length > 0
+    ? await db
+        .select({
+          id: issuePullRequestActivities.id,
+          requestId: issuePullRequestActivities.requestId,
+          event: issuePullRequestActivities.event,
+          createdAt: issuePullRequestActivities.createdAt,
+        })
+        .from(issuePullRequestActivities)
+        .where(
+          inArray(
+            issuePullRequestActivities.requestId,
+            requests.map((request) => request.id),
+          ),
+        )
+        .orderBy(asc(issuePullRequestActivities.id))
+    : [];
+  const activitiesByRequest = Map.groupBy(
+    activityRows,
+    (activity) => activity.requestId,
+  );
+  const requestsWithActivities = requests.map((request) => ({
+    ...request,
+    activities: activitiesByRequest.get(request.id) ?? [],
+  }));
   const activeRequest = requests.find((request) =>
     ["queued", "creating", "created", "merged"].includes(request.status),
   );
   return {
     canCreate: eligibleInvestigations.length > 0 && !activeRequest,
-    requests,
+    requests: requestsWithActivities,
   };
+}
+
+export function pullRequestActivityEvent(
+  type: IssuePullRequestActivityEvent["type"],
+  data?: Record<string, unknown>,
+  at = new Date(),
+): IssuePullRequestActivityEvent {
+  return {
+    ...(data ? { data } : {}),
+    meta: { at: at.toISOString() },
+    type,
+  };
+}
+
+export async function appendIssuePullRequestActivity(input: {
+  event: IssuePullRequestActivityEvent;
+  externalKey?: string;
+  requestId: string;
+}): Promise<void> {
+  const insert = getDatabase()
+    .insert(issuePullRequestActivities)
+    .values({
+      event: input.event,
+      externalKey: input.externalKey,
+      requestId: input.requestId,
+    });
+  if (input.externalKey) {
+    await insert.onConflictDoNothing({
+      target: [
+        issuePullRequestActivities.requestId,
+        issuePullRequestActivities.externalKey,
+      ],
+      where: sql`${issuePullRequestActivities.externalKey} is not null`,
+    });
+    return;
+  }
+  await insert;
+}
+
+export async function registerIssuePullRequestSlackMessage(input: {
+  channelId: string;
+  integrationAccountId: string;
+  messageTimestamp: string;
+  requestId: string;
+}): Promise<void> {
+  await getDatabase()
+    .insert(issuePullRequestSlackMessages)
+    .values(input)
+    .onConflictDoNothing({
+      target: [
+        issuePullRequestSlackMessages.requestId,
+        issuePullRequestSlackMessages.integrationAccountId,
+        issuePullRequestSlackMessages.channelId,
+        issuePullRequestSlackMessages.messageTimestamp,
+      ],
+    });
+}
+
+export async function getIssuePullRequestSlackCard(requestId: string) {
+  const rows = await getDatabase()
+    .select({
+      requestId: issuePullRequests.id,
+      issueId: issues.id,
+      issueTitle: issues.title,
+      issueSeverity: issues.severity,
+      issueRemediations: issues.remediations,
+      remediationId: issuePullRequests.remediationId,
+      repositoryFullName: issuePullRequests.repositoryFullName,
+      status: issuePullRequests.status,
+      pullRequestNumber: issuePullRequests.pullRequestNumber,
+      pullRequestUrl: issuePullRequests.pullRequestUrl,
+      failureReason: issuePullRequests.failureReason,
+    })
+    .from(issuePullRequests)
+    .innerJoin(issues, eq(issues.id, issuePullRequests.issueId))
+    .where(eq(issuePullRequests.id, requestId))
+    .limit(1);
+  const request = rows[0];
+  if (!request) return null;
+  const selectedRemediation = request.remediationId
+    ? request.issueRemediations.find(
+        (remediation) => remediation.id === request.remediationId,
+      )
+    : undefined;
+  if (!selectedRemediation) return null;
+  return { ...request, selectedRemediation };
+}
+
+export async function getIssuePullRequestSlackDeliveries(requestId: string) {
+  return getDatabase()
+    .select({
+      channelId: issuePullRequestSlackMessages.channelId,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      messageTimestamp: issuePullRequestSlackMessages.messageTimestamp,
+    })
+    .from(issuePullRequestSlackMessages)
+    .innerJoin(
+      integrationAccounts,
+      eq(
+        integrationAccounts.id,
+        issuePullRequestSlackMessages.integrationAccountId,
+      ),
+    )
+    .where(
+      and(
+        eq(issuePullRequestSlackMessages.requestId, requestId),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    );
 }
 
 export async function queueManualIssuePullRequest(input: {
   issueId: string;
   organizationId: string;
+  remediationId: string;
 }) {
   const db = getDatabase();
   return db.transaction(async (tx) => {
     const issueRows = await tx
-      .select({ id: issues.id })
+      .select({ id: issues.id, remediations: issues.remediations })
       .from(issues)
       .where(
         and(
@@ -191,8 +344,18 @@ export async function queueManualIssuePullRequest(input: {
         ),
       )
       .limit(1);
-    if (!issueRows[0]) {
+    const issue = issueRows[0];
+    if (!issue) {
       throw new IssuePullRequestError("Issue not found", "issue_not_found");
+    }
+    const remediation = issue.remediations.find(
+      (candidate) => candidate.id === input.remediationId,
+    );
+    if (!remediation || remediation.type !== "code_change") {
+      throw new IssuePullRequestError(
+        "Code remediation not found",
+        "remediation_not_found",
+      );
     }
 
     const activeIndexAvailable = await prepareIssuePullRequestWrite(tx);
@@ -261,6 +424,7 @@ export async function queueManualIssuePullRequest(input: {
         issueId: input.issueId,
         investigationId: target.investigationId,
         agentConfigVersionId: target.agentConfigVersionId,
+        remediationId: remediation.id,
       });
     const inserted = activeIndexAvailable
       ? await insert
@@ -291,6 +455,7 @@ export async function getIssuePullRequestForRemediation(requestId: string) {
       issueRootCause: issues.rootCause,
       issueTimeline: issues.timeline,
       issueRemediation: issues.remediation,
+      issueRemediations: issues.remediations,
       issueSeverity: issues.severity,
       issueEvidence: issues.evidence,
       investigationId: investigations.id,
@@ -298,6 +463,7 @@ export async function getIssuePullRequestForRemediation(requestId: string) {
       agentId: agents.id,
       organizationId: agents.organizationId,
       runtimeProfileId: investigations.runtimeProfileId,
+      remediationId: issuePullRequests.remediationId,
       status: issuePullRequests.status,
     })
     .from(issuePullRequests)
@@ -320,6 +486,17 @@ export async function getIssuePullRequestForRemediation(requestId: string) {
       "request_not_found",
     );
   }
+  const selectedRemediation = request.remediationId
+    ? request.issueRemediations.find(
+        (remediation) => remediation.id === request.remediationId,
+      )
+    : undefined;
+  if (request.remediationId && selectedRemediation?.type !== "code_change") {
+    throw new IssuePullRequestError(
+      "Code remediation not found",
+      "remediation_not_found",
+    );
+  }
 
   let runtimeProfileId = request.runtimeProfileId;
   if (!runtimeProfileId) {
@@ -337,7 +514,7 @@ export async function getIssuePullRequestForRemediation(requestId: string) {
   if (!runtimeProfileId) {
     throw new Error("The Responder instance does not have an active runtime profile");
   }
-  return { ...request, runtimeProfileId };
+  return { ...request, runtimeProfileId, selectedRemediation };
 }
 
 async function transitionIssuePullRequestToCreating(
@@ -407,6 +584,8 @@ export async function getExecutableIssuePullRequest(input: {
       issueTimeline: issues.timeline,
       issueEvidence: issues.evidence,
       issueRemediation: issues.remediation,
+      issueRemediations: issues.remediations,
+      remediationId: issuePullRequests.remediationId,
       investigationEvidence: investigationIssues.evidence,
       investigationInput: investigations.input,
       status: issuePullRequests.status,
@@ -451,7 +630,12 @@ export async function getExecutableIssuePullRequest(input: {
       "request_not_found",
     );
   }
-  return request;
+  const selectedRemediation = request.remediationId
+    ? request.issueRemediations.find(
+        (remediation) => remediation.id === request.remediationId,
+      )
+    : undefined;
+  return { ...request, selectedRemediation };
 }
 
 export async function markIssuePullRequestCreated(input: {

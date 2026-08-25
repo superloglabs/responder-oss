@@ -9,6 +9,7 @@ import {
   type DaytonaSandboxSession,
 } from "@openai/agents-extensions/sandbox/daytona";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
+import type { InvestigationTraceEvent } from "@responder/core/db/schema";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { daytonaClientOptions } from "@responder/core/daytona-config";
 import type { PullRequestReviewJob } from "@responder/core/jobs";
@@ -26,6 +27,7 @@ import {
   prepareDaytonaSandbox,
 } from "./sandbox.js";
 import { workspaceSecretUsageInstructions } from "./secret-safety.js";
+import { investigationTraceEventFromStream } from "./trace.js";
 
 export const pullRequestReviewMaxTurns = 40;
 
@@ -46,14 +48,27 @@ function renderReviewThreads(threads: BotReviewThread[]): string {
 export async function runPullRequestReviewAgent(
   job: PullRequestReviewJob,
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<{ addressedThreads: number; changedFiles: string[] }> {
+  onTraceEvent: (event: InvestigationTraceEvent) => Promise<void> = async () => {},
+): Promise<{
+  addressedThreads: number;
+  changedFiles: string[];
+  commitMessage: string | null;
+  headSha: string;
+  responses: Array<{ body: string; threadId: string }>;
+}> {
   const review = await listUnresolvedBotReviewThreads({
     installationId: job.installationId,
     pullRequestNumber: job.pullRequest.number,
     repository: job.pullRequest.repository,
   });
   if (review.threads.length === 0) {
-    return { addressedThreads: 0, changedFiles: [] };
+    return {
+      addressedThreads: 0,
+      changedFiles: [],
+      commitMessage: null,
+      headSha: review.headSha,
+      responses: [],
+    };
   }
   if (review.branch !== job.pullRequest.branch) {
     throw new Error("Pull request branch no longer matches the created request");
@@ -124,10 +139,24 @@ export async function runPullRequestReviewAgent(
       capabilities: Capabilities.default(),
       tools: [reviewTool.tool],
     });
-    await run(agent, `Address these review threads:\n\n${renderReviewThreads(review.threads)}`, {
-      maxTurns: pullRequestReviewMaxTurns,
-      sandbox: { session },
-    });
+    const runResult = await run(
+      agent,
+      `Address these review threads:\n\n${renderReviewThreads(review.threads)}`,
+      {
+        maxTurns: pullRequestReviewMaxTurns,
+        sandbox: { session },
+        stream: true,
+      },
+    );
+    for await (const streamEvent of runResult) {
+      const event = investigationTraceEventFromStream(
+        streamEvent,
+        environment,
+        new Date(),
+      );
+      if (event) await onTraceEvent(event);
+    }
+    await runResult.completed;
     const result = reviewTool.getResult();
     if (!result) {
       throw new Error("Pull request review finished without addressing its threads");
@@ -135,6 +164,9 @@ export async function runPullRequestReviewAgent(
     return {
       addressedThreads: result.addressedThreadIds.length,
       changedFiles: result.changedFiles,
+      commitMessage: result.commitMessage,
+      headSha: result.headSha,
+      responses: result.responses,
     };
   } finally {
     if (session) {

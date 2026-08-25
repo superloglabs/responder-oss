@@ -5,12 +5,14 @@ import {
   claimIssuePullRequestForRemediation,
   listStaleCreatingIssuePullRequests,
   markIssuePullRequestStarted,
+  pullRequestActivityEvent,
   queueAutomaticIssuePullRequests,
   queueManualIssuePullRequest,
   recoverAbandonedIssuePullRequest,
 } from "./pull-requests.js";
 import {
   activeIssuePullRequestIndexPredicate,
+  issuePullRequestActivities,
   issuePullRequests,
 } from "./schema.js";
 
@@ -22,6 +24,14 @@ const issueId = "10101010-1010-4010-8010-101010101010";
 const organizationId = "15151515-1515-4515-8515-151515151515";
 const investigationId = "16161616-1616-4616-8616-161616161616";
 const agentConfigVersionId = "08080808-0808-4808-8808-080808080808";
+const remediationId = "09090909-0909-4909-8909-090909090909";
+const codeRemediation = {
+  id: remediationId,
+  type: "code_change" as const,
+  title: "Handle the missing value",
+  description: "Guard the optional value before using it.",
+  diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1 @@\n-old\n+new",
+};
 
 function simpleSelect(
   rows: unknown[],
@@ -65,7 +75,9 @@ function databaseDouble(
   const transaction = vi.fn(async (callback) => {
     const select = vi
       .fn()
-      .mockReturnValueOnce(simpleSelect([{ id: issueId }]))
+      .mockReturnValueOnce(
+        simpleSelect([{ id: issueId, remediations: [codeRemediation] }]),
+      )
       .mockReturnValueOnce(simpleSelect(options.existing ?? [], existingLimit))
       .mockReturnValueOnce(
         joinedSelect([{ investigationId, agentConfigVersionId }]),
@@ -83,6 +95,39 @@ function databaseDouble(
 function compiledSql(statement: unknown) {
   return new PgDialect().sqlToQuery(statement as never);
 }
+
+describe("pull request activity storage", () => {
+  it("deduplicates externally sourced activity within a request", () => {
+    const index = getTableConfig(issuePullRequestActivities).indexes.find(
+      (candidate) =>
+        candidate.config.name === "issue_pull_request_activities_external_key_idx",
+    );
+
+    expect(index?.config.unique).toBe(true);
+    expect(
+      index?.config.columns.map((column) =>
+        "name" in column ? column.name : undefined,
+      ),
+    ).toEqual(["request_id", "external_key"]);
+    expect(new PgDialect().sqlToQuery(index?.config.where as never).sql).toBe(
+      '"issue_pull_request_activities"."external_key" is not null',
+    );
+  });
+
+  it("timestamps activity at the event source", () => {
+    expect(
+      pullRequestActivityEvent(
+        "review.comment.received",
+        { body: "Please use silver petals." },
+        new Date("2026-08-25T10:00:00.000Z"),
+      ),
+    ).toEqual({
+      data: { body: "Please use silver petals." },
+      meta: { at: "2026-08-25T10:00:00.000Z" },
+      type: "review.comment.received",
+    });
+  });
+});
 
 describe("manual pull request uniqueness", () => {
   afterEach(() => {
@@ -112,7 +157,7 @@ describe("manual pull request uniqueness", () => {
     const { execute, onConflictDoNothing } = databaseDouble([{ id: requestId }]);
 
     await expect(
-      queueManualIssuePullRequest({ issueId, organizationId }),
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
     ).resolves.toEqual({ id: requestId });
     expect(execute).toHaveBeenCalledOnce();
     expect(compiledSql(execute.mock.calls[0]![0])).toMatchObject({
@@ -131,7 +176,7 @@ describe("manual pull request uniqueness", () => {
     databaseDouble([]);
 
     await expect(
-      queueManualIssuePullRequest({ issueId, organizationId }),
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
     ).rejects.toMatchObject({
       code: "already_requested",
       message: "A pull request has already been requested for this issue",
@@ -148,7 +193,7 @@ describe("manual pull request uniqueness", () => {
     } = databaseDouble([{ id: requestId }], { activeIndexAvailable: false });
 
     await expect(
-      queueManualIssuePullRequest({ issueId, organizationId }),
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
     ).resolves.toEqual({ id: requestId });
 
     expect(execute).toHaveBeenCalledTimes(2);
@@ -170,7 +215,7 @@ describe("manual pull request uniqueness", () => {
     });
 
     await expect(
-      queueManualIssuePullRequest({ issueId, organizationId }),
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
     ).rejects.toMatchObject({
       code: "already_requested",
       message: "A pull request has already been requested for this issue",
@@ -350,13 +395,16 @@ describe("automatic pull request uniqueness", () => {
       queueAutomaticIssuePullRequests(tx as never, {
         agentConfigVersionId,
         investigationId,
-        issueIds: [issueId, secondIssueId],
+        remediations: [
+          { issueId, remediationId },
+          { issueId: secondIssueId, remediationId },
+        ],
       }),
     ).resolves.toEqual([winningRequest]);
 
     expect(values).toHaveBeenCalledWith([
-      { agentConfigVersionId, investigationId, issueId },
-      { agentConfigVersionId, investigationId, issueId: secondIssueId },
+      { agentConfigVersionId, investigationId, issueId, remediationId },
+      { agentConfigVersionId, investigationId, issueId: secondIssueId, remediationId },
     ]);
     expect(onConflictDoNothing).toHaveBeenCalledWith({
       target: issuePullRequests.issueId,
@@ -395,7 +443,10 @@ describe("automatic pull request uniqueness", () => {
       queueAutomaticIssuePullRequests(tx as never, {
         agentConfigVersionId,
         investigationId,
-        issueIds: [issueId, secondIssueId],
+        remediations: [
+          { issueId, remediationId },
+          { issueId: secondIssueId, remediationId },
+        ],
       }),
     ).resolves.toEqual(inserted);
 
@@ -407,7 +458,7 @@ describe("automatic pull request uniqueness", () => {
       existingWhere.mock.invocationCallOrder[0]!,
     );
     expect(values).toHaveBeenCalledWith([
-      { agentConfigVersionId, investigationId, issueId: secondIssueId },
+      { agentConfigVersionId, investigationId, issueId: secondIssueId, remediationId },
     ]);
     expect(onConflictDoNothing).not.toHaveBeenCalled();
   });

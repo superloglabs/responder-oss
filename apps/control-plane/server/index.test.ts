@@ -1134,69 +1134,68 @@ describe("control-plane API", () => {
     });
   });
 
-  it("removes the create-pull-request button after queueing", () => {
-    expect(
-      slackPullRequestQueuedResponse({
-        text: "SEV-2 — Plant API returns HTTP 500",
-        blocks: [
-          {
-            type: "section",
-            text: { type: "mrkdwn", text: "*SEV-2 — Plant API*" },
-          },
-          {
-            type: "actions",
-            elements: [
-              {
-                type: "button",
-                action_id: "create_issue_pull_request",
-                value: "07070707-0707-4707-8707-070707070707",
-              },
-              {
-                type: "button",
-                action_id: "view_issue",
-                value: "07070707-0707-4707-8707-070707070707",
-              },
-            ],
-          },
-        ],
-      }),
-    ).toEqual({
-      replace_original: true,
-      text: "SEV-2 — Plant API returns HTTP 500",
-      blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: "*SEV-2 — Plant API*" },
-        },
-        {
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              action_id: "view_issue",
-              value: "07070707-0707-4707-8707-070707070707",
-            },
-          ],
-        },
-        {
-          type: "context",
-          elements: [
-            {
-              type: "mrkdwn",
-              text: "Pull request creation started. Follow progress in the issue.",
-            },
-          ],
-        },
-      ],
+  it("replaces the remediation picker with the selected remediation and PR cards", () => {
+    const response = slackPullRequestQueuedResponse({
+      failureReason: null,
+      issueId: "07070707-0707-4707-8707-070707070707",
+      issueSeverity: "SEV-2",
+      issueTitle: "Plant API returns HTTP 500",
+      pullRequestNumber: null,
+      pullRequestUrl: null,
+      repositoryFullName: null,
+      requestId: "23232323-2323-4323-8323-232323232323",
+      selectedRemediation: {
+        id: "24242424-2424-4424-8424-242424242424",
+        type: "code_change",
+        title: "Restore the plant guard",
+        description: "Handle plants without a configured color.",
+        diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+      },
+      status: "creating",
     });
+
+    expect(response.replace_original).toBe(true);
+    expect(response.text).toContain("Pull request: Creating");
+    expect(response.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "header",
+          text: expect.objectContaining({ text: "Selected remediation" }),
+        }),
+        expect.objectContaining({
+          type: "header",
+          text: expect.objectContaining({ text: "Pull request" }),
+        }),
+      ]),
+    );
   });
 
   it("starts pull request creation from a signed Slack action", async () => {
     vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    const remediationId = "24242424-2424-4424-8424-242424242424";
     vi.mocked(startSlackIssueRemediation).mockResolvedValue({
       ok: true,
       requestId: "23232323-2323-4323-8323-232323232323",
       sessionId: "session-1",
+      integrationAccountId: "25252525-2525-4525-8525-252525252525",
+      card: {
+        failureReason: null,
+        issueId: "07070707-0707-4707-8707-070707070707",
+        issueSeverity: "SEV-2",
+        issueTitle: "Plant API returns HTTP 500",
+        pullRequestNumber: null,
+        pullRequestUrl: null,
+        repositoryFullName: null,
+        requestId: "23232323-2323-4323-8323-232323232323",
+        selectedRemediation: {
+          id: remediationId,
+          type: "code_change",
+          title: "Restore the plant guard",
+          description: "Handle plants without a configured color.",
+          diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+        },
+        status: "creating",
+      },
     });
     const responseUrl =
       "https://hooks.slack.com/actions/T123/B123/response-token";
@@ -1216,7 +1215,7 @@ describe("control-plane API", () => {
               {
                 type: "button",
                 action_id: "create_issue_pull_request",
-                value: issueId,
+                value: JSON.stringify({ issueId, remediationId }),
               },
             ],
           },
@@ -1225,7 +1224,7 @@ describe("control-plane API", () => {
       actions: [
         {
           action_id: "create_issue_pull_request",
-          value: issueId,
+          value: JSON.stringify({ issueId, remediationId }),
         },
       ],
     });
@@ -1250,6 +1249,7 @@ describe("control-plane API", () => {
     expect(response.status).toBe(200);
     expect(startSlackIssueRemediation).toHaveBeenCalledWith({
       issueId,
+      remediationId,
       teamId: "T123",
     });
     expect(fetchMock).toHaveBeenCalledWith(

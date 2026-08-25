@@ -169,7 +169,7 @@ export async function embedNewIssues(
   issues: Array<{
     title: string;
     description: string;
-    remediation: string;
+    remediations: Array<{ title: string; description: string }>;
   }>,
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: IssueEmbeddingDependencies = defaultDependencies,
@@ -177,7 +177,14 @@ export async function embedNewIssues(
   if (issues.length === 0) return [];
   try {
     const { model, vectors } = await createEmbeddings(
-      issues.map(issueEmbeddingText),
+      issues.map((issue) =>
+        issueEmbeddingText({
+          ...issue,
+          remediation: issue.remediations
+            .map((remediation) => `${remediation.title}: ${remediation.description}`)
+            .join("\n\n"),
+        }),
+      ),
       environment,
       dependencies,
     );

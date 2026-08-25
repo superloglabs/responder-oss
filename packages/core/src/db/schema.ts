@@ -17,6 +17,7 @@ import {
 import type {
   InvestigationReportSubmission,
   IssueEvidence,
+  IssueRemediation,
   IssueTimelineEntry,
   StructuredInvestigationReport,
 } from "../investigations/report.js";
@@ -377,6 +378,22 @@ export interface InvestigationTraceEvent {
   };
 }
 
+export interface IssuePullRequestActivityEvent {
+  type:
+    | "review.comment.received"
+    | "review.job.queued"
+    | "review.session.started"
+    | "review.trace"
+    | "review.commit.pushed"
+    | "review.threads.addressed"
+    | "review.session.completed"
+    | "review.session.failed";
+  data?: Record<string, unknown>;
+  meta: {
+    at: string;
+  };
+}
+
 export interface InvestigationSlackTraceItem {
   detail?: string;
   id: string;
@@ -506,6 +523,10 @@ export const issues = pgTable(
     timeline: jsonb("timeline").$type<IssueTimelineEntry[]>().notNull().default([]),
     severity: severity("severity").notNull(),
     remediation: text("remediation").notNull(),
+    remediations: jsonb("remediations")
+      .$type<IssueRemediation[]>()
+      .notNull()
+      .default([]),
     evidence: jsonb("evidence").$type<IssueEvidence[]>().notNull().default([]),
     embedding: jsonb("embedding").$type<number[]>(),
     embeddingModel: text("embedding_model"),
@@ -538,6 +559,7 @@ export const issuePullRequests = pgTable(
     agentConfigVersionId: uuid("agent_config_version_id")
       .notNull()
       .references(() => agentConfigVersions.id, { onDelete: "restrict" }),
+    remediationId: uuid("remediation_id"),
     repositoryFullName: text("repository_full_name"),
     status: text("status")
       .$type<"queued" | "creating" | "created" | "merged" | "failed">()
@@ -561,6 +583,53 @@ export const issuePullRequests = pgTable(
       table.createdAt,
     ),
     index("issue_pull_requests_investigation_idx").on(table.investigationId),
+  ],
+);
+
+export const issuePullRequestActivities = pgTable(
+  "issue_pull_request_activities",
+  {
+    id: serial("id").primaryKey(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => issuePullRequests.id, { onDelete: "cascade" }),
+    externalKey: text("external_key"),
+    event: jsonb("event").$type<IssuePullRequestActivityEvent>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("issue_pull_request_activities_request_idx").on(
+      table.requestId,
+      table.id,
+    ),
+    uniqueIndex("issue_pull_request_activities_external_key_idx")
+      .on(table.requestId, table.externalKey)
+      .where(sql`${table.externalKey} is not null`),
+  ],
+);
+
+export const issuePullRequestSlackMessages = pgTable(
+  "issue_pull_request_slack_messages",
+  {
+    id: serial("id").primaryKey(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => issuePullRequests.id, { onDelete: "cascade" }),
+    integrationAccountId: uuid("integration_account_id")
+      .notNull()
+      .references(() => integrationAccounts.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").notNull(),
+    messageTimestamp: text("message_timestamp").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("issue_pull_request_slack_messages_message_idx").on(
+      table.requestId,
+      table.integrationAccountId,
+      table.channelId,
+      table.messageTimestamp,
+    ),
+    index("issue_pull_request_slack_messages_request_idx").on(table.requestId),
   ],
 );
 

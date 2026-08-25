@@ -210,6 +210,40 @@ export interface IssueEvidence {
   toolCallId?: string;
 }
 
+export type IssueRemediation =
+  | {
+      id: string;
+      type: "code_change";
+      title: string;
+      description: string;
+      diff: string;
+    }
+  | {
+      id: string;
+      type: "external_action";
+      title: string;
+      description: string;
+      agentPrompt: string;
+    };
+
+export interface IssuePullRequestActivity {
+  id: number;
+  event: {
+    type:
+      | "review.comment.received"
+      | "review.job.queued"
+      | "review.session.started"
+      | "review.trace"
+      | "review.commit.pushed"
+      | "review.threads.addressed"
+      | "review.session.completed"
+      | "review.session.failed";
+    data?: Record<string, unknown>;
+    meta: { at: string };
+  };
+  createdAt: string;
+}
+
 export interface IssueListItem {
   id: string;
   title: string;
@@ -218,6 +252,7 @@ export interface IssueListItem {
   timeline: Array<{ title: string; description: string }>;
   severity: "SEV-1" | "SEV-2" | "SEV-3";
   remediation: string;
+  remediations: IssueRemediation[];
   archivedAt: string | null;
   createdAt: string;
 }
@@ -257,8 +292,9 @@ export interface IssueDetailResponse {
     canCreate: boolean;
     requests: Array<{
       id: string;
+      remediationId: string | null;
       repositoryFullName: string | null;
-      status: "queued" | "creating" | "created" | "failed";
+      status: "queued" | "creating" | "created" | "merged" | "failed";
       branch: string | null;
       pullRequestNumber: number | null;
       pullRequestUrl: string | null;
@@ -266,6 +302,7 @@ export interface IssueDetailResponse {
       createdAt: string;
       updatedAt: string;
       completedAt: string | null;
+      activities: IssuePullRequestActivity[];
     }>;
   };
 }
@@ -444,10 +481,15 @@ export async function setIssueArchived(
 
 export async function createIssuePullRequest(
   issueId: string,
+  remediationId: string,
 ): Promise<{ requestId: string; sessionId: string | null }> {
   return apiJson<{ requestId: string; sessionId: string | null }>(
     `/api/issues/${encodeURIComponent(issueId)}/pull-requests`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ remediationId }),
+    },
   );
 }
 

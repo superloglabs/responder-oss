@@ -69,6 +69,9 @@ describe("pull request tool", () => {
         },
       ],
       issueRemediation: "Handle the missing value.",
+      issueRemediations: [],
+      remediationId: null,
+      selectedRemediation: undefined,
       investigationInput: {
         provider: "slack",
         externalEventId: "thread-1",

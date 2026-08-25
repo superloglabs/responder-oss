@@ -10,6 +10,7 @@ import {
 } from "@responder/core/db/pull-requests";
 import type { InvestigationInput } from "@responder/core/db/schema";
 import type { IssueEvidence } from "@responder/core/investigations/report";
+import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { responderIssueUrl as buildResponderIssueUrl } from "@responder/core/responder-urls";
 import { z } from "zod";
 import {
@@ -101,6 +102,7 @@ export function createPullRequestTool(input: {
           : {}),
       });
       await markIssuePullRequestStarted(request.requestId);
+      await refreshIssuePullRequestSlackMessages(request.requestId);
       let published = false;
 
       try {
@@ -143,7 +145,7 @@ export function createPullRequestTool(input: {
             repository: repository.fullName,
             repositoryPath: checkout.path,
             requestId: request.requestId,
-            title: `Fix: ${request.issueTitle}`.slice(0, 240),
+            title: `Fix: ${request.selectedRemediation?.title ?? request.issueTitle}`.slice(0, 240),
             workspaceBaseSha: checkout.workspaceBaseSha,
           },
           input.session,
@@ -156,6 +158,7 @@ export function createPullRequestTool(input: {
           pullRequestNumber: result.number,
           pullRequestUrl: result.url,
         });
+        await refreshIssuePullRequestSlackMessages(request.requestId);
         await captureAnalyticsEvent({
           distinctId: `investigation:${input.investigationId}`,
           event: "pr opened",
@@ -182,6 +185,7 @@ export function createPullRequestTool(input: {
             request.requestId,
             error instanceof Error ? error.message : "Unable to create pull request",
           );
+          await refreshIssuePullRequestSlackMessages(request.requestId);
         }
         throw error;
       }

@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
+import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { queuePullRequestReview } from "../investigations/queue.js";
 import { githubWebhookRoutes, verifyGitHubSignature } from "./github.js";
 
@@ -12,6 +13,10 @@ vi.mock("@responder/core/analytics", () => ({
 
 vi.mock("@responder/core/db/pull-requests", () => ({
   markIssuePullRequestMerged: vi.fn(),
+}));
+
+vi.mock("@responder/core/integrations/slack-remediations", () => ({
+  refreshIssuePullRequestSlackMessages: vi.fn(),
 }));
 
 vi.mock("../investigations/queue.js", () => ({
@@ -45,11 +50,18 @@ function reviewCommentEvent(overrides: {
   return JSON.stringify({
     action: overrides.action ?? "created",
     comment: {
+      body: "Use a null guard here.",
+      html_url: "https://github.com/acme/api/pull/42#discussion_r123",
       id: 123,
       ...(overrides.inReplyToId
         ? { in_reply_to_id: overrides.inReplyToId }
         : {}),
-      user: { type: overrides.authorType ?? "Bot" },
+      line: 17,
+      path: "src/route.ts",
+      user: {
+        login: "reviewer-bot",
+        type: overrides.authorType ?? "Bot",
+      },
     },
     installation: { id: 789 },
     pull_request: { number: 42 },
@@ -136,6 +148,7 @@ describe("GitHub pull request webhooks", () => {
       repositoryFullName: "acme/api",
       pullRequestNumber: 42,
     });
+    expect(refreshIssuePullRequestSlackMessages).toHaveBeenCalledWith("req-1");
     expect(captureAnalyticsEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "pr merged",
@@ -194,6 +207,14 @@ describe("GitHub pull request webhooks", () => {
     expect(queuePullRequestReview).toHaveBeenCalledWith({
       installationId: 789,
       pullRequestNumber: 42,
+      reviewComment: {
+        author: "reviewer-bot",
+        body: "Use a null guard here.",
+        id: 123,
+        line: 17,
+        path: "src/route.ts",
+        url: "https://github.com/acme/api/pull/42#discussion_r123",
+      },
       repositoryFullName: "acme/api",
     });
   });
