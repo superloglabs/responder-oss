@@ -400,7 +400,9 @@ export async function runInvestigationAgent(
     ? createAxiomMcpServer(axiomConnection)
     : null;
   const sentryServer = sentryConnection
-    ? createSentryMcpServer(sentryConnection)
+    ? createSentryMcpServer(sentryConnection, {
+        investigationId: job.investigationId,
+      })
     : null;
   const customMcpServers = customMcpConnections.map(createCustomMcpServer);
   const clickStackServer = clickStackConnection
