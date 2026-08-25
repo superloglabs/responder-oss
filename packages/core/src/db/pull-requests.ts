@@ -524,6 +524,70 @@ export async function markIssuePullRequestMerged(input: {
   return { ...request, organizationId };
 }
 
+export async function getIssuePullRequestForReview(input: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+}) {
+  const rows = await getDatabase()
+    .select({
+      requestId: issuePullRequests.id,
+      repositoryFullName: issuePullRequests.repositoryFullName,
+      branch: issuePullRequests.branch,
+      pullRequestNumber: issuePullRequests.pullRequestNumber,
+      issueId: issues.id,
+      issueTitle: issues.title,
+      issueDescription: issues.description,
+      issueRootCause: issues.rootCause,
+      issueTimeline: issues.timeline,
+      issueRemediation: issues.remediation,
+      issueSeverity: issues.severity,
+      issueEvidence: issues.evidence,
+      investigationId: investigations.id,
+      agentConfigVersionId: agentConfigVersions.id,
+      runtimeProfileId: investigations.runtimeProfileId,
+    })
+    .from(issuePullRequests)
+    .innerJoin(issues, eq(issues.id, issuePullRequests.issueId))
+    .innerJoin(
+      investigations,
+      eq(investigations.id, issuePullRequests.investigationId),
+    )
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, issuePullRequests.agentConfigVersionId),
+    )
+    .where(
+      and(
+        eq(issuePullRequests.repositoryFullName, input.repositoryFullName),
+        eq(issuePullRequests.pullRequestNumber, input.pullRequestNumber),
+        eq(issuePullRequests.status, "created"),
+      ),
+    )
+    .limit(1);
+  const request = rows[0];
+  const branch = request?.branch;
+  if (!request || !branch) return null;
+
+  let runtimeProfileId = request.runtimeProfileId;
+  if (!runtimeProfileId) {
+    const activeProfiles = await getDatabase()
+      .select({ id: runtimeProfiles.id })
+      .from(instanceConfiguration)
+      .innerJoin(
+        runtimeProfiles,
+        eq(runtimeProfiles.id, instanceConfiguration.activeRuntimeProfileId),
+      )
+      .where(eq(instanceConfiguration.id, "default"))
+      .limit(1);
+    runtimeProfileId = activeProfiles[0]?.id ?? null;
+  }
+  if (!runtimeProfileId) {
+    throw new Error("The Responder instance does not have an active runtime profile");
+  }
+
+  return { ...request, branch, runtimeProfileId };
+}
+
 export async function failIssuePullRequest(
   requestId: string,
   failureReason: string,

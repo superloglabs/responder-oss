@@ -3,6 +3,7 @@ import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { Hono } from "hono";
 import { z } from "zod";
+import { queuePullRequestReview } from "../investigations/queue.js";
 
 const pullRequestEventSchema = z.object({
   action: z.string(),
@@ -14,6 +15,19 @@ const pullRequestEventSchema = z.object({
   repository: z.object({
     full_name: z.string().min(1),
   }),
+});
+
+const pullRequestReviewCommentEventSchema = z.object({
+  action: z.string(),
+  comment: z.object({
+    id: z.number().int().positive(),
+    in_reply_to_id: z.number().int().positive().optional(),
+    user: z.object({ type: z.string() }),
+  }),
+  installation: z.object({ id: z.number().int().positive() }),
+  pull_request: z.object({ number: z.number().int().positive() }),
+  repository: z.object({ full_name: z.string().min(1) }),
+  sender: z.object({ type: z.string() }),
 });
 
 function safeEqual(left: string, right: string): boolean {
@@ -64,6 +78,45 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
   }
 
   const eventType = context.req.header("x-github-event");
+  if (eventType === "pull_request_review_comment") {
+    const parsed = pullRequestReviewCommentEventSchema.safeParse(
+      parseJson(rawBody),
+    );
+    if (
+      !parsed.success ||
+      parsed.data.action !== "created" ||
+      parsed.data.comment.in_reply_to_id !== undefined ||
+      parsed.data.comment.user.type !== "Bot" ||
+      parsed.data.sender.type !== "Bot"
+    ) {
+      return context.json({ ok: true, ignored: true });
+    }
+
+    const queued = await queuePullRequestReview({
+      installationId: parsed.data.installation.id,
+      pullRequestNumber: parsed.data.pull_request.number,
+      repositoryFullName: parsed.data.repository.full_name,
+    });
+    if (!queued.matched) {
+      return context.json({ ok: true, matched: false });
+    }
+
+    console.info(
+      JSON.stringify({
+        event: "github_pull_request_review_queued",
+        pullRequestNumber: parsed.data.pull_request.number,
+        repository: parsed.data.repository.full_name,
+        requestId: queued.requestId,
+        queued: queued.queued,
+      }),
+    );
+    return context.json({
+      ok: true,
+      matched: true,
+      queued: queued.queued,
+    });
+  }
+
   if (eventType !== "pull_request") {
     return context.json({ ok: true, ignored: true });
   }

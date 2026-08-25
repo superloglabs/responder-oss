@@ -4,6 +4,8 @@ import {
   linearTicketJobSchema,
   linearTicketQueue,
   prepareWorkerQueues,
+  pullRequestReviewJobSchema,
+  pullRequestReviewQueue,
   remediationJobSchema,
   remediationQueue as remediationQueueName,
   type LinearTicketJob,
@@ -57,6 +59,7 @@ import {
   reportWorkerException,
 } from "./monitoring.js";
 import { processRemediationJob } from "./remediation-job.js";
+import { processPullRequestReviewJob } from "./pull-request-review-job.js";
 import { loadResponderSecrets } from "@responder/core/secrets";
 
 loadResponderSecrets();
@@ -277,6 +280,10 @@ await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
 await boss.work(remediationQueueName, { localConcurrency: 1 }, async ([job]) => {
   const payload = remediationJobSchema.parse(job.data);
   return processRemediationJob(job.id, payload, process.env);
+});
+await boss.work(pullRequestReviewQueue, { localConcurrency: 1 }, async ([job]) => {
+  const payload = pullRequestReviewJobSchema.parse(job.data);
+  return processPullRequestReviewJob(job.id, payload, process.env);
 });
 await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
   const payload = responderJobSchema.parse(job.data);

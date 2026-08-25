@@ -15,6 +15,7 @@ export const investigationQueue = "responder-investigations";
 // leaves an existing queue's policy unchanged.
 export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
+export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
 
 export const workerHealthJobSchema = z.object({
   marker: z.string().min(1),
@@ -30,6 +31,17 @@ const runtimeAgentJobConfigSchema = z.object({
     organizationId: z.uuid(),
     prMode: agentPrModeSchema,
     prompt: z.string(),
+});
+
+const remediationIssueSchema = z.object({
+  id: z.uuid(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  rootCause: z.string().default(""),
+  timeline: z.array(issueTimelineEntrySchema).default([]),
+  severity: issueSeveritySchema,
+  remediation: z.string().min(1),
+  evidence: z.array(issueEvidenceSchema),
 });
 
 export const investigationJobSchema = z.object({
@@ -48,22 +60,33 @@ export const remediationJobSchema = z.object({
   kind: z.literal("remediation"),
   config: runtimeAgentJobConfigSchema,
   investigationId: z.uuid(),
-  issue: z.object({
-    id: z.uuid(),
-    title: z.string().min(1),
-    description: z.string().min(1),
-    rootCause: z.string().default(""),
-    timeline: z.array(issueTimelineEntrySchema).default([]),
-    severity: issueSeveritySchema,
-    remediation: z.string().min(1),
-    evidence: z.array(issueEvidenceSchema),
-  }),
+  issue: remediationIssueSchema,
   queuedAt: z.iso.datetime(),
   remediationRequestId: z.uuid(),
   runtimeProfileId: z.uuid(),
 });
 
 export type RemediationJob = z.infer<typeof remediationJobSchema>;
+
+export const pullRequestReviewJobSchema = z.object({
+  kind: z.literal("pull_request_review"),
+  config: runtimeAgentJobConfigSchema,
+  installationId: z.number().int().positive(),
+  investigationId: z.uuid(),
+  issue: remediationIssueSchema,
+  pullRequest: z.object({
+    branch: z.string().min(1),
+    number: z.number().int().positive(),
+    repository: z.string().min(1),
+  }),
+  queuedAt: z.iso.datetime(),
+  requestId: z.uuid(),
+  runtimeProfileId: z.uuid(),
+});
+
+export type PullRequestReviewJob = z.infer<
+  typeof pullRequestReviewJobSchema
+>;
 export const linearTicketJobSchema = z.object({
   kind: z.literal("linear_ticket"),
   config: runtimeAgentJobConfigSchema,
@@ -119,6 +142,17 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       policy: "exclusive",
       // Retrying the agent could repeat PR side effects. Terminal writes are
       // independent of monitoring, and a worker sweep reconciles abandoned rows.
+      retryLimit: 0,
+    }),
+    boss.createQueue(pullRequestReviewQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 3_600,
+      notify: true,
+      // Keep one active follow-up per PR while retaining later comment events.
+      // Redundant queued passes are cheap because they exit when no threads remain.
+      policy: "singleton",
+      // A retry could duplicate review replies or race a newer PR head. A new
+      // root review comment will enqueue another pass.
       retryLimit: 0,
     }),
     boss.createQueue(linearTicketQueue, {

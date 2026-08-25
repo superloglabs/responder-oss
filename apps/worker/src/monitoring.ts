@@ -10,6 +10,7 @@ export interface WorkerErrorContext {
   operation:
     | "investigation"
     | "linear_ticket"
+    | "pull_request_review"
     | "remediation"
     | "sandbox_cleanup"
     | "slack_delivery"

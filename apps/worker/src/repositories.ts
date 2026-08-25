@@ -89,6 +89,11 @@ export interface CheckedOutRepository {
   workspaceBaseSha: string;
 }
 
+export interface RuntimeRepositoryReference {
+  branch: string;
+  sha: string;
+}
+
 export interface RepositoryCheckoutDependencies {
   createInstallationToken: (installationId: number) => Promise<string>;
   downloadWithGit?: (
@@ -359,27 +364,24 @@ async function fetchRepositorySnapshot(
   downloadWithGit: NonNullable<
     RepositoryCheckoutDependencies["downloadWithGit"]
   >,
+  reference?: RuntimeRepositoryReference,
 ): Promise<{ sha: string }> {
   const headers = githubAppHeaders(accessToken);
-  const branch = encodeURIComponent(repository.defaultBranch);
-  let commitResponse: Response;
-  try {
-    commitResponse = await fetchImpl(
-      `https://api.github.com/repos/${repository.fullName}/commits/${branch}`,
-      { headers, signal: AbortSignal.timeout(30_000) },
-    );
-  } catch {
-    return downloadWithGit(
-      repository,
-      accessToken,
-      repository.defaultBranch,
-      archivePath,
-      archiveLimitBytes,
-    );
+  if (reference && !/^[a-f0-9]{40}$/i.test(reference.sha)) {
+    throw new Error(`Invalid commit for ${repository.fullName}`);
   }
-  if (!commitResponse.ok) {
-    if (shouldUseGitFallback(commitResponse)) {
-      await commitResponse.body?.cancel();
+  let sha: string;
+  if (reference) {
+    sha = reference.sha;
+  } else {
+    const branch = encodeURIComponent(repository.defaultBranch);
+    let commitResponse: Response;
+    try {
+      commitResponse = await fetchImpl(
+        `https://api.github.com/repos/${repository.fullName}/commits/${branch}`,
+        { headers, signal: AbortSignal.timeout(30_000) },
+      );
+    } catch {
       return downloadWithGit(
         repository,
         accessToken,
@@ -388,14 +390,28 @@ async function fetchRepositorySnapshot(
         archiveLimitBytes,
       );
     }
-    throw new Error(
-      `Unable to resolve ${repository.fullName}@${repository.defaultBranch}`,
-    );
-  }
-  const commit = (await commitResponse.json()) as { sha?: unknown };
-  const sha = commit.sha;
-  if (typeof sha !== "string" || !/^[a-f0-9]{40}$/i.test(sha)) {
-    throw new Error(`GitHub returned an invalid commit for ${repository.fullName}`);
+    if (!commitResponse.ok) {
+      if (shouldUseGitFallback(commitResponse)) {
+        await commitResponse.body?.cancel();
+        return downloadWithGit(
+          repository,
+          accessToken,
+          repository.defaultBranch,
+          archivePath,
+          archiveLimitBytes,
+        );
+      }
+      throw new Error(
+        `Unable to resolve ${repository.fullName}@${repository.defaultBranch}`,
+      );
+    }
+    const commit = (await commitResponse.json()) as { sha?: unknown };
+    if (typeof commit.sha !== "string" || !/^[a-f0-9]{40}$/i.test(commit.sha)) {
+      throw new Error(
+        `GitHub returned an invalid commit for ${repository.fullName}`,
+      );
+    }
+    sha = commit.sha;
   }
 
   let archiveResponse: Response;
@@ -454,6 +470,34 @@ export async function checkoutRuntimeRepositories(
   versionId: string,
   dependencies: RepositoryCheckoutDependencies = defaultDependencies,
 ): Promise<CheckedOutRepository[]> {
+  return checkoutRuntimeRepositoriesWithRefs(
+    session,
+    versionId,
+    new Map(),
+    dependencies,
+  );
+}
+
+export async function checkoutRuntimeRepositoriesAtRefs(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  references: ReadonlyMap<string, RuntimeRepositoryReference>,
+  dependencies: RepositoryCheckoutDependencies = defaultDependencies,
+): Promise<CheckedOutRepository[]> {
+  return checkoutRuntimeRepositoriesWithRefs(
+    session,
+    versionId,
+    references,
+    dependencies,
+  );
+}
+
+async function checkoutRuntimeRepositoriesWithRefs(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  references: ReadonlyMap<string, RuntimeRepositoryReference>,
+  dependencies: RepositoryCheckoutDependencies,
+): Promise<CheckedOutRepository[]> {
   const repositories = await dependencies.getRepositories(versionId);
   if (repositories.length === 0) return [];
 
@@ -489,6 +533,7 @@ export async function checkoutRuntimeRepositories(
         localArchivePath,
         archiveLimitBytes,
         dependencies.downloadWithGit ?? downloadRepositorySnapshotWithGit,
+        references.get(repository.fullName),
       );
       const archivePath =
         `${workspaceRoot}/.responder/archives/${owner}-${name}-${snapshot.sha}.tar.gz`;
@@ -522,7 +567,8 @@ export async function checkoutRuntimeRepositories(
       }
 
       checkedOut.push({
-        branch: repository.defaultBranch,
+        branch:
+          references.get(repository.fullName)?.branch ?? repository.defaultBranch,
         path: destination,
         repository: repository.fullName,
         sha: snapshot.sha,

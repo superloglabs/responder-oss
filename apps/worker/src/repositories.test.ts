@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   checkoutRuntimeRepositories,
+  checkoutRuntimeRepositoriesAtRefs,
   repositoryWorkspacePath,
 } from "./repositories.js";
 
@@ -24,6 +25,43 @@ function uploadArchive() {
 }
 
 describe("Daytona repository checkout", () => {
+  it("downloads an exact pull request head without resolving the default branch", async () => {
+    const session = fakeSession();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
+    );
+
+    await expect(
+      checkoutRuntimeRepositoriesAtRefs(
+        session,
+        "version-id",
+        new Map([
+          ["example-org/example-repo", { branch: "fix/review", sha }],
+        ]),
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+          getRepositories: vi.fn().mockResolvedValue([
+            {
+              defaultBranch: "main",
+              fullName: "example-org/example-repo",
+              installationId: 123,
+              private: true,
+            },
+          ]),
+          uploadArchive: uploadArchive(),
+        },
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ branch: "fix/review", sha }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.github.com/repos/example-org/example-repo/tarball/${sha}`,
+      expect.anything(),
+    );
+  });
+
   it("downloads selected repositories without placing the GitHub token in the sandbox", async () => {
     const session = fakeSession();
     const upload = uploadArchive();
