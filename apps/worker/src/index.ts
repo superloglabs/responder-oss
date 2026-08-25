@@ -3,6 +3,7 @@ import {
   investigationQueue,
   linearTicketJobSchema,
   linearTicketQueue,
+  migrateLegacyInvestigationHeartbeats,
   prepareWorkerQueues,
   pullRequestReviewJobSchema,
   pullRequestReviewQueue,
@@ -44,8 +45,10 @@ import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
 } from "./investigation-completion.js";
-import { migrateLegacyInvestigationHeartbeats } from "./legacy-job-heartbeat.js";
-import { workerGracefulShutdownTimeoutMs } from "./shutdown-policy.js";
+import {
+  legacyHeartbeatHandoffWaitMs,
+  workerGracefulShutdownTimeoutMs,
+} from "./shutdown-policy.js";
 import {
   runInvestigationAgent,
   safeInvestigationError,
@@ -330,7 +333,9 @@ await boss.work(pullRequestReviewQueue, { localConcurrency: 1 }, async ([job]) =
 });
 // Only investigation consumption waits for the one-time legacy handoff. The
 // other queues above remain available, with shutdown handling already active.
-await migrateLegacyInvestigationHeartbeats(boss);
+await migrateLegacyInvestigationHeartbeats(boss, {
+  handoffWaitMs: legacyHeartbeatHandoffWaitMs(),
+});
 await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
   const payload = responderJobSchema.parse(job.data);
   if (payload.kind === "remediation") {

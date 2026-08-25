@@ -261,7 +261,7 @@ describe("investigation report submission", () => {
     });
 
     await expect(
-      deliverCompletedInvestigationWithWarnings("investigation-id"),
+      deliverCompletedInvestigationWithWarnings("investigation-id", "job-id"),
     ).resolves.toEqual(["Slack lookup failed"]);
     expect(JSON.parse(String(consoleError.mock.calls[0]?.[0]))).toEqual(
       expect.objectContaining({

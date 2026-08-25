@@ -119,6 +119,50 @@ export function createJobBoss(
   });
 }
 
+interface LegacyHeartbeatMigrationOptions {
+  handoffWaitMs: number;
+  now?: () => number;
+  wait?: (milliseconds: number) => Promise<void>;
+}
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+// One-time queue migration for jobs created before heartbeat support.
+// Remove this function and its worker startup call after 2026-09-02, when
+// pg-boss's seven-day retention guarantees no pre-rollout job can remain.
+export async function migrateLegacyInvestigationHeartbeats(
+  boss: PgBoss,
+  options: LegacyHeartbeatMigrationOptions,
+): Promise<void> {
+  const database = boss.getDb();
+  const now = options.now ?? Date.now;
+  const waitFor = options.wait ?? wait;
+  const deadline = now() + options.handoffWaitMs;
+
+  while (true) {
+    await database.executeSql(
+      `UPDATE pgboss.job
+       SET heartbeat_seconds = $2
+       WHERE name = $1
+         AND state IN ('created', 'retry')
+         AND heartbeat_seconds IS NULL`,
+      [investigationQueue, investigationHeartbeatSeconds],
+    );
+    const active = await database.executeSql(
+      `SELECT id
+       FROM pgboss.job
+       WHERE name = $1
+         AND state = 'active'
+         AND heartbeat_seconds IS NULL
+       LIMIT 1`,
+      [investigationQueue],
+    );
+    if (active.rows.length === 0 || now() >= deadline) return;
+    await waitFor(1_000);
+  }
+}
+
 export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
   await Promise.all([
     boss.createQueue(workerHealthQueue, {
