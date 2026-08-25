@@ -52,7 +52,7 @@ function cleanupHarness(options?: {
 }
 
 describe("Daytona sandbox preparation", () => {
-  it("ensures git and ripgrep are installed before the agent starts", async () => {
+  it("ensures investigation tools are installed before the agent starts", async () => {
     const session = {
       execCommand: vi.fn().mockResolvedValue(
         "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 0\nOutput:\n",
@@ -62,8 +62,37 @@ describe("Daytona sandbox preparation", () => {
     await expect(prepareDaytonaSandbox(session)).resolves.toBeUndefined();
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        cmd: expect.stringContaining("install -y -qq git ripgrep"),
+        cmd: expect.stringContaining(
+          "command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1",
+        ),
       }),
+    );
+    expect(session.execCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: expect.stringContaining("install -y -qq git python3 ripgrep"),
+      }),
+    );
+  });
+
+  it("reports sandbox preparation command failures", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: abc123\nProcess exited with code 1\nOutput:\npython3 unavailable\n",
+      ),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
+      "Unable to install git, Python 3, and ripgrep in Daytona: python3 unavailable",
+    );
+  });
+
+  it("rejects sandbox output without a successful exit marker", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue("unexpected output"),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
+      "Unable to install git, Python 3, and ripgrep in Daytona",
     );
   });
 });
