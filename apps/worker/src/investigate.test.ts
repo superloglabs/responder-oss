@@ -115,9 +115,13 @@ describe("sandbox agent configuration", () => {
 
   it("gives investigations and replays the same sandbox capabilities", () => {
     expect(investigationCapabilities(true).map(({ type }) => type)).toEqual([
+      "filesystem",
+      "shell",
       "compaction",
     ]);
     expect(investigationCapabilities(false).map(({ type }) => type)).toEqual([
+      "filesystem",
+      "shell",
       "compaction",
     ]);
   });

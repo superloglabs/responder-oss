@@ -171,9 +171,7 @@ export function sandboxAgentConfig(
 
 export function investigationCapabilities(replay: boolean) {
   void replay;
-  return Capabilities.default().filter(
-    (capability) => capability.type === "compaction",
-  );
+  return Capabilities.default();
 }
 
 export function investigationInstructions(input: {
