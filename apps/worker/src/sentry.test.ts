@@ -129,13 +129,104 @@ describe("Sentry MCP", () => {
       event: "sentry_mcp_tool_call_failed",
       investigationId: "investigation-1",
       toolName: "search_events",
-      transport: {
-        durationMs: expect.any(Number),
-        kind: "http",
-        mcpMethod: "tools/call",
-        method: "POST",
-        status: 503,
+      transportFailureCount: 1,
+      transportFailures: [
+        {
+          durationMs: expect.any(Number),
+          kind: "http",
+          mcpMethod: "tools/call",
+          method: "POST",
+          status: 503,
+        },
+      ],
+    });
+  });
+
+  it("keeps every transport failure from a failed tool call", async () => {
+    const failure = new Error("sanitized transport failure");
+    failure.name = "MCPTransportError";
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 504 }));
+    const server = createSentryMcpServer(
+      {
+        accessToken: "sentry-test-token",
+        mcpUrl: "https://mcp.sentry.dev/mcp/acme/api?skills=inspect",
+        organizationSlug: "acme",
+        projectSlug: "api",
       },
+      { investigationId: "investigation-1" },
+    );
+    serverCallToolResult.mockImplementation(async () => {
+      const fetchImpl = serverOptions.current?.fetch as typeof fetch;
+      const request = {
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "search_events" },
+        }),
+        method: "POST",
+      };
+      await fetchImpl("https://mcp.sentry.dev/mcp/acme?skills=inspect", request);
+      await fetchImpl("https://mcp.sentry.dev/mcp/acme?skills=inspect", request);
+      throw failure;
+    });
+
+    await expect(server.callToolResult("search_events", {})).rejects.toBe(
+      failure,
+    );
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const log = JSON.parse(String(consoleError.mock.calls[0]?.[0]));
+    expect(log.transportFailureCount).toBe(2);
+    expect(log.transportFailures).toEqual([
+      expect.objectContaining({ kind: "http", status: 503 }),
+      expect.objectContaining({ kind: "http", status: 504 }),
+    ]);
+  });
+
+  it("logs transport failures when a tool retry recovers", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 503 }),
+    );
+    const server = createSentryMcpServer(
+      {
+        accessToken: "sentry-test-token",
+        mcpUrl: "https://mcp.sentry.dev/mcp/acme/api?skills=inspect",
+        organizationSlug: "acme",
+        projectSlug: "api",
+      },
+      { investigationId: "investigation-1" },
+    );
+    serverCallToolResult.mockImplementation(async () => {
+      const fetchImpl = serverOptions.current?.fetch as typeof fetch;
+      await fetchImpl("https://mcp.sentry.dev/mcp/acme?skills=inspect", {
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "search_events" },
+        }),
+        method: "POST",
+      });
+      return { content: [] };
+    });
+
+    await server.callToolResult("search_events", {});
+
+    expect(consoleInfo).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(consoleInfo.mock.calls[0]?.[0]))).toEqual({
+      durationMs: expect.any(Number),
+      event: "sentry_mcp_tool_call_recovered",
+      investigationId: "investigation-1",
+      toolName: "search_events",
+      transportFailureCount: 1,
+      transportFailures: [
+        expect.objectContaining({ kind: "http", status: 503 }),
+      ],
     });
   });
 

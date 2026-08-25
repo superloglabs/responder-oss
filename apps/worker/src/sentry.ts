@@ -36,7 +36,22 @@ type SentryMcpTransportDiagnostics = Pick<
   );
 
 interface SentryMcpToolCallState {
-  transport?: Omit<SentryMcpTransportDiagnostics, "toolName">;
+  transportFailureCount: number;
+  transportFailures: Array<Omit<SentryMcpTransportDiagnostics, "toolName">>;
+}
+
+const MAX_TRANSPORT_FAILURES_PER_TOOL_CALL = 5;
+
+function transportFailureFields(state: SentryMcpToolCallState): object {
+  return state.transportFailureCount === 0
+    ? {}
+    : {
+        transportFailureCount: state.transportFailureCount,
+        transportFailures: state.transportFailures,
+        transportFailuresTruncated:
+          state.transportFailureCount > state.transportFailures.length ||
+          undefined,
+      };
 }
 
 class SentryMcpServer extends MCPServerStreamableHttp {
@@ -52,11 +67,26 @@ class SentryMcpServer extends MCPServerStreamableHttp {
     ...args: Parameters<MCPServerStreamableHttp["callToolResult"]>
   ): ReturnType<MCPServerStreamableHttp["callToolResult"]> {
     const startedAt = performance.now();
-    const state: SentryMcpToolCallState = {};
+    const state: SentryMcpToolCallState = {
+      transportFailureCount: 0,
+      transportFailures: [],
+    };
     try {
-      return await this.toolCallStorage.run(state, () =>
+      const result = await this.toolCallStorage.run(state, () =>
         super.callToolResult(...args),
       );
+      if (state.transportFailureCount > 0) {
+        console.info(
+          JSON.stringify({
+            durationMs: Math.round(performance.now() - startedAt),
+            event: "sentry_mcp_tool_call_recovered",
+            investigationId: this.context.investigationId,
+            toolName: args[0].slice(0, 100),
+            ...transportFailureFields(state),
+          }),
+        );
+      }
+      return result;
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -66,7 +96,7 @@ class SentryMcpServer extends MCPServerStreamableHttp {
           event: "sentry_mcp_tool_call_failed",
           investigationId: this.context.investigationId,
           toolName: args[0].slice(0, 100),
-          transport: state.transport,
+          ...transportFailureFields(state),
         }),
       );
       throw error;
@@ -84,7 +114,12 @@ function recordTransportFailure(
   if (state) {
     const transport = { ...diagnostics };
     delete transport.toolName;
-    state.transport = transport;
+    state.transportFailureCount += 1;
+    if (
+      state.transportFailures.length < MAX_TRANSPORT_FAILURES_PER_TOOL_CALL
+    ) {
+      state.transportFailures.push(transport);
+    }
     return;
   }
   console.error(
