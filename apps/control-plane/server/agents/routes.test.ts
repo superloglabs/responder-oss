@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  disableAgentsWithUnavailableRepositories,
   listAgentOptions,
   setAgentEnabled,
 } from "../../../../packages/core/src/db/agents.js";
@@ -36,6 +37,7 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   createAgent: vi.fn(),
+  disableAgentsWithUnavailableRepositories: vi.fn(),
   getAgent: vi.fn(),
   listAgentOptions: vi.fn(),
   listAgents: vi.fn(),
@@ -567,6 +569,9 @@ describe("GitHub repository option refresh", () => {
     expect(replaceRepositories).toHaveBeenCalledWith(
       "github-account-2",
       [expect.objectContaining({ fullName: "example/api" })],
+    );
+    expect(disableAgentsWithUnavailableRepositories).toHaveBeenCalledWith(
+      tenant.organizationId,
     );
   });
 

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -517,6 +518,46 @@ export function AgentCreatePage() {
   const [notice] = useState(connectionNotice);
   useDocumentTitle(isEditing ? "Edit agent" : "Create agent");
 
+  const refreshGithubRepositories = useCallback((): Promise<void> => {
+    if (githubRefreshInFlight.current) return githubRefreshInFlight.current;
+
+    setRefreshingGithubRepositories(true);
+    setGithubRefreshError(null);
+    const refresh = refreshGitHubAgentOptions()
+      .then((freshOptions) => {
+        const freshRepositoryIds = new Set(
+          freshOptions.repositories.map((repository) => repository.id),
+        );
+        setOptions(freshOptions);
+        setDraft((current) => {
+          if (!current) return current;
+          const repositoryIds = current.repositoryIds.filter((id) =>
+            freshRepositoryIds.has(id),
+          );
+          return {
+            ...current,
+            repositoryIds,
+            prMode: repositoryIds.length === 0 ? "disabled" : current.prMode,
+          };
+        });
+      })
+      .catch((caught: unknown) => {
+        setGithubRefreshError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to refresh GitHub repositories",
+        );
+      })
+      .finally(() => {
+        setRefreshingGithubRepositories(false);
+        if (githubRefreshInFlight.current === refresh) {
+          githubRefreshInFlight.current = null;
+        }
+      });
+    githubRefreshInFlight.current = refresh;
+    return refresh;
+  }, []);
+
   useEffect(() => {
     if (
       !githubDialogOpen &&
@@ -782,6 +823,11 @@ export function AgentCreatePage() {
   }, [draft, draftStorageKey, options]);
 
   useEffect(() => {
+    if (!githubJustConnected || loading) return;
+    void refreshGithubRepositories();
+  }, [githubJustConnected, loading, refreshGithubRepositories]);
+
+  useEffect(() => {
     window.sessionStorage.setItem(
       stepStorageKey,
       activeStep.toString(),
@@ -1008,46 +1054,6 @@ export function AgentCreatePage() {
         }
       });
     slackRefreshInFlight.current = refresh;
-    return refresh;
-  }
-
-  function refreshGithubRepositories(): Promise<void> {
-    if (githubRefreshInFlight.current) return githubRefreshInFlight.current;
-
-    setRefreshingGithubRepositories(true);
-    setGithubRefreshError(null);
-    const refresh = refreshGitHubAgentOptions()
-      .then((freshOptions) => {
-        const freshRepositoryIds = new Set(
-          freshOptions.repositories.map((repository) => repository.id),
-        );
-        setOptions(freshOptions);
-        setDraft((current) => {
-          if (!current) return current;
-          const repositoryIds = current.repositoryIds.filter((id) =>
-            freshRepositoryIds.has(id),
-          );
-          return {
-            ...current,
-            repositoryIds,
-            prMode: repositoryIds.length === 0 ? "disabled" : current.prMode,
-          };
-        });
-      })
-      .catch((caught: unknown) => {
-        setGithubRefreshError(
-          caught instanceof Error
-            ? caught.message
-            : "Unable to refresh GitHub repositories",
-        );
-      })
-      .finally(() => {
-        setRefreshingGithubRepositories(false);
-        if (githubRefreshInFlight.current === refresh) {
-          githubRefreshInFlight.current = null;
-        }
-      });
-    githubRefreshInFlight.current = refresh;
     return refresh;
   }
 

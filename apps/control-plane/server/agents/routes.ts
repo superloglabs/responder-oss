@@ -7,6 +7,7 @@ import { decryptCredentials } from "../../../../packages/core/src/credentials/en
 import {
   AgentConfigurationError,
   createAgent,
+  disableAgentsWithUnavailableRepositories,
   getAgent,
   listAgentOptions,
   listAgents,
@@ -285,6 +286,7 @@ export const agentRoutes = new Hono()
 
     try {
       await refreshGitHubRepositories(tenant.organizationId);
+      await disableAgentsWithUnavailableRepositories(tenant.organizationId);
       return context.json(await listAgentOptions(tenant.organizationId));
     } catch (error) {
       console.error("Unable to refresh GitHub repositories", error);
