@@ -15,8 +15,10 @@ import {
 } from "../../../../packages/core/src/db/agents.js";
 import {
   getSlackChannelConnection,
+  listConnectedIntegrationAccounts,
   listConnectedIntegrationAccountCredentials,
   markSlackChannelJoined,
+  replaceRepositories,
   replaceIntegrationResources,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
@@ -36,6 +38,7 @@ import {
   listSlackChannels,
   SlackChannelJoinError,
 } from "../integrations/slack.js";
+import { listGitHubRepositories } from "../integrations/github.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
 import {
@@ -46,6 +49,8 @@ import {
 const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
 });
+
+const githubInstallationIdSchema = z.coerce.number().int().positive();
 
 const agentEnabledSchema = z.object({
   enabled: z.boolean(),
@@ -130,6 +135,24 @@ export async function refreshSlackChannelResources(
         "slack_channel",
         channels,
       );
+    }),
+  );
+}
+
+export async function refreshGitHubRepositories(
+  organizationId: string,
+): Promise<void> {
+  const accounts = await listConnectedIntegrationAccounts(
+    organizationId,
+    "github",
+  );
+
+  await Promise.all(
+    accounts.map(async (account) => {
+      const repositories = await listGitHubRepositories(
+        githubInstallationIdSchema.parse(account.externalAccountId),
+      );
+      await replaceRepositories(account.id, repositories);
     }),
   );
 }
@@ -249,6 +272,26 @@ export const agentRoutes = new Hono()
         {
           error: "Unable to refresh Slack channels",
           code: "slack_refresh_failed",
+        },
+        502,
+      );
+    }
+  })
+  .post("/options/refresh/github", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    try {
+      await refreshGitHubRepositories(tenant.organizationId);
+      return context.json(await listAgentOptions(tenant.organizationId));
+    } catch (error) {
+      console.error("Unable to refresh GitHub repositories", error);
+      return context.json(
+        {
+          error: "Unable to refresh GitHub repositories",
+          code: "github_refresh_failed",
         },
         502,
       );

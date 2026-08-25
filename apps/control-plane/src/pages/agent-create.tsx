@@ -16,6 +16,7 @@ import {
   fetchAgentOptions,
   fetchIntegrations,
   createWorkspaceSecret,
+  refreshGitHubAgentOptions,
   refreshSlackAgentOptions,
   saveAgent,
   slackChannelLabel,
@@ -498,6 +499,11 @@ export function AgentCreatePage() {
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshingGithubRepositories, setRefreshingGithubRepositories] =
+    useState(false);
+  const [githubRefreshError, setGithubRefreshError] = useState<string | null>(
+    null,
+  );
   const [refreshingSlackChannels, setRefreshingSlackChannels] = useState(false);
   const [slackRefreshError, setSlackRefreshError] = useState<string | null>(null);
   const [secretName, setSecretName] = useState("");
@@ -505,6 +511,7 @@ export function AgentCreatePage() {
   const [secretHosts, setSecretHosts] = useState("");
   const [creatingSecret, setCreatingSecret] = useState(false);
   const [secretError, setSecretError] = useState<string | null>(null);
+  const githubRefreshInFlight = useRef<Promise<void> | null>(null);
   const slackRefreshInFlight = useRef<Promise<void> | null>(null);
   const connectingProviderRef = useRef<IntegrationSummary["id"] | null>(null);
   const [notice] = useState(connectionNotice);
@@ -1004,6 +1011,51 @@ export function AgentCreatePage() {
     return refresh;
   }
 
+  function refreshGithubRepositories(): Promise<void> {
+    if (githubRefreshInFlight.current) return githubRefreshInFlight.current;
+
+    setRefreshingGithubRepositories(true);
+    setGithubRefreshError(null);
+    const refresh = refreshGitHubAgentOptions()
+      .then((freshOptions) => {
+        const freshRepositoryIds = new Set(
+          freshOptions.repositories.map((repository) => repository.id),
+        );
+        setOptions(freshOptions);
+        setDraft((current) => {
+          if (!current) return current;
+          const repositoryIds = current.repositoryIds.filter((id) =>
+            freshRepositoryIds.has(id),
+          );
+          return {
+            ...current,
+            repositoryIds,
+            prMode: repositoryIds.length === 0 ? "disabled" : current.prMode,
+          };
+        });
+      })
+      .catch((caught: unknown) => {
+        setGithubRefreshError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to refresh GitHub repositories",
+        );
+      })
+      .finally(() => {
+        setRefreshingGithubRepositories(false);
+        if (githubRefreshInFlight.current === refresh) {
+          githubRefreshInFlight.current = null;
+        }
+      });
+    githubRefreshInFlight.current = refresh;
+    return refresh;
+  }
+
+  function openGithubDialog() {
+    setGithubDialogOpen(true);
+    void refreshGithubRepositories();
+  }
+
   function integrationFor(provider: IntegrationSummary["id"]) {
     return integrations.find((integration) => integration.id === provider);
   }
@@ -1151,7 +1203,7 @@ export function AgentCreatePage() {
     }
     const firstRepository = options.repositories[0];
     if (!firstRepository) {
-      setGithubDialogOpen(true);
+      openGithubDialog();
       return;
     }
     updateDraft({ repositoryIds: [firstRepository.id], prMode: "manual" });
@@ -1971,7 +2023,7 @@ export function AgentCreatePage() {
                       <ContextIntegrationControls
                         enabled={draft.repositoryIds.length > 0}
                         label="GitHub"
-                        onConfigure={() => setGithubDialogOpen(true)}
+                        onConfigure={openGithubDialog}
                         onToggle={toggleGithubContextIntegration}
                       />
                     }
@@ -2066,6 +2118,9 @@ export function AgentCreatePage() {
                                 </label>
                               </div>
                               <div className="repositoryConnectList">
+                                {refreshingGithubRepositories ? (
+                                  <p>Refreshing repositories…</p>
+                                ) : null}
                                 {filteredGithubRepositories.map((repository) => {
                                   const selected = draft.repositoryIds.includes(
                                     repository.id,
@@ -2130,6 +2185,14 @@ export function AgentCreatePage() {
                                 ) : null}
                               </div>
                             </div>
+
+                          {!refreshingGithubRepositories && githubRefreshError ? (
+                            <Alert
+                              role="alert"
+                              title={`${githubRefreshError}. Showing the last available list.`}
+                              tone="danger"
+                            />
+                          ) : null}
 
                           <div className="contextSettingRow">
                             <span>

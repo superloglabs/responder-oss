@@ -471,6 +471,12 @@ export async function refreshSlackAgentOptions(): Promise<AgentOptions> {
   });
 }
 
+export async function refreshGitHubAgentOptions(): Promise<AgentOptions> {
+  return apiJson<AgentOptions>("/api/agents/options/refresh/github", {
+    method: "POST",
+  });
+}
+
 export async function createWorkspaceSecret(input: {
   name: string;
   value: string;
