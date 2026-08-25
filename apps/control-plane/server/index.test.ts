@@ -253,17 +253,20 @@ describe("control-plane API", () => {
   });
 
   it("rejects unauthenticated agent writes", async () => {
-    const [createResponse, refreshResponse] = await Promise.all([
+    const [createResponse, slackRefreshResponse, githubRefreshResponse] =
+      await Promise.all([
       app.request("/api/agents", {
         method: "POST",
         body: "{}",
         headers: { "content-type": "application/json" },
       }),
       app.request("/api/agents/options/refresh/slack", { method: "POST" }),
+      app.request("/api/agents/options/refresh/github", { method: "POST" }),
     ]);
 
     expect(createResponse.status).toBe(401);
-    expect(refreshResponse.status).toBe(401);
+    expect(slackRefreshResponse.status).toBe(401);
+    expect(githubRefreshResponse.status).toBe(401);
   });
 
   it("rejects unauthenticated billing requests", async () => {

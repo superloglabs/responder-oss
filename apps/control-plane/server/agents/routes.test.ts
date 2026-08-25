@@ -2,11 +2,14 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  disableAgentsWithUnavailableRepositories,
   listAgentOptions,
   setAgentEnabled,
 } from "../../../../packages/core/src/db/agents.js";
 import {
+  listConnectedIntegrationAccounts,
   listConnectedIntegrationAccountCredentials,
+  replaceRepositories,
   replaceIntegrationResources,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
@@ -22,6 +25,7 @@ import {
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
 import { listSlackChannels } from "../integrations/slack.js";
+import { listGitHubRepositories } from "../integrations/github.js";
 import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
@@ -33,6 +37,7 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   createAgent: vi.fn(),
+  disableAgentsWithUnavailableRepositories: vi.fn(),
   getAgent: vi.fn(),
   listAgentOptions: vi.fn(),
   listAgents: vi.fn(),
@@ -42,8 +47,10 @@ vi.mock("../../../../packages/core/src/db/agents.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   getSlackChannelConnection: vi.fn(),
+  listConnectedIntegrationAccounts: vi.fn(),
   listConnectedIntegrationAccountCredentials: vi.fn(),
   markSlackChannelJoined: vi.fn(),
+  replaceRepositories: vi.fn(),
   replaceIntegrationResources: vi.fn(),
 }));
 vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
@@ -67,6 +74,9 @@ vi.mock("../integrations/slack.js", () => ({
       this.slackCode = slackCode;
     }
   },
+}));
+vi.mock("../integrations/github.js", () => ({
+  listGitHubRepositories: vi.fn(),
 }));
 vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
@@ -506,6 +516,85 @@ describe("Slack channel option refresh", () => {
       code: "slack_refresh_failed",
     });
     expect(replaceIntegrationResources).not.toHaveBeenCalled();
+    expect(listAgentOptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("GitHub repository option refresh", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it("fetches live repositories for every connected GitHub installation", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { id: "github-account-1", externalAccountId: "123" },
+      { id: "github-account-2", externalAccountId: "456" },
+    ]);
+    vi.mocked(listGitHubRepositories)
+      .mockResolvedValueOnce([
+        {
+          externalId: "1001",
+          fullName: "acme/new-repository",
+          defaultBranch: "main",
+          private: true,
+          metadata: {},
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          externalId: "1002",
+          fullName: "example/api",
+          defaultBranch: "main",
+          private: false,
+          metadata: {},
+        },
+      ]);
+    vi.mocked(listAgentOptions).mockResolvedValue(options);
+
+    const response = await app.request("/api/agents/options/refresh/github", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(options);
+    expect(listGitHubRepositories).toHaveBeenCalledTimes(2);
+    expect(listGitHubRepositories).toHaveBeenCalledWith(123);
+    expect(listGitHubRepositories).toHaveBeenCalledWith(456);
+    expect(replaceRepositories).toHaveBeenCalledWith(
+      "github-account-1",
+      [expect.objectContaining({ fullName: "acme/new-repository" })],
+    );
+    expect(replaceRepositories).toHaveBeenCalledWith(
+      "github-account-2",
+      [expect.objectContaining({ fullName: "example/api" })],
+    );
+    expect(disableAgentsWithUnavailableRepositories).toHaveBeenCalledWith(
+      tenant.organizationId,
+    );
+  });
+
+  it("returns a retryable error without replacing repositories when GitHub fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { id: "github-account-1", externalAccountId: "123" },
+    ]);
+    vi.mocked(listGitHubRepositories).mockRejectedValue(
+      new Error("GitHub unavailable"),
+    );
+
+    const response = await app.request("/api/agents/options/refresh/github", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to refresh GitHub repositories",
+      code: "github_refresh_failed",
+    });
+    expect(replaceRepositories).not.toHaveBeenCalled();
     expect(listAgentOptions).not.toHaveBeenCalled();
   });
 });

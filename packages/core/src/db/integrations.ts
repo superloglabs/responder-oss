@@ -508,6 +508,25 @@ export async function listConnectedIntegrationAccountCredentials(
     );
 }
 
+export async function listConnectedIntegrationAccounts(
+  organizationId: string,
+  provider: IntegrationProvider,
+) {
+  return getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      externalAccountId: integrationAccounts.externalAccountId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, organizationId),
+        eq(integrationAccounts.provider, provider),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    );
+}
+
 export interface SyncedIntegrationResource {
   externalId: string;
   displayName: string;
