@@ -136,20 +136,21 @@ export async function prepareDaytonaSandbox(
   const output = await session.execCommand({
     cmd: [
       "set -eu",
-      "if command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1; then exit 0; fi",
-      "if ! command -v apt-get >/dev/null 2>&1; then echo 'curl, git, Python 3, or ripgrep is unavailable and apt-get is missing' >&2; exit 1; fi",
+      "if command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1; then exit 0; fi",
+      "if ! command -v apt-get >/dev/null 2>&1; then echo 'curl, git, Node.js, Python 3, or ripgrep is unavailable and apt-get is missing' >&2; exit 1; fi",
       "if [ \"$(id -u)\" -eq 0 ]; then",
       "  apt-get update -qq",
-      "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git python3 ripgrep",
+      "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs python3 ripgrep",
       "elif command -v sudo >/dev/null 2>&1; then",
       "  sudo apt-get update -qq",
-      "  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git python3 ripgrep",
+      "  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs python3 ripgrep",
       "else",
-      "  echo 'curl, git, Python 3, and ripgrep installation require root access' >&2",
+      "  echo 'curl, git, Node.js, Python 3, and ripgrep installation require root access' >&2",
       "  exit 1",
       "fi",
       "command -v curl >/dev/null",
       "command -v git >/dev/null",
+      "command -v node >/dev/null",
       "command -v python3 >/dev/null",
       "command -v rg >/dev/null",
     ].join("\n"),
@@ -159,7 +160,7 @@ export async function prepareDaytonaSandbox(
   if (!execSucceeded(output)) {
     const detail = output.split("\nOutput:\n", 2)[1]?.trim();
     throw new Error(
-      `Unable to install curl, git, Python 3, and ripgrep in Daytona${detail ? `: ${detail}` : ""}`,
+      `Unable to install curl, git, Node.js, Python 3, and ripgrep in Daytona${detail ? `: ${detail}` : ""}`,
     );
   }
 }
