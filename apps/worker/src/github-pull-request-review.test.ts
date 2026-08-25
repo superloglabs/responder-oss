@@ -8,6 +8,7 @@ import {
 } from "./github-pull-request-review.js";
 
 const headSha = "a".repeat(40);
+const noMorePages = { endCursor: null, hasNextPage: false };
 
 function commandResult(exitCode: number, output = "") {
   return `Process exited with code ${exitCode}\nOutput:\n${output}`;
@@ -295,7 +296,10 @@ describe("GitHub pull request review follow-up", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         graphqlResponse({
-          node: { comments: { nodes: [] }, isResolved: false },
+          node: {
+            comments: { nodes: [], pageInfo: noMorePages },
+            isResolved: false,
+          },
         }),
       )
       .mockResolvedValueOnce(
@@ -339,18 +343,25 @@ describe("GitHub pull request review follow-up", () => {
 
   it("resumes resolution without duplicating a reply after a lost response", async () => {
     const marker = "<!-- responder-review-thread:thread-1 -->";
+    const sleep = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         graphqlResponse({
-          node: { comments: { nodes: [] }, isResolved: false },
+          node: {
+            comments: { nodes: [], pageInfo: noMorePages },
+            isResolved: false,
+          },
         }),
       )
-      .mockRejectedValueOnce(new Error("connection lost after write"))
+      .mockRejectedValueOnce(new TypeError("connection lost after write"))
       .mockResolvedValueOnce(
         graphqlResponse({
           node: {
-            comments: { nodes: [{ body: `Handled.\n\n${marker}` }] },
+            comments: {
+              nodes: [{ body: `Handled.\n\n${marker}` }],
+              pageInfo: noMorePages,
+            },
             isResolved: false,
           },
         }),
@@ -370,6 +381,7 @@ describe("GitHub pull request review follow-up", () => {
         {
           createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
           fetch: fetchMock,
+          sleep,
         },
       ),
     ).resolves.toBeUndefined();
@@ -380,6 +392,85 @@ describe("GitHub pull request review follow-up", () => {
       operations.filter((query) => query.includes("addPullRequestReviewThreadReply")),
     ).toHaveLength(1);
     expect(operations.at(-1)).toContain("resolveReviewThread");
+    expect(sleep).toHaveBeenCalledWith(250);
+  });
+
+  it("paginates marker lookup before deciding to add a reply", async () => {
+    const marker = "<!-- responder-review-thread:thread-1 -->";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          node: {
+            comments: {
+              nodes: [{ body: "An older reply" }],
+              pageInfo: { endCursor: "comment-cursor", hasNextPage: true },
+            },
+            isResolved: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          node: {
+            comments: {
+              nodes: [{ body: `Handled.\n\n${marker}` }],
+              pageInfo: noMorePages,
+            },
+            isResolved: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          resolveReviewThread: { thread: { id: "thread-1", isResolved: true } },
+        }),
+      );
+
+    await replyToAndResolveReviewThreads(
+      {
+        installationId: 123,
+        responses: [{ body: "Handled.", threadId: "thread-1" }],
+      },
+      {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        fetch: fetchMock,
+      },
+    );
+
+    const operations = fetchMock.mock.calls.map((call) =>
+      JSON.parse((call[1]?.body as string) ?? "{}"),
+    );
+    expect(operations[1]?.variables.after).toBe("comment-cursor");
+    expect(
+      operations.filter((operation) =>
+        operation.query.includes("addPullRequestReviewThreadReply"),
+      ),
+    ).toHaveLength(0);
+    expect(operations.at(-1)?.query).toContain("resolveReviewThread");
+  });
+
+  it("does not retry a permanent GitHub error", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ message: "Validation failed" }, { status: 422 }),
+    );
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      replyToAndResolveReviewThreads(
+        {
+          installationId: 123,
+          responses: [{ body: "Handled.", threadId: "thread-1" }],
+        },
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+          sleep,
+        },
+      ),
+    ).rejects.toThrow("Validation failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("rejects review publication when the PR head changed", () => {

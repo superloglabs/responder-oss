@@ -69,6 +69,10 @@ const reviewThreadStateSchema = z.object({
     .object({
       comments: z.object({
         nodes: z.array(z.object({ body: z.string() })),
+        pageInfo: z.object({
+          endCursor: z.string().nullable(),
+          hasNextPage: z.boolean(),
+        }),
       }),
       isResolved: z.boolean(),
     })
@@ -78,6 +82,7 @@ const reviewThreadStateSchema = z.object({
 interface ReviewDependencies {
   createInstallationToken: (installationId: number) => Promise<string>;
   fetch: typeof fetch;
+  sleep?: (milliseconds: number) => Promise<void>;
 }
 
 const defaultDependencies: ReviewDependencies = {
@@ -123,7 +128,7 @@ async function githubGraphql(
   });
   const payload = (await response.json().catch(() => null)) as {
     data?: unknown;
-    errors?: Array<{ message?: unknown }>;
+    errors?: Array<{ message?: unknown; type?: unknown }>;
     message?: unknown;
   } | null;
   const graphErrorValue = payload?.errors?.find(
@@ -137,7 +142,18 @@ async function githubGraphql(
       (typeof payload?.message === "string"
         ? payload.message
         : `GitHub request failed (${response.status})`);
-    throw new Error(message);
+    const retryable =
+      response.status === 408 ||
+      response.status === 429 ||
+      response.status >= 500 ||
+      (response.status === 403 &&
+        (response.headers.has("retry-after") ||
+          response.headers.get("x-ratelimit-remaining") === "0")) ||
+      payload?.errors?.some(
+        (error) =>
+          error.type === "INTERNAL" || error.type === "RATE_LIMITED",
+      ) === true;
+    throw new GitHubGraphqlRequestError(message, retryable);
   }
   return payload.data;
 }
@@ -332,25 +348,15 @@ export async function replyToAndResolveReviewThreads(
     assertNoDaytonaSecretPlaceholders(response.body, "Review reply");
     const marker = `<!-- responder-review-thread:${response.threadId} -->`;
     await retryReviewOperation(async () => {
-      const state = reviewThreadStateSchema.parse(
-        await githubGraphql(
-          dependencies.fetch,
-          token,
-          `query ResponderReviewThreadState($threadId: ID!) {
-            node(id: $threadId) {
-              ... on PullRequestReviewThread {
-                isResolved
-                comments(first: 100) { nodes { body } }
-              }
-            }
-          }`,
-          { threadId: response.threadId },
-        ),
-      ).node;
-      if (!state) throw new Error("Pull request review thread is unavailable");
+      const state = await getReviewThreadState(
+        dependencies.fetch,
+        token,
+        response.threadId,
+        marker,
+      );
       if (state.isResolved) return;
 
-      if (!state.comments.nodes.some((comment) => comment.body.includes(marker))) {
+      if (!state.hasMarker) {
         await githubGraphql(
           dependencies.fetch,
           token,
@@ -372,21 +378,103 @@ export async function replyToAndResolveReviewThreads(
         }`,
         { threadId: response.threadId },
       );
-    });
+    }, dependencies.sleep ?? sleep);
   }
 }
 
-async function retryReviewOperation(operation: () => Promise<void>) {
-  let failure: unknown;
+class GitHubGraphqlRequestError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "GitHubGraphqlRequestError";
+  }
+}
+
+async function getReviewThreadState(
+  fetchImpl: typeof fetch,
+  token: string,
+  threadId: string,
+  marker: string,
+): Promise<{ hasMarker: boolean; isResolved: boolean }> {
+  let after: string | null = null;
+  do {
+    const parsed: {
+      node: {
+        comments: {
+          nodes: Array<{ body: string }>;
+          pageInfo: { endCursor: string | null; hasNextPage: boolean };
+        };
+        isResolved: boolean;
+      } | null;
+    } = reviewThreadStateSchema.parse(
+      await githubGraphql(
+        fetchImpl,
+        token,
+        `query ResponderReviewThreadState($threadId: ID!, $after: String) {
+          node(id: $threadId) {
+            ... on PullRequestReviewThread {
+              isResolved
+              comments(first: 100, after: $after) {
+                nodes { body }
+                pageInfo { endCursor hasNextPage }
+              }
+            }
+          }
+        }`,
+        { after, threadId },
+      ),
+    );
+    const state = parsed.node;
+    if (!state) throw new Error("Pull request review thread is unavailable");
+    if (
+      state.isResolved ||
+      state.comments.nodes.some((comment) => comment.body.includes(marker))
+    ) {
+      return {
+        hasMarker: !state.isResolved,
+        isResolved: state.isResolved,
+      };
+    }
+    if (
+      state.comments.pageInfo.hasNextPage &&
+      !state.comments.pageInfo.endCursor
+    ) {
+      throw new Error("GitHub omitted the review comment pagination cursor");
+    }
+    after = state.comments.pageInfo.hasNextPage
+      ? state.comments.pageInfo.endCursor
+      : null;
+  } while (after);
+  return { hasMarker: false, isResolved: false };
+}
+
+function isTransientGitHubError(error: unknown): boolean {
+  return (
+    (error instanceof GitHubGraphqlRequestError && error.retryable) ||
+    error instanceof TypeError ||
+    (error instanceof DOMException && error.name === "AbortError")
+  );
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function retryReviewOperation(
+  operation: () => Promise<void>,
+  wait: (milliseconds: number) => Promise<void>,
+) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       await operation();
       return;
     } catch (error) {
-      failure = error;
+      if (attempt === 3 || !isTransientGitHubError(error)) throw error;
+      await wait(250 * 2 ** (attempt - 1));
     }
   }
-  throw failure;
 }
 
 export function assertPullRequestReviewStateCurrent(
