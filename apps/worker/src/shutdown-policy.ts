@@ -1,6 +1,21 @@
-export const workerGracefulShutdownTimeoutMs = 110_000;
+const defaultWorkerGracefulShutdownTimeoutMs = 110_000;
 
-// Allow the old task's graceful stop plus a small scheduling margin before a
-// startup migration treats its legacy active job as abandoned.
-export const legacyHeartbeatAdoptionGraceMs =
-  workerGracefulShutdownTimeoutMs + 15_000;
+export function workerGracefulShutdownTimeoutMs(
+  environment: NodeJS.ProcessEnv = process.env,
+): number {
+  const configured = Number.parseInt(
+    environment.WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_MS ?? "",
+    10,
+  );
+  return Number.isFinite(configured) && configured >= 1_000
+    ? configured
+    : defaultWorkerGracefulShutdownTimeoutMs;
+}
+
+// Wait slightly longer than the old task's graceful stop for it to hand active
+// jobs back. This never reclassifies active work by itself.
+export function legacyHeartbeatHandoffWaitMs(
+  environment: NodeJS.ProcessEnv = process.env,
+): number {
+  return workerGracefulShutdownTimeoutMs(environment) + 15_000;
+}

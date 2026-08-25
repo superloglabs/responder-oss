@@ -258,7 +258,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     await boss.stop({
       graceful: true,
-      timeout: workerGracefulShutdownTimeoutMs,
+      timeout: workerGracefulShutdownTimeoutMs(),
     });
   } finally {
     await flushWorkerMonitoring();
