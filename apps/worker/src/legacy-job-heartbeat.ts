@@ -2,7 +2,7 @@ import {
   investigationHeartbeatSeconds,
   investigationQueue,
 } from "@responder/core/jobs";
-import { legacyHeartbeatAdoptionGraceMs } from "./shutdown-policy.js";
+import { legacyHeartbeatHandoffWaitMs } from "./shutdown-policy.js";
 
 const pollIntervalMs = 1_000;
 
@@ -31,7 +31,7 @@ export async function migrateLegacyInvestigationHeartbeats(
   const database = boss.getDb();
   const now = options.now ?? Date.now;
   const waitFor = options.wait ?? wait;
-  const deadline = now() + (options.graceMs ?? legacyHeartbeatAdoptionGraceMs);
+  const deadline = now() + (options.graceMs ?? legacyHeartbeatHandoffWaitMs());
 
   while (true) {
     await database.executeSql(
@@ -52,22 +52,7 @@ export async function migrateLegacyInvestigationHeartbeats(
       [investigationQueue],
     );
     if (active.rows.length === 0) return;
-    if (now() < deadline) {
-      await waitFor(pollIntervalMs);
-      continue;
-    }
-
-    // The previous ECS task has exhausted its stop timeout. Any legacy active
-    // row is abandoned, so initialize its heartbeat for pg-boss supervision.
-    await database.executeSql(
-      `UPDATE pgboss.job
-       SET heartbeat_seconds = $2,
-           heartbeat_on = now()
-     WHERE name = $1
-       AND state = 'active'
-       AND heartbeat_seconds IS NULL`,
-      [investigationQueue, investigationHeartbeatSeconds],
-    );
-    return;
+    if (now() >= deadline) return;
+    await waitFor(pollIntervalMs);
   }
 }

@@ -39,22 +39,20 @@ describe("legacy investigation heartbeat rollout migration", () => {
     expect(executeSql).toHaveBeenCalledTimes(4);
   });
 
-  it("adopts an abandoned active row after the ECS shutdown window", async () => {
+  it("never reclassifies an active row after the handoff window", async () => {
     const executeSql = vi
       .fn()
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ id: "job-id" }] })
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({ rows: [{ id: "job-id" }] });
 
     await migrateLegacyInvestigationHeartbeats(
       { getDb: () => ({ executeSql }) },
       { graceMs: 0, now: () => 0 },
     );
 
-    expect(executeSql).toHaveBeenNthCalledWith(
-      3,
-      expect.stringContaining("heartbeat_on = now()"),
-      [investigationQueue, 60],
+    expect(executeSql).toHaveBeenCalledTimes(2);
+    expect(executeSql.mock.calls.flat().join("\n")).not.toContain(
+      "heartbeat_on = now()",
     );
   });
 });
