@@ -1,6 +1,7 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
 import {
+  assertPullRequestReviewStateCurrent,
   listUnresolvedBotReviewThreads,
   publishPullRequestReviewChanges,
   replyToAndResolveReviewThreads,
@@ -141,6 +142,76 @@ describe("GitHub pull request review follow-up", () => {
     ).rejects.toThrow("forked repositories");
   });
 
+  it("loads bot review threads from every page", async () => {
+    const thread = (id: string, path: string) => ({
+      id,
+      isOutdated: false,
+      isResolved: false,
+      comments: {
+        nodes: [
+          {
+            author: { login: "reviewer[bot]", __typename: "Bot" },
+            body: `Review ${path}`,
+            id: `comment-${id}`,
+            line: 5,
+            originalLine: 5,
+            path,
+            url: `https://github.com/acme/app/pull/42#discussion_${id}`,
+          },
+        ],
+      },
+    });
+    const page = (
+      nodes: ReturnType<typeof thread>[],
+      pageInfo: { endCursor: string | null; hasNextPage: boolean },
+    ) =>
+      graphqlResponse({
+        repository: {
+          pullRequest: {
+            headRefName: "fix/review",
+            headRefOid: headSha,
+            headRepository: { nameWithOwner: "acme/app" },
+            reviewThreads: { nodes, pageInfo },
+          },
+        },
+      });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        page([thread("thread-1", "src/one.ts")], {
+          endCursor: "cursor-1",
+          hasNextPage: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        page([thread("thread-2", "src/two.ts")], {
+          endCursor: null,
+          hasNextPage: false,
+        }),
+      );
+
+    const result = await listUnresolvedBotReviewThreads(
+      {
+        installationId: 123,
+        pullRequestNumber: 42,
+        repository: "acme/app",
+      },
+      {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        fetch: fetchMock,
+      },
+    );
+
+    expect(result.threads.map((item) => item.id)).toEqual([
+      "thread-1",
+      "thread-2",
+    ]);
+    const secondRequest = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1]?.body as string) ?? "{}",
+    );
+    expect(secondRequest.variables.after).toBe("cursor-1");
+  });
+
   it("fast-forwards the existing PR branch with sandbox changes", async () => {
     const session = {
       execCommand: vi
@@ -152,6 +223,7 @@ describe("GitHub pull request review follow-up", () => {
     } as unknown as DaytonaSandboxSession;
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ tree: { sha: "head-tree-sha" } }))
       .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
       .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
       .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
@@ -185,6 +257,13 @@ describe("GitHub pull request review follow-up", () => {
         method: "PATCH",
       }),
     );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://api.github.com/repos/acme/app/git/trees",
+      expect.objectContaining({
+        body: expect.stringContaining('"base_tree":"head-tree-sha"'),
+      }),
+    );
   });
 
   it("can respond without publishing a commit", async () => {
@@ -212,12 +291,23 @@ describe("GitHub pull request review follow-up", () => {
   });
 
   it("replies before resolving each supplied thread", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
-      graphqlResponse({
-        addPullRequestReviewThreadReply: { comment: { id: "reply" } },
-        resolveReviewThread: { thread: { id: "thread-1", isResolved: true } },
-      }),
-    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          node: { comments: { nodes: [] }, isResolved: false },
+        }),
+      )
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          addPullRequestReviewThreadReply: { comment: { id: "reply" } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          resolveReviewThread: { thread: { id: "thread-1", isResolved: true } },
+        }),
+      );
 
     await replyToAndResolveReviewThreads(
       {
@@ -236,7 +326,84 @@ describe("GitHub pull request review follow-up", () => {
     const secondBody = JSON.parse(
       (fetchMock.mock.calls[1]?.[1]?.body as string) ?? "{}",
     );
-    expect(firstBody.query).toContain("addPullRequestReviewThreadReply");
-    expect(secondBody.query).toContain("resolveReviewThread");
+    const thirdBody = JSON.parse(
+      (fetchMock.mock.calls[2]?.[1]?.body as string) ?? "{}",
+    );
+    expect(firstBody.query).toContain("ResponderReviewThreadState");
+    expect(secondBody.query).toContain("addPullRequestReviewThreadReply");
+    expect(secondBody.variables.body).toContain(
+      "<!-- responder-review-thread:thread-1 -->",
+    );
+    expect(thirdBody.query).toContain("resolveReviewThread");
+  });
+
+  it("resumes resolution without duplicating a reply after a lost response", async () => {
+    const marker = "<!-- responder-review-thread:thread-1 -->";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          node: { comments: { nodes: [] }, isResolved: false },
+        }),
+      )
+      .mockRejectedValueOnce(new Error("connection lost after write"))
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          node: {
+            comments: { nodes: [{ body: `Handled.\n\n${marker}` }] },
+            isResolved: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          resolveReviewThread: { thread: { id: "thread-1", isResolved: true } },
+        }),
+      );
+
+    await expect(
+      replyToAndResolveReviewThreads(
+        {
+          installationId: 123,
+          responses: [{ body: "Handled.", threadId: "thread-1" }],
+        },
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+        },
+      ),
+    ).resolves.toBeUndefined();
+    const operations = fetchMock.mock.calls.map((call) =>
+      JSON.parse((call[1]?.body as string) ?? "{}").query,
+    );
+    expect(
+      operations.filter((query) => query.includes("addPullRequestReviewThreadReply")),
+    ).toHaveLength(1);
+    expect(operations.at(-1)).toContain("resolveReviewThread");
+  });
+
+  it("rejects review publication when the PR head changed", () => {
+    const expected = {
+      branch: "fix/review",
+      headSha,
+      threads: [
+        {
+          author: "reviewer[bot]",
+          body: "Handle this.",
+          id: "thread-1",
+          line: 5,
+          path: "src/app.ts",
+          url: "https://github.com/acme/app/pull/42#discussion_thread-1",
+        },
+      ],
+    };
+
+    expect(() =>
+      assertPullRequestReviewStateCurrent(
+        expected,
+        { ...expected, headSha: "c".repeat(40) },
+        new Set(["thread-1"]),
+      ),
+    ).toThrow("head changed");
   });
 });

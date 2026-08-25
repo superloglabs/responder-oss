@@ -97,6 +97,7 @@ export async function runPullRequestReviewAgent(
     const reviewTool = createPullRequestReviewTool({
       checkout,
       installationId: job.installationId,
+      pullRequestNumber: job.pullRequest.number,
       review,
       session,
       threads: review.threads,

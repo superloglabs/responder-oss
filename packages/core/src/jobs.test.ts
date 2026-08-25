@@ -55,7 +55,11 @@ describe("background jobs", () => {
     expect(pullRequestReviewQueue).toBe("responder-pull-request-reviews-v1");
     expect(createQueue).toHaveBeenCalledWith(
       pullRequestReviewQueue,
-      expect.objectContaining({ policy: "singleton", retryLimit: 0 }),
+      expect.objectContaining({
+        policy: "key_strict_fifo",
+        retryBackoff: true,
+        retryLimit: 3,
+      }),
     );
   });
 

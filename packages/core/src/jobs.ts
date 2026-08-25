@@ -148,12 +148,14 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       deleteAfterSeconds: 604_800,
       expireInSeconds: 3_600,
       notify: true,
-      // Keep one active follow-up per PR while retaining later comment events.
+      // Preserve every comment event while running only one follow-up per PR.
       // Redundant queued passes are cheap because they exit when no threads remain.
-      policy: "singleton",
-      // A retry could duplicate review replies or race a newer PR head. A new
-      // root review comment will enqueue another pass.
-      retryLimit: 0,
+      policy: "key_strict_fifo",
+      retryBackoff: true,
+      retryDelay: 30,
+      // Thread replies carry stable markers, so partial publication can resume
+      // without posting duplicate replies.
+      retryLimit: 3,
     }),
     boss.createQueue(linearTicketQueue, {
       deleteAfterSeconds: 604_800,

@@ -6,6 +6,8 @@ import type {
   PullRequestReviewState,
 } from "./github-pull-request-review.js";
 import {
+  assertPullRequestReviewStateCurrent,
+  listUnresolvedBotReviewThreads,
   publishPullRequestReviewChanges,
   replyToAndResolveReviewThreads,
 } from "./github-pull-request-review.js";
@@ -20,6 +22,7 @@ export interface AddressedReviewResult {
 export function createPullRequestReviewTool(input: {
   checkout: CheckedOutRepository;
   installationId: number;
+  pullRequestNumber: number;
   review: PullRequestReviewState;
   session: DaytonaSandboxSession;
   threads: BotReviewThread[];
@@ -54,6 +57,17 @@ export function createPullRequestReviewTool(input: {
         ) {
           throw new Error("Responses must cover every supplied review thread exactly once");
         }
+
+        const currentReview = await listUnresolvedBotReviewThreads({
+          installationId: input.installationId,
+          pullRequestNumber: input.pullRequestNumber,
+          repository: input.checkout.repository,
+        });
+        assertPullRequestReviewStateCurrent(
+          input.review,
+          currentReview,
+          allowedThreadIds,
+        );
 
         const published = await publishPullRequestReviewChanges(
           {

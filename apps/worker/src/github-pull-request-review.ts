@@ -61,6 +61,19 @@ const reviewThreadsResponseSchema = z.object({
 const githubBlobSchema = z.object({ sha: z.string().min(1) });
 const githubTreeSchema = z.object({ sha: z.string().min(1) });
 const githubCommitSchema = z.object({ sha: z.string().min(1) });
+const githubCommitDetailsSchema = z.object({
+  tree: z.object({ sha: z.string().min(1) }),
+});
+const reviewThreadStateSchema = z.object({
+  node: z
+    .object({
+      comments: z.object({
+        nodes: z.array(z.object({ body: z.string() })),
+      }),
+      isResolved: z.boolean(),
+    })
+    .nullable(),
+});
 
 interface ReviewDependencies {
   createInstallationToken: (installationId: number) => Promise<string>;
@@ -192,7 +205,6 @@ export async function listUnresolvedBotReviewThreads(
       const comment = thread.comments.nodes[0];
       if (
         thread.isResolved ||
-        thread.isOutdated ||
         !comment ||
         comment.author?.__typename !== "Bot"
       ) {
@@ -249,6 +261,14 @@ export async function publishPullRequestReviewChanges(
 
   const token = await dependencies.createInstallationToken(input.installationId);
   const apiBase = `https://api.github.com/repos/${repositoryApiPath(input.repository)}`;
+  const headCommit = githubCommitDetailsSchema.parse(
+    await githubJson(
+      dependencies.fetch,
+      token,
+      `${apiBase}/git/commits/${encodeURIComponent(input.headSha)}`,
+      { method: "GET" },
+    ),
+  );
   const treeEntries: Array<{
     mode: "100644" | "100755";
     path: string;
@@ -274,7 +294,7 @@ export async function publishPullRequestReviewChanges(
   const tree = githubTreeSchema.parse(
     await githubJson(dependencies.fetch, token, `${apiBase}/git/trees`, {
       method: "POST",
-      body: JSON.stringify({ base_tree: input.headSha, tree: treeEntries }),
+      body: JSON.stringify({ base_tree: headCommit.tree.sha, tree: treeEntries }),
     }),
   );
   const commit = githubCommitSchema.parse(
@@ -310,25 +330,78 @@ export async function replyToAndResolveReviewThreads(
   const token = await dependencies.createInstallationToken(input.installationId);
   for (const response of input.responses) {
     assertNoDaytonaSecretPlaceholders(response.body, "Review reply");
-    await githubGraphql(
-      dependencies.fetch,
-      token,
-      `mutation ResponderReplyToReviewThread($threadId: ID!, $body: String!) {
-        addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
-          comment { id }
-        }
-      }`,
-      { body: response.body, threadId: response.threadId },
-    );
-    await githubGraphql(
-      dependencies.fetch,
-      token,
-      `mutation ResponderResolveReviewThread($threadId: ID!) {
-        resolveReviewThread(input: { threadId: $threadId }) {
-          thread { id isResolved }
-        }
-      }`,
-      { threadId: response.threadId },
-    );
+    const marker = `<!-- responder-review-thread:${response.threadId} -->`;
+    await retryReviewOperation(async () => {
+      const state = reviewThreadStateSchema.parse(
+        await githubGraphql(
+          dependencies.fetch,
+          token,
+          `query ResponderReviewThreadState($threadId: ID!) {
+            node(id: $threadId) {
+              ... on PullRequestReviewThread {
+                isResolved
+                comments(first: 100) { nodes { body } }
+              }
+            }
+          }`,
+          { threadId: response.threadId },
+        ),
+      ).node;
+      if (!state) throw new Error("Pull request review thread is unavailable");
+      if (state.isResolved) return;
+
+      if (!state.comments.nodes.some((comment) => comment.body.includes(marker))) {
+        await githubGraphql(
+          dependencies.fetch,
+          token,
+          `mutation ResponderReplyToReviewThread($threadId: ID!, $body: String!) {
+            addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+              comment { id }
+            }
+          }`,
+          { body: `${response.body}\n\n${marker}`, threadId: response.threadId },
+        );
+      }
+      await githubGraphql(
+        dependencies.fetch,
+        token,
+        `mutation ResponderResolveReviewThread($threadId: ID!) {
+          resolveReviewThread(input: { threadId: $threadId }) {
+            thread { id isResolved }
+          }
+        }`,
+        { threadId: response.threadId },
+      );
+    });
+  }
+}
+
+async function retryReviewOperation(operation: () => Promise<void>) {
+  let failure: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      failure = error;
+    }
+  }
+  throw failure;
+}
+
+export function assertPullRequestReviewStateCurrent(
+  expected: PullRequestReviewState,
+  current: PullRequestReviewState,
+  threadIds: ReadonlySet<string>,
+): void {
+  if (
+    current.branch !== expected.branch ||
+    current.headSha !== expected.headSha
+  ) {
+    throw new Error("Pull request head changed during review follow-up");
+  }
+  const currentThreadIds = new Set(current.threads.map((thread) => thread.id));
+  if ([...threadIds].some((threadId) => !currentThreadIds.has(threadId))) {
+    throw new Error("Pull request review threads changed during follow-up");
   }
 }
