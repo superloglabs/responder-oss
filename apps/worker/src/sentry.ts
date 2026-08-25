@@ -1,5 +1,6 @@
 import { MCPServerStreamableHttp } from "@openai/agents";
 import type { RuntimeSentryConnection } from "@responder/core/db/investigations";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 interface SentryMcpRequestContext {
   investigationId: string;
@@ -11,10 +12,38 @@ interface SentryMcpRequestDetails {
   toolName?: string;
 }
 
+type SentryMcpTransportDiagnostics = Pick<
+  SentryMcpRequestDetails,
+  "mcpMethod" | "method" | "toolName"
+> &
+  (
+    | {
+        durationMs: number;
+        kind: "http";
+        retryAfter?: string;
+        status: number;
+        statusText?: string;
+        upstreamRequestId?: string;
+      }
+    | {
+        causeCode?: string;
+        causeName?: string;
+        durationMs: number;
+        errorCode?: string;
+        errorName: string;
+        kind: "network";
+      }
+  );
+
+interface SentryMcpToolCallState {
+  transport?: Omit<SentryMcpTransportDiagnostics, "toolName">;
+}
+
 class SentryMcpServer extends MCPServerStreamableHttp {
   constructor(
     options: ConstructorParameters<typeof MCPServerStreamableHttp>[0],
     private readonly context: SentryMcpRequestContext,
+    private readonly toolCallStorage: AsyncLocalStorage<SentryMcpToolCallState>,
   ) {
     super(options);
   }
@@ -23,8 +52,11 @@ class SentryMcpServer extends MCPServerStreamableHttp {
     ...args: Parameters<MCPServerStreamableHttp["callToolResult"]>
   ): ReturnType<MCPServerStreamableHttp["callToolResult"]> {
     const startedAt = performance.now();
+    const state: SentryMcpToolCallState = {};
     try {
-      return await super.callToolResult(...args);
+      return await this.toolCallStorage.run(state, () =>
+        super.callToolResult(...args),
+      );
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -34,11 +66,34 @@ class SentryMcpServer extends MCPServerStreamableHttp {
           event: "sentry_mcp_tool_call_failed",
           investigationId: this.context.investigationId,
           toolName: args[0].slice(0, 100),
+          transport: state.transport,
         }),
       );
       throw error;
     }
   }
+}
+
+function recordTransportFailure(
+  context: SentryMcpRequestContext,
+  toolCallStorage: AsyncLocalStorage<SentryMcpToolCallState> | undefined,
+  event: "sentry_mcp_http_error" | "sentry_mcp_transport_error",
+  diagnostics: SentryMcpTransportDiagnostics,
+): void {
+  const state = toolCallStorage?.getStore();
+  if (state) {
+    const transport = { ...diagnostics };
+    delete transport.toolName;
+    state.transport = transport;
+    return;
+  }
+  console.error(
+    JSON.stringify({
+      ...diagnostics,
+      event,
+      investigationId: context.investigationId,
+    }),
+  );
 }
 
 function requestDetails(
@@ -101,6 +156,7 @@ function expectedUnsupportedRequest(
 export function createSentryMcpFetch(
   context: SentryMcpRequestContext,
   fetchImpl: typeof fetch = globalThis.fetch,
+  toolCallStorage?: AsyncLocalStorage<SentryMcpToolCallState>,
 ): typeof fetch {
   // The agent SDK redacts errors for every endpoint with a query string and
   // drops the original cause. Sentry intentionally uses `?skills=inspect`, so
@@ -111,20 +167,24 @@ export function createSentryMcpFetch(
     try {
       const response = await fetchImpl(input, init);
       if (!response.ok && !expectedUnsupportedRequest(details, response)) {
-        console.error(
-          JSON.stringify({
-            ...details,
+        recordTransportFailure(
+          context,
+          toolCallStorage,
+          "sentry_mcp_http_error",
+          {
             durationMs: Math.round(performance.now() - startedAt),
-            event: "sentry_mcp_http_error",
-            investigationId: context.investigationId,
+            kind: "http",
+            mcpMethod: details.mcpMethod,
+            method: details.method,
             retryAfter: response.headers.get("retry-after") ?? undefined,
             status: response.status,
             statusText: response.statusText.slice(0, 100) || undefined,
+            toolName: details.toolName,
             upstreamRequestId:
               response.headers.get("x-request-id") ??
               response.headers.get("x-sentry-request-id") ??
               undefined,
-          }),
+          },
         );
       }
       return response;
@@ -133,17 +193,21 @@ export function createSentryMcpFetch(
         error && typeof error === "object"
           ? (error as { cause?: unknown }).cause
           : undefined;
-      console.error(
-        JSON.stringify({
-          ...details,
+      recordTransportFailure(
+        context,
+        toolCallStorage,
+        "sentry_mcp_transport_error",
+        {
           causeCode: errorCode(cause),
           causeName: cause === undefined ? undefined : errorName(cause),
           durationMs: Math.round(performance.now() - startedAt),
           errorCode: errorCode(error),
           errorName: errorName(error),
-          event: "sentry_mcp_transport_error",
-          investigationId: context.investigationId,
-        }),
+          kind: "network",
+          mcpMethod: details.mcpMethod,
+          method: details.method,
+          toolName: details.toolName,
+        },
       );
       throw error;
     }
@@ -162,11 +226,12 @@ export function createSentryMcpServer(
   connection: RuntimeSentryConnection,
   context: SentryMcpRequestContext,
 ): MCPServerStreamableHttp {
+  const toolCallStorage = new AsyncLocalStorage<SentryMcpToolCallState>();
   return new SentryMcpServer(
     {
       cacheToolsList: true,
       clientSessionTimeoutSeconds: 300,
-      fetch: createSentryMcpFetch(context),
+      fetch: createSentryMcpFetch(context, globalThis.fetch, toolCallStorage),
       name: "sentry",
       requestInit: {
         headers: sentryMcpHeaders(connection),
@@ -176,5 +241,6 @@ export function createSentryMcpServer(
       useStructuredContent: true,
     },
     context,
+    toolCallStorage,
   );
 }
