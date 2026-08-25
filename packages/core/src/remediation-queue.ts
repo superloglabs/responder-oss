@@ -7,6 +7,7 @@ import {
   recoverAbandonedIssuePullRequest,
   setIssuePullRequestSession,
 } from "./db/pull-requests.js";
+import { refreshIssuePullRequestSlackMessages } from "./integrations/slack-remediations.js";
 import {
   investigationQueue,
   remediationQueue,
@@ -66,6 +67,7 @@ export async function recoverAbandonedIssueRemediations(
         staleBefore,
       )
     ) {
+      await refreshIssuePullRequestSlackMessages(candidate.requestId);
       recovered.push(candidate.requestId);
     }
   }
@@ -107,6 +109,7 @@ export async function queueIssueRemediationJob(
           remediation: remediation.issueRemediation,
           evidence: remediation.issueEvidence,
         },
+        selectedRemediation: remediation.selectedRemediation,
         queuedAt: new Date().toISOString(),
         remediationRequestId: remediation.requestId,
         runtimeProfileId: remediation.runtimeProfileId,
@@ -156,6 +159,7 @@ export async function queueIssueRemediationJob(
         requestId,
         error instanceof Error ? error.message : "Unable to start remediation",
       );
+      await refreshIssuePullRequestSlackMessages(requestId);
     }
     throw error;
   }

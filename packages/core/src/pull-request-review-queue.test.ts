@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRuntimeAgentConfig } from "./db/investigations.js";
-import { getIssuePullRequestForReview } from "./db/pull-requests.js";
+import {
+  appendIssuePullRequestActivity,
+  getIssuePullRequestForReview,
+} from "./db/pull-requests.js";
 import { pullRequestReviewQueue } from "./jobs.js";
 import { queuePullRequestReviewJob } from "./pull-request-review-queue.js";
 
@@ -9,8 +12,22 @@ vi.mock("./db/investigations.js", () => ({
 }));
 
 vi.mock("./db/pull-requests.js", () => ({
+  appendIssuePullRequestActivity: vi.fn(),
   getIssuePullRequestForReview: vi.fn(),
+  pullRequestActivityEvent: (
+    type: string,
+    data?: Record<string, unknown>,
+  ) => ({ type, data, meta: { at: "2026-08-25T00:00:00.000Z" } }),
 }));
+
+const reviewComment = {
+  author: "reviewer-bot",
+  body: "Use a null guard here.",
+  id: 123,
+  line: 17,
+  path: "src/route.ts",
+  url: "https://github.com/acme/app/pull/42#discussion_r123",
+};
 
 const review = {
   agentConfigVersionId: "08080808-0808-4808-8808-080808080808",
@@ -55,6 +72,7 @@ describe("pull request review queue", () => {
         {
           installationId: 123,
           pullRequestNumber: 42,
+          reviewComment,
           repositoryFullName: "acme/app",
         },
       ),
@@ -77,6 +95,21 @@ describe("pull request review queue", () => {
       }),
       { singletonKey: `pull-request-review:${review.requestId}` },
     );
+    expect(appendIssuePullRequestActivity).toHaveBeenCalledTimes(2);
+    expect(appendIssuePullRequestActivity).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        externalKey: "github-review-comment:123",
+        requestId: review.requestId,
+      }),
+    );
+    expect(appendIssuePullRequestActivity).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        externalKey: "review-job:job-1:queued",
+        requestId: review.requestId,
+      }),
+    );
   });
 
   it("ignores a review for a pull request Responder did not create", async () => {
@@ -89,6 +122,7 @@ describe("pull request review queue", () => {
         {
           installationId: 123,
           pullRequestNumber: 42,
+          reviewComment,
           repositoryFullName: "acme/app",
         },
       ),

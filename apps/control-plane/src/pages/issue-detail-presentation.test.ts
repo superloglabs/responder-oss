@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { IssueDetailResponse, IssueEvidence } from "../agents-api";
+import type {
+  IssueDetailResponse,
+  IssueEvidence,
+  IssuePullRequestActivity,
+} from "../agents-api";
 import {
   evidenceSourceGlyph,
+  groupPullRequestActivities,
   rowStatusLabel,
   evidenceSourceLabel,
   investigationCountLabel,
@@ -11,6 +16,10 @@ import {
   issueRowDate,
   originatingAgentName,
   primaryEvidenceSource,
+  pullRequestActivityPresentation,
+  pullRequestReviewActivityPresentation,
+  pullRequestReviewIsActive,
+  pullRequestStateLabel,
   relationshipLabel,
 } from "./issue-detail-presentation";
 
@@ -32,6 +41,22 @@ function investigation(overrides: Partial<Investigation>): Investigation {
     createdAt: "2026-05-20T01:25:00.000Z",
     completedAt: null,
     ...overrides,
+  };
+}
+
+function activity(
+  type: IssuePullRequestActivity["event"]["type"],
+  data?: Record<string, unknown>,
+  id = 1,
+): IssuePullRequestActivity {
+  return {
+    id,
+    event: {
+      ...(data ? { data } : {}),
+      meta: { at: "2026-08-25T10:00:00.000Z" },
+      type,
+    },
+    createdAt: "2026-08-25T10:00:00.000Z",
   };
 }
 
@@ -184,5 +209,127 @@ describe("rowStatusLabel", () => {
     expect(rowStatusLabel("queued")).toBe("Queued");
     expect(rowStatusLabel("creating")).toBe("Creating");
     expect(rowStatusLabel("created")).toBe("Created");
+    expect(rowStatusLabel("merged")).toBe("Merged");
+  });
+});
+
+describe("pullRequestStateLabel", () => {
+  it("uses the GitHub-facing state after publication", () => {
+    expect(pullRequestStateLabel("created")).toBe("Open");
+    expect(pullRequestStateLabel("merged")).toBe("Merged");
+  });
+});
+
+describe("pullRequestActivityPresentation", () => {
+  it("presents an incoming comment as a single top-level event", () => {
+    expect(
+      pullRequestActivityPresentation(
+        activity("review.comment.received", {
+          author: "silver-bot",
+          body: "Petals need to be silver.",
+          line: 12,
+          path: "src/flower.ts",
+          url: "https://github.com/acme/app/pull/27#discussion_r1",
+        }),
+        "acme/app",
+      ),
+    ).toEqual({
+      detail: "“Petals need to be silver.”",
+      href: "https://github.com/acme/app/pull/27#discussion_r1",
+      title: "@silver-bot commented",
+      tone: "default",
+    });
+  });
+
+  it("links a pushed commit to its repository", () => {
+    expect(
+      pullRequestActivityPresentation(
+        activity("review.commit.pushed", {
+          files: ["src/flower.ts"],
+          message: "Use silver petals",
+          sha: "abc123",
+        }),
+        "acme/app",
+      ),
+    ).toEqual({
+      detail: "Use silver petals · 1 changed file",
+      href: "https://github.com/acme/app/commit/abc123",
+      title: "Committed",
+      tone: "success",
+    });
+  });
+
+  it("turns trace tool calls into compact activity labels", () => {
+    expect(
+      pullRequestActivityPresentation(
+        activity("review.trace", {
+          event: {
+            type: "actions.requested",
+            data: { actions: [{ toolName: "apply_patch" }] },
+          },
+        }),
+        "acme/app",
+      ).title,
+    ).toBe("Ran apply_patch");
+  });
+});
+
+describe("groupPullRequestActivities", () => {
+  it("collapses review lifecycle and trace events between comment and commit", () => {
+    const activities = [
+      activity("review.comment.received", { body: "Use bronze." }, 1),
+      activity("review.job.queued", { jobId: "job-1" }, 2),
+      activity("review.session.started", { jobId: "job-1" }, 3),
+      activity("review.trace", {
+        event: { type: "message.completed", data: { message: "Inspecting." } },
+        jobId: "job-1",
+      }, 4),
+      activity("review.commit.pushed", { sha: "abc123" }, 5),
+      activity("review.threads.addressed", { count: 1 }, 6),
+      activity("review.session.completed", { jobId: "job-1" }, 7),
+    ];
+
+    const timeline = groupPullRequestActivities(activities);
+
+    expect(timeline.map((item) => item.kind)).toEqual([
+      "activity",
+      "review",
+      "activity",
+    ]);
+    const review = timeline[1];
+    expect(review?.kind).toBe("review");
+    if (review?.kind !== "review") throw new Error("Expected review group");
+    expect(review.activities.map((item) => item.event.type)).toEqual([
+      "review.job.queued",
+      "review.session.started",
+      "review.trace",
+      "review.threads.addressed",
+      "review.session.completed",
+    ]);
+    expect(pullRequestReviewActivityPresentation(review.activities)).toEqual({
+      detail: null,
+      href: null,
+      title: "Review ran",
+      tone: "success",
+      traceCount: 1,
+    });
+  });
+});
+
+describe("pullRequestReviewIsActive", () => {
+  it("polls between queueing and a terminal review event", () => {
+    expect(pullRequestReviewIsActive([activity("review.job.queued")])).toBe(true);
+    expect(
+      pullRequestReviewIsActive([
+        activity("review.job.queued"),
+        activity("review.session.started", undefined, 2),
+      ]),
+    ).toBe(true);
+    expect(
+      pullRequestReviewIsActive([
+        activity("review.session.started"),
+        activity("review.session.completed", undefined, 2),
+      ]),
+    ).toBe(false);
   });
 });

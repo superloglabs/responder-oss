@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
-import { renderIssueFixPrompt } from "@responder/core/investigations/report";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Fragment, lazy, Suspense, useEffect, useState } from "react";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import {
   createIssuePullRequest,
   fetchIssue,
   setIssueArchived,
+  type InvestigationTraceEvent,
   type IssueDetailResponse,
+  type IssuePullRequestActivity,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { EvidenceList, EvidenceSourceGlyph } from "../components/evidence-list";
@@ -22,18 +23,29 @@ import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import {
   evidenceSourceLabel,
+  groupPullRequestActivities,
   investigationCountLabel,
   investigationStatusTone,
   issueIdentifiedAt,
   issueParagraphs,
   issueRowDate,
   originatingAgentName,
+  pullRequestActivityPresentation,
+  pullRequestReviewActivityPresentation,
+  pullRequestReviewIsActive,
   primaryEvidenceSource,
+  pullRequestStateLabel,
   relationshipLabel,
   rowStatusLabel,
 } from "./issue-detail-presentation";
+import { toolInputSummary, traceEventText } from "./investigation-presentation";
 
 const severityBars = { "SEV-1": 3, "SEV-2": 2, "SEV-3": 1 } as const;
+const RemediationDiff = lazy(() =>
+  import("../components/remediation-diff").then((module) => ({
+    default: module.RemediationDiff,
+  })),
+);
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -43,16 +55,277 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+type PullRequestRequest =
+  IssueDetailResponse["pullRequestState"]["requests"][number];
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function reviewTraceEvent(
+  activity: IssuePullRequestActivity,
+): InvestigationTraceEvent | null {
+  if (activity.event.type !== "review.trace") return null;
+  const event = asRecord(activity.event.data?.event);
+  if (typeof event?.type !== "string") return null;
+  const meta = asRecord(event.meta);
+  return {
+    ...(event.data === undefined ? {} : { data: event.data }),
+    ...(typeof meta?.at === "string" ? { meta: { at: meta.at } } : {}),
+    type: event.type,
+  };
+}
+
+function traceCallId(value: unknown): string | null {
+  const record = asRecord(value);
+  return typeof record?.callId === "string" ? record.callId : null;
+}
+
+function traceToolName(value: unknown): string {
+  const raw = typeof value === "string" && value ? value : "tool";
+  const label = raw
+    .replace(/^mcp_+/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[_./:-]+|\s+/)
+    .filter(Boolean)
+    .join(" ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function formatTraceTime(value: string | null): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}
+
+function PullRequestReviewTrace({
+  activities,
+}: {
+  activities: IssuePullRequestActivity[];
+}) {
+  const events = activities
+    .map(reviewTraceEvent)
+    .filter((event): event is InvestigationTraceEvent => Boolean(event));
+  const toolResults = new Map<string, InvestigationTraceEvent>();
+  for (const event of events) {
+    if (event.type !== "action.result") continue;
+    const result = asRecord(asRecord(event.data)?.result);
+    if (typeof result?.callId === "string") {
+      toolResults.set(result.callId, event);
+    }
+  }
+
+  if (events.length === 0) {
+    return <p className="remediationReviewTrace__empty">No trace events recorded.</p>;
+  }
+  return (
+    <div className="remediationReviewTrace">
+      <header>
+        <strong>Trace</strong>
+        <span>{events.length} events</span>
+      </header>
+      <ol className="traceTimeline remediationReviewTrace__timeline">
+        {events.map((event, index) => {
+          if (event.type === "action.result") return null;
+          if (event.type === "actions.requested") {
+            const actions = asRecord(event.data)?.actions;
+            if (!Array.isArray(actions)) return null;
+            return (
+              <Fragment key={`${event.type}-${index}`}>
+                {actions.map((action, actionIndex) => {
+                  const request = asRecord(action);
+                  const callId = traceCallId(action);
+                  const resultEvent = callId ? toolResults.get(callId) : undefined;
+                  const resultData = asRecord(resultEvent?.data);
+                  const result = asRecord(resultData?.result);
+                  const failed = resultData?.status === "failed" ||
+                    resultData?.error !== undefined;
+                  const name = request?.toolName ?? request?.kind;
+                  const inputSummary = toolInputSummary(request?.input);
+                  return (
+                    <li
+                      className={`traceTool${failed ? " traceTool--failed" : ""}`}
+                      key={callId ?? `${index}-${actionIndex}`}
+                    >
+                      <details>
+                        <summary>
+                          <span aria-hidden="true" className="traceTool__icon">⌘</span>
+                          <span className="traceTool__label">
+                            <span>{traceToolName(name)}</span>
+                            {inputSummary ? <code>{inputSummary}</code> : null}
+                          </span>
+                        </summary>
+                        <div className="traceTool__data">
+                          <span>Input</span>
+                          <pre>{JSON.stringify(request?.input ?? {}, null, 2)}</pre>
+                          {resultEvent ? (
+                            <>
+                              <span>Output</span>
+                              <pre>
+                                {JSON.stringify(
+                                  result?.output ?? resultData?.error ?? result ?? {},
+                                  null,
+                                  2,
+                                )}
+                              </pre>
+                            </>
+                          ) : null}
+                        </div>
+                      </details>
+                    </li>
+                  );
+                })}
+              </Fragment>
+            );
+          }
+          const content = traceEventText(event);
+          if (!content) return null;
+          const reasoning = event.type === "reasoning.completed";
+          return (
+            <li
+              className={`traceMessage ${reasoning ? "traceMessage--runtime" : "traceMessage--assistant"}`}
+              key={`${event.type}-${index}`}
+            >
+              {reasoning ? (
+                <span aria-hidden="true" className="traceMessage__avatar">R</span>
+              ) : null}
+              <article>
+                <header>
+                  <span>
+                    <strong>{reasoning ? "Reasoning" : "Review agent"}</strong>
+                    <small>{reasoning ? "Thinking" : "Update"}</small>
+                  </span>
+                  <time>{formatTraceTime(event.meta?.at ?? null)}</time>
+                </header>
+                <div className="traceMessage__content">{content}</div>
+              </article>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+function PullRequestActivity({ request }: { request: PullRequestRequest }) {
+  const activities = request.activities ?? [];
+  if (activities.length === 0) return null;
+  const timeline = groupPullRequestActivities(activities);
+  const latest = timeline.at(-1);
+  const latestPresentation = latest?.kind === "review"
+    ? pullRequestReviewActivityPresentation(latest.activities)
+    : latest
+      ? pullRequestActivityPresentation(
+          latest.activity,
+          request.repositoryFullName,
+        )
+      : null;
+
+  return (
+    <details
+      className="remediationActivity"
+      open={pullRequestReviewIsActive(activities)}
+    >
+      <summary>
+        <span>
+          <strong>Activity</strong>
+          {latestPresentation ? <small>{latestPresentation.title}</small> : null}
+        </span>
+        <span className="remediationActivity__count">
+          {timeline.length}
+        </span>
+      </summary>
+      <ol className="remediationActivity__list">
+        {timeline.map((item) => {
+          if (item.kind === "review") {
+            const presentation = pullRequestReviewActivityPresentation(
+              item.activities,
+            );
+            const reviewStartedActivity = item.activities.find(
+              (activity) => activity.event.type === "review.session.started",
+            ) ?? item.anchor;
+            const reviewActive = pullRequestReviewIsActive(item.activities);
+            return (
+              <li
+                className={`remediationActivity__item remediationActivity__item--${presentation.tone}`}
+                key={item.jobId}
+              >
+                <span className="remediationActivity__marker" aria-hidden="true" />
+                <details className="remediationReviewRun" open={reviewActive}>
+                  <summary>
+                    <span>
+                      <strong>{presentation.title}</strong>
+                      <small>
+                        {presentation.traceCount} trace {presentation.traceCount === 1 ? "event" : "events"}
+                      </small>
+                    </span>
+                    <time dateTime={reviewStartedActivity.event.meta.at}>
+                      {formatDate(reviewStartedActivity.event.meta.at)}
+                    </time>
+                  </summary>
+                  {presentation.detail ? <p>{presentation.detail}</p> : null}
+                  <PullRequestReviewTrace activities={item.activities} />
+                </details>
+              </li>
+            );
+          }
+          const { activity } = item;
+          const presentation = pullRequestActivityPresentation(
+            activity,
+            request.repositoryFullName,
+          );
+          return (
+            <li
+              className={`remediationActivity__item remediationActivity__item--${presentation.tone}`}
+              key={activity.id}
+            >
+              <span className="remediationActivity__marker" aria-hidden="true" />
+              <div>
+                <div className="remediationActivity__heading">
+                  {presentation.href ? (
+                    <a href={presentation.href} rel="noreferrer" target="_blank">
+                      {presentation.title}
+                    </a>
+                  ) : (
+                    <strong>{presentation.title}</strong>
+                  )}
+                  <time dateTime={activity.event.meta.at}>
+                    {formatDate(activity.event.meta.at)}
+                  </time>
+                </div>
+                {presentation.detail ? <p>{presentation.detail}</p> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </details>
+  );
+}
+
 export function IssueDetailPage() {
   const { issueId } = useParams();
+  const location = useLocation();
   const [detail, setDetail] = useState<IssueDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [archivePending, setArchivePending] = useState(false);
-  const [promptCopied, setPromptCopied] = useState(false);
-  const [pullRequestPending, setPullRequestPending] = useState(false);
+  const [copiedRemediationId, setCopiedRemediationId] = useState<string | null>(
+    null,
+  );
+  const [pullRequestPending, setPullRequestPending] = useState<string | null>(
+    null,
+  );
   useDocumentTitle(detail?.issue.title ?? "Issue");
+  const codeChangeRemediationId = new URLSearchParams(location.search).get(
+    "codeChange",
+  );
 
   useEffect(() => {
     if (!issueId) return;
@@ -79,24 +352,54 @@ export function IssueDetailPage() {
     detail?.pullRequestState.requests.some((request) =>
       request.status === "queued" || request.status === "creating",
     ) ?? false;
+  const hasActivePullRequestReview =
+    detail?.pullRequestState.requests.some((request) =>
+      pullRequestReviewIsActive(request.activities ?? []),
+    ) ?? false;
   const hasActiveLinearTicket =
     detail?.linearTicketState.requests.some((request) =>
       request.status === "pending" || request.status === "creating",
     ) ?? false;
 
   useEffect(() => {
-    if (!issueId || (!hasActivePullRequest && !hasActiveLinearTicket)) return;
+    if (
+      !issueId ||
+      (!hasActivePullRequest &&
+        !hasActivePullRequestReview &&
+        !hasActiveLinearTicket)
+    ) return;
     const interval = window.setInterval(() => {
       void fetchIssue(issueId).then(setDetail).catch(() => undefined);
     }, 3_000);
     return () => window.clearInterval(interval);
-  }, [hasActiveLinearTicket, hasActivePullRequest, issueId]);
+  }, [
+    hasActiveLinearTicket,
+    hasActivePullRequest,
+    hasActivePullRequestReview,
+    issueId,
+  ]);
 
   useEffect(() => {
-    if (!promptCopied) return;
-    const timeout = window.setTimeout(() => setPromptCopied(false), 1600);
+    if (!copiedRemediationId) return;
+    const timeout = window.setTimeout(() => setCopiedRemediationId(null), 1600);
     return () => window.clearTimeout(timeout);
-  }, [promptCopied]);
+  }, [copiedRemediationId]);
+
+  useEffect(() => {
+    if (!detail || !location.hash) return;
+    let remediationId: string;
+    try {
+      remediationId = decodeURIComponent(location.hash.slice(1));
+    } catch {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      document.getElementById(remediationId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+  }, [detail, location.hash]);
 
   if (notFound || !issueId) return <Navigate replace to="/issues" />;
   if (loading) {
@@ -149,12 +452,12 @@ export function IssueDetailPage() {
     }
   }
 
-  async function createPullRequest() {
+  async function createPullRequest(remediationId: string) {
     if (!issueId || pullRequestPending) return;
-    setPullRequestPending(true);
+    setPullRequestPending(remediationId);
     setError(null);
     try {
-      await createIssuePullRequest(issueId);
+      await createIssuePullRequest(issueId, remediationId);
       setDetail(await fetchIssue(issueId));
     } catch (caught: unknown) {
       setError(
@@ -163,18 +466,18 @@ export function IssueDetailPage() {
           : "Unable to create pull request",
       );
     } finally {
-      setPullRequestPending(false);
+      setPullRequestPending(null);
     }
   }
 
-  async function copyPrompt() {
+  async function copyPrompt(remediationId: string, prompt: string) {
     setError(null);
     try {
-      await copyToClipboard(renderIssueFixPrompt(issue));
-      setPromptCopied(true);
+      await copyToClipboard(prompt);
+      setCopiedRemediationId(remediationId);
     } catch {
-      setPromptCopied(false);
-      setError("Unable to copy the issue prompt");
+      setCopiedRemediationId(null);
+      setError("Unable to copy the remediation prompt");
     }
   }
 
@@ -231,9 +534,135 @@ export function IssueDetailPage() {
             )}
           </section>
 
-          <section className="issueCallout">
-            <h2>Remediation</h2>
-            <p>{issue.remediation}</p>
+          <section className="issueSection">
+            <h2 className="issueSection__title">Remediations</h2>
+            <div className="remediationList">
+              {issue.remediations.map((remediation) => {
+                const request = pullRequests.find(
+                  (candidate) => candidate.remediationId === remediation.id,
+                );
+                const publishedPullRequest =
+                  request?.pullRequestUrl &&
+                  (request.status === "created" || request.status === "merged")
+                    ? request
+                    : null;
+                return (
+                  <article
+                    className="remediationCard"
+                    id={`remediation-${remediation.id}`}
+                    key={remediation.id}
+                  >
+                    <header className="remediationCard__header">
+                      <span
+                        className={`remediationCard__kind remediationCard__kind--${remediation.type}`}
+                      >
+                        {remediation.type === "code_change"
+                          ? "Code change"
+                          : "External action"}
+                      </span>
+                      <h3>{remediation.title}</h3>
+                    </header>
+                    <p className="remediationCard__description">
+                      {remediation.description}
+                    </p>
+                    {remediation.type === "code_change" && publishedPullRequest ? (
+                      <>
+                        <a
+                          className="remediationPullRequest"
+                          href={publishedPullRequest.pullRequestUrl ?? undefined}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <span
+                            className={`remediationPullRequest__icon remediationPullRequest__icon--${publishedPullRequest.status}`}
+                          >
+                            <PullRequestIcon />
+                          </span>
+                          <span className="remediationPullRequest__body">
+                            <strong>
+                              Pull request #{publishedPullRequest.pullRequestNumber}
+                            </strong>
+                            <small>{publishedPullRequest.repositoryFullName}</small>
+                          </span>
+                          <span
+                            className={`remediationPullRequest__state remediationPullRequest__state--${publishedPullRequest.status}`}
+                          >
+                            {pullRequestStateLabel(publishedPullRequest.status)}
+                          </span>
+                          <ArrowIcon />
+                        </a>
+                        <PullRequestActivity request={publishedPullRequest} />
+                        {codeChangeRemediationId === remediation.id ? (
+                          <Suspense
+                            fallback={
+                              <div className="remediationDiff__loading">
+                                Loading proposed diff…
+                              </div>
+                            }
+                          >
+                            <RemediationDiff remediation={remediation} />
+                          </Suspense>
+                        ) : null}
+                      </>
+                    ) : remediation.type === "code_change" ? (
+                      <Suspense
+                        fallback={
+                          <div className="remediationDiff__loading">
+                            Loading proposed diff…
+                          </div>
+                        }
+                      >
+                        <RemediationDiff remediation={remediation} />
+                      </Suspense>
+                    ) : (
+                      <div className="remediationPrompt">
+                        <span>Prompt for your agent</span>
+                        <pre>{remediation.agentPrompt}</pre>
+                      </div>
+                    )}
+                    {remediation.type === "code_change" && publishedPullRequest ? null : (
+                      <div className="remediationCard__actions">
+                        {remediation.type === "code_change" ? (
+                          request &&
+                          ["queued", "creating"].includes(request.status) ? (
+                            <span className="remediationCard__status">
+                              Opening pull request…
+                            </span>
+                          ) : detail.pullRequestState.canCreate ? (
+                            <Button
+                              loading={pullRequestPending === remediation.id}
+                              onClick={() => void createPullRequest(remediation.id)}
+                              size="small"
+                              variant="primary"
+                            >
+                              {pullRequestPending === remediation.id
+                                ? "Starting…"
+                                : "Open pull request"}
+                            </Button>
+                          ) : null
+                        ) : (
+                          <Button
+                            aria-live="polite"
+                            onClick={() =>
+                              void copyPrompt(
+                                remediation.id,
+                                remediation.agentPrompt,
+                              )
+                            }
+                            size="small"
+                            variant="secondary"
+                          >
+                            {copiedRemediationId === remediation.id
+                              ? "Copied"
+                              : "Copy prompt"}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
           </section>
 
           <section className="issueSection">
@@ -283,7 +712,7 @@ export function IssueDetailPage() {
                   <span
                     aria-label={rowStatusLabel(request.status)}
                     className={`issueLine__status issueLine__status--${
-                      request.status === "created"
+                      request.status === "created" || request.status === "merged"
                         ? "resolved"
                         : request.status === "failed"
                           ? "failed"
@@ -295,14 +724,15 @@ export function IssueDetailPage() {
                   </span>
                   <span className="issueLine__body">
                     <strong>
-                      {request.status === "created"
+                      {request.status === "created" || request.status === "merged"
                         ? `#${request.pullRequestNumber} in ${request.repositoryFullName}`
                         : request.status === "failed"
                           ? "Pull request failed"
                           : "Creating pull request…"}
                     </strong>
                     <small>
-                      {request.failureReason ?? formatDate(request.createdAt)}
+                      {request.failureReason ??
+                        `${pullRequestStateLabel(request.status)} · ${formatDate(request.createdAt)}`}
                     </small>
                   </span>
                   {request.pullRequestUrl ? (
@@ -388,24 +818,6 @@ export function IssueDetailPage() {
           </div>
 
           <div className="issueRail__actions">
-            {detail.pullRequestState.canCreate ? (
-              <Button
-                loading={pullRequestPending}
-                onClick={() => void createPullRequest()}
-                size="small"
-                variant="primary"
-              >
-                {pullRequestPending ? "Starting…" : "Create pull request"}
-              </Button>
-            ) : null}
-            <Button
-              aria-live="polite"
-              onClick={() => void copyPrompt()}
-              size="small"
-              variant="secondary"
-            >
-              {promptCopied ? "Copied" : "Copy prompt"}
-            </Button>
             <Button
               disabled={archivePending}
               loading={archivePending}

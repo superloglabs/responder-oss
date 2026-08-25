@@ -1,5 +1,6 @@
 import { failIssuePullRequest } from "@responder/core/db/pull-requests";
 import type { RemediationJob } from "@responder/core/jobs";
+import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import {
   remediationRunDiagnostics,
   runRemediationAgent,
@@ -10,6 +11,7 @@ import { reportWorkerException } from "./monitoring.js";
 interface RemediationJobDependencies {
   failRequest: typeof failIssuePullRequest;
   reportException: typeof reportWorkerException;
+  refreshSlack?: typeof refreshIssuePullRequestSlackMessages;
   runDiagnostics: typeof remediationRunDiagnostics;
   runAgent: typeof runRemediationAgent;
 }
@@ -17,6 +19,7 @@ interface RemediationJobDependencies {
 const defaultDependencies: RemediationJobDependencies = {
   failRequest: failIssuePullRequest,
   reportException: reportWorkerException,
+  refreshSlack: refreshIssuePullRequestSlackMessages,
   runDiagnostics: remediationRunDiagnostics,
   runAgent: runRemediationAgent,
 };
@@ -113,6 +116,8 @@ export async function processRemediationJob(
       "Unable to record remediation failure",
     );
   }
+
+  await dependencies.refreshSlack?.(payload.remediationRequestId);
 
   if (!reportFailure) {
     console.log(

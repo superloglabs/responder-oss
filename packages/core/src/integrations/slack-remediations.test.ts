@@ -1,0 +1,126 @@
+import { describe, expect, it } from "vitest";
+import {
+  parseSlackRemediationActionValue,
+  slackCodeChangeUrl,
+  slackIssuePullRequestMessage,
+  slackRemediationActionValue,
+  slackRemediationCarousel,
+} from "./slack-remediations.js";
+
+const issueId = "07070707-0707-4707-8707-070707070707";
+const codeRemediation = {
+  id: "24242424-2424-4424-8424-242424242424",
+  type: "code_change" as const,
+  title: "Restore the plant guard",
+  description: "Handle plants without a configured color.",
+  diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+};
+const externalRemediation = {
+  id: "26262626-2626-4626-8626-262626262626",
+  type: "external_action" as const,
+  title: "Update the production palette",
+  description: "Change the configured petal color.",
+  agentPrompt: "Set the production petal color to silver.",
+};
+
+describe("Slack remediation cards", () => {
+  it("renders every remediation in a selectable carousel", () => {
+    const blocks = slackRemediationCarousel({
+      canCreatePullRequest: true,
+      issueId,
+      remediations: [codeRemediation, externalRemediation],
+    });
+
+    expect(blocks).toEqual([
+      expect.objectContaining({ type: "header" }),
+      expect.objectContaining({ type: "section" }),
+      expect.objectContaining({
+        type: "carousel",
+        elements: [
+          expect.objectContaining({
+            title: expect.objectContaining({ text: codeRemediation.title }),
+            subtitle: expect.objectContaining({ text: "Code change" }),
+            actions: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: "view_code_change",
+                url: slackCodeChangeUrl(issueId, codeRemediation.id),
+              }),
+              expect.objectContaining({
+                action_id: "create_issue_pull_request",
+                value: slackRemediationActionValue(
+                  issueId,
+                  codeRemediation.id,
+                ),
+              }),
+            ]),
+          }),
+          expect.objectContaining({
+            title: expect.objectContaining({ text: externalRemediation.title }),
+            subtitle: expect.objectContaining({ text: "External action" }),
+            actions: [
+              expect.objectContaining({
+                action_id: "copy_issue_prompt",
+                value: slackRemediationActionValue(
+                  issueId,
+                  externalRemediation.id,
+                ),
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("round-trips the selected issue and remediation IDs", () => {
+    expect(
+      parseSlackRemediationActionValue(
+        slackRemediationActionValue(issueId, codeRemediation.id),
+      ),
+    ).toEqual({ issueId, remediationId: codeRemediation.id });
+    expect(parseSlackRemediationActionValue(issueId)).toBeNull();
+  });
+
+  it("deep-links code changes to the selected remediation diff", () => {
+    const url = new URL(slackCodeChangeUrl(issueId, codeRemediation.id));
+    expect(url.pathname).toBe(`/issues/${issueId}`);
+    expect(url.searchParams.get("codeChange")).toBe(codeRemediation.id);
+    expect(url.hash).toBe(`#remediation-${codeRemediation.id}`);
+  });
+
+  it("shows the selected remediation and live pull request state", () => {
+    const message = slackIssuePullRequestMessage({
+      failureReason: null,
+      issueId,
+      issueSeverity: "SEV-2",
+      issueTitle: "Plant API returns HTTP 500",
+      pullRequestNumber: 42,
+      pullRequestUrl: "https://github.com/example/plants/pull/42",
+      repositoryFullName: "example/plants",
+      requestId: "23232323-2323-4323-8323-232323232323",
+      selectedRemediation: codeRemediation,
+      status: "created",
+    });
+
+    expect(message.text).toContain("Pull request: Open");
+    expect(message.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "carousel",
+          elements: [
+            expect.objectContaining({
+              block_id: "pull-request-23232323-2323-4323-8323-232323232323",
+              subtitle: expect.objectContaining({ text: "Open" }),
+              actions: expect.arrayContaining([
+                expect.objectContaining({
+                  action_id: "open_pull_request",
+                  url: "https://github.com/example/plants/pull/42",
+                }),
+              ]),
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+});

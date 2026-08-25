@@ -6,6 +6,7 @@ import {
   getSlackInvestigationDeliveryContext,
   type SlackInvestigationDeliveryContext,
 } from "../db/issues.js";
+import { registerIssuePullRequestSlackMessage } from "../db/pull-requests.js";
 import {
   addSlackReaction,
   postSlackMessage,
@@ -13,6 +14,11 @@ import {
   setSlackThreadStatus,
   updateSlackMessage,
 } from "./slack.js";
+import {
+  refreshIssuePullRequestSlackMessages,
+  slackIssuePullRequestMessage,
+  slackRemediationCarousel,
+} from "./slack-remediations.js";
 import {
   slackErrorLogFields,
   slackInvestigationCard,
@@ -139,27 +145,17 @@ export function slackIssueMessage(
         type: "section",
         text: { type: "mrkdwn", text: blockText },
       },
+      ...(issue.remediations.length > 0
+        ? slackRemediationCarousel({
+            canCreatePullRequest,
+            issueId: issue.id,
+            remediations: issue.remediations,
+          })
+        : []),
       {
         type: "actions",
         block_id: `issue_actions_${issue.id}`,
         elements: [
-          ...(canCreatePullRequest
-            ? [
-                {
-                  type: "button",
-                  action_id: "create_issue_pull_request",
-                  style: "primary",
-                  text: { type: "plain_text", text: "Create pull request" },
-                  value: issue.id,
-                },
-              ]
-            : []),
-          {
-            type: "button",
-            action_id: "copy_issue_prompt",
-            text: { type: "plain_text", text: "Copy prompt" },
-            value: issue.id,
-          },
           {
             type: "button",
             action_id: "view_issue",
@@ -171,6 +167,54 @@ export function slackIssueMessage(
       },
     ],
   };
+}
+
+function issueSlackMessage(
+  context: SlackInvestigationDeliveryContext,
+  issue: DeliveryIssue,
+) {
+  const request = issue.pullRequest;
+  const selectedRemediation = request?.remediationId
+    ? issue.remediations.find(
+        (remediation) => remediation.id === request.remediationId,
+      )
+    : undefined;
+  return context.prMode === "always" && request && selectedRemediation
+    ? slackIssuePullRequestMessage({
+        failureReason: request.failureReason,
+        issueId: issue.id,
+        issueSeverity: issue.severity,
+        issueTitle: issue.title,
+        pullRequestNumber: request.pullRequestNumber,
+        pullRequestUrl: request.pullRequestUrl,
+        repositoryFullName: request.repositoryFullName,
+        requestId: request.id,
+        selectedRemediation,
+        status: request.status,
+      })
+    : slackIssueMessage(
+        issue,
+        context.prMode === "manual" &&
+          issue.remediations.some(
+            (remediation) => remediation.type === "code_change",
+          ),
+      );
+}
+
+async function registerPullRequestMessage(input: {
+  channelId: string;
+  integrationAccountId: string;
+  issue: DeliveryIssue;
+  messageTimestamp: string | null;
+}): Promise<void> {
+  if (!input.issue.pullRequest || !input.messageTimestamp) return;
+  await registerIssuePullRequestSlackMessage({
+    channelId: input.channelId,
+    integrationAccountId: input.integrationAccountId,
+    messageTimestamp: input.messageTimestamp,
+    requestId: input.issue.pullRequest.id,
+  });
+  await refreshIssuePullRequestSlackMessages(input.issue.pullRequest.id);
 }
 
 function accessToken(encryptedCredentials: string): string {
@@ -289,9 +333,9 @@ async function deliverSourceThread(
     failures.push(error);
   }
   for (const [issueIndex, issue] of context.issues.entries()) {
-    const message = slackIssueMessage(issue, context.prMode === "manual");
+    const message = issueSlackMessage(context, issue);
     try {
-      await postSlackMessage({
+      const messageTimestamp = await postSlackMessage({
         accessToken: token,
         blocks: message.blocks,
         channelId: context.source.channelId,
@@ -301,6 +345,12 @@ async function deliverSourceThread(
         ),
         text: message.text,
         threadTimestamp: context.source.threadTimestamp,
+      });
+      await registerPullRequestMessage({
+        channelId: context.source.channelId,
+        integrationAccountId: context.source.integrationAccountId,
+        issue,
+        messageTimestamp,
       });
     } catch (error) {
       console.error(
@@ -357,8 +407,8 @@ async function deliverOutputChannel(
     context.output.severities,
   );
   for (const issue of issues) {
-    const message = slackIssueMessage(issue, context.prMode === "manual");
-    await postSlackMessage({
+    const message = issueSlackMessage(context, issue);
+    const messageTimestamp = await postSlackMessage({
       accessToken: token,
       blocks: message.blocks,
       channelId: context.output.channelId,
@@ -367,6 +417,12 @@ async function deliverOutputChannel(
         `output:${context.output.channelId}:issue:${issue.id}`,
       ),
       text: message.text,
+    });
+    await registerPullRequestMessage({
+      channelId: context.output.channelId,
+      integrationAccountId: context.output.integrationAccountId,
+      issue,
+      messageTimestamp,
     });
   }
 }

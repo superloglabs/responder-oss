@@ -5,6 +5,7 @@ import { investigationRequestSchema } from "./investigations/input.js";
 import { agentPrModeSchema } from "./agents/config.js";
 import {
   issueEvidenceSchema,
+  issueRemediationSubmissionSchema,
   issueSeveritySchema,
   issueTimelineEntrySchema,
 } from "./investigations/report.js";
@@ -63,6 +64,7 @@ export const remediationJobSchema = z.object({
   config: runtimeAgentJobConfigSchema,
   investigationId: z.uuid(),
   issue: remediationIssueSchema,
+  selectedRemediation: issueRemediationSubmissionSchema.optional(),
   queuedAt: z.iso.datetime(),
   remediationRequestId: z.uuid(),
   runtimeProfileId: z.uuid(),

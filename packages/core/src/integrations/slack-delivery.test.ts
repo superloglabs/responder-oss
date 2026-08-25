@@ -56,6 +56,8 @@ describe("Slack issue delivery", () => {
       ],
       severity: "SEV-2",
       remediation: "Wait for organization provisioning before redirecting the user.",
+      remediations: [],
+      pullRequest: null,
       relationship: "new",
       evidence: [],
     });
@@ -71,5 +73,56 @@ describe("Slack issue delivery", () => {
       }),
       expect.objectContaining({ type: "actions" }),
     ]);
+  });
+
+  it("shows every proposed remediation in a carousel", () => {
+    const issueId = "07070707-0707-4707-8707-070707070707";
+    const message = slackIssueMessage({
+      id: issueId,
+      title: "Plant colors are stale",
+      description: "The rendered petals use the old color.",
+      rootCause: "The palette and component defaults disagree.",
+      timeline: [{
+        title: "Palette changed",
+        description: "The production palette changed before the component.",
+      }],
+      severity: "SEV-3",
+      remediation: "Update the component or production palette.",
+      remediations: [
+        {
+          id: "24242424-2424-4424-8424-242424242424",
+          type: "code_change",
+          title: "Update the component default",
+          description: "Use the configured petal color.",
+          diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+        },
+        {
+          id: "26262626-2626-4626-8626-262626262626",
+          type: "external_action",
+          title: "Update the production palette",
+          description: "Set the petal color in production.",
+          agentPrompt: "Set the production petal color to silver.",
+        },
+      ],
+      pullRequest: null,
+      relationship: "new",
+      evidence: [],
+    }, true);
+
+    expect(message.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "carousel",
+          elements: [
+            expect.objectContaining({
+              subtitle: expect.objectContaining({ text: "Code change" }),
+            }),
+            expect.objectContaining({
+              subtitle: expect.objectContaining({ text: "External action" }),
+            }),
+          ],
+        }),
+      ]),
+    );
   });
 });

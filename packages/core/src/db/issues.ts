@@ -12,9 +12,13 @@ import {
 import type {
   InvestigationReportSubmission,
   IssueEvidence,
+  IssueRemediation,
   StructuredInvestigationReport,
 } from "../investigations/report.js";
-import { renderInvestigationReportMarkdown } from "../investigations/report.js";
+import {
+  remediationSummary,
+  renderInvestigationReportMarkdown,
+} from "../investigations/report.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -23,6 +27,7 @@ import {
   investigationIssues,
   investigations,
   issueLinearTickets,
+  issuePullRequests,
   issues,
   type AgentPrMode,
   type InvestigationSlackTraceItem,
@@ -127,6 +132,13 @@ export async function searchIssuesByText(
               or timeline_entry->>'description' ilike ${pattern}
           )`,
           ilike(issues.remediation, pattern),
+          sql`exists (
+            select 1
+            from jsonb_array_elements(${issues.remediations}) as remediation_option
+            where remediation_option->>'title' ilike ${pattern}
+              or remediation_option->>'description' ilike ${pattern}
+              or remediation_option->>'agentPrompt' ilike ${pattern}
+          )`,
         ),
       ),
     )
@@ -232,6 +244,9 @@ export async function submitInvestigationReport(input: {
       const embedding = input.submission.newIssueEmbeddings[newIssueIndex] ?? null;
       newIssueIndex += 1;
       const issueId = randomUUID();
+      const remediations: IssueRemediation[] = submittedIssue.remediations.map(
+        (remediation) => ({ ...remediation, id: randomUUID() }),
+      );
       const inserted = await tx
         .insert(issues)
         .values({
@@ -242,7 +257,8 @@ export async function submitInvestigationReport(input: {
           rootCause: submittedIssue.rootCause,
           timeline: submittedIssue.timeline,
           severity: submittedIssue.severity,
-          remediation: submittedIssue.remediation,
+          remediation: remediationSummary(remediations),
+          remediations,
           evidence: submittedIssue.evidence,
           embedding: embedding?.vector ?? null,
           embeddingModel: embedding?.model ?? null,
@@ -278,16 +294,21 @@ export async function submitInvestigationReport(input: {
         })),
       );
     }
-    const candidatePullRequestIssueIds = references.map(
-      (reference) => reference.issueId,
-    );
+    const candidateCodeRemediations = reportIssues.flatMap((issue) => {
+      const remediation = issue.remediations.find(
+        (candidate) => candidate.type === "code_change",
+      );
+      return remediation
+        ? [{ issueId: issue.id, remediationId: remediation.id }]
+        : [];
+    });
     const automaticPullRequestRequests =
       investigation.prMode === "always" &&
-      candidatePullRequestIssueIds.length > 0
+      candidateCodeRemediations.length > 0
         ? await queueAutomaticIssuePullRequests(tx, {
             agentConfigVersionId: investigation.agentConfigVersionId,
             investigationId: input.investigationId,
-            issueIds: candidatePullRequestIssueIds,
+            remediations: candidateCodeRemediations,
           })
         : [];
     const newIssueIds = references.flatMap((reference) =>
@@ -337,6 +358,7 @@ export async function submitInvestigationReport(input: {
         timeline: issue.timeline,
         severity: issue.severity,
         remediation: issue.remediation,
+        remediations: issue.remediations,
       })),
       newIssues: references.flatMap((reference) => {
         if (reference.relationship !== "new") return [];
@@ -350,6 +372,7 @@ export async function submitInvestigationReport(input: {
               timeline: issue.timeline,
               severity: issue.severity,
               remediation: issue.remediation,
+              remediations: issue.remediations,
               evidence: issue.evidence,
             }]
           : [];
@@ -392,6 +415,7 @@ export async function listIssues(
       timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
+      remediations: issues.remediations,
       archivedAt: issues.archivedAt,
       createdAt: issues.createdAt,
     })
@@ -421,6 +445,7 @@ export async function getIssueDetail(
       timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
+      remediations: issues.remediations,
       evidence: issues.evidence,
       archivedAt: issues.archivedAt,
       createdAt: issues.createdAt,
@@ -520,8 +545,10 @@ export async function getIssueForSlackAction(input: {
       timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
+      remediations: issues.remediations,
       evidence: issues.evidence,
       organizationId: issues.organizationId,
+      integrationAccountId: integrationAccounts.id,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
     })
     .from(issues)
@@ -549,6 +576,7 @@ export async function getInvestigationIssueDetails(investigationId: string) {
       timeline: issues.timeline,
       severity: issues.severity,
       remediation: issues.remediation,
+      remediations: issues.remediations,
       relationship: investigationIssues.relationship,
       evidence: investigationIssues.evidence,
       createdAt: issues.createdAt,
@@ -574,12 +602,23 @@ export interface SlackInvestigationDeliveryContext {
     timeline: Array<{ title: string; description: string }>;
     severity: "SEV-1" | "SEV-2" | "SEV-3";
     remediation: string;
+    remediations: IssueRemediation[];
     relationship: "new" | "recurrence";
     evidence: IssueEvidence[];
+    pullRequest: {
+      id: string;
+      remediationId: string | null;
+      repositoryFullName: string | null;
+      status: "queued" | "creating" | "created" | "merged" | "failed";
+      pullRequestNumber: number | null;
+      pullRequestUrl: string | null;
+      failureReason: string | null;
+    } | null;
   }>;
   source: {
     channelId: string;
     encryptedCredentials: string;
+    integrationAccountId: string;
     messageTimestamp: string | null;
     reactionTimestamp: string;
     threadTimestamp: string;
@@ -587,6 +626,7 @@ export interface SlackInvestigationDeliveryContext {
   output: {
     channelId: string;
     encryptedCredentials: string;
+    integrationAccountId: string;
     severities: Array<"SEV-1" | "SEV-2" | "SEV-3"> | null;
   } | null;
 }
@@ -761,6 +801,27 @@ export async function getSlackInvestigationDeliveryContext(
   const outputCredentials = outputConfig
     ? credentialsByAccount.get(outputConfig.integrationAccountId)
     : null;
+  const issueDetails = await getInvestigationIssueDetails(investigation.id);
+  const pullRequestRows = await db
+    .select({
+      id: issuePullRequests.id,
+      issueId: issuePullRequests.issueId,
+      remediationId: issuePullRequests.remediationId,
+      repositoryFullName: issuePullRequests.repositoryFullName,
+      status: issuePullRequests.status,
+      pullRequestNumber: issuePullRequests.pullRequestNumber,
+      pullRequestUrl: issuePullRequests.pullRequestUrl,
+      failureReason: issuePullRequests.failureReason,
+    })
+    .from(issuePullRequests)
+    .where(eq(issuePullRequests.investigationId, investigation.id))
+    .orderBy(desc(issuePullRequests.createdAt));
+  const pullRequestByIssueId = new Map<string, (typeof pullRequestRows)[number]>();
+  for (const request of pullRequestRows) {
+    if (!pullRequestByIssueId.has(request.issueId)) {
+      pullRequestByIssueId.set(request.issueId, request);
+    }
+  }
 
   return {
     agentId: investigation.agentId,
@@ -769,15 +830,20 @@ export async function getSlackInvestigationDeliveryContext(
     report: investigation.report,
     title: investigation.title,
     traceItems: investigation.traceItems,
-    issues: await getInvestigationIssueDetails(investigation.id),
+    issues: issueDetails.map((issue) => ({
+      ...issue,
+      pullRequest: pullRequestByIssueId.get(issue.id) ?? null,
+    })),
     source:
       typeof sourceChannelId === "string" &&
       typeof sourceReactionTimestamp === "string" &&
       typeof sourceTimestamp === "string" &&
+      sourceAccountId &&
       sourceCredentials
         ? {
             channelId: sourceChannelId,
             encryptedCredentials: sourceCredentials,
+            integrationAccountId: sourceAccountId,
             messageTimestamp: investigation.messageTimestamp,
             reactionTimestamp: sourceReactionTimestamp,
             threadTimestamp: sourceTimestamp,
@@ -788,6 +854,7 @@ export async function getSlackInvestigationDeliveryContext(
         ? {
             channelId: outputConfig.outputChannelId,
             encryptedCredentials: outputCredentials,
+            integrationAccountId: outputConfig.integrationAccountId,
             severities: outputConfig.severities ?? null,
           }
         : null,

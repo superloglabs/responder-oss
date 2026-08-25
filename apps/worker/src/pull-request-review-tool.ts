@@ -16,7 +16,9 @@ import type { CheckedOutRepository } from "./repositories.js";
 export interface AddressedReviewResult {
   addressedThreadIds: string[];
   changedFiles: string[];
+  commitMessage: string;
   headSha: string;
+  responses: Array<{ body: string; threadId: string }>;
 }
 
 export function createPullRequestReviewTool(input: {
@@ -88,7 +90,9 @@ export function createPullRequestReviewTool(input: {
         result = {
           addressedThreadIds: responseIds,
           changedFiles: published.changedFiles,
+          commitMessage: request.commitMessage,
           headSha: published.headSha,
+          responses: request.responses,
         };
         return result;
       },

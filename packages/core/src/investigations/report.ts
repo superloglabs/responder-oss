@@ -60,6 +60,63 @@ export const issueEvidenceSchema = z.object({
 
 export type IssueEvidence = z.infer<typeof issueEvidenceSchema>;
 
+const remediationTitleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .describe("Short action-oriented remediation title.");
+
+const remediationDescriptionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(4_000)
+  .describe("Human-readable explanation of the proposed remediation.");
+
+export const issueRemediationSubmissionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("code_change"),
+    title: remediationTitleSchema,
+    description: remediationDescriptionSchema,
+    diff: z
+      .string()
+      .trim()
+      .min(1)
+      .max(40_000)
+      .refine(
+        (diff) =>
+          /^diff --git /m.test(diff) &&
+          /^--- /m.test(diff) &&
+          /^\+\+\+ /m.test(diff) &&
+          /^@@ /m.test(diff),
+        "Must be a complete unified git diff",
+      )
+      .describe(
+        "A complete unified git diff proposing the code change, including diff --git, ---/+++, and hunk headers. Do not invent a diff unless the relevant repository files were inspected.",
+      ),
+  }),
+  z.object({
+    type: z.literal("external_action"),
+    title: remediationTitleSchema,
+    description: remediationDescriptionSchema,
+    agentPrompt: z
+      .string()
+      .trim()
+      .min(1)
+      .max(8_000)
+      .describe(
+        "A self-contained prompt the user can give to an agent that has access to the external system.",
+      ),
+  }),
+]);
+
+export type IssueRemediationSubmission = z.infer<
+  typeof issueRemediationSubmissionSchema
+>;
+
+export type IssueRemediation = IssueRemediationSubmission & { id: string };
+
 const newIssueSubmissionSchema = z.object({
   resolution: z.literal("new"),
   title: z
@@ -84,12 +141,13 @@ const newIssueSubmissionSchema = z.object({
     .max(30)
     .describe("Ordered events that explain how the issue unfolded."),
   severity: issueSeveritySchema,
-  remediation: z
-    .string()
-    .trim()
+  remediations: z
+    .array(issueRemediationSubmissionSchema)
     .min(1)
-    .max(8_000)
-    .describe("Suggested remediation."),
+    .max(10)
+    .describe(
+      "Concrete remediation options. Use code_change only after inspecting the relevant files; use external_action for configuration, deployment, data, or other work outside the attached repositories.",
+    ),
   evidence: z.array(issueEvidenceSchema).min(1).max(30),
 });
 
@@ -156,10 +214,20 @@ export interface ReportIssue {
   timeline: IssueTimelineEntry[];
   severity: "SEV-1" | "SEV-2" | "SEV-3";
   remediation: string;
+  remediations?: IssueRemediation[];
+}
+
+export function remediationSummary(
+  remediations: IssueRemediationSubmission[],
+): string {
+  return remediations
+    .map((remediation) => `${remediation.title}: ${remediation.description}`)
+    .join("\n\n");
 }
 
 export function renderIssueFixPrompt(
   issue: ReportIssue & { evidence: IssueEvidence[] },
+  selectedRemediation?: IssueRemediationSubmission,
 ): string {
   const timeline = issue.timeline ?? [];
   const evidence = issue.evidence
@@ -186,7 +254,11 @@ export function renderIssueFixPrompt(
         ]
       : []),
     `Severity: ${issue.severity}`,
-    `Remediation: ${issue.remediation}`,
+    `Remediation: ${selectedRemediation?.title ?? "Recommended fix"}`,
+    selectedRemediation?.description ?? issue.remediation,
+    ...(selectedRemediation?.type === "code_change"
+      ? ["", "Proposed diff:", "```diff", selectedRemediation.diff, "```"]
+      : []),
     ...(evidence ? ["", "Evidence:", evidence] : []),
     "",
     "Make the smallest safe change and verify it with relevant tests.",

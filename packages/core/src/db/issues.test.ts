@@ -19,6 +19,8 @@ const organizationId = "15151515-1515-4515-8515-151515151515";
 const agentConfigVersionId = "08080808-0808-4808-8808-080808080808";
 const firstIssueId = "10101010-1010-4010-8010-101010101010";
 const secondIssueId = "20202020-2020-4020-8020-202020202020";
+const firstRemediationId = "11111111-1111-4111-8111-111111111111";
+const secondRemediationId = "22222222-2222-4222-8222-222222222222";
 
 function databaseDouble(status = "investigating") {
   const forUpdate = vi.fn().mockResolvedValue([{
@@ -42,6 +44,13 @@ function databaseDouble(status = "investigating") {
       description: "First issue description",
       severity: "SEV-2",
       remediation: "Fix the first issue",
+      remediations: [{
+        id: firstRemediationId,
+        type: "code_change",
+        title: "Fix the first issue",
+        description: "Fix the first issue",
+        diff: "diff --git a/first.ts b/first.ts\n--- a/first.ts\n+++ b/first.ts\n@@ -1 +1 @@\n-old\n+new",
+      }],
     },
     {
       id: secondIssueId,
@@ -49,6 +58,13 @@ function databaseDouble(status = "investigating") {
       description: "Second issue description",
       severity: "SEV-3",
       remediation: "Fix the second issue",
+      remediations: [{
+        id: secondRemediationId,
+        type: "code_change",
+        title: "Fix the second issue",
+        description: "Fix the second issue",
+        diff: "diff --git a/second.ts b/second.ts\n--- a/second.ts\n+++ b/second.ts\n@@ -1 +1 @@\n-old\n+new",
+      }],
     },
   ]);
   const select = vi
@@ -117,7 +133,10 @@ describe("automatic pull requests from investigation reports", () => {
     expect(queueAutomaticIssuePullRequests).toHaveBeenCalledWith(tx, {
       agentConfigVersionId,
       investigationId,
-      issueIds: [firstIssueId, secondIssueId],
+      remediations: [
+        { issueId: firstIssueId, remediationId: firstRemediationId },
+        { issueId: secondIssueId, remediationId: secondRemediationId },
+      ],
     });
     expect(result.automaticPullRequestIssueIds).toEqual([secondIssueId]);
     expect(result.automaticPullRequestRequestIds).toEqual([requestId]);
