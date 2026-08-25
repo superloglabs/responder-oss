@@ -15,6 +15,7 @@ export interface AnalyticsEvent {
     | "organization created"
     | "pr merged"
     | "pr opened"
+    | "pr review addressed"
     | "prompt copied"
     | "user signed up";
   organizationId?: string;

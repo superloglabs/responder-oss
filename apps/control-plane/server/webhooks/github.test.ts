@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
+import { queuePullRequestReview } from "../investigations/queue.js";
 import { githubWebhookRoutes, verifyGitHubSignature } from "./github.js";
 
 vi.mock("@responder/core/analytics", () => ({
@@ -11,6 +12,10 @@ vi.mock("@responder/core/analytics", () => ({
 
 vi.mock("@responder/core/db/pull-requests", () => ({
   markIssuePullRequestMerged: vi.fn(),
+}));
+
+vi.mock("../investigations/queue.js", () => ({
+  queuePullRequestReview: vi.fn(),
 }));
 
 const app = new Hono().route("/api/webhooks/github", githubWebhookRoutes);
@@ -29,6 +34,27 @@ function pullRequestEvent(overrides: {
       html_url: "https://github.com/acme/api/pull/42",
     },
     repository: { full_name: overrides.repository ?? "acme/api" },
+  });
+}
+
+function reviewCommentEvent(overrides: {
+  action?: string;
+  authorType?: string;
+  inReplyToId?: number;
+} = {}) {
+  return JSON.stringify({
+    action: overrides.action ?? "created",
+    comment: {
+      id: 123,
+      ...(overrides.inReplyToId
+        ? { in_reply_to_id: overrides.inReplyToId }
+        : {}),
+      user: { type: overrides.authorType ?? "Bot" },
+    },
+    installation: { id: 789 },
+    pull_request: { number: 42 },
+    repository: { full_name: "acme/api" },
+    sender: { type: overrides.authorType ?? "Bot" },
   });
 }
 
@@ -144,6 +170,50 @@ describe("GitHub pull request webhooks", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
     expect(markIssuePullRequestMerged).not.toHaveBeenCalled();
+  });
+
+  it("queues a review pass for a top-level bot review comment", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(queuePullRequestReview).mockResolvedValue({
+      jobId: "job-1",
+      matched: true,
+      queued: true,
+      requestId: "request-1",
+    });
+    const body = reviewCommentEvent();
+
+    const response = await post(body, {
+      "x-github-event": "pull_request_review_comment",
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      matched: true,
+      queued: true,
+    });
+    expect(queuePullRequestReview).toHaveBeenCalledWith({
+      installationId: 789,
+      pullRequestNumber: 42,
+      repositoryFullName: "acme/api",
+    });
+  });
+
+  it.each([
+    ["a human comment", reviewCommentEvent({ authorType: "User" })],
+    ["a reply", reviewCommentEvent({ inReplyToId: 100 })],
+    ["an edited comment", reviewCommentEvent({ action: "edited" })],
+  ])("ignores %s", async (_label, body) => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+
+    const response = await post(body, {
+      "x-github-event": "pull_request_review_comment",
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: true,
+    });
+    expect(queuePullRequestReview).not.toHaveBeenCalled();
   });
 
   it("does not capture an event when no matching pull request exists", async () => {

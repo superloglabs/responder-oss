@@ -85,13 +85,17 @@ Configure a public GitHub App with:
   Metadata read
 - Account permission: Email addresses read-only
 - Webhook URL: `<public>/api/webhooks/github`
-- Subscribe to: Pull request
+- Subscribe to: Pull request and Pull request review comment
 - Environment: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`,
   `GITHUB_APP_PRIVATE_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and
   `GITHUB_WEBHOOK_SECRET`
 
 The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.
+When a reviewer bot leaves a new inline comment on a pull request created by
+Responder, the agent checks every unresolved bot thread, pushes any needed
+follow-up commit, replies to the addressed threads, and resolves them. Human
+review comments are never handled automatically.
 
 ## Datadog
 

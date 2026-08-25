@@ -12,6 +12,7 @@ import {
   prepareInvestigationRetry,
 } from "../../../../packages/core/src/db/investigations.js";
 import { queueIssueRemediationJob } from "../../../../packages/core/src/remediation-queue.js";
+import { queuePullRequestReviewJob } from "../../../../packages/core/src/pull-request-review-queue.js";
 import {
   type InvestigationRequest,
   toInvestigationInput,
@@ -254,6 +255,20 @@ export async function queueIssueRemediation(requestId: string) {
         (await getBoss()).send(name, data, options),
     },
     requestId,
+  );
+}
+
+export async function queuePullRequestReview(input: {
+  installationId: number;
+  pullRequestNumber: number;
+  repositoryFullName: string;
+}) {
+  return queuePullRequestReviewJob(
+    {
+      send: async (name, data, options) =>
+        (await getBoss()).send(name, data, options),
+    },
+    input,
   );
 }
 

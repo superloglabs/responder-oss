@@ -58,6 +58,10 @@ types. `drizzle/` contains the ordered schema history.
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without
   buffering the complete archive in worker memory.
+- Pull-request review follow-ups accept only new top-level bot comments on PRs
+  created by Responder. Comment text is untrusted input, human comments are
+  ignored, and the controlled publisher can only fast-forward the existing PR
+  branch, reply to the supplied thread IDs, and resolve those threads.
 - Tenant trace responses omit the initial composed runtime instructions. The
   raw stored trace retains them for an operator's private diagnostics.
 
@@ -78,6 +82,9 @@ external-action behavior.
 Postgres and pg-boss hold investigation, remediation, and follow-up work.
 Delivery may be at least once, so handlers use idempotency keys and state
 transitions rather than assuming a job runs exactly once.
+Review follow-ups are serialized per pull request. Each pass reloads unresolved
+bot threads and the current PR head, so redundant queued comment events exit
+without repeating replies.
 
 ## Deployment contract
 

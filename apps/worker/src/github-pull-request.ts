@@ -28,7 +28,7 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function repositoryApiPath(fullName: string): string {
+export function repositoryApiPath(fullName: string): string {
   const parts = fullName.split("/");
   if (
     parts.length !== 2 ||
@@ -109,7 +109,7 @@ async function runCommand(
   );
 }
 
-async function githubJson(
+export async function githubJson(
   fetchImpl: typeof fetch,
   token: string,
   url: string,
@@ -138,10 +138,11 @@ async function githubJson(
   return payload;
 }
 
-async function changedFiles(
+export async function changedFiles(
   session: DaytonaSandboxSession,
   repositoryPath: string,
   workspaceBaseSha: string,
+  allowEmpty = false,
 ): Promise<
   Array<{ content: Uint8Array | null; mode: "100644" | "100755"; path: string }>
 > {
@@ -157,7 +158,9 @@ async function changedFiles(
     throw new Error(`Unable to inspect repository changes: ${listed.stdout.trim()}`);
   }
   const paths = [...new Set(listed.stdout.split("\0").filter(Boolean))];
-  if (paths.length === 0) throw new Error("No repository changes were made");
+  if (paths.length === 0 && !allowEmpty) {
+    throw new Error("No repository changes were made");
+  }
   if (paths.length > 50) throw new Error("A pull request may change at most 50 files");
 
   const files: Array<{
