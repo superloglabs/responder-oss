@@ -25,6 +25,7 @@ describe("investigation completion", () => {
     await expect(
       completeInvestigationRun(
         {
+          deliveryRunId: "job-id",
           investigationId: "investigation-id",
           replay: false,
           report: "Final report",
@@ -34,6 +35,7 @@ describe("investigation completion", () => {
     ).resolves.toEqual([]);
 
     expect(order).toEqual(["complete", "deliver"]);
+    expect(deliver).toHaveBeenCalledWith("investigation-id", "job-id");
     expect(completeReplay).not.toHaveBeenCalled();
   });
 
@@ -44,6 +46,7 @@ describe("investigation completion", () => {
 
     await completeInvestigationRun(
       {
+        deliveryRunId: "job-id",
         investigationId: "replay-id",
         replay: true,
         report: "Replay report",
@@ -66,6 +69,7 @@ describe("investigation completion", () => {
     await expect(
       completeInvestigationRun(
         {
+          deliveryRunId: "job-id",
           investigationId: "investigation-id",
           replay: false,
           report: "Final report",
@@ -92,6 +96,7 @@ describe("investigation completion", () => {
     await expect(
       completeInvestigationRun(
         {
+          deliveryRunId: "job-id",
           investigationId: "replay-id",
           replay: true,
           report: "Replay report",
@@ -113,6 +118,7 @@ describe("investigation completion", () => {
 
     await deliverPersistedInvestigationAfterFailure(
       {
+        deliveryRunId: "job-id",
         investigationFailed: false,
         investigationId: "investigation-id",
         replay: false,
@@ -120,6 +126,42 @@ describe("investigation completion", () => {
       deliver,
     );
 
-    expect(deliver).toHaveBeenCalledWith("investigation-id");
+    expect(deliver).toHaveBeenCalledWith("investigation-id", "job-id");
+  });
+
+  it("delivers the persisted report when a completed job is recovered", async () => {
+    const deliver = vi.fn().mockResolvedValue([]);
+
+    await expect(
+      deliverPersistedInvestigationAfterFailure(
+        {
+          deliveryRunId: "job-id",
+          investigationFailed: false,
+          investigationId: "investigation-id",
+          replay: false,
+        },
+        deliver,
+      ),
+    ).resolves.toEqual([]);
+
+    expect(deliver).toHaveBeenCalledWith("investigation-id", "job-id");
+  });
+
+  it("does not deliver a recovered replay investigation", async () => {
+    const deliver = vi.fn().mockResolvedValue([]);
+
+    await expect(
+      deliverPersistedInvestigationAfterFailure(
+        {
+          deliveryRunId: "job-id",
+          investigationFailed: false,
+          investigationId: "replay-id",
+          replay: true,
+        },
+        deliver,
+      ),
+    ).resolves.toEqual([]);
+
+    expect(deliver).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,8 @@ export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
 export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
 
+const investigationHeartbeatSeconds = 60;
+
 export const workerHealthJobSchema = z.object({
   marker: z.string().min(1),
   requestedAt: z.iso.datetime(),
@@ -130,6 +132,7 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
     boss.createQueue(investigationQueue, {
       deleteAfterSeconds: 604_800,
       expireInSeconds: 3_600,
+      heartbeatSeconds: investigationHeartbeatSeconds,
       notify: true,
       retryBackoff: true,
       retryDelay: 30,
@@ -170,4 +173,10 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryLimit: 5,
     }),
   ]);
+  // createQueue leaves an existing queue unchanged. Reconcile the heartbeat
+  // separately so future jobs use it on the durable production queue. Active
+  // jobs from the old task are failed back to the queue by pg-boss shutdown.
+  await boss.updateQueue(investigationQueue, {
+    heartbeatSeconds: investigationHeartbeatSeconds,
+  });
 }

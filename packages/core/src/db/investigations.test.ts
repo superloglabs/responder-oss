@@ -14,6 +14,7 @@ import {
   customMcpTokenRefreshSuccessEvent,
   customMcpReconnectError,
   investigationCanBeRetried,
+  markInvestigationStarted,
   prepareInvestigationRetry,
   replayReportMarkdownUpdate,
 } from "./investigations.js";
@@ -113,6 +114,49 @@ describe("investigation retry", () => {
       agentConfigVersionId: "active-config",
       runtimeProfileId: "active-runtime",
     }));
+  });
+});
+
+describe("investigation worker recovery", () => {
+  it("starts an investigation that still needs work", async () => {
+    const returning = vi.fn().mockResolvedValue([{ id: "investigation-1" }]);
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      markInvestigationStarted("investigation-1", "openai-daytona:job-1"),
+    ).resolves.toBe("started");
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      completedAt: null,
+      eveSessionId: "openai-daytona:job-1",
+      failureReason: null,
+      status: "investigating",
+    }));
+  });
+
+  it("preserves a report that completed before the worker stopped", async () => {
+    const returning = vi.fn().mockResolvedValue([]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where: updateWhere }));
+    const selectQuery = {
+      from: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{ status: "resolved" }]),
+    };
+    selectQuery.from.mockReturnValue(selectQuery);
+    selectQuery.where.mockReturnValue(selectQuery);
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => selectQuery),
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      markInvestigationStarted("investigation-1", "openai-daytona:job-1"),
+    ).resolves.toBe("completed");
+    expect(set).toHaveBeenCalledTimes(1);
   });
 });
 
