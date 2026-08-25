@@ -44,7 +44,8 @@ import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
 } from "./investigation-completion.js";
-import { maintainLegacyInvestigationHeartbeat } from "./legacy-job-heartbeat.js";
+import { migrateLegacyInvestigationHeartbeats } from "./legacy-job-heartbeat.js";
+import { workerGracefulShutdownTimeoutMs } from "./shutdown-policy.js";
 import {
   runInvestigationAgent,
   safeInvestigationError,
@@ -85,6 +86,11 @@ let stopping = false;
 let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
+const pollers: {
+  linearTicket?: NodeJS.Timeout;
+  remediationRecovery?: NodeJS.Timeout;
+  replayRequest?: NodeJS.Timeout;
+} = {};
 
 const replayRequestQueue = {
   send: (
@@ -239,6 +245,42 @@ boss.on("error", (error) => {
   void reportWorkerException(error, { operation: "worker" });
 });
 
+async function shutdown(signal: string): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  if (pollers.replayRequest) clearInterval(pollers.replayRequest);
+  if (pollers.linearTicket) clearInterval(pollers.linearTicket);
+  if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
+  await replayRequestDrain;
+  await linearTicketDrain;
+  await remediationRecoveryDrain;
+  console.log(JSON.stringify({ event: "worker_stopping", signal }));
+  try {
+    await boss.stop({
+      graceful: true,
+      timeout: workerGracefulShutdownTimeoutMs,
+    });
+  } finally {
+    await flushWorkerMonitoring();
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    void shutdown(signal)
+      .then(() => process.exit(0))
+      .catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            error: error instanceof Error ? error.message : String(error),
+            event: "worker_shutdown_failed",
+          }),
+        );
+        process.exit(1);
+      });
+  });
+}
+
 await boss.start();
 await prepareWorkerQueues(boss);
 await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
@@ -286,12 +328,10 @@ await boss.work(pullRequestReviewQueue, { localConcurrency: 1 }, async ([job]) =
   const payload = pullRequestReviewJobSchema.parse(job.data);
   return processPullRequestReviewJob(job.id, payload, process.env);
 });
+// Only investigation consumption waits for the one-time legacy handoff. The
+// other queues above remain available, with shutdown handling already active.
+await migrateLegacyInvestigationHeartbeats(boss);
 await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
-  const stopLegacyHeartbeat = await maintainLegacyInvestigationHeartbeat(
-    boss,
-    job,
-  );
-  try {
   const payload = responderJobSchema.parse(job.data);
   if (payload.kind === "remediation") {
     // Drain jobs queued by older workers while all new remediations use the
@@ -488,61 +528,25 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
     );
     throw new Error(message, { cause: error });
   }
-  } finally {
-    stopLegacyHeartbeat();
-  }
 });
 
 void drainInvestigationReplayRequests();
 void drainLinearTicketRequests();
 void drainAbandonedRemediationRequests();
-const replayRequestPoller = setInterval(
+pollers.replayRequest = setInterval(
   () => void drainInvestigationReplayRequests(),
   2_000,
 );
-replayRequestPoller.unref();
-const linearTicketPoller = setInterval(
+pollers.replayRequest.unref();
+pollers.linearTicket = setInterval(
   () => void drainLinearTicketRequests(),
   10_000,
 );
-linearTicketPoller.unref();
-const remediationRecoveryPoller = setInterval(
+pollers.linearTicket.unref();
+pollers.remediationRecovery = setInterval(
   () => void drainAbandonedRemediationRequests(),
   5 * 60 * 1_000,
 );
-remediationRecoveryPoller.unref();
+pollers.remediationRecovery.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));
-
-async function shutdown(signal: string): Promise<void> {
-  if (stopping) return;
-  stopping = true;
-  clearInterval(replayRequestPoller);
-  clearInterval(linearTicketPoller);
-  clearInterval(remediationRecoveryPoller);
-  await replayRequestDrain;
-  await linearTicketDrain;
-  await remediationRecoveryDrain;
-  console.log(JSON.stringify({ event: "worker_stopping", signal }));
-  try {
-    await boss.stop({ graceful: true, timeout: 110_000 });
-  } finally {
-    await flushWorkerMonitoring();
-  }
-}
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void shutdown(signal)
-      .then(() => process.exit(0))
-      .catch((error: unknown) => {
-        console.error(
-          JSON.stringify({
-            error: error instanceof Error ? error.message : String(error),
-            event: "worker_shutdown_failed",
-          }),
-        );
-        process.exit(1);
-      });
-  });
-}

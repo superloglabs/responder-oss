@@ -17,7 +17,7 @@ export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
 export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
 
-const investigationHeartbeatSeconds = 60;
+export const investigationHeartbeatSeconds = 60;
 
 export const workerHealthJobSchema = z.object({
   marker: z.string().min(1),
