@@ -121,11 +121,15 @@ export async function postSlackMessage(input: {
   accessToken: string;
   blocks?: unknown[];
   channelId: string;
+  clientMessageId?: string;
   text: string;
   threadTimestamp?: string;
 }): Promise<string | null> {
   const response = await callSlackApi(input.accessToken, "chat.postMessage", {
     channel: input.channelId,
+    ...(input.clientMessageId
+      ? { client_msg_id: input.clientMessageId }
+      : {}),
     text: input.text,
     ...(input.blocks ? { blocks: input.blocks } : {}),
     ...(input.threadTimestamp ? { thread_ts: input.threadTimestamp } : {}),

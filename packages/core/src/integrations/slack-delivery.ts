@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
 import { responderIssueUrl } from "../responder-urls.js";
@@ -22,6 +23,26 @@ const slackCredentialsSchema = z.object({
 });
 
 type DeliveryIssue = SlackInvestigationDeliveryContext["issues"][number];
+
+export function slackDeliveryClientMessageId(
+  deliveryRunId: string,
+  deliveryKey: string,
+): string {
+  const bytes = createHash("sha256")
+    .update(`${deliveryRunId}:${deliveryKey}`)
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+}
 
 export function filterSlackOutputIssues(
   issues: DeliveryIssue[],
@@ -216,6 +237,7 @@ export async function reconcileCompletedInvestigationSlackCard(
 
 async function deliverSourceThread(
   context: SlackInvestigationDeliveryContext,
+  deliveryRunId: string,
 ): Promise<void> {
   if (!context.source) return;
   const token = accessToken(context.source.encryptedCredentials);
@@ -249,6 +271,10 @@ async function deliverSourceThread(
     await postSlackMessage({
       accessToken: token,
       channelId: context.source.channelId,
+      clientMessageId: slackDeliveryClientMessageId(
+        deliveryRunId,
+        `source:${context.source.channelId}:summary`,
+      ),
       text: completionText,
       threadTimestamp: context.source.threadTimestamp,
     });
@@ -269,6 +295,10 @@ async function deliverSourceThread(
         accessToken: token,
         blocks: message.blocks,
         channelId: context.source.channelId,
+        clientMessageId: slackDeliveryClientMessageId(
+          deliveryRunId,
+          `source:${context.source.channelId}:issue:${issue.id}`,
+        ),
         text: message.text,
         threadTimestamp: context.source.threadTimestamp,
       });
@@ -318,6 +348,7 @@ async function deliverSourceThread(
 
 async function deliverOutputChannel(
   context: SlackInvestigationDeliveryContext,
+  deliveryRunId: string,
 ): Promise<void> {
   if (!context.output) return;
   const token = accessToken(context.output.encryptedCredentials);
@@ -331,6 +362,10 @@ async function deliverOutputChannel(
       accessToken: token,
       blocks: message.blocks,
       channelId: context.output.channelId,
+      clientMessageId: slackDeliveryClientMessageId(
+        deliveryRunId,
+        `output:${context.output.channelId}:issue:${issue.id}`,
+      ),
       text: message.text,
     });
   }
@@ -338,12 +373,13 @@ async function deliverOutputChannel(
 
 export async function deliverInvestigationToSlack(
   investigationId: string,
+  deliveryRunId: string = investigationId,
 ): Promise<string[]> {
   const context = await getSlackInvestigationDeliveryContext(investigationId);
   if (!context) return [];
   const results = await Promise.allSettled([
-    deliverSourceThread(context),
-    deliverOutputChannel(context),
+    deliverSourceThread(context, deliveryRunId),
+    deliverOutputChannel(context, deliveryRunId),
   ]);
   return results.flatMap((result) =>
     result.status === "rejected"

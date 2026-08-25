@@ -1,7 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { slackIssueMessage } from "./slack-delivery.js";
+import {
+  slackDeliveryClientMessageId,
+  slackIssueMessage,
+} from "./slack-delivery.js";
 
 describe("Slack issue delivery", () => {
+  it("uses stable, destination-specific message IDs for retry deduplication", () => {
+    const first = slackDeliveryClientMessageId(
+      "job-id",
+      "source:C123:issue:issue-id",
+    );
+
+    expect(first).toBe(
+      slackDeliveryClientMessageId(
+        "job-id",
+        "source:C123:issue:issue-id",
+      ),
+    );
+    expect(first).not.toBe(
+      slackDeliveryClientMessageId(
+        "job-id",
+        "output:C123:issue:issue-id",
+      ),
+    );
+    expect(first).not.toBe(
+      slackDeliveryClientMessageId(
+        "manual-rerun-job-id",
+        "source:C123:issue:issue-id",
+      ),
+    );
+    expect(first).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
   it("shows root cause and an ordered timeline in the issue message", () => {
     const message = slackIssueMessage({
       id: "07070707-0707-4707-8707-070707070707",

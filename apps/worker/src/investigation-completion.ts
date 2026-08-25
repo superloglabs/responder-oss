@@ -18,6 +18,7 @@ const defaultDependencies: InvestigationCompletionDependencies = {
 
 export async function completeInvestigationRun(
   input: {
+    deliveryRunId: string;
     investigationId: string;
     replay: boolean;
     report: string;
@@ -51,11 +52,12 @@ export async function completeInvestigationRun(
     );
     throw error;
   }
-  return dependencies.deliver(input.investigationId);
+  return dependencies.deliver(input.investigationId, input.deliveryRunId);
 }
 
 export async function deliverPersistedInvestigationAfterFailure(
   input: {
+    deliveryRunId: string;
     investigationFailed: boolean;
     investigationId: string;
     replay: boolean;
@@ -64,5 +66,5 @@ export async function deliverPersistedInvestigationAfterFailure(
     deliverCompletedInvestigationWithWarnings,
 ): Promise<string[]> {
   if (input.replay || input.investigationFailed) return [];
-  return deliver(input.investigationId);
+  return deliver(input.investigationId, input.deliveryRunId);
 }

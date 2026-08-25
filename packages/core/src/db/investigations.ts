@@ -2246,8 +2246,9 @@ export async function beginInvestigation(
 export async function markInvestigationStarted(
   investigationId: string,
   eveSessionId: string,
-): Promise<void> {
-  await getDatabase()
+): Promise<"completed" | "started"> {
+  const database = getDatabase();
+  const started = await database
     .update(investigations)
     .set({
       completedAt: null,
@@ -2257,7 +2258,22 @@ export async function markInvestigationStarted(
       startedAt: new Date(),
       updatedAt: new Date(),
     })
-    .where(eq(investigations.id, investigationId));
+    .where(
+      and(
+        eq(investigations.id, investigationId),
+        inArray(investigations.status, ["pending", "investigating", "failed"]),
+      ),
+    )
+    .returning({ id: investigations.id });
+  if (started[0]) return "started";
+
+  const existing = await database
+    .select({ status: investigations.status })
+    .from(investigations)
+    .where(eq(investigations.id, investigationId))
+    .limit(1);
+  if (existing[0]?.status === "resolved") return "completed";
+  throw new Error("Investigation is unavailable");
 }
 
 export async function discardPendingInvestigation(

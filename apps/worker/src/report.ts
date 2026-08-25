@@ -41,9 +41,10 @@ function reportToolResult(input: {
 
 export async function deliverCompletedInvestigationWithWarnings(
   investigationId: string,
+  deliveryRunId: string = investigationId,
 ): Promise<string[]> {
   try {
-    return await deliverInvestigationToSlack(investigationId);
+    return await deliverInvestigationToSlack(investigationId, deliveryRunId);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Slack delivery failed";

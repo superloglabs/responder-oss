@@ -21,8 +21,14 @@ describe("background jobs", () => {
 
   it("enforces Linear request singleton keys at the queue policy boundary", async () => {
     const createQueue = vi.fn().mockResolvedValue(undefined);
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const updateQueue = vi.fn().mockResolvedValue(undefined);
 
-    await prepareWorkerQueues({ createQueue } as never);
+    await prepareWorkerQueues({
+      createQueue,
+      getDb: () => ({ executeSql }),
+      updateQueue,
+    } as never);
 
     expect(linearTicketQueue).toBe("responder-linear-tickets-v2");
     expect(createQueue).toHaveBeenCalledWith(
@@ -31,10 +37,40 @@ describe("background jobs", () => {
     );
   });
 
+  it("detects interrupted investigations without shortening their runtime limit", async () => {
+    const createQueue = vi.fn().mockResolvedValue(undefined);
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const updateQueue = vi.fn().mockResolvedValue(undefined);
+
+    await prepareWorkerQueues({
+      createQueue,
+      getDb: () => ({ executeSql }),
+      updateQueue,
+    } as never);
+
+    expect(createQueue).toHaveBeenCalledWith(
+      investigationQueue,
+      expect.objectContaining({
+        expireInSeconds: 3_600,
+        heartbeatSeconds: 60,
+        retryLimit: 2,
+      }),
+    );
+    expect(updateQueue).toHaveBeenCalledWith(investigationQueue, {
+      heartbeatSeconds: 60,
+    });
+  });
+
   it("uses a versioned exclusive queue for remediation side effects", async () => {
     const createQueue = vi.fn().mockResolvedValue(undefined);
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const updateQueue = vi.fn().mockResolvedValue(undefined);
 
-    await prepareWorkerQueues({ createQueue } as never);
+    await prepareWorkerQueues({
+      createQueue,
+      getDb: () => ({ executeSql }),
+      updateQueue,
+    } as never);
 
     expect(remediationQueue).toBe("responder-remediations-v2");
     expect(createQueue).toHaveBeenCalledWith(
@@ -49,8 +85,14 @@ describe("background jobs", () => {
 
   it("serializes pull request review side effects without dropping later events", async () => {
     const createQueue = vi.fn().mockResolvedValue(undefined);
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const updateQueue = vi.fn().mockResolvedValue(undefined);
 
-    await prepareWorkerQueues({ createQueue } as never);
+    await prepareWorkerQueues({
+      createQueue,
+      getDb: () => ({ executeSql }),
+      updateQueue,
+    } as never);
 
     expect(pullRequestReviewQueue).toBe("responder-pull-request-reviews-v1");
     expect(createQueue).toHaveBeenCalledWith(

@@ -46,6 +46,7 @@ describe("Slack delivery client", () => {
       postSlackMessage({
         accessToken: "xoxb-test",
         channelId: "C123",
+        clientMessageId: "16161616-1616-4616-8616-161616161616",
         text: "I’m investigating this alert.",
         threadTimestamp: "1785500000.000100",
       }),
@@ -56,6 +57,7 @@ describe("Slack delivery client", () => {
       expect.objectContaining({
         body: JSON.stringify({
           channel: "C123",
+          client_msg_id: "16161616-1616-4616-8616-161616161616",
           text: "I’m investigating this alert.",
           thread_ts: "1785500000.000100",
         }),

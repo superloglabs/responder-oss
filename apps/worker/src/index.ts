@@ -44,6 +44,7 @@ import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
 } from "./investigation-completion.js";
+import { maintainLegacyInvestigationHeartbeat } from "./legacy-job-heartbeat.js";
 import {
   runInvestigationAgent,
   safeInvestigationError,
@@ -286,15 +287,49 @@ await boss.work(pullRequestReviewQueue, { localConcurrency: 1 }, async ([job]) =
   return processPullRequestReviewJob(job.id, payload, process.env);
 });
 await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
+  const stopLegacyHeartbeat = await maintainLegacyInvestigationHeartbeat(
+    boss,
+    job,
+  );
+  try {
   const payload = responderJobSchema.parse(job.data);
   if (payload.kind === "remediation") {
     // Drain jobs queued by older workers while all new remediations use the
     // versioned exclusive queue above.
     return processRemediationJob(job.id, payload, process.env);
   }
-  await markInvestigationStarted(
+  const investigationState = await markInvestigationStarted(
     payload.investigationId,
     `openai-daytona:${job.id}`,
+  );
+  if (investigationState === "completed") {
+    const deliveryWarnings = await deliverPersistedInvestigationAfterFailure({
+      deliveryRunId: job.id,
+      investigationFailed: false,
+      investigationId: payload.investigationId,
+      replay: payload.replay,
+    });
+    await reportIncompleteSlackDelivery({
+      deliveryWarnings,
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      organizationId: payload.config.organizationId,
+    });
+    console.log(
+      JSON.stringify({
+        event: "investigation_job_recovered",
+        investigationId: payload.investigationId,
+        jobId: job.id,
+      }),
+    );
+    return { investigationId: payload.investigationId };
+  }
+  console.log(
+    JSON.stringify({
+      event: "investigation_job_started",
+      investigationId: payload.investigationId,
+      jobId: job.id,
+    }),
   );
 
   let finalizingSlackCard = false;
@@ -389,6 +424,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       },
     );
     const deliveryWarnings = await completeInvestigationRun({
+      deliveryRunId: job.id,
       investigationId: payload.investigationId,
       replay: payload.replay,
       report,
@@ -425,6 +461,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       "Investigation failed before remediation could be queued",
     );
     const deliveryWarnings = await deliverPersistedInvestigationAfterFailure({
+      deliveryRunId: job.id,
       investigationFailed,
       investigationId: payload.investigationId,
       replay: payload.replay,
@@ -450,6 +487,9 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       }),
     );
     throw new Error(message, { cause: error });
+  }
+  } finally {
+    stopLegacyHeartbeat();
   }
 });
 
@@ -485,7 +525,7 @@ async function shutdown(signal: string): Promise<void> {
   await remediationRecoveryDrain;
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
-    await boss.stop({ graceful: true, timeout: 25_000 });
+    await boss.stop({ graceful: true, timeout: 110_000 });
   } finally {
     await flushWorkerMonitoring();
   }
