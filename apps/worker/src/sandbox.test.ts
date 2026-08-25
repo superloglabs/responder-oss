@@ -52,7 +52,7 @@ function cleanupHarness(options?: {
 }
 
 describe("Daytona sandbox preparation", () => {
-  it("ensures git and ripgrep are installed before the agent starts", async () => {
+  it("ensures investigation tools are installed before the agent starts", async () => {
     const session = {
       execCommand: vi.fn().mockResolvedValue(
         "Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code 0\nOutput:\n",
@@ -62,7 +62,14 @@ describe("Daytona sandbox preparation", () => {
     await expect(prepareDaytonaSandbox(session)).resolves.toBeUndefined();
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        cmd: expect.stringContaining("install -y -qq git ripgrep"),
+        cmd: expect.stringContaining(
+          "command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1",
+        ),
+      }),
+    );
+    expect(session.execCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: expect.stringContaining("install -y -qq git python3 ripgrep"),
       }),
     );
   });
