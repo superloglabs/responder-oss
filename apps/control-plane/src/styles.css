@@ -5135,7 +5135,7 @@ button:disabled {
 .integrationBento {
   min-height: 0;
   display: flex;
-  flex: 1 1 0;
+  flex: none;
   flex-direction: column;
   gap: 20px;
 }
