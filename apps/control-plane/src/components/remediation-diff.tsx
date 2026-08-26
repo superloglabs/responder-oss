@@ -2,12 +2,14 @@ import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import { useMemo } from "react";
 import type { IssueRemediation } from "../agents-api";
+import { useColorTheme } from "../color-theme";
 
 export function RemediationDiff({
   remediation,
 }: {
   remediation: IssueRemediation & { type: "code_change" };
 }) {
+  const { theme } = useColorTheme();
   const files = useMemo(() => {
     try {
       return parsePatchFiles(
@@ -35,7 +37,7 @@ export function RemediationDiff({
             diffIndicators: "bars",
             diffStyle: "unified",
             overflow: "scroll",
-            themeType: "dark",
+            themeType: theme,
           }}
         />
       ))}

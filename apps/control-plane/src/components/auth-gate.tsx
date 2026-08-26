@@ -10,6 +10,7 @@ import { trackXSignupPixel } from "../x-pixel";
 import { workspaceSlug } from "./workspace";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { ProviderGlyph } from "./icons";
+import { ColorThemeToggle } from "./color-theme-toggle";
 
 interface AuthGateProps {
   children: ReactNode;
@@ -18,6 +19,7 @@ interface AuthGateProps {
 function AuthFrame({ children }: AuthGateProps) {
   return (
     <main className="authPage">
+      <ColorThemeToggle className="authThemeToggle" />
       <section className="authCard">
         <div className="authBrand">
           <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
