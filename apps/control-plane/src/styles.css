@@ -8219,7 +8219,15 @@ body:has(.appShell--create) {
   min-height: 30px;
   display: flex;
   align-items: center;
+  gap: 12px;
   justify-content: flex-end;
+}
+
+.remediationCard__failure {
+  margin-right: auto;
+  color: #f29a9a;
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .remediationCard__status {

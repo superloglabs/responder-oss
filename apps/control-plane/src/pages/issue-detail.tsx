@@ -546,6 +546,8 @@ export function IssueDetailPage() {
                   (request.status === "created" || request.status === "merged")
                     ? request
                     : null;
+                const failedPullRequest =
+                  request?.status === "failed" ? request : null;
                 return (
                   <article
                     className="remediationCard"
@@ -623,23 +625,32 @@ export function IssueDetailPage() {
                     {remediation.type === "code_change" && publishedPullRequest ? null : (
                       <div className="remediationCard__actions">
                         {remediation.type === "code_change" ? (
-                          request &&
-                          ["queued", "creating"].includes(request.status) ? (
-                            <span className="remediationCard__status">
-                              Opening pull request…
-                            </span>
-                          ) : detail.pullRequestState.canCreate ? (
-                            <Button
-                              loading={pullRequestPending === remediation.id}
-                              onClick={() => void createPullRequest(remediation.id)}
-                              size="small"
-                              variant="primary"
-                            >
-                              {pullRequestPending === remediation.id
-                                ? "Starting…"
-                                : "Open pull request"}
-                            </Button>
-                          ) : null
+                          <>
+                            {failedPullRequest?.failureReason ? (
+                              <span className="remediationCard__failure">
+                                {failedPullRequest.failureReason}
+                              </span>
+                            ) : null}
+                            {request &&
+                            ["queued", "creating"].includes(request.status) ? (
+                              <span className="remediationCard__status">
+                                Opening pull request…
+                              </span>
+                            ) : detail.pullRequestState.canCreate ? (
+                              <Button
+                                loading={pullRequestPending === remediation.id}
+                                onClick={() => void createPullRequest(remediation.id)}
+                                size="small"
+                                variant="primary"
+                              >
+                                {pullRequestPending === remediation.id
+                                  ? "Starting…"
+                                  : failedPullRequest
+                                    ? "Retry pull request"
+                                    : "Open pull request"}
+                              </Button>
+                            ) : null}
+                          </>
                         ) : (
                           <Button
                             aria-live="polite"

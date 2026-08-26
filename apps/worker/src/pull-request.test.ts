@@ -100,6 +100,7 @@ describe("pull request tool", () => {
       investigationId: "16161616-1616-4616-8616-161616161616",
       organizationId: "15151515-1515-4515-8515-151515151515",
       pullRequestRequestId: requestId,
+      repositories: manifest.repositories,
       session,
     });
 
@@ -139,6 +140,38 @@ describe("pull request tool", () => {
       }),
       session,
     );
+  });
+
+  it("rejects repository names outside the configured checkouts", async () => {
+    const pullRequestTool = createPullRequestTool({
+      agentConfigVersionId: "08080808-0808-4808-8808-080808080808",
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      organizationId: "15151515-1515-4515-8515-151515151515",
+      repositories: [
+        {
+          branch: "main",
+          path: "/home/daytona/workspace/repositories/acme/service",
+          repository: "acme/service",
+          sha: "a".repeat(40),
+          workspaceBaseSha: "b".repeat(40),
+        },
+      ],
+      session: {} as DaytonaSandboxSession,
+    });
+
+    await expect(
+      pullRequestTool.invoke(
+        undefined as never,
+        JSON.stringify({
+          issueId: "12121212-1212-4212-8212-121212121212",
+          repository: "acme/other-service",
+          failureMechanism: "A missing value made the page stop loading.",
+          summary: "Handle the unchecked value.",
+          testing: "Added a regression test.",
+        }),
+      ),
+    ).resolves.toContain("Invalid JSON input for tool");
+    expect(getExecutableIssuePullRequest).not.toHaveBeenCalled();
   });
 
   it("builds a Responder issue URL only when an app origin is configured", () => {
