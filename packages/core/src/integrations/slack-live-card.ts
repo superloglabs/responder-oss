@@ -14,12 +14,56 @@ import type { SlackInvestigationTraceItem } from "./slack-live-progress.js";
 const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
 });
+const investigationIdSchema = z.uuid();
+const INVESTIGATION_FEEDBACK_BLOCK_PREFIX = "investigation_feedback_";
 
 export type SlackInvestigationCardStatus =
   | "pending"
   | "in_progress"
   | "complete"
   | "error";
+
+export function slackInvestigationFeedbackBlock(investigationId: string) {
+  return {
+    type: "context_actions",
+    block_id: `${INVESTIGATION_FEEDBACK_BLOCK_PREFIX}${investigationId}_${randomUUID()}`,
+    elements: [
+      {
+        type: "feedback_buttons",
+        action_id: "feedback",
+        positive_button: {
+          text: { type: "plain_text", text: "Good Response" },
+          value: "positive",
+          accessibility_label: "Submit positive investigation feedback",
+        },
+        negative_button: {
+          text: { type: "plain_text", text: "Bad Response" },
+          value: "negative",
+          accessibility_label: "Submit negative investigation feedback",
+        },
+      },
+      {
+        type: "icon_button",
+        action_id: "remove",
+        icon: "trash",
+        text: { type: "plain_text", text: "Remove" },
+      },
+    ],
+  };
+}
+
+export function investigationIdFromFeedbackBlockId(
+  blockId: string | undefined,
+): string | null {
+  if (!blockId?.startsWith(INVESTIGATION_FEEDBACK_BLOCK_PREFIX)) return null;
+  const investigationId = blockId.slice(
+    INVESTIGATION_FEEDBACK_BLOCK_PREFIX.length,
+    INVESTIGATION_FEEDBACK_BLOCK_PREFIX.length + 36,
+  );
+  return investigationIdSchema.safeParse(investigationId).success
+    ? investigationId
+    : null;
+}
 
 function truncate(value: string, maximum: number): string {
   return value.length > maximum

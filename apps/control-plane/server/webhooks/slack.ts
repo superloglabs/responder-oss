@@ -5,7 +5,10 @@ import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents.js";
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
-import { recordInvestigationSlackMessage } from "../../../../packages/core/src/db/investigations.js";
+import {
+  getInvestigationForSlackAction,
+  recordInvestigationSlackMessage,
+} from "../../../../packages/core/src/db/investigations.js";
 import { getIssueForSlackAction } from "../../../../packages/core/src/db/issues.js";
 import {
   IssuePullRequestError,
@@ -20,6 +23,7 @@ import {
 } from "../../../../packages/core/src/integrations/slack.js";
 import {
   failInvestigationSlackCard,
+  investigationIdFromFeedbackBlockId,
   slackErrorLogFields,
   slackInvestigationCard,
 } from "../../../../packages/core/src/integrations/slack-live-card.js";
@@ -89,11 +93,16 @@ const investigationStartResponseSchema = z.object({
   duplicate: z.boolean(),
   investigationId: z.uuid(),
 });
+const investigationFeedbackSchema = z.enum(["positive", "negative"]);
 const slackBlockActionsSchema = z.object({
   type: z.literal("block_actions"),
   team: z.object({ id: z.string().min(1) }),
   channel: z.object({ id: z.string().min(1) }),
-  user: z.object({ id: z.string().min(1) }),
+  user: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1).optional(),
+    username: z.string().min(1).optional(),
+  }),
   response_url: z.string().url(),
   message: z
     .object({
@@ -106,6 +115,7 @@ const slackBlockActionsSchema = z.object({
   actions: z.array(
     z.object({
       action_id: z.string().min(1),
+      block_id: z.string().min(1).optional(),
       value: z.string().optional(),
     }),
   ),
@@ -887,6 +897,59 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     });
     if (!response.ok) {
       console.error(`Unable to dismiss Slack issue prompt (${response.status})`);
+    }
+    return context.json({ ok: true });
+  }
+
+  const feedbackAction = action.data.actions.find(
+    (item) => item.action_id === "feedback",
+  );
+  const feedbackInvestigationId = investigationIdFromFeedbackBlockId(
+    feedbackAction?.block_id,
+  );
+  const feedback = investigationFeedbackSchema.safeParse(
+    feedbackAction?.value,
+  );
+  if (feedbackInvestigationId && feedback.success) {
+    const investigation = await getInvestigationForSlackAction({
+      investigationId: feedbackInvestigationId,
+      teamId: action.data.team.id,
+    });
+    if (investigation) {
+      await captureAnalyticsEvent({
+        distinctId: `slack:${action.data.team.id}:${action.data.user.id}`,
+        event: "investigation feedback submitted",
+        organizationId: investigation.organizationId,
+        properties: {
+          $process_person_profile: false,
+          agent_id: investigation.agentId,
+          channel_id: action.data.channel.id,
+          feedback: feedback.data,
+          investigation_id: investigation.id,
+          message_timestamp: action.data.message?.ts,
+          slack_user_id: action.data.user.id,
+          surface: "slack",
+          team_id: action.data.team.id,
+          user_name: action.data.user.name ?? action.data.user.username,
+        },
+      });
+    }
+    return context.json({ ok: true });
+  }
+
+  const removeAction = action.data.actions.find(
+    (item) => item.action_id === "remove",
+  );
+  if (investigationIdFromFeedbackBlockId(removeAction?.block_id)) {
+    const response = await fetch(action.data.response_url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ delete_original: true }),
+    });
+    if (!response.ok) {
+      console.error(
+        `Unable to remove Slack investigation message (${response.status})`,
+      );
     }
     return context.json({ ok: true });
   }

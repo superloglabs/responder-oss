@@ -2,12 +2,46 @@ import { describe, expect, it, vi } from "vitest";
 import { SlackApiError } from "./slack.js";
 import {
   redeliverInvestigationSlackIssue,
+  slackCompletedInvestigationCard,
   slackDeliveryClientMessageId,
   slackDeliveryErrorMessage,
   slackIssueMessage,
 } from "./slack-delivery.js";
 
 describe("Slack issue delivery", () => {
+  it("adds feedback controls to completed investigation messages", () => {
+    const investigationId = "16161616-1616-4616-8616-161616161616";
+    const message = slackCompletedInvestigationCard({
+      agentId: "13131313-1313-4313-8313-131313131313",
+      investigationId,
+      title: "Plant API error rate is elevated",
+      traceItems: [],
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({ type: "plan" }),
+      expect.objectContaining({
+        type: "context_actions",
+        block_id: expect.stringMatching(
+          new RegExp(`^investigation_feedback_${investigationId}_`),
+        ),
+        elements: [
+          expect.objectContaining({
+            type: "feedback_buttons",
+            action_id: "feedback",
+            positive_button: expect.objectContaining({ value: "positive" }),
+            negative_button: expect.objectContaining({ value: "negative" }),
+          }),
+          expect.objectContaining({
+            type: "icon_button",
+            action_id: "remove",
+            icon: "trash",
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("uses stable, destination-specific message IDs for retry deduplication", () => {
     const first = slackDeliveryClientMessageId(
       "job-id",
