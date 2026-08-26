@@ -17,18 +17,7 @@ import {
   buildPullRequestBody,
   createPullRequestFromSandbox,
 } from "./github-pull-request.js";
-
-const checkedOutRepositoriesSchema = z.object({
-  repositories: z.array(
-    z.object({
-      branch: z.string().min(1),
-      path: z.string().min(1),
-      repository: z.string().min(1),
-      sha: z.string().regex(/^[a-f0-9]{40}$/i),
-      workspaceBaseSha: z.string().regex(/^[a-f0-9]{40}$/i),
-    }),
-  ),
-});
+import type { CheckedOutRepository } from "./repositories.js";
 
 export function responderIssueUrl(
   issueId: string,
@@ -71,15 +60,26 @@ export function createPullRequestTool(input: {
   investigationId: string;
   organizationId: string;
   pullRequestRequestId?: string;
+  repositories: CheckedOutRepository[];
   session: DaytonaSandboxSession;
 }) {
+  const configuredRepositoryNames = [
+    ...new Set(input.repositories.map(({ repository }) => repository)),
+  ];
+  if (configuredRepositoryNames.length === 0) {
+    throw new Error("No repositories are configured for this agent");
+  }
+  const repositorySchema = z
+    .enum(configuredRepositoryNames as [string, ...string[]])
+    .describe(`One of: ${configuredRepositoryNames.join(", ")}`);
+
   return tool({
     name: "create_pull_request",
     description:
       "Create a GitHub pull request from changes made in one selected repository. Call this only after the report tool returns the matching issue ID, or when this run explicitly asks for that issue to be fixed.",
     parameters: z.object({
       issueId: z.uuid(),
-      repository: z.string().min(1),
+      repository: repositorySchema,
       failureMechanism: z
         .string()
         .trim()
@@ -116,13 +116,7 @@ export function createPullRequestTool(input: {
           throw new Error("The selected repository is not configured for this agent");
         }
 
-        const manifestBytes = await input.session.readFile({
-          path: "/home/daytona/workspace/.responder/repositories.json",
-        });
-        const manifest = checkedOutRepositoriesSchema.parse(
-          JSON.parse(new TextDecoder().decode(manifestBytes)),
-        );
-        const checkout = manifest.repositories.find(
+        const checkout = input.repositories.find(
           (candidate) => candidate.repository === requestedPullRequest.repository,
         );
         if (!checkout) throw new Error("The selected repository is not checked out");

@@ -202,6 +202,7 @@ export async function runRemediationAgent(
       investigationId: job.investigationId,
       organizationId: job.config.organizationId,
       pullRequestRequestId: job.remediationRequestId,
+      repositories,
       session,
     });
     const agent = new SandboxAgent({
@@ -221,6 +222,7 @@ export async function runRemediationAgent(
           ? "Use the proposed diff as the starting point. Verify it against the current checkout, adjust it when needed, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks."
           : "Inspect the relevant code, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks.",
         remediationFailureMechanismInstruction,
+        "Call create_pull_request with exactly one of the selected repository names shown above.",
         `Then call create_pull_request with issue ID ${job.issue.id}. Do not finish without creating the pull request or clearly explaining why no safe code fix is possible.`,
         "Do not expose credentials or secret values. The pull request is the only allowed external change.",
         workspaceSecretUsageInstructions(workspaceSecrets),

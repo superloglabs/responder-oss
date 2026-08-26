@@ -26,6 +26,8 @@ const activeIssuePullRequestStatuses = [
   "created",
 ] as const;
 
+const requestablePullRequestModes = ["manual", "always"] as const;
+
 export class IssuePullRequestError extends Error {
   constructor(
     message: string,
@@ -177,7 +179,7 @@ export async function getIssuePullRequestState(
           eq(investigationIssues.issueId, issueId),
           eq(investigations.organizationId, organizationId),
           eq(agents.enabled, true),
-          eq(agentConfigVersions.prMode, "manual"),
+          inArray(agentConfigVersions.prMode, requestablePullRequestModes),
         ),
       )
       .limit(1),
@@ -405,7 +407,7 @@ export async function queueManualIssuePullRequest(input: {
           eq(investigationIssues.issueId, input.issueId),
           eq(investigations.organizationId, input.organizationId),
           eq(agents.enabled, true),
-          eq(agentConfigVersions.prMode, "manual"),
+          inArray(agentConfigVersions.prMode, requestablePullRequestModes),
         ),
       )
       .orderBy(desc(investigations.createdAt))
@@ -413,7 +415,7 @@ export async function queueManualIssuePullRequest(input: {
     const target = eligible[0];
     if (!target) {
       throw new IssuePullRequestError(
-        "This issue is not linked to an agent configured for on-request pull requests",
+        "This issue is not linked to an agent configured to create pull requests",
         "not_available",
       );
     }

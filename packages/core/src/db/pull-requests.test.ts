@@ -44,16 +44,22 @@ function simpleSelect(
   };
 }
 
-function joinedSelect(rows: unknown[]) {
+function joinedSelect(
+  rows: unknown[],
+  where = vi.fn(() => ({
+    orderBy: vi.fn(() => ({ limit: vi.fn().mockResolvedValue(rows) })),
+  })),
+) {
   const limit = vi.fn().mockResolvedValue(rows);
+  where.mockImplementation(() => ({
+    orderBy: vi.fn(() => ({ limit })),
+  }));
   const joined = {
     innerJoin: vi.fn(),
-    where: vi.fn(() => ({
-      orderBy: vi.fn(() => ({ limit })),
-    })),
+    where,
   };
   joined.innerJoin.mockReturnValue(joined);
-  return { from: vi.fn(() => joined) };
+  return { from: vi.fn(() => joined), where };
 }
 
 function databaseDouble(
@@ -72,16 +78,19 @@ function databaseDouble(
     .fn()
     .mockResolvedValueOnce({ rows: [{ available: activeIndexAvailable }] })
     .mockResolvedValue({ rows: [] });
+  const eligibilityWhere = vi.fn();
   const transaction = vi.fn(async (callback) => {
+    const eligible = joinedSelect(
+      [{ investigationId, agentConfigVersionId }],
+      eligibilityWhere,
+    );
     const select = vi
       .fn()
       .mockReturnValueOnce(
         simpleSelect([{ id: issueId, remediations: [codeRemediation] }]),
       )
       .mockReturnValueOnce(simpleSelect(options.existing ?? [], existingLimit))
-      .mockReturnValueOnce(
-        joinedSelect([{ investigationId, agentConfigVersionId }]),
-      );
+      .mockReturnValueOnce(eligible);
     return callback({
       execute,
       insert: vi.fn(() => ({ values })),
@@ -89,7 +98,13 @@ function databaseDouble(
     });
   });
   vi.mocked(getDatabase).mockReturnValue({ transaction } as never);
-  return { execute, existingLimit, onConflictDoNothing, returning };
+  return {
+    eligibilityWhere,
+    execute,
+    existingLimit,
+    onConflictDoNothing,
+    returning,
+  };
 }
 
 function compiledSql(statement: unknown) {
@@ -170,6 +185,21 @@ describe("manual pull request uniqueness", () => {
       target: issuePullRequests.issueId,
       where: activeIssuePullRequestIndexPredicate,
     });
+  });
+
+  it("allows a failed automatic pull request to be retried", async () => {
+    const requestId = "05050505-0505-4505-8505-050505050505";
+    const { eligibilityWhere } = databaseDouble([{ id: requestId }]);
+
+    await queueManualIssuePullRequest({ issueId, organizationId, remediationId });
+
+    expect(compiledSql(eligibilityWhere.mock.calls[0]![0]).params).toEqual([
+      issueId,
+      organizationId,
+      true,
+      "manual",
+      "always",
+    ]);
   });
 
   it("rejects a concurrent request that loses the atomic insert", async () => {
