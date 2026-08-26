@@ -21,6 +21,16 @@
   --ds-warning: #cbb984;
   --ds-danger: #cf9793;
   --ds-info: #91afca;
+  --ds-positive-border: #33452f;
+  --ds-positive-surface: #11190f;
+  --ds-warning-border: #514525;
+  --ds-warning-surface: #1b170c;
+  --ds-danger-border: #563432;
+  --ds-danger-border-hover: #754945;
+  --ds-danger-surface: #1c1110;
+  --ds-danger-surface-hover: #251514;
+  --ds-info-border: #2d4050;
+  --ds-info-surface: #10171c;
   --ds-font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
   --ds-radius-small: 10px;
   --ds-radius-medium: 16px;
@@ -31,6 +41,39 @@
   --shadow-xl:
     0 22px 36px -10px rgb(0 0 0 / 60%),
     0 8px 14px -8px rgb(0 0 0 / 46%);
+}
+
+:root[data-color-theme="light"] {
+  --ds-canvas: #fbfbf9;
+  --ds-surface-base: #efefeb;
+  --ds-surface-raised: #e5e5df;
+  --ds-surface-overlay: #efefeb;
+  --ds-surface-hover: #ddddd7;
+  --ds-border-subtle: #dfdfd9;
+  --ds-border-default: #d5d5cf;
+  --ds-border-top: #ffffff;
+  --ds-border-strong: #b9b9b2;
+  --ds-text-primary: #171715;
+  --ds-text-secondary: #41413d;
+  --ds-text-muted: #62625d;
+  --ds-text-disabled: #92928b;
+  --ds-positive: #3d6f31;
+  --ds-warning: #76580f;
+  --ds-danger: #a33f38;
+  --ds-info: #326b96;
+  --ds-positive-border: color-mix(in srgb, var(--ds-positive) 28%, var(--ds-border-default));
+  --ds-positive-surface: color-mix(in srgb, var(--ds-positive) 9%, var(--ds-surface-base));
+  --ds-warning-border: color-mix(in srgb, var(--ds-warning) 28%, var(--ds-border-default));
+  --ds-warning-surface: color-mix(in srgb, var(--ds-warning) 9%, var(--ds-surface-base));
+  --ds-danger-border: color-mix(in srgb, var(--ds-danger) 28%, var(--ds-border-default));
+  --ds-danger-border-hover: color-mix(in srgb, var(--ds-danger) 42%, var(--ds-border-default));
+  --ds-danger-surface: color-mix(in srgb, var(--ds-danger) 9%, var(--ds-surface-base));
+  --ds-danger-surface-hover: color-mix(in srgb, var(--ds-danger) 13%, var(--ds-surface-base));
+  --ds-info-border: color-mix(in srgb, var(--ds-info) 28%, var(--ds-border-default));
+  --ds-info-surface: color-mix(in srgb, var(--ds-info) 9%, var(--ds-surface-base));
+  --shadow-xl:
+    0 22px 36px -10px rgb(41 41 37 / 18%),
+    0 8px 14px -8px rgb(41 41 37 / 14%);
 }
 
 .dsVisuallyHidden {
@@ -105,11 +148,11 @@
 
 .dsButton--primary {
   background: var(--ds-text-primary);
-  color: #11110f;
+  color: var(--ds-canvas);
 }
 
 .dsButton--primary:hover:not(:disabled) {
-  background: #d9d9d5;
+  background: color-mix(in srgb, var(--ds-text-primary) 90%, var(--ds-canvas));
 }
 
 .dsButton--secondary {
@@ -134,14 +177,14 @@
 }
 
 .dsButton--danger {
-  border-color: #563432;
-  background: #1c1110;
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-surface);
   color: var(--ds-danger);
 }
 
 .dsButton--danger:hover:not(:disabled) {
-  border-color: #754945;
-  background: #251514;
+  border-color: var(--ds-danger-border-hover);
+  background: var(--ds-danger-surface-hover);
 }
 
 .dsButton--small {
@@ -302,26 +345,26 @@
 }
 
 .dsBadge--live {
-  border-color: #33452f;
-  background: #11190f;
+  border-color: var(--ds-positive-border);
+  background: var(--ds-positive-surface);
   color: var(--ds-positive);
 }
 
 .dsBadge--warning {
-  border-color: #514525;
-  background: #1b170c;
+  border-color: var(--ds-warning-border);
+  background: var(--ds-warning-surface);
   color: var(--ds-warning);
 }
 
 .dsBadge--danger {
-  border-color: #563432;
-  background: #1c1110;
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-surface);
   color: var(--ds-danger);
 }
 
 .dsBadge--info {
-  border-color: #2d4050;
-  background: #10171c;
+  border-color: var(--ds-info-border);
+  background: var(--ds-info-surface);
   color: var(--ds-info);
 }
 
@@ -695,7 +738,7 @@
 }
 
 .dsSegmentedControl__option[aria-checked="true"] {
-  background: #3b3b3b;
+  background: var(--ds-surface-hover);
   color: var(--ds-text-primary);
   box-shadow: 0 1px 3px rgb(0 0 0 / 28%);
 }

@@ -1,3 +1,5 @@
+import { ColorThemeToggle } from "./color-theme-toggle";
+
 interface ApplicationErrorProps {
   eventId?: string;
 }
@@ -5,6 +7,7 @@ interface ApplicationErrorProps {
 export function ApplicationError({ eventId }: ApplicationErrorProps) {
   return (
     <main className="authPage">
+      <ColorThemeToggle className="authThemeToggle" />
       <section className="authCard">
         <div className="authIntro">
           <h1>Something went wrong</h1>

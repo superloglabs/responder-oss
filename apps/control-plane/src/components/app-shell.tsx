@@ -4,6 +4,7 @@ import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
 import { BillingBanner } from "./billing-banner";
+import { ColorThemeToggle } from "./color-theme-toggle";
 
 interface AppShellProps {
   active: "agents" | "issues" | "settings";
@@ -141,6 +142,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
           </nav>
         </div>
         <div className="globalHeader__right" ref={menuRef}>
+          <ColorThemeToggle className="globalThemeToggle" />
           <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}

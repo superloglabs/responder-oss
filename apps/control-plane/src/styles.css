@@ -11,6 +11,19 @@
   --live: #b8e6a3;
 }
 
+:root[data-color-theme="light"] {
+  --background: var(--ds-canvas);
+  --surface: var(--ds-surface-base);
+  --foreground: var(--ds-text-primary);
+  --secondary: var(--ds-text-secondary);
+  --muted: var(--ds-text-muted);
+  --dim: #85857f;
+  --border: var(--ds-border-default);
+  --border-strong: var(--ds-border-strong);
+  --border-logo: var(--ds-text-disabled);
+  --live: var(--ds-positive);
+}
+
 /* Keep the viewport around design-system shells on the same canvas color. */
 html:has(.appShell--settings),
 body:has(.appShell--settings),
@@ -325,18 +338,18 @@ body:has(.appShell--investigation) {
 }
 
 .appShell--settings .settingsNotice--success {
-  border-color: #33452f;
+  border-color: var(--ds-positive-border);
   color: var(--ds-positive);
 }
 
 .appShell--settings .settingsNotice--warning {
-  border-color: #66542d;
+  border-color: var(--ds-warning-border);
   color: var(--ds-warning);
 }
 
 .appShell--settings .settingsNotice--error,
 .appShell--settings .integrationMessage--error {
-  border-color: #563432;
+  border-color: var(--ds-danger-border);
   color: var(--ds-danger);
 }
 
@@ -392,9 +405,9 @@ body:has(.appShell--investigation) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #33452f;
+  border: 1px solid var(--ds-positive-border);
   border-radius: var(--ds-radius-pill);
-  background: #11190f;
+  background: var(--ds-positive-surface);
   color: var(--ds-positive);
   font-size: 10px;
   line-height: 16px;
@@ -773,8 +786,8 @@ body:has(.appShell--investigation) {
 }
 
 .contextStoryboardStep.isComplete > span {
-  border-color: #33452f;
-  background: #11190f;
+  border-color: var(--ds-positive-border);
+  background: var(--ds-positive-surface);
   color: var(--ds-positive);
 }
 
@@ -954,8 +967,8 @@ body:has(.appShell--investigation) {
 }
 
 .contextStoryboardToggle[aria-checked="true"] > i {
-  border-color: #3f5738;
-  background: #1b2a17;
+  border-color: var(--ds-positive-border);
+  background: var(--ds-positive-surface);
 }
 
 .contextStoryboardToggle[aria-checked="true"] > i > i {
@@ -1481,6 +1494,10 @@ html {
   color-scheme: dark;
 }
 
+html[data-color-theme="light"] {
+  color-scheme: light;
+}
+
 body {
   min-height: 100vh;
   margin: 0;
@@ -1546,6 +1563,17 @@ button:disabled {
   width: auto;
   height: 20px;
   display: block;
+}
+
+:root[data-color-theme="light"] .authBrand img,
+:root[data-color-theme="light"] .brand img {
+  filter: invert(1);
+}
+
+.authThemeToggle {
+  position: fixed;
+  top: 32px;
+  right: 32px;
 }
 
 .authIntro {
@@ -1711,7 +1739,7 @@ button:disabled {
 
 .authError {
   margin: -4px 0 0;
-  color: #e7a4a4;
+  color: var(--ds-danger);
   font-size: 12px;
   line-height: 18px;
 }
@@ -1927,6 +1955,42 @@ button:disabled {
 
 .globalHeader__right {
   position: relative;
+  gap: 8px;
+}
+
+.globalThemeToggle,
+.authThemeToggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.globalThemeToggle:hover,
+.globalThemeToggle:focus-visible,
+.authThemeToggle:hover,
+.authThemeToggle:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--foreground);
+  outline: none;
+}
+
+.globalThemeToggle svg,
+.authThemeToggle svg {
+  width: 15px;
+  height: 15px;
 }
 
 .statusDot {
@@ -1946,7 +2010,7 @@ button:disabled {
   flex: 0 0 auto;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
-  background: #151515;
+  background: var(--surface);
   color: var(--secondary);
   cursor: pointer;
   font-size: 10px;
@@ -2022,7 +2086,7 @@ button:disabled {
   overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #111;
+  background: var(--surface);
   box-shadow: 0 18px 50px rgb(0 0 0 / 45%);
 }
 
@@ -2086,7 +2150,7 @@ button:disabled {
 
 .accountPopover__item:hover,
 .accountPopover__item:focus-visible {
-  background: #1a1a1a;
+  background: var(--ds-surface-hover);
   color: var(--foreground);
   outline: none;
 }
@@ -2198,12 +2262,12 @@ button:disabled {
 
 .button--primary {
   background: var(--foreground);
-  color: #11110f;
+  color: var(--background);
 }
 
 .button--primary:hover,
 .button--primary:focus-visible {
-  background: #d9d9d5;
+  background: color-mix(in srgb, var(--foreground) 90%, var(--background));
 }
 
 .button--secondary {
@@ -2315,14 +2379,14 @@ button:disabled {
 }
 
 .issueTableSeverity--sev-1 {
-  border-color: #563432;
-  background: #1c1110;
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-surface);
   color: var(--ds-danger);
 }
 
 .issueTableSeverity--sev-2 {
-  border-color: #514525;
-  background: #1b170c;
+  border-color: var(--ds-warning-border);
+  background: var(--ds-warning-surface);
   color: var(--ds-warning);
 }
 
@@ -3529,8 +3593,8 @@ button:disabled {
 }
 
 .traceTool--failed .traceTool__label code {
-  border-color: #754d49;
-  background: #211311;
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-surface);
   color: var(--ds-danger);
 }
 
@@ -3806,8 +3870,8 @@ button:disabled {
 }
 
 .traceMessage--failure .traceMessage__avatar {
-  border-color: #754d49;
-  background: #211311;
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-surface);
   color: var(--ds-danger);
 }
 
@@ -5272,7 +5336,7 @@ button:disabled {
 .integrationCard:hover,
 .integrationCard:focus-visible {
   border-color: var(--border-strong);
-  background: #111;
+  background: var(--ds-surface-hover);
   outline: none;
 }
 
@@ -5814,7 +5878,7 @@ button:disabled {
   gap: 14px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #0b0b0b;
+  background: var(--surface);
 }
 
 .connectedSetup--channel {
@@ -6473,8 +6537,8 @@ button:disabled {
 }
 
 .contextIntegrationToggle[aria-checked="true"] > i {
-  border-color: #3f5738;
-  background: #1b2a17;
+  border-color: var(--ds-positive-border);
+  background: var(--ds-positive-surface);
 }
 
 .contextIntegrationToggle[aria-checked="true"] > i > i {
@@ -7092,8 +7156,8 @@ body:has(.appShell--create) {
 }
 
 .appShell--create .createStepperStep.isComplete .createStepperStep__marker {
-  border-color: #33452f;
-  background: #11190f;
+  border-color: var(--ds-positive-border);
+  background: var(--ds-positive-surface);
   color: var(--ds-positive);
 }
 
@@ -7247,7 +7311,7 @@ body:has(.appShell--create) {
 }
 
 .appShell--create .providerMark.isConnected {
-  border-color: #33452f;
+  border-color: var(--ds-positive-border);
   color: var(--ds-positive);
 }
 
@@ -7400,8 +7464,8 @@ body:has(.appShell--create) {
 }
 
 .appShell--create .repositoryConnectButton.isConnected {
-  border-color: #33452f;
-  background: #11190f;
+  border-color: var(--ds-positive-border);
+  background: var(--ds-positive-surface);
   color: var(--ds-positive);
 }
 
@@ -7534,10 +7598,22 @@ body:has(.appShell--create) {
   --issueFaint: #3e4045;
   --issueHairline: #212224;
   --issueRailValue: #e8e9eb;
+  --issueLink: #7e8cde;
   padding-top: 18px;
   display: flex;
   align-items: flex-start;
   gap: 0;
+}
+
+:root[data-color-theme="light"] .issueDetail {
+  --issueText: var(--ds-text-primary);
+  --issueBody: var(--ds-text-secondary);
+  --issueMuted: var(--ds-text-muted);
+  --issueDim: #787872;
+  --issueFaint: var(--ds-text-disabled);
+  --issueHairline: var(--ds-border-default);
+  --issueRailValue: color-mix(in srgb, var(--ds-text-primary) 90%, var(--ds-text-secondary));
+  --issueLink: #4b5aae;
 }
 
 .issueDetail__main {
@@ -7590,8 +7666,8 @@ body:has(.appShell--create) {
   display: inline-flex;
   align-items: center;
   border-radius: 4px;
-  background: #3a2f1c;
-  color: #e9a23b;
+  background: var(--ds-warning-surface);
+  color: var(--ds-warning);
   font-size: 11px;
   font-weight: 600;
   line-height: 14px;
@@ -8305,7 +8381,7 @@ body:has(.appShell--create) {
 
 .evidenceItem__body a {
   margin-top: 2px;
-  color: #7e8cde;
+  color: var(--issueLink);
   font-size: 12.5px;
   line-height: 16px;
 }
@@ -9361,5 +9437,133 @@ a.issueLine:focus-visible {
 @media (max-width: 760px) {
   .screenSkeleton__pipeline {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Light-theme corrections for legacy surfaces that predate the shared tokens. */
+:root[data-color-theme="light"] .inviteForm input,
+:root[data-color-theme="light"] .inviteForm select,
+:root[data-color-theme="light"] .invitationLink input,
+:root[data-color-theme="light"] .memberRow select,
+:root[data-color-theme="light"] .memberAvatar,
+:root[data-color-theme="light"] .channelPicker__popover,
+:root[data-color-theme="light"] .configurationDialog {
+  background: var(--ds-surface-base);
+}
+
+:root[data-color-theme="light"] .siteDialog__instructions,
+:root[data-color-theme="light"] .siteDialog__site,
+:root[data-color-theme="light"] .siteDialog__field input,
+:root[data-color-theme="light"] .siteDialog__field select {
+  background: var(--ds-surface-raised);
+}
+
+:root[data-color-theme="light"] .channelPicker__popover > input {
+  background: var(--ds-canvas);
+}
+
+:root[data-color-theme="light"] .billingProgress,
+:root[data-color-theme="light"] .toggle::after {
+  background: var(--ds-surface-hover);
+}
+
+:root[data-color-theme="light"] .issueCallout,
+:root[data-color-theme="light"] .remediationCard,
+:root[data-color-theme="light"] .remediationPullRequest,
+:root[data-color-theme="light"] .remediationActivity,
+:root[data-color-theme="light"] .remediationReviewTrace__timeline .traceTool__data pre,
+:root[data-color-theme="light"] .remediationReviewTrace__timeline .traceMessage--assistant,
+:root[data-color-theme="light"] .remediationDiff__file,
+:root[data-color-theme="light"] .remediationDiff__loading,
+:root[data-color-theme="light"] .remediationDiff__fallback,
+:root[data-color-theme="light"] .remediationPrompt pre {
+  border-color: var(--ds-border-default);
+  background: var(--ds-surface-base);
+}
+
+:root[data-color-theme="light"] .remediationCard__kind,
+:root[data-color-theme="light"] .remediationActivity__count,
+:root[data-color-theme="light"] .evidenceGlyph,
+:root[data-color-theme="light"] .evidenceGlyph--clickstack,
+:root[data-color-theme="light"] a.issueLine:hover,
+:root[data-color-theme="light"] .issueLine__action {
+  border-color: var(--ds-border-default);
+  background: var(--ds-surface-hover);
+  color: var(--issueMuted);
+}
+
+:root[data-color-theme="light"] .remediationPullRequest:hover,
+:root[data-color-theme="light"] .issueLine__action:hover {
+  border-color: var(--ds-border-strong);
+  background: var(--ds-surface-raised);
+  color: var(--issueText);
+}
+
+:root[data-color-theme="light"] .remediationActivity__marker {
+  background: var(--ds-surface-base);
+}
+
+:root[data-color-theme="light"] .remediationCard__kind--code_change,
+:root[data-color-theme="light"] .remediationPullRequest__icon,
+:root[data-color-theme="light"] .remediationPullRequest__state {
+  background: var(--ds-positive-surface);
+  color: var(--ds-positive);
+}
+
+:root[data-color-theme="light"] .remediationCard__kind--external_action,
+:root[data-color-theme="light"] .remediationPullRequest__icon--merged,
+:root[data-color-theme="light"] .remediationPullRequest__state--merged {
+  background: #eeeafb;
+  color: #6652ad;
+}
+
+:root[data-color-theme="light"] .evidenceGlyph--sentry {
+  background: #f5eafa;
+  color: #8b4aa1;
+}
+
+:root[data-color-theme="light"] .evidenceGlyph--datadog {
+  background: #e7f1f8;
+  color: #326b96;
+}
+
+:root[data-color-theme="light"] .issueCallout p,
+:root[data-color-theme="light"] .remediationDiff__fallback,
+:root[data-color-theme="light"] .remediationPrompt pre {
+  color: var(--issueBody);
+}
+
+:root[data-color-theme="light"] .issueRail__title {
+  color: var(--issueText);
+}
+
+@media (max-width: 620px) {
+  .authThemeToggle {
+    top: 18px;
+    right: 18px;
+  }
+}
+
+@media (max-width: 440px) {
+  .globalHeader .brand {
+    display: none;
+  }
+
+  .globalHeader__left {
+    gap: 0;
+  }
+
+  .primaryNav {
+    gap: 14px;
+    font-size: 12px;
+  }
+
+  .globalHeader__right {
+    gap: 4px;
+  }
+
+  .globalThemeToggle {
+    width: 30px;
+    height: 30px;
   }
 }
