@@ -9,6 +9,7 @@ import {
 } from "./slack.js";
 import {
   failInvestigationSlackCard,
+  investigationIdFromFeedbackBlockId,
   slackCardFailureMetricEvent,
   slackErrorLogFields,
   slackInvestigationCard,
@@ -142,6 +143,24 @@ describe("Slack live investigation card", () => {
         ],
       }),
     ]);
+  });
+
+  it("reads an investigation ID only from its feedback block", () => {
+    expect(
+      investigationIdFromFeedbackBlockId(
+        `investigation_feedback_${context.investigationId}_card-version`,
+      ),
+    ).toBe(context.investigationId);
+    expect(
+      investigationIdFromFeedbackBlockId(
+        `other_feedback_${context.investigationId}_card-version`,
+      ),
+    ).toBeNull();
+    expect(
+      investigationIdFromFeedbackBlockId(
+        "investigation_feedback_not-an-investigation_card-version",
+      ),
+    ).toBeNull();
   });
 
   it("renders ClickStack's alert shortcode as an emoji in the plan title", () => {

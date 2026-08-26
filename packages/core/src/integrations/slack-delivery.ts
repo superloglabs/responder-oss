@@ -21,6 +21,7 @@ import {
 } from "./slack-remediations.js";
 import {
   slackErrorLogFields,
+  slackInvestigationFeedbackBlock,
   slackInvestigationCard,
 } from "./slack-live-card.js";
 
@@ -284,8 +285,13 @@ export async function redeliverInvestigationSlackIssue(
   return { issueId: issue.id, messageTimestamp };
 }
 
-function completedInvestigationCard(context: SlackInvestigationDeliveryContext) {
-  return slackInvestigationCard({
+export function slackCompletedInvestigationCard(
+  context: Pick<
+    SlackInvestigationDeliveryContext,
+    "agentId" | "investigationId" | "title" | "traceItems"
+  >,
+) {
+  const card = slackInvestigationCard({
     agentId: context.agentId,
     detail: "Completed the investigation plan.",
     investigationId: context.investigationId,
@@ -293,6 +299,13 @@ function completedInvestigationCard(context: SlackInvestigationDeliveryContext) 
     title: context.title,
     traceItems: context.traceItems ?? [],
   });
+  return {
+    ...card,
+    blocks: [
+      ...card.blocks,
+      slackInvestigationFeedbackBlock(context.investigationId),
+    ],
+  };
 }
 
 export function slackDeliveryErrorMessage(error: unknown): string {
@@ -314,7 +327,7 @@ export async function reconcileCompletedInvestigationSlackCard(
   const context = await getSlackInvestigationDeliveryContext(investigationId);
   if (!context?.source?.messageTimestamp) return false;
   const token = accessToken(context.source.encryptedCredentials);
-  const card = completedInvestigationCard(context);
+  const card = slackCompletedInvestigationCard(context);
   const results = await Promise.allSettled([
     updateSlackMessage({
       accessToken: token,
@@ -360,7 +373,7 @@ async function deliverSourceThread(
     context.issues.length,
   );
   if (context.source.messageTimestamp) {
-    const card = completedInvestigationCard(context);
+    const card = slackCompletedInvestigationCard(context);
     try {
       await updateSlackMessage({
         accessToken: token,

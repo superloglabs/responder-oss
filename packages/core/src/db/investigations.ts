@@ -136,6 +136,35 @@ export async function getInvestigationForRetry(input: {
   return rows[0] ?? null;
 }
 
+export async function getInvestigationForSlackAction(input: {
+  investigationId: string;
+  teamId: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      agentId: investigations.agentId,
+      id: investigations.id,
+      organizationId: investigations.organizationId,
+    })
+    .from(investigations)
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(
+          integrationAccounts.organizationId,
+          investigations.organizationId,
+        ),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.externalAccountId, input.teamId),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(eq(investigations.id, input.investigationId))
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function getInvestigationDetail(input: {
   organizationId: string;
   agentId: string;

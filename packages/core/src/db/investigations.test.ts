@@ -13,6 +13,7 @@ import {
   customMcpTokenRefreshFailureEvent,
   customMcpTokenRefreshSuccessEvent,
   customMcpReconnectError,
+  getInvestigationForSlackAction,
   investigationCanBeRetried,
   markInvestigationStarted,
   prepareInvestigationRetry,
@@ -22,6 +23,36 @@ import {
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
 }));
+
+describe("Slack investigation actions", () => {
+  it("resolves an investigation through a connected Slack workspace", async () => {
+    const investigation = {
+      agentId: "agent-1",
+      id: "investigation-1",
+      organizationId: "organization-1",
+    };
+    const query = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([investigation]),
+    };
+    query.from.mockReturnValue(query);
+    query.innerJoin.mockReturnValue(query);
+    query.where.mockReturnValue(query);
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => query),
+    } as never);
+
+    await expect(
+      getInvestigationForSlackAction({
+        investigationId: investigation.id,
+        teamId: "T123",
+      }),
+    ).resolves.toEqual(investigation);
+    expect(query.innerJoin).toHaveBeenCalledOnce();
+  });
+});
 
 describe("investigation retry", () => {
   it("allows terminal investigations to run again", () => {
