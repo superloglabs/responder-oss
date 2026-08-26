@@ -120,14 +120,22 @@ const defaultDependencies: RepositoryCheckoutDependencies = {
   getRepositories: getRuntimeRepositories,
 };
 
-async function writeGitArchiveWithLimit(
-  gitDirectory: string,
+async function writeRepositoryArchiveWithLimit(
+  repositoryDirectory: string,
   archivePath: string,
   archiveLimitBytes: number,
 ): Promise<void> {
   const archiveProcess = spawn(
-    "git",
-    ["-C", gitDirectory, "archive", "--format=tar.gz", "FETCH_HEAD"],
+    "tar",
+    [
+      "-czf",
+      "-",
+      "--exclude=.git",
+      "--exclude=*/.git",
+      "-C",
+      repositoryDirectory,
+      ".",
+    ],
     {
       killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
@@ -143,7 +151,7 @@ async function writeGitArchiveWithLimit(
       }
       reject(
         new Error(
-          `Git archive exited with ${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}`,
+          `Tar exited with ${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}`,
         ),
       );
     });
@@ -175,13 +183,22 @@ async function downloadRepositorySnapshotWithGit(
 ): Promise<{ sha: string }> {
   const temporaryRoot = dirname(archivePath);
   const gitDirectory = join(temporaryRoot, "repository.git");
+  const checkoutDirectory = join(temporaryRoot, "repository");
   const gitEnvironment = {
     ...process.env,
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraHeader",
-    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${accessToken}`,
+    GIT_ALLOW_PROTOCOL: "https",
+    GIT_CONFIG_COUNT: "3",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraHeader",
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(
+      `x-access-token:${accessToken}`,
+    ).toString("base64")}`,
+    GIT_CONFIG_KEY_1: "url.https://github.com/.insteadOf",
+    GIT_CONFIG_VALUE_1: "git@github.com:",
+    GIT_CONFIG_KEY_2: "url.https://github.com/.insteadOf",
+    GIT_CONFIG_VALUE_2: "ssh://git@github.com/",
     GIT_TERMINAL_PROMPT: "0",
   };
+  const repositoryUrl = `https://github.com/${repository.fullName}.git`;
 
   try {
     await mkdir(gitDirectory);
@@ -196,7 +213,7 @@ async function downloadRepositorySnapshotWithGit(
         "remote",
         "add",
         "origin",
-        `https://github.com/${repository.fullName}.git`,
+        repositoryUrl,
       ],
       { timeout: 30_000 },
     );
@@ -222,8 +239,39 @@ async function downloadRepositorySnapshotWithGit(
     if (!/^[a-f0-9]{40}$/i.test(sha)) {
       throw new Error("Git returned an invalid repository commit");
     }
-    await writeGitArchiveWithLimit(
-      gitDirectory,
+
+    await execFileAsync(
+      "git",
+      [
+        "-C",
+        gitDirectory,
+        "worktree",
+        "add",
+        "--quiet",
+        "--detach",
+        checkoutDirectory,
+        sha,
+      ],
+      {
+        env: gitEnvironment,
+        timeout: repositoryDownloadTimeoutMs,
+      },
+    );
+    await execFileAsync(
+      "git",
+      [
+        "-C",
+        checkoutDirectory,
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "--depth=1",
+      ],
+      { env: gitEnvironment, timeout: repositoryDownloadTimeoutMs },
+    );
+    await writeRepositoryArchiveWithLimit(
+      checkoutDirectory,
       archivePath,
       archiveLimitBytes,
     );
@@ -332,6 +380,31 @@ function shouldUseGitFallback(response: Response): boolean {
   );
 }
 
+async function repositoryUsesSubmodules(
+  repository: RuntimeRepository,
+  sha: string,
+  accessToken: string,
+  fetchImpl: typeof fetch,
+): Promise<boolean> {
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `https://api.github.com/repos/${repository.fullName}/contents/.gitmodules?ref=${sha}`,
+      {
+        headers: githubAppHeaders(accessToken),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+  } catch {
+    return true;
+  }
+  await response.body?.cancel();
+  if (response.ok) return true;
+  if (response.status === 404) return false;
+  if (shouldUseGitFallback(response)) return true;
+  throw new Error(`Unable to inspect ${repository.fullName}@${sha} for submodules`);
+}
+
 async function downloadExactSnapshotWithGit(
   repository: RuntimeRepository,
   accessToken: string,
@@ -412,6 +485,24 @@ async function fetchRepositorySnapshot(
       );
     }
     sha = commit.sha;
+  }
+
+  if (
+    await repositoryUsesSubmodules(
+      repository,
+      sha,
+      accessToken,
+      fetchImpl,
+    )
+  ) {
+    return downloadExactSnapshotWithGit(
+      repository,
+      accessToken,
+      sha,
+      archivePath,
+      archiveLimitBytes,
+      downloadWithGit,
+    );
   }
 
   let archiveResponse: Response;
