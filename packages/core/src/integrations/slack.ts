@@ -205,7 +205,7 @@ export async function postSlackMessage(input: {
     if (!input.clientMessageId || !isRetryableSlackPostError(error)) {
       throw error;
     }
-    await wait(100);
+    await wait(500);
     try {
       const response = await callSlackApi(
         input.accessToken,

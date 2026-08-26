@@ -66,6 +66,7 @@ describe("Slack delivery client", () => {
   });
 
   it("retries an ambiguous post response with the same client message ID", async () => {
+    vi.useFakeTimers();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -79,16 +80,16 @@ describe("Slack delivery client", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      postSlackMessage({
-        accessToken: "xoxb-test",
-        channelId: "C123",
-        clientMessageId: "16161616-1616-4616-8616-161616161616",
-        text: "Investigation result",
-        threadTimestamp: "1785500000.000100",
-      }),
-    ).resolves.toBe("1785500001.000200");
+    const result = postSlackMessage({
+      accessToken: "xoxb-test",
+      channelId: "C123",
+      clientMessageId: "16161616-1616-4616-8616-161616161616",
+      text: "Investigation result",
+      threadTimestamp: "1785500000.000100",
+    });
+    await vi.advanceTimersByTimeAsync(500);
 
+    await expect(result).resolves.toBe("1785500001.000200");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[1]).toEqual(fetchMock.mock.calls[0]?.[1]);
   });
