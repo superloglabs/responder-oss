@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { SlackApiError } from "./slack.js";
 import {
+  redeliverInvestigationSlackIssue,
   slackDeliveryClientMessageId,
+  slackDeliveryErrorMessage,
   slackIssueMessage,
 } from "./slack-delivery.js";
 
@@ -31,6 +34,91 @@ describe("Slack issue delivery", () => {
     );
     expect(first).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("includes safe Slack response diagnostics in delivery warnings", () => {
+    const warning = slackDeliveryErrorMessage(
+      new AggregateError(
+        [
+          new SlackApiError("chat.postMessage", "http_200", [
+            "Slack returned invalid JSON (status=200, content-type=text/plain, bytes=12); body=bad response",
+          ]),
+        ],
+        "Slack source thread delivery failed",
+      ),
+    );
+
+    expect(warning).toContain("Slack source thread delivery failed");
+    expect(warning).toContain("chat.postMessage http_200");
+    expect(warning).toContain("Slack returned invalid JSON");
+  });
+
+  it("redelivers only the selected issue to its source thread", async () => {
+    const postMessage = vi.fn().mockResolvedValue("1785500001.000200");
+    const registerPullRequestMessage = vi.fn().mockResolvedValue(undefined);
+    const issue = {
+      id: "07070707-0707-4707-8707-070707070707",
+      title: "Organization provisioning race",
+      description: "The first request failed.",
+      rootCause: "Provisioning was still running.",
+      timeline: [],
+      severity: "SEV-2" as const,
+      remediation: "Wait for provisioning.",
+      remediations: [],
+      relationship: "new" as const,
+      evidence: [],
+      pullRequest: null,
+    };
+
+    await expect(
+      redeliverInvestigationSlackIssue(
+        {
+          deliveryRunId: "backfill-2026-08-26",
+          investigationId: "08080808-0808-4808-8808-080808080808",
+          issueId: issue.id,
+        },
+        {
+          getContext: vi.fn().mockResolvedValue({
+            investigationId: "08080808-0808-4808-8808-080808080808",
+            issues: [issue],
+            prMode: "manual",
+            source: {
+              channelId: "C123",
+              encryptedCredentials:
+                "not-read-because-the-credential-parser-is-covered-separately",
+              integrationAccountId: "09090909-0909-4909-8909-090909090909",
+              messageTimestamp: null,
+              reactionTimestamp: "1785500000.000100",
+              threadTimestamp: "1785500000.000100",
+            },
+          } as never),
+          postMessage,
+          registerPullRequestMessage,
+          resolveAccessToken: vi.fn().mockReturnValue("xoxb-test"),
+        },
+      ),
+    ).resolves.toEqual({
+      issueId: issue.id,
+      messageTimestamp: "1785500001.000200",
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "xoxb-test",
+        channelId: "C123",
+        clientMessageId: slackDeliveryClientMessageId(
+          "backfill-2026-08-26",
+          `source:C123:issue:${issue.id}`,
+        ),
+        threadTimestamp: "1785500000.000100",
+      }),
+    );
+    expect(registerPullRequestMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: "C123",
+        issue,
+        messageTimestamp: "1785500001.000200",
+      }),
     );
   });
 

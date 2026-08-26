@@ -223,6 +223,67 @@ function accessToken(encryptedCredentials: string): string {
   ).accessToken;
 }
 
+interface SlackIssueRedeliveryDependencies {
+  getContext: typeof getSlackInvestigationDeliveryContext;
+  postMessage: typeof postSlackMessage;
+  registerPullRequestMessage: typeof registerPullRequestMessage;
+  resolveAccessToken: typeof accessToken;
+}
+
+export async function redeliverInvestigationSlackIssue(
+  input: {
+    deliveryRunId: string;
+    investigationId: string;
+    issueId: string;
+  },
+  dependencies?: SlackIssueRedeliveryDependencies,
+): Promise<{ issueId: string; messageTimestamp: string }> {
+  const resolvedDependencies = dependencies ?? {
+    getContext: getSlackInvestigationDeliveryContext,
+    postMessage: postSlackMessage,
+    registerPullRequestMessage,
+    resolveAccessToken: accessToken,
+  };
+  const context = await resolvedDependencies.getContext(input.investigationId);
+  if (!context?.source) {
+    throw new Error(
+      `Slack source thread is unavailable for investigation ${input.investigationId}`,
+    );
+  }
+  const issue = context.issues.find((candidate) => candidate.id === input.issueId);
+  if (!issue) {
+    throw new Error(
+      `Issue ${input.issueId} is not attached to investigation ${input.investigationId}`,
+    );
+  }
+  const message = issueSlackMessage(context, issue);
+  const messageTimestamp = await resolvedDependencies.postMessage({
+    accessToken: resolvedDependencies.resolveAccessToken(
+      context.source.encryptedCredentials,
+    ),
+    blocks: message.blocks,
+    channelId: context.source.channelId,
+    clientMessageId: slackDeliveryClientMessageId(
+      input.deliveryRunId,
+      `source:${context.source.channelId}:issue:${issue.id}`,
+    ),
+    text: message.text,
+    threadTimestamp: context.source.threadTimestamp,
+  });
+  if (!messageTimestamp) {
+    throw new Error(
+      `Slack did not return a message timestamp for issue ${input.issueId}`,
+    );
+  }
+  await resolvedDependencies.registerPullRequestMessage({
+    channelId: context.source.channelId,
+    integrationAccountId: context.source.integrationAccountId,
+    issue,
+    messageTimestamp,
+  });
+  return { issueId: issue.id, messageTimestamp };
+}
+
 function completedInvestigationCard(context: SlackInvestigationDeliveryContext) {
   return slackInvestigationCard({
     agentId: context.agentId,
@@ -236,7 +297,15 @@ function completedInvestigationCard(context: SlackInvestigationDeliveryContext) 
 
 export function slackDeliveryErrorMessage(error: unknown): string {
   const fields = slackErrorLogFields(error);
-  return [fields.error, ...(fields.causes ?? [])].join(": ");
+  const diagnostics = (fields.slackErrors ?? []).flatMap((slackError) =>
+    slackError.diagnostics.map(
+      (diagnostic) =>
+        `${slackError.method} ${slackError.code}: ${diagnostic}`,
+    ),
+  );
+  return [fields.error, ...(fields.causes ?? []), ...diagnostics]
+    .join(": ")
+    .slice(0, 2_000);
 }
 
 export async function reconcileCompletedInvestigationSlackCard(
