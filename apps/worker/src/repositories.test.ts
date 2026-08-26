@@ -1,7 +1,9 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import {
   checkoutRuntimeRepositories,
@@ -10,6 +12,7 @@ import {
 } from "./repositories.js";
 
 const sha = "a".repeat(40);
+const execFileAsync = promisify(execFile);
 
 function fakeSession() {
   return {
@@ -24,12 +27,19 @@ function uploadArchive() {
   return vi.fn().mockResolvedValue(undefined);
 }
 
+function missingGitmodules() {
+  return new Response(null, { status: 404 });
+}
+
 describe("Daytona repository checkout", () => {
   it("downloads an exact pull request head without resolving the default branch", async () => {
     const session = fakeSession();
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
-    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(missingGitmodules())
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
+      );
 
     await expect(
       checkoutRuntimeRepositoriesAtRefs(
@@ -55,7 +65,7 @@ describe("Daytona repository checkout", () => {
     ).resolves.toEqual([
       expect.objectContaining({ branch: "fix/review", sha }),
     ]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(
       `https://api.github.com/repos/example-org/example-repo/tarball/${sha}`,
       expect.anything(),
@@ -73,6 +83,7 @@ describe("Daytona repository checkout", () => {
           status: 200,
         }),
       )
+      .mockResolvedValueOnce(missingGitmodules())
       .mockResolvedValueOnce(
         new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
       );
@@ -123,6 +134,115 @@ describe("Daytona repository checkout", () => {
     );
   });
 
+  it("uses an exact Git checkout when the parent commit declares submodules", async () => {
+    const session = fakeSession();
+    const downloadWithGit = vi.fn().mockResolvedValue({ sha });
+
+    await expect(
+      checkoutRuntimeRepositories(session, "version-id", {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        downloadWithGit,
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ sha }), { status: 200 }),
+          )
+          .mockResolvedValueOnce(new Response(null, { status: 200 })),
+        getRepositories: vi.fn().mockResolvedValue([
+          {
+            defaultBranch: "main",
+            fullName: "example-org/example-repo",
+            installationId: 123,
+            private: true,
+          },
+        ]),
+        uploadArchive: uploadArchive(),
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        repository: "example-org/example-repo",
+        sha,
+      }),
+    ]);
+    expect(downloadWithGit).toHaveBeenCalledWith(
+      expect.objectContaining({ fullName: "example-org/example-repo" }),
+      "github-secret",
+      sha,
+      expect.any(String),
+      5 * 1024 * 1024 * 1024,
+    );
+  });
+
+  it("archives recursively materialized submodule files without Git metadata", async () => {
+    const session = fakeSession();
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "responder-submodule-checkout-test-"),
+    );
+    const binDirectory = join(temporaryDirectory, "bin");
+    const gitPath = join(binDirectory, "git");
+    const callsPath = join(temporaryDirectory, "git-calls");
+    const authPath = join(temporaryDirectory, "git-auth");
+    let uploadedEntries = "";
+    await mkdir(binDirectory);
+    await writeFile(
+      gitPath,
+      [
+        "#!/bin/sh",
+        "printf '%s\\n' \"$*\" >> \"$RESPONDER_TEST_GIT_CALLS\"",
+        "case \" $* \" in",
+        "  *\" fetch \"*) printf '%s\\n' \"$GIT_CONFIG_VALUE_0\" > \"$RESPONDER_TEST_GIT_AUTH\" ;;",
+        "  *\" rev-parse \"*) printf '%s\\n' \"$RESPONDER_TEST_GIT_SHA\" ;;",
+        "  *\" ls-tree \"*) printf '.gitmodules\\n' ;;",
+        "  *\" worktree add \"*)",
+        "    for argument do destination=\"${previous:-}\"; previous=\"$argument\"; done",
+        "    mkdir -p \"$destination/.git\" \"$destination/open-core\"",
+        "    printf 'pinned source\\n' > \"$destination/open-core/app.ts\"",
+        "    ;;",
+        "esac",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    vi.stubEnv("PATH", `${binDirectory}:${process.env.PATH ?? ""}`);
+    vi.stubEnv("RESPONDER_TEST_GIT_AUTH", authPath);
+    vi.stubEnv("RESPONDER_TEST_GIT_CALLS", callsPath);
+    vi.stubEnv("RESPONDER_TEST_GIT_SHA", sha);
+
+    try {
+      await checkoutRuntimeRepositories(session, "version-id", {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        fetch: vi.fn<typeof fetch>().mockRejectedValue(new Error("offline")),
+        getRepositories: vi.fn().mockResolvedValue([
+          {
+            defaultBranch: "main",
+            fullName: "example-org/example-repo",
+            installationId: 123,
+            private: true,
+          },
+        ]),
+        temporaryDirectory,
+        uploadArchive: vi.fn(async (_session, localPath) => {
+          const { stdout } = await execFileAsync("tar", ["-tzf", localPath]);
+          uploadedEntries = stdout;
+        }),
+      });
+
+      expect(uploadedEntries).toContain("./open-core/app.ts");
+      expect(uploadedEntries).not.toMatch(/(?:^|\/)\.git(?:\/|$)/m);
+      const gitCalls = await readFile(callsPath, "utf8");
+      expect(gitCalls).toContain(
+        "submodule update --init --recursive --depth=1",
+      );
+      expect(await readFile(authPath, "utf8")).toBe(
+        `Authorization: Basic ${Buffer.from(
+          "x-access-token:github-secret",
+        ).toString("base64")}\n`,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  });
+
   it.each([429, 503])(
     "falls back to an exact Git fetch when the archive host returns %i",
     async (status) => {
@@ -141,6 +261,7 @@ describe("Daytona repository checkout", () => {
             status: 200,
           }),
         )
+        .mockResolvedValueOnce(missingGitmodules())
         .mockResolvedValueOnce(
           new Response("temporarily unavailable", { status }),
         );
@@ -264,6 +385,7 @@ describe("Daytona repository checkout", () => {
           status: 200,
         }),
       )
+      .mockResolvedValueOnce(missingGitmodules())
       .mockRejectedValueOnce(new DOMException("Timed out", "AbortError"));
 
     await expect(
@@ -299,6 +421,7 @@ describe("Daytona repository checkout", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ sha }), { status: 200 }),
       )
+      .mockResolvedValueOnce(missingGitmodules())
       .mockResolvedValueOnce(
         new Response(new Uint8Array([31, 139, 8, 0]), {
           headers: { "content-length": String(101 * 1024 * 1024) },
@@ -345,6 +468,7 @@ describe("Daytona repository checkout", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ sha }), { status: 200 }),
       )
+      .mockResolvedValueOnce(missingGitmodules())
       .mockResolvedValueOnce(new Response(archive, { status: 200 }));
 
     await expect(
@@ -365,12 +489,13 @@ describe("Daytona repository checkout", () => {
     ).rejects.toThrow("GitHub repository archive exceeds the 4 bytes limit");
   });
 
-  it("stops Git archive generation as soon as the disk-safety limit is crossed", async () => {
+  it("stops fallback archive generation as soon as the disk-safety limit is crossed", async () => {
     const temporaryDirectory = await mkdtemp(
       join(tmpdir(), "responder-git-limit-test-"),
     );
     const binDirectory = join(temporaryDirectory, "bin");
     const gitPath = join(binDirectory, "git");
+    const tarPath = join(binDirectory, "tar");
     const completionMarker = join(temporaryDirectory, "archive-completed");
     await mkdir(binDirectory);
     await writeFile(
@@ -379,13 +504,22 @@ describe("Daytona repository checkout", () => {
         "#!/bin/sh",
         "case \" $* \" in",
         "  *\" rev-parse \"*) printf '%s\\n' \"$RESPONDER_TEST_GIT_SHA\" ;;",
-        "  *\" archive \"*)",
-        "    printf '12345'",
-        "    sleep 1",
-        "    : > \"$RESPONDER_TEST_GIT_COMPLETED\"",
-        "    printf '6789'",
+        "  *\" worktree add \"*)",
+        "    for argument do destination=\"${previous:-}\"; previous=\"$argument\"; done",
+        "    mkdir -p \"$destination\"",
         "    ;;",
         "esac",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    await writeFile(
+      tarPath,
+      [
+        "#!/bin/sh",
+        "printf '12345'",
+        "sleep 1",
+        ": > \"$RESPONDER_TEST_GIT_COMPLETED\"",
+        "printf '6789'",
       ].join("\n"),
       { mode: 0o755 },
     );
