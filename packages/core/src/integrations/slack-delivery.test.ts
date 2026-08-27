@@ -90,6 +90,7 @@ describe("Slack issue delivery", () => {
 
   it("redelivers only the selected issue to its source thread", async () => {
     const postMessage = vi.fn().mockResolvedValue("1785500001.000200");
+    const recordReply = vi.fn().mockResolvedValue(undefined);
     const registerPullRequestMessage = vi.fn().mockResolvedValue(undefined);
     const issue = {
       id: "07070707-0707-4707-8707-070707070707",
@@ -128,6 +129,7 @@ describe("Slack issue delivery", () => {
             },
           } as never),
           postMessage,
+          recordReply,
           registerPullRequestMessage,
           resolveAccessToken: vi.fn().mockReturnValue("xoxb-test"),
         },
@@ -152,6 +154,13 @@ describe("Slack issue delivery", () => {
         channelId: "C123",
         issue,
         messageTimestamp: "1785500001.000200",
+      }),
+    );
+    expect(recordReply).toHaveBeenCalledWith(
+      "08080808-0808-4808-8808-080808080808",
+      expect.objectContaining({
+        key: `issue:${issue.id}`,
+        slackTimestamp: "1785500001.000200",
       }),
     );
   });

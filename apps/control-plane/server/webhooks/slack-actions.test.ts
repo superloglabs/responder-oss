@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getInvestigationForSlackAction: vi.fn(),
   getIssueForSlackAction: vi.fn(),
   postSlackEphemeralMessage: vi.fn(),
+  removeInvestigationSlackReply: vi.fn(),
 }));
 
 vi.mock("@responder/core/analytics", () => ({
@@ -21,6 +22,7 @@ vi.mock(
   async (importOriginal) => ({
     ...(await importOriginal()),
     getInvestigationForSlackAction: mocks.getInvestigationForSlackAction,
+    removeInvestigationSlackReply: mocks.removeInvestigationSlackReply,
   }),
 );
 vi.mock("../../../../packages/core/src/db/issues.js", () => ({
@@ -143,6 +145,7 @@ describe("Slack actions", () => {
       channel: { id: "C123" },
       user: { id: "U123" },
       response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
+      message: { ts: "1785500001.000200" },
       actions: [
         {
           action_id: "remove",
@@ -159,6 +162,11 @@ describe("Slack actions", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ delete_original: true }),
       },
+    );
+    expect(mocks.removeInvestigationSlackReply).toHaveBeenCalledWith(
+      investigationId,
+      "investigation-status",
+      "1785500001.000200",
     );
   });
 
