@@ -587,6 +587,44 @@ export async function getInvestigationIssueDetails(investigationId: string) {
     .orderBy(issues.createdAt);
 }
 
+export async function getIssueForSlackBackfill(input: {
+  investigationId: string;
+  issueId: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      rootCause: issues.rootCause,
+      timeline: issues.timeline,
+      severity: issues.severity,
+      remediation: issues.remediation,
+      remediations: issues.remediations,
+      evidence: issues.evidence,
+    })
+    .from(issues)
+    .innerJoin(
+      investigations,
+      eq(investigations.organizationId, issues.organizationId),
+    )
+    .where(
+      and(
+        eq(investigations.id, input.investigationId),
+        eq(issues.id, input.issueId),
+      ),
+    )
+    .limit(1);
+  const issue = rows[0];
+  return issue
+    ? {
+        ...issue,
+        pullRequest: null,
+        relationship: "new" as const,
+      }
+    : null;
+}
+
 export interface SlackInvestigationDeliveryContext {
   agentId: string;
   investigationId: string;

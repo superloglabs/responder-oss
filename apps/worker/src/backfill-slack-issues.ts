@@ -4,22 +4,27 @@ import { loadResponderSecrets } from "@responder/core/secrets";
 import { z } from "zod";
 
 const targetSchema = z.object({
+  allowDetachedIssue: z.boolean(),
   investigationId: z.uuid(),
   issueId: z.uuid(),
 });
 
 function parseTarget(value: string) {
-  const [investigationId, issueId, ...extra] = value.split(":");
-  if (extra.length > 0) {
+  const [investigationId, issueId, mode, ...extra] = value.split(":");
+  if (extra.length > 0 || (mode !== undefined && mode !== "detached")) {
     throw new Error(`Invalid Slack issue backfill target: ${value}`);
   }
-  return targetSchema.parse({ investigationId, issueId });
+  return targetSchema.parse({
+    allowDetachedIssue: mode === "detached",
+    investigationId,
+    issueId,
+  });
 }
 
 const [deliveryRunId, ...targetValues] = process.argv.slice(2);
 if (!deliveryRunId || targetValues.length === 0) {
   throw new Error(
-    "Usage: backfill-slack-issues <delivery-run-id> <investigation-id:issue-id> [...]",
+    "Usage: backfill-slack-issues <delivery-run-id> <investigation-id:issue-id[:detached]> [...]",
   );
 }
 
