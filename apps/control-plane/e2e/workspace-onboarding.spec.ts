@@ -153,6 +153,25 @@ test("shows specific workspace secret validation issues", async ({
   await page.route(/\/api\/agents\/options(?:\/refresh\/slack)?$/, (route) =>
     route.fulfill({ json: agentOptions }),
   );
+  await page.route("**/api/integrations", (route) =>
+    route.fulfill({
+      json: {
+        integrations: [
+          {
+            id: "slack",
+            name: "Slack",
+            description: "Channels, threads, and incident discussion",
+            state: "available",
+            accountCount: 0,
+            resourceCount: 0,
+            accounts: [],
+            connectUrl: "/api/integrations/slack/start",
+            configurationUrl: null,
+          },
+        ],
+      },
+    }),
+  );
   await page.route("**/api/agents/secrets", async (route) => {
     expect(route.request().postDataJSON()).toEqual({
       name: "PATH",
@@ -187,6 +206,7 @@ test("shows specific workspace secret validation issues", async ({
   await expect(
     page.getByRole("heading", { name: "Agent context" }),
   ).toBeVisible();
+  await expect(page.getByText("Slack", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Add secret" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Add a workspace secret",

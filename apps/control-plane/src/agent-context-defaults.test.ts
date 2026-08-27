@@ -53,10 +53,10 @@ const OPTIONS: AgentOptions = {
 };
 
 describe("defaultAgentContext", () => {
-  it("enables every direct connection and a safe initial scope for resource providers", () => {
+  it("enables direct connections and supported resource providers", () => {
     expect(defaultAgentContext(OPTIONS)).toEqual({
       contextAccountIds: ["sentry-1", "axiom-1", "aws-1", "aws-2", "vercel-1"],
-      contextResourceIds: ["slack-channel-1", "vercel-project-1"],
+      contextResourceIds: ["vercel-project-1"],
       repositoryIds: ["repository-1"],
     });
   });
