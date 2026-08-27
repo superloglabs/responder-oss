@@ -23,6 +23,7 @@ import { checkoutRuntimeRepositories } from "./repositories.js";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
+  createDaytonaSandboxSession,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
 import {
@@ -179,15 +180,16 @@ export async function runRemediationAgent(
   setTracingDisabled(true);
   const runtimeProfile = await getRuntimeProfile(job.runtimeProfileId);
   const workspaceSecrets = await getRuntimeWorkspaceSecrets(job.config.id);
+  const sandboxName = `responder-remediation-${job.remediationRequestId}`;
   const client = new DaytonaSandboxClient({
     ...daytonaClientOptions(config),
-    name: `responder-remediation-${job.remediationRequestId}`,
+    name: sandboxName,
     pauseOnExit: false,
   });
   let session: DaytonaSandboxSession | null = null;
 
   try {
-    session = await client.create();
+    session = await createDaytonaSandboxSession(client, config, sandboxName);
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositories(

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
+  createDaytonaSandboxSession,
   type DaytonaCleanupDependencies,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
@@ -100,6 +101,62 @@ describe("Daytona sandbox preparation", () => {
 });
 
 describe("Daytona sandbox cleanup", () => {
+  it("removes an existing named sandbox before creating a replacement", async () => {
+    const harness = cleanupHarness();
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const creator = {
+      create: vi.fn().mockResolvedValue(createdSession),
+    };
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(harness.get).toHaveBeenCalledWith("responder-investigation-1");
+    expect(harness.deleteSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sandbox-1" }),
+      60,
+      true,
+    );
+    expect(creator.create).toHaveBeenCalledOnce();
+  });
+
+  it("cleans up a sandbox that appears after creation times out", async () => {
+    const harness = cleanupHarness({ missing: true });
+    const timeout = new Error("sandbox creation timed out");
+    const creator = { create: vi.fn().mockRejectedValue(timeout) };
+    harness.get
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing"), { statusCode: 404 }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing"), { statusCode: 404 }),
+      )
+      .mockResolvedValueOnce({ id: "sandbox-1" });
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).rejects.toBe(timeout);
+
+    expect(harness.get).toHaveBeenCalledTimes(3);
+    expect(harness.deleteSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sandbox-1" }),
+      60,
+      true,
+    );
+    expect(harness.sleep).toHaveBeenCalledWith(500);
+  });
+
   it("enables provider-side deletion when a sandbox stops", async () => {
     const harness = cleanupHarness();
     const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
@@ -117,6 +174,32 @@ describe("Daytona sandbox cleanup", () => {
 
     expect(setAutoDeleteInterval).toHaveBeenCalledWith(0);
     expect(harness.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("retries transient lifecycle failures", async () => {
+    const harness = cleanupHarness();
+    const gatewayError = Object.assign(new Error("bad gateway"), {
+      name: "DaytonaBadGatewayError",
+      statusCode: 502,
+    });
+    const setAutoDeleteInterval = vi
+      .fn()
+      .mockRejectedValueOnce(gatewayError)
+      .mockResolvedValue(undefined);
+    harness.get.mockResolvedValue({
+      id: "sandbox-1",
+      setAutoDeleteInterval,
+    });
+
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      harness.dependencies,
+    );
+
+    expect(setAutoDeleteInterval).toHaveBeenCalledTimes(2);
+    expect(harness.sleep).toHaveBeenCalledWith(500);
   });
 
   it("mounts opaque secrets and restarts before enabling stop-time deletion", async () => {
