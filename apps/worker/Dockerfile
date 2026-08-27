@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim
+FROM node:25-bookworm-slim
 
 ENV NODE_ENV=production
 ENV TSX_DISABLE_CACHE=1
