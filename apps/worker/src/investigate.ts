@@ -55,6 +55,7 @@ import {
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
+  createDaytonaSandboxSession,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
 import {
@@ -509,9 +510,10 @@ export async function runInvestigationAgent(
     (server): server is NonNullable<typeof server> => server !== null,
   );
 
+  const sandboxName = `responder-investigation-${job.investigationId}`;
   const client = new DaytonaSandboxClient({
     ...daytonaClientOptions(config),
-    name: `responder-investigation-${job.investigationId}`,
+    name: sandboxName,
     pauseOnExit: false,
   });
 
@@ -564,7 +566,7 @@ export async function runInvestigationAgent(
         );
       }
     }
-    session = await client.create();
+    session = await createDaytonaSandboxSession(client, config, sandboxName);
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositories(

@@ -2,7 +2,10 @@ import {
   Daytona,
   type Sandbox,
 } from "@daytona/sdk";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type {
+  DaytonaSandboxClient,
+  DaytonaSandboxSession,
+} from "@openai/agents-extensions/sandbox/daytona";
 import {
   daytonaClientOptions,
   isDaytonaNotFound,
@@ -23,6 +26,8 @@ interface DaytonaCleanupClient {
   [Symbol.asyncDispose](): Promise<void>;
 }
 
+type DaytonaSandboxCreator = Pick<DaytonaSandboxClient, "create">;
+
 export interface DaytonaCleanupDependencies {
   createClient(config: DaytonaCleanupConfig): DaytonaCleanupClient;
   reportException: typeof reportWorkerException;
@@ -38,6 +43,115 @@ const defaultCleanupDependencies: DaytonaCleanupDependencies = {
     }),
 };
 
+const daytonaRetryDelaysMs = [0, 500, 1_500] as const;
+
+function isTransientDaytonaError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "statusCode" in error) {
+    const statusCode = error.statusCode;
+    if (
+      typeof statusCode === "number" &&
+      (statusCode === 408 || statusCode === 429 || statusCode >= 500)
+    ) {
+      return true;
+    }
+  }
+  return (
+    error instanceof Error &&
+    [
+      "DaytonaBadGatewayError",
+      "DaytonaConnectionError",
+      "DaytonaConnectionTimeoutError",
+      "DaytonaInternalServerError",
+      "DaytonaRateLimitError",
+      "DaytonaServiceUnavailableError",
+      "DaytonaTimeoutError",
+    ].includes(error.name)
+  );
+}
+
+async function retryTransientDaytonaOperation<T>(
+  operation: () => Promise<T>,
+  dependencies: DaytonaCleanupDependencies,
+): Promise<T> {
+  let lastError: unknown;
+  for (const delayMs of daytonaRetryDelaysMs) {
+    if (delayMs > 0) await dependencies.sleep(delayMs);
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDaytonaError(error)) throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function deleteDaytonaSandboxByReference(
+  reference: string,
+  config: DaytonaCleanupConfig,
+  waitForAppearance: boolean,
+  dependencies: DaytonaCleanupDependencies,
+): Promise<void> {
+  const client = dependencies.createClient(config);
+  try {
+    for (const [index, delayMs] of daytonaRetryDelaysMs.entries()) {
+      if (delayMs > 0) await dependencies.sleep(delayMs);
+      try {
+        const sandbox = await client.get(reference);
+        await client.delete(sandbox, 60, true);
+        return;
+      } catch (error) {
+        if (isDaytonaNotFound(error)) {
+          if (waitForAppearance && index < daytonaRetryDelaysMs.length - 1) {
+            continue;
+          }
+          return;
+        }
+        if (
+          !isTransientDaytonaError(error) ||
+          index === daytonaRetryDelaysMs.length - 1
+        ) {
+          throw error;
+        }
+      }
+    }
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
+export async function createDaytonaSandboxSession(
+  creator: DaytonaSandboxCreator,
+  config: DaytonaCleanupConfig,
+  sandboxName: string,
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<DaytonaSandboxSession> {
+  await deleteDaytonaSandboxByReference(
+    sandboxName,
+    config,
+    false,
+    dependencies,
+  );
+  try {
+    return await creator.create();
+  } catch (createError) {
+    try {
+      await deleteDaytonaSandboxByReference(
+        sandboxName,
+        config,
+        true,
+        dependencies,
+      );
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [createError, cleanupError],
+        `Unable to create or clean up Daytona sandbox ${sandboxName}`,
+      );
+    }
+    throw createError;
+  }
+}
+
 export async function configureDaytonaSandboxLifecycle(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
@@ -46,20 +160,30 @@ export async function configureDaytonaSandboxLifecycle(
 ): Promise<void> {
   const client = dependencies.createClient(config);
   try {
-    const sandbox = await client.get(session.state.sandboxId);
+    const sandbox = await retryTransientDaytonaOperation(
+      () => client.get(session.state.sandboxId),
+      dependencies,
+    );
     if (secrets.length > 0) {
-      await sandbox.updateSecrets(
-        Object.fromEntries(
-          secrets.map((secret) => [
-            secret.environmentVariable,
-            secret.daytonaSecretName,
-          ]),
-        ),
+      await retryTransientDaytonaOperation(
+        () =>
+          sandbox.updateSecrets(
+            Object.fromEntries(
+              secrets.map((secret) => [
+                secret.environmentVariable,
+                secret.daytonaSecretName,
+              ]),
+            ),
+          ),
+        dependencies,
       );
-      await sandbox.stop();
-      await sandbox.start();
+      await retryTransientDaytonaOperation(() => sandbox.stop(), dependencies);
+      await retryTransientDaytonaOperation(() => sandbox.start(), dependencies);
     }
-    await sandbox.setAutoDeleteInterval(0);
+    await retryTransientDaytonaOperation(
+      () => sandbox.setAutoDeleteInterval(0),
+      dependencies,
+    );
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }

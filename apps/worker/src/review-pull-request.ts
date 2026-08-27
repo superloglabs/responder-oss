@@ -24,6 +24,7 @@ import { checkoutRuntimeRepositoriesAtRefs } from "./repositories.js";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
+  createDaytonaSandboxSession,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
 import { workspaceSecretUsageInstructions } from "./secret-safety.js";
@@ -81,15 +82,16 @@ export async function runPullRequestReviewAgent(
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
+  const sandboxName = `responder-pr-review-${job.requestId}`;
   const client = new DaytonaSandboxClient({
     ...daytonaClientOptions(config),
-    name: `responder-pr-review-${job.requestId}`,
+    name: sandboxName,
     pauseOnExit: false,
   });
   let session: DaytonaSandboxSession | null = null;
 
   try {
-    session = await client.create();
+    session = await createDaytonaSandboxSession(client, config, sandboxName);
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositoriesAtRefs(
