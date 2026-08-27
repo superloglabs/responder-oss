@@ -488,7 +488,6 @@ export function AgentCreatePage() {
   const [connectionSettingsOpen, setConnectionSettingsOpen] = useState<
     AgentOptions["accounts"][number] | null
   >(null);
-  const [promptStepReady, setPromptStepReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connectingProvider, setConnectingProvider] =
@@ -596,12 +595,6 @@ export function AgentCreatePage() {
     slackContextDialogOpen,
     vercelDialogOpen,
   ]);
-
-  useEffect(() => {
-    if (activeStep !== 4 || promptStepReady) return;
-    const timeout = window.setTimeout(() => setPromptStepReady(true), 500);
-    return () => window.clearTimeout(timeout);
-  }, [activeStep, promptStepReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1324,7 +1317,6 @@ export function AgentCreatePage() {
 
   function showStep(step: CreateStep) {
     if (step > furthestStep) return;
-    if (step === 4) setPromptStepReady(false);
     setActiveStep(step);
     setError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1337,7 +1329,6 @@ export function AgentCreatePage() {
     }
     if (activeStep === 4) return;
     const nextStep = (activeStep + 1) as CreateStep;
-    if (nextStep === 4) setPromptStepReady(false);
     setActiveStep(nextStep);
     setFurthestStep((current) =>
       Math.max(current, nextStep) as CreateStep
@@ -1355,13 +1346,7 @@ export function AgentCreatePage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const submitter = (event.nativeEvent as SubmitEvent).submitter;
-    if (
-      activeStep !== 4 ||
-      !promptStepReady ||
-      !(submitter instanceof HTMLButtonElement) ||
-      submitter.dataset.submitAgent !== "true"
-    ) {
+    if (activeStep !== 4) {
       if (activeStep < 4) continueToNextStep();
       return;
     }
@@ -2972,12 +2957,12 @@ export function AgentCreatePage() {
               <span
                 aria-live="polite"
                 className={
-                  currentRequirement
+                  currentRequirement || (activeStep === 4 && missingRequirement)
                     ? "createRequirement"
                     : "createRequirement isReady"
                 }
               >
-                {currentRequirement ??
+                {(activeStep === 4 ? missingRequirement : currentRequirement) ??
                   (activeStep === 3
                     ? "Context is optional. Add only what the agent needs."
                     : "All required setup is complete.")}
@@ -3005,10 +2990,7 @@ export function AgentCreatePage() {
               </Button>
             ) : (
               <Button
-                data-submit-agent="true"
-                disabled={
-                  Boolean(missingRequirement) || !promptStepReady || saving
-                }
+                disabled={saving}
                 loading={saving}
                 type="submit"
                 variant="primary"
