@@ -46,9 +46,8 @@ Configure a distributed Slack app with:
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
 
-Enable Slack's hosted MCP server in the app's agent settings if the app is
-eligible to use it. Reconnect existing installations after changing scopes.
-Private channels require the bot to be invited.
+Reconnect existing installations after changing scopes. Private channels
+require the bot to be invited.
 
 Watched channels accept app-authored CloudWatch alarm notifications from AWS
 and Amazon Q Developer in chat applications. Responder starts investigations
