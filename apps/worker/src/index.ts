@@ -467,6 +467,25 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
           }));
         }));
       },
+      async (error) => {
+        await reportWorkerException(error, {
+          diagnostics: {
+            contextProvider: "sentry",
+            degradedContext: true,
+            errorCode: error.errorCode,
+            failureKind: error.failureKind,
+            ...(error.httpStatus === undefined
+              ? {}
+              : { httpStatus: error.httpStatus }),
+            requestDurationMs: error.requestDurationMs,
+            retryable: error.retryable,
+          },
+          investigationId: payload.investigationId,
+          jobId: job.id,
+          operation: "investigation",
+          organizationId: payload.config.organizationId,
+        });
+      },
     );
     const deliveryWarnings = await completeInvestigationRun({
       deliveryRunId: job.id,
