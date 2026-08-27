@@ -18,6 +18,8 @@ const remediationActionValueSchema = z.object({
   remediationId: z.uuid(),
 });
 
+const slackCardTextMaxLength = 200;
+
 export type SlackRemediationActionValue = z.infer<
   typeof remediationActionValueSchema
 >;
@@ -125,7 +127,10 @@ export function slackRemediationCard(input: {
     block_id: `remediation-${input.remediation.id}`,
     title: {
       type: "mrkdwn",
-      text: truncate(escapeSlack(input.remediation.title), 200),
+      text: truncate(
+        escapeSlack(input.remediation.title),
+        slackCardTextMaxLength,
+      ),
       verbatim: false,
     },
     subtitle: {
@@ -135,7 +140,10 @@ export function slackRemediationCard(input: {
     },
     body: {
       type: "mrkdwn",
-      text: truncate(escapeSlack(input.remediation.description), 2_900),
+      text: truncate(
+        escapeSlack(input.remediation.description),
+        slackCardTextMaxLength,
+      ),
       verbatim: false,
     },
     ...(actions.length > 0 ? { actions } : {}),
@@ -224,7 +232,7 @@ function pullRequestStatus(card: SlackIssuePullRequestCard): {
           escapeSlack(
             card.failureReason ?? "Responder could not create the pull request.",
           ),
-          2_900,
+          slackCardTextMaxLength,
         ),
         label: "Failed",
       };

@@ -72,6 +72,26 @@ describe("Slack remediation cards", () => {
     ]);
   });
 
+  it("keeps card title and body text within Slack's 200-character limit", () => {
+    const blocks = slackRemediationCarousel({
+      canCreatePullRequest: true,
+      issueId,
+      remediations: [{
+        ...codeRemediation,
+        title: "T".repeat(250),
+        description: "D".repeat(250),
+      }],
+    });
+    const carousel = blocks[2] as {
+      elements: Array<{ body: { text: string }; title: { text: string } }>;
+    };
+
+    expect(carousel.elements[0]?.title.text).toHaveLength(200);
+    expect(carousel.elements[0]?.title.text.endsWith("…")).toBe(true);
+    expect(carousel.elements[0]?.body.text).toHaveLength(200);
+    expect(carousel.elements[0]?.body.text.endsWith("…")).toBe(true);
+  });
+
   it("round-trips the selected issue and remediation IDs", () => {
     expect(
       parseSlackRemediationActionValue(
