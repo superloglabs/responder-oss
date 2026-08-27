@@ -128,7 +128,7 @@ describe("Slack live investigation card", () => {
     expect(message.blocks).toEqual([
       expect.objectContaining({
         type: "plan",
-        title: context.title,
+        title: "Investigation trace",
         tasks: [
           expect.objectContaining({
             status: "in_progress",
@@ -164,7 +164,7 @@ describe("Slack live investigation card", () => {
     ).toBeNull();
   });
 
-  it("renders ClickStack's alert shortcode as an emoji in the plan title", () => {
+  it("keeps the investigation title in fallback text while using a fixed plan title", () => {
     vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
 
     const message = slackInvestigationCard({
@@ -178,7 +178,7 @@ describe("Slack live investigation card", () => {
     expect(message.blocks).toEqual([
       expect.objectContaining({
         type: "plan",
-        title: '🚨 Alert for "Errors"',
+        title: "Investigation trace",
       }),
     ]);
     expect(message.text).toBe(
