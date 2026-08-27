@@ -27,6 +27,7 @@ import {
 } from "../agent-detail-presentation";
 import { AppShell } from "../components/app-shell";
 import { AgentDetailSkeleton } from "../components/screen-skeletons";
+import { dateGroupLabel } from "../date-presentation";
 import {
   Badge,
   DataTable,
@@ -489,6 +490,9 @@ export function AgentDetailPage() {
           aria-label="Agent investigations"
           columns={investigationColumns}
           emptyMessage="No investigations have run yet."
+          getRowGroup={(investigation) =>
+            dateGroupLabel(investigation.createdAt)
+          }
           getRowKey={(investigation) => investigation.id}
           rows={agent.investigations}
         />
