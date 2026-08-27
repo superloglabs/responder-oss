@@ -62,6 +62,29 @@ test.beforeEach(async ({ page }) => {
   await mockApplicationApis(page);
 });
 
+async function mockSignedInWorkspace(page: Page) {
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(organization.id) });
+      return;
+    }
+
+    if (path.endsWith("/organization/list")) {
+      await route.fulfill({ json: [organization] });
+      return;
+    }
+
+    if (path.endsWith("/organization/get-full-organization")) {
+      await route.fulfill({ json: organization });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+}
+
 test("opens agent creation after creating a workspace", async ({ page }) => {
   let activeOrganizationId: string | null = null;
 
@@ -202,6 +225,91 @@ test("shows specific workspace secret validation issues", async ({
   await expect(dialog.getByRole("alert")).toHaveText(
     "PATH controls the sandbox runtime; choose a credential-specific environment variable name. Use a hostname without a scheme, path, or port",
   );
+});
+
+test("explains an earlier missing requirement when a saved draft resumes on the prompt step", async ({
+  page,
+}) => {
+  await mockSignedInWorkspace(page);
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem("responder:new-agent-step", "4");
+  });
+
+  await page.goto("/agents/new");
+  await expect(page.getByRole("heading", { name: "Prompt" })).toBeVisible();
+  await expect(
+    page.getByText("Connect Sentry and choose at least one project."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Create agent" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText(
+    "Connect Sentry and choose at least one project.",
+  );
+  await expect(page.getByRole("heading", { name: "Input" })).toBeVisible();
+});
+
+test("submits a complete saved draft without depending on a native submitter", async ({
+  page,
+}) => {
+  await mockSignedInWorkspace(page);
+  const agentOptions = {
+    accounts: [
+      {
+        id: "slack-account-1",
+        provider: "slack",
+        displayName: "Acme Slack",
+        slackContextAvailable: true,
+      },
+    ],
+    resources: [
+      {
+        id: "slack-channel-1",
+        integrationAccountId: "slack-account-1",
+        kind: "slack_channel",
+        externalId: "C123",
+        displayName: "incidents",
+      },
+    ],
+    repositories: [],
+    secrets: [],
+  };
+  await page.route(/\/api\/agents\/options(?:\/refresh\/slack)?$/, (route) =>
+    route.fulfill({ json: agentOptions }),
+  );
+  await page.route("**/api/agents", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 201, json: { agentId: "agent-1" } });
+      return;
+    }
+    await route.fulfill({ json: { agents: [] } });
+  });
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem("responder:new-agent-step", "4");
+    window.sessionStorage.setItem(
+      "responder:new-agent-draft",
+      JSON.stringify({
+        inputKind: "slack_channel",
+        slackInputResourceId: "slack-channel-1",
+        outputMode: "thread",
+      }),
+    );
+  });
+
+  await page.goto("/agents/new");
+  await expect(page.getByRole("heading", { name: "Prompt" })).toBeVisible();
+  const createRequest = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/api/agents" &&
+      request.method() === "POST",
+  );
+
+  await page.locator("form.createAgentForm").evaluate((form) =>
+    (form as HTMLFormElement).requestSubmit(),
+  );
+
+  await createRequest;
+  await expect(page).toHaveURL(/\/agents\/agent-1$/);
 });
 
 test("keeps an invitation link open while the recipient signs in", async ({
