@@ -45,12 +45,6 @@ export function slackInvestigationFeedbackBlock(investigationId: string) {
           accessibility_label: "Submit negative investigation feedback",
         },
       },
-      {
-        type: "icon_button",
-        action_id: "remove",
-        icon: "trash",
-        text: { type: "plain_text", text: "Remove" },
-      },
     ],
   };
 }
@@ -821,7 +815,7 @@ export function slackInvestigationCard(input: {
       {
         type: "plan",
         block_id: `investigation_plan_${input.status}_${randomUUID()}`,
-        title,
+        title: "Investigation trace",
         tasks: [
           ...(input.traceItems ?? [])
             .slice(-11)

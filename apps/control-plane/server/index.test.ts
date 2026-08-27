@@ -1068,7 +1068,7 @@ describe("control-plane API", () => {
     expect(message.blocks).toContainEqual(
       expect.objectContaining({
         type: "plan",
-        title: "Plant API error rate is elevated",
+        title: "Investigation trace",
         tasks: [
           expect.objectContaining({
             status: "in_progress",

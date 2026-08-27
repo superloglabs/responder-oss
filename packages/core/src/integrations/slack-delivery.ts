@@ -90,6 +90,24 @@ export function slackThreadCompletionText(
   return `*${issueCount} ${issueCount === 1 ? "issue" : "issues"} identified:*`;
 }
 
+export function slackInvestigationSummaryMessage(input: {
+  investigationId: string;
+  issueCount: number;
+  summary: string;
+}): { blocks: unknown[]; text: string } {
+  const text = slackThreadCompletionText(input.summary, input.issueCount);
+  return {
+    text,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text },
+      },
+      slackInvestigationFeedbackBlock(input.investigationId),
+    ],
+  };
+}
+
 function escapeSlack(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -315,7 +333,7 @@ export function slackCompletedInvestigationCard(
     "agentId" | "investigationId" | "title" | "traceItems"
   >,
 ) {
-  const card = slackInvestigationCard({
+  return slackInvestigationCard({
     agentId: context.agentId,
     detail: "Completed the investigation plan.",
     investigationId: context.investigationId,
@@ -323,13 +341,6 @@ export function slackCompletedInvestigationCard(
     title: context.title,
     traceItems: context.traceItems ?? [],
   });
-  return {
-    ...card,
-    blocks: [
-      ...card.blocks,
-      slackInvestigationFeedbackBlock(context.investigationId),
-    ],
-  };
 }
 
 export function slackDeliveryErrorMessage(error: unknown): string {
@@ -413,10 +424,11 @@ async function deliverSourceThread(
   if (!context.source) return;
   const token = accessToken(context.source.encryptedCredentials);
   const failures: unknown[] = [];
-  const completionText = slackThreadCompletionText(
-    context.report.summary,
-    context.issues.length,
-  );
+  const summaryMessage = slackInvestigationSummaryMessage({
+    investigationId: context.investigationId,
+    issueCount: context.issues.length,
+    summary: context.report.summary,
+  });
   if (context.source.messageTimestamp) {
     const card = slackCompletedInvestigationCard(context);
     try {
@@ -449,12 +461,13 @@ async function deliverSourceThread(
   try {
     const messageTimestamp = await postSlackMessage({
       accessToken: token,
+      blocks: summaryMessage.blocks,
       channelId: context.source.channelId,
       clientMessageId: slackDeliveryClientMessageId(
         deliveryRunId,
         `source:${context.source.channelId}:summary`,
       ),
-      text: completionText,
+      text: summaryMessage.text,
       threadTimestamp: context.source.threadTimestamp,
     });
     if (!messageTimestamp) {
@@ -463,10 +476,10 @@ async function deliverSourceThread(
     await recordInvestigationSlackReply(context.investigationId, {
       attachments: [],
       authorName: "Responder",
-      blocks: [],
+      blocks: summaryMessage.blocks,
       key: "investigation-summary",
       slackTimestamp: messageTimestamp,
-      text: completionText,
+      text: summaryMessage.text,
     });
   } catch (error) {
     console.error(

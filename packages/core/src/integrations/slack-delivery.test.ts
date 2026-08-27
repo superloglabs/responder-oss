@@ -5,11 +5,12 @@ import {
   slackCompletedInvestigationCard,
   slackDeliveryClientMessageId,
   slackDeliveryErrorMessage,
+  slackInvestigationSummaryMessage,
   slackIssueMessage,
 } from "./slack-delivery.js";
 
 describe("Slack issue delivery", () => {
-  it("adds feedback controls to completed investigation messages", () => {
+  it("keeps the completed investigation card focused on the trace", () => {
     const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackCompletedInvestigationCard({
       agentId: "13131313-1313-4313-8313-131313131313",
@@ -19,7 +20,26 @@ describe("Slack issue delivery", () => {
     });
 
     expect(message.blocks).toEqual([
-      expect.objectContaining({ type: "plan" }),
+      expect.objectContaining({ type: "plan", title: "Investigation trace" }),
+    ]);
+  });
+
+  it("adds feedback controls without a remove action to the final summary", () => {
+    const investigationId = "16161616-1616-4616-8616-161616161616";
+    const message = slackInvestigationSummaryMessage({
+      investigationId,
+      issueCount: 0,
+      summary: "The alert was transient.",
+    });
+
+    expect(message.text).toBe(
+      "✅ *No issues identified.* The alert was transient.",
+    );
+    expect(message.blocks).toEqual([
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: message.text },
+      },
       expect.objectContaining({
         type: "context_actions",
         block_id: expect.stringMatching(
@@ -31,11 +51,6 @@ describe("Slack issue delivery", () => {
             action_id: "feedback",
             positive_button: expect.objectContaining({ value: "positive" }),
             negative_button: expect.objectContaining({ value: "negative" }),
-          }),
-          expect.objectContaining({
-            type: "icon_button",
-            action_id: "remove",
-            icon: "trash",
           }),
         ],
       }),
