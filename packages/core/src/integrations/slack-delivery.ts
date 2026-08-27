@@ -3,6 +3,7 @@ import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
 import { responderIssueUrl } from "../responder-urls.js";
 import {
+  getIssueForSlackBackfill,
   getSlackInvestigationDeliveryContext,
   type SlackInvestigationDeliveryContext,
 } from "../db/issues.js";
@@ -230,6 +231,7 @@ function accessToken(encryptedCredentials: string): string {
 
 interface SlackIssueRedeliveryDependencies {
   getContext: typeof getSlackInvestigationDeliveryContext;
+  getDetachedIssue: typeof getIssueForSlackBackfill;
   postMessage: typeof postSlackMessage;
   recordReply: typeof recordInvestigationSlackReply;
   registerPullRequestMessage: typeof registerPullRequestMessage;
@@ -238,6 +240,7 @@ interface SlackIssueRedeliveryDependencies {
 
 export async function redeliverInvestigationSlackIssue(
   input: {
+    allowDetachedIssue?: boolean;
     deliveryRunId: string;
     investigationId: string;
     issueId: string;
@@ -246,6 +249,7 @@ export async function redeliverInvestigationSlackIssue(
 ): Promise<{ issueId: string; messageTimestamp: string }> {
   const resolvedDependencies = dependencies ?? {
     getContext: getSlackInvestigationDeliveryContext,
+    getDetachedIssue: getIssueForSlackBackfill,
     postMessage: postSlackMessage,
     recordReply: recordInvestigationSlackReply,
     registerPullRequestMessage,
@@ -257,10 +261,16 @@ export async function redeliverInvestigationSlackIssue(
       `Slack source thread is unavailable for investigation ${input.investigationId}`,
     );
   }
-  const issue = context.issues.find((candidate) => candidate.id === input.issueId);
+  const issue = context.issues.find((candidate) => candidate.id === input.issueId) ??
+    (input.allowDetachedIssue
+      ? await resolvedDependencies.getDetachedIssue({
+          investigationId: input.investigationId,
+          issueId: input.issueId,
+        })
+      : null);
   if (!issue) {
     throw new Error(
-      `Issue ${input.issueId} is not attached to investigation ${input.investigationId}`,
+      `Issue ${input.issueId} is not available for investigation ${input.investigationId}`,
     );
   }
   const message = issueSlackMessage(context, issue);

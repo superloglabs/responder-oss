@@ -128,6 +128,7 @@ describe("Slack issue delivery", () => {
               threadTimestamp: "1785500000.000100",
             },
           } as never),
+          getDetachedIssue: vi.fn().mockResolvedValue(null),
           postMessage,
           recordReply,
           registerPullRequestMessage,
@@ -163,6 +164,76 @@ describe("Slack issue delivery", () => {
         slackTimestamp: "1785500001.000200",
       }),
     );
+  });
+
+  it("requires an explicit flag to redeliver a detached historical issue", async () => {
+    const issue = {
+      id: "07070707-0707-4707-8707-070707070707",
+      title: "Historical delivery failure",
+      description: "Slack rejected the original issue card.",
+      rootCause: "The card body exceeded Slack's limit.",
+      timeline: [],
+      severity: "SEV-2" as const,
+      remediation: "Truncate card bodies.",
+      remediations: [],
+      relationship: "new" as const,
+      evidence: [],
+      pullRequest: null,
+    };
+    const getDetachedIssue = vi.fn().mockResolvedValue(issue);
+    const postMessage = vi.fn().mockResolvedValue("1785500002.000300");
+    const dependencies = {
+      getContext: vi.fn().mockResolvedValue({
+        investigationId: "08080808-0808-4808-8808-080808080808",
+        issues: [],
+        prMode: "manual",
+        source: {
+          channelId: "C123",
+          encryptedCredentials: "encrypted",
+          integrationAccountId: "09090909-0909-4909-8909-090909090909",
+          messageTimestamp: null,
+          reactionTimestamp: "1785500000.000100",
+          threadTimestamp: "1785500000.000100",
+        },
+      } as never),
+      getDetachedIssue,
+      postMessage,
+      recordReply: vi.fn().mockResolvedValue(undefined),
+      registerPullRequestMessage: vi.fn().mockResolvedValue(undefined),
+      resolveAccessToken: vi.fn().mockReturnValue("xoxb-test"),
+    };
+
+    await expect(
+      redeliverInvestigationSlackIssue(
+        {
+          deliveryRunId: "backfill-2026-08-27",
+          investigationId: "08080808-0808-4808-8808-080808080808",
+          issueId: issue.id,
+        },
+        dependencies,
+      ),
+    ).rejects.toThrow("is not available for investigation");
+    expect(getDetachedIssue).not.toHaveBeenCalled();
+
+    await expect(
+      redeliverInvestigationSlackIssue(
+        {
+          allowDetachedIssue: true,
+          deliveryRunId: "backfill-2026-08-27",
+          investigationId: "08080808-0808-4808-8808-080808080808",
+          issueId: issue.id,
+        },
+        dependencies,
+      ),
+    ).resolves.toEqual({
+      issueId: issue.id,
+      messageTimestamp: "1785500002.000300",
+    });
+    expect(getDetachedIssue).toHaveBeenCalledWith({
+      investigationId: "08080808-0808-4808-8808-080808080808",
+      issueId: issue.id,
+    });
+    expect(postMessage).toHaveBeenCalledTimes(1);
   });
 
   it("shows root cause and an ordered timeline in the issue message", () => {
