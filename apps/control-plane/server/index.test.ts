@@ -33,6 +33,7 @@ import { queueInvestigation } from "./investigations/queue.js";
 const slackWebhookMocks = vi.hoisted(() => ({
   findAgentsForSlackEvent: vi.fn(),
   getSlackChannelConnection: vi.fn(),
+  recordInvestigationSlackSource: vi.fn(),
 }));
 
 vi.mock("../../../packages/core/src/db/agents.js", async (importOriginal) => ({
@@ -45,6 +46,15 @@ vi.mock(
   async (importOriginal) => ({
     ...(await importOriginal()),
     getSlackChannelConnection: slackWebhookMocks.getSlackChannelConnection,
+  }),
+);
+
+vi.mock(
+  "../../../packages/core/src/db/investigations.js",
+  async (importOriginal) => ({
+    ...(await importOriginal()),
+    recordInvestigationSlackSource:
+      slackWebhookMocks.recordInvestigationSlackSource,
   }),
 );
 
@@ -685,6 +695,16 @@ describe("control-plane API", () => {
       sourceUrl: "https://slack.com/archives/C123/p1700000005000001",
       title: expect.stringContaining("responder-aws-alarm-e2e-lambda-errors"),
     });
+    expect(slackWebhookMocks.recordInvestigationSlackSource).toHaveBeenCalledWith(
+      "01010101-0101-4101-8101-010101010101",
+      {
+        attachments: [],
+        authorName: "AWS Alarm notification",
+        blocks: [],
+        slackTimestamp: "1700000005.000001",
+        text: expect.stringContaining("changed state to ALARM"),
+      },
+    );
   });
 
   it("ignores AWS alarm recovery and unrelated Amazon Q messages", () => {

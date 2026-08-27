@@ -8,6 +8,9 @@ import { getSlackChannelConnection } from "../../../../packages/core/src/db/inte
 import {
   getInvestigationForSlackAction,
   recordInvestigationSlackMessage,
+  recordInvestigationSlackSource,
+  removeInvestigationSlackReply,
+  setInvestigationSlackReaction,
 } from "../../../../packages/core/src/db/investigations.js";
 import { getIssueForSlackAction } from "../../../../packages/core/src/db/issues.js";
 import {
@@ -208,6 +211,14 @@ function slackMessageTitle(body: string): string {
     .map((line) => line.trim())
     .find(Boolean);
   return (firstLine ?? "Slack channel alert").slice(0, 500);
+}
+
+function slackMessageAuthor(
+  event: z.infer<typeof slackMessageSchema>,
+): string {
+  return event.bot_profile?.name?.trim() ||
+    event.username?.trim() ||
+    (event.user ? "Customer" : "Slack app");
 }
 
 export function isDatadogRecoveryMessage(body: string): boolean {
@@ -506,6 +517,13 @@ export async function acknowledgeSlackAlert(input: {
     investigationStatus = await recordInvestigationSlackMessage(
       input.investigationId,
       liveMessageTimestamp,
+      {
+        attachments: [],
+        authorName: "Responder",
+        blocks: message.blocks,
+        key: "investigation-status",
+        text: message.text,
+      },
     );
   } catch (error) {
     console.error(
@@ -542,6 +560,17 @@ export async function acknowledgeSlackAlert(input: {
       result.status === "rejected" ? [result.reason] : [],
     ),
   );
+  if (results[0]?.status === "fulfilled") {
+    try {
+      await setInvestigationSlackReaction(
+        input.investigationId,
+        "eyes",
+        true,
+      );
+    } catch (error) {
+      failures.push(error);
+    }
+  }
   try {
     investigationStatus = await recordInvestigationSlackMessage(
       input.investigationId,
@@ -842,6 +871,13 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         threadTimestamp: event.thread_ts ?? event.ts,
         timestamp: event.ts,
       });
+      await recordInvestigationSlackSource(result.investigationId, {
+        attachments: event.attachments ?? [],
+        authorName: slackMessageAuthor(event),
+        blocks: event.blocks ?? [],
+        slackTimestamp: event.ts,
+        text: event.text,
+      });
       if (!result.duplicate && match.trigger === "slack_channel") {
         await acknowledgeSlackAlert({
           agentId: match.agentId,
@@ -940,7 +976,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   const removeAction = action.data.actions.find(
     (item) => item.action_id === "remove",
   );
-  if (investigationIdFromFeedbackBlockId(removeAction?.block_id)) {
+  const removedInvestigationId = investigationIdFromFeedbackBlockId(
+    removeAction?.block_id,
+  );
+  if (removedInvestigationId) {
     const response = await fetch(action.data.response_url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -949,6 +988,12 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     if (!response.ok) {
       console.error(
         `Unable to remove Slack investigation message (${response.status})`,
+      );
+    } else if (action.data.message?.ts) {
+      await removeInvestigationSlackReply(
+        removedInvestigationId,
+        "investigation-status",
+        action.data.message.ts,
       );
     }
     return context.json({ ok: true });

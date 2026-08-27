@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   postSlackMessage: vi.fn(),
   reconcileCompletedInvestigationSlackCard: vi.fn(),
   recordInvestigationSlackMessage: vi.fn(),
+  recordInvestigationSlackSource: vi.fn(),
+  removeInvestigationSlackReply: vi.fn(),
+  setInvestigationSlackReaction: vi.fn(),
   setSlackThreadStatus: vi.fn(),
   slackInvestigationCard: vi.fn(),
 }));
@@ -20,6 +23,9 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   recordInvestigationSlackMessage: mocks.recordInvestigationSlackMessage,
+  recordInvestigationSlackSource: mocks.recordInvestigationSlackSource,
+  removeInvestigationSlackReply: mocks.removeInvestigationSlackReply,
+  setInvestigationSlackReaction: mocks.setInvestigationSlackReaction,
 }));
 vi.mock("../../../../packages/core/src/integrations/slack.js", () => ({
   addSlackReaction: mocks.addSlackReaction,
@@ -93,6 +99,20 @@ describe("Slack alert acknowledgement", () => {
     );
     expect(mocks.reconcileCompletedInvestigationSlackCard).toHaveBeenCalledWith(
       input.investigationId,
+    );
+    expect(mocks.recordInvestigationSlackMessage).toHaveBeenCalledWith(
+      input.investigationId,
+      "1785500001.000200",
+      expect.objectContaining({
+        authorName: "Responder",
+        key: "investigation-status",
+        text: "Investigating",
+      }),
+    );
+    expect(mocks.setInvestigationSlackReaction).toHaveBeenCalledWith(
+      input.investigationId,
+      "eyes",
+      true,
     );
   });
 

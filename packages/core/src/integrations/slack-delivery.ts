@@ -6,6 +6,10 @@ import {
   getSlackInvestigationDeliveryContext,
   type SlackInvestigationDeliveryContext,
 } from "../db/issues.js";
+import {
+  recordInvestigationSlackReply,
+  setInvestigationSlackReaction,
+} from "../db/investigations.js";
 import { registerIssuePullRequestSlackMessage } from "../db/pull-requests.js";
 import {
   addSlackReaction,
@@ -227,6 +231,7 @@ function accessToken(encryptedCredentials: string): string {
 interface SlackIssueRedeliveryDependencies {
   getContext: typeof getSlackInvestigationDeliveryContext;
   postMessage: typeof postSlackMessage;
+  recordReply: typeof recordInvestigationSlackReply;
   registerPullRequestMessage: typeof registerPullRequestMessage;
   resolveAccessToken: typeof accessToken;
 }
@@ -242,6 +247,7 @@ export async function redeliverInvestigationSlackIssue(
   const resolvedDependencies = dependencies ?? {
     getContext: getSlackInvestigationDeliveryContext,
     postMessage: postSlackMessage,
+    recordReply: recordInvestigationSlackReply,
     registerPullRequestMessage,
     resolveAccessToken: accessToken,
   };
@@ -276,6 +282,14 @@ export async function redeliverInvestigationSlackIssue(
       `Slack did not return a message timestamp for issue ${input.issueId}`,
     );
   }
+  await resolvedDependencies.recordReply(input.investigationId, {
+    attachments: [],
+    authorName: "Responder",
+    blocks: message.blocks,
+    key: `issue:${issue.id}`,
+    slackTimestamp: messageTimestamp,
+    text: message.text,
+  });
   await resolvedDependencies.registerPullRequestMessage({
     channelId: context.source.channelId,
     integrationAccountId: context.source.integrationAccountId,
@@ -352,6 +366,27 @@ export async function reconcileCompletedInvestigationSlackCard(
   const failures = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
   );
+  if (results[0]?.status === "fulfilled") {
+    try {
+      await recordInvestigationSlackReply(investigationId, {
+        attachments: [],
+        authorName: "Responder",
+        blocks: card.blocks,
+        key: "investigation-status",
+        slackTimestamp: context.source.messageTimestamp,
+        text: card.text,
+      });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (results[1]?.status === "fulfilled") {
+    try {
+      await setInvestigationSlackReaction(investigationId, "eyes", false);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
   if (failures.length > 0) {
     throw new AggregateError(
       failures,
@@ -382,6 +417,14 @@ async function deliverSourceThread(
         text: card.text,
         timestamp: context.source.messageTimestamp,
       });
+      await recordInvestigationSlackReply(context.investigationId, {
+        attachments: [],
+        authorName: "Responder",
+        blocks: card.blocks,
+        key: "investigation-status",
+        slackTimestamp: context.source.messageTimestamp,
+        text: card.text,
+      });
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -394,7 +437,7 @@ async function deliverSourceThread(
     }
   }
   try {
-    await postSlackMessage({
+    const messageTimestamp = await postSlackMessage({
       accessToken: token,
       channelId: context.source.channelId,
       clientMessageId: slackDeliveryClientMessageId(
@@ -403,6 +446,17 @@ async function deliverSourceThread(
       ),
       text: completionText,
       threadTimestamp: context.source.threadTimestamp,
+    });
+    if (!messageTimestamp) {
+      throw new Error("Slack did not return a message timestamp for the investigation summary");
+    }
+    await recordInvestigationSlackReply(context.investigationId, {
+      attachments: [],
+      authorName: "Responder",
+      blocks: [],
+      key: "investigation-summary",
+      slackTimestamp: messageTimestamp,
+      text: completionText,
     });
   } catch (error) {
     console.error(
@@ -427,6 +481,17 @@ async function deliverSourceThread(
         ),
         text: message.text,
         threadTimestamp: context.source.threadTimestamp,
+      });
+      if (!messageTimestamp) {
+        throw new Error(`Slack did not return a message timestamp for issue ${issue.id}`);
+      }
+      await recordInvestigationSlackReply(context.investigationId, {
+        attachments: [],
+        authorName: "Responder",
+        blocks: message.blocks,
+        key: `issue:${issue.id}`,
+        slackTimestamp: messageTimestamp,
+        text: message.text,
       });
       await registerPullRequestMessage({
         channelId: context.source.channelId,
@@ -473,6 +538,28 @@ async function deliverSourceThread(
       result.status === "rejected" ? [result.reason] : [],
     ),
   );
+  if (cleanup[0]?.status === "fulfilled") {
+    try {
+      await setInvestigationSlackReaction(
+        context.investigationId,
+        slackCompletionReaction(context.issues),
+        true,
+      );
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (cleanup[1]?.status === "fulfilled") {
+    try {
+      await setInvestigationSlackReaction(
+        context.investigationId,
+        "eyes",
+        false,
+      );
+    } catch (error) {
+      failures.push(error);
+    }
+  }
   if (failures.length > 0) {
     throw new AggregateError(failures, "Slack source thread delivery failed");
   }

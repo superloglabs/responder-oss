@@ -310,9 +310,15 @@ export async function getIssuePullRequestSlackDeliveries(requestId: string) {
     .select({
       channelId: issuePullRequestSlackMessages.channelId,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
+      investigationId: issuePullRequests.investigationId,
+      issueId: issuePullRequests.issueId,
       messageTimestamp: issuePullRequestSlackMessages.messageTimestamp,
     })
     .from(issuePullRequestSlackMessages)
+    .innerJoin(
+      issuePullRequests,
+      eq(issuePullRequests.id, issuePullRequestSlackMessages.requestId),
+    )
     .innerJoin(
       integrationAccounts,
       eq(

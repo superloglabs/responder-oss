@@ -4,6 +4,7 @@ import {
   getIssuePullRequestSlackCard,
   getIssuePullRequestSlackDeliveries,
 } from "../db/pull-requests.js";
+import { refreshInvestigationSlackReply } from "../db/investigations.js";
 import type { IssueRemediation } from "../investigations/report.js";
 import { responderIssueUrl } from "../responder-urls.js";
 import { updateSlackMessage } from "./slack.js";
@@ -341,6 +342,14 @@ export async function refreshIssuePullRequestSlackMessages(
           channelId: delivery.channelId,
           text: message.text,
           timestamp: delivery.messageTimestamp,
+        });
+        await refreshInvestigationSlackReply(delivery.investigationId, {
+          attachments: [],
+          authorName: "Responder",
+          blocks: message.blocks,
+          key: `issue:${delivery.issueId}`,
+          slackTimestamp: delivery.messageTimestamp,
+          text: message.text,
         });
       }),
     );

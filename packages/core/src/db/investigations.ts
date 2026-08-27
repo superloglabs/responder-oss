@@ -50,6 +50,9 @@ import {
   runtimeProfiles,
   webhookReceipts,
   type InvestigationInput,
+  type InvestigationSlackMessageSnapshot,
+  type InvestigationSlackReplySnapshot,
+  type InvestigationSlackThreadSnapshot,
   type InvestigationSlackTraceItem,
   type InvestigationTraceEvent,
   type AgentPrMode,
@@ -242,18 +245,143 @@ export async function getInvestigationTraceSession(
 export async function recordInvestigationSlackMessage(
   investigationId: string,
   messageTimestamp: string,
+  message?: Omit<InvestigationSlackReplySnapshot, "slackTimestamp">,
 ): Promise<"pending" | "investigating" | "resolved" | "failed"> {
-  const rows = await getDatabase()
-    .update(investigations)
-    .set({
-      slackMessageTimestamp: messageTimestamp,
-      updatedAt: new Date(),
-    })
-    .where(eq(investigations.id, investigationId))
-    .returning({ status: investigations.status });
-  const investigation = rows[0];
-  if (!investigation) throw new Error("Investigation not found");
-  return investigation.status;
+  return getDatabase().transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        slackThreadSnapshot: investigations.slackThreadSnapshot,
+        status: investigations.status,
+      })
+      .from(investigations)
+      .where(eq(investigations.id, investigationId))
+      .limit(1)
+      .for("update");
+    const investigation = rows[0];
+    if (!investigation) throw new Error("Investigation not found");
+    const snapshot = message
+      ? upsertSlackThreadReply(
+          slackThreadSnapshot(investigation.slackThreadSnapshot),
+          { ...message, slackTimestamp: messageTimestamp },
+        )
+      : investigation.slackThreadSnapshot;
+    await tx
+      .update(investigations)
+      .set({
+        slackMessageTimestamp: messageTimestamp,
+        slackThreadSnapshot: snapshot,
+        updatedAt: new Date(),
+      })
+      .where(eq(investigations.id, investigationId));
+    return investigation.status;
+  });
+}
+
+function slackThreadSnapshot(
+  snapshot: InvestigationSlackThreadSnapshot | null,
+): InvestigationSlackThreadSnapshot {
+  return snapshot ?? {
+    reactions: [],
+    replies: [],
+    source: null,
+    version: 1,
+  };
+}
+
+function upsertSlackThreadReply(
+  snapshot: InvestigationSlackThreadSnapshot,
+  reply: InvestigationSlackReplySnapshot,
+): InvestigationSlackThreadSnapshot {
+  const index = snapshot.replies.findIndex((candidate) => candidate.key === reply.key);
+  const replies = [...snapshot.replies];
+  if (index >= 0) replies[index] = reply;
+  else replies.push(reply);
+  return { ...snapshot, replies };
+}
+
+async function updateInvestigationSlackThread(
+  investigationId: string,
+  update: (
+    snapshot: InvestigationSlackThreadSnapshot,
+  ) => InvestigationSlackThreadSnapshot,
+): Promise<void> {
+  await getDatabase().transaction(async (tx) => {
+    const rows = await tx
+      .select({ snapshot: investigations.slackThreadSnapshot })
+      .from(investigations)
+      .where(eq(investigations.id, investigationId))
+      .limit(1)
+      .for("update");
+    if (!rows[0]) throw new Error("Investigation not found");
+    await tx
+      .update(investigations)
+      .set({
+        slackThreadSnapshot: update(slackThreadSnapshot(rows[0].snapshot)),
+        updatedAt: new Date(),
+      })
+      .where(eq(investigations.id, investigationId));
+  });
+}
+
+export async function recordInvestigationSlackSource(
+  investigationId: string,
+  source: InvestigationSlackMessageSnapshot,
+): Promise<void> {
+  await updateInvestigationSlackThread(investigationId, (snapshot) => ({
+    ...snapshot,
+    source,
+  }));
+}
+
+export async function recordInvestigationSlackReply(
+  investigationId: string,
+  reply: InvestigationSlackReplySnapshot,
+): Promise<void> {
+  await updateInvestigationSlackThread(investigationId, (snapshot) =>
+    upsertSlackThreadReply(snapshot, reply),
+  );
+}
+
+export async function refreshInvestigationSlackReply(
+  investigationId: string,
+  reply: InvestigationSlackReplySnapshot,
+): Promise<void> {
+  await updateInvestigationSlackThread(investigationId, (snapshot) => {
+    const existing = snapshot.replies.find(
+      (candidate) =>
+        candidate.key === reply.key &&
+        candidate.slackTimestamp === reply.slackTimestamp,
+    );
+    return existing ? upsertSlackThreadReply(snapshot, reply) : snapshot;
+  });
+}
+
+export async function removeInvestigationSlackReply(
+  investigationId: string,
+  key: string,
+  slackTimestamp: string,
+): Promise<void> {
+  await updateInvestigationSlackThread(investigationId, (snapshot) => ({
+    ...snapshot,
+    replies: snapshot.replies.filter(
+      (candidate) =>
+        candidate.key !== key ||
+        candidate.slackTimestamp !== slackTimestamp,
+    ),
+  }));
+}
+
+export async function setInvestigationSlackReaction(
+  investigationId: string,
+  name: string,
+  active: boolean,
+): Promise<void> {
+  await updateInvestigationSlackThread(investigationId, (snapshot) => {
+    const reactions = new Set(snapshot.reactions);
+    if (active) reactions.add(name);
+    else reactions.delete(name);
+    return { ...snapshot, reactions: [...reactions] };
+  });
 }
 
 export async function recordInvestigationSlackTrace(

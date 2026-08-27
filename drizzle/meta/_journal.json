@@ -218,6 +218,13 @@
       "when": 1787680535295,
       "tag": "0030_low_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787821722547,
+      "tag": "0031_nostalgic_angel",
+      "breakpoints": true
     }
   ]
 }

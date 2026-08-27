@@ -1,0 +1,1 @@
+ALTER TABLE "investigations" ADD COLUMN "slack_thread_snapshot" jsonb;

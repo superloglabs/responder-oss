@@ -20,6 +20,7 @@ vi.mock("../credentials/encryption.js", () => ({
   decryptCredentials: vi.fn(),
 }));
 vi.mock("../db/investigations.js", () => ({
+  recordInvestigationSlackReply: vi.fn(),
   recordInvestigationSlackTrace: vi.fn(),
 }));
 vi.mock("../db/issues.js", () => ({

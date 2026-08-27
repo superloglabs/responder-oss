@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
 import { responderIssueUrl } from "../responder-urls.js";
-import { recordInvestigationSlackTrace } from "../db/investigations.js";
+import {
+  recordInvestigationSlackReply,
+  recordInvestigationSlackTrace,
+} from "../db/investigations.js";
 import { getSlackInvestigationLiveContext } from "../db/issues.js";
 import {
   SlackApiError,
@@ -966,6 +969,14 @@ async function performInvestigationSlackProgressUpdate(
         text: card.text,
         timestamp: context.source.messageTimestamp,
       });
+      await recordInvestigationSlackReply(investigationId, {
+        attachments: [],
+        authorName: "Responder",
+        blocks: card.blocks,
+        key: "investigation-status",
+        slackTimestamp: context.source.messageTimestamp,
+        text: card.text,
+      });
     } catch (error) {
       failures.push(error);
     }
@@ -1045,6 +1056,14 @@ async function performInvestigationSlackCardFailure(
         channelId: context.source.channelId,
         text: card.text,
         timestamp: context.source.messageTimestamp,
+      });
+      await recordInvestigationSlackReply(investigationId, {
+        attachments: [],
+        authorName: "Responder",
+        blocks: card.blocks,
+        key: "investigation-status",
+        slackTimestamp: context.source.messageTimestamp,
+        text: card.text,
       });
     } catch (error) {
       failures.push(error);

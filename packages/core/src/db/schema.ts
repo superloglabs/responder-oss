@@ -402,6 +402,26 @@ export interface InvestigationSlackTraceItem {
   title: string;
 }
 
+export interface InvestigationSlackMessageSnapshot {
+  attachments: unknown[];
+  authorName: string;
+  blocks: unknown[];
+  slackTimestamp: string;
+  text: string;
+}
+
+export interface InvestigationSlackReplySnapshot
+  extends InvestigationSlackMessageSnapshot {
+  key: string;
+}
+
+export interface InvestigationSlackThreadSnapshot {
+  reactions: string[];
+  replies: InvestigationSlackReplySnapshot[];
+  source: InvestigationSlackMessageSnapshot | null;
+  version: 1;
+}
+
 export const investigations = pgTable(
   "investigations",
   {
@@ -434,6 +454,8 @@ export const investigations = pgTable(
       .$type<InvestigationSlackTraceItem[]>()
       .notNull()
       .default([]),
+    slackThreadSnapshot: jsonb("slack_thread_snapshot")
+      .$type<InvestigationSlackThreadSnapshot>(),
     failureReason: text("failure_reason"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
