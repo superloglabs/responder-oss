@@ -1630,11 +1630,105 @@ const sentryAuthorizationSchema = z.object({
   expiresAt: z.string().nullable().optional(),
 });
 
-class SentryRefreshError extends Error {
+export class SentryRefreshHttpError extends Error {
   constructor(readonly httpStatus: number) {
     super("Unable to refresh Sentry access");
-    this.name = "SentryRefreshError";
+    this.name = "SentryRefreshHttpError";
   }
+}
+
+export type SentryConnectionFailureKind =
+  | "http"
+  | "invalid_response"
+  | "network"
+  | "timeout";
+
+export interface SentryConnectionFailureDiagnostics {
+  errorCode: string;
+  failureKind: SentryConnectionFailureKind;
+  httpStatus?: number;
+  requestDurationMs: number;
+  retryable: boolean;
+}
+
+export class SentryConnectionUnavailableError extends Error {
+  readonly errorCode: string;
+  readonly failureKind: SentryConnectionFailureKind;
+  readonly httpStatus?: number;
+  readonly requestDurationMs: number;
+  readonly retryable: boolean;
+
+  constructor(
+    diagnostics: SentryConnectionFailureDiagnostics,
+    cause: unknown,
+  ) {
+    super("Unable to refresh Sentry access", { cause });
+    this.name = "SentryConnectionUnavailableError";
+    this.errorCode = diagnostics.errorCode;
+    this.failureKind = diagnostics.failureKind;
+    this.httpStatus = diagnostics.httpStatus;
+    this.requestDurationMs = diagnostics.requestDurationMs;
+    this.retryable = diagnostics.retryable;
+  }
+}
+
+function nestedErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("cause" in error)) return undefined;
+  const cause = error.cause;
+  if (!cause || typeof cause !== "object" || !("code" in cause)) return undefined;
+  return typeof cause.code === "string" &&
+    /^[A-Z][A-Z0-9_]{0,99}$/u.test(cause.code)
+    ? cause.code
+    : undefined;
+}
+
+export function sentryConnectionFailureDiagnostics(
+  error: unknown,
+  requestDurationMs: number,
+): SentryConnectionFailureDiagnostics {
+  if (error instanceof SentryRefreshHttpError) {
+    return {
+      errorCode: error.name,
+      failureKind: "http",
+      httpStatus: error.httpStatus,
+      requestDurationMs,
+      retryable:
+        error.httpStatus === 408 ||
+        error.httpStatus === 429 ||
+        error.httpStatus >= 500,
+    };
+  }
+
+  const errorCode =
+    nestedErrorCode(error) ??
+    (error instanceof Error ? error.name : typeof error);
+  if (
+    errorCode === "TimeoutError" ||
+    errorCode === "AbortError" ||
+    errorCode === "ETIMEDOUT" ||
+    errorCode === "UND_ERR_CONNECT_TIMEOUT"
+  ) {
+    return {
+      errorCode,
+      failureKind: "timeout",
+      requestDurationMs,
+      retryable: true,
+    };
+  }
+  if (error instanceof SyntaxError || error instanceof z.ZodError) {
+    return {
+      errorCode,
+      failureKind: "invalid_response",
+      requestDurationMs,
+      retryable: true,
+    };
+  }
+  return {
+    errorCode,
+    failureKind: "network",
+    requestDurationMs,
+    retryable: true,
+  };
 }
 
 const sentryTriggerConfigSchema = z.object({
@@ -1726,27 +1820,39 @@ export async function getRuntimeSentryConnection(
               return { value: current };
             }
 
-            const response = await fetch(
-              `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(current.installationId)}/authorizations/`,
-              {
-                method: "POST",
-                headers: {
-                  accept: "application/json",
-                  "content-type": "application/json",
+            const requestStartedAt = Date.now();
+            let refreshed: z.infer<typeof sentryAuthorizationSchema>;
+            try {
+              const response = await fetch(
+                `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(current.installationId)}/authorizations/`,
+                {
+                  method: "POST",
+                  headers: {
+                    accept: "application/json",
+                    "content-type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    grant_type: "refresh_token",
+                    refresh_token: current.refreshToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                  }),
+                  signal: AbortSignal.timeout(10_000),
                 },
-                body: JSON.stringify({
-                  grant_type: "refresh_token",
-                  refresh_token: current.refreshToken,
-                  client_id: clientId,
-                  client_secret: clientSecret,
-                }),
-                signal: AbortSignal.timeout(10_000),
-              },
-            );
-            if (!response.ok) throw new SentryRefreshError(response.status);
-            const refreshed = sentryAuthorizationSchema.parse(
-              await response.json(),
-            );
+              );
+              if (!response.ok) {
+                throw new SentryRefreshHttpError(response.status);
+              }
+              refreshed = sentryAuthorizationSchema.parse(await response.json());
+            } catch (error) {
+              throw new SentryConnectionUnavailableError(
+                sentryConnectionFailureDiagnostics(
+                  error,
+                  Date.now() - requestStartedAt,
+                ),
+                error,
+              );
+            }
             const nextCredentials = {
               accessToken: refreshed.token,
               refreshToken: refreshed.refreshToken,
@@ -1762,7 +1868,8 @@ export async function getRuntimeSentryConnection(
           organizationId: config.organizationId,
           provider: "sentry",
           statusOnError: (error) =>
-            error instanceof SentryRefreshError &&
+            error instanceof SentryConnectionUnavailableError &&
+              error.httpStatus !== undefined &&
               [400, 401, 403].includes(error.httpStatus)
               ? "error"
               : undefined,
@@ -1770,16 +1877,31 @@ export async function getRuntimeSentryConnection(
       if (!refreshedCredentials) return null;
       credentials = refreshedCredentials;
     } catch (error) {
+      const diagnostics =
+        error instanceof SentryConnectionUnavailableError
+          ? {
+              errorCode: error.errorCode,
+              failureKind: error.failureKind,
+              ...(error.httpStatus === undefined
+                ? {}
+                : { httpStatus: error.httpStatus }),
+              requestDurationMs: error.requestDurationMs,
+              retryable: error.retryable,
+            }
+          : {
+              errorCode: error instanceof Error ? error.name : typeof error,
+              failureKind: "internal",
+              retryable: false,
+            };
       console.error(
         JSON.stringify({
           event: "sentry_token_refresh_failed",
-          ...(error instanceof SentryRefreshError
-            ? { httpStatus: error.httpStatus }
-            : {}),
+          ...diagnostics,
           integrationAccountId: account.id,
         }),
       );
-      throw new Error("Unable to refresh Sentry access");
+      if (error instanceof SentryConnectionUnavailableError) throw error;
+      throw new Error("Unable to refresh Sentry access", { cause: error });
     }
   }
 

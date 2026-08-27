@@ -16,6 +16,8 @@ import {
   getRuntimeSentryConnection,
   getRuntimeUpstashConnection,
   getRuntimeVercelConnections,
+  SentryConnectionUnavailableError,
+  type RuntimeSentryConnection,
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
@@ -154,6 +156,81 @@ export function contextServerConnectFailureEvent(input: {
   };
 }
 
+export async function loadSentryConnectionForInvestigation(input: {
+  getConnection?: typeof getRuntimeSentryConnection;
+  investigationId: string;
+  investigationInput: InvestigationInput;
+  onRecoverableFailure?: (
+    error: SentryConnectionUnavailableError,
+  ) => Promise<void>;
+  versionId: string;
+}): Promise<RuntimeSentryConnection | null> {
+  const getConnection = input.getConnection ?? getRuntimeSentryConnection;
+  try {
+    const connection = await getConnection(
+      input.versionId,
+      input.investigationInput,
+    );
+    if (!connection && input.investigationInput.provider === "sentry") {
+      console.info(
+        JSON.stringify({
+          event: "sentry_connection_unavailable",
+          investigationId: input.investigationId,
+        }),
+      );
+    }
+    return connection;
+  } catch (error) {
+    if (!(error instanceof SentryConnectionUnavailableError)) {
+      console.error(
+        JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: error instanceof Error ? error.name : typeof error,
+          event: "sentry_connection_lookup_failed",
+          investigationId: input.investigationId,
+        }),
+      );
+      throw error;
+    }
+
+    console.error(
+      JSON.stringify({
+        errorCode: error.errorCode,
+        event: "sentry_connection_degraded",
+        failureKind: error.failureKind,
+        ...(error.httpStatus === undefined
+          ? {}
+          : { httpStatus: error.httpStatus }),
+        investigationContinues: true,
+        investigationId: input.investigationId,
+        requestDurationMs: error.requestDurationMs,
+        retryable: error.retryable,
+      }),
+    );
+    if (input.onRecoverableFailure) {
+      try {
+        await input.onRecoverableFailure(error);
+      } catch (reportingError) {
+        console.error(
+          JSON.stringify({
+            error:
+              reportingError instanceof Error
+                ? reportingError.message
+                : String(reportingError),
+            errorCode:
+              reportingError instanceof Error
+                ? reportingError.name
+                : typeof reportingError,
+            event: "sentry_connection_degraded_reporting_failed",
+            investigationId: input.investigationId,
+          }),
+        );
+      }
+    }
+    return null;
+  }
+}
+
 export function sandboxAgentConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): SandboxAgentConfig {
@@ -186,6 +263,7 @@ export function investigationInstructions(input: {
   repositories: CheckedOutRepository[];
   runtimeSystemPrompt?: string | null;
   sentryConnected: boolean;
+  sentryUnavailable?: boolean;
   linearConnected?: boolean;
   langfuseProjectNames?: string[];
   slackChannels?: Array<{ id: string; name: string }>;
@@ -239,6 +317,9 @@ export function investigationInstructions(input: {
       : null,
     input.sentryConnected
       ? "Use the connected read-only Sentry tools to inspect the issue, related events, traces, and relevant historical telemetry before concluding."
+      : null,
+    input.sentryUnavailable
+      ? "Sentry context is temporarily unavailable. Continue with the alert payload, repositories, and other connected evidence sources. Clearly state that live Sentry evidence could not be inspected."
       : null,
     input.upstashConnected
       ? "Use list_upstash_resources first to locate relevant Redis, Vector, Search, QStash, or team resources, then use the read-only Upstash inspection and runtime tools for evidence. Workflow and QStash runtime history are available through the connected Upstash tools. Never create, update, delete, retry, publish, or otherwise mutate Upstash resources or data."
@@ -311,8 +392,12 @@ export async function runInvestigationAgent(
   traceContext: { jobId: string },
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>,
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>,
+  onRecoverableSentryFailure?: (
+    error: SentryConnectionUnavailableError,
+  ) => Promise<void>,
 ): Promise<string> {
   const investigationInput = toInvestigationInput(job.request);
+  let sentryConnectionDegraded = false;
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
     investigationInput.attributes?.slackAlertProvider === "aws";
@@ -360,28 +445,15 @@ export async function runInvestigationAgent(
     getRuntimeAwsConnections(job.config.id),
     getRuntimeAxiomConnection(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
-    getRuntimeSentryConnection(job.config.id, investigationInput)
-      .then((connection) => {
-        if (!connection && investigationInput.provider === "sentry") {
-          console.info(
-            JSON.stringify({
-              event: "sentry_connection_unavailable",
-              investigationId: job.investigationId,
-            }),
-          );
-        }
-        return connection;
-      })
-      .catch((error: unknown) => {
-        console.error(
-          JSON.stringify({
-            error: error instanceof Error ? error.message : String(error),
-            event: "sentry_connection_lookup_failed",
-            investigationId: job.investigationId,
-          }),
-        );
-        throw error;
-      }),
+    loadSentryConnectionForInvestigation({
+      investigationId: job.investigationId,
+      investigationInput,
+      onRecoverableFailure: async (error) => {
+        sentryConnectionDegraded = true;
+        await onRecoverableSentryFailure?.(error);
+      },
+      versionId: job.config.id,
+    }),
     getRuntimeCustomMcpConnections(job.config.id),
     getRuntimeClickStackConnection(job.config.id),
     getRuntimeLinearConnection(job.config.id),
@@ -538,6 +610,7 @@ export async function runInvestigationAgent(
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
+      sentryUnavailable: sentryConnectionDegraded,
       linearConnected: linearServer !== null,
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { SentryConnectionUnavailableError } from "@responder/core/db/investigations";
+import { describe, expect, it, vi } from "vitest";
 import {
   contextServerConnectFailureEvent,
   initialInvestigationMessage,
@@ -6,6 +7,7 @@ import {
   investigationInstructions,
   investigationInstructionsTraceEvent,
   investigationTraceWriteFailure,
+  loadSentryConnectionForInvestigation,
   safeInvestigationError,
   sandboxAgentConfig,
 } from "./investigate.js";
@@ -165,6 +167,25 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("connected ClickStack tools");
     expect(instructions).toContain(
       "Do not create, update, or delete ClickStack resources",
+    );
+  });
+
+  it("tells the agent to continue when live Sentry context is unavailable", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      sentryUnavailable: true,
+    });
+
+    expect(instructions).toContain("Sentry context is temporarily unavailable");
+    expect(instructions).toContain(
+      "Continue with the alert payload, repositories, and other connected evidence sources",
+    );
+    expect(instructions).toContain(
+      "live Sentry evidence could not be inspected",
     );
   });
 
@@ -343,5 +364,118 @@ describe("sandbox agent configuration", () => {
         OPENAI_API_KEY: "openai-secret",
       }),
     ).toBe("AWS guide failed after [redacted]");
+  });
+
+  it("continues without Sentry context after a refresh outage", async () => {
+    const failure = new SentryConnectionUnavailableError(
+      {
+        errorCode: "TimeoutError",
+        failureKind: "timeout",
+        requestDurationMs: 10_003,
+        retryable: true,
+      },
+      new DOMException("The operation was aborted", "TimeoutError"),
+    );
+    const getConnection = vi.fn().mockRejectedValue(failure);
+    const onRecoverableFailure = vi.fn().mockResolvedValue(undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      loadSentryConnectionForInvestigation({
+        getConnection,
+        investigationId: "investigation-123",
+        investigationInput: {
+          body: "Sentry alert body",
+          externalEventId: "event-123",
+          provider: "slack",
+          title: "Sentry alert",
+        },
+        onRecoverableFailure,
+        versionId: "version-123",
+      }),
+    ).resolves.toBeNull();
+
+    expect(onRecoverableFailure).toHaveBeenCalledWith(failure);
+    expect(consoleError).toHaveBeenCalledWith(
+      JSON.stringify({
+        errorCode: "TimeoutError",
+        event: "sentry_connection_degraded",
+        failureKind: "timeout",
+        investigationContinues: true,
+        investigationId: "investigation-123",
+        requestDurationMs: 10_003,
+        retryable: true,
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("does not let monitoring failure stop a degraded investigation", async () => {
+    const failure = new SentryConnectionUnavailableError(
+      {
+        errorCode: "SentryRefreshHttpError",
+        failureKind: "http",
+        httpStatus: 503,
+        requestDurationMs: 321,
+        retryable: true,
+      },
+      new Error("service unavailable"),
+    );
+    const reportingFailure = new Error("monitoring unavailable");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      loadSentryConnectionForInvestigation({
+        getConnection: vi.fn().mockRejectedValue(failure),
+        investigationId: "investigation-123",
+        investigationInput: {
+          body: "Sentry alert body",
+          externalEventId: "event-123",
+          provider: "slack",
+          title: "Sentry alert",
+        },
+        onRecoverableFailure: vi.fn().mockRejectedValue(reportingFailure),
+        versionId: "version-123",
+      }),
+    ).resolves.toBeNull();
+
+    expect(consoleError).toHaveBeenLastCalledWith(
+      JSON.stringify({
+        error: "monitoring unavailable",
+        errorCode: "Error",
+        event: "sentry_connection_degraded_reporting_failed",
+        investigationId: "investigation-123",
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("still fails investigations for unexpected connection lookup errors", async () => {
+    const failure = new Error("database unavailable");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      loadSentryConnectionForInvestigation({
+        getConnection: vi.fn().mockRejectedValue(failure),
+        investigationId: "investigation-123",
+        investigationInput: {
+          body: "Sentry alert body",
+          externalEventId: "event-123",
+          provider: "slack",
+          title: "Sentry alert",
+        },
+        versionId: "version-123",
+      }),
+    ).rejects.toBe(failure);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      JSON.stringify({
+        error: "database unavailable",
+        errorCode: "Error",
+        event: "sentry_connection_lookup_failed",
+        investigationId: "investigation-123",
+      }),
+    );
+    consoleError.mockRestore();
   });
 });
