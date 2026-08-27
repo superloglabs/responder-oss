@@ -8,9 +8,9 @@ import {
 import { AppShell } from "../components/app-shell";
 import { ArrowIcon } from "../components/icons";
 import { IssueListSkeleton } from "../components/screen-skeletons";
+import { dateGroupLabel } from "../date-presentation";
 import { DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
-import { issueDateGroupLabel } from "./issues-presentation";
 
 type IssueFilter = "all" | IssueListItem["severity"];
 
@@ -158,7 +158,7 @@ export function IssuesPage() {
               value: "SEV-3",
             },
           ]}
-          getRowGroup={(issue) => issueDateGroupLabel(issue.createdAt)}
+          getRowGroup={(issue) => dateGroupLabel(issue.createdAt)}
           getRowKey={(issue) => issue.id}
           onFilterChange={setIssueFilter}
           rows={filteredIssues}

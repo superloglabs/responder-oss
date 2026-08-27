@@ -8,7 +8,7 @@ function localCalendarDay(value: Date): number {
   return Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
-export function issueDateGroupLabel(
+export function dateGroupLabel(
   value: string,
   now = new Date(),
   locale?: string,
