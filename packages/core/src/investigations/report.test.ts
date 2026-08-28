@@ -98,6 +98,31 @@ describe("investigation report", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("rejects a multi-sentence remediation description", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Route needs remediation",
+      summary: "The route needs a guard.",
+      issues: [{
+        resolution: "new",
+        title: "Missing route guard",
+        description: "The route reads an optional value without checking it.",
+        rootCause: "A route change removed the optional-value guard.",
+        timeline: [{
+          title: "Request reached the route",
+          description: "The request reached the route without the optional value.",
+        }],
+        severity: "SEV-2",
+        remediations: externalRemediation(
+          "Correct the compile error. Redeploy the application.",
+        ),
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("requires at least one remediation option for every new issue", () => {
     const parsed = investigationReportSubmissionSchema.safeParse({
       schemaVersion: 1,

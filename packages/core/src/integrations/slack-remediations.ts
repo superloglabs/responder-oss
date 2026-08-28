@@ -8,6 +8,7 @@ import { refreshInvestigationSlackReply } from "../db/investigations.js";
 import type { IssueRemediation } from "../investigations/report.js";
 import { responderIssueUrl } from "../responder-urls.js";
 import { updateSlackMessage } from "./slack.js";
+import { slackInvestigationFeedbackBlock } from "./slack-live-card.js";
 
 const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
@@ -161,13 +162,6 @@ export function slackRemediationCarousel(input: {
       text: { type: "plain_text", text: "Remediations", emoji: true },
     },
     {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: "You can use any of these remediations.",
-      },
-    },
-    {
       type: "carousel",
       elements: input.remediations.map((remediation) =>
         slackRemediationCard({
@@ -239,7 +233,10 @@ function pullRequestStatus(card: SlackIssuePullRequestCard): {
   }
 }
 
-export function slackIssuePullRequestMessage(card: SlackIssuePullRequestCard): {
+export function slackIssuePullRequestMessage(
+  card: SlackIssuePullRequestCard,
+  investigationId?: string,
+): {
   blocks: unknown[];
   text: string;
 } {
@@ -320,6 +317,9 @@ export function slackIssuePullRequestMessage(card: SlackIssuePullRequestCard): {
           },
         ],
       },
+      ...(investigationId
+        ? [slackInvestigationFeedbackBlock(investigationId)]
+        : []),
     ],
   };
 }
@@ -333,7 +333,6 @@ export async function refreshIssuePullRequestSlackMessages(
       getIssuePullRequestSlackDeliveries(requestId),
     ]);
     if (!card || deliveries.length === 0) return;
-    const message = slackIssuePullRequestMessage(card);
     const updates = await Promise.allSettled(
       deliveries.map(async (delivery) => {
         if (!delivery.encryptedCredentials) {
@@ -343,6 +342,10 @@ export async function refreshIssuePullRequestSlackMessages(
           decryptCredentials<Record<string, unknown>>(
             delivery.encryptedCredentials,
           ),
+        );
+        const message = slackIssuePullRequestMessage(
+          card,
+          delivery.investigationId,
         );
         await updateSlackMessage({
           accessToken: credentials.accessToken,
