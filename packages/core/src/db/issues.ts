@@ -627,6 +627,7 @@ export async function getIssueForSlackBackfill(input: {
 
 export interface SlackInvestigationDeliveryContext {
   agentId: string;
+  executionMode: "standard" | "slack_thread";
   investigationId: string;
   prMode: AgentPrMode;
   report: StructuredInvestigationReport;
@@ -671,6 +672,7 @@ export interface SlackInvestigationDeliveryContext {
 
 export interface SlackInvestigationLiveContext {
   agentId: string;
+  executionMode: "standard" | "slack_thread";
   investigationId: string;
   title: string;
   traceItems: InvestigationSlackTraceItem[];
@@ -678,6 +680,8 @@ export interface SlackInvestigationLiveContext {
     channelId: string;
     encryptedCredentials: string;
     messageTimestamp: string | null;
+    reactionTimestamp?: string;
+    responseMessageTimestamp?: string;
     threadTimestamp: string;
   };
 }
@@ -698,10 +702,12 @@ export async function getSlackInvestigationLiveContext(
   const rows = await getDatabase()
     .select({
       agentId: investigations.agentId,
+      executionMode: investigations.executionMode,
       id: investigations.id,
       input: investigations.input,
       messageTimestamp: investigations.slackMessageTimestamp,
       organizationId: investigations.organizationId,
+      slackThreadSnapshot: investigations.slackThreadSnapshot,
       title: investigations.title,
       traceItems: investigations.slackTraceItems,
       trigger: agentConfigVersions.trigger,
@@ -717,10 +723,13 @@ export async function getSlackInvestigationLiveContext(
   const investigation = rows[0];
   if (!investigation || investigation.input.provider !== "slack") return null;
 
-  const accountId = slackSourceAccountId({
-    trigger: investigation.trigger,
-    triggerConfig: investigation.triggerConfig,
-  });
+  const accountId =
+    typeof investigation.input.attributes?.integrationAccountId === "string"
+      ? investigation.input.attributes.integrationAccountId
+      : slackSourceAccountId({
+          trigger: investigation.trigger,
+          triggerConfig: investigation.triggerConfig,
+        });
   const channelId = investigation.input.attributes?.channelId;
   const sourceTimestamp = investigation.input.attributes?.timestamp;
   const threadTimestamp =
@@ -728,6 +737,7 @@ export async function getSlackInvestigationLiveContext(
   if (
     !accountId ||
     typeof channelId !== "string" ||
+    typeof sourceTimestamp !== "string" ||
     typeof threadTimestamp !== "string"
   ) {
     return null;
@@ -747,9 +757,13 @@ export async function getSlackInvestigationLiveContext(
     .limit(1);
   const encryptedCredentials = accounts[0]?.encryptedCredentials;
   if (!encryptedCredentials) return null;
+  const responseMessageTimestamp = investigation.slackThreadSnapshot?.replies.find(
+    (reply) => reply.key === "thread-response",
+  )?.slackTimestamp;
 
   return {
     agentId: investigation.agentId,
+    executionMode: investigation.executionMode,
     investigationId: investigation.id,
     title: investigation.title,
     traceItems: investigation.traceItems,
@@ -757,6 +771,8 @@ export async function getSlackInvestigationLiveContext(
       channelId,
       encryptedCredentials,
       messageTimestamp: investigation.messageTimestamp,
+      reactionTimestamp: sourceTimestamp,
+      ...(responseMessageTimestamp ? { responseMessageTimestamp } : {}),
       threadTimestamp,
     },
   };
@@ -769,6 +785,7 @@ export async function getSlackInvestigationDeliveryContext(
   const rows = await db
     .select({
       agentId: investigations.agentId,
+      executionMode: investigations.executionMode,
       id: investigations.id,
       input: investigations.input,
       messageTimestamp: investigations.slackMessageTimestamp,
@@ -791,13 +808,14 @@ export async function getSlackInvestigationDeliveryContext(
   const investigation = rows[0];
   if (!investigation?.report) return null;
 
-  const sourceAccountId =
-    investigation.input.provider === "slack"
-      ? slackSourceAccountId({
+  const sourceAccountId = investigation.input.provider === "slack"
+    ? typeof investigation.input.attributes?.integrationAccountId === "string"
+      ? investigation.input.attributes.integrationAccountId
+      : slackSourceAccountId({
           trigger: investigation.trigger,
           triggerConfig: investigation.triggerConfig,
         })
-      : null;
+    : null;
   const outputConfig =
     investigation.reportConfig.mode === "thread"
       ? null
@@ -863,6 +881,7 @@ export async function getSlackInvestigationDeliveryContext(
 
   return {
     agentId: investigation.agentId,
+    executionMode: investigation.executionMode,
     investigationId: investigation.id,
     prMode: investigation.prMode,
     report: investigation.report,

@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+import { z } from "zod";
 import {
   getRuntimeRepositories,
   type RuntimeRepository,
@@ -87,6 +88,30 @@ export interface CheckedOutRepository {
   repository: string;
   sha: string;
   workspaceBaseSha: string;
+}
+
+const checkedOutRepositoriesSchema = z.object({
+  repositories: z.array(z.object({
+    branch: z.string(),
+    path: z.string(),
+    repository: z.string(),
+    sha: z.string(),
+    workspaceBaseSha: z.string(),
+  })),
+});
+
+export async function loadCheckedOutRepositories(
+  session: DaytonaSandboxSession,
+): Promise<CheckedOutRepository[]> {
+  const manifestPath = `${workspaceRoot}/.responder/repositories.json`;
+  if (!(await session.pathExists(manifestPath))) return [];
+  const contents = await session.readFile({
+    path: manifestPath,
+    maxBytes: 1_000_000,
+  });
+  return checkedOutRepositoriesSchema.parse(
+    JSON.parse(new TextDecoder().decode(contents)),
+  ).repositories;
 }
 
 export interface RuntimeRepositoryReference {
@@ -567,6 +592,38 @@ export async function checkoutRuntimeRepositories(
     new Map(),
     dependencies,
   );
+}
+
+export async function refreshRuntimeRepositories(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  dependencies: RepositoryCheckoutDependencies = defaultDependencies,
+): Promise<CheckedOutRepository[]> {
+  await runSandboxCommand(
+    session,
+    [
+      "set -eu",
+      `rm -rf ${shellQuote(`${workspaceRoot}/repositories`)}`,
+      `mkdir -p ${shellQuote(`${workspaceRoot}/repositories`)}`,
+      `rm -f ${shellQuote(`${workspaceRoot}/.responder/repositories.json`)}`,
+    ].join("\n"),
+    "refresh configured repositories",
+  );
+  const repositories = await checkoutRuntimeRepositories(
+    session,
+    versionId,
+    dependencies,
+  );
+  if (repositories.length === 0) {
+    await session.materializeEntry({
+      entry: {
+        type: "file",
+        content: `${JSON.stringify({ repositories: [] }, null, 2)}\n`,
+      },
+      path: `${workspaceRoot}/.responder/repositories.json`,
+    });
+  }
+  return repositories;
 }
 
 export async function checkoutRuntimeRepositoriesAtRefs(

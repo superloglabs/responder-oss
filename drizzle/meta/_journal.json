@@ -225,6 +225,13 @@
       "when": 1787821722547,
       "tag": "0031_nostalgic_angel",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787849835131,
+      "tag": "0032_flippant_stryfe",
+      "breakpoints": true
     }
   ]
 }

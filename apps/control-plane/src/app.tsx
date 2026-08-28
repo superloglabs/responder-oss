@@ -19,6 +19,7 @@ import {
 import { SettingsPage } from "./pages/settings";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
+import { TagModeSettingsPage } from "./pages/tag-mode-settings";
 import { blogArticlePath } from "./public-routes";
 import { usePageMetadata } from "./use-page-metadata";
 
@@ -77,6 +78,7 @@ export function App() {
         <Route element={<SettingsPage />} path="/settings" />
         <Route element={<BillingPage />} path="/settings/billing" />
         <Route element={<WorkspaceSettingsPage />} path="/settings/workspace" />
+        <Route element={<TagModeSettingsPage />} path="/settings/tag-mode" />
         <Route element={<SuperuserUsersPage />} path="/superuser/users" />
       </Route>
       <Route element={<Navigate replace to="/" />} path="*" />

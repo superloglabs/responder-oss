@@ -12,6 +12,8 @@ import {
 
 export const workerHealthQueue = "responder-worker-health";
 export const investigationQueue = "responder-investigations";
+export const slackThreadInvestigationQueue =
+  "responder-slack-thread-investigations-v1";
 // Version queue names when introducing a policy: createQueue intentionally
 // leaves an existing queue's policy unchanged.
 export const linearTicketQueue = "responder-linear-tickets-v2";
@@ -58,6 +60,17 @@ export const investigationJobSchema = z.object({
 });
 
 export type InvestigationJob = z.infer<typeof investigationJobSchema>;
+
+export const slackThreadInvestigationJobSchema = investigationJobSchema
+  .omit({ kind: true, replay: true })
+  .extend({
+    refreshWorkspace: z.boolean().default(false),
+    kind: z.literal("slack_thread_investigation"),
+    slackInvestigationSessionId: z.uuid(),
+  });
+export type SlackThreadInvestigationJob = z.infer<
+  typeof slackThreadInvestigationJobSchema
+>;
 
 export const remediationJobSchema = z.object({
   kind: z.literal("remediation"),
@@ -180,6 +193,16 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       expireInSeconds: 3_600,
       heartbeatSeconds: investigationHeartbeatSeconds,
       notify: true,
+      retryBackoff: true,
+      retryDelay: 30,
+      retryLimit: 2,
+    }),
+    boss.createQueue(slackThreadInvestigationQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 3_600,
+      heartbeatSeconds: investigationHeartbeatSeconds,
+      notify: true,
+      policy: "key_strict_fifo",
       retryBackoff: true,
       retryDelay: 30,
       retryLimit: 2,

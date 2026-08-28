@@ -24,6 +24,11 @@ import {
 } from "../agents-api";
 import { defaultAgentContext } from "../agent-context-defaults";
 import { AppShell } from "../components/app-shell";
+import {
+  AgentContextIntegrationControls as ContextIntegrationControls,
+  AgentContextProviderMark as ProviderMark,
+  AgentContextRow as ContextRow,
+} from "../components/agent-context-controls";
 import { AgentSetupSkeleton } from "../components/screen-skeletons";
 import {
   DatadogConnectionDialog,
@@ -35,14 +40,12 @@ import { UpstashConnectionDialog } from "../components/upstash-connection-dialog
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import {
   ChevronDownIcon,
-  CogIcon,
   ProviderGlyph,
   RepositoryIcon,
   SearchIcon,
 } from "../components/icons";
 import {
   providerDisplayName,
-  type ProviderGlyphId,
 } from "../components/provider-glyphs";
 import {
   Alert,
@@ -2857,26 +2860,6 @@ function ChoiceCard({
   );
 }
 
-type ProviderId = Exclude<ProviderGlyphId, "google">;
-
-function ProviderMark({
-  connected = false,
-  provider,
-}: {
-  connected?: boolean;
-  provider: ProviderId;
-}) {
-  return (
-    <ProviderGlyph
-      className={`providerMark providerMark--${provider} ${
-        connected ? "isConnected" : ""
-      }`}
-      decorative
-      provider={provider}
-    />
-  );
-}
-
 function ConnectionPrompt({
   actionLabel,
   compact = false,
@@ -3136,76 +3119,5 @@ function SeverityFilter({
         ))}
       </div>
     </fieldset>
-  );
-}
-
-function ContextRow({
-  action,
-  detail,
-  label,
-  provider,
-}: {
-  action: ReactNode;
-  detail: string;
-  label: string;
-  provider:
-    | "aws"
-    | "github"
-    | "slack"
-    | "sentry"
-    | "datadog"
-    | "axiom"
-    | "upstash"
-    | "langfuse"
-    | "vercel"
-    | "custom_mcp"
-    | "clickstack"
-    | "linear";
-}) {
-  return (
-    <div className="contextRow">
-      <ProviderMark provider={provider} />
-      <span className="contextRow__copy">
-        <strong>{label}</strong>
-        <small>{detail}</small>
-      </span>
-      <span className="contextRow__action">{action}</span>
-    </div>
-  );
-}
-
-function ContextIntegrationControls({
-  enabled,
-  label,
-  onConfigure,
-  onToggle,
-}: {
-  enabled: boolean;
-  label: string;
-  onConfigure: () => void;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="contextIntegrationControls">
-      <IconButton
-        aria-label={`Configure ${label}`}
-        onClick={onConfigure}
-        size="small"
-        type="button"
-        variant="ghost"
-      >
-        <CogIcon />
-      </IconButton>
-      <button
-        aria-checked={enabled}
-        aria-label={`${enabled ? "Disable" : "Enable"} ${label} for this agent`}
-        className="contextIntegrationToggle"
-        onClick={onToggle}
-        role="switch"
-        type="button"
-      >
-        <i aria-hidden="true"><i /></i>
-      </button>
-    </div>
   );
 }

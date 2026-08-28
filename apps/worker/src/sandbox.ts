@@ -156,8 +156,16 @@ export async function configureDaytonaSandboxLifecycle(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
   secrets: DaytonaSandboxSecretMount[] = [],
-  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+  lifecycleOrDependencies: number | DaytonaCleanupDependencies =
+    defaultCleanupDependencies,
+  persistentDependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
 ): Promise<void> {
+  const autoDeleteInterval = typeof lifecycleOrDependencies === "number"
+    ? lifecycleOrDependencies
+    : 0;
+  const dependencies = typeof lifecycleOrDependencies === "number"
+    ? persistentDependencies
+    : lifecycleOrDependencies;
   const client = dependencies.createClient(config);
   try {
     const sandbox = await retryTransientDaytonaOperation(
@@ -181,12 +189,18 @@ export async function configureDaytonaSandboxLifecycle(
       await retryTransientDaytonaOperation(() => sandbox.start(), dependencies);
     }
     await retryTransientDaytonaOperation(
-      () => sandbox.setAutoDeleteInterval(0),
+      () => sandbox.setAutoDeleteInterval(autoDeleteInterval),
       dependencies,
     );
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }
+}
+
+export async function pauseDaytonaSandbox(
+  session: DaytonaSandboxSession,
+): Promise<void> {
+  await session.close();
 }
 
 export async function closeDaytonaSandbox(

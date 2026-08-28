@@ -222,6 +222,19 @@ export async function postSlackMessage(input: {
   }
 }
 
+export async function stopSlackResponseStream(input: {
+  accessToken: string;
+  channelId: string;
+  markdownText: string;
+  timestamp: string;
+}): Promise<void> {
+  await callSlackApi(input.accessToken, "chat.stopStream", {
+    channel: input.channelId,
+    markdown_text: input.markdownText,
+    ts: input.timestamp,
+  });
+}
+
 export async function updateSlackMessage(input: {
   accessToken: string;
   blocks: unknown[];

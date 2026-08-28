@@ -48,6 +48,7 @@ import {
   investigations,
   repositories,
   runtimeProfiles,
+  slackInvestigationSessions,
   webhookReceipts,
   type InvestigationInput,
   type InvestigationSlackMessageSnapshot,
@@ -90,6 +91,12 @@ export interface BeginInvestigationResult {
   investigationId: string;
   runtimeProfileId: string;
   config: RuntimeAgentConfig;
+}
+
+export interface BeginSlackThreadInvestigationResult
+  extends BeginInvestigationResult {
+  configurationChanged: boolean;
+  slackInvestigationSessionId: string;
 }
 
 export class InstanceRuntimeProfileError extends Error {
@@ -2522,6 +2529,254 @@ export async function beginInvestigation(
   });
 }
 
+export async function beginSlackThreadInvestigation(input: {
+  agentId: string;
+  investigationInput: InvestigationInput;
+  teamId: string;
+  channelId: string;
+  threadTimestamp: string;
+}): Promise<BeginSlackThreadInvestigationResult> {
+  const db = getDatabase();
+  const payloadHash = createHash("sha256")
+    .update(JSON.stringify(input.investigationInput))
+    .digest("hex");
+
+  return db.transaction(async (tx) => {
+    const agentRows = await tx
+      .select({
+        id: agents.id,
+        organizationId: agents.organizationId,
+        activeVersionId: agents.activeVersionId,
+      })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.enabled, true),
+          eq(agents.purpose, "slack_thread"),
+        ),
+      )
+      .limit(1);
+    const agent = agentRows[0];
+    if (!agent?.activeVersionId) {
+      throw new Error("Tag mode is missing an active configuration");
+    }
+
+    let sessionRows = await tx
+      .select({
+        id: slackInvestigationSessions.id,
+        agentConfigVersionId: slackInvestigationSessions.agentConfigVersionId,
+        runtimeProfileId: slackInvestigationSessions.runtimeProfileId,
+      })
+      .from(slackInvestigationSessions)
+      .where(
+        and(
+          eq(slackInvestigationSessions.organizationId, agent.organizationId),
+          eq(slackInvestigationSessions.agentId, agent.id),
+          eq(slackInvestigationSessions.teamId, input.teamId),
+          eq(slackInvestigationSessions.channelId, input.channelId),
+          eq(slackInvestigationSessions.threadTimestamp, input.threadTimestamp),
+        ),
+      )
+      .limit(1);
+
+    if (!sessionRows[0]) {
+      const activeProfiles = await tx
+        .select({ id: runtimeProfiles.id })
+        .from(instanceConfiguration)
+        .innerJoin(
+          runtimeProfiles,
+          eq(runtimeProfiles.id, instanceConfiguration.activeRuntimeProfileId),
+        )
+        .where(eq(instanceConfiguration.id, "default"))
+        .limit(1);
+      const activeProfile = activeProfiles[0];
+      if (!activeProfile) throw new InstanceRuntimeProfileError();
+      const inserted = await tx
+        .insert(slackInvestigationSessions)
+        .values({
+          organizationId: agent.organizationId,
+          agentId: agent.id,
+          agentConfigVersionId: agent.activeVersionId,
+          runtimeProfileId: activeProfile.id,
+          teamId: input.teamId,
+          channelId: input.channelId,
+          threadTimestamp: input.threadTimestamp,
+        })
+        .onConflictDoNothing()
+        .returning({
+          id: slackInvestigationSessions.id,
+          agentConfigVersionId: slackInvestigationSessions.agentConfigVersionId,
+          runtimeProfileId: slackInvestigationSessions.runtimeProfileId,
+        });
+      sessionRows = inserted.length > 0
+        ? inserted
+        : await tx
+            .select({
+              id: slackInvestigationSessions.id,
+              agentConfigVersionId:
+                slackInvestigationSessions.agentConfigVersionId,
+              runtimeProfileId: slackInvestigationSessions.runtimeProfileId,
+            })
+            .from(slackInvestigationSessions)
+            .where(
+              and(
+                eq(slackInvestigationSessions.organizationId, agent.organizationId),
+                eq(slackInvestigationSessions.agentId, agent.id),
+                eq(slackInvestigationSessions.teamId, input.teamId),
+                eq(slackInvestigationSessions.channelId, input.channelId),
+                eq(slackInvestigationSessions.threadTimestamp, input.threadTimestamp),
+              ),
+            )
+            .limit(1);
+    }
+    let session = sessionRows[0];
+    if (!session) throw new Error("Unable to create Slack investigation session");
+    const configurationChanged =
+      session.agentConfigVersionId !== agent.activeVersionId;
+    if (configurationChanged) {
+      await tx
+        .update(slackInvestigationSessions)
+        .set({
+          agentConfigVersionId: agent.activeVersionId,
+          updatedAt: new Date(),
+        })
+        .where(eq(slackInvestigationSessions.id, session.id));
+      session = {
+        ...session,
+        agentConfigVersionId: agent.activeVersionId,
+      };
+    }
+
+    const configRows = await tx
+      .select({
+        id: agentConfigVersions.id,
+        agentId: agentConfigVersions.agentId,
+        model: agentConfigVersions.model,
+        prompt: agentConfigVersions.prompt,
+        prMode: agentConfigVersions.prMode,
+        createLinearTickets: agentConfigVersions.createLinearTickets,
+        linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
+      })
+      .from(agentConfigVersions)
+      .where(eq(agentConfigVersions.id, session.agentConfigVersionId))
+      .limit(1);
+    const config = configRows[0];
+    if (!config || config.agentId !== agent.id) {
+      throw new Error("Tag mode configuration is invalid");
+    }
+
+    const investigationId = randomUUID();
+    const insertedReceipt = await tx
+      .insert(webhookReceipts)
+      .values({
+        organizationId: agent.organizationId,
+        provider: "slack",
+        externalEventId: input.investigationInput.externalEventId,
+        investigationId,
+        payloadHash,
+      })
+      .onConflictDoNothing({
+        target: [webhookReceipts.provider, webhookReceipts.externalEventId],
+      })
+      .returning({ investigationId: webhookReceipts.investigationId });
+
+    if (!insertedReceipt[0]) {
+      const existing = await tx
+        .select({ investigationId: webhookReceipts.investigationId })
+        .from(webhookReceipts)
+        .where(
+          and(
+            eq(webhookReceipts.provider, "slack"),
+            eq(
+              webhookReceipts.externalEventId,
+              input.investigationInput.externalEventId,
+            ),
+          ),
+        )
+        .limit(1);
+      if (!existing[0]) throw new Error("Unable to resolve duplicate mention");
+      return {
+        created: false,
+        configurationChanged,
+        investigationId: existing[0].investigationId,
+        slackInvestigationSessionId: session.id,
+        runtimeProfileId: session.runtimeProfileId,
+        config: { ...config, organizationId: agent.organizationId },
+      };
+    }
+
+    await tx.insert(investigations).values({
+      id: investigationId,
+      organizationId: agent.organizationId,
+      agentId: agent.id,
+      agentConfigVersionId: config.id,
+      runtimeProfileId: session.runtimeProfileId,
+      executionMode: "slack_thread",
+      slackInvestigationSessionId: session.id,
+      title: input.investigationInput.title,
+      input: input.investigationInput,
+    });
+    return {
+      created: true,
+      configurationChanged,
+      investigationId,
+      slackInvestigationSessionId: session.id,
+      runtimeProfileId: session.runtimeProfileId,
+      config: { ...config, organizationId: agent.organizationId },
+    };
+  });
+}
+
+export async function getSlackInvestigationSessionRuntime(sessionId: string) {
+  const rows = await getDatabase()
+    .select({
+      sandboxSessionState: slackInvestigationSessions.sandboxSessionState,
+      previousResponseId: slackInvestigationSessions.previousResponseId,
+    })
+    .from(slackInvestigationSessions)
+    .where(eq(slackInvestigationSessions.id, sessionId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function completeSlackThreadInvestigationTurn(input: {
+  investigationId: string;
+  sessionId: string;
+  reportMarkdown: string;
+  sandboxSessionState: Record<string, unknown>;
+  previousResponseId?: string;
+}): Promise<void> {
+  await getDatabase().transaction(async (tx) => {
+    const sessions = await tx
+      .update(slackInvestigationSessions)
+      .set({
+        sandboxSessionState: input.sandboxSessionState,
+        previousResponseId: input.previousResponseId ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(slackInvestigationSessions.id, input.sessionId))
+      .returning({ id: slackInvestigationSessions.id });
+    if (!sessions[0]) throw new Error("Slack investigation session not found");
+    const completed = await tx
+      .update(investigations)
+      .set({
+        status: "resolved",
+        reportMarkdown: input.reportMarkdown,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(investigations.id, input.investigationId),
+          eq(investigations.slackInvestigationSessionId, input.sessionId),
+        ),
+      )
+      .returning({ id: investigations.id });
+    if (!completed[0]) throw new Error("Slack investigation turn not found");
+  });
+}
+
 export async function markInvestigationStarted(
   investigationId: string,
   eveSessionId: string,
@@ -2597,6 +2852,17 @@ export async function completeInvestigation(
       updatedAt: new Date(),
     })
     .where(eq(investigations.id, investigationId));
+}
+
+export async function getInvestigationReportMarkdown(
+  investigationId: string,
+): Promise<string | null> {
+  const rows = await getDatabase()
+    .select({ reportMarkdown: investigations.reportMarkdown })
+    .from(investigations)
+    .where(eq(investigations.id, investigationId))
+    .limit(1);
+  return rows[0]?.reportMarkdown ?? null;
 }
 
 export function replayReportMarkdownUpdate(

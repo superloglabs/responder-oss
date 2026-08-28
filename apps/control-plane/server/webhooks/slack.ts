@@ -38,7 +38,10 @@ import {
   type SlackIssuePullRequestCard,
 } from "../../../../packages/core/src/integrations/slack-remediations.js";
 import { startSlackIssueRemediation } from "../issues/remediation.js";
-import { queueInvestigation } from "../investigations/queue.js";
+import {
+  queueInvestigation,
+  queueSlackThreadInvestigation,
+} from "../investigations/queue.js";
 
 const slackUrlVerificationSchema = z.object({
   type: z.literal("url_verification"),
@@ -422,11 +425,14 @@ async function forwardSlackEvent(input: {
   body: string;
   channelId: string;
   eventId: string;
+  integrationAccountId: string;
   teamId: string;
   threadTimestamp: string;
   timestamp: string;
+  threadMode?: boolean;
+  userId?: string;
 }) {
-  const result = await queueInvestigation({
+  const request = {
     agentId: input.agentId,
     provider: "slack",
     externalEventId: `${input.eventId}:${input.agentId}`,
@@ -448,12 +454,25 @@ async function forwardSlackEvent(input: {
         : {}),
       ...(input.awsAlarm ? { awsAlarmState: input.awsAlarm.state } : {}),
       channelId: input.channelId,
+      ...(input.threadMode
+        ? {
+            integrationAccountId: input.integrationAccountId,
+            ...(input.userId ? { slackUserId: input.userId } : {}),
+          }
+        : {}),
       slackEventId: input.eventId,
       teamId: input.teamId,
       threadTimestamp: input.threadTimestamp,
       timestamp: input.timestamp,
     },
-  });
+  } as const;
+  const result = input.threadMode
+    ? await queueSlackThreadInvestigation(request, {
+        teamId: input.teamId,
+        channelId: input.channelId,
+        threadTimestamp: input.threadTimestamp,
+      })
+    : await queueInvestigation(request);
   if (result.kind === "blocked") {
     throw new Error("Monthly investigation allowance exhausted");
   }
@@ -472,6 +491,7 @@ export async function acknowledgeSlackAlert(input: {
   messageTimestamp: string;
   title: string;
   threadTimestamp: string;
+  threadMode?: boolean;
 }): Promise<void> {
   const connection = await getSlackChannelConnection({
     organizationId: input.organizationId,
@@ -487,8 +507,23 @@ export async function acknowledgeSlackAlert(input: {
   const message = investigatingSlackMessage({
     agentId: input.agentId,
     investigationId: input.investigationId,
+    threadMode: input.threadMode,
     title: input.title,
   });
+  const failures: unknown[] = [];
+  if (input.threadMode) {
+    try {
+      await addSlackReaction({
+        accessToken: credentials.accessToken,
+        channelId: input.channelId,
+        name: "eyes",
+        timestamp: input.messageTimestamp,
+      });
+      await setInvestigationSlackReaction(input.investigationId, "eyes", true);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
   const liveMessageTimestamp = await postSlackMessage({
     accessToken: credentials.accessToken,
     blocks: message.blocks,
@@ -506,7 +541,6 @@ export async function acknowledgeSlackAlert(input: {
     );
     throw new Error("Slack did not return the live investigation message timestamp");
   }
-  const failures: unknown[] = [];
   let investigationStatus:
     | "pending"
     | "investigating"
@@ -536,31 +570,35 @@ export async function acknowledgeSlackAlert(input: {
     failures.push(error);
   }
   const results = await Promise.allSettled([
-    addSlackReaction({
-      accessToken: credentials.accessToken,
-      channelId: input.channelId,
-      name: "eyes",
-      timestamp: input.messageTimestamp,
-    }),
-    setSlackThreadStatus({
-      accessToken: credentials.accessToken,
-      channelId: input.channelId,
-      loadingMessages: [
-        "Gathering evidence…",
-        "Checking telemetry…",
-        "Inspecting relevant code…",
-        "Connecting the dots…",
-      ],
-      status: "is investigating this alert…",
-      threadTimestamp: input.threadTimestamp,
-    }),
+    input.threadMode
+      ? Promise.resolve()
+      : addSlackReaction({
+          accessToken: credentials.accessToken,
+          channelId: input.channelId,
+          name: "eyes",
+          timestamp: input.messageTimestamp,
+        }),
+    input.threadMode
+      ? Promise.resolve()
+      : setSlackThreadStatus({
+          accessToken: credentials.accessToken,
+          channelId: input.channelId,
+          loadingMessages: [
+            "Gathering evidence…",
+            "Checking telemetry…",
+            "Inspecting relevant code…",
+            "Connecting the dots…",
+          ],
+          status: "is investigating this alert…",
+          threadTimestamp: input.threadTimestamp,
+        }),
   ]);
   failures.push(
     ...results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],
     ),
   );
-  if (results[0]?.status === "fulfilled") {
+  if (!input.threadMode && results[0]?.status === "fulfilled") {
     try {
       await setInvestigationSlackReaction(
         input.investigationId,
@@ -576,7 +614,7 @@ export async function acknowledgeSlackAlert(input: {
       input.investigationId,
       liveMessageTimestamp,
     );
-    if (investigationStatus && investigationStatus !== "failed") {
+    if (investigationStatus === "resolved") {
       await reconcileCompletedInvestigationSlackCard(input.investigationId);
     } else if (investigationStatus === "failed") {
       await failInvestigationSlackCard(input.investigationId);
@@ -629,12 +667,14 @@ export function logSlackAcknowledgementFailure(input: {
 export function investigatingSlackMessage(input: {
   agentId: string;
   investigationId: string;
+  threadMode?: boolean;
   title?: string;
 }): { blocks: unknown[]; text: string } {
   return slackInvestigationCard({
     agentId: input.agentId,
     detail: "Responder is gathering evidence and preparing the investigation.",
     investigationId: input.investigationId,
+    showInvestigationLink: input.threadMode !== true,
     status: "in_progress",
     title: input.title ?? "Investigating alert",
   });
@@ -744,7 +784,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ ok: true, ignored: true });
   }
 
-  const body = slackMessageBody(event);
+  const rawMessageBody = slackMessageBody(event);
+  const body = event.type === "app_mention"
+    ? rawMessageBody.replace(/^\s*<@[A-Z0-9]+>\s*/iu, "").trim() || rawMessageBody
+    : rawMessageBody;
   let alertProvider: SlackAlertProvider | null = null;
   let awsAlarm: SlackAwsAlarm | null = null;
   if (event.type === "message") {
@@ -867,9 +910,12 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         body,
         channelId: event.channel,
         eventId: callback.data.event_id,
+        integrationAccountId: match.integrationAccountId,
         teamId: callback.data.team_id,
         threadTimestamp: event.thread_ts ?? event.ts,
         timestamp: event.ts,
+        threadMode: match.trigger === "slack_thread",
+        userId: event.user,
       });
       await recordInvestigationSlackSource(result.investigationId, {
         attachments: event.attachments ?? [],
@@ -878,7 +924,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         slackTimestamp: event.ts,
         text: event.text,
       });
-      if (!result.duplicate && match.trigger === "slack_channel") {
+      if (
+        !result.duplicate &&
+        (match.trigger === "slack_channel" || match.trigger === "slack_thread")
+      ) {
         await acknowledgeSlackAlert({
           agentId: match.agentId,
           channelId: event.channel,
@@ -888,6 +937,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           messageTimestamp: event.ts,
           title: slackMessageTitle(body),
           threadTimestamp: event.thread_ts ?? event.ts,
+          threadMode: match.trigger === "slack_thread",
         }).catch((error: unknown) => {
           logSlackAcknowledgementFailure({
             alertProvider,

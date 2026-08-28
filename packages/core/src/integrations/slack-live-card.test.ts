@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../credentials/encryption.js";
-import { recordInvestigationSlackTrace } from "../db/investigations.js";
+import {
+  recordInvestigationSlackReply,
+  recordInvestigationSlackTrace,
+  setInvestigationSlackReaction,
+} from "../db/investigations.js";
 import { getSlackInvestigationLiveContext } from "../db/issues.js";
 import {
   SlackApiError,
+  removeSlackReaction,
   setSlackThreadStatus,
+  stopSlackResponseStream,
   updateSlackMessage,
 } from "./slack.js";
 import {
@@ -22,18 +28,22 @@ vi.mock("../credentials/encryption.js", () => ({
 vi.mock("../db/investigations.js", () => ({
   recordInvestigationSlackReply: vi.fn(),
   recordInvestigationSlackTrace: vi.fn(),
+  setInvestigationSlackReaction: vi.fn(),
 }));
 vi.mock("../db/issues.js", () => ({
   getSlackInvestigationLiveContext: vi.fn(),
 }));
 vi.mock("./slack.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./slack.js")>()),
+  removeSlackReaction: vi.fn(),
   setSlackThreadStatus: vi.fn(),
+  stopSlackResponseStream: vi.fn(),
   updateSlackMessage: vi.fn(),
 }));
 
 const context = {
   agentId: "13131313-1313-4313-8313-131313131313",
+  executionMode: "standard" as const,
   investigationId: "16161616-1616-4616-8616-161616161616",
   title: "Plant API error rate is elevated",
   traceItems: [],
@@ -128,7 +138,7 @@ describe("Slack live investigation card", () => {
     expect(message.blocks).toEqual([
       expect.objectContaining({
         type: "plan",
-        title: "Investigation trace",
+        title: "Trace",
         tasks: [
           expect.objectContaining({
             status: "in_progress",
@@ -141,6 +151,26 @@ describe("Slack live investigation card", () => {
               },
             ],
           }),
+        ],
+      }),
+    ]);
+  });
+
+  it("omits the investigation link from tag mode cards", () => {
+    const message = slackInvestigationCard({
+      agentId: context.agentId,
+      detail: "Inspecting the relevant source code.",
+      investigationId: context.investigationId,
+      showInvestigationLink: false,
+      status: "in_progress",
+      title: context.title,
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: "plan",
+        tasks: [
+          expect.not.objectContaining({ sources: expect.anything() }),
         ],
       }),
     ]);
@@ -178,7 +208,7 @@ describe("Slack live investigation card", () => {
     expect(message.blocks).toEqual([
       expect.objectContaining({
         type: "plan",
-        title: "Investigation trace",
+        title: "Trace",
       }),
     ]);
     expect(message.text).toBe(
@@ -990,6 +1020,49 @@ describe("Slack live investigation card", () => {
     );
     expect(setSlackThreadStatus).toHaveBeenCalledWith(
       expect.objectContaining({ status: "" }),
+    );
+  });
+
+  it("finalizes the tag-mode response stream and removes eyes on failure", async () => {
+    const threadContext = {
+      ...context,
+      executionMode: "slack_thread" as const,
+      source: {
+        ...context.source,
+        reactionTimestamp: "1785500000.000100",
+        responseMessageTimestamp: "1785500002.000300",
+      },
+    };
+    vi.mocked(getSlackInvestigationLiveContext).mockResolvedValue(threadContext);
+    vi.mocked(decryptCredentials).mockReturnValue({ accessToken: "xoxb-test" });
+    vi.mocked(stopSlackResponseStream).mockResolvedValue();
+    vi.mocked(updateSlackMessage).mockResolvedValue();
+    vi.mocked(removeSlackReaction).mockResolvedValue();
+    vi.mocked(setSlackThreadStatus).mockResolvedValue();
+
+    await expect(
+      failInvestigationSlackCard(threadContext.investigationId),
+    ).resolves.toBe(true);
+
+    expect(stopSlackResponseStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timestamp: "1785500002.000300",
+      }),
+    );
+    expect(recordInvestigationSlackReply).toHaveBeenCalledWith(
+      threadContext.investigationId,
+      expect.objectContaining({
+        key: "thread-response",
+        slackTimestamp: "1785500002.000300",
+      }),
+    );
+    expect(removeSlackReaction).toHaveBeenCalledWith(
+      expect.objectContaining({ timestamp: "1785500000.000100" }),
+    );
+    expect(setInvestigationSlackReaction).toHaveBeenCalledWith(
+      threadContext.investigationId,
+      "eyes",
+      false,
     );
   });
 });
