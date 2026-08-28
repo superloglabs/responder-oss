@@ -13,7 +13,7 @@ import {
   integrationsForAgent,
 } from "../agent-list-presentation";
 import { AppShell } from "../components/app-shell";
-import { ArrowIcon, PlusIcon } from "../components/icons";
+import { ArrowIcon, CogIcon, PlusIcon } from "../components/icons";
 import { AgentListSkeleton } from "../components/screen-skeletons";
 import { Badge, DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -164,15 +164,24 @@ export function AgentsPage() {
                 header: "",
                 key: "open",
                 render: (agent) => (
-                  <Link
-                    aria-label={`Open ${agent.name}`}
-                    className="agentTableArrow"
-                    to={`/agents/${agent.id}`}
-                  >
-                    <ArrowIcon />
-                  </Link>
+                  <span className="agentTableActions">
+                    <Link
+                      aria-label={`Edit ${agent.name} settings`}
+                      className="agentTableSettings"
+                      to={`/agents/${agent.id}/edit`}
+                    >
+                      <CogIcon />
+                    </Link>
+                    <Link
+                      aria-label={`Open ${agent.name}`}
+                      className="agentTableArrow"
+                      to={`/agents/${agent.id}`}
+                    >
+                      <ArrowIcon />
+                    </Link>
+                  </span>
                 ),
-                width: "5%",
+                width: "8%",
               },
             ]}
             filters={[

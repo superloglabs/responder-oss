@@ -454,10 +454,13 @@ export function AgentCreatePage() {
   );
   const [furthestStep, setFurthestStep] =
     useState<CreateStep>(
-      contextIntegrationJustConnected
-        ? 3
-        : () => readSavedStep(stepStorageKey),
+      isEditing
+        ? 4
+        : contextIntegrationJustConnected
+          ? 3
+          : () => readSavedStep(stepStorageKey),
   );
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
@@ -863,6 +866,7 @@ export function AgentCreatePage() {
   function updateDraft(update: Partial<CreateDraft>) {
     setDraft((current) => (current ? { ...current, ...update } : current));
     setError(null);
+    setSaveNotice(null);
   }
 
   function refreshSlackChannels(): Promise<void> {
@@ -1101,6 +1105,7 @@ export function AgentCreatePage() {
     if (step === 4) setPromptStepReady(false);
     setActiveStep(step);
     setError(null);
+    setSaveNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1129,6 +1134,10 @@ export function AgentCreatePage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isEditing) {
+      await persistAgent();
+      return;
+    }
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     if (
       activeStep !== 4 ||
@@ -1139,6 +1148,10 @@ export function AgentCreatePage() {
       if (activeStep < 4) continueToNextStep();
       return;
     }
+    await persistAgent();
+  }
+
+  async function persistAgent() {
     if (missingRequirement) {
       setError(missingRequirement);
       const blockedStep: CreateStep = inputRequirement
@@ -1210,11 +1223,17 @@ export function AgentCreatePage() {
 
     setSaving(true);
     setError(null);
+    setSaveNotice(null);
     try {
       const savedAgentId = await saveAgent(agentId, configuration);
       window.sessionStorage.removeItem(draftStorageKey);
       window.sessionStorage.removeItem(stepStorageKey);
-      navigate(`/agents/${savedAgentId}`);
+      if (isEditing) {
+        setExistingConfiguration(configuration);
+        setSaveNotice("Changes saved.");
+      } else {
+        navigate(`/agents/${savedAgentId}`);
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -1330,7 +1349,7 @@ export function AgentCreatePage() {
           <h1>{isEditing ? `Edit ${existingConfiguration?.name ?? "agent"}` : "Create agent"}</h1>
           <p>
             {isEditing
-              ? "Update what starts the agent, where its results go, and what context it can use."
+              ? "Pick a section on the left to update its settings, then save your changes."
               : "Choose what starts the agent, where its results go, and what context it can use."}
           </p>
         </div>
@@ -1348,38 +1367,77 @@ export function AgentCreatePage() {
         <Alert className="createNotice" role="alert" title={error} tone="danger" />
       ) : null}
 
-      <form className="createAgentForm createStepper" onSubmit={submit}>
-        <nav aria-label="Agent setup progress" className="createStepperRail">
-          {CREATE_STEPS.map((step) => {
-            const current = activeStep === step.id;
-            const complete =
-              step.id < furthestStep && !stepRequirements[step.id];
-            return (
-              <button
-                aria-current={current ? "step" : undefined}
-                className={[
-                  "createStepperStep",
-                  current ? "isCurrent" : "",
-                  complete ? "isComplete" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                disabled={step.id > furthestStep}
-                key={step.id}
-                onClick={() => showStep(step.id)}
-                type="button"
-              >
-                <span className="createStepperStep__marker">
-                  {complete ? "✓" : step.id}
-                </span>
-                <span className="createStepperStep__copy">
-                  <strong>{step.title}</strong>
-                  <small>{step.description}</small>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+      <form
+        className={`createAgentForm ${isEditing ? "agentEditLayout" : "createStepper"}`}
+        onSubmit={submit}
+      >
+        {isEditing ? (
+          <nav aria-label="Agent settings" className="agentEditNav">
+            {CREATE_STEPS.map((step) => {
+              const current = activeStep === step.id;
+              const invalid = Boolean(stepRequirements[step.id]);
+              return (
+                <button
+                  aria-current={current ? "page" : undefined}
+                  className={[
+                    "agentEditNavItem",
+                    current ? "isCurrent" : "",
+                    invalid ? "isInvalid" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={step.id}
+                  onClick={() => showStep(step.id)}
+                  type="button"
+                >
+                  <span className="agentEditNavItem__copy">
+                    <strong>{step.title}</strong>
+                    <small>{step.description}</small>
+                  </span>
+                  {invalid ? (
+                    <span
+                      aria-label="Needs attention"
+                      className="agentEditNavItem__dot"
+                      role="img"
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
+          </nav>
+        ) : (
+          <nav aria-label="Agent setup progress" className="createStepperRail">
+            {CREATE_STEPS.map((step) => {
+              const current = activeStep === step.id;
+              const complete =
+                step.id < furthestStep && !stepRequirements[step.id];
+              return (
+                <button
+                  aria-current={current ? "step" : undefined}
+                  className={[
+                    "createStepperStep",
+                    current ? "isCurrent" : "",
+                    complete ? "isComplete" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  disabled={step.id > furthestStep}
+                  key={step.id}
+                  onClick={() => showStep(step.id)}
+                  type="button"
+                >
+                  <span className="createStepperStep__marker">
+                    {complete ? "✓" : step.id}
+                  </span>
+                  <span className="createStepperStep__copy">
+                    <strong>{step.title}</strong>
+                    <small>{step.description}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
         <div className="createStepperPanel">
           {activeStep === 1 ? (
@@ -2831,53 +2889,84 @@ export function AgentCreatePage() {
           ) : null}
 
           <footer className="createAgentActions">
-            {currentRequirement || activeStep >= 3 ? (
-              <span
-                aria-live="polite"
-                className={
-                  currentRequirement
-                    ? "createRequirement"
-                    : "createRequirement isReady"
-                }
-              >
-                {currentRequirement ??
-                  (activeStep === 3
-                    ? "Context is optional. Add only what the agent needs."
-                    : "All required setup is complete.")}
-              </span>
-            ) : null}
-            {activeStep === 1 ? (
-              <Link
-                className="dsButton dsButton--secondary dsButton--medium"
-                to={agentId ? `/agents/${agentId}` : "/agents"}
-              >
-                Cancel
-              </Link>
+            {isEditing ? (
+              <>
+                {saveNotice ? (
+                  <span aria-live="polite" className="createRequirement isReady">
+                    {saveNotice}
+                  </span>
+                ) : currentRequirement ? (
+                  <span aria-live="polite" className="createRequirement">
+                    {currentRequirement}
+                  </span>
+                ) : null}
+                <Link
+                  className="dsButton dsButton--secondary dsButton--medium"
+                  to={`/agents/${agentId}`}
+                >
+                  Done
+                </Link>
+                <Button
+                  data-submit-agent="true"
+                  disabled={Boolean(currentRequirement) || saving}
+                  loading={saving}
+                  type="submit"
+                  variant="primary"
+                >
+                  Save changes
+                </Button>
+              </>
             ) : (
-              <Button onClick={returnToPreviousStep} variant="secondary">
-                Back
-              </Button>
-            )}
-            {activeStep < 4 ? (
-              <Button
-                disabled={Boolean(currentRequirement)}
-                onClick={continueToNextStep}
-                variant="primary"
-              >
-                Continue
-              </Button>
-            ) : (
-              <Button
-                data-submit-agent="true"
-                disabled={
-                  Boolean(missingRequirement) || !promptStepReady || saving
-                }
-                loading={saving}
-                type="submit"
-                variant="primary"
-              >
-                {isEditing ? "Save changes" : "Create agent"}
-              </Button>
+              <>
+                {currentRequirement || activeStep >= 3 ? (
+                  <span
+                    aria-live="polite"
+                    className={
+                      currentRequirement
+                        ? "createRequirement"
+                        : "createRequirement isReady"
+                    }
+                  >
+                    {currentRequirement ??
+                      (activeStep === 3
+                        ? "Context is optional. Add only what the agent needs."
+                        : "All required setup is complete.")}
+                  </span>
+                ) : null}
+                {activeStep === 1 ? (
+                  <Link
+                    className="dsButton dsButton--secondary dsButton--medium"
+                    to={agentId ? `/agents/${agentId}` : "/agents"}
+                  >
+                    Cancel
+                  </Link>
+                ) : (
+                  <Button onClick={returnToPreviousStep} variant="secondary">
+                    Back
+                  </Button>
+                )}
+                {activeStep < 4 ? (
+                  <Button
+                    disabled={Boolean(currentRequirement)}
+                    onClick={continueToNextStep}
+                    variant="primary"
+                  >
+                    Continue
+                  </Button>
+                ) : (
+                  <Button
+                    data-submit-agent="true"
+                    disabled={
+                      Boolean(missingRequirement) || !promptStepReady || saving
+                    }
+                    loading={saving}
+                    type="submit"
+                    variant="primary"
+                  >
+                    Create agent
+                  </Button>
+                )}
+              </>
             )}
           </footer>
         </div>
