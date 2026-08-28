@@ -176,6 +176,25 @@ describe("Daytona sandbox cleanup", () => {
     expect(harness.dispose).toHaveBeenCalledOnce();
   });
 
+  it("keeps a thread sandbox after it pauses", async () => {
+    const harness = cleanupHarness();
+    const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
+    harness.get.mockResolvedValue({
+      id: "sandbox-1",
+      setAutoDeleteInterval,
+    });
+
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      -1,
+      harness.dependencies,
+    );
+
+    expect(setAutoDeleteInterval).toHaveBeenCalledWith(-1);
+  });
+
   it("retries transient lifecycle failures", async () => {
     const harness = cleanupHarness();
     const gatewayError = Object.assign(new Error("bad gateway"), {

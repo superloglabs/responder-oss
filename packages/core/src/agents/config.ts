@@ -118,7 +118,20 @@ export const agentConfigurationSchema = z
     }
   });
 
+export const slackThreadModeConfigurationSchema = z.object({
+  enabled: z.boolean().default(false),
+  model: z.string().trim().min(1, "Model is required").max(160),
+  instructions: z.string().trim().min(1, "Instructions are required").max(20_000),
+  repositoryIds: z.array(z.uuid()).max(100).default([]),
+  contextAccountIds: z.array(z.uuid()).max(20).default([]),
+  contextResourceIds: z.array(z.uuid()).max(100).default([]),
+  secretIds: z.array(z.uuid()).max(20).default([]),
+});
+
 export type AgentConfigurationInput = z.input<typeof agentConfigurationSchema>;
 export type AgentConfiguration = z.output<typeof agentConfigurationSchema>;
 export type AgentTrigger = AgentConfiguration["trigger"];
 export type AgentReporting = AgentConfiguration["reporting"];
+export type SlackThreadModeConfiguration = z.output<
+  typeof slackThreadModeConfigurationSchema
+>;

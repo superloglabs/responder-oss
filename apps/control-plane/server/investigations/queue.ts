@@ -7,6 +7,7 @@ import { notifyBillingLimitReached } from "../../../../packages/core/src/billing
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import {
   beginInvestigation,
+  beginSlackThreadInvestigation,
   discardPendingInvestigation,
   failInvestigation,
   prepareInvestigationRetry,
@@ -21,6 +22,7 @@ import {
   createJobBoss,
   investigationQueue,
   prepareWorkerQueues,
+  slackThreadInvestigationQueue,
 } from "../../../../packages/core/src/jobs.js";
 
 type QueueResult =
@@ -123,6 +125,86 @@ export async function queueInvestigation(
       { singletonKey: result.investigationId },
     );
     if (!jobId) throw new Error("The investigation job was not created");
+    return { investigationId: result.investigationId, jobId, kind: "queued" };
+  } catch (error) {
+    await failInvestigation(
+      result.investigationId,
+      error instanceof Error ? error.message : "Unable to queue investigation",
+    );
+    throw new Error("Investigation worker is unavailable", { cause: error });
+  }
+}
+
+export async function queueSlackThreadInvestigation(
+  request: InvestigationRequest,
+  thread: { teamId: string; channelId: string; threadTimestamp: string },
+): Promise<QueueResult> {
+  const input = toInvestigationInput(request);
+  const result = await beginSlackThreadInvestigation({
+    agentId: request.agentId,
+    investigationInput: input,
+    ...thread,
+  });
+  if (!result.created) {
+    return { investigationId: result.investigationId, kind: "duplicate" };
+  }
+
+  try {
+    const access = await consumeInvestigation(
+      result.config.organizationId,
+      result.investigationId,
+    );
+    if (!access.allowed) {
+      await discardPendingInvestigation(result.investigationId);
+      await notifyBillingLimitReached(
+        result.config.organizationId,
+        access.nextResetAt,
+      ).catch(() => undefined);
+      return { kind: "blocked" };
+    }
+  } catch (error) {
+    await discardPendingInvestigation(result.investigationId);
+    throw new Error("Billing service unavailable", { cause: error });
+  }
+
+  await captureAnalyticsEvent({
+    distinctId: `investigation:${result.investigationId}`,
+    event: "investigation created",
+    organizationId: result.config.organizationId,
+    properties: {
+      $process_person_profile: false,
+      agent_config_version_id: result.config.id,
+      agent_id: result.config.agentId,
+      investigation_id: result.investigationId,
+      is_replay: false,
+      provider: "slack",
+      slack_thread_mode: true,
+    },
+  });
+
+  try {
+    const jobId = await (await getBoss()).send(
+      slackThreadInvestigationQueue,
+      {
+        kind: "slack_thread_investigation",
+        config: {
+          agentId: result.config.agentId,
+          id: result.config.id,
+          model: result.config.model,
+          organizationId: result.config.organizationId,
+          prMode: "disabled",
+          prompt: result.config.prompt,
+        },
+        investigationId: result.investigationId,
+        queuedAt: new Date().toISOString(),
+        refreshWorkspace: result.configurationChanged,
+        request,
+        runtimeProfileId: result.runtimeProfileId,
+        slackInvestigationSessionId: result.slackInvestigationSessionId,
+      },
+      { singletonKey: result.slackInvestigationSessionId },
+    );
+    if (!jobId) throw new Error("The Slack investigation turn was not created");
     return { investigationId: result.investigationId, jobId, kind: "queued" };
   } catch (error) {
     await failInvestigation(

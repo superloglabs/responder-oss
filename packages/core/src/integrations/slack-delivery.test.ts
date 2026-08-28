@@ -14,13 +14,14 @@ describe("Slack issue delivery", () => {
     const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackCompletedInvestigationCard({
       agentId: "13131313-1313-4313-8313-131313131313",
+      executionMode: "standard",
       investigationId,
       title: "Plant API error rate is elevated",
       traceItems: [],
     });
 
     expect(message.blocks).toEqual([
-      expect.objectContaining({ type: "plan", title: "Investigation trace" }),
+      expect.objectContaining({ type: "plan", title: "Trace" }),
     ]);
   });
 

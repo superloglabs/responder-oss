@@ -1,5 +1,8 @@
 import { and, desc, eq, exists, inArray } from "drizzle-orm";
-import type { AgentConfiguration } from "../agents/config.js";
+import type {
+  AgentConfiguration,
+  SlackThreadModeConfiguration,
+} from "../agents/config.js";
 import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { getDatabase } from "./client.js";
 import {
@@ -43,7 +46,7 @@ export async function findAgentsForSlackEvent(input: {
     agentId: string;
     integrationAccountId: string;
     organizationId: string;
-    trigger: "slack_channel" | "slack_mention";
+    trigger: "slack_channel" | "slack_mention" | "slack_thread";
   }>
 > {
   const rows = await getDatabase()
@@ -54,6 +57,7 @@ export async function findAgentsForSlackEvent(input: {
       accountMetadata: integrationAccounts.metadata,
       trigger: agentConfigVersions.trigger,
       triggerConfig: agentConfigVersions.triggerConfig,
+      purpose: agents.purpose,
     })
     .from(agents)
     .innerJoin(
@@ -71,6 +75,10 @@ export async function findAgentsForSlackEvent(input: {
     )
     .where(eq(agents.enabled, true));
 
+  const useSlackThreadMode =
+    input.eventType === "app_mention" &&
+    rows.some((row) => row.purpose === "slack_thread");
+
   return rows
     .filter((row) => {
       if (
@@ -81,9 +89,11 @@ export async function findAgentsForSlackEvent(input: {
       ) {
         return false;
       }
-      if (row.triggerConfig.integrationAccountId !== row.integrationAccountId) {
-        return false;
+      if (row.purpose === "slack_thread") {
+        return input.eventType === "app_mention";
       }
+      if (useSlackThreadMode) return false;
+      if (row.triggerConfig.integrationAccountId !== row.integrationAccountId) return false;
       if (row.trigger === "slack_channel" && input.eventType === "message") {
         return (
           "channelId" in row.triggerConfig &&
@@ -103,7 +113,9 @@ export async function findAgentsForSlackEvent(input: {
       agentId: row.agentId,
       integrationAccountId: row.integrationAccountId,
       organizationId: row.organizationId,
-      trigger: row.trigger as "slack_channel" | "slack_mention",
+      trigger: row.purpose === "slack_thread"
+        ? "slack_thread" as const
+        : row.trigger as "slack_channel" | "slack_mention",
     }));
 }
 
@@ -486,6 +498,7 @@ export async function createAgent(input: {
   organizationId: string;
   userId: string;
   configuration: AgentConfiguration;
+  purpose?: "standard" | "slack_thread";
 }): Promise<string> {
   await validateConfigurationResources(input.organizationId, input.configuration);
   const db = getDatabase();
@@ -498,6 +511,7 @@ export async function createAgent(input: {
         name: input.configuration.name,
         description: input.configuration.description,
         enabled: input.configuration.enabled,
+        purpose: input.purpose ?? "standard",
       })
       .returning({ id: agents.id });
     const agent = insertedAgents[0];
@@ -558,6 +572,7 @@ export async function updateAgent(input: {
   organizationId: string;
   userId: string;
   configuration: AgentConfiguration;
+  purpose?: "standard" | "slack_thread";
 }): Promise<void> {
   await validateConfigurationResources(input.organizationId, input.configuration);
   const db = getDatabase();
@@ -570,6 +585,7 @@ export async function updateAgent(input: {
         and(
           eq(agents.id, input.agentId),
           eq(agents.organizationId, input.organizationId),
+          eq(agents.purpose, input.purpose ?? "standard"),
         ),
       )
       .limit(1)
@@ -796,7 +812,12 @@ export async function listAgents(organizationId: string) {
       agentConfigVersions,
       eq(agentConfigVersions.id, agents.activeVersionId),
     )
-    .where(eq(agents.organizationId, organizationId))
+    .where(
+      and(
+        eq(agents.organizationId, organizationId),
+        eq(agents.purpose, "standard"),
+      ),
+    )
     .orderBy(desc(agents.updatedAt));
 
   const agentIds = rows.map((agent) => agent.id);
@@ -879,7 +900,11 @@ export async function getAgent(
       eq(agentConfigVersions.id, agents.activeVersionId),
     )
     .where(
-      and(eq(agents.id, agentId), eq(agents.organizationId, organizationId)),
+      and(
+        eq(agents.id, agentId),
+        eq(agents.organizationId, organizationId),
+        eq(agents.purpose, "standard"),
+      ),
     )
     .limit(1);
   const agent = rows[0];
@@ -979,4 +1004,135 @@ export async function getAgent(
       }),
     ),
   };
+}
+
+export async function getSlackThreadModeConfiguration(
+  organizationId: string,
+): Promise<SlackThreadModeConfiguration | null> {
+  const db = getDatabase();
+  const rows = await db
+    .select({
+      enabled: agents.enabled,
+      versionId: agentConfigVersions.id,
+      model: agentConfigVersions.model,
+      instructions: agentConfigVersions.prompt,
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      contextResourceIds: agentConfigVersions.contextResourceIds,
+    })
+    .from(agents)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, agents.activeVersionId),
+    )
+    .where(
+      and(
+        eq(agents.organizationId, organizationId),
+        eq(agents.purpose, "slack_thread"),
+      ),
+    )
+    .limit(1);
+  const configuration = rows[0];
+  if (!configuration) return null;
+
+  const [repositoryRows, secretRows] = await Promise.all([
+    db
+      .select({ id: agentVersionRepositories.repositoryId })
+      .from(agentVersionRepositories)
+      .where(
+        eq(
+          agentVersionRepositories.agentConfigVersionId,
+          configuration.versionId,
+        ),
+      ),
+    db
+      .select({ id: agentVersionSecrets.workspaceSecretId })
+      .from(agentVersionSecrets)
+      .where(
+        eq(agentVersionSecrets.agentConfigVersionId, configuration.versionId),
+      ),
+  ]);
+
+  return {
+    enabled: configuration.enabled,
+    model: configuration.model,
+    instructions: configuration.instructions,
+    repositoryIds: repositoryRows.map((row) => row.id),
+    contextAccountIds: configuration.contextAccountIds,
+    contextResourceIds: configuration.contextResourceIds,
+    secretIds: secretRows.map((row) => row.id),
+  };
+}
+
+export async function saveSlackThreadModeConfiguration(input: {
+  organizationId: string;
+  userId: string;
+  configuration: SlackThreadModeConfiguration;
+}): Promise<void> {
+  const db = getDatabase();
+  const slackAccounts = await db
+    .select({ id: integrationAccounts.id })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .limit(1);
+  const slackAccount = slackAccounts[0];
+  if (!slackAccount) {
+    throw new AgentConfigurationError(
+      "Connect Slack before enabling tag mode",
+      "integration_not_found",
+    );
+  }
+
+  const configuration: AgentConfiguration = {
+    name: "Responder tag mode",
+    description: "Runs ad-hoc investigations from Slack mentions.",
+    model: input.configuration.model,
+    instructions: input.configuration.instructions,
+    enabled: input.configuration.enabled,
+    prMode: "disabled",
+    repositoryIds: input.configuration.repositoryIds,
+    contextAccountIds: input.configuration.contextAccountIds,
+    contextResourceIds: input.configuration.contextResourceIds,
+    secretIds: input.configuration.secretIds,
+    createLinearTickets: false,
+    linearIssueTemplate: "",
+    trigger: {
+      kind: "slack_mention",
+      integrationAccountId: slackAccount.id,
+      channelIds: [],
+    },
+    reporting: { mode: "thread" },
+  };
+  const existing = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.organizationId, input.organizationId),
+        eq(agents.purpose, "slack_thread"),
+      ),
+    )
+    .limit(1);
+
+  if (existing[0]) {
+    await updateAgent({
+      agentId: existing[0].id,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      configuration,
+      purpose: "slack_thread",
+    });
+    return;
+  }
+  await createAgent({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    configuration,
+    purpose: "slack_thread",
+  });
 }

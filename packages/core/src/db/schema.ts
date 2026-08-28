@@ -72,6 +72,8 @@ export const issueRelationship = pgEnum("issue_relationship", [
 ]);
 
 export type RuntimeProfileModelOptions = Record<string, unknown>;
+export type AgentPurpose = "standard" | "slack_thread";
+export type InvestigationExecutionMode = "standard" | "slack_thread";
 
 export const runtimeProfiles = pgTable(
   "runtime_profiles",
@@ -109,12 +111,21 @@ export const agents = pgTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
+    purpose: text("purpose")
+      .$type<AgentPurpose>()
+      .notNull()
+      .default("standard"),
     activeVersionId: uuid("active_version_id"),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("agents_organization_idx").on(table.organizationId)],
+  (table) => [
+    index("agents_organization_idx").on(table.organizationId),
+    uniqueIndex("agents_organization_slack_thread_idx")
+      .on(table.organizationId)
+      .where(sql`${table.purpose} = 'slack_thread'`),
+  ],
 );
 
 export type AgentTriggerConfig =
@@ -422,6 +433,43 @@ export interface InvestigationSlackThreadSnapshot {
   version: 1;
 }
 
+export const slackInvestigationSessions = pgTable(
+  "slack_investigation_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    agentConfigVersionId: uuid("agent_config_version_id")
+      .notNull()
+      .references(() => agentConfigVersions.id, { onDelete: "restrict" }),
+    runtimeProfileId: uuid("runtime_profile_id")
+      .notNull()
+      .references(() => runtimeProfiles.id, { onDelete: "restrict" }),
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTimestamp: text("thread_timestamp").notNull(),
+    sandboxSessionState: jsonb("sandbox_session_state").$type<
+      Record<string, unknown>
+    >(),
+    previousResponseId: text("previous_response_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_investigation_sessions_thread_idx").on(
+      table.organizationId,
+      table.agentId,
+      table.teamId,
+      table.channelId,
+      table.threadTimestamp,
+    ),
+  ],
+);
+
 export const investigations = pgTable(
   "investigations",
   {
@@ -439,6 +487,12 @@ export const investigations = pgTable(
       () => runtimeProfiles.id,
       { onDelete: "restrict" },
     ),
+    executionMode: text("execution_mode")
+      .$type<InvestigationExecutionMode>()
+      .notNull()
+      .default("standard"),
+    slackInvestigationSessionId: uuid("slack_investigation_session_id")
+      .references(() => slackInvestigationSessions.id, { onDelete: "set null" }),
     status: investigationStatus("status").notNull().default("pending"),
     title: text("title").notNull(),
     input: jsonb("input").$type<InvestigationInput>().notNull(),

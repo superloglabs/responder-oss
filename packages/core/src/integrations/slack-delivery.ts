@@ -5,6 +5,7 @@ import { responderIssueUrl } from "../responder-urls.js";
 import {
   getIssueForSlackBackfill,
   getSlackInvestigationDeliveryContext,
+  getSlackInvestigationLiveContext,
   type SlackInvestigationDeliveryContext,
 } from "../db/issues.js";
 import {
@@ -17,6 +18,7 @@ import {
   postSlackMessage,
   removeSlackReaction,
   setSlackThreadStatus,
+  stopSlackResponseStream,
   updateSlackMessage,
 } from "./slack.js";
 import {
@@ -314,17 +316,127 @@ export async function redeliverInvestigationSlackIssue(
 export function slackCompletedInvestigationCard(
   context: Pick<
     SlackInvestigationDeliveryContext,
-    "agentId" | "investigationId" | "title" | "traceItems"
+    "agentId" | "executionMode" | "investigationId" | "title" | "traceItems"
   >,
 ) {
   return slackInvestigationCard({
     agentId: context.agentId,
     detail: "Completed the investigation plan.",
     investigationId: context.investigationId,
+    showInvestigationLink: context.executionMode !== "slack_thread",
     status: "complete",
     title: context.title,
     traceItems: context.traceItems ?? [],
   });
+}
+
+export async function deliverSlackThreadInvestigationResponse(input: {
+  deliveryRunId: string;
+  investigationId: string;
+  response: string;
+}): Promise<void> {
+  const context = await getSlackInvestigationLiveContext(input.investigationId);
+  if (!context) {
+    throw new Error("Slack thread context is unavailable");
+  }
+  const token = accessToken(context.source.encryptedCredentials);
+  const markdown = input.response.slice(0, 11_900);
+  const message = {
+    text: markdown,
+    blocks: [{ type: "markdown", text: markdown }],
+  };
+  const messageTimestamp = context.source.responseMessageTimestamp
+    ? context.source.responseMessageTimestamp
+    : await postSlackMessage({
+        accessToken: token,
+        blocks: message.blocks,
+        channelId: context.source.channelId,
+        clientMessageId: slackDeliveryClientMessageId(
+          input.deliveryRunId,
+          `thread-response:${input.investigationId}`,
+        ),
+        text: message.text,
+        threadTimestamp: context.source.threadTimestamp,
+      });
+  if (!messageTimestamp) {
+    throw new Error("Slack did not return a response message timestamp");
+  }
+  if (context.source.responseMessageTimestamp) {
+    await stopSlackResponseStream({
+      accessToken: token,
+      channelId: context.source.channelId,
+      markdownText: markdown,
+      timestamp: context.source.responseMessageTimestamp,
+    });
+  }
+  await recordInvestigationSlackReply(input.investigationId, {
+    attachments: [],
+    authorName: "Responder",
+    blocks: message.blocks,
+    key: "thread-response",
+    slackTimestamp: messageTimestamp,
+    text: message.text,
+  });
+
+  const card = slackInvestigationCard({
+    agentId: context.agentId,
+    detail: "Completed the investigation plan.",
+    investigationId: context.investigationId,
+    showInvestigationLink: false,
+    status: "complete",
+    title: context.title,
+    traceItems: context.traceItems,
+  });
+  const results = await Promise.allSettled([
+    context.source.messageTimestamp
+      ? updateSlackMessage({
+          accessToken: token,
+          blocks: card.blocks,
+          channelId: context.source.channelId,
+          text: card.text,
+          timestamp: context.source.messageTimestamp,
+        })
+      : Promise.resolve(),
+  ]);
+  if (context.source.messageTimestamp && results[0]?.status === "fulfilled") {
+    await recordInvestigationSlackReply(input.investigationId, {
+      attachments: [],
+      authorName: "Responder",
+      blocks: card.blocks,
+      key: "investigation-status",
+      slackTimestamp: context.source.messageTimestamp,
+      text: card.text,
+    });
+  }
+  const failures = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  if (failures.length === 0 && context.source.reactionTimestamp) {
+    try {
+      await removeSlackReaction({
+        accessToken: token,
+        channelId: context.source.channelId,
+        name: "eyes",
+        timestamp: context.source.reactionTimestamp,
+      });
+      await setInvestigationSlackReaction(input.investigationId, "eyes", false);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  try {
+    await setSlackThreadStatus({
+      accessToken: token,
+      channelId: context.source.channelId,
+      status: "",
+      threadTimestamp: context.source.threadTimestamp,
+    });
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Slack thread response cleanup failed");
+  }
 }
 
 export function slackDeliveryErrorMessage(error: unknown): string {
@@ -343,7 +455,9 @@ export function slackDeliveryErrorMessage(error: unknown): string {
 export async function reconcileCompletedInvestigationSlackCard(
   investigationId: string,
 ): Promise<boolean> {
-  const context = await getSlackInvestigationDeliveryContext(investigationId);
+  const context =
+    await getSlackInvestigationDeliveryContext(investigationId) ??
+    await getSlackInvestigationLiveContext(investigationId);
   if (!context?.source?.messageTimestamp) return false;
   const token = accessToken(context.source.encryptedCredentials);
   const card = slackCompletedInvestigationCard(context);
@@ -355,12 +469,14 @@ export async function reconcileCompletedInvestigationSlackCard(
       text: card.text,
       timestamp: context.source.messageTimestamp,
     }),
-    removeSlackReaction({
-      accessToken: token,
-      channelId: context.source.channelId,
-      name: "eyes",
-      timestamp: context.source.reactionTimestamp,
-    }),
+    context.source.reactionTimestamp
+      ? removeSlackReaction({
+          accessToken: token,
+          channelId: context.source.channelId,
+          name: "eyes",
+          timestamp: context.source.reactionTimestamp,
+        })
+      : Promise.resolve(),
     setSlackThreadStatus({
       accessToken: token,
       channelId: context.source.channelId,
@@ -385,7 +501,7 @@ export async function reconcileCompletedInvestigationSlackCard(
       failures.push(error);
     }
   }
-  if (results[1]?.status === "fulfilled") {
+  if (context.source.reactionTimestamp && results[1]?.status === "fulfilled") {
     try {
       await setInvestigationSlackReaction(investigationId, "eyes", false);
     } catch (error) {

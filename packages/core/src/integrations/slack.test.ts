@@ -5,6 +5,7 @@ import {
   postSlackMessage,
   removeSlackReaction,
   setSlackThreadStatus,
+  stopSlackResponseStream,
   updateSlackMessage,
 } from "./slack.js";
 
@@ -60,6 +61,29 @@ describe("Slack delivery client", () => {
           client_msg_id: "16161616-1616-4616-8616-161616161616",
           text: "I’m investigating this alert.",
           thread_ts: "1785500000.000100",
+        }),
+      }),
+    );
+  });
+
+  it("completes a native Slack response stream", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await stopSlackResponseStream({
+      accessToken: "xoxb-test",
+      channelId: "C123",
+      markdownText: "The investigation is complete.",
+      timestamp: "1785500002.000300",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.stopStream",
+      expect.objectContaining({
+        body: JSON.stringify({
+          channel: "C123",
+          markdown_text: "The investigation is complete.",
+          ts: "1785500002.000300",
         }),
       }),
     );

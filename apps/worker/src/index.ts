@@ -12,14 +12,18 @@ import {
   type LinearTicketJob,
   type RemediationJob,
   responderJobSchema,
+  slackThreadInvestigationJobSchema,
+  slackThreadInvestigationQueue,
   workerHealthJobSchema,
   workerHealthQueue,
 } from "@responder/core/jobs";
 import {
   appendInvestigationTraceEvent,
+  completeSlackThreadInvestigationTurn,
   failInvestigation,
   failInvestigationReplayRequest,
   markInvestigationStarted,
+  getInvestigationReportMarkdown,
 } from "@responder/core/db/investigations";
 import {
   failPendingInvestigationPullRequests,
@@ -41,6 +45,7 @@ import {
   slackProgressFromTrace,
   type SlackInvestigationTraceItem,
 } from "@responder/core/integrations/slack-live-progress";
+import { deliverSlackThreadInvestigationResponse } from "@responder/core/integrations/slack-delivery";
 import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
@@ -331,6 +336,89 @@ await boss.work(pullRequestReviewQueue, { localConcurrency: 1 }, async ([job]) =
   const payload = pullRequestReviewJobSchema.parse(job.data);
   return processPullRequestReviewJob(job.id, payload, process.env);
 });
+await boss.work(
+  slackThreadInvestigationQueue,
+  { localConcurrency: 1 },
+  async ([job]) => {
+    const payload = slackThreadInvestigationJobSchema.parse(job.data);
+    const investigationState = await markInvestigationStarted(
+      payload.investigationId,
+      `openai-daytona:${job.id}`,
+    );
+    if (investigationState === "completed") {
+      const response = await getInvestigationReportMarkdown(
+        payload.investigationId,
+      );
+      if (response) {
+        await deliverSlackThreadInvestigationResponse({
+          deliveryRunId: job.id,
+          investigationId: payload.investigationId,
+          response,
+        });
+      }
+      return { investigationId: payload.investigationId };
+    }
+
+    let lastSlackProgressAt = 0;
+    let slackTraceItems: SlackInvestigationTraceItem[] = [];
+    try {
+      const result = await runInvestigationAgent(
+        payload,
+        process.env,
+        async (event) => {
+          await appendInvestigationTraceEvent(payload.investigationId, event);
+          const progress = slackProgressFromTrace(event);
+          if (!progress) return;
+          slackTraceItems = applySlackTraceUpdate(slackTraceItems, progress);
+          const now = Date.now();
+          if (!progress.finalizing && now - lastSlackProgressAt < 3_000) return;
+          lastSlackProgressAt = now;
+          await updateInvestigationSlackProgress(
+            payload.investigationId,
+            progress.detail,
+            slackTraceItems,
+          ).catch(() => undefined);
+        },
+        { jobId: job.id },
+      );
+      if (!result.sandboxSessionState) {
+        throw new Error("Slack investigation sandbox state was not returned");
+      }
+      await completeSlackThreadInvestigationTurn({
+        investigationId: payload.investigationId,
+        sessionId: payload.slackInvestigationSessionId,
+        reportMarkdown: result.report,
+        sandboxSessionState: result.sandboxSessionState,
+        previousResponseId: result.previousResponseId,
+      });
+      await deliverSlackThreadInvestigationResponse({
+        deliveryRunId: job.id,
+        investigationId: payload.investigationId,
+        response: result.report,
+      });
+      return { investigationId: payload.investigationId };
+    } catch (error) {
+      const message = safeInvestigationError(error);
+      await reportWorkerException(error, {
+        investigationId: payload.investigationId,
+        jobId: job.id,
+        operation: "investigation",
+        organizationId: payload.config.organizationId,
+      });
+      const investigationFailed = await failInvestigation(
+        payload.investigationId,
+        message,
+      );
+      if (investigationFailed) {
+        await failInvestigationSlackCard(
+          payload.investigationId,
+          slackTraceItems.length > 0 ? slackTraceItems : undefined,
+        ).catch(() => undefined);
+      }
+      throw new Error(message, { cause: error });
+    }
+  },
+);
 // Only investigation consumption waits for the one-time legacy handoff. The
 // other queues above remain available, with shutdown handling already active.
 await migrateLegacyInvestigationHeartbeats(boss, {
@@ -383,7 +471,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
 
   try {
-    const report = await runInvestigationAgent(
+    const result = await runInvestigationAgent(
       payload,
       process.env,
       async (event) => {
@@ -491,7 +579,7 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
       deliveryRunId: job.id,
       investigationId: payload.investigationId,
       replay: payload.replay,
-      report,
+      report: result.report,
     });
     await reportIncompleteSlackDelivery({
       deliveryWarnings,

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { agentConfigurationSchema } from "./config.js";
+import {
+  agentConfigurationSchema,
+  slackThreadModeConfigurationSchema,
+} from "./config.js";
 
 const baseConfiguration = {
   name: "Checkout guardian",
@@ -19,6 +22,27 @@ const baseConfiguration = {
 };
 
 describe("agent configuration", () => {
+  it("keeps tag mode configuration to prompt and context capabilities", () => {
+    const parsed = slackThreadModeConfigurationSchema.parse({
+      enabled: true,
+      model: "instance/default",
+      instructions: "Investigate the request.",
+      repositoryIds: ["14141414-1414-4414-8414-141414141414"],
+    });
+
+    expect(parsed).toEqual({
+      enabled: true,
+      model: "instance/default",
+      instructions: "Investigate the request.",
+      repositoryIds: ["14141414-1414-4414-8414-141414141414"],
+      contextAccountIds: [],
+      contextResourceIds: [],
+      secretIds: [],
+    });
+    expect(parsed).not.toHaveProperty("prMode");
+    expect(parsed).not.toHaveProperty("createLinearTickets");
+  });
+
   it("accepts a Slack mention agent that reports in the source thread", () => {
     const parsed = agentConfigurationSchema.safeParse(baseConfiguration);
 
