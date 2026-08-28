@@ -2631,7 +2631,21 @@ button:disabled {
   color: var(--ds-text-muted);
 }
 
+.agentTableActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.agentTableSettings {
+  display: flex;
+  align-items: center;
+  color: var(--ds-text-muted);
+}
+
 .agentTableTitle:focus-visible,
+.agentTableSettings:focus-visible,
 .agentTableArrow:focus-visible {
   border-radius: 4px;
   outline: 2px solid var(--ds-text-primary);
@@ -2639,6 +2653,7 @@ button:disabled {
 }
 
 .agentTableTitle:hover strong,
+.agentTableSettings:hover,
 .agentTableArrow:hover {
   color: var(--ds-text-primary);
 }
@@ -5796,6 +5811,84 @@ button:disabled {
   grid-template-columns: 230px minmax(0, 1fr);
   align-items: start;
   gap: 56px;
+}
+
+.agentEditLayout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  align-items: start;
+  gap: 56px;
+}
+
+.agentEditNav {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agentEditNavItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ds-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.agentEditNavItem:hover {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+
+.agentEditNavItem:focus-visible {
+  outline: 2px solid var(--ds-text-primary);
+  outline-offset: 2px;
+}
+
+.agentEditNavItem.isCurrent {
+  border-left-color: var(--ds-text-primary);
+  background: var(--ds-surface-raised);
+  color: var(--ds-text-primary);
+}
+
+.agentEditNavItem__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agentEditNavItem__copy strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.agentEditNavItem__copy small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.agentEditNavItem__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ds-danger);
 }
 
 .createStepperRail {
