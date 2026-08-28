@@ -153,6 +153,9 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain(
       "Do not include actions performed by Responder during the investigation in an issue timeline",
     );
+    expect(instructions).toContain(
+      "Keep each remediation description to at most one sentence.",
+    );
   });
 
   it("keeps ClickStack investigation access read-only", () => {

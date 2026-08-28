@@ -24,10 +24,8 @@ describe("Slack issue delivery", () => {
     ]);
   });
 
-  it("adds feedback controls without a remove action to the final summary", () => {
-    const investigationId = "16161616-1616-4616-8616-161616161616";
+  it("keeps feedback controls off the final summary", () => {
     const message = slackInvestigationSummaryMessage({
-      investigationId,
       issueCount: 0,
       summary: "The alert was transient.",
     });
@@ -35,26 +33,10 @@ describe("Slack issue delivery", () => {
     expect(message.text).toBe(
       "✅ *No issues identified.* The alert was transient.",
     );
-    expect(message.blocks).toEqual([
-      {
-        type: "section",
-        text: { type: "mrkdwn", text: message.text },
-      },
-      expect.objectContaining({
-        type: "context_actions",
-        block_id: expect.stringMatching(
-          new RegExp(`^investigation_feedback_${investigationId}_`),
-        ),
-        elements: [
-          expect.objectContaining({
-            type: "feedback_buttons",
-            action_id: "feedback",
-            positive_button: expect.objectContaining({ value: "positive" }),
-            negative_button: expect.objectContaining({ value: "negative" }),
-          }),
-        ],
-      }),
-    ]);
+    expect(message.blocks).toEqual([{
+      type: "section",
+      text: { type: "mrkdwn", text: message.text },
+    }]);
   });
 
   it("uses stable, destination-specific message IDs for retry deduplication", () => {
@@ -251,7 +233,8 @@ describe("Slack issue delivery", () => {
     expect(postMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("shows root cause and an ordered timeline in the issue message", () => {
+  it("hides root cause and timeline and adds feedback to the issue message", () => {
+    const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackIssueMessage({
       id: "07070707-0707-4707-8707-070707070707",
       title: "Organization provisioning race",
@@ -277,18 +260,24 @@ describe("Slack issue delivery", () => {
       pullRequest: null,
       relationship: "new",
       evidence: [],
-    });
+    }, investigationId);
 
-    expect(message.text).toContain("Root cause: An authentication change");
-    expect(message.text).toContain("3. Request failed — The API could not resolve");
+    expect(message.text).not.toContain("Root cause");
+    expect(message.text).not.toContain("Timeline");
     expect(message.blocks).toEqual([
       expect.objectContaining({
         type: "section",
         text: expect.objectContaining({
-          text: expect.stringContaining("*Timeline*\n1. *User logged in*"),
+          text: expect.not.stringContaining("*Root cause*"),
         }),
       }),
       expect.objectContaining({ type: "actions" }),
+      expect.objectContaining({
+        type: "context_actions",
+        block_id: expect.stringMatching(
+          new RegExp(`^investigation_feedback_${investigationId}_`),
+        ),
+      }),
     ]);
   });
 
@@ -324,7 +313,7 @@ describe("Slack issue delivery", () => {
       pullRequest: null,
       relationship: "new",
       evidence: [],
-    }, true);
+    }, "16161616-1616-4616-8616-161616161616", true);
 
     expect(message.blocks).toEqual(
       expect.arrayContaining([

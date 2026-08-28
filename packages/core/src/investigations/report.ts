@@ -67,12 +67,10 @@ const remediationTitleSchema = z
   .max(200)
   .describe("Short action-oriented remediation title.");
 
-const remediationDescriptionSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(4_000)
-  .describe("Human-readable explanation of the proposed remediation.");
+const remediationDescriptionSchema = oneSentenceSchema(
+  4_000,
+  "One-sentence human-readable explanation of the proposed remediation.",
+);
 
 export const issueRemediationSubmissionSchema = z.discriminatedUnion("type", [
   z.object({
