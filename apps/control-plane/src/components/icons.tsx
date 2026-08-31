@@ -310,6 +310,23 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
+export function EllipsisIcon(props: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="16"
+      viewBox="0 0 16 16"
+      width="16"
+      {...props}
+    >
+      <circle cx="3.5" cy="8" fill="currentColor" r="1.1" />
+      <circle cx="8" cy="8" fill="currentColor" r="1.1" />
+      <circle cx="12.5" cy="8" fill="currentColor" r="1.1" />
+    </svg>
+  );
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <svg

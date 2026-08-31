@@ -1182,6 +1182,10 @@
   background: var(--ds-surface-hover);
 }
 
+.dsDataTable__row--interactive {
+  cursor: pointer;
+}
+
 .dsDataTable__cell--left {
   text-align: left;
 }
