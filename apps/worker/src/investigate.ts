@@ -1,5 +1,5 @@
 import { run, setDefaultOpenAIKey, setTracingDisabled } from "@openai/agents";
-import { Capabilities, SandboxAgent } from "@openai/agents/sandbox";
+import { Capabilities, SandboxAgent, skills } from "@openai/agents/sandbox";
 import {
   DaytonaSandboxClient,
   type DaytonaSandboxSession,
@@ -53,6 +53,10 @@ import {
   refreshRuntimeRepositories,
   type CheckedOutRepository,
 } from "./repositories.js";
+import {
+  discoverRepositoryInstructions,
+  loadRepositorySkills,
+} from "./repository-skills.js";
 import { createRepositoryInspectionTools } from "./repository-inspection.js";
 import {
   createCaptureInvestigationReplayReportTool,
@@ -269,6 +273,7 @@ export function investigationInstructions(input: {
   datadogConnected: boolean;
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
+  repositoryInstructions?: string[];
   runtimeSystemPrompt?: string | null;
   sentryConnected: boolean;
   sentryUnavailable?: boolean;
@@ -289,6 +294,7 @@ export function investigationInstructions(input: {
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
   const vercelAccountIds = input.vercelAccountIds ?? [];
+  const repositoryInstructions = input.repositoryInstructions ?? [];
   const observabilityConnected =
     input.datadogConnected ||
     input.axiomConnected ||
@@ -361,6 +367,12 @@ export function investigationInstructions(input: {
           "Inspect the relevant files before claiming a code-level root cause.",
         ].join("\n")
       : "No repositories are attached to this Agent version. Clearly distinguish code-level hypotheses from verified root causes.",
+    repositoryInstructions.length > 0
+      ? [
+          "Read the repository instruction file(s) that apply to the files you inspect:",
+          ...repositoryInstructions.map((path) => `- ${path}`),
+        ].join("\n")
+      : null,
     input.threadMode
       ? "Use the sandbox tools and attached code to investigate the request."
       : "Use the read-only repository inspection tools to list, search, and read attached repository files.",
@@ -628,6 +640,11 @@ export async function runInvestigationAgent(
         ? await refreshRuntimeRepositories(session, job.config.id)
         : await loadCheckedOutRepositories(session)
       : await checkoutRuntimeRepositories(session, job.config.id);
+    const repositorySkills = await loadRepositorySkills(session, repositories);
+    const repositoryInstructions = await discoverRepositoryInstructions(
+      session,
+      repositories,
+    );
     if (threadMode && !sessionReady) {
       await session.materializeEntry({
         entry: { type: "file", content: "ready\n" },
@@ -680,6 +697,7 @@ export async function runInvestigationAgent(
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,
       ),
+      repositoryInstructions,
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,
       workspaceSecrets,
@@ -692,7 +710,10 @@ export async function runInvestigationAgent(
       name: "Responder investigator",
       model: config.model,
       instructions,
-      capabilities: investigationCapabilities(replay),
+      capabilities: [
+        ...investigationCapabilities(replay),
+        ...(repositorySkills ? [skills({ from: repositorySkills })] : []),
+      ],
       // MCP servers are tenant-configurable and may expose the same generic
       // tool names (for example, `search` or `execute`). Prefix each tool
       // with its server name so one connection cannot prevent an entire
