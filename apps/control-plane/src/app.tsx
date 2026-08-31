@@ -16,6 +16,7 @@ import {
   HomePage,
   PrivacyPage,
   PricingPage,
+  ProductUpdateArticlePage,
   TeamPage,
   TermsPage,
 } from "./edition-pages";
@@ -55,6 +56,7 @@ export function App() {
         element={<BlogArticlePage />}
         path={blogArticlePath}
       />
+      <Route element={<ProductUpdateArticlePage />} path="/blog/quieter-incidents-slack-and-connectors" />
       {import.meta.env.DEV ? (
         <>
           <Route element={<DesignLibraryPage />} path="/_design" />

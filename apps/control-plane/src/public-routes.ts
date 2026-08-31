@@ -11,6 +11,10 @@ export const publicDocumentRoutes = [
     output: "blog/kill-alert-fatigue-automating-on-call-with-ai/index.html",
     pathname: blogArticlePath,
   },
+  {
+    output: "blog/quieter-incidents-slack-and-connectors/index.html",
+    pathname: "/blog/quieter-incidents-slack-and-connectors",
+  },
 ] as const;
 
 export const publicDocumentPathnames = publicDocumentRoutes.map(
