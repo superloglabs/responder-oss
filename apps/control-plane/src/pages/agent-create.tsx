@@ -488,8 +488,11 @@ export function AgentCreatePage() {
     : initialStep;
   const [activeStep, setActiveStep] =
     useState<CreateStep>(normalizedInitialStep);
-  const [furthestStep, setFurthestStep] =
-    useState<CreateStep>(normalizedInitialStep);
+  // Editing an existing agent unlocks every section immediately; only the
+  // create flow walks steps sequentially.
+  const [furthestStep, setFurthestStep] = useState<CreateStep>(
+    isEditing ? 4 : normalizedInitialStep,
+  );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
   const [vercelAccountId, setVercelAccountId] = useState(
@@ -505,7 +508,6 @@ export function AgentCreatePage() {
   const [connectionSettingsOpen, setConnectionSettingsOpen] = useState<
     AgentOptions["accounts"][number] | null
   >(null);
-  const [promptStepReady, setPromptStepReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connectingProvider, setConnectingProvider] =
@@ -610,12 +612,6 @@ export function AgentCreatePage() {
     secretDialogOpen,
     vercelDialogOpen,
   ]);
-
-  useEffect(() => {
-    if (activeStep !== 4 || promptStepReady) return;
-    const timeout = window.setTimeout(() => setPromptStepReady(true), 500);
-    return () => window.clearTimeout(timeout);
-  }, [activeStep, promptStepReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1282,7 +1278,6 @@ export function AgentCreatePage() {
 
   function showStep(step: CreateStep) {
     if (step > furthestStep) return;
-    if (step === 4) setPromptStepReady(false);
     setActiveStep(step);
     setError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1295,7 +1290,6 @@ export function AgentCreatePage() {
     }
     if (activeStep === finalStep) return;
     const nextStep = (activeStep + 1) as CreateStep;
-    if (nextStep === 4) setPromptStepReady(false);
     setActiveStep(nextStep);
     setFurthestStep((current) =>
       Math.max(current, nextStep) as CreateStep
@@ -1312,12 +1306,8 @@ export function AgentCreatePage() {
   }
 
   async function saveConfiguration() {
-    if (
-      activeStep !== finalStep ||
-      (isEditing && !promptStepReady)
-    ) {
-      return;
-    }
+    // Editing saves the whole configuration from any section.
+    if (!isEditing && activeStep !== finalStep) return;
     if (missingRequirement) {
       setError(missingRequirement);
       const blockedStep: CreateStep = slackConnectionRequirement
@@ -1557,8 +1547,11 @@ export function AgentCreatePage() {
         >
           {steps.map((step) => {
             const current = activeStep === step.id;
-            const complete =
-              step.id < furthestStep && !stepRequirements[step.id];
+            // Editing has no step order: each marker reflects whether its
+            // section is complete right now.
+            const complete = isEditing
+              ? !stepRequirements[step.id]
+              : step.id < furthestStep && !stepRequirements[step.id];
             return (
               <button
                 aria-current={current ? "step" : undefined}
@@ -1575,7 +1568,7 @@ export function AgentCreatePage() {
                 type="button"
               >
                 <span className="createStepperStep__marker">
-                  {complete ? "✓" : step.id}
+                  {complete ? "✓" : isEditing ? "" : step.id}
                 </span>
                 <span className="createStepperStep__copy">
                   <strong>{step.title}</strong>
@@ -2918,25 +2911,20 @@ export function AgentCreatePage() {
                 Back
               </Button>
             )}
-            {activeStep < finalStep ? (
+            {!isEditing && activeStep < finalStep ? (
               <Button
                 disabled={Boolean(currentRequirement)}
                 onClick={continueToNextStep}
                 type="button"
                 variant="primary"
               >
-                {!isEditing && activeStep === 2
-                  ? "Continue to context"
-                  : "Continue"}
+                {activeStep === 2 ? "Continue to context" : "Continue"}
               </Button>
-            ) : (
+            ) : null}
+            {isEditing || activeStep === finalStep ? (
               <Button
                 data-submit-agent="true"
-                disabled={
-                  Boolean(missingRequirement) ||
-                  (isEditing && !promptStepReady) ||
-                  saving
-                }
+                disabled={Boolean(missingRequirement) || saving}
                 loading={saving}
                 onClick={!isEditing ? () => void saveConfiguration() : undefined}
                 type={isEditing ? "submit" : "button"}
@@ -2944,7 +2932,7 @@ export function AgentCreatePage() {
               >
                 {isEditing ? "Save changes" : "Create agent"}
               </Button>
-            )}
+            ) : null}
           </footer>
           )}
         </div>
