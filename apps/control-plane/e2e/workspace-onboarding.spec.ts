@@ -200,9 +200,7 @@ test("shows specific workspace secret validation issues", async ({
   });
 
   await page.goto("/agents/new");
-  await page.getByText("Alert in a Slack channel", { exact: true }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue to context" }).click();
   await expect(
     page.getByRole("heading", { name: "Agent context" }),
   ).toBeVisible();

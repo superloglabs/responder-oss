@@ -633,6 +633,7 @@ export interface SlackInvestigationDeliveryContext {
   agentId: string;
   executionMode: "standard" | "slack_thread";
   investigationId: string;
+  organizationId?: string;
   prMode: AgentPrMode;
   report: StructuredInvestigationReport;
   title: string;
@@ -678,6 +679,7 @@ export interface SlackInvestigationLiveContext {
   agentId: string;
   executionMode: "standard" | "slack_thread";
   investigationId: string;
+  organizationId?: string;
   title: string;
   traceItems: InvestigationSlackTraceItem[];
   source: {
@@ -769,6 +771,7 @@ export async function getSlackInvestigationLiveContext(
     agentId: investigation.agentId,
     executionMode: investigation.executionMode,
     investigationId: investigation.id,
+    organizationId: investigation.organizationId,
     title: investigation.title,
     traceItems: investigation.traceItems,
     source: {
@@ -887,6 +890,7 @@ export async function getSlackInvestigationDeliveryContext(
     agentId: investigation.agentId,
     executionMode: investigation.executionMode,
     investigationId: investigation.id,
+    organizationId: investigation.organizationId,
     prMode: investigation.prMode,
     report: investigation.report,
     title: investigation.title,

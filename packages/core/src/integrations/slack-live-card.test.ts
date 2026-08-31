@@ -176,6 +176,36 @@ describe("Slack live investigation card", () => {
     ]);
   });
 
+  it("includes the investigation workspace in Slack links", () => {
+    vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
+
+    const message = slackInvestigationCard({
+      agentId: context.agentId,
+      detail: "Inspecting the relevant source code.",
+      investigationId: context.investigationId,
+      organizationId: "24242424-2424-4424-8424-242424242424",
+      status: "in_progress",
+      title: context.title,
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: "plan",
+        tasks: [
+          expect.objectContaining({
+            sources: [
+              {
+                type: "url",
+                text: "View investigation",
+                url: `https://responder.example/agents/${context.agentId}/investigations/${context.investigationId}?organization_id=24242424-2424-4424-8424-242424242424`,
+              },
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("reads an investigation ID only from its feedback block", () => {
     expect(
       investigationIdFromFeedbackBlockId(

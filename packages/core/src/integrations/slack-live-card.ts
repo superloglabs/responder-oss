@@ -88,9 +88,18 @@ function responderAppUrl(): string {
   ).replace(/\/$/, "");
 }
 
-function investigationUrl(agentId: string, investigationId: string): string {
+function investigationUrl(
+  agentId: string,
+  investigationId: string,
+  organizationId?: string,
+): string {
   const origin = responderAppUrl();
-  return `${origin}/agents/${encodeURIComponent(agentId)}/investigations/${encodeURIComponent(investigationId)}`;
+  const url = new URL(origin);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/agents/${encodeURIComponent(agentId)}/investigations/${encodeURIComponent(investigationId)}`;
+  url.search = "";
+  url.hash = "";
+  if (organizationId) url.searchParams.set("organization_id", organizationId);
+  return url.toString();
 }
 
 function richText(value: string, preformatted = false) {
@@ -781,6 +790,7 @@ export function slackInvestigationCard(input: {
   agentId: string;
   detail: string;
   investigationId: string;
+  organizationId?: string;
   showInvestigationLink?: boolean;
   status: SlackInvestigationCardStatus;
   title: string;
@@ -810,7 +820,11 @@ export function slackInvestigationCard(input: {
             {
               type: "url",
               text: "View investigation",
-              url: investigationUrl(input.agentId, input.investigationId),
+              url: investigationUrl(
+                input.agentId,
+                input.investigationId,
+                input.organizationId,
+              ),
             },
           ],
         }),
@@ -960,6 +974,7 @@ async function performInvestigationSlackProgressUpdate(
       agentId: context.agentId,
       detail,
       investigationId: context.investigationId,
+      organizationId: context.organizationId,
       showInvestigationLink: context.executionMode !== "slack_thread",
       status: "in_progress",
       title: context.title,
@@ -1075,6 +1090,7 @@ async function performInvestigationSlackCardFailure(
       agentId: context.agentId,
       detail: "The investigation stopped before it could finish.",
       investigationId: context.investigationId,
+      organizationId: context.organizationId,
       showInvestigationLink: context.executionMode !== "slack_thread",
       status: "error",
       title: context.title,

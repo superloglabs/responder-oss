@@ -1,6 +1,6 @@
 {
-  "id": "99b7bbd5-e87d-4a6a-9689-1235963df448",
-  "prevId": "ef0238dc-3acf-4fb1-b2dc-72b0cc14d59a",
+  "id": "d4a89c8a-8717-4e47-894f-f3fc5f4de30e",
+  "prevId": "99b7bbd5-e87d-4a6a-9689-1235963df448",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -243,74 +243,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.legacy_account_redirect": {
-      "name": "legacy_account_redirect",
-      "schema": "",
-      "columns": {
-        "email_normalized": {
-          "name": "email_normalized",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "old_user_id": {
-          "name": "old_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "redirect_enabled": {
-          "name": "redirect_enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "source_snapshot": {
-          "name": "source_snapshot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "legacy_account_redirect_enabled_idx": {
-          "name": "legacy_account_redirect_enabled_idx",
-          "columns": [
-            {
-              "expression": "redirect_enabled",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -3160,7 +3092,29 @@
             }
           ],
           "isUnique": true,
-          "where": "\"status\" in ('queued', 'creating', 'created')",
+          "where": "\"status\" in ('queued', 'creating', 'created') and \"repository_full_name\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "issue_pull_requests_active_issue_repository_idx": {
+          "name": "issue_pull_requests_active_issue_repository_idx",
+          "columns": [
+            {
+              "expression": "issue_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "repository_full_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"status\" in ('queued', 'creating', 'created') and \"repository_full_name\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3390,6 +3344,74 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.legacy_account_redirect": {
+      "name": "legacy_account_redirect",
+      "schema": "",
+      "columns": {
+        "email_normalized": {
+          "name": "email_normalized",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "old_user_id": {
+          "name": "old_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "redirect_enabled": {
+          "name": "redirect_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "source_snapshot": {
+          "name": "source_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "legacy_account_redirect_enabled_idx": {
+          "name": "legacy_account_redirect_enabled_idx",
+          "columns": [
+            {
+              "expression": "redirect_enabled",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

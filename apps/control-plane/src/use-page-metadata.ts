@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import type { SeoMetadata } from "./page-metadata";
 
 const ownedSelector = "[data-responder-seo]";
-const shellTitle = "Responder";
+const shellTitle = "Superlog";
 
 function removeOwnedMetadata() {
   document.head.querySelectorAll(ownedSelector).forEach((element) => element.remove());

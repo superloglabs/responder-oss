@@ -23,7 +23,7 @@ function AuthFrame({ children }: AuthGateProps) {
       <section className="authCard">
         <div className="authBrand">
           <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
-          <span>Responder</span>
+          <span>Superlog</span>
         </div>
         {children}
       </section>
@@ -94,6 +94,12 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") ?? "");
     const password = String(data.get("password") ?? "");
+    if (isCreatingAccount) {
+      // AuthGate clears a legacy marker after the newly-created session is
+      // visible. Keeping this intent in sessionStorage closes the race between
+      // Better Auth returning a session and the clear request completing.
+      sessionStorage.setItem("superlog_explicit_signup", "1");
+    }
     const result = isCreatingAccount
       ? await authClient.signUp.email({
           email,
@@ -104,6 +110,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
 
     setIsSubmitting(false);
     if (result.error) {
+      if (isCreatingAccount) sessionStorage.removeItem("superlog_explicit_signup");
       console.error(
         JSON.stringify({
           event: isCreatingAccount
@@ -217,7 +224,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       >
         {isCreatingAccount
           ? "Already have an account? Sign in"
-          : "New to Responder? Create an account"}
+          : "New to Superlog? Create an account"}
       </button>
     </>
   );
@@ -465,26 +472,120 @@ function InvitationGate({
   );
 }
 
+function WorkspaceActivation({
+  organizationId,
+  refetch,
+}: {
+  organizationId: string;
+  refetch: () => Promise<unknown>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void authClient.organization
+      .setActive({ organizationId })
+      .then(async (result) => {
+        if (cancelled) return;
+        if (result.error) {
+          setError(result.error.message ?? "Could not open the workspace");
+          return;
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.delete("organization_id");
+        window.history.replaceState(window.history.state, "", url);
+        await refetch();
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not open the workspace",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, refetch]);
+
+  return (
+    <AuthFrame>
+      {error ? (
+        <div className="authIntro">
+          <h1>Workspace unavailable</h1>
+          <p>{error}</p>
+        </div>
+      ) : (
+        <p className="authMuted">Opening workspace…</p>
+      )}
+    </AuthFrame>
+  );
+}
+
 export function AuthGate({ children }: AuthGateProps) {
   const session = authClient.useSession();
   const invitationMatch = window.location.pathname.match(
     /^\/invite\/([0-9a-f-]+)$/i,
   );
+  const requestedOrganizationId = new URL(window.location.href).searchParams.get(
+    "organization_id",
+  );
 
   const signedInUserId = session.data?.user.id;
+  const activeOrganizationId = session.data?.session.activeOrganizationId;
   useEffect(() => {
     if (!signedInUserId) return;
     const url = new URL(window.location.href);
-    if (url.searchParams.get("signed_up") !== "1") return;
-    url.searchParams.delete("signed_up");
-    window.history.replaceState(window.history.state, "", url);
-    trackXSignupPixel(signedInUserId);
+    const socialSignup = url.searchParams.get("signed_up") === "1";
+    const explicitSignup =
+      socialSignup || sessionStorage.getItem("superlog_explicit_signup") === "1";
+    if (!explicitSignup) return;
+    sessionStorage.removeItem("superlog_explicit_signup");
+    void fetch("/api/legacy-account-redirect/clear", {
+      credentials: "include",
+      method: "POST",
+    }).catch(() => undefined);
+    if (socialSignup) {
+      url.searchParams.delete("signed_up");
+      window.history.replaceState(window.history.state, "", url);
+      trackXSignupPixel(signedInUserId);
+    }
+  }, [signedInUserId]);
+
+  useEffect(() => {
+    if (!signedInUserId) return;
+    const url = new URL(window.location.href);
+    if (
+      url.searchParams.get("signed_up") === "1" ||
+      sessionStorage.getItem("superlog_explicit_signup") === "1"
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void fetch("/api/legacy-account-redirect", { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as {
+          redirect?: boolean;
+          targetUrl?: string;
+        };
+      })
+      .then((routing) => {
+        if (cancelled || !routing?.redirect || !routing.targetUrl) return;
+        window.location.replace(routing.targetUrl);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [signedInUserId]);
 
   if (session.isPending) {
     return (
       <AuthFrame>
-        <p className="authMuted">Loading Responder…</p>
+        <p className="authMuted">Loading Superlog…</p>
       </AuthFrame>
     );
   }
@@ -515,6 +616,18 @@ export function AuthGate({ children }: AuthGateProps) {
       <AuthFrame>
         <SignIn isInvitation={Boolean(invitationMatch?.[1])} />
       </AuthFrame>
+    );
+  }
+
+  if (
+    requestedOrganizationId &&
+    requestedOrganizationId !== activeOrganizationId
+  ) {
+    return (
+      <WorkspaceActivation
+        organizationId={requestedOrganizationId}
+        refetch={session.refetch}
+      />
     );
   }
 

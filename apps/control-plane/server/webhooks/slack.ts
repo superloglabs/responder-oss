@@ -507,6 +507,7 @@ export async function acknowledgeSlackAlert(input: {
   const message = investigatingSlackMessage({
     agentId: input.agentId,
     investigationId: input.investigationId,
+    organizationId: input.organizationId,
     threadMode: input.threadMode,
     title: input.title,
   });
@@ -667,6 +668,7 @@ export function logSlackAcknowledgementFailure(input: {
 export function investigatingSlackMessage(input: {
   agentId: string;
   investigationId: string;
+  organizationId?: string;
   threadMode?: boolean;
   title?: string;
 }): { blocks: unknown[]; text: string } {
@@ -674,6 +676,7 @@ export function investigatingSlackMessage(input: {
     agentId: input.agentId,
     detail: "Responder is gathering evidence and preparing the investigation.",
     investigationId: input.investigationId,
+    organizationId: input.organizationId,
     showInvestigationLink: input.threadMode !== true,
     status: "in_progress",
     title: input.title ?? "Investigating alert",

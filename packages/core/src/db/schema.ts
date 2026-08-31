@@ -23,6 +23,30 @@ import type {
 } from "../investigations/report.js";
 import { organization, user } from "./auth-schema.js";
 
+/**
+ * Email-keyed handoff markers for accounts that originated in the legacy
+ * Superlog product. This lives in the application schema (rather than the
+ * generated Better Auth schema) so auth-schema regeneration cannot erase it.
+ * The marker is intentionally not tied to a Responder user: an old user may
+ * authenticate through OAuth for the first time after the import, at which
+ * point Better Auth creates the local user row.
+ */
+export const legacyAccountRedirect = pgTable(
+  "legacy_account_redirect",
+  {
+    emailNormalized: text("email_normalized").primaryKey(),
+    oldUserId: text("old_user_id").notNull(),
+    redirectEnabled: boolean("redirect_enabled").default(true).notNull(),
+    sourceSnapshot: text("source_snapshot").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [index("legacy_account_redirect_enabled_idx").on(table.redirectEnabled)],
+);
+
 export const integrationProvider = pgEnum("integration_provider", [
   "aws",
   "github",

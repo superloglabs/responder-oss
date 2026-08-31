@@ -268,22 +268,28 @@ function execSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
+/**
+ * Install the small set of tools needed by agents when no prebuilt snapshot
+ * is configured. Named snapshots already contain these tools and skip this.
+ */
 export async function prepareDaytonaSandbox(
   session: DaytonaSandboxSession,
 ): Promise<void> {
   const output = await session.execCommand({
     cmd: [
       "set -eu",
-      "if command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1; then exit 0; fi",
-      "if ! command -v apt-get >/dev/null 2>&1; then echo 'curl, git, Node.js, Python 3, or ripgrep is unavailable and apt-get is missing' >&2; exit 1; fi",
+      "if command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then exit 0; fi",
+      "if ! command -v apt-get >/dev/null 2>&1; then echo 'curl, git, Node.js, Python 3, ripgrep, or Bun is unavailable and apt-get is missing' >&2; exit 1; fi",
       "if [ \"$(id -u)\" -eq 0 ]; then",
       "  apt-get update -qq",
       "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs python3 ripgrep",
+      "  if ! command -v bun >/dev/null 2>&1; then curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash; fi",
       "elif command -v sudo >/dev/null 2>&1; then",
       "  sudo apt-get update -qq",
       "  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs python3 ripgrep",
+      "  if ! command -v bun >/dev/null 2>&1; then curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash; fi",
       "else",
-      "  echo 'curl, git, Node.js, Python 3, and ripgrep installation require root access' >&2",
+      "  echo 'curl, git, Node.js, Python 3, ripgrep, and Bun installation require root access' >&2",
       "  exit 1",
       "fi",
       "command -v curl >/dev/null",
@@ -291,6 +297,7 @@ export async function prepareDaytonaSandbox(
       "command -v node >/dev/null",
       "command -v python3 >/dev/null",
       "command -v rg >/dev/null",
+      "command -v bun >/dev/null",
     ].join("\n"),
     maxOutputTokens: 2_000,
     workdir: "/home/daytona/workspace",
@@ -298,7 +305,7 @@ export async function prepareDaytonaSandbox(
   if (!execSucceeded(output)) {
     const detail = output.split("\nOutput:\n", 2)[1]?.trim();
     throw new Error(
-      `Unable to install curl, git, Node.js, Python 3, and ripgrep in Daytona${detail ? `: ${detail}` : ""}`,
+      `Unable to install curl, git, Node.js, Python 3, ripgrep, and Bun in Daytona${detail ? `: ${detail}` : ""}`,
     );
   }
 }

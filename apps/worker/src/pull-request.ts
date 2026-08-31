@@ -13,10 +13,7 @@ import type { IssueEvidence } from "@responder/core/investigations/report";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { responderIssueUrl as buildResponderIssueUrl } from "@responder/core/responder-urls";
 import { z } from "zod";
-import {
-  buildPullRequestBody,
-  createPullRequestFromSandbox,
-} from "./github-pull-request.js";
+import { createPullRequestFromSandbox } from "./github-pull-request.js";
 import type { CheckedOutRepository } from "./repositories.js";
 
 export function responderIssueUrl(
@@ -91,6 +88,12 @@ export function createPullRequestTool(input: {
         ),
       summary: z.string().trim().min(1).max(4_000),
       testing: z.string().trim().min(1).max(2_000),
+      body: z
+        .string()
+        .trim()
+        .min(1)
+        .max(12_000)
+        .describe("The completed Markdown pull request body, following any repository template."),
     }),
     async execute(requestedPullRequest) {
       const request = await getExecutableIssuePullRequest({
@@ -132,16 +135,7 @@ export function createPullRequestTool(input: {
           {
             baseBranch: checkout.branch,
             baseSha: checkout.sha,
-            body: buildPullRequestBody({
-              failureMechanism: requestedPullRequest.failureMechanism,
-              responderIssueUrl: responderIssueUrl(requestedPullRequest.issueId),
-              sentryIssueUrl: sentryIssueUrl(
-                request.investigationInput,
-                [...request.issueEvidence, ...request.investigationEvidence],
-              ),
-              summary: requestedPullRequest.summary,
-              testing: requestedPullRequest.testing,
-            }),
+            body: requestedPullRequest.body,
             installationId: repository.installationId,
             repository: repository.fullName,
             repositoryPath: checkout.path,

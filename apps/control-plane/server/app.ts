@@ -13,6 +13,11 @@ import {
   getAuth,
   platformRoleForIdentity,
 } from "./auth.js";
+import {
+  clearLegacyAccountRedirect,
+  legacyProductUrl,
+  shouldRedirectLegacyAccount,
+} from "../../../packages/core/src/db/legacy-account-redirect.js";
 import { billingRoutes } from "./billing/routes.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
@@ -266,6 +271,49 @@ export const app = instrumentedApp
       status: "ok",
     }),
   )
+  .get("/api/legacy-account-redirect", async (context) => {
+    const session = await getAuth().api
+      .getSession({ headers: context.req.raw.headers })
+      .catch(() => null);
+    if (!session) return context.json({ error: "Unauthorized" }, 401);
+
+    try {
+      const redirect = await shouldRedirectLegacyAccount(session.user.email);
+      return context.json({
+        redirect,
+        ...(redirect ? { targetUrl: legacyProductUrl() } : {}),
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "legacy_account_redirect_lookup_failed",
+          errorCode: error instanceof Error ? error.constructor.name : "unknown",
+          errorMessage: authHandlerErrorMessage(error),
+        }),
+      );
+      return context.json({ error: "Could not determine account routing" }, 500);
+    }
+  })
+  .post("/api/legacy-account-redirect/clear", async (context) => {
+    const session = await getAuth().api
+      .getSession({ headers: context.req.raw.headers })
+      .catch(() => null);
+    if (!session) return context.json({ error: "Unauthorized" }, 401);
+
+    try {
+      await clearLegacyAccountRedirect(session.user.email);
+      return context.json({ redirect: false });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "legacy_account_redirect_clear_failed",
+          errorCode: error instanceof Error ? error.constructor.name : "unknown",
+          errorMessage: authHandlerErrorMessage(error),
+        }),
+      );
+      return context.json({ error: "Could not update account routing" }, 500);
+    }
+  })
   .get("/api/auth/github/callback", (context) => {
     const callbackUrl = new URL(context.req.url);
     callbackUrl.pathname = "/api/integrations/github/callback";

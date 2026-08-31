@@ -2624,23 +2624,74 @@ button:disabled {
   color: var(--ds-positive);
 }
 
-.agentTableArrow,
 .investigationRow__arrow {
   display: flex;
   justify-content: flex-end;
   color: var(--ds-text-muted);
 }
 
-.agentTableTitle:focus-visible,
-.agentTableArrow:focus-visible {
+.agentTableTitle:focus-visible {
   border-radius: 4px;
   outline: 2px solid var(--ds-text-primary);
   outline-offset: 2px;
 }
 
 .agentTableTitle:hover strong,
-.agentTableArrow:hover {
+.dsDataTable__row--interactive:hover .agentTableTitle strong {
   color: var(--ds-text-primary);
+}
+
+.agentRowMenu {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agentRowMenu__popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 148px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 45%);
+}
+
+/* The table container scrolls, so the last row opens its menu upward and a
+   lone row opens sideways to stay inside the visible area. */
+.agentListTable .dsDataTable tbody tr:last-child:not(:first-child) .agentRowMenu__popover {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.agentListTable .dsDataTable tbody tr:first-child:last-child .agentRowMenu__popover {
+  top: auto;
+  right: calc(100% + 6px);
+  bottom: 0;
+}
+
+.agentRowMenu__item {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 9px;
+  display: flex;
+  align-items: center;
+  border-radius: 5px;
+  color: var(--secondary);
+  font-size: 12px;
+  text-align: left;
+}
+
+.agentRowMenu__item:hover,
+.agentRowMenu__item:focus-visible {
+  background: var(--ds-surface-hover);
+  color: var(--foreground);
+  outline: none;
 }
 
 .detailHeading {
@@ -7340,6 +7391,112 @@ body:has(.appShell--create) {
   line-height: 20px;
 }
 
+.appShell--create .newAgentSetupStep {
+  width: 100%;
+  max-width: 760px;
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.appShell--create .newAgentSetupStep--connect {
+  min-height: 480px;
+  max-width: 720px;
+  gap: 30px;
+}
+
+.appShell--create .newAgentSetupStep > header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.appShell--create .newAgentSetupStep h2 {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 36px;
+  letter-spacing: -0.03em;
+}
+
+.appShell--create .newAgentSetupStep header p {
+  max-width: 540px;
+  margin: 0;
+  color: var(--ds-text-muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.appShell--create .newAgentSetupStep--connect header p {
+  max-width: 520px;
+}
+
+.appShell--create .newAgentSetupStep__connectAction {
+  display: flex;
+  align-items: center;
+}
+
+.appShell--create .newAgentSetupStep__connectButton.dsButton {
+  min-height: 44px;
+  padding-inline: 20px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.appShell--create .newAgentSetupStep--connect .slackConnectionHeader {
+  max-width: 640px;
+}
+
+.appShell--create .newAgentSetupStep--channel .channelPicker {
+  width: 100%;
+  max-width: 640px;
+  gap: 8px;
+}
+
+.appShell--create
+  .newAgentSetupStep--channel
+  .channelPicker
+  > span:first-child {
+  color: var(--ds-text-secondary);
+  font-weight: 500;
+}
+
+.appShell--create .newAgentSetupStep--channel .channelPicker__trigger {
+  min-height: 50px;
+  padding-inline: 15px;
+  border-color: var(--ds-border-strong);
+  border-radius: 10px;
+  background: var(--ds-surface-base);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.appShell--create
+  .newAgentSetupStep--channel
+  .channelPicker__placeholder {
+  color: var(--ds-text-disabled);
+}
+
+.appShell--create .createAgentActions--guided {
+  width: 100%;
+  max-width: 760px;
+  min-height: 0;
+  padding: 12px 4px 0;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.appShell--create .createAgentActions--guided .dsButton {
+  min-height: 40px;
+}
+
+.appShell--create .createAgentActions--guided .dsButton--secondary {
+  border-color: var(--ds-border-strong);
+  background: transparent;
+}
+
 .appShell--create .createSection__body.dsPanel {
   gap: 24px;
   border: 0;
@@ -7396,6 +7553,14 @@ body:has(.appShell--create) {
   border-color: var(--ds-border-default);
   border-radius: var(--ds-radius-medium);
   background: var(--ds-surface-raised);
+}
+
+.appShell--create .connectionPrompt.isFlat {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .appShell--create .connectedSetup--channel > .dsButton {
@@ -9503,6 +9668,10 @@ a.issueLine:focus-visible {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .appShell--create .createStepperRail--three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .appShell--create .createStepperStep {
     min-height: 68px;
     padding: 8px 4px;
@@ -9514,6 +9683,10 @@ a.issueLine:focus-visible {
   }
 
   .appShell--create .createStepperPanel .createSection {
+    min-height: 0;
+  }
+
+  .appShell--create .newAgentSetupStep--connect {
     min-height: 0;
   }
 
