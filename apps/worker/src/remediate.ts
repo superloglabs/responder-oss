@@ -196,7 +196,7 @@ export async function runRemediationAgent(
   try {
     session = await createDaytonaSandboxSession(client, config, sandboxName);
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
-    await prepareDaytonaSandbox(session);
+    if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositories(
       session,
       job.config.id,
