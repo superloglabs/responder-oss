@@ -488,8 +488,11 @@ export function AgentCreatePage() {
     : initialStep;
   const [activeStep, setActiveStep] =
     useState<CreateStep>(normalizedInitialStep);
-  const [furthestStep, setFurthestStep] =
-    useState<CreateStep>(normalizedInitialStep);
+  // Editing an existing agent unlocks every section immediately; only the
+  // create flow walks steps sequentially.
+  const [furthestStep, setFurthestStep] = useState<CreateStep>(
+    isEditing ? 4 : normalizedInitialStep,
+  );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
   const [vercelAccountId, setVercelAccountId] = useState(
