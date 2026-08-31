@@ -43,12 +43,16 @@ async function readDirectoryEntry(
     }
   }
   for (const [name, childPath] of directFiles) {
-    children[name] = file({
-      content: await session.readFile({
-        path: childPath,
-        maxBytes: maxSkillFileBytes,
-      }),
-    });
+    try {
+      children[name] = file({
+        content: await session.readFile({
+          path: childPath,
+          maxBytes: maxSkillFileBytes,
+        }),
+      });
+    } catch {
+      continue;
+    }
   }
   for (const name of directDirectories) {
     const nestedPath = `${path}/${name}`;
