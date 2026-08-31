@@ -16,6 +16,7 @@ import {
   getInvestigationForSlackAction,
   investigationCanBeRetried,
   markInvestigationStarted,
+  prepareInvestigationReplay,
   prepareInvestigationRetry,
   replayReportMarkdownUpdate,
 } from "./investigations.js";
@@ -144,6 +145,98 @@ describe("investigation retry", () => {
     expect(set).toHaveBeenCalledWith(expect.objectContaining({
       agentConfigVersionId: "active-config",
       runtimeProfileId: "active-runtime",
+    }));
+  });
+});
+
+describe("investigation replay", () => {
+  it("uses the agent's active configuration for a new replay", async () => {
+    const sourceInput = {
+      agentId: "agent-1",
+      body: "Original alert",
+      externalEventId: "event-1",
+      provider: "sentry" as const,
+      title: "Production error",
+    };
+    const sourceQuery = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{
+        agentId: "agent-1",
+        configId: "latest-config",
+        createLinearTickets: true,
+        input: sourceInput,
+        linearIssueTemplate: "Latest template",
+        model: "latest-model",
+        organizationId: "organization-1",
+        prMode: "always",
+        prompt: "Latest instructions",
+        status: "resolved",
+        title: "Production error",
+      }]),
+    };
+    sourceQuery.from.mockReturnValue(sourceQuery);
+    sourceQuery.innerJoin.mockReturnValue(sourceQuery);
+    sourceQuery.where.mockReturnValue(sourceQuery);
+    const profileQuery = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{ id: "active-runtime" }]),
+    };
+    profileQuery.from.mockReturnValue(profileQuery);
+    profileQuery.innerJoin.mockReturnValue(profileQuery);
+    profileQuery.where.mockReturnValue(profileQuery);
+    const existingQuery = {
+      from: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([]),
+    };
+    existingQuery.from.mockReturnValue(existingQuery);
+    existingQuery.where.mockReturnValue(existingQuery);
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(sourceQuery)
+      .mockReturnValueOnce(profileQuery)
+      .mockReturnValueOnce(existingQuery);
+    const values = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      insert: vi.fn(() => ({ values })),
+      select,
+    };
+    const transaction = vi.fn(async (callback) => callback(tx));
+    vi.mocked(getDatabase).mockReturnValue({ transaction } as never);
+
+    await expect(
+      prepareInvestigationReplay({
+        agentId: "agent-1",
+        investigationId: "investigation-1",
+        organizationId: "organization-1",
+        replayInvestigationId: "replay-1",
+      }),
+    ).resolves.toEqual({
+      config: {
+        agentId: "agent-1",
+        createLinearTickets: true,
+        id: "latest-config",
+        linearIssueTemplate: "Latest template",
+        model: "latest-model",
+        organizationId: "organization-1",
+        prMode: "always",
+        prompt: "Latest instructions",
+      },
+      created: true,
+      input: sourceInput,
+      investigationId: "replay-1",
+      replayStatus: "pending",
+      runtimeProfileId: "active-runtime",
+    });
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({
+      agentConfigVersionId: "latest-config",
+      id: "replay-1",
+      isReplay: true,
+      replayOfInvestigationId: "investigation-1",
     }));
   });
 });

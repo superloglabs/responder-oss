@@ -600,10 +600,13 @@ export async function prepareInvestigationReplay(input: {
       })
       .from(investigations)
       .innerJoin(
-        agentConfigVersions,
-        eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+        agents,
+        eq(agents.id, investigations.agentId),
       )
-      .innerJoin(agents, eq(agents.id, investigations.agentId))
+      .innerJoin(
+        agentConfigVersions,
+        eq(agentConfigVersions.id, agents.activeVersionId),
+      )
       .where(
         and(
           eq(investigations.id, input.investigationId),
