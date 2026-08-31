@@ -693,6 +693,11 @@ export async function runInvestigationAgent(
       model: config.model,
       instructions,
       capabilities: investigationCapabilities(replay),
+      // MCP servers are tenant-configurable and may expose the same generic
+      // tool names (for example, `search` or `execute`). Prefix each tool
+      // with its server name so one connection cannot prevent an entire
+      // investigation from starting.
+      mcpConfig: { includeServerInToolNames: true },
       mcpServers: contextServers,
       tools: [
         ...(threadMode ? [] : [issueSearchTool, reportTool!]),

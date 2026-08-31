@@ -440,6 +440,7 @@ export async function listInvestigationTraceEvents(
 
 export async function prepareInvestigationRetry(
   investigationId: string,
+  options?: { expectedFailureReason?: string },
 ): Promise<{
   investigationId: string;
   input: InvestigationInput;
@@ -461,6 +462,7 @@ export async function prepareInvestigationRetry(
         prompt: agentConfigVersions.prompt,
         createLinearTickets: agentConfigVersions.createLinearTickets,
         linearIssueTemplate: agentConfigVersions.linearIssueTemplate,
+        failureReason: investigations.failureReason,
       })
       .from(investigations)
       .innerJoin(
@@ -479,6 +481,16 @@ export async function prepareInvestigationRetry(
       throw new InvestigationRetryError(
         "not_found",
         "Investigation not found",
+      );
+    }
+    if (
+      options?.expectedFailureReason &&
+      (investigation.status !== "failed" ||
+        !investigation.failureReason?.includes(options.expectedFailureReason))
+    ) {
+      throw new InvestigationRetryError(
+        "not_retryable",
+        "Investigation does not match the expected backfill failure",
       );
     }
     if (!investigationCanBeRetried(investigation.status)) {
