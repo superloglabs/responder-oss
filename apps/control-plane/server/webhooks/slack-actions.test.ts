@@ -73,7 +73,7 @@ describe("Slack actions", () => {
         type: "code_change",
         title: "Handle missing plant records",
         description: "Guard missing plant records before using them.",
-        diff: "diff --git a/src/plants.ts b/src/plants.ts\n--- a/src/plants.ts\n+++ b/src/plants.ts\n@@ -1 +1 @@\n-old\n+new",
+        changes: [{ repository: null, diff: "diff --git a/src/plants.ts b/src/plants.ts\n--- a/src/plants.ts\n+++ b/src/plants.ts\n@@ -1 +1 @@\n-old\n+new" }],
       }],
       evidence: [],
       organizationId: "03030303-0303-4303-8303-030303030303",

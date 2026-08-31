@@ -2,7 +2,6 @@ import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { IssuePullRequestActivityEvent } from "./schema.js";
 import { getDatabase } from "./client.js";
 import {
-  activeIssuePullRequestIndexPredicate,
   agentConfigVersions,
   agents,
   instanceConfiguration,
@@ -77,13 +76,17 @@ export async function queueAutomaticIssuePullRequests(
   input: {
     agentConfigVersionId: string;
     investigationId: string;
-    remediations: Array<{ issueId: string; remediationId: string }>;
+    remediations: Array<{
+      issueId: string;
+      remediationId: string;
+      repositoryFullName?: string;
+    }>;
   },
 ) {
   const uniqueRemediations = [
     ...new Map(
       input.remediations.map((remediation) => [
-        remediation.issueId,
+        `${remediation.issueId}:${remediation.repositoryFullName ?? ""}`,
         remediation,
       ]),
     ).values(),
@@ -115,14 +118,14 @@ export async function queueAutomaticIssuePullRequests(
       investigationId: input.investigationId,
       agentConfigVersionId: input.agentConfigVersionId,
       remediationId: remediation.remediationId,
+      ...(remediation.repositoryFullName
+        ? { repositoryFullName: remediation.repositoryFullName }
+        : {}),
     })),
   );
   return activeIndexAvailable
     ? insert
-      .onConflictDoNothing({
-        target: issuePullRequests.issueId,
-        where: activeIssuePullRequestIndexPredicate,
-      })
+      .onConflictDoNothing()
       .returning({ id: issuePullRequests.id, issueId: issuePullRequests.issueId })
     : insert.returning({
       id: issuePullRequests.id,
@@ -426,30 +429,34 @@ export async function queueManualIssuePullRequest(input: {
       );
     }
 
-    const insert = tx
-      .insert(issuePullRequests)
-      .values({
+    const changes = remediation.changes;
+    if (changes.length === 0) {
+      throw new IssuePullRequestError(
+        "Code remediation not found",
+        "remediation_not_found",
+      );
+    }
+    const insert = tx.insert(issuePullRequests).values(
+      changes.map((change) => ({
         issueId: input.issueId,
         investigationId: target.investigationId,
         agentConfigVersionId: target.agentConfigVersionId,
         remediationId: remediation.id,
-      });
+        repositoryFullName: change.repository,
+      })),
+    );
     const inserted = activeIndexAvailable
       ? await insert
-        .onConflictDoNothing({
-          target: issuePullRequests.issueId,
-          where: activeIssuePullRequestIndexPredicate,
-        })
+        .onConflictDoNothing()
         .returning({ id: issuePullRequests.id })
       : await insert.returning({ id: issuePullRequests.id });
-    const request = inserted[0];
-    if (!request) {
+    if (inserted.length !== changes.length) {
       throw new IssuePullRequestError(
         "A pull request has already been requested for this issue",
         "already_requested",
       );
     }
-    return request;
+    return inserted.length === 1 ? inserted[0]! : inserted;
   });
 }
 
@@ -472,6 +479,7 @@ export async function getIssuePullRequestForRemediation(requestId: string) {
       organizationId: agents.organizationId,
       runtimeProfileId: investigations.runtimeProfileId,
       remediationId: issuePullRequests.remediationId,
+      repositoryFullName: issuePullRequests.repositoryFullName,
       status: issuePullRequests.status,
     })
     .from(issuePullRequests)

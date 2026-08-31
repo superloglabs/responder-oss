@@ -16,6 +16,7 @@ import type {
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import {
+  codeChangeParts,
   remediationSummary,
   renderInvestigationReportMarkdown,
 } from "../investigations/report.js";
@@ -298,9 +299,12 @@ export async function submitInvestigationReport(input: {
       const remediation = issue.remediations.find(
         (candidate) => candidate.type === "code_change",
       );
-      return remediation
-        ? [{ issueId: issue.id, remediationId: remediation.id }]
-        : [];
+      if (!remediation) return [];
+      return codeChangeParts(remediation).map((change) => ({
+        issueId: issue.id,
+        remediationId: remediation.id,
+        ...(change.repository ? { repositoryFullName: change.repository } : {}),
+      }));
     });
     const automaticPullRequestRequests =
       investigation.prMode === "always" &&

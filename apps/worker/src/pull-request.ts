@@ -62,6 +62,7 @@ export function createPullRequestTool(input: {
   pullRequestRequestId?: string;
   repositories: CheckedOutRepository[];
   session: DaytonaSandboxSession;
+  targetRepository?: string;
 }) {
   const configuredRepositoryNames = [
     ...new Set(input.repositories.map(({ repository }) => repository)),
@@ -112,6 +113,12 @@ export function createPullRequestTool(input: {
         const repository = repositories.find(
           (candidate) => candidate.fullName === requestedPullRequest.repository,
         );
+        if (
+          input.targetRepository &&
+          requestedPullRequest.repository !== input.targetRepository
+        ) {
+          throw new Error("The pull request must target the assigned repository");
+        }
         if (!repository) {
           throw new Error("The selected repository is not configured for this agent");
         }

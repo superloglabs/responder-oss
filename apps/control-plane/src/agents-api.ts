@@ -226,7 +226,10 @@ export type IssueRemediation =
       type: "code_change";
       title: string;
       description: string;
-      diff: string;
+      changes: Array<{
+        repository: string | null;
+        diff: string;
+      }>;
     }
   | {
       id: string;
@@ -492,8 +495,18 @@ export async function setIssueArchived(
 export async function createIssuePullRequest(
   issueId: string,
   remediationId: string,
-): Promise<{ requestId: string; sessionId: string | null }> {
-  return apiJson<{ requestId: string; sessionId: string | null }>(
+): Promise<{
+  requestId: string;
+  requestIds: string[];
+  sessionId: string | null;
+  sessionIds: Array<string | null>;
+}> {
+  return apiJson<{
+    requestId: string;
+    requestIds: string[];
+    sessionId: string | null;
+    sessionIds: Array<string | null>;
+  }>(
     `/api/issues/${encodeURIComponent(issueId)}/pull-requests`,
     {
       method: "POST",

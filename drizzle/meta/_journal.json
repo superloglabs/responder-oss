@@ -232,6 +232,13 @@
       "when": 1787849835131,
       "tag": "0032_flippant_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788192333170,
+      "tag": "0033_demonic_black_cat",
+      "breakpoints": true
     }
   ]
 }

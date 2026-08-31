@@ -80,6 +80,7 @@ export const remediationJobSchema = z.object({
   selectedRemediation: issueRemediationSubmissionSchema.optional(),
   queuedAt: z.iso.datetime(),
   remediationRequestId: z.uuid(),
+  targetRepository: z.string().trim().min(1).optional(),
   runtimeProfileId: z.uuid(),
 });
 

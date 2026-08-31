@@ -30,7 +30,10 @@ const codeRemediation = {
   type: "code_change" as const,
   title: "Handle the missing value",
   description: "Guard the optional value before using it.",
-  diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1 @@\n-old\n+new",
+  changes: [{
+    repository: null,
+    diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1 @@\n-old\n+new",
+  }],
 };
 
 function simpleSelect(
@@ -67,6 +70,7 @@ function databaseDouble(
   options: {
     activeIndexAvailable?: boolean;
     existing?: Array<{ id: string }>;
+    remediations?: unknown[];
   } = {},
 ) {
   const activeIndexAvailable = options.activeIndexAvailable ?? true;
@@ -87,7 +91,10 @@ function databaseDouble(
     const select = vi
       .fn()
       .mockReturnValueOnce(
-        simpleSelect([{ id: issueId, remediations: [codeRemediation] }]),
+        simpleSelect([{
+          id: issueId,
+          remediations: options.remediations ?? [codeRemediation],
+        }]),
       )
       .mockReturnValueOnce(simpleSelect(options.existing ?? [], existingLimit))
       .mockReturnValueOnce(eligible);
@@ -104,6 +111,7 @@ function databaseDouble(
     existingLimit,
     onConflictDoNothing,
     returning,
+    values,
   };
 }
 
@@ -164,7 +172,7 @@ describe("manual pull request uniqueness", () => {
     expect(index?.config.where).toBe(activeIssuePullRequestIndexPredicate);
     expect(
       new PgDialect().sqlToQuery(activeIssuePullRequestIndexPredicate).sql,
-    ).toBe(`"status" in ('queued', 'creating', 'created')`);
+    ).toBe(`"status" in ('queued', 'creating', 'created') and "repository_full_name" is null`);
   });
 
   it("returns the request that wins the atomic insert", async () => {
@@ -181,10 +189,37 @@ describe("manual pull request uniqueness", () => {
     expect(compiledSql(execute.mock.calls[0]![0]).sql).toContain(
       "and indisunique",
     );
-    expect(onConflictDoNothing).toHaveBeenCalledWith({
-      target: issuePullRequests.issueId,
-      where: activeIssuePullRequestIndexPredicate,
-    });
+    expect(onConflictDoNothing).toHaveBeenCalledWith();
+  });
+
+  it("queues one request per repository for a multi-repository remediation", async () => {
+    const firstRequestId = "05050505-0505-4505-8505-050505050505";
+    const secondRequestId = "06060606-0606-4606-8606-060606060606";
+    const plan = {
+      id: remediationId,
+      type: "code_change" as const,
+      title: "Update app and SDK",
+      description: "Propagate the channel through both repositories.",
+      changes: [
+        { repository: "acme/app", diff: codeRemediation.changes[0]!.diff },
+        { repository: "acme/sdk", diff: codeRemediation.changes[0]!.diff },
+      ],
+    };
+    const { values } = databaseDouble(
+      [{ id: firstRequestId }, { id: secondRequestId }],
+      { remediations: [plan] },
+    );
+
+    await expect(
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
+    ).resolves.toEqual([
+      { id: firstRequestId },
+      { id: secondRequestId },
+    ]);
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({ repositoryFullName: "acme/app" }),
+      expect.objectContaining({ repositoryFullName: "acme/sdk" }),
+    ]);
   });
 
   it("allows a failed automatic pull request to be retried", async () => {
@@ -436,10 +471,7 @@ describe("automatic pull request uniqueness", () => {
       { agentConfigVersionId, investigationId, issueId, remediationId },
       { agentConfigVersionId, investigationId, issueId: secondIssueId, remediationId },
     ]);
-    expect(onConflictDoNothing).toHaveBeenCalledWith({
-      target: issuePullRequests.issueId,
-      where: activeIssuePullRequestIndexPredicate,
-    });
+    expect(onConflictDoNothing).toHaveBeenCalledWith();
     const activeRequestQuery = compiledSql(existingWhere.mock.calls[0]![0]);
     expect(activeRequestQuery.params).toEqual([
       issueId,

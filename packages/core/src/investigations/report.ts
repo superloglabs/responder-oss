@@ -72,28 +72,60 @@ const remediationDescriptionSchema = oneSentenceSchema(
   "One-sentence human-readable explanation of the proposed remediation.",
 );
 
-export const issueRemediationSubmissionSchema = z.discriminatedUnion("type", [
-  z.object({
+const codeChangePartSchema = z.object({
+  repository: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .nullable()
+    .describe("Attached repository that receives this change."),
+  diff: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40_000)
+    .refine(
+      (diff) =>
+        /^diff --git /m.test(diff) &&
+        /^--- /m.test(diff) &&
+        /^\+\+\+ /m.test(diff) &&
+        /^@@ /m.test(diff),
+      "Must be a complete unified git diff",
+    )
+    .describe(
+      "Complete unified git diff for this repository, including diff --git, ---/+++, and hunk headers.",
+    ),
+});
+
+const codeChangeRemediationSchema = z
+  .object({
     type: z.literal("code_change"),
     title: remediationTitleSchema,
     description: remediationDescriptionSchema,
-    diff: z
-      .string()
-      .trim()
+    changes: z
+      .array(codeChangePartSchema)
       .min(1)
-      .max(40_000)
-      .refine(
-        (diff) =>
-          /^diff --git /m.test(diff) &&
-          /^--- /m.test(diff) &&
-          /^\+\+\+ /m.test(diff) &&
-          /^@@ /m.test(diff),
-        "Must be a complete unified git diff",
-      )
+      .max(20)
       .describe(
-        "A complete unified git diff proposing the code change, including diff --git, ---/+++, and hunk headers. Do not invent a diff unless the relevant repository files were inspected.",
+        "Required code changes. One change produces one pull request; changes for the same repository should be combined.",
       ),
-  }),
+  })
+  .superRefine((value, context) => {
+    const repositories = value.changes
+      .map((change) => change.repository)
+      .filter((repository): repository is string => Boolean(repository));
+    if (new Set(repositories).size !== repositories.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Each repository may appear only once in a code change plan",
+        path: ["changes"],
+      });
+    }
+  });
+
+export const issueRemediationSubmissionSchema = z.discriminatedUnion("type", [
+  codeChangeRemediationSchema,
   z.object({
     type: z.literal("external_action"),
     title: remediationTitleSchema,
@@ -114,6 +146,14 @@ export type IssueRemediationSubmission = z.infer<
 >;
 
 export type IssueRemediation = IssueRemediationSubmission & { id: string };
+
+export type CodeChangePart = z.infer<typeof codeChangePartSchema>;
+
+export function codeChangeParts(
+  remediation: Extract<IssueRemediationSubmission, { type: "code_change" }>,
+): CodeChangePart[] {
+  return remediation.changes;
+}
 
 const newIssueSubmissionSchema = z.object({
   resolution: z.literal("new"),
@@ -226,6 +266,7 @@ export function remediationSummary(
 export function renderIssueFixPrompt(
   issue: ReportIssue & { evidence: IssueEvidence[] },
   selectedRemediation?: IssueRemediationSubmission,
+  targetRepository?: string,
 ): string {
   const timeline = issue.timeline ?? [];
   const evidence = issue.evidence
@@ -255,7 +296,23 @@ export function renderIssueFixPrompt(
     `Remediation: ${selectedRemediation?.title ?? "Recommended fix"}`,
     selectedRemediation?.description ?? issue.remediation,
     ...(selectedRemediation?.type === "code_change"
-      ? ["", "Proposed diff:", "```diff", selectedRemediation.diff, "```"]
+      ? [
+          "",
+          "Proposed changes:",
+          ...codeChangeParts(selectedRemediation)
+            .filter(
+              (change) =>
+                !targetRepository ||
+                !change.repository ||
+                change.repository === targetRepository,
+            )
+            .flatMap((change) => [
+            change.repository ? `Repository: ${change.repository}` : "",
+            "```diff",
+            change.diff,
+            "```",
+            ]),
+        ]
       : []),
     ...(evidence ? ["", "Evidence:", evidence] : []),
     "",

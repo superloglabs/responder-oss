@@ -82,7 +82,10 @@ describe("investigation report", () => {
             type: "code_change",
             title: "Restore the route guard",
             description: "Return early when the optional value is absent.",
-            diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1,2 @@\n+if (!value) return;\n use(value);",
+            changes: [{
+              repository: null,
+              diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1,2 @@\n+if (!value) return;\n use(value);",
+            }],
           },
           {
             type: "external_action",
@@ -96,6 +99,78 @@ describe("investigation report", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it("accepts one code remediation containing changes for several repositories", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Channel attribution needs coordinated changes",
+      summary: "The app and SDK must propagate the resolved channel.",
+      issues: [{
+        resolution: "new",
+        title: "Channel attribution is incomplete",
+        description: "Events lose their channel before ingest.",
+        rootCause: "The channel is resolved but not forwarded to the event producer.",
+        timeline: [{
+          title: "Event was rejected",
+          description: "Ingest rejected the event because no channel resolved.",
+        }],
+        severity: "SEV-2",
+        remediations: [{
+          type: "code_change",
+          title: "Propagate the resolved channel",
+          description: "Update the app and SDK together so every event carries its channel.",
+          changes: [
+            {
+              repository: "acme/app",
+              diff: "diff --git a/src/config.ts b/src/config.ts\n--- a/src/config.ts\n+++ b/src/config.ts\n@@ -1 +1,2 @@\n+export const channelId = \"chan\";",
+            },
+            {
+              repository: "acme/sdk",
+              diff: "diff --git a/src/events.ts b/src/events.ts\n--- a/src/events.ts\n+++ b/src/events.ts\n@@ -1 +1,2 @@\n+export const channelId = \"chan\";",
+            },
+          ],
+        }],
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("renders only the targeted repository change for a remediation job", () => {
+    const prompt = renderIssueFixPrompt(
+      {
+        id: "07070707-0707-4707-8707-070707070707",
+        title: "Channel attribution is incomplete",
+        description: "Events lose their channel before ingest.",
+        rootCause: "The channel is resolved but not forwarded.",
+        timeline: [],
+        severity: "SEV-2",
+        remediation: "Update the app and SDK.",
+        evidence: [evidence],
+      },
+      {
+        type: "code_change",
+        title: "Propagate the resolved channel",
+        description: "Update the app and SDK together.",
+        changes: [
+          {
+            repository: "acme/app",
+            diff: "diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new",
+          },
+          {
+            repository: "acme/sdk",
+            diff: "diff --git a/sdk.ts b/sdk.ts\n--- a/sdk.ts\n+++ b/sdk.ts\n@@ -1 +1 @@\n-old\n+new",
+          },
+        ],
+      },
+      "acme/sdk",
+    );
+
+    expect(prompt).toContain("Repository: acme/sdk");
+    expect(prompt).not.toContain("Repository: acme/app");
+    expect(prompt).toContain("sdk.ts");
   });
 
   it("rejects a multi-sentence remediation description", () => {
