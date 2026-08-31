@@ -447,6 +447,7 @@ export function AgentCreatePage() {
   const stepStorageKey = storageKey(DRAFT_STEP_STORAGE_KEY, agentId);
   const returnTo = agentId ? `/agents/${agentId}/edit` : "/agents/new";
   const sentryJustConnected = successfulConnectionReturn("sentry");
+  const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const axiomJustConnected = successfulConnectionReturn("axiom");
@@ -811,6 +812,7 @@ export function AgentCreatePage() {
     linearJustConnected,
     returnedIntegrationAccountId,
     sentryJustConnected,
+    slackJustConnected,
     vercelJustConnected,
   ]);
 
