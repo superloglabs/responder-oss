@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   type AgentListItem,
   fetchAgents,
@@ -13,16 +13,105 @@ import {
   integrationsForAgent,
 } from "../agent-list-presentation";
 import { AppShell } from "../components/app-shell";
-import { ArrowIcon, PlusIcon } from "../components/icons";
+import { EllipsisIcon, PlusIcon } from "../components/icons";
 import { AgentListSkeleton } from "../components/screen-skeletons";
-import { Badge, DataTable } from "../design-system";
+import { Badge, DataTable, IconButton } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
+
+function AgentRowMenu({ agent }: { agent: AgentListItem }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  function cancelScheduledClose() {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  // The short delay lets the pointer cross the gap between the trigger and
+  // the popover without the menu closing underneath it.
+  function scheduleClose() {
+    cancelScheduledClose();
+    closeTimer.current = window.setTimeout(() => setOpen(false), 140);
+  }
+
+  useEffect(() => cancelScheduledClose, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (
+        event.target instanceof Node &&
+        !rootRef.current?.contains(event.target)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div
+      className="agentRowMenu"
+      onMouseEnter={cancelScheduledClose}
+      onMouseLeave={scheduleClose}
+      ref={rootRef}
+    >
+      <IconButton
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Actions for ${agent.name}`}
+        onClick={() => setOpen((value) => !value)}
+        onMouseEnter={() => {
+          cancelScheduledClose();
+          setOpen(true);
+        }}
+        size="small"
+        variant="ghost"
+      >
+        <EllipsisIcon />
+      </IconButton>
+      {open ? (
+        <div className="agentRowMenu__popover" role="menu">
+          <Link
+            className="agentRowMenu__item"
+            role="menuitem"
+            to={`/agents/${agent.id}`}
+          >
+            View details
+          </Link>
+          <Link
+            className="agentRowMenu__item"
+            role="menuitem"
+            to={`/agents/${agent.id}/edit`}
+          >
+            Edit agent
+          </Link>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentListItem[]>([]);
   const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
   useDocumentTitle("Agents");
 
   useEffect(() => {
@@ -162,16 +251,8 @@ export function AgentsPage() {
               {
                 align: "right",
                 header: "",
-                key: "open",
-                render: (agent) => (
-                  <Link
-                    aria-label={`Open ${agent.name}`}
-                    className="agentTableArrow"
-                    to={`/agents/${agent.id}`}
-                  >
-                    <ArrowIcon />
-                  </Link>
-                ),
+                key: "actions",
+                render: (agent) => <AgentRowMenu agent={agent} />,
                 width: "5%",
               },
             ]}
@@ -192,6 +273,7 @@ export function AgentsPage() {
             ]}
             getRowKey={(agent) => agent.id}
             onFilterChange={setAgentFilter}
+            onRowClick={(agent) => navigate(`/agents/${agent.id}`)}
             rows={filteredAgents}
           />
         </section>

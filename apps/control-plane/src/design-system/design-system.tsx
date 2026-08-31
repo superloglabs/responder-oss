@@ -735,6 +735,7 @@ export interface DataTableProps<Row, Filter extends string = string> {
   getRowGroup?: (row: Row) => string;
   getRowKey: (row: Row) => string | number;
   onFilterChange?: (value: Filter) => void;
+  onRowClick?: (row: Row) => void;
   rows: Array<Row>;
 }
 
@@ -768,6 +769,7 @@ export function DataTable<Row, Filter extends string = string>({
   getRowGroup,
   getRowKey,
   onFilterChange,
+  onRowClick,
   rows,
 }: DataTableProps<Row, Filter>) {
   const rowGroups = getRowGroup ? groupDataTableRows(rows, getRowGroup) : [];
@@ -797,7 +799,26 @@ export function DataTable<Row, Filter extends string = string>({
 
   function renderedRows(groupRows: Array<Row>) {
     return groupRows.map((row) => (
-      <tr key={getRowKey(row)}>
+      <tr
+        className={onRowClick ? "dsDataTable__row--interactive" : undefined}
+        key={getRowKey(row)}
+        onClick={
+          onRowClick
+            ? (event) => {
+                // Clicks on links, buttons, and inputs inside the row keep
+                // their own behavior; selecting text must not navigate.
+                if (
+                  event.target instanceof Element &&
+                  event.target.closest("a, button, input, textarea, select, label")
+                ) {
+                  return;
+                }
+                if (window.getSelection()?.toString()) return;
+                onRowClick(row);
+              }
+            : undefined
+        }
+      >
         {columns.map((column) => (
           <td
             className={`dsDataTable__cell--${column.align ?? "left"}`}
