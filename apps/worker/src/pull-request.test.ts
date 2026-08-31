@@ -114,6 +114,7 @@ describe("pull request tool", () => {
             "A missing value made the page stop loading.",
           summary: "Handle the unchecked value.",
           testing: "Added a regression test.",
+          body: "Closes WAN-123\n\n## Summary\nHandle the unchecked value.\n\n## How to see it working\nRun the focused test.",
         }),
       ),
     ).resolves.toEqual({
@@ -134,9 +135,7 @@ describe("pull request tool", () => {
     });
     expect(createPullRequestFromSandbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: expect.stringContaining(
-          "[Sentry issue](<https://example.sentry.io/issues/42/>)",
-        ),
+        body: "Closes WAN-123\n\n## Summary\nHandle the unchecked value.\n\n## How to see it working\nRun the focused test.",
       }),
       session,
     );
@@ -168,6 +167,7 @@ describe("pull request tool", () => {
           failureMechanism: "A missing value made the page stop loading.",
           summary: "Handle the unchecked value.",
           testing: "Added a regression test.",
+          body: "A concise pull request body.",
         }),
       ),
     ).resolves.toContain("Invalid JSON input for tool");
