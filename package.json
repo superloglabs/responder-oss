@@ -26,6 +26,7 @@
     "callbacks:use": "bash scripts/local-tunnel.sh claim",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "legacy-redirect:import": "tsx scripts/import-legacy-account-redirects.ts",
     "dev": "pnpm --filter @responder/control-plane dev",
     "dev:worker": "bash scripts/local-worker.sh",
     "dev:callback-bridge": "node scripts/local-callback-bridge.mjs",

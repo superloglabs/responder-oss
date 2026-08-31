@@ -232,6 +232,13 @@
       "when": 1787849835131,
       "tag": "0032_flippant_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788183472547,
+      "tag": "0033_melodic_frightful_four",
+      "breakpoints": true
     }
   ]
 }
