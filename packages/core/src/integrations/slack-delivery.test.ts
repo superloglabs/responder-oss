@@ -301,7 +301,7 @@ describe("Slack issue delivery", () => {
           type: "code_change",
           title: "Update the component default",
           description: "Use the configured petal color.",
-          diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+          changes: [{ repository: null, diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b" }],
         },
         {
           id: "26262626-2626-4626-8626-262626262626",

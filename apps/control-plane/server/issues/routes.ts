@@ -70,7 +70,12 @@ export const issueRoutes = new Hono()
       return context.json({ error: result.error }, result.status);
     }
     return context.json(
-      { requestId: result.requestId, sessionId: result.sessionId },
+      {
+        requestId: result.requestId,
+        requestIds: result.requestIds ?? [result.requestId],
+        sessionId: result.sessionId,
+        sessionIds: result.sessionIds ?? [result.sessionId],
+      },
       202,
     );
   })

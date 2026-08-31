@@ -49,7 +49,7 @@ function databaseDouble(status = "investigating") {
         type: "code_change",
         title: "Fix the first issue",
         description: "Fix the first issue",
-        diff: "diff --git a/first.ts b/first.ts\n--- a/first.ts\n+++ b/first.ts\n@@ -1 +1 @@\n-old\n+new",
+        changes: [{ repository: null, diff: "diff --git a/first.ts b/first.ts\n--- a/first.ts\n+++ b/first.ts\n@@ -1 +1 @@\n-old\n+new" }],
       }],
     },
     {
@@ -63,7 +63,7 @@ function databaseDouble(status = "investigating") {
         type: "code_change",
         title: "Fix the second issue",
         description: "Fix the second issue",
-        diff: "diff --git a/second.ts b/second.ts\n--- a/second.ts\n+++ b/second.ts\n@@ -1 +1 @@\n-old\n+new",
+        changes: [{ repository: null, diff: "diff --git a/second.ts b/second.ts\n--- a/second.ts\n+++ b/second.ts\n@@ -1 +1 @@\n-old\n+new" }],
       }],
     },
   ]);

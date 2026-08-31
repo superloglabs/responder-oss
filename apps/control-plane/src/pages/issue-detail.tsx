@@ -538,16 +538,18 @@ export function IssueDetailPage() {
             <h2 className="issueSection__title">Remediations</h2>
             <div className="remediationList">
               {issue.remediations.map((remediation) => {
-                const request = pullRequests.find(
+                const remediationRequests = pullRequests.filter(
                   (candidate) => candidate.remediationId === remediation.id,
                 );
-                const publishedPullRequest =
-                  request?.pullRequestUrl &&
-                  (request.status === "created" || request.status === "merged")
-                    ? request
-                    : null;
+                const request = remediationRequests[0];
+                const publishedPullRequests = remediationRequests.filter(
+                  (candidate) =>
+                    candidate.pullRequestUrl &&
+                    (candidate.status === "created" || candidate.status === "merged"),
+                );
+                const publishedPullRequest = publishedPullRequests[0] ?? null;
                 const failedPullRequest =
-                  request?.status === "failed" ? request : null;
+                  remediationRequests.find((candidate) => candidate.status === "failed") ?? null;
                 return (
                   <article
                     className="remediationCard"
@@ -559,7 +561,9 @@ export function IssueDetailPage() {
                         className={`remediationCard__kind remediationCard__kind--${remediation.type}`}
                       >
                         {remediation.type === "code_change"
-                          ? "Code change"
+                          ? remediation.changes
+                            ? "Code change plan"
+                            : "Code change"
                           : "External action"}
                       </span>
                       <h3>{remediation.title}</h3>
@@ -569,31 +573,35 @@ export function IssueDetailPage() {
                     </p>
                     {remediation.type === "code_change" && publishedPullRequest ? (
                       <>
-                        <a
-                          className="remediationPullRequest"
-                          href={publishedPullRequest.pullRequestUrl ?? undefined}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          <span
-                            className={`remediationPullRequest__icon remediationPullRequest__icon--${publishedPullRequest.status}`}
-                          >
-                            <PullRequestIcon />
-                          </span>
-                          <span className="remediationPullRequest__body">
-                            <strong>
-                              Pull request #{publishedPullRequest.pullRequestNumber}
-                            </strong>
-                            <small>{publishedPullRequest.repositoryFullName}</small>
-                          </span>
-                          <span
-                            className={`remediationPullRequest__state remediationPullRequest__state--${publishedPullRequest.status}`}
-                          >
-                            {pullRequestStateLabel(publishedPullRequest.status)}
-                          </span>
-                          <ArrowIcon />
-                        </a>
-                        <PullRequestActivity request={publishedPullRequest} />
+                        {publishedPullRequests.map((pullRequest) => (
+                          <div key={pullRequest.id}>
+                            <a
+                              className="remediationPullRequest"
+                              href={pullRequest.pullRequestUrl ?? undefined}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <span
+                                className={`remediationPullRequest__icon remediationPullRequest__icon--${pullRequest.status}`}
+                              >
+                                <PullRequestIcon />
+                              </span>
+                              <span className="remediationPullRequest__body">
+                                <strong>
+                                  Pull request #{pullRequest.pullRequestNumber}
+                                </strong>
+                                <small>{pullRequest.repositoryFullName}</small>
+                              </span>
+                              <span
+                                className={`remediationPullRequest__state remediationPullRequest__state--${pullRequest.status}`}
+                              >
+                                {pullRequestStateLabel(pullRequest.status)}
+                              </span>
+                              <ArrowIcon />
+                            </a>
+                            <PullRequestActivity request={pullRequest} />
+                          </div>
+                        ))}
                         {codeChangeRemediationId === remediation.id ? (
                           <Suspense
                             fallback={

@@ -643,7 +643,11 @@ export const issues = pgTable(
 );
 
 export const activeIssuePullRequestIndexPredicate = sql.raw(
-  `"status" in ('queued', 'creating', 'created')`,
+  `"status" in ('queued', 'creating', 'created') and "repository_full_name" is null`,
+);
+
+export const activeIssuePullRequestRepositoryIndexPredicate = sql.raw(
+  `"status" in ('queued', 'creating', 'created') and "repository_full_name" is not null`,
 );
 
 export const issuePullRequests = pgTable(
@@ -678,6 +682,9 @@ export const issuePullRequests = pgTable(
     uniqueIndex("issue_pull_requests_active_issue_idx")
       .on(table.issueId)
       .where(activeIssuePullRequestIndexPredicate),
+    uniqueIndex("issue_pull_requests_active_issue_repository_idx")
+      .on(table.issueId, table.repositoryFullName)
+      .where(activeIssuePullRequestRepositoryIndexPredicate),
     index("issue_pull_requests_issue_created_idx").on(
       table.issueId,
       table.createdAt,

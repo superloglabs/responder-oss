@@ -10,36 +10,50 @@ export function RemediationDiff({
   remediation: IssueRemediation & { type: "code_change" };
 }) {
   const { theme } = useColorTheme();
-  const files = useMemo(() => {
-    try {
-      return parsePatchFiles(
-        remediation.diff,
-        `remediation-${remediation.id}`,
-        true,
-      ).flatMap((patch) => patch.files);
-    } catch {
-      return [];
-    }
-  }, [remediation]);
+  const changes = useMemo(() => remediation.changes, [remediation.changes]);
+  const files = useMemo(
+    () => changes.flatMap((change, changeIndex) => {
+      try {
+        return parsePatchFiles(
+          change.diff,
+          `remediation-${remediation.id}-${changeIndex}`,
+          true,
+        ).flatMap((patch) =>
+          patch.files.map((file) => ({ file, repository: change.repository })),
+        );
+      } catch {
+        return [];
+      }
+    }),
+    [changes, remediation.id],
+  );
 
   if (files.length === 0) {
-    return <pre className="remediationDiff__fallback">{remediation.diff}</pre>;
+    return (
+      <pre className="remediationDiff__fallback">
+        {changes.map((change) =>
+          `${change.repository ? `# ${change.repository}\n` : ""}${change.diff}`,
+        ).join("\n\n")}
+      </pre>
+    );
   }
 
   return (
     <div className="remediationDiff">
-      {files.map((file, index) => (
-        <FileDiff
-          className="remediationDiff__file"
-          fileDiff={file}
-          key={`${remediation.id}-${index}`}
-          options={{
-            diffIndicators: "bars",
-            diffStyle: "unified",
-            overflow: "scroll",
-            themeType: theme,
-          }}
-        />
+      {files.map(({ file, repository }, index) => (
+        <div key={`${remediation.id}-${index}`}>
+          {repository ? <h4>{repository}</h4> : null}
+          <FileDiff
+            className="remediationDiff__file"
+            fileDiff={file}
+            options={{
+              diffIndicators: "bars",
+              diffStyle: "unified",
+              overflow: "scroll",
+              themeType: theme,
+            }}
+          />
+        </div>
       ))}
     </div>
   );

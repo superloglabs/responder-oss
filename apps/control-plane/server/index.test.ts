@@ -1266,7 +1266,7 @@ describe("control-plane API", () => {
         type: "code_change",
         title: "Restore the plant guard",
         description: "Handle plants without a configured color.",
-        diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+        changes: [{ repository: null, diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b" }],
       },
       status: "creating",
     });
@@ -1309,7 +1309,7 @@ describe("control-plane API", () => {
           type: "code_change",
           title: "Restore the plant guard",
           description: "Handle plants without a configured color.",
-          diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+          changes: [{ repository: null, diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b" }],
         },
         status: "creating",
       },

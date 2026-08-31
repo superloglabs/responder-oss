@@ -386,7 +386,7 @@ export function investigationInstructions(input: {
       : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
     input.threadMode
       ? null
-      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. A code_change must include a complete unified git diff based on files you inspected. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
+      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. A code_change must contain a changes array with one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
     input.threadMode
       ? null
       : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",

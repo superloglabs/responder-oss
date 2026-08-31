@@ -10,7 +10,9 @@ export type IssueRemediationStartResult =
   | {
       ok: true;
       requestId: string;
+      requestIds?: string[];
       sessionId: string | null;
+      sessionIds?: Array<string | null>;
     }
   | {
       ok: false;
@@ -25,11 +27,16 @@ export async function startIssueRemediation(input: {
 }): Promise<IssueRemediationStartResult> {
   const queued = await queueManualIssuePullRequest(input);
   try {
-    const job = await queueIssueRemediation(queued.id);
+    const requests = Array.isArray(queued) ? queued : [queued];
+    const jobs = await Promise.all(
+      requests.map((request) => queueIssueRemediation(request.id)),
+    );
     return {
       ok: true,
-      requestId: job.requestId,
-      sessionId: `openai-daytona:${job.jobId}`,
+      requestId: jobs[0]!.requestId,
+      requestIds: jobs.map((job) => job.requestId),
+      sessionId: `openai-daytona:${jobs[0]!.jobId}`,
+      sessionIds: jobs.map((job) => `openai-daytona:${job.jobId}`),
     };
   } catch (caught) {
     const error =

@@ -110,6 +110,9 @@ export async function queueIssueRemediationJob(
           evidence: remediation.issueEvidence,
         },
         selectedRemediation: remediation.selectedRemediation,
+        ...(remediation.repositoryFullName
+          ? { targetRepository: remediation.repositoryFullName }
+          : {}),
         queuedAt: new Date().toISOString(),
         remediationRequestId: remediation.requestId,
         runtimeProfileId: remediation.runtimeProfileId,

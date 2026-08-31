@@ -4,7 +4,7 @@ import {
   setDefaultOpenAIKey,
   setTracingDisabled,
 } from "@openai/agents";
-import { Capabilities, SandboxAgent, skills } from "@openai/agents/sandbox";
+import { Capabilities, SandboxAgent } from "@openai/agents/sandbox";
 import {
   DaytonaSandboxClient,
   type DaytonaSandboxSession,
@@ -20,11 +20,6 @@ import {
 } from "./investigate.js";
 import { createPullRequestTool } from "./pull-request.js";
 import { checkoutRuntimeRepositories } from "./repositories.js";
-import {
-  discoverPullRequestTemplates,
-  discoverRepositoryInstructions,
-  loadRepositorySkills,
-} from "./repository-skills.js";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
@@ -196,7 +191,7 @@ export async function runRemediationAgent(
   try {
     session = await createDaytonaSandboxSession(client, config, sandboxName);
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
-    if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
+    await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositories(
       session,
       job.config.id,
@@ -204,15 +199,6 @@ export async function runRemediationAgent(
     if (repositories.length === 0) {
       throw new Error("No repositories are attached to this Agent version");
     }
-    const repositorySkills = await loadRepositorySkills(session, repositories);
-    const repositoryInstructions = await discoverRepositoryInstructions(
-      session,
-      repositories,
-    );
-    const pullRequestTemplates = await discoverPullRequestTemplates(
-      session,
-      repositories,
-    );
     const pullRequestTool = createPullRequestTool({
       agentConfigVersionId: job.config.id,
       investigationId: job.investigationId,
@@ -220,6 +206,7 @@ export async function runRemediationAgent(
       pullRequestRequestId: job.remediationRequestId,
       repositories,
       session,
+      targetRepository: job.targetRepository,
     });
     const agent = new SandboxAgent({
       name: "Responder issue fixer",
@@ -227,45 +214,38 @@ export async function runRemediationAgent(
       instructions: [
         runtimeProfile?.systemPrompt,
         job.config.prompt,
-        renderIssueFixPrompt(job.issue, job.selectedRemediation),
+        renderIssueFixPrompt(
+          job.issue,
+          job.selectedRemediation,
+          job.targetRepository,
+        ),
         "The selected repositories are already checked out:",
         ...repositories.map(
           (repository) =>
             `- ${repository.repository}: ${repository.path} (${repository.branch} at ${repository.sha})`,
         ),
         remediationApplyPatchPathInstruction,
-        repositoryInstructions.length > 0
-          ? [
-              "Before editing, read the repository instruction file(s) that apply to the files you will change:",
-              ...repositoryInstructions.map((path) => `- ${path}`),
-            ].join("\n")
-          : undefined,
         job.selectedRemediation?.type === "code_change"
-          ? "Use the proposed diff as the starting point. Verify it against the current checkout, adjust it when needed, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks."
-          : "Inspect the relevant code, make the smallest safe fix in exactly one selected repository, and run the narrowest useful checks.",
+          ? `Use the proposed diff as the starting point. Verify it against the current checkout, adjust it when needed, make the smallest safe fix in ${job.targetRepository ? `the target repository ${job.targetRepository}` : "one selected repository"}, and run the narrowest useful checks.`
+          : `Inspect the relevant code, make the smallest safe fix in ${job.targetRepository ? `the target repository ${job.targetRepository}` : "one selected repository"}, and run the narrowest useful checks.`,
         remediationFailureMechanismInstruction,
-        "Call create_pull_request with exactly one of the selected repository names shown above.",
-        pullRequestTemplates.length > 0
-          ? [
-              "Before creating the pull request, read the repository template file(s) below and use the applicable template. Pass the completed Markdown as the body; do not invent a different structure:",
-              ...pullRequestTemplates.map((path) => `- ${path}`),
-            ].join("\n")
-          : "Before creating the pull request, write a concise Markdown body describing the change and verification.",
+        `Call create_pull_request for ${job.targetRepository ? `the target repository ${job.targetRepository}` : "exactly one of the selected repository names shown above"}.`,
         `Then call create_pull_request with issue ID ${job.issue.id}. Do not finish without creating the pull request or clearly explaining why no safe code fix is possible.`,
         "Do not expose credentials or secret values. The pull request is the only allowed external change.",
         workspaceSecretUsageInstructions(workspaceSecrets),
       ]
         .filter((instruction): instruction is string => Boolean(instruction))
         .join("\n\n"),
-      capabilities: [
-        ...Capabilities.default(),
-        ...(repositorySkills ? [skills({ from: repositorySkills })] : []),
-      ],
+      capabilities: Capabilities.default(),
       tools: [pullRequestTool],
     });
     const result = await run(
       agent,
-      renderIssueFixPrompt(job.issue, job.selectedRemediation),
+      renderIssueFixPrompt(
+        job.issue,
+        job.selectedRemediation,
+        job.targetRepository,
+      ),
       {
         maxTurns: remediationMaxTurns,
         sandbox: { session },

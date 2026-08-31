@@ -13,7 +13,7 @@ const codeRemediation = {
   type: "code_change" as const,
   title: "Restore the plant guard",
   description: "Handle plants without a configured color.",
-  diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b",
+  changes: [{ repository: null, diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b" }],
 };
 const externalRemediation = {
   id: "26262626-2626-4626-8626-262626262626",
