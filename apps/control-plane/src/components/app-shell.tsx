@@ -113,9 +113,8 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
     <main className={`appShell appShell--${density}`}>
       <header className="globalHeader">
         <div className="globalHeader__left">
-          <Link aria-label="Superlog Responder home" className="brand" to="/agents">
+          <Link aria-label="Superlog home" className="brand" to="/agents">
             <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
-            <span>Responder</span>
           </Link>
           <nav aria-label="Primary navigation" className="primaryNav">
             <Link
