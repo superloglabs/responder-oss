@@ -316,13 +316,19 @@ export async function redeliverInvestigationSlackIssue(
 export function slackCompletedInvestigationCard(
   context: Pick<
     SlackInvestigationDeliveryContext,
-    "agentId" | "executionMode" | "investigationId" | "title" | "traceItems"
+    | "agentId"
+    | "executionMode"
+    | "investigationId"
+    | "organizationId"
+    | "title"
+    | "traceItems"
   >,
 ) {
   return slackInvestigationCard({
     agentId: context.agentId,
     detail: "Completed the investigation plan.",
     investigationId: context.investigationId,
+    organizationId: context.organizationId,
     showInvestigationLink: context.executionMode !== "slack_thread",
     status: "complete",
     title: context.title,
@@ -382,6 +388,7 @@ export async function deliverSlackThreadInvestigationResponse(input: {
     agentId: context.agentId,
     detail: "Completed the investigation plan.",
     investigationId: context.investigationId,
+    organizationId: context.organizationId,
     showInvestigationLink: false,
     status: "complete",
     title: context.title,

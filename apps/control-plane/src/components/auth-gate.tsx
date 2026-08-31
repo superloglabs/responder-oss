@@ -465,13 +465,69 @@ function InvitationGate({
   );
 }
 
+function WorkspaceActivation({
+  organizationId,
+  refetch,
+}: {
+  organizationId: string;
+  refetch: () => Promise<unknown>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void authClient.organization
+      .setActive({ organizationId })
+      .then(async (result) => {
+        if (cancelled) return;
+        if (result.error) {
+          setError(result.error.message ?? "Could not open the workspace");
+          return;
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.delete("organization_id");
+        window.history.replaceState(window.history.state, "", url);
+        await refetch();
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not open the workspace",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, refetch]);
+
+  return (
+    <AuthFrame>
+      {error ? (
+        <div className="authIntro">
+          <h1>Workspace unavailable</h1>
+          <p>{error}</p>
+        </div>
+      ) : (
+        <p className="authMuted">Opening workspace…</p>
+      )}
+    </AuthFrame>
+  );
+}
+
 export function AuthGate({ children }: AuthGateProps) {
   const session = authClient.useSession();
   const invitationMatch = window.location.pathname.match(
     /^\/invite\/([0-9a-f-]+)$/i,
   );
+  const requestedOrganizationId = new URL(window.location.href).searchParams.get(
+    "organization_id",
+  );
 
   const signedInUserId = session.data?.user.id;
+  const activeOrganizationId = session.data?.session.activeOrganizationId;
   useEffect(() => {
     if (!signedInUserId) return;
     const url = new URL(window.location.href);
@@ -515,6 +571,18 @@ export function AuthGate({ children }: AuthGateProps) {
       <AuthFrame>
         <SignIn isInvitation={Boolean(invitationMatch?.[1])} />
       </AuthFrame>
+    );
+  }
+
+  if (
+    requestedOrganizationId &&
+    requestedOrganizationId !== activeOrganizationId
+  ) {
+    return (
+      <WorkspaceActivation
+        organizationId={requestedOrganizationId}
+        refetch={session.refetch}
+      />
     );
   }
 
