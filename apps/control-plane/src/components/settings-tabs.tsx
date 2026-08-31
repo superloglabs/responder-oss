@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-type SettingsSection = "billing" | "integrations" | "workspace";
+type SettingsSection = "billing" | "integrations" | "tag-mode" | "workspace";
 
 export function SettingsTabs({ active }: { active: SettingsSection }) {
   const [billingEnabled, setBillingEnabled] = useState(false);
@@ -31,6 +31,13 @@ export function SettingsTabs({ active }: { active: SettingsSection }) {
         to="/settings"
       >
         Integrations
+      </Link>
+      <Link
+        aria-current={active === "tag-mode" ? "page" : undefined}
+        className={active === "tag-mode" ? "isActive" : undefined}
+        to="/settings/tag-mode"
+      >
+        Tag mode
       </Link>
       <Link
         aria-current={active === "workspace" ? "page" : undefined}

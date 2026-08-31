@@ -116,6 +116,26 @@ describe("Slack alert acknowledgement", () => {
     );
   });
 
+  it("posts the tag-mode plan while keeping eyes active until completion", async () => {
+    mocks.recordInvestigationSlackMessage.mockResolvedValue("investigating");
+
+    await expect(
+      acknowledgeSlackAlert({
+        ...input,
+        threadMode: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.addSlackReaction).toHaveBeenCalledBefore(
+      mocks.postSlackMessage,
+    );
+    expect(mocks.setSlackThreadStatus).not.toHaveBeenCalled();
+    expect(
+      mocks.reconcileCompletedInvestigationSlackCard,
+    ).not.toHaveBeenCalled();
+    expect(mocks.failInvestigationSlackCard).not.toHaveBeenCalled();
+  });
+
   it("reconciles a fast failure after recording the live message", async () => {
     mocks.recordInvestigationSlackMessage.mockResolvedValue("failed");
 

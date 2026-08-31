@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
-import { agentConfigurationSchema } from "../../../../packages/core/src/agents/config.js";
+import {
+  agentConfigurationSchema,
+  slackThreadModeConfigurationSchema,
+} from "../../../../packages/core/src/agents/config.js";
 import type { AgentConfiguration } from "../../../../packages/core/src/agents/config.js";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
@@ -9,9 +12,11 @@ import {
   createAgent,
   disableAgentsWithUnavailableRepositories,
   getAgent,
+  getSlackThreadModeConfiguration,
   listAgentOptions,
   listAgents,
   setAgentEnabled,
+  saveSlackThreadModeConfiguration,
   updateAgent,
 } from "../../../../packages/core/src/db/agents.js";
 import {
@@ -257,6 +262,43 @@ export const agentRoutes = new Hono()
     }
 
     return context.json(await listAgentOptions(tenant.organizationId));
+  })
+  .get("/thread-mode", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    return context.json({
+      configuration: await getSlackThreadModeConfiguration(
+        tenant.organizationId,
+      ),
+    });
+  })
+  .put("/thread-mode", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = slackThreadModeConfigurationSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Invalid tag mode configuration", issues: parsed.error.issues },
+        400,
+      );
+    }
+    try {
+      await saveSlackThreadModeConfiguration({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        configuration: parsed.data,
+      });
+      return context.json({ configuration: parsed.data });
+    } catch (error) {
+      const response = configurationError(error);
+      return context.json(response.body, response.status);
+    }
   })
   .post("/options/refresh/slack", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

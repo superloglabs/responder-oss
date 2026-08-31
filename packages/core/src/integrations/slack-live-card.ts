@@ -5,11 +5,14 @@ import { responderIssueUrl } from "../responder-urls.js";
 import {
   recordInvestigationSlackReply,
   recordInvestigationSlackTrace,
+  setInvestigationSlackReaction,
 } from "../db/investigations.js";
 import { getSlackInvestigationLiveContext } from "../db/issues.js";
 import {
   SlackApiError,
+  removeSlackReaction,
   setSlackThreadStatus,
+  stopSlackResponseStream,
   updateSlackMessage,
 } from "./slack.js";
 import type { SlackInvestigationTraceItem } from "./slack-live-progress.js";
@@ -778,6 +781,7 @@ export function slackInvestigationCard(input: {
   agentId: string;
   detail: string;
   investigationId: string;
+  showInvestigationLink?: boolean;
   status: SlackInvestigationCardStatus;
   title: string;
   traceItems?: SlackInvestigationTraceItem[];
@@ -789,11 +793,6 @@ export function slackInvestigationCard(input: {
       .replace(/:rotating_light:/giu, "🚨"),
     180,
   );
-  const source = {
-    type: "url",
-    text: "View investigation",
-    url: investigationUrl(input.agentId, input.investigationId),
-  };
   const summaryTask = {
     task_id: `${input.investigationId}:current`.slice(0, 255),
     title:
@@ -804,7 +803,17 @@ export function slackInvestigationCard(input: {
           : nonEmptyText(input.detail, 180, "Investigation in progress"),
     status: input.status,
     ...(input.status === "error" ? { output: richText(input.detail) } : {}),
-    sources: [source],
+    ...(input.showInvestigationLink === false
+      ? {}
+      : {
+          sources: [
+            {
+              type: "url",
+              text: "View investigation",
+              url: investigationUrl(input.agentId, input.investigationId),
+            },
+          ],
+        }),
   };
   return {
     text:
@@ -815,7 +824,7 @@ export function slackInvestigationCard(input: {
       {
         type: "plan",
         block_id: `investigation_plan_${input.status}_${randomUUID()}`,
-        title: "Investigation trace",
+        title: "Trace",
         tasks: [
           ...(input.traceItems ?? [])
             .slice(-11)
@@ -951,6 +960,7 @@ async function performInvestigationSlackProgressUpdate(
       agentId: context.agentId,
       detail,
       investigationId: context.investigationId,
+      showInvestigationLink: context.executionMode !== "slack_thread",
       status: "in_progress",
       title: context.title,
       traceItems,
@@ -1025,10 +1035,36 @@ async function performInvestigationSlackCardFailure(
   if (!context) return false;
   const token = accessToken(context.source.encryptedCredentials);
   const failures: unknown[] = [];
+  const failureMessage =
+    "I couldn't complete this investigation. Please try again or add more context.";
 
   if (traceItems) {
     try {
       await recordInvestigationSlackTrace(investigationId, traceItems);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  if (
+    context.executionMode === "slack_thread" &&
+    context.source.responseMessageTimestamp
+  ) {
+    try {
+      await stopSlackResponseStream({
+        accessToken: token,
+        channelId: context.source.channelId,
+        markdownText: failureMessage,
+        timestamp: context.source.responseMessageTimestamp,
+      });
+      await recordInvestigationSlackReply(investigationId, {
+        attachments: [],
+        authorName: "Responder",
+        blocks: [{ type: "markdown", text: failureMessage }],
+        key: "thread-response",
+        slackTimestamp: context.source.responseMessageTimestamp,
+        text: failureMessage,
+      });
     } catch (error) {
       failures.push(error);
     }
@@ -1039,6 +1075,7 @@ async function performInvestigationSlackCardFailure(
       agentId: context.agentId,
       detail: "The investigation stopped before it could finish.",
       investigationId: context.investigationId,
+      showInvestigationLink: context.executionMode !== "slack_thread",
       status: "error",
       title: context.title,
       traceItems: traceItems ?? context.traceItems,
@@ -1073,6 +1110,19 @@ async function performInvestigationSlackCardFailure(
     });
   } catch (error) {
     failures.push(error);
+  }
+  if (context.source.reactionTimestamp) {
+    try {
+      await removeSlackReaction({
+        accessToken: token,
+        channelId: context.source.channelId,
+        name: "eyes",
+        timestamp: context.source.reactionTimestamp,
+      });
+      await setInvestigationSlackReaction(investigationId, "eyes", false);
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length > 0) {
     throw new AggregateError(

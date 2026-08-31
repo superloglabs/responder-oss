@@ -153,6 +153,27 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain(
       "Do not include actions performed by Responder during the investigation in an issue timeline",
     );
+    expect(instructions).toContain(
+      "Keep each remediation description to at most one sentence.",
+    );
+  });
+
+  it("keeps Slack thread turns sandbox-only without issue or PR workflows", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Investigate what the person asked.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+    });
+
+    expect(instructions).toContain("ad-hoc Slack thread investigation");
+    expect(instructions).toContain("Never create or update issues");
+    expect(instructions).toContain("nothing in it is published");
+    expect(instructions).toContain("response directly to the Slack thread");
+    expect(instructions).not.toContain("search_existing_issues");
+    expect(instructions).not.toContain("submit_investigation_report");
   });
 
   it("keeps ClickStack investigation access read-only", () => {

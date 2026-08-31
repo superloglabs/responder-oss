@@ -16,6 +16,7 @@ import {
   getRuntimeSentryConnection,
   getRuntimeUpstashConnection,
   getRuntimeVercelConnections,
+  getSlackInvestigationSessionRuntime,
   SentryConnectionUnavailableError,
   type RuntimeSentryConnection,
 } from "@responder/core/db/investigations";
@@ -30,7 +31,10 @@ import type {
   InvestigationInput,
   InvestigationTraceEvent,
 } from "@responder/core/db/schema";
-import type { InvestigationJob } from "@responder/core/jobs";
+import type {
+  InvestigationJob,
+  SlackThreadInvestigationJob,
+} from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
 import {
   createAwsMcpServer,
@@ -45,6 +49,8 @@ import { createLangfuseMcpServer } from "./langfuse.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
 import {
   checkoutRuntimeRepositories,
+  loadCheckedOutRepositories,
+  refreshRuntimeRepositories,
   type CheckedOutRepository,
 } from "./repositories.js";
 import { createRepositoryInspectionTools } from "./repository-inspection.js";
@@ -56,6 +62,7 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
+  pauseDaytonaSandbox,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
 import {
@@ -274,6 +281,7 @@ export function investigationInstructions(input: {
     allowedHosts: string[];
   }>;
   vercelAccountIds?: string[];
+  threadMode?: boolean;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
@@ -353,15 +361,29 @@ export function investigationInstructions(input: {
           "Inspect the relevant files before claiming a code-level root cause.",
         ].join("\n")
       : "No repositories are attached to this Agent version. Clearly distinguish code-level hypotheses from verified root causes.",
-    "Use the read-only repository inspection tools to list, search, and read attached repository files.",
-    "This run is only for investigation and reporting. Do not modify repository code or create pull requests. Pull request remediation, when enabled, runs separately after the report is saved.",
+    input.threadMode
+      ? "Use the sandbox tools and attached code to investigate the request."
+      : "Use the read-only repository inspection tools to list, search, and read attached repository files.",
+    input.threadMode
+      ? null
+      : "This run is only for investigation and reporting. Do not modify repository code or create pull requests. Pull request remediation, when enabled, runs separately after the report is saved.",
     "Do not expose credentials or secret values.",
     workspaceSecretUsageInstructions(workspaceSecrets),
-    "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
-    "For every new issue, submit one or more concrete remediation options with the report. A code_change must include a complete unified git diff based on files you inspected. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
-    "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
-    "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
-    "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
+    input.threadMode
+      ? "This is an ad-hoc Slack thread investigation. Never create or update issues, tickets, branches, commits, or pull requests. You may use the sandbox for notes, experiments, and local code changes, but nothing in it is published."
+      : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
+    input.threadMode
+      ? null
+      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. A code_change must include a complete unified git diff based on files you inspected. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
+    input.threadMode
+      ? null
+      : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
+    input.threadMode
+      ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session."
+      : "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
+    input.threadMode
+      ? null
+      : "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
     "Clearly say when the available evidence is insufficient.",
   ]
     .filter((instruction): instruction is string => Boolean(instruction))
@@ -387,7 +409,7 @@ export function investigationInstructionsTraceEvent(
 }
 
 export async function runInvestigationAgent(
-  job: InvestigationJob,
+  job: InvestigationJob | SlackThreadInvestigationJob,
   environment: NodeJS.ProcessEnv = process.env,
   onTraceEvent: (event: InvestigationTraceEvent) => Promise<void>,
   traceContext: { jobId: string },
@@ -396,7 +418,13 @@ export async function runInvestigationAgent(
   onRecoverableSentryFailure?: (
     error: SentryConnectionUnavailableError,
   ) => Promise<void>,
-): Promise<string> {
+): Promise<{
+  report: string;
+  previousResponseId?: string;
+  sandboxSessionState?: Record<string, unknown>;
+}> {
+  const threadMode = job.kind === "slack_thread_investigation";
+  const replay = job.kind === "investigation" && job.replay;
   const investigationInput = toInvestigationInput(job.request);
   let sentryConnectionDegraded = false;
   const awsAlarmTriggered =
@@ -514,7 +542,7 @@ export async function runInvestigationAgent(
   const client = new DaytonaSandboxClient({
     ...daytonaClientOptions(config),
     name: sandboxName,
-    pauseOnExit: false,
+    pauseOnExit: threadMode,
   });
 
   let session: DaytonaSandboxSession | null = null;
@@ -566,19 +594,54 @@ export async function runInvestigationAgent(
         );
       }
     }
-    session = await createDaytonaSandboxSession(client, config, sandboxName);
-    await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
-    await prepareDaytonaSandbox(session);
-    const repositories = await checkoutRuntimeRepositories(
-      session,
-      job.config.id,
+    const sessionRuntime = threadMode
+      ? await getSlackInvestigationSessionRuntime(
+          job.slackInvestigationSessionId,
+        )
+      : null;
+    if (threadMode && !sessionRuntime) {
+      throw new Error("Slack investigation session not found");
+    }
+    const persistedState = sessionRuntime?.sandboxSessionState;
+    if (threadMode && persistedState) {
+      session = await client.resume(
+        await client.deserializeSessionState(persistedState),
+      );
+    } else {
+      session = await createDaytonaSandboxSession(client, config, sandboxName);
+    }
+    const sessionMarker = "/home/daytona/workspace/.responder/thread-session-ready";
+    const sessionReady = Boolean(
+      persistedState && await session.pathExists(sessionMarker),
     );
-    const reportTool = job.replay
+    if (!sessionReady) {
+      await configureDaytonaSandboxLifecycle(
+        session,
+        config,
+        workspaceSecrets,
+        threadMode ? -1 : 0,
+      );
+      await prepareDaytonaSandbox(session);
+    }
+    const repositories = sessionReady
+      ? threadMode && job.refreshWorkspace
+        ? await refreshRuntimeRepositories(session, job.config.id)
+        : await loadCheckedOutRepositories(session)
+      : await checkoutRuntimeRepositories(session, job.config.id);
+    if (threadMode && !sessionReady) {
+      await session.materializeEntry({
+        entry: { type: "file", content: "ready\n" },
+        path: sessionMarker,
+      });
+    }
+    const reportTool = replay
       ? createCaptureInvestigationReplayReportTool({
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
         })
-      : createSubmitInvestigationReportTool({
+      : threadMode
+        ? null
+        : createSubmitInvestigationReportTool({
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
           environment,
@@ -621,6 +684,7 @@ export async function runInvestigationAgent(
       upstashConnected: upstashServer !== null,
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
+      threadMode,
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -628,11 +692,15 @@ export async function runInvestigationAgent(
       name: "Responder investigator",
       model: config.model,
       instructions,
-      capabilities: investigationCapabilities(job.replay),
+      capabilities: investigationCapabilities(replay),
+      // MCP servers are tenant-configurable and may expose the same generic
+      // tool names (for example, `search` or `execute`). Prefix each tool
+      // with its server name so one connection cannot prevent an entire
+      // investigation from starting.
+      mcpConfig: { includeServerInToolNames: true },
       mcpServers: contextServers,
       tools: [
-        issueSearchTool,
-        reportTool,
+        ...(threadMode ? [] : [issueSearchTool, reportTool!]),
         ...awsInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,
@@ -646,6 +714,9 @@ export async function runInvestigationAgent(
         maxTurns: 20,
         sandbox: { session },
         stream: true,
+        ...(sessionRuntime?.previousResponseId
+          ? { previousResponseId: sessionRuntime.previousResponseId }
+          : {}),
       },
     );
     for await (const streamEvent of result) {
@@ -660,8 +731,25 @@ export async function runInvestigationAgent(
     if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
       throw new Error("OpenAI agent returned an empty report");
     }
+    const report = redactDaytonaSecretPlaceholders(result.finalOutput.trim());
     await writeTrace(traceEvent("session.completed"));
-    return redactDaytonaSecretPlaceholders(result.finalOutput.trim());
+    if (threadMode) {
+      const sandboxSessionState = await client.serializeSessionState(
+        session.state,
+      );
+      delete sandboxSessionState.apiKey;
+      return {
+        report,
+        sandboxSessionState,
+        ...(result.lastResponseId
+          ? { previousResponseId: result.lastResponseId }
+          : {}),
+      };
+    }
+    return {
+      report,
+      ...(result.lastResponseId ? { previousResponseId: result.lastResponseId } : {}),
+    };
   } catch (error) {
     await writeTrace(
       traceEvent("session.failed", {
@@ -671,10 +759,14 @@ export async function runInvestigationAgent(
     throw error;
   } finally {
     if (session) {
-      await closeDaytonaSandbox(session, config, {
-        investigationId: job.investigationId,
-        organizationId: job.config.organizationId,
-      });
+      if (threadMode) {
+        await pauseDaytonaSandbox(session);
+      } else {
+        await closeDaytonaSandbox(session, config, {
+          investigationId: job.investigationId,
+          organizationId: job.config.organizationId,
+        });
+      }
     }
     await Promise.all(
       contextServers.map((server) =>

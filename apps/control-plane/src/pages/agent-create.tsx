@@ -24,6 +24,11 @@ import {
 } from "../agents-api";
 import { defaultAgentContext } from "../agent-context-defaults";
 import { AppShell } from "../components/app-shell";
+import {
+  AgentContextIntegrationControls as ContextIntegrationControls,
+  AgentContextProviderMark as ProviderMark,
+  AgentContextRow as ContextRow,
+} from "../components/agent-context-controls";
 import { AgentSetupSkeleton } from "../components/screen-skeletons";
 import {
   DatadogConnectionDialog,
@@ -35,14 +40,12 @@ import { UpstashConnectionDialog } from "../components/upstash-connection-dialog
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import {
   ChevronDownIcon,
-  CogIcon,
   ProviderGlyph,
   RepositoryIcon,
   SearchIcon,
 } from "../components/icons";
 import {
   providerDisplayName,
-  type ProviderGlyphId,
 } from "../components/provider-glyphs";
 import {
   Alert,
@@ -284,7 +287,6 @@ function createInitialDraft(
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
   const vercelProjects = resourcesOfKind(options, "vercel_project");
-  const contextResources = [...slackChannels, ...vercelProjects];
   const githubAccounts = accountsFor(options, "github");
   const firstSentryAccount =
     sentryAccounts.find((account) =>
@@ -386,10 +388,10 @@ function createInitialDraft(
       (isEditing ? defaultContext.contextAccountIds : []),
     contextResourceIds:
       saved.contextResourceIds?.filter((id) =>
-        contextResources.some((resource) => resource.id === id),
+        vercelProjects.some((resource) => resource.id === id),
       ) ??
       configured.contextResourceIds?.filter((id) =>
-        contextResources.some((resource) => resource.id === id),
+        vercelProjects.some((resource) => resource.id === id),
       ) ??
       (isEditing ? defaultContext.contextResourceIds : []),
     workspaceSecretRecordIds,
@@ -445,7 +447,6 @@ export function AgentCreatePage() {
   const stepStorageKey = storageKey(DRAFT_STEP_STORAGE_KEY, agentId);
   const returnTo = agentId ? `/agents/${agentId}/edit` : "/agents/new";
   const sentryJustConnected = successfulConnectionReturn("sentry");
-  const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const axiomJustConnected = successfulConnectionReturn("axiom");
@@ -461,7 +462,6 @@ export function AgentCreatePage() {
   ).get("integration_account_id");
   const contextIntegrationJustConnected =
     sentryJustConnected ||
-    slackJustConnected ||
     githubJustConnected ||
     datadogJustConnected ||
     axiomJustConnected ||
@@ -490,7 +490,6 @@ export function AgentCreatePage() {
   const [furthestStep, setFurthestStep] =
     useState<CreateStep>(normalizedInitialStep);
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
-  const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
   const [vercelAccountId, setVercelAccountId] = useState(
     returnedIntegrationAccountId ?? "",
@@ -579,7 +578,6 @@ export function AgentCreatePage() {
     if (
       !githubDialogOpen &&
       !linearDialogOpen &&
-      !slackContextDialogOpen &&
       !vercelDialogOpen &&
       !connectionSettingsOpen &&
       !secretDialogOpen
@@ -590,7 +588,6 @@ export function AgentCreatePage() {
       if (event.key === "Escape") {
         setGithubDialogOpen(false);
         setLinearDialogOpen(false);
-        setSlackContextDialogOpen(false);
         setVercelDialogOpen(false);
         setConnectionSettingsOpen(null);
         if (!creatingSecret) {
@@ -610,7 +607,6 @@ export function AgentCreatePage() {
     githubDialogOpen,
     linearDialogOpen,
     secretDialogOpen,
-    slackContextDialogOpen,
     vercelDialogOpen,
   ]);
 
@@ -650,27 +646,6 @@ export function AgentCreatePage() {
           !loadedDraft.contextAccountIds.includes(connectedSentry.id)
         ) {
           loadedDraft.contextAccountIds.push(connectedSentry.id);
-        }
-        const connectedSlackAccount = accountsFor(loadedOptions, "slack").find(
-          (account) => account.slackContextAvailable,
-        );
-        const connectedSlackChannel = resourcesOfKind(
-          loadedOptions,
-          "slack_channel",
-        ).find(
-          (channel) =>
-            channel.integrationAccountId === connectedSlackAccount?.id,
-        );
-        if (
-          slackJustConnected &&
-          connectedSlackChannel &&
-          !loadedDraft.contextResourceIds.some((id) =>
-            loadedOptions.resources.some(
-              (resource) => resource.id === id && resource.kind === "slack_channel",
-            ),
-          )
-        ) {
-          loadedDraft.contextResourceIds.push(connectedSlackChannel.id);
         }
         const connectedGithubRepository = loadedOptions.repositories.find(
           (repository) =>
@@ -836,7 +811,6 @@ export function AgentCreatePage() {
     linearJustConnected,
     returnedIntegrationAccountId,
     sentryJustConnected,
-    slackJustConnected,
     vercelJustConnected,
   ]);
 
@@ -899,10 +873,6 @@ export function AgentCreatePage() {
   );
   const githubAccounts = useMemo(
     () => accountsFor(options, "github"),
-    [options],
-  );
-  const slackAccounts = useMemo(
-    () => accountsFor(options, "slack"),
     [options],
   );
   const sentryProjects = useMemo(
@@ -1072,11 +1042,6 @@ export function AgentCreatePage() {
             )
               ? current.outputChannelResourceId
               : freshChannels[0]?.id ?? "",
-            contextResourceIds: current.contextResourceIds.filter(
-              (id) =>
-                !slackChannels.some((channel) => channel.id === id) ||
-                freshChannelIds.has(id),
-            ),
           };
         });
       })
@@ -1162,26 +1127,6 @@ export function AgentCreatePage() {
     });
   }
 
-  function toggleSlackContextResource(resourceId: string) {
-    const resource = slackChannels.find((channel) => channel.id === resourceId);
-    if (!resource) return;
-    const selected = currentDraft.contextResourceIds.includes(resourceId);
-    updateDraft({
-      contextResourceIds: selected
-        ? currentDraft.contextResourceIds.filter((id) => id !== resourceId)
-        : [
-            ...currentDraft.contextResourceIds.filter((id) => {
-              const channel = slackChannels.find((item) => item.id === id);
-              return (
-                !channel ||
-                channel.integrationAccountId === resource.integrationAccountId
-              );
-            }),
-            resourceId,
-          ],
-    });
-  }
-
   function toggleVercelProject(resourceId: string) {
     const resource = vercelProjects.find(
       (project) => project.id === resourceId,
@@ -1210,35 +1155,6 @@ export function AgentCreatePage() {
           (id) => !currentDraft.contextAccountIds.includes(id),
         ),
       ],
-    });
-  }
-
-  function toggleSlackContextIntegration() {
-    const selectedSlackIds = new Set(
-      slackChannels
-        .filter((channel) => currentDraft.contextResourceIds.includes(channel.id))
-        .map((channel) => channel.id),
-    );
-    if (selectedSlackIds.size > 0) {
-      updateDraft({
-        contextResourceIds: currentDraft.contextResourceIds.filter(
-          (id) => !selectedSlackIds.has(id),
-        ),
-      });
-      return;
-    }
-
-    const firstAccount = slackAccounts.find((account) => account.slackContextAvailable);
-    const firstChannel = slackChannels.find(
-      (channel) => channel.integrationAccountId === firstAccount?.id,
-    );
-    if (!firstChannel) {
-      setSlackContextDialogOpen(true);
-      void refreshSlackChannels();
-      return;
-    }
-    updateDraft({
-      contextResourceIds: [...currentDraft.contextResourceIds, firstChannel.id],
     });
   }
 
@@ -1507,9 +1423,6 @@ export function AgentCreatePage() {
   const sentryConnected = sentryProjects.length > 0;
   const outputChannelSelected = effectiveOutputMode === "output_channel";
   const vercelContextConnected = selectedVercelProjects.length > 0;
-  const selectedSlackContextChannels = slackChannels.filter((channel) =>
-    draft.contextResourceIds.includes(channel.id),
-  );
   const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
     draft.workspaceSecretRecordIds.includes(secret.id),
   );
@@ -1518,7 +1431,6 @@ export function AgentCreatePage() {
     sentryAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
-    Number(selectedSlackContextChannels.length > 0) +
     datadogAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1546,6 +1458,7 @@ export function AgentCreatePage() {
     ).length;
   const normalizedIntegrationQuery = integrationQuery.trim().toLocaleLowerCase();
   const visibleContextIntegrations = integrations.filter((integration) => {
+    if (integration.id === "slack") return false;
     if (
       integration.accountCount > 0 &&
       !MULTI_ACCOUNT_CONTEXT_PROVIDERS.has(integration.id)
@@ -2022,132 +1935,6 @@ export function AgentCreatePage() {
                       />
                     );
                   })}
-
-                  {slackAccounts.length > 0 ? (
-                    <ContextRow
-                      action={
-                        <ContextIntegrationControls
-                          enabled={selectedSlackContextChannels.length > 0}
-                          label="Slack"
-                          onConfigure={() => {
-                            setSlackContextDialogOpen(true);
-                            void refreshSlackChannels();
-                          }}
-                          onToggle={toggleSlackContextIntegration}
-                        />
-                      }
-                      detail={
-                        selectedSlackContextChannels.length > 0
-                          ? `${selectedSlackContextChannels.length} ${
-                              selectedSlackContextChannels.length === 1
-                                ? "channel"
-                                : "channels"
-                            } selected · Read-only message and thread history`
-                          : `${slackAccounts[0]!.displayName} · Choose channels for read-only history`
-                      }
-                      label="Slack"
-                      provider="slack"
-                    />
-                  ) : null}
-
-                  {slackContextDialogOpen ? (
-                    <div
-                      className="configurationDialogBackdrop"
-                      onMouseDown={(event) => {
-                        if (event.target === event.currentTarget) {
-                          setSlackContextDialogOpen(false);
-                        }
-                      }}
-                    >
-                      <section
-                        aria-labelledby="slack-context-configuration-title"
-                        aria-modal="true"
-                        className="configurationDialog"
-                        role="dialog"
-                      >
-                        <header className="configurationDialog__header">
-                          <ProviderMark provider="slack" />
-                          <span className="configurationDialog__copy">
-                            <strong id="slack-context-configuration-title">
-                              Configure Slack context
-                            </strong>
-                            <small>
-                              Choose one or more channels from one Slack workspace.
-                            </small>
-                          </span>
-                          <IconButton
-                            aria-label="Close Slack context configuration"
-                            autoFocus
-                            onClick={() => setSlackContextDialogOpen(false)}
-                            size="small"
-                            variant="ghost"
-                          >
-                            ×
-                          </IconButton>
-                        </header>
-                        <div className="configurationDialog__body">
-                          <div className="projectPicker slackContextPicker">
-                            <span>Channels</span>
-                            <div>
-                              {slackChannels
-                                .filter((channel) =>
-                                  slackAccounts.some(
-                                    (account) =>
-                                      account.id ===
-                                        channel.integrationAccountId &&
-                                      account.slackContextAvailable,
-                                  ),
-                                )
-                                .map((channel) => {
-                                  const account = slackAccounts.find(
-                                    (item) =>
-                                      item.id === channel.integrationAccountId,
-                                  );
-                                  return (
-                                    <Checkbox
-                                      checked={draft.contextResourceIds.includes(
-                                        channel.id,
-                                      )}
-                                      description={
-                                        slackAccounts.length > 1
-                                          ? account?.displayName
-                                          : undefined
-                                      }
-                                      key={channel.id}
-                                      label={slackChannelLabel(
-                                        channel.displayName,
-                                      )}
-                                      onChange={() =>
-                                        toggleSlackContextResource(channel.id)
-                                      }
-                                    />
-                                  );
-                                })}
-                            </div>
-                          </div>
-                          {slackRefreshError ? (
-                            <Alert
-                              role="alert"
-                              title={slackRefreshError}
-                              tone="danger"
-                            />
-                          ) : null}
-                        </div>
-                        <footer className="configurationDialog__footer">
-                          <span>
-                            {selectedSlackContextChannels.length} selected
-                          </span>
-                          <Button
-                            onClick={() => setSlackContextDialogOpen(false)}
-                            size="small"
-                            variant="primary"
-                          >
-                            Done
-                          </Button>
-                        </footer>
-                      </section>
-                    </div>
-                  ) : null}
 
                   {githubAccounts.length > 0 ? (
                     <ContextRow
@@ -3236,26 +3023,6 @@ function ChoiceCard({
   );
 }
 
-type ProviderId = Exclude<ProviderGlyphId, "google">;
-
-function ProviderMark({
-  connected = false,
-  provider,
-}: {
-  connected?: boolean;
-  provider: ProviderId;
-}) {
-  return (
-    <ProviderGlyph
-      className={`providerMark providerMark--${provider} ${
-        connected ? "isConnected" : ""
-      }`}
-      decorative
-      provider={provider}
-    />
-  );
-}
-
 function SlackConnectionSummary({
   displayName,
   onReconnect,
@@ -3283,7 +3050,6 @@ function SlackConnectionSummary({
     </div>
   );
 }
-
 function ConnectionPrompt({
   actionLabel,
   compact = false,
@@ -3549,76 +3315,5 @@ function SeverityFilter({
         ))}
       </div>
     </fieldset>
-  );
-}
-
-function ContextRow({
-  action,
-  detail,
-  label,
-  provider,
-}: {
-  action: ReactNode;
-  detail: string;
-  label: string;
-  provider:
-    | "aws"
-    | "github"
-    | "slack"
-    | "sentry"
-    | "datadog"
-    | "axiom"
-    | "upstash"
-    | "langfuse"
-    | "vercel"
-    | "custom_mcp"
-    | "clickstack"
-    | "linear";
-}) {
-  return (
-    <div className="contextRow">
-      <ProviderMark provider={provider} />
-      <span className="contextRow__copy">
-        <strong>{label}</strong>
-        <small>{detail}</small>
-      </span>
-      <span className="contextRow__action">{action}</span>
-    </div>
-  );
-}
-
-function ContextIntegrationControls({
-  enabled,
-  label,
-  onConfigure,
-  onToggle,
-}: {
-  enabled: boolean;
-  label: string;
-  onConfigure: () => void;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="contextIntegrationControls">
-      <IconButton
-        aria-label={`Configure ${label}`}
-        onClick={onConfigure}
-        size="small"
-        type="button"
-        variant="ghost"
-      >
-        <CogIcon />
-      </IconButton>
-      <button
-        aria-checked={enabled}
-        aria-label={`${enabled ? "Disable" : "Enable"} ${label} for this agent`}
-        className="contextIntegrationToggle"
-        onClick={onToggle}
-        role="switch"
-        type="button"
-      >
-        <i aria-hidden="true"><i /></i>
-      </button>
-    </div>
   );
 }

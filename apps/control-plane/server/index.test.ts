@@ -28,7 +28,10 @@ import {
   verifySentrySignature,
 } from "./webhooks/sentry.js";
 import { startSlackIssueRemediation } from "./issues/remediation.js";
-import { queueInvestigation } from "./investigations/queue.js";
+import {
+  queueInvestigation,
+  queueSlackThreadInvestigation,
+} from "./investigations/queue.js";
 
 const slackWebhookMocks = vi.hoisted(() => ({
   findAgentsForSlackEvent: vi.fn(),
@@ -74,6 +77,7 @@ vi.mock("./tenant.js", () => ({
 vi.mock("./investigations/queue.js", () => ({
   closeInvestigationQueue: vi.fn(),
   queueInvestigation: vi.fn(),
+  queueSlackThreadInvestigation: vi.fn(),
 }));
 
 describe("control-plane API", () => {
@@ -737,7 +741,7 @@ describe("control-plane API", () => {
     ).toBeNull();
   });
 
-  it("ignores human messages in a watched channel", async () => {
+  it("ignores the channel-message copy of a tagged thread reply", async () => {
     vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
     const timestamp = Math.floor(Date.now() / 1_000).toString();
     const body = JSON.stringify({
@@ -748,8 +752,9 @@ describe("control-plane API", () => {
         type: "message",
         channel: "C123",
         ts: "1700000002.000001",
+        thread_ts: "1700000001.000001",
         user: "U123",
-        text: "Can someone take a look at this?",
+        text: "<@U-RESPONDER> Can you take another look?",
       },
     });
     const signature = `v0=${createHmac("sha256", "slack-signing-secret")
@@ -772,6 +777,80 @@ describe("control-plane API", () => {
       ignored: true,
       reason: "unsupported_alert_sender",
     });
+    expect(queueSlackThreadInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("queues app mentions as durable Slack thread turns", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    slackWebhookMocks.findAgentsForSlackEvent.mockResolvedValueOnce([
+      {
+        agentId: "17171717-1717-4717-8717-171717171717",
+        integrationAccountId: "04040404-0404-4404-8404-040404040404",
+        organizationId: "03030303-0303-4303-8303-030303030303",
+        trigger: "slack_thread",
+      },
+    ]);
+    slackWebhookMocks.getSlackChannelConnection.mockResolvedValueOnce(null);
+    vi.mocked(queueSlackThreadInvestigation).mockResolvedValueOnce({
+      investigationId: "01010101-0101-4101-8101-010101010101",
+      jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
+    });
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvMention",
+      event: {
+        type: "app_mention",
+        channel: "C123",
+        ts: "1700000006.000002",
+        thread_ts: "1700000006.000001",
+        user: "U123",
+        text: "<@U-RESPONDER> investigate checkout latency",
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      matchedAgents: 1,
+      ok: true,
+    });
+    expect(queueSlackThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "17171717-1717-4717-8717-171717171717",
+        attributes: expect.objectContaining({
+          channelId: "C123",
+          integrationAccountId: "04040404-0404-4404-8404-040404040404",
+          slackUserId: "U123",
+          teamId: "T123",
+          threadTimestamp: "1700000006.000001",
+        }),
+        externalEventId:
+          "EvMention:17171717-1717-4717-8717-171717171717",
+        provider: "slack",
+      }),
+      {
+        channelId: "C123",
+        teamId: "T123",
+        threadTimestamp: "1700000006.000001",
+      },
+    );
+    expect(queueInvestigation).not.toHaveBeenCalled();
   });
 
   it("ignores resolved app alerts that start with a white check mark", async () => {
@@ -1068,7 +1147,7 @@ describe("control-plane API", () => {
     expect(message.blocks).toContainEqual(
       expect.objectContaining({
         type: "plan",
-        title: "Investigation trace",
+        title: "Trace",
         tasks: [
           expect.objectContaining({
             status: "in_progress",
@@ -1083,6 +1162,24 @@ describe("control-plane API", () => {
         ],
       }),
     );
+  });
+
+  it("omits the investigation link from tag mode acknowledgements", () => {
+    const message = investigatingSlackMessage({
+      agentId: "17171717-1717-4717-8717-171717171717",
+      investigationId: "01010101-0101-4101-8101-010101010101",
+      threadMode: true,
+      title: "Investigate checkout latency",
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: "plan",
+        tasks: [
+          expect.not.objectContaining({ sources: expect.anything() }),
+        ],
+      }),
+    ]);
   });
 
   it("logs Slack acknowledgement failures with alert context", () => {

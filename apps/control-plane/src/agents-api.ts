@@ -54,6 +54,16 @@ export interface AgentConfiguration {
   reporting: AgentReporting;
 }
 
+export interface SlackThreadModeConfiguration {
+  enabled: boolean;
+  model: string;
+  instructions: string;
+  repositoryIds: string[];
+  contextAccountIds: string[];
+  contextResourceIds: string[];
+  secretIds: string[];
+}
+
 export interface AgentOptions {
   accounts: Array<{
     id: string;
@@ -505,6 +515,28 @@ export async function retryInvestigation(
 
 export async function fetchAgentOptions(): Promise<AgentOptions> {
   return apiJson<AgentOptions>("/api/agents/options");
+}
+
+export async function fetchSlackThreadModeConfiguration(): Promise<
+  SlackThreadModeConfiguration | null
+> {
+  const response = await apiJson<{
+    configuration: SlackThreadModeConfiguration | null;
+  }>("/api/agents/thread-mode");
+  return response.configuration;
+}
+
+export async function saveSlackThreadModeConfiguration(
+  configuration: SlackThreadModeConfiguration,
+): Promise<SlackThreadModeConfiguration> {
+  const response = await apiJson<{
+    configuration: SlackThreadModeConfiguration;
+  }>("/api/agents/thread-mode", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(configuration),
+  });
+  return response.configuration;
 }
 
 export async function refreshSlackAgentOptions(): Promise<AgentOptions> {

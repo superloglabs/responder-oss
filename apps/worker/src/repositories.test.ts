@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkoutRuntimeRepositories,
   checkoutRuntimeRepositoriesAtRefs,
+  refreshRuntimeRepositories,
   repositoryWorkspacePath,
 } from "./repositories.js";
 
@@ -568,5 +569,32 @@ describe("Daytona repository checkout", () => {
     ).resolves.toEqual([]);
     expect(session.materializeEntry).not.toHaveBeenCalled();
     expect(session.execCommand).not.toHaveBeenCalled();
+  });
+
+  it("clears repositories and records an empty manifest when configuration changes", async () => {
+    const session = fakeSession();
+
+    await expect(
+      refreshRuntimeRepositories(session, "version-id", {
+        createInstallationToken: vi.fn(),
+        fetch: vi.fn(),
+        getRepositories: vi.fn().mockResolvedValue([]),
+      }),
+    ).resolves.toEqual([]);
+
+    expect(session.execCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: expect.stringContaining(
+          "rm -rf '/home/daytona/workspace/repositories'",
+        ),
+      }),
+    );
+    expect(session.materializeEntry).toHaveBeenCalledWith({
+      entry: {
+        type: "file",
+        content: '{\n  "repositories": []\n}\n',
+      },
+      path: "/home/daytona/workspace/.responder/repositories.json",
+    });
   });
 });

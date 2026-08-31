@@ -33,7 +33,6 @@ describe("Slack remediation cards", () => {
 
     expect(blocks).toEqual([
       expect.objectContaining({ type: "header" }),
-      expect.objectContaining({ type: "section" }),
       expect.objectContaining({
         type: "carousel",
         elements: [
@@ -70,6 +69,9 @@ describe("Slack remediation cards", () => {
         ],
       }),
     ]);
+    expect(JSON.stringify(blocks)).not.toContain(
+      "You can use any of these remediations.",
+    );
   });
 
   it("keeps card title and body text within Slack's 200-character limit", () => {
@@ -82,7 +84,7 @@ describe("Slack remediation cards", () => {
         description: "D".repeat(250),
       }],
     });
-    const carousel = blocks[2] as {
+    const carousel = blocks[1] as {
       elements: Array<{ body: { text: string }; title: { text: string } }>;
     };
 
@@ -109,6 +111,7 @@ describe("Slack remediation cards", () => {
   });
 
   it("shows the selected remediation and live pull request state", () => {
+    const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackIssuePullRequestMessage({
       failureReason: null,
       issueId,
@@ -120,7 +123,7 @@ describe("Slack remediation cards", () => {
       requestId: "23232323-2323-4323-8323-232323232323",
       selectedRemediation: codeRemediation,
       status: "created",
-    });
+    }, investigationId);
 
     expect(message.text).toContain("Pull request: Open");
     expect(message.blocks).toEqual(
@@ -139,6 +142,12 @@ describe("Slack remediation cards", () => {
               ]),
             }),
           ],
+        }),
+        expect.objectContaining({
+          type: "context_actions",
+          block_id: expect.stringMatching(
+            new RegExp(`^investigation_feedback_${investigationId}_`),
+          ),
         }),
       ]),
     );
