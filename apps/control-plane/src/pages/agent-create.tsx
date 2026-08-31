@@ -1315,10 +1315,11 @@ export function AgentCreatePage() {
   }
 
   async function saveConfiguration() {
-    if (
-      activeStep !== finalStep ||
-      (isEditing && !promptStepReady)
-    ) {
+    // Editing saves the whole configuration from any section. The prompt
+    // guard still absorbs the double-click that lands where Continue was.
+    if (isEditing) {
+      if (activeStep === 4 && !promptStepReady) return;
+    } else if (activeStep !== finalStep) {
       return;
     }
     if (missingRequirement) {
@@ -2926,18 +2927,19 @@ export function AgentCreatePage() {
                 disabled={Boolean(currentRequirement)}
                 onClick={continueToNextStep}
                 type="button"
-                variant="primary"
+                variant={isEditing ? "secondary" : "primary"}
               >
                 {!isEditing && activeStep === 2
                   ? "Continue to context"
                   : "Continue"}
               </Button>
-            ) : (
+            ) : null}
+            {isEditing || activeStep === finalStep ? (
               <Button
                 data-submit-agent="true"
                 disabled={
                   Boolean(missingRequirement) ||
-                  (isEditing && !promptStepReady) ||
+                  (isEditing && activeStep === 4 && !promptStepReady) ||
                   saving
                 }
                 loading={saving}
@@ -2947,7 +2949,7 @@ export function AgentCreatePage() {
               >
                 {isEditing ? "Save changes" : "Create agent"}
               </Button>
-            )}
+            ) : null}
           </footer>
           )}
         </div>
