@@ -268,6 +268,10 @@ function execSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
+/**
+ * Install the small set of tools needed by agents when no prebuilt snapshot
+ * is configured. Named snapshots already contain these tools and skip this.
+ */
 export async function prepareDaytonaSandbox(
   session: DaytonaSandboxSession,
 ): Promise<void> {

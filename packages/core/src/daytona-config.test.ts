@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  daytonaClientOptions,
   isDaytonaNotFound,
   requireDaytonaClientConfig,
 } from "./daytona-config.js";
@@ -9,6 +10,7 @@ describe("Daytona client configuration", () => {
     expect(
       requireDaytonaClientConfig({
         DAYTONA_API_KEY: "api-key",
+        DAYTONA_SANDBOX_SNAPSHOT_NAME: "snapshot-name",
         DAYTONA_API_URL: " ",
         DAYTONA_TARGET: "",
       }),
@@ -16,6 +18,7 @@ describe("Daytona client configuration", () => {
       daytonaApiKey: "api-key",
       daytonaApiUrl: undefined,
       daytonaTarget: undefined,
+      sandboxSnapshotName: "snapshot-name",
     });
   });
 
@@ -23,9 +26,24 @@ describe("Daytona client configuration", () => {
     expect(
       requireDaytonaClientConfig({
         DAYTONA_API_KEY: "api-key",
+        DAYTONA_SANDBOX_SNAPSHOT_NAME: "snapshot-name",
         DAYTONA_API_URL: " https://daytona.example.test:8443/api ",
       }).daytonaApiUrl,
     ).toBe("https://daytona.example.test:8443/api");
+  });
+
+  it("passes the configured snapshot to Daytona clients", () => {
+    expect(
+      daytonaClientOptions({
+        daytonaApiKey: "api-key",
+        sandboxSnapshotName: "snapshot-name",
+      }),
+    ).toEqual({
+      apiKey: "api-key",
+      apiUrl: undefined,
+      sandboxSnapshotName: "snapshot-name",
+      target: undefined,
+    });
   });
 
   it.each([
@@ -36,6 +54,7 @@ describe("Daytona client configuration", () => {
     expect(() =>
       requireDaytonaClientConfig({
         DAYTONA_API_KEY: "api-key",
+        DAYTONA_SANDBOX_SNAPSHOT_NAME: "snapshot-name",
         DAYTONA_API_URL: daytonaApiUrl,
       }),
     ).toThrow("DAYTONA_API_URL must be an absolute HTTPS URL");
@@ -45,18 +64,21 @@ describe("Daytona client configuration", () => {
     expect(() =>
       requireDaytonaClientConfig({
         DAYTONA_API_KEY: "api-key",
+        DAYTONA_SANDBOX_SNAPSHOT_NAME: "snapshot-name",
         DAYTONA_API_URL: "https://user:password@daytona.example.test/api",
       }),
     ).toThrow("DAYTONA_API_URL cannot contain credentials");
     expect(() =>
       requireDaytonaClientConfig({
         DAYTONA_API_KEY: "api-key",
+        DAYTONA_SANDBOX_SNAPSHOT_NAME: "snapshot-name",
         DAYTONA_API_URL: "https://daytona.example.test/api#ignored",
       }),
     ).toThrow("DAYTONA_API_URL cannot contain a fragment");
     expect(() =>
       requireDaytonaClientConfig({
         DAYTONA_API_KEY: "api-key",
+        DAYTONA_SANDBOX_SNAPSHOT_NAME: "snapshot-name",
         DAYTONA_API_URL:
           "https://daytona.example.test/api?access_token=secret",
       }),

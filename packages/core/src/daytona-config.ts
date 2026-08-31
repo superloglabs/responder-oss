@@ -2,6 +2,7 @@ export interface DaytonaClientConfig {
   daytonaApiKey: string;
   daytonaApiUrl?: string;
   daytonaTarget?: string;
+  sandboxSnapshotName?: string;
 }
 
 function optionalDaytonaApiUrl(value: string | undefined): string | undefined {
@@ -34,10 +35,12 @@ export function requireDaytonaClientConfig(
 ): DaytonaClientConfig {
   const daytonaApiKey = environment.DAYTONA_API_KEY;
   if (!daytonaApiKey) throw new Error("DAYTONA_API_KEY is required");
+  const sandboxSnapshotName = environment.DAYTONA_SANDBOX_SNAPSHOT_NAME?.trim();
   return {
     daytonaApiKey,
     daytonaApiUrl: optionalDaytonaApiUrl(environment.DAYTONA_API_URL),
     daytonaTarget: environment.DAYTONA_TARGET?.trim() || undefined,
+    sandboxSnapshotName,
   };
 }
 
@@ -55,10 +58,12 @@ export function daytonaClientOptions(config: DaytonaClientConfig): {
   apiKey: string;
   apiUrl?: string;
   target?: string;
+  sandboxSnapshotName?: string;
 } {
   return {
     apiKey: config.daytonaApiKey,
     apiUrl: config.daytonaApiUrl,
     target: config.daytonaTarget,
+    sandboxSnapshotName: config.sandboxSnapshotName,
   };
 }

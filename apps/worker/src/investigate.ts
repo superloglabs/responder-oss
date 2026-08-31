@@ -66,8 +66,8 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
-  pauseDaytonaSandbox,
   prepareDaytonaSandbox,
+  pauseDaytonaSandbox,
 } from "./sandbox.js";
 import {
   investigationTraceEventFromStream,
@@ -633,7 +633,7 @@ export async function runInvestigationAgent(
         workspaceSecrets,
         threadMode ? -1 : 0,
       );
-      await prepareDaytonaSandbox(session);
+      if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
     }
     const repositories = sessionReady
       ? threadMode && job.refreshWorkspace
