@@ -115,7 +115,7 @@ export function createResponderAuth() {
   const githubClientSecret = process.env.AUTH_GITHUB_CLIENT_SECRET;
 
   return betterAuth({
-    appName: "Responder",
+    appName: "Superlog",
     baseURL,
     database: drizzleAdapter(getDatabase(), {
       provider: "pg",
@@ -253,7 +253,7 @@ export function createResponderAuth() {
               idempotencyKey: `workspace-invitation/${id}/${new Date(
                 invitation.expiresAt,
               ).getTime()}`,
-              subject: `You're invited to ${organization.name} in Responder`,
+              subject: `You're invited to ${organization.name} in Superlog`,
               to: email,
             });
             console.info(

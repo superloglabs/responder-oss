@@ -18,7 +18,7 @@ describe("workspaceInvitationEmailBody", () => {
     });
 
     expect(body.text).toContain(
-      "Ada invited you to join the Acme workspace in Responder as a member.",
+      "Ada invited you to join the Acme workspace in Superlog as a member.",
     );
     expect(body.text).toContain(`Accept invitation: ${invitationUrl}`);
     expect(body.html).toContain("<strong>Acme</strong>");
@@ -63,14 +63,14 @@ describe("sendEmail", () => {
       deliver,
       environment: {
         RESEND_API_KEY: "test-key",
-        RESPONDER_FROM_EMAIL: "Responder <invite@example.com>",
+        RESPONDER_FROM_EMAIL: "Superlog <invite@example.com>",
         RESPONDER_REPLY_TO_EMAIL: "support@example.com",
       } as NodeJS.ProcessEnv,
     });
 
     expect(deliver).toHaveBeenCalledWith(
       {
-        from: "Responder <invite@example.com>",
+        from: "Superlog <invite@example.com>",
         html: message.html,
         replyTo: "support@example.com",
         subject: message.subject,

@@ -14,7 +14,10 @@ import {
   BlogArticlePage,
   BlogIndexPage,
   HomePage,
+  PrivacyPage,
   PricingPage,
+  TeamPage,
+  TermsPage,
 } from "./edition-pages";
 import { SettingsPage } from "./pages/settings";
 import { SuperuserUsersPage } from "./pages/superuser-users";
@@ -45,6 +48,9 @@ export function App() {
       <Route element={<HomePage />} path="/" />
       <Route element={<PricingPage />} path="/pricing" />
       <Route element={<BlogIndexPage />} path="/blog" />
+      <Route element={<TeamPage />} path="/team" />
+      <Route element={<PrivacyPage />} path="/privacy" />
+      <Route element={<TermsPage />} path="/tos" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}

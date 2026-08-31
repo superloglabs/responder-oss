@@ -224,7 +224,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       >
         {isCreatingAccount
           ? "Already have an account? Sign in"
-          : "New to Responder? Create an account"}
+          : "New to Superlog? Create an account"}
       </button>
     </>
   );
@@ -529,7 +529,7 @@ export function AuthGate({ children }: AuthGateProps) {
   if (session.isPending) {
     return (
       <AuthFrame>
-        <p className="authMuted">Loading Responder…</p>
+        <p className="authMuted">Loading Superlog…</p>
       </AuthFrame>
     );
   }

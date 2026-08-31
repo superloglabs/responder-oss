@@ -16,3 +16,15 @@ export function BlogIndexPage() {
 export function BlogArticlePage() {
   return <Navigate replace to="/agents" />;
 }
+
+export function TeamPage() {
+  return <Navigate replace to="/agents" />;
+}
+
+export function PrivacyPage() {
+  return <Navigate replace to="/agents" />;
+}
+
+export function TermsPage() {
+  return <Navigate replace to="/agents" />;
+}

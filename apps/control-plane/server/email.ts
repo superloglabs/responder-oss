@@ -5,7 +5,7 @@ import {
   type CreateEmailResponse,
 } from "resend";
 
-const defaultFrom = "Responder <no-reply@superlog.sh>";
+const defaultFrom = "Superlog <no-reply@superlog.sh>";
 
 type EmailDelivery = (
   message: CreateEmailOptions,
@@ -89,8 +89,8 @@ export function workspaceInvitationEmailBody(args: {
   const safeUrl = escapeHtml(args.invitationUrl);
 
   return {
-    text: `${inviter} invited you to join the ${args.organizationName} workspace in Responder as a ${args.role}.\n\nAccept invitation: ${args.invitationUrl}\n\nIf you weren't expecting this invitation, you can ignore this email.`,
-    html: `<p>${safeInviter} invited you to join the <strong>${safeOrganization}</strong> workspace in Responder as a ${safeRole}.</p>
+    text: `${inviter} invited you to join the ${args.organizationName} workspace in Superlog as a ${args.role}.\n\nAccept invitation: ${args.invitationUrl}\n\nIf you weren't expecting this invitation, you can ignore this email.`,
+    html: `<p>${safeInviter} invited you to join the <strong>${safeOrganization}</strong> workspace in Superlog as a ${safeRole}.</p>
 <p><a href="${safeUrl}">Accept invitation</a></p>
 <p style="color:#888">If you weren't expecting this invitation, you can ignore this email.</p>`,
   };
