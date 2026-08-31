@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  createAgent,
   disableAgentsWithUnavailableRepositories,
   listAgentOptions,
   setAgentEnabled,
+  updateAgent,
 } from "../../../../packages/core/src/db/agents.js";
 import {
   listConnectedIntegrationAccounts,
@@ -121,6 +123,129 @@ const tenant = {
     email: "test@example.com",
   },
 };
+
+const agentConfiguration = {
+  name: "Alert responder",
+  description: "Investigates alerts",
+  model: "instance/default",
+  instructions: "Investigate this alert.",
+  enabled: true,
+  prMode: "disabled" as const,
+  repositoryIds: [],
+  contextAccountIds: [],
+  contextResourceIds: [],
+  secretIds: [],
+  createLinearTickets: false,
+  linearIssueTemplate: "",
+  trigger: {
+    kind: "slack_channel" as const,
+    integrationAccountId: "50000000-0000-4000-8000-000000000000",
+    channelId: "C123",
+  },
+  reporting: { mode: "thread" as const },
+};
+
+describe("agent creation modes", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates agents from Slack channel alerts with thread replies", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(createAgent).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(agentConfiguration),
+    });
+
+    expect(response.status).toBe(201);
+    expect(createAgent).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      configuration: agentConfiguration,
+    });
+  });
+
+  it.each([
+    {
+      label: "Sentry triggers",
+      configuration: {
+        ...agentConfiguration,
+        trigger: {
+          kind: "sentry_issue" as const,
+          integrationAccountId: "60000000-0000-4000-8000-000000000000",
+          projectIds: ["project-1"],
+        },
+        reporting: {
+          mode: "output_channel" as const,
+          integrationAccountId: "50000000-0000-4000-8000-000000000000",
+          outputChannelId: "C123",
+          severities: ["SEV-1" as const],
+        },
+      },
+    },
+    {
+      label: "separate output channels",
+      configuration: {
+        ...agentConfiguration,
+        reporting: {
+          mode: "output_channel" as const,
+          integrationAccountId: "50000000-0000-4000-8000-000000000000",
+          outputChannelId: "C123",
+          severities: ["SEV-1" as const],
+        },
+      },
+    },
+  ])("rejects new agents using $label", async ({ configuration }) => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+
+    const response = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(configuration),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "New agents must use a Slack channel alert and reply in its thread",
+    });
+    expect(createAgent).not.toHaveBeenCalled();
+  });
+
+  it("continues to accept legacy modes when updating existing agents", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    const configuration = {
+      ...agentConfiguration,
+      reporting: {
+        mode: "output_channel" as const,
+        integrationAccountId: "50000000-0000-4000-8000-000000000000",
+        outputChannelId: "C123",
+        severities: ["SEV-1" as const],
+      },
+    };
+
+    const response = await app.request(
+      "/api/agents/30000000-0000-4000-8000-000000000000",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(configuration),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateAgent).toHaveBeenCalledWith({
+      agentId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      configuration,
+    });
+  });
+});
 
 describe("investigation reruns", () => {
   const agentId = "30000000-0000-4000-8000-000000000000";

@@ -383,6 +383,18 @@ export const agentRoutes = new Hono()
         400,
       );
     }
+    if (
+      parsed.data.trigger.kind !== "slack_channel" ||
+      parsed.data.reporting.mode !== "thread"
+    ) {
+      return context.json(
+        {
+          error:
+            "New agents must use a Slack channel alert and reply in its thread",
+        },
+        400,
+      );
+    }
 
     try {
       await ensureSlackChannelMemberships(
