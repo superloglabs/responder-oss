@@ -160,7 +160,7 @@ export async function refreshSentryGrant(input: {
       authorization: `Bearer ${sentryClientSecretJwt(clientId, clientSecret)}`,
     },
     body: JSON.stringify({
-      grant_type: "client_secret_jwt",
+      grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer",
     }),
   });
   if (!manualResponse.ok) {

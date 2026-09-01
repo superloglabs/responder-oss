@@ -557,7 +557,7 @@ describe("integration providers", () => {
         .digest("base64url"),
     );
     expect(JSON.parse(manualRequest[1].body as string)).toEqual({
-      grant_type: "client_secret_jwt",
+      grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer",
     });
   });
 
