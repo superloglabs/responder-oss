@@ -18,6 +18,7 @@ export interface AnalyticsEvent {
     | "pr opened"
     | "pr review addressed"
     | "prompt copied"
+    | "tag mode used"
     | "user signed up";
   organizationId?: string;
   properties?: Record<string, AnalyticsProperty>;

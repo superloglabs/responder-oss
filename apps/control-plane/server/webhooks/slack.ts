@@ -431,6 +431,7 @@ async function forwardSlackEvent(input: {
   timestamp: string;
   threadMode?: boolean;
   userId?: string;
+  userName?: string;
 }) {
   const request = {
     agentId: input.agentId,
@@ -458,6 +459,7 @@ async function forwardSlackEvent(input: {
         ? {
             integrationAccountId: input.integrationAccountId,
             ...(input.userId ? { slackUserId: input.userId } : {}),
+            ...(input.userName ? { slackUserName: input.userName } : {}),
           }
         : {}),
       slackEventId: input.eventId,
@@ -919,6 +921,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         timestamp: event.ts,
         threadMode: match.trigger === "slack_thread",
         userId: event.user,
+        userName: event.username?.trim() || undefined,
       });
       await recordInvestigationSlackSource(result.investigationId, {
         attachments: event.attachments ?? [],

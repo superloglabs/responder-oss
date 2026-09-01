@@ -205,6 +205,30 @@ export async function queueSlackThreadInvestigation(
       { singletonKey: result.slackInvestigationSessionId },
     );
     if (!jobId) throw new Error("The Slack investigation turn was not created");
+    const slackUserId = typeof request.attributes?.slackUserId === "string"
+      ? request.attributes.slackUserId
+      : undefined;
+    const slackUserName = typeof request.attributes?.slackUserName === "string"
+      ? request.attributes.slackUserName
+      : undefined;
+    await captureAnalyticsEvent({
+      distinctId: slackUserId
+        ? `slack:${thread.teamId}:${slackUserId}`
+        : `investigation:${result.investigationId}`,
+      event: "tag mode used",
+      organizationId: result.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_id: result.config.agentId,
+        channel_id: thread.channelId,
+        investigation_id: result.investigationId,
+        slack_user_id: slackUserId,
+        user_name: slackUserName,
+        surface: "slack",
+        team_id: thread.teamId,
+        thread_timestamp: thread.threadTimestamp,
+      },
+    });
     return { investigationId: result.investigationId, jobId, kind: "queued" };
   } catch (error) {
     await failInvestigation(
