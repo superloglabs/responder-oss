@@ -23,7 +23,6 @@ function AuthFrame({ children }: AuthGateProps) {
       <section className="authCard">
         <div className="authBrand">
           <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
-          <span>Superlog</span>
         </div>
         {children}
       </section>
