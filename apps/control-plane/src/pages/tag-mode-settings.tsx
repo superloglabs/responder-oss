@@ -227,6 +227,7 @@ export function TagModeSettingsPage() {
     if (integration.id === "slack") return false;
     if (
       integration.accountCount > 0 &&
+      integration.id !== "sentry" &&
       !multiAccountContextProviders.has(integration.id)
     ) {
       return false;

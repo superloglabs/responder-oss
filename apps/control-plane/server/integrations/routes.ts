@@ -437,6 +437,7 @@ async function retrySentrySetup(organizationId: string): Promise<{
     const fresh = await getFreshSentryCredentials({
       accountId: account.id,
       allowedStatuses: ["connected", "error", "pending"],
+      forceRefresh: true,
       organizationId,
     });
     expectedEncryptedCredentials = fresh.encryptedCredentials;
@@ -470,6 +471,7 @@ async function retrySentrySetup(organizationId: string): Promise<{
 async function getFreshSentryCredentials(input: {
   accountId: string;
   allowedStatuses?: Array<"connected" | "error" | "pending">;
+  forceRefresh?: boolean;
   organizationId: string;
 }) {
   const fresh = await withIntegrationAccountCredentialLease({
@@ -488,7 +490,11 @@ async function getFreshSentryCredentials(input: {
       const expiresAt = current.expiresAt
         ? Date.parse(current.expiresAt)
         : Number.POSITIVE_INFINITY;
-      if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+      if (
+        !input.forceRefresh &&
+        Number.isFinite(expiresAt) &&
+        expiresAt > Date.now() + 60_000
+      ) {
         return {
           value: { credentials: current, encryptedCredentials },
         };
@@ -590,7 +596,7 @@ export const integrationRoutes = new Hono()
                 : definition.id === "github" && providerAccounts.length === 0
                   ? "/api/integrations/github/start?mode=install"
                 : definition.id === "sentry" && providerAccounts.length > 0
-                  ? "/api/integrations/sentry/start?mode=reconnect"
+                  ? "/api/integrations/sentry/start"
                   : `/api/integrations/${definition.id}/start`
               : null,
           configurationUrl:
@@ -630,10 +636,25 @@ export const integrationRoutes = new Hono()
           });
           expectedEncryptedCredentials = fresh.encryptedCredentials;
           const organizationSlug = getSentryOrganizationSlug(account.metadata);
-          const projects = await listSentryProjects(
-            fresh.credentials.accessToken,
-            organizationSlug,
-          );
+          let projects;
+          try {
+            projects = await listSentryProjects(
+              fresh.credentials.accessToken,
+              organizationSlug,
+            );
+          } catch (error) {
+            if (!sentryErrorNeedsReconnect(error)) throw error;
+            const recovered = await getFreshSentryCredentials({
+              accountId: account.id,
+              forceRefresh: true,
+              organizationId: tenant.organizationId,
+            });
+            expectedEncryptedCredentials = recovered.encryptedCredentials;
+            projects = await listSentryProjects(
+              recovered.credentials.accessToken,
+              organizationSlug,
+            );
+          }
           const updated = await replaceIntegrationResourcesIfCredentialsMatch({
             encryptedCredentials: expectedEncryptedCredentials,
             integrationAccountId: account.id,
@@ -723,10 +744,7 @@ export const integrationRoutes = new Hono()
         405,
       );
     }
-    if (
-      parsedProvider.data === "sentry" &&
-      context.req.query("mode") !== "reconnect"
-    ) {
+    if (parsedProvider.data === "sentry") {
       try {
         const retriedAccount = await retrySentrySetup(tenant.organizationId);
         if (retriedAccount) {
