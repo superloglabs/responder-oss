@@ -716,25 +716,16 @@ function formattedTraceTask(
     };
   }
 
-  if (
-    item.title === "slack_read_channel" ||
-    item.title === "slack_read_thread"
-  ) {
+  if (item.title === "slack_search_channel") {
     const channelId = input?.channel_id;
     if (!input || typeof channelId !== "string") return null;
-    const threadTimestamp = input?.thread_ts ?? input?.thread_timestamp;
-    const details = objectDetails(
-      input,
-      new Set(["channel_id", "thread_ts", "thread_timestamp"]),
-    );
+    const query = input.query;
+    if (typeof query !== "string") return null;
+    const details = objectDetails(input, new Set(["channel_id", "query"]));
     const url = firstUrl(item.output);
     return {
       task_id: taskId,
-      title:
-        item.title === "slack_read_thread" &&
-        typeof threadTimestamp === "string"
-          ? `Read Slack thread \`${threadTimestamp}\` in \`${channelId}\``
-          : `Read Slack channel \`${channelId}\``,
+      title: `Search Slack channel \`${channelId}\` for \`${query}\``,
       status,
       ...(details ? { details } : {}),
       ...(item.output ? { output: preformatted(item.output) } : {}),

@@ -86,7 +86,6 @@ describe("runtime Slack context", () => {
         { id: "C123", name: "incidents" },
         { id: "C456", name: "engineering" },
       ],
-      mcpUrl: "https://mcp.slack.com/mcp",
       userAccessToken: "user-token",
     });
   });
@@ -136,7 +135,6 @@ describe("runtime Slack context", () => {
     ).resolves.toEqual({
       accountId: "slack-account-1",
       channels: [{ id: "C123", name: "incidents" }],
-      mcpUrl: "https://mcp.slack.com/mcp",
       userAccessToken: "user-token",
     });
   });

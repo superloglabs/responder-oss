@@ -30,7 +30,6 @@ import {
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
 } from "../integrations/linear.js";
-import { SLACK_MCP_URL } from "../integrations/slack-mcp.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
 import { parseLangfuseCredentials } from "../integrations/langfuse.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
@@ -82,7 +81,6 @@ export interface RuntimeRepository {
 export interface RuntimeSlackConnection {
   accountId: string;
   channels: Array<{ id: string; name: string }>;
-  mcpUrl: string;
   userAccessToken: string;
 }
 
@@ -2306,7 +2304,6 @@ export async function getRuntimeSlackConnection(
       const resource = resourcesById.get(resourceId)!;
       return { id: resource.externalId, name: resource.displayName };
     }),
-    mcpUrl: SLACK_MCP_URL,
     userAccessToken: credentials.data.userAccessToken,
   };
 }

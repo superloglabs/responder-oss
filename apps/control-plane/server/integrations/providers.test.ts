@@ -366,9 +366,7 @@ describe("integration providers", () => {
     expect(scopes).toContain("chat:write");
     expect(scopes).toContain("chat:write.public");
     const userScopes = url.searchParams.get("user_scope")?.split(",") ?? [];
-    expect(userScopes).toEqual(
-      expect.arrayContaining(["channels:history", "groups:history"]),
-    );
+    expect(userScopes).toEqual(["search:read"]);
   });
 
   it("joins a selected public Slack channel", async () => {
@@ -386,7 +384,7 @@ describe("integration providers", () => {
     );
   });
 
-  it("captures the Slack user token used by the hosted MCP", async () => {
+  it("captures the Slack user token used for channel search", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("SLACK_CLIENT_ID", "slack-client");
     vi.stubEnv("SLACK_CLIENT_SECRET", "slack-secret");
@@ -405,7 +403,7 @@ describe("integration providers", () => {
             id: "U123",
             access_token: "xoxp-user-token",
             token_type: "user",
-            scope: "channels:history,groups:history",
+            scope: "search:read",
           },
         }),
       ),
@@ -415,7 +413,7 @@ describe("integration providers", () => {
       access_token: "xoxb-bot-token",
       authed_user: {
         access_token: "xoxp-user-token",
-        scope: "channels:history,groups:history",
+        scope: "search:read",
       },
     });
   });
