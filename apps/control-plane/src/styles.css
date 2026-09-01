@@ -1696,13 +1696,6 @@ button:disabled {
 
 .authBrand {
   margin-bottom: 56px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--foreground);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.018em;
 }
 
 .authBrand img {
