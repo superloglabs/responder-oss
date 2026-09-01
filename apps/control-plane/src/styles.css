@@ -7765,37 +7765,171 @@ body:has(.appShell--create) {
   color: var(--ds-text-secondary);
 }
 
-.appShell--create .slackContextPicker__empty {
-  width: 100%;
-  min-height: 72px;
+.appShell--create .slackContextPicker {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.appShell--create .slackContextSearch {
+  min-height: 44px;
+  padding-inline: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-canvas);
+  color: var(--ds-text-muted);
+}
+
+.appShell--create .slackContextSearch:focus-within {
+  outline: 2px solid var(--ds-text-primary);
+  outline-offset: 2px;
+}
+
+.appShell--create .slackContextSearch > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.appShell--create .slackContextSearch > input {
+  min-width: 0;
+  height: 42px;
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.appShell--create .slackContextSearch > input::placeholder {
+  color: var(--ds-text-muted);
+}
+
+.appShell--create .slackContextSearch > button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-secondary);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.appShell--create .slackContextSearch > button:focus-visible {
+  outline: 2px solid var(--ds-text-primary);
+  outline-offset: 2px;
+}
+
+.appShell--create .slackContextPicker__meta {
+  min-height: 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 15px;
 }
 
-.appShell--create .slackContextPicker__empty > span {
+.appShell--create .slackContextPicker__meta span:last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+.appShell--create .slackContextChannelList {
+  min-height: 184px;
+  max-height: min(440px, calc(100vh - 310px));
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-canvas);
+}
+
+.appShell--create .slackContextChannelRow {
+  min-height: 44px;
+  padding: 10px 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--ds-border-default);
+}
+
+.appShell--create .slackContextChannelRow:last-of-type {
+  border-bottom: 0;
+}
+
+.appShell--create .slackContextChannelRow:has(.dsChoice__input:checked) {
+  background: var(--ds-surface-raised);
+}
+
+.appShell--create .slackContextChannelRow .dsChoice__mark {
+  margin-top: 0;
+}
+
+.appShell--create .slackContextChannelRow .dsChoice__copy strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.appShell--create .slackContextPicker__empty,
+.appShell--create .slackContextPicker__noResults {
+  width: 100%;
+  min-height: 96px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-canvas);
+}
+
+.appShell--create .slackContextPicker__empty > span,
+.appShell--create .slackContextPicker__noResults > span {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
-.appShell--create .slackContextPicker__empty strong {
+.appShell--create .slackContextPicker__empty strong,
+.appShell--create .slackContextPicker__noResults strong {
   color: var(--ds-text-primary);
   font-size: 13px;
   font-weight: 500;
   line-height: 18px;
 }
 
-.appShell--create .slackContextPicker__empty small {
+.appShell--create .slackContextPicker__empty small,
+.appShell--create .slackContextPicker__noResults small {
   color: var(--ds-text-muted);
   font-size: 12px;
   line-height: 17px;
 }
 
-.appShell--create .slackContextPicker__empty > .dsButton {
+.appShell--create .slackContextPicker__empty > .dsButton,
+.appShell--create .slackContextPicker__noResults > .dsButton {
   flex: 0 0 auto;
+}
+
+@media (hover: hover) {
+  .appShell--create .slackContextChannelRow:hover {
+    background: var(--ds-surface-hover);
+  }
 }
 
 .appShell--create .requiredOutput__label small,
@@ -9976,6 +10110,21 @@ a.issueLine:focus-visible {
 }
 
 @media (max-width: 620px) {
+  .appShell--create .slackContextSearch > input {
+    font-size: 16px;
+  }
+
+  .appShell--create .slackContextPicker__empty,
+  .appShell--create .slackContextPicker__noResults {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .appShell--create .slackContextPicker__empty > .dsButton,
+  .appShell--create .slackContextPicker__noResults > .dsButton {
+    width: 100%;
+  }
+
   .authThemeToggle {
     top: 18px;
     right: 18px;

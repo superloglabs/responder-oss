@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentOptions } from "./agents-api";
 import {
   defaultAgentContext,
+  filterSlackSearchChannels,
   resolveSlackSearchContext,
 } from "./agent-context-defaults";
 
@@ -157,5 +158,21 @@ describe("resolveSlackSearchContext", () => {
       searchableChannels: [],
       reconnectRequired: true,
     });
+  });
+});
+
+describe("filterSlackSearchChannels", () => {
+  const channels = OPTIONS.resources.filter(
+    (resource) => resource.kind === "slack_channel",
+  );
+
+  it("matches channel names case-insensitively with an optional hash prefix", () => {
+    expect(filterSlackSearchChannels(channels, " #PLAT ")).toEqual([
+      expect.objectContaining({ id: "slack-channel-2" }),
+    ]);
+  });
+
+  it("returns every channel for an empty query", () => {
+    expect(filterSlackSearchChannels(channels, "   ")).toEqual(channels);
   });
 });
