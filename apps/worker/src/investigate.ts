@@ -263,6 +263,8 @@ export function investigationCapabilities(replay: boolean) {
   return Capabilities.default();
 }
 
+export const investigationMaxTurns = 40;
+
 export function investigationInstructions(input: {
   agentPrompt: string;
   awsAlarmTriggered?: boolean;
@@ -732,7 +734,7 @@ export async function runInvestigationAgent(
       agent,
       initialMessage.message,
       {
-        maxTurns: 20,
+        maxTurns: investigationMaxTurns,
         sandbox: { session },
         stream: true,
         ...(sessionRuntime?.previousResponseId

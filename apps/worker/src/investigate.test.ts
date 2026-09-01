@@ -4,6 +4,7 @@ import {
   contextServerConnectFailureEvent,
   initialInvestigationMessage,
   investigationCapabilities,
+  investigationMaxTurns,
   investigationInstructions,
   investigationInstructionsTraceEvent,
   investigationTraceWriteFailure,
@@ -13,6 +14,10 @@ import {
 } from "./investigate.js";
 
 describe("sandbox agent configuration", () => {
+  it("allows forty model turns for investigations", () => {
+    expect(investigationMaxTurns).toBe(40);
+  });
+
   it("identifies the custom MCP account when its server cannot connect", () => {
     expect(
       contextServerConnectFailureEvent({
