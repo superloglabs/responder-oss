@@ -20,6 +20,7 @@ import {
 const defaultMaxArchiveBytes = 5 * 1024 * 1024 * 1024;
 const repositoryDownloadTimeoutMs = 10 * 60_000;
 const repositoryUploadTimeoutSeconds = 30 * 60;
+const repositoryFileDownloadTimeoutSeconds = 30 * 60;
 const workspaceRoot = "/home/daytona/workspace";
 const execFileAsync = promisify(execFile);
 
@@ -323,6 +324,32 @@ async function uploadRepositoryArchive(
     await sandbox.fs.uploadFileStream(localPath, remotePath, {
       timeout: repositoryUploadTimeoutSeconds,
     });
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
+/**
+ * Download repository content through Daytona's filesystem API. The sandbox
+ * editor's readFile implementation streams a file through a command output
+ * buffer, which is unsuitable for arbitrarily-sized repository files.
+ */
+export async function downloadRepositoryFile(
+  session: DaytonaSandboxSession,
+  remotePath: string,
+): Promise<Uint8Array> {
+  const { apiKey, apiUrl, sandboxId, target } = session.state;
+  if (!apiKey) throw new Error("Daytona API key is unavailable for file download");
+
+  const client = new Daytona({ apiKey, apiUrl, target });
+  try {
+    const sandbox = await client.get(sandboxId);
+    return Uint8Array.from(
+      await sandbox.fs.downloadFile(
+        remotePath,
+        repositoryFileDownloadTimeoutSeconds,
+      ),
+    );
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }

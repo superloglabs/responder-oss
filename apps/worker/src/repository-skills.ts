@@ -1,13 +1,38 @@
 import { dir, file, type Dir, type Entry } from "@openai/agents/sandbox";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { dirname, relative } from "node:path";
-import type { CheckedOutRepository } from "./repositories.js";
+import {
+  downloadRepositoryFile,
+  type CheckedOutRepository,
+} from "./repositories.js";
 
 const skillRoots = [".agents/skills", ".claude/skills"] as const;
-const maxSkillFileBytes = 512_000;
+
+export interface RepositorySkillsDependencies {
+  downloadFile: typeof downloadRepositoryFile;
+}
+
+const defaultDependencies: RepositorySkillsDependencies = {
+  downloadFile: downloadRepositoryFile,
+};
 
 function commandSucceeded(output: string): boolean {
-  return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
+  return output.includes("Process exited with 0");
+}
+
+async function readSkillFile(
+  session: DaytonaSandboxSession,
+  path: string,
+  dependencies: RepositorySkillsDependencies,
+): Promise<Uint8Array> {
+  try {
+    return await dependencies.downloadFile(session, path);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to read repository skill file ${path}: ${detail}`, {
+      cause: error,
+    });
+  }
 }
 
 async function findFiles(
@@ -28,6 +53,7 @@ async function readDirectoryEntry(
   session: DaytonaSandboxSession,
   path: string,
   files: string[],
+  dependencies: RepositorySkillsDependencies,
 ): Promise<Dir> {
   const children: Record<string, Entry> = {};
   const directFiles = new Map<string, string>();
@@ -44,10 +70,7 @@ async function readDirectoryEntry(
   }
   for (const [name, childPath] of directFiles) {
     children[name] = file({
-      content: await session.readFile({
-        path: childPath,
-        maxBytes: maxSkillFileBytes,
-      }),
+      content: await readSkillFile(session, childPath, dependencies),
     });
   }
   for (const name of directDirectories) {
@@ -55,7 +78,12 @@ async function readDirectoryEntry(
     const nestedFiles = files.filter((candidate) =>
       candidate.startsWith(`${nestedPath}/`),
     );
-    children[name] = await readDirectoryEntry(session, nestedPath, nestedFiles);
+    children[name] = await readDirectoryEntry(
+      session,
+      nestedPath,
+      nestedFiles,
+      dependencies,
+    );
   }
   return dir({ children });
 }
@@ -63,6 +91,7 @@ async function readDirectoryEntry(
 export async function loadRepositorySkills(
   session: DaytonaSandboxSession,
   repositories: CheckedOutRepository[],
+  dependencies: RepositorySkillsDependencies = defaultDependencies,
 ): Promise<Dir | undefined> {
   const skills: Record<string, Entry> = {};
   const usedNames = new Set<string>();
@@ -88,6 +117,7 @@ export async function loadRepositorySkills(
           session,
           skillDirectory,
           files.filter((path) => path.startsWith(`${skillDirectory}/`)),
+          dependencies,
         );
       }
     }
