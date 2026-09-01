@@ -52,6 +52,21 @@ export function resolveSlackSearchContext(options: AgentOptions): SlackSearchCon
   };
 }
 
+export function filterSlackSearchChannels(
+  channels: AgentOptions["resources"],
+  query: string,
+): AgentOptions["resources"] {
+  const normalizedQuery = query.trim().toLocaleLowerCase().replace(/^#/, "");
+  if (!normalizedQuery) return channels;
+
+  return channels.filter((channel) =>
+    channel.displayName
+      .toLocaleLowerCase()
+      .replace(/^#/, "")
+      .includes(normalizedQuery),
+  );
+}
+
 export function defaultAgentContext(options: AgentOptions): DefaultAgentContext {
   const firstSlackChannel = resolveSlackSearchContext(options).searchableChannels[0];
   const firstVercelProject = options.resources.find(

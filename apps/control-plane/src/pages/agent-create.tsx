@@ -24,6 +24,7 @@ import {
 } from "../agents-api";
 import {
   defaultAgentContext,
+  filterSlackSearchChannels,
   resolveSlackSearchContext,
 } from "../agent-context-defaults";
 import { AppShell } from "../components/app-shell";
@@ -515,6 +516,7 @@ export function AgentCreatePage() {
     linearJustConnected ? returnedIntegrationAccountId ?? "" : "",
   );
   const [repositoryQuery, setRepositoryQuery] = useState("");
+  const [slackContextQuery, setSlackContextQuery] = useState("");
   const [integrationQuery, setIntegrationQuery] = useState("");
   const [connectionSettingsOpen, setConnectionSettingsOpen] = useState<
     AgentOptions["accounts"][number] | null
@@ -932,6 +934,10 @@ export function AgentCreatePage() {
   const slackAccounts = slackSearchContext.connectedAccounts;
   const searchableSlackAccounts = slackSearchContext.searchableAccounts;
   const searchableSlackChannels = slackSearchContext.searchableChannels;
+  const filteredSlackContextChannels = filterSlackSearchChannels(
+    searchableSlackChannels,
+    slackContextQuery,
+  );
   const slackSearchReconnectRequired = slackSearchContext.reconnectRequired;
   const sentryProjects = useMemo(
     () => resourcesOfKind(options, "sentry_project"),
@@ -2120,7 +2126,6 @@ export function AgentCreatePage() {
                           </span>
                           <IconButton
                             aria-label="Close Slack context configuration"
-                            autoFocus
                             onClick={() => setSlackContextDialogOpen(false)}
                             size="small"
                             variant="ghost"
@@ -2129,80 +2134,161 @@ export function AgentCreatePage() {
                           </IconButton>
                         </header>
                         <div className="configurationDialog__body">
-                          <div className="projectPicker slackContextPicker">
-                            <span>Channels</span>
-                            <div>
-                              {searchableSlackChannels.map((channel) => {
-                                  const account = slackAccounts.find(
-                                    (item) => item.id === channel.integrationAccountId,
-                                  );
-                                  return (
-                                    <Checkbox
-                                      checked={draft.contextResourceIds.includes(channel.id)}
-                                      description={
-                                        slackAccounts.length > 1
-                                          ? account?.displayName
-                                          : undefined
-                                      }
-                                      key={channel.id}
-                                      label={slackChannelLabel(channel.displayName)}
-                                      onChange={() =>
-                                        toggleSlackContextResource(channel.id)
-                                      }
-                                    />
-                                  );
-                                })}
-                              {slackSearchReconnectRequired ? (
-                                <div className="slackContextPicker__empty">
-                                  <span>
-                                    <strong>Reconnect Slack to search messages</strong>
-                                    <small>
-                                      Your existing connection needs permission to search
-                                      the channels you select.
-                                    </small>
-                                  </span>
-                                  <Button
-                                    disabled={connectingProvider === "slack"}
-                                    loading={connectingProvider === "slack"}
-                                    onClick={() => connect("slack")}
-                                    size="small"
-                                    type="button"
-                                    variant="primary"
+                          <div className="slackContextPicker">
+                            {!slackSearchReconnectRequired &&
+                            searchableSlackChannels.length > 0 ? (
+                              <>
+                                <div className="slackContextSearch">
+                                  <SearchIcon />
+                                  <label
+                                    className="srOnly"
+                                    htmlFor="slack-context-channel-search"
                                   >
-                                    {connectingProvider === "slack"
-                                      ? "Reconnecting…"
-                                      : "Reconnect Slack"}
-                                  </Button>
-                                </div>
-                              ) : null}
-                              {!slackSearchReconnectRequired &&
-                              searchableSlackChannels.length === 0 ? (
-                                <div className="slackContextPicker__empty">
-                                  <span>
-                                    <strong>
-                                      {refreshingSlackChannels
-                                        ? "Refreshing Slack channels…"
-                                        : "No Slack channels are available"}
-                                    </strong>
-                                    <small>
-                                      {refreshingSlackChannels
-                                        ? "This should only take a moment."
-                                        : "Invite Responder to a channel, then refresh the list."}
-                                    </small>
-                                  </span>
-                                  {!refreshingSlackChannels ? (
-                                    <Button
-                                      onClick={() => void refreshSlackChannels()}
-                                      size="small"
+                                    Search Slack channels
+                                  </label>
+                                  <input
+                                    aria-describedby="slack-context-result-count"
+                                    autoComplete="off"
+                                    autoFocus
+                                    id="slack-context-channel-search"
+                                    onChange={(event) =>
+                                      setSlackContextQuery(event.target.value)
+                                    }
+                                    placeholder="Search channels…"
+                                    type="search"
+                                    value={slackContextQuery}
+                                  />
+                                  {slackContextQuery ? (
+                                    <button
+                                      aria-label="Clear Slack channel search"
+                                      onClick={() => setSlackContextQuery("")}
                                       type="button"
-                                      variant="secondary"
                                     >
-                                      Refresh
-                                    </Button>
+                                      ×
+                                    </button>
                                   ) : null}
                                 </div>
-                              ) : null}
-                            </div>
+                                <div className="slackContextPicker__meta">
+                                  <span>All channels</span>
+                                  <span
+                                    aria-live="polite"
+                                    id="slack-context-result-count"
+                                    role="status"
+                                  >
+                                    {refreshingSlackChannels
+                                      ? "Refreshing channels…"
+                                      : slackContextQuery.trim()
+                                        ? `${filteredSlackContextChannels.length} ${
+                                            filteredSlackContextChannels.length === 1
+                                              ? "result"
+                                              : "results"
+                                          }`
+                                        : `${searchableSlackChannels.length} ${
+                                            searchableSlackChannels.length === 1
+                                              ? "channel"
+                                              : "channels"
+                                          }`}
+                                  </span>
+                                </div>
+                                <fieldset className="slackContextChannelList">
+                                  <legend className="srOnly">Slack channels</legend>
+                                  {filteredSlackContextChannels.map((channel) => {
+                                    const account = slackAccounts.find(
+                                      (item) =>
+                                        item.id === channel.integrationAccountId,
+                                    );
+                                    return (
+                                      <Checkbox
+                                        checked={draft.contextResourceIds.includes(
+                                          channel.id,
+                                        )}
+                                        className="slackContextChannelRow"
+                                        description={
+                                          slackAccounts.length > 1
+                                            ? account?.displayName
+                                            : undefined
+                                        }
+                                        key={channel.id}
+                                        label={slackChannelLabel(channel.displayName)}
+                                        onChange={() =>
+                                          toggleSlackContextResource(channel.id)
+                                        }
+                                      />
+                                    );
+                                  })}
+                                  {filteredSlackContextChannels.length === 0 ? (
+                                    <div className="slackContextPicker__noResults">
+                                      <span>
+                                        <strong>
+                                          No channels match “{slackContextQuery.trim()}”
+                                        </strong>
+                                        <small>
+                                          Try another channel name or clear the search.
+                                        </small>
+                                      </span>
+                                      <Button
+                                        onClick={() => setSlackContextQuery("")}
+                                        size="small"
+                                        type="button"
+                                        variant="secondary"
+                                      >
+                                        Clear search
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                </fieldset>
+                              </>
+                            ) : null}
+                            {slackSearchReconnectRequired ? (
+                              <div className="slackContextPicker__empty">
+                                <span>
+                                  <strong>Reconnect Slack to search messages</strong>
+                                  <small>
+                                    Your existing connection needs permission to search
+                                    the channels you select.
+                                  </small>
+                                </span>
+                                <Button
+                                  disabled={connectingProvider === "slack"}
+                                  loading={connectingProvider === "slack"}
+                                  onClick={() => connect("slack")}
+                                  size="small"
+                                  type="button"
+                                  variant="primary"
+                                >
+                                  {connectingProvider === "slack"
+                                    ? "Reconnecting…"
+                                    : "Reconnect Slack"}
+                                </Button>
+                              </div>
+                            ) : null}
+                            {!slackSearchReconnectRequired &&
+                            searchableSlackChannels.length === 0 ? (
+                              <div className="slackContextPicker__empty">
+                                <span>
+                                  <strong>
+                                    {refreshingSlackChannels
+                                      ? "Refreshing Slack channels…"
+                                      : "No Slack channels are available"}
+                                  </strong>
+                                  <small>
+                                    {refreshingSlackChannels
+                                      ? "This should only take a moment."
+                                      : "Invite Responder to a channel, then refresh the list."}
+                                  </small>
+                                </span>
+                                {!refreshingSlackChannels ? (
+                                  <Button
+                                    onClick={() => void refreshSlackChannels()}
+                                    size="small"
+                                    type="button"
+                                    variant="secondary"
+                                  >
+                                    Refresh
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                           {slackRefreshError ? (
                             <Alert role="alert" title={slackRefreshError} tone="danger" />
