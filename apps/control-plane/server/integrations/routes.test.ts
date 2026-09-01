@@ -189,7 +189,7 @@ describe("integration callback routing", () => {
     });
   });
 
-  it("starts a fresh Sentry authorization when reconnecting", async () => {
+  it("tries automatic Sentry recovery before fresh authorization", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
     vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
@@ -203,7 +203,9 @@ describe("integration callback routing", () => {
     expect(response.status).toBe(302);
     expect(new URL(response.headers.get("location")!).searchParams.get("state"))
       .toBe("fresh-state");
-    expect(getRecoverableSentryIntegrationAccount).not.toHaveBeenCalled();
+    expect(getRecoverableSentryIntegrationAccount).toHaveBeenCalledWith(
+      tenant.organizationId,
+    );
   });
 
   it("falls back to fresh Sentry authorization when an old retry fails", async () => {
@@ -294,6 +296,68 @@ describe("integration callback routing", () => {
     });
   });
 
+  it("recovers a revoked Sentry token during a connection check", async () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        encryptedCredentials: "encrypted-credentials",
+        metadata: { organizationSlug: "example" },
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "revoked-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "revoked-refresh-token",
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("recovered-credentials");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "1",
+          token: "recovered-token",
+          refreshToken: "recovered-refresh-token",
+          expiresAt: "2099-01-01T01:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          { id: "1", name: "Backend", platform: "node", slug: "backend" },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request("/api/integrations/sentry/check", {
+      method: "POST",
+    });
+
+    expect(await response.json()).toEqual({
+      accounts: [
+        {
+          id: "30000000-0000-4000-8000-000000000000",
+          resourceCount: 1,
+          status: "working",
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls[2]?.[1]?.headers.authorization).toMatch(
+      /^Bearer /,
+    );
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "recovered-credentials",
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      }),
+    );
+    expect(setIntegrationAccountStatusIfCredentialsMatch).not.toHaveBeenCalled();
+  });
+
   it("discards a Sentry check superseded by reconnect", async () => {
     vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
       {
@@ -336,6 +400,9 @@ describe("integration callback routing", () => {
   });
 
   it("marks a Sentry account for reconnect after a live authorization failure", async () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
     vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
       {
         id: "30000000-0000-4000-8000-000000000000",
@@ -902,7 +969,7 @@ describe("integration callback routing", () => {
     );
   });
 
-  it("offers a fresh Sentry reconnect when an account already exists", async () => {
+  it("offers automatic Sentry recovery when an account already exists", async () => {
     vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
     vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
     vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
@@ -926,7 +993,7 @@ describe("integration callback routing", () => {
     expect(body.integrations).toContainEqual(
       expect.objectContaining({
         id: "sentry",
-        connectUrl: "/api/integrations/sentry/start?mode=reconnect",
+        connectUrl: "/api/integrations/sentry/start",
       }),
     );
   });

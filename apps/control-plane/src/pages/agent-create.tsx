@@ -1453,6 +1453,7 @@ export function AgentCreatePage() {
     if (integration.id === "slack") return false;
     if (
       integration.accountCount > 0 &&
+      integration.id !== "sentry" &&
       !MULTI_ACCOUNT_CONTEXT_PROVIDERS.has(integration.id)
     ) {
       return false;

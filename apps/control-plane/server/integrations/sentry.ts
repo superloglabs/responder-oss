@@ -1,3 +1,4 @@
+import { createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
 
 const SENTRY_REQUEST_TIMEOUT_MS = 10_000;
@@ -54,6 +55,32 @@ export function sentryInstallUrl(state: string): string {
   return url.toString();
 }
 
+function base64Url(value: string | Uint8Array): string {
+  return Buffer.from(value)
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+}
+
+function sentryClientSecretJwt(clientId: string, clientSecret: string): string {
+  const issuedAt = Math.floor(Date.now() / 1_000);
+  const encodedHeader = base64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const encodedPayload = base64Url(
+    JSON.stringify({
+      exp: issuedAt + 60,
+      iat: issuedAt,
+      iss: clientId,
+      jti: randomUUID(),
+    }),
+  );
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = createHmac("sha256", clientSecret)
+    .update(signingInput)
+    .digest();
+  return `${signingInput}.${base64Url(signature)}`;
+}
+
 export async function exchangeSentryGrant(input: {
   code: string;
   installationId: string;
@@ -91,31 +118,59 @@ export async function refreshSentryGrant(input: {
   refreshToken: string;
 }) {
   const { clientId, clientSecret } = sentryEnvironment();
-  const response = await fetch(
-    `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(input.installationId)}/authorizations/`,
-    {
-      method: "POST",
-      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        grant_type: "refresh_token",
-        refresh_token: input.refreshToken,
-        client_id: clientId,
-        client_secret: clientSecret,
-      }),
+  const authorizationUrl =
+    `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(input.installationId)}/authorizations/`;
+  const response = await fetch(authorizationUrl, {
+    method: "POST",
+    signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
     },
-  );
-  if (!response.ok) {
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: input.refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+  if (response.ok) {
+    return sentryAuthorizationSchema.parse(await response.json());
+  }
+
+  // Sentry can revoke a refresh token while leaving the installation in place
+  // (for example after an administrator changes the app's access). A client
+  // secret JWT refreshes the existing installation token without requiring an
+  // uninstall/reinstall cycle. Only use it for authorization failures; a
+  // timeout or provider outage should remain retryable as-is.
+  if (response.status !== 401 && response.status !== 403) {
     throw new SentryApiError(
       "Unable to refresh Sentry access",
       response.status,
       "authorization",
     );
   }
-  return sentryAuthorizationSchema.parse(await response.json());
+
+  const manualResponse = await fetch(authorizationUrl, {
+    method: "POST",
+    signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${sentryClientSecretJwt(clientId, clientSecret)}`,
+    },
+    body: JSON.stringify({
+      grant_type: "client_secret_jwt",
+    }),
+  });
+  if (!manualResponse.ok) {
+    throw new SentryApiError(
+      "Unable to refresh Sentry access",
+      manualResponse.status,
+      "authorization",
+    );
+  }
+  return sentryAuthorizationSchema.parse(await manualResponse.json());
 }
 
 function nextSentryPage(linkHeader: string | null): string | null {
