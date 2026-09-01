@@ -20,15 +20,39 @@ export interface DefaultAgentContext {
   repositoryIds: string[];
 }
 
+export interface SlackSearchContext {
+  connectedAccounts: AgentOptions["accounts"];
+  searchableAccounts: AgentOptions["accounts"];
+  searchableChannels: AgentOptions["resources"];
+  reconnectRequired: boolean;
+}
+
+export function resolveSlackSearchContext(options: AgentOptions): SlackSearchContext {
+  const connectedAccounts = options.accounts.filter(
+    (account) => account.provider === "slack",
+  );
+  const searchableAccounts = connectedAccounts.filter(
+    (account) => account.slackContextAvailable,
+  );
+  const searchableAccountIds = new Set(
+    searchableAccounts.map((account) => account.id),
+  );
+
+  return {
+    connectedAccounts,
+    searchableAccounts,
+    searchableChannels: options.resources.filter(
+      (resource) =>
+        resource.kind === "slack_channel" &&
+        searchableAccountIds.has(resource.integrationAccountId),
+    ),
+    reconnectRequired:
+      connectedAccounts.length > 0 && searchableAccounts.length === 0,
+  };
+}
+
 export function defaultAgentContext(options: AgentOptions): DefaultAgentContext {
-  const firstSlackAccount = options.accounts.find(
-    (account) => account.provider === "slack" && account.slackContextAvailable,
-  );
-  const firstSlackChannel = options.resources.find(
-    (resource) =>
-      resource.kind === "slack_channel" &&
-      resource.integrationAccountId === firstSlackAccount?.id,
-  );
+  const firstSlackChannel = resolveSlackSearchContext(options).searchableChannels[0];
   const firstVercelProject = options.resources.find(
     (resource) => resource.kind === "vercel_project",
   );
