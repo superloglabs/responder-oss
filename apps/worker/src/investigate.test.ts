@@ -195,6 +195,8 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("Never create or update issues");
     expect(instructions).toContain("nothing in it is published");
     expect(instructions).toContain("response directly to the Slack thread");
+    expect(instructions).toContain("reconsider prior conclusions and the proposed remediation");
+    expect(instructions).toContain("provide the updated remediation");
     expect(instructions).not.toContain("search_existing_issues");
     expect(instructions).not.toContain("submit_investigation_report");
   });

@@ -13,6 +13,7 @@ import type {
   InvestigationReportSubmission,
   IssueEvidence,
   IssueRemediation,
+  IssueRemediationSubmission,
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import {
@@ -570,6 +571,52 @@ export async function getIssueForSlackAction(input: {
   return rows[0] ?? null;
 }
 
+export async function updateIssueRemediations(input: {
+  issueId: string;
+  organizationId: string;
+  remediations: IssueRemediationSubmission[];
+}) {
+  const remediations: IssueRemediation[] = input.remediations.map(
+    (remediation) => ({ ...remediation, id: randomUUID() }),
+  );
+  const rows = await getDatabase()
+    .update(issues)
+    .set({
+      remediation: remediationSummary(remediations),
+      remediations,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(issues.id, input.issueId),
+        eq(issues.organizationId, input.organizationId),
+        isNull(issues.archivedAt),
+      ),
+    )
+    .returning({
+      id: issues.id,
+      remediations: issues.remediations,
+      title: issues.title,
+      remediation: issues.remediation,
+    });
+  const updated = rows[0];
+  if (updated) {
+    const preferred = remediations.find((remediation) => remediation.type === "code_change") ?? remediations[0];
+    if (preferred) {
+      await getDatabase()
+        .update(issuePullRequests)
+        .set({ remediationId: preferred.id, updatedAt: new Date() })
+        .where(
+          and(
+            eq(issuePullRequests.issueId, input.issueId),
+            inArray(issuePullRequests.status, ["queued", "creating", "created"]),
+          ),
+        );
+    }
+  }
+  return updated ?? null;
+}
+
 export async function getInvestigationIssueDetails(investigationId: string) {
   return getDatabase()
     .select({
@@ -665,6 +712,7 @@ export interface SlackInvestigationDeliveryContext {
     integrationAccountId: string;
     messageTimestamp: string | null;
     reactionTimestamp: string;
+    teamId?: string;
     threadTimestamp: string;
   } | null;
   output: {
@@ -672,6 +720,7 @@ export interface SlackInvestigationDeliveryContext {
     encryptedCredentials: string;
     integrationAccountId: string;
     severities: Array<"SEV-1" | "SEV-2" | "SEV-3"> | null;
+    teamId?: string;
   } | null;
 }
 
@@ -836,10 +885,11 @@ export async function getSlackInvestigationDeliveryContext(
   ];
   const accountRows = accountIds.length
     ? await db
-        .select({
-          id: integrationAccounts.id,
-          encryptedCredentials: integrationAccounts.encryptedCredentials,
-        })
+      .select({
+        id: integrationAccounts.id,
+        encryptedCredentials: integrationAccounts.encryptedCredentials,
+        teamId: integrationAccounts.externalAccountId,
+      })
         .from(integrationAccounts)
         .where(
           and(
@@ -864,6 +914,8 @@ export async function getSlackInvestigationDeliveryContext(
   const outputCredentials = outputConfig
     ? credentialsByAccount.get(outputConfig.integrationAccountId)
     : null;
+  const teamIdForAccount = (accountId: string): string | null =>
+    accountRows.find((account) => account.id === accountId)?.teamId ?? null;
   const issueDetails = await getInvestigationIssueDetails(investigation.id);
   const pullRequestRows = await db
     .select({
@@ -911,17 +963,22 @@ export async function getSlackInvestigationDeliveryContext(
             integrationAccountId: sourceAccountId,
             messageTimestamp: investigation.messageTimestamp,
             reactionTimestamp: sourceReactionTimestamp,
+            teamId:
+              typeof investigation.input.attributes?.teamId === "string"
+                ? investigation.input.attributes.teamId
+                : teamIdForAccount(sourceAccountId) ?? "",
             threadTimestamp: sourceTimestamp,
           }
         : null,
     output:
       outputConfig && outputCredentials
         ? {
-            channelId: outputConfig.outputChannelId,
-            encryptedCredentials: outputCredentials,
-            integrationAccountId: outputConfig.integrationAccountId,
-            severities: outputConfig.severities ?? null,
-          }
+          channelId: outputConfig.outputChannelId,
+          encryptedCredentials: outputCredentials,
+          integrationAccountId: outputConfig.integrationAccountId,
+          severities: outputConfig.severities ?? null,
+          teamId: teamIdForAccount(outputConfig.integrationAccountId) ?? "",
+        }
         : null,
   };
 }

@@ -49,7 +49,8 @@ export async function findAgentsForSlackEvent(input: {
     trigger: "slack_channel" | "slack_mention" | "slack_thread";
   }>
 > {
-  const rows = await getDatabase()
+  const db = getDatabase();
+  const rows = await db
     .select({
       agentId: agents.id,
       organizationId: agents.organizationId,

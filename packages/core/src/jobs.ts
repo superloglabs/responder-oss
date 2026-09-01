@@ -57,6 +57,12 @@ export const investigationJobSchema = z.object({
   request: investigationRequestSchema,
   replay: z.boolean().default(false),
   runtimeProfileId: z.uuid(),
+  slackIssueFollowup: z.object({
+    originalInvestigationId: z.uuid(),
+    issueIds: z.array(z.uuid()).min(1),
+    channelId: z.string().min(1),
+    threadTimestamp: z.string().min(1),
+  }).optional(),
 });
 
 export type InvestigationJob = z.infer<typeof investigationJobSchema>;

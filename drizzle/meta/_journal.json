@@ -253,6 +253,13 @@
       "when": 1788283103101,
       "tag": "0035_add_gcp_context",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788283879030,
+      "tag": "0036_slack_issue_followups",
+      "breakpoints": true
     }
   ]
 }

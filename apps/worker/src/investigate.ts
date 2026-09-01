@@ -86,6 +86,7 @@ import {
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
+import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 
 export interface SandboxAgentConfig extends DaytonaClientConfig {
   model: string;
@@ -299,6 +300,7 @@ export function investigationInstructions(input: {
   }>;
   vercelAccountIds?: string[];
   threadMode?: boolean;
+  issueFollowup?: boolean;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
@@ -401,16 +403,19 @@ export function investigationInstructions(input: {
     input.threadMode
       ? "This is an ad-hoc Slack thread investigation. Never create or update issues, tickets, branches, commits, or pull requests. You may use the sandbox for notes, experiments, and local code changes, but nothing in it is published."
       : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
-    input.threadMode
+    input.issueFollowup
+      ? "This is a follow-up to an existing Slack issue investigation. Use the supplied prior investigation context and the latest Slack feedback to decide which bound issue remediations need to change. Do not create new issues, tickets, or pull requests. Call update_issue_remediation for each affected issue, and do not update unrelated issues. If the feedback is ambiguous, ask for clarification instead of guessing."
+      : null,
+    input.threadMode || input.issueFollowup
       ? null
       : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. A code_change must contain a changes array with one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
     input.threadMode
       ? null
       : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
-    input.threadMode
-      ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session."
+    input.threadMode || input.issueFollowup
+      ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session. Treat every follow-up reply as new information: reconsider prior conclusions and the proposed remediation, explain what changed, and provide the updated remediation (including concrete code changes or steps when appropriate)."
       : "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
-    input.threadMode
+    input.threadMode || input.issueFollowup
       ? null
       : "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
     "Clearly say when the available evidence is insufficient.",
@@ -451,9 +456,12 @@ export async function runInvestigationAgent(
   report: string;
   previousResponseId?: string;
   sandboxSessionState?: Record<string, unknown>;
+  updatedIssueIds?: string[];
 }> {
   const threadMode = job.kind === "slack_thread_investigation";
   const replay = job.kind === "investigation" && job.replay;
+  const issueFollowup = job.kind === "investigation" ? job.slackIssueFollowup : undefined;
+  const updatedIssueIds = new Set<string>();
   const investigationInput = toInvestigationInput(job.request);
   let sentryConnectionDegraded = false;
   const awsAlarmTriggered =
@@ -696,6 +704,13 @@ export async function runInvestigationAgent(
       organizationId: job.config.organizationId,
       environment,
     });
+    const issueUpdateTool = issueFollowup
+      ? createIssueRemediationUpdateTool({
+          allowedIssueIds: new Set(issueFollowup.issueIds),
+          onUpdated: (issueId) => updatedIssueIds.add(issueId),
+          organizationId: job.config.organizationId,
+        })
+      : null;
     const repositoryInspectionTools = createRepositoryInspectionTools({
       repositories,
       session,
@@ -733,6 +748,7 @@ export async function runInvestigationAgent(
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
+      issueFollowup: Boolean(issueFollowup),
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -751,7 +767,11 @@ export async function runInvestigationAgent(
       mcpConfig: { includeServerInToolNames: true },
       mcpServers: contextServers,
       tools: [
-        ...(threadMode ? [] : [issueSearchTool, reportTool!]),
+        ...(threadMode
+          ? []
+          : issueFollowup
+            ? [issueUpdateTool!]
+            : [issueSearchTool, reportTool!]),
         ...awsInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,
@@ -800,6 +820,9 @@ export async function runInvestigationAgent(
     return {
       report,
       ...(result.lastResponseId ? { previousResponseId: result.lastResponseId } : {}),
+      ...(updatedIssueIds.size > 0
+        ? { updatedIssueIds: [...updatedIssueIds] }
+        : {}),
     };
   } catch (error) {
     await writeTrace(
