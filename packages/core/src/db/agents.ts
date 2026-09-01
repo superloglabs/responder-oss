@@ -253,6 +253,7 @@ async function validateConfigurationResources(
       !account ||
       ![
         "aws",
+        "gcp",
         "sentry",
         "datadog",
         "axiom",

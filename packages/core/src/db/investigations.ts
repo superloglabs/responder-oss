@@ -23,6 +23,7 @@ import {
   normalizeClickStackMcpUrl,
 } from "../integrations/clickstack.js";
 import { awsConnectionCredentialsSchema } from "../integrations/aws.js";
+import { gcpConnectionCredentialsSchema } from "../integrations/gcp.js";
 import {
   type LinearOAuthCredentials,
   linearAccessTokenNeedsRefresh,
@@ -1356,6 +1357,62 @@ export async function getRuntimeAwsConnections(
       displayName: account.displayName,
       externalId: credentials.externalId,
       roleArn: credentials.roleArn,
+    });
+  }
+  return connections;
+}
+
+export interface RuntimeGcpConnection {
+  accountId: string;
+  displayName: string;
+  projectId: string;
+  projectNumber: string;
+  sessionName: string;
+}
+
+export async function getRuntimeGcpConnections(
+  versionId: string,
+): Promise<RuntimeGcpConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "gcp"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeGcpConnection[] = [];
+
+  for (const accountId of config.contextAccountIds) {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) continue;
+    const credentials = gcpConnectionCredentialsSchema.parse(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    connections.push({
+      accountId: account.id,
+      displayName: account.displayName,
+      ...credentials,
     });
   }
   return connections;

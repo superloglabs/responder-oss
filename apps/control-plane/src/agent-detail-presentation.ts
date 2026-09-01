@@ -20,6 +20,7 @@ export interface AgentPipelinePresentation {
 
 const providerLabels: Record<AgentOptions["accounts"][number]["provider"], string> = {
   aws: "AWS",
+  gcp: "Google Cloud",
   axiom: "Axiom",
   custom_mcp: "MCP",
   clickstack: "ClickStack / HyperDX",

@@ -38,6 +38,7 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
+import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
@@ -106,12 +107,14 @@ const CONTEXT_PROVIDER_METADATA: Record<
   slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
   linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
   aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
+  gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
   upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
   custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
 };
 
 const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "aws",
+  "gcp",
   "custom_mcp",
   "langfuse",
 ]);
@@ -462,6 +465,7 @@ export function AgentCreatePage() {
   const linearJustConnected = successfulConnectionReturn("linear");
   const vercelJustConnected = successfulConnectionReturn("vercel");
   const awsJustConnected = successfulConnectionReturn("aws");
+  const gcpJustConnected = successfulConnectionReturn("gcp");
   const returnedIntegrationAccountId = new URLSearchParams(
     window.location.search,
   ).get("integration_account_id");
@@ -477,7 +481,8 @@ export function AgentCreatePage() {
     customMcpJustConnected ||
     clickStackJustConnected ||
     linearJustConnected ||
-    awsJustConnected;
+    awsJustConnected ||
+    gcpJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [existingConfiguration, setExistingConfiguration] =
@@ -524,6 +529,7 @@ export function AgentCreatePage() {
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
+  const [connectingGcp, setConnectingGcp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingGithubRepositories, setRefreshingGithubRepositories] =
     useState(false);
@@ -806,6 +812,17 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedAwsId);
         }
+        const connectedGcpId = returnedIntegrationAccountId;
+        if (
+          gcpJustConnected &&
+          connectedGcpId &&
+          loadedOptions.accounts.some(
+            (account) => account.id === connectedGcpId && account.provider === "gcp",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(connectedGcpId)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedGcpId);
+        }
         setDraft(loadedDraft);
       })
       .catch((caught: unknown) => {
@@ -827,6 +844,7 @@ export function AgentCreatePage() {
     agentId,
     axiomJustConnected,
     awsJustConnected,
+    gcpJustConnected,
     clickStackJustConnected,
     customMcpJustConnected,
     datadogJustConnected,
@@ -865,6 +883,10 @@ export function AgentCreatePage() {
   );
   const awsAccounts = useMemo(
     () => accountsFor(options, "aws"),
+    [options],
+  );
+  const gcpAccounts = useMemo(
+    () => accountsFor(options, "gcp"),
     [options],
   );
   const datadogAccounts = useMemo(
@@ -1129,6 +1151,7 @@ export function AgentCreatePage() {
     }
     if (
       provider === "aws" ||
+      provider === "gcp" ||
       provider === "datadog" ||
       provider === "clickstack" ||
       provider === "upstash" ||
@@ -1136,6 +1159,7 @@ export function AgentCreatePage() {
     ) {
       saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       if (provider === "aws") setConnectingAws(true);
+      else if (provider === "gcp") setConnectingGcp(true);
       else if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
       else if (provider === "langfuse") setConnectingLangfuse(true);
@@ -1539,6 +1563,9 @@ export function AgentCreatePage() {
     awsAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    gcpAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     clickStackAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1597,6 +1624,12 @@ export function AgentCreatePage() {
         connectUrl={integrationFor("aws")?.connectUrl ?? ""}
         onCancel={() => setConnectingAws(false)}
         open={connectingAws}
+        returnTo={returnTo}
+      />
+      <GcpConnectionDialog
+        connectUrl={integrationFor("gcp")?.connectUrl ?? ""}
+        onCancel={() => setConnectingGcp(false)}
+        open={connectingGcp}
         returnTo={returnTo}
       />
       <section className="createAgentHeading">
@@ -2420,6 +2453,25 @@ export function AgentCreatePage() {
                         key={account.id}
                         label={account.displayName}
                         provider="aws"
+                      />
+                    );
+                  })}
+                  {gcpAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail="Asset inventory, logs, metrics, and alerting state"
+                        key={account.id}
+                        label={account.displayName}
+                        provider="gcp"
                       />
                     );
                   })}

@@ -5,6 +5,7 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
+import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
@@ -24,6 +25,7 @@ type IntegrationState =
 interface IntegrationSummary {
   id:
     | "aws"
+    | "gcp"
     | "github"
     | "slack"
     | "sentry"
@@ -46,6 +48,8 @@ interface IntegrationSummary {
     status: "connected" | "error" | "pending";
     resourceCount: number;
     updatedAt: string;
+    projectId?: string;
+    projectNumber?: string;
   }>;
   connectUrl: string | null;
   configurationUrl: string | null;
@@ -223,6 +227,7 @@ export function SettingsPage() {
   const secondary = integrations.filter((integration) =>
     [
       "aws",
+      "gcp",
       "sentry",
       "datadog",
       "axiom",
@@ -335,6 +340,19 @@ function integrationDetail(
 }
 
 function IntegrationCard({
+  integration,
+  sentryHealth,
+}: {
+  integration: IntegrationSummary;
+  sentryHealth: SentryHealth | null;
+}) {
+  if (integration.id === "gcp") {
+    return <GcpIntegrationCard integration={integration} />;
+  }
+  return <DefaultIntegrationCard integration={integration} sentryHealth={sentryHealth} />;
+}
+
+function DefaultIntegrationCard({
   integration,
   sentryHealth,
 }: {
@@ -463,5 +481,142 @@ function IntegrationCard({
         returnTo="/settings"
       />
     </>
+  );
+}
+
+function GcpIntegrationCard({
+  integration,
+}: {
+  integration: IntegrationSummary;
+}) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [reconnectProject, setReconnectProject] = useState<{
+    displayName: string;
+    projectId: string;
+    projectNumber: string;
+  } | undefined>();
+  const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const canConnect = Boolean(integration.connectUrl);
+
+  return (
+    <article className="integrationCard integrationCard--managed">
+      <div className="integrationCard__top">
+        <ProviderGlyph
+          className="integrationLogo integrationLogo--gcp"
+          decorative
+          provider="gcp"
+        />
+        {integration.accounts.some((account) => account.status === "error") ? (
+          <span className="connectedBadge connectedBadge--warning">Action needed</span>
+        ) : integration.accountCount > 0 ? (
+          <span className="connectedBadge">Connected</span>
+        ) : null}
+      </div>
+      <div className="integrationCard__body">
+        <strong>Google Cloud</strong>
+        <small>
+          {integration.accountCount > 0
+            ? `${integration.accountCount} connected project${integration.accountCount === 1 ? "" : "s"}`
+            : "Read-only infrastructure, logs, metrics, and alert context."}
+        </small>
+        {integration.accounts.length > 0 ? (
+          <ul className="integrationCard__accounts" aria-label="Connected Google Cloud projects">
+            {integration.accounts.map((account) => (
+              <li key={account.id}>
+                <span>
+                  <strong>{account.displayName.replace(/^GCP · /u, "")}</strong>
+                  <small>
+                    {account.projectNumber
+                      ? `Project number ${account.projectNumber}`
+                      : account.status === "pending"
+                        ? "Setup pending"
+                        : account.status === "error"
+                          ? "Needs attention"
+                          : "Read-only access"}
+                  </small>
+                </span>
+                <span className="integrationCard__accountStatus">
+                  {account.status === "connected"
+                    ? "Connected"
+                    : account.status === "pending"
+                      ? "Pending"
+                      : "Error"}
+                </span>
+                <span className="integrationCard__accountActions">
+                  {account.projectNumber ? (
+                    <button
+                      className="button button--secondary button--small"
+                      onClick={() => {
+                        setReconnectProject({
+                          displayName: account.displayName.replace(/^GCP · /u, ""),
+                          projectId: account.projectId ?? account.displayName.replace(/^GCP · /u, ""),
+                          projectNumber: account.projectNumber!,
+                        });
+                        setDialogOpen(true);
+                      }}
+                      type="button"
+                    >
+                      Reconnect
+                    </button>
+                  ) : null}
+                  <button
+                    className="button button--secondary button--small"
+                    disabled={removingAccountId === account.id}
+                    onClick={() => {
+                      if (!window.confirm(
+                        `Remove ${account.displayName.replace(/^GCP · /u, "")} from Responder? This does not revoke IAM in Google Cloud.`,
+                      )) return;
+                      setRemoveError(null);
+                      setRemovingAccountId(account.id);
+                      void fetch(`/api/integrations/gcp/${account.id}`, { method: "DELETE" })
+                        .then(async (response) => {
+                          if (!response.ok) {
+                            const body = (await response.json().catch(() => null)) as { error?: string } | null;
+                            throw new Error(body?.error ?? "Unable to remove the project");
+                          }
+                          window.location.reload();
+                        })
+                        .catch((cause: unknown) => {
+                          setRemoveError(cause instanceof Error ? cause.message : "Unable to remove the project");
+                          setRemovingAccountId(null);
+                        });
+                    }}
+                    type="button"
+                  >
+                    {removingAccountId === account.id ? "Removing…" : "Remove"}
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+      {removeError ? <p className="siteDialog__error">{removeError}</p> : null}
+      <div className="integrationCard__actions">
+        {canConnect ? (
+          <button
+            className="button button--primary button--small"
+            onClick={() => setDialogOpen(true)}
+            type="button"
+          >
+            Add project manually
+          </button>
+        ) : (
+          <small>Provider configuration required</small>
+        )}
+      </div>
+      <GcpConnectionDialog
+        connectUrl={integration.connectUrl ?? "/api/integrations/gcp/connect"}
+        initialProject={reconnectProject}
+        key={reconnectProject?.projectId ?? "manual"}
+        onCancel={() => {
+          setDialogOpen(false);
+          setReconnectProject(undefined);
+        }}
+        open={dialogOpen}
+        returnTo="/settings"
+      />
+    </article>
   );
 }

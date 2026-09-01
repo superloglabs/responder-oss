@@ -75,6 +75,24 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("identifies GCP connection failures without exposing federated credentials", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("request failed with federated access token"),
+        gcpConnections: [{ accountId: "account-gcp" }],
+        investigationId: "investigation-123",
+        serverName: "gcp-account-gcp-logging",
+      }),
+    ).toEqual({
+      accountId: "account-gcp",
+      error: "Unable to connect to GCP context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "gcp-account-gcp-logging",
+    });
+  });
+
   it("identifies Langfuse connection failures without exposing project keys", () => {
     expect(
       contextServerConnectFailureEvent({
@@ -320,6 +338,23 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("exact PascalCase AWS API operation names");
     expect(instructions).toContain("outer success status");
     expect(instructions).toContain("# AWS Observability");
+  });
+
+  it("keeps GCP investigation access read-only", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      gcpProjectNames: ["GCP · production (production-123)"],
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("Google Cloud Asset Inventory");
+    expect(instructions).toContain("GCP · production (production-123)");
+    expect(instructions).toContain("Never request secret values");
+    expect(instructions).toContain("Never request secret values or attempt to change");
+    expect(instructions).not.toContain("No observability data source is connected");
   });
 
   it("stores the exact initial message that is sent to the agent", () => {

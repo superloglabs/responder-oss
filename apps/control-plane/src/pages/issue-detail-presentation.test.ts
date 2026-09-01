@@ -123,6 +123,7 @@ describe("evidenceSourceGlyph", () => {
   it("uses the provider logo when the source is a provider", () => {
     expect(evidenceSourceGlyph("sentry")).toBe("sentry");
     expect(evidenceSourceGlyph("aws")).toBe("aws");
+    expect(evidenceSourceGlyph("gcp")).toBe("gcp");
     expect(evidenceSourceGlyph("langfuse")).toBe("langfuse");
   });
 

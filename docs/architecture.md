@@ -46,6 +46,11 @@ types. `drizzle/` contains the ordered schema history.
   the existing Slack trigger. The control plane normalizes available alarm
   identity and location fields, ignores recovery states, and the worker uses
   only AWS accounts selected on the pinned Agent version as read-only context.
+- Google Cloud context uses customer-owned Workload Identity Federation and a
+  dedicated service account. A unique AWS broker session is the federated
+  principal, so Responder exchanges short-lived credentials without creating
+  or storing service-account keys. The worker exposes only managed Cloud Asset
+  Inventory, Logging, and Monitoring tools annotated read-only.
 - Remote MCP destinations must use HTTPS and resolve to public addresses.
   Redirects are revalidated and authorization is not forwarded across origins.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through

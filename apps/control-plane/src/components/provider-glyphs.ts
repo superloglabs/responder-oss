@@ -5,6 +5,7 @@ export const providerGlyphs = {
   custom_mcp: { label: "Custom MCP", text: "MCP" },
   datadog: { label: "Datadog", logo: "datadog" },
   github: { label: "GitHub", logo: "github" },
+  gcp: { label: "Google Cloud", logo: "google" },
   google: { label: "Google", logo: "google" },
   linear: { label: "Linear", logo: "linear" },
   langfuse: { label: "Langfuse", logo: "langfuse" },

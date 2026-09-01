@@ -83,4 +83,15 @@ describe("ProviderGlyph", () => {
     expect(markup).toContain('class="providerGlyph__asset"');
     expect(markup).not.toContain(">AWS</span>");
   });
+
+  it("renders the Google mark for Google Cloud", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "gcp" }),
+    );
+
+    expect(markup).toContain('aria-label="Google Cloud"');
+    expect(markup).toContain("providerGlyph--gcp");
+    expect(markup).toContain("#4285f4");
+    expect(markup).not.toContain(">GCP</span>");
+  });
 });

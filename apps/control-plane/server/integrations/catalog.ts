@@ -1,5 +1,6 @@
 export const productIntegrationIds = [
   "aws",
+  "gcp",
   "github",
   "slack",
   "sentry",
@@ -28,6 +29,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     id: "aws",
     name: "AWS",
     description: "Read-only infrastructure, telemetry, and service context.",
+    implemented: true,
+    requiredEnvironment: ["AWS_INTEGRATION_PRINCIPAL_ARN"],
+  },
+  {
+    id: "gcp",
+    name: "Google Cloud",
+    description: "Read-only infrastructure, logs, metrics, and alert context.",
     implemented: true,
     requiredEnvironment: ["AWS_INTEGRATION_PRINCIPAL_ARN"],
   },

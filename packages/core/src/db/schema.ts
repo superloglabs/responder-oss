@@ -49,6 +49,7 @@ export const legacyAccountRedirect = pgTable(
 
 export const integrationProvider = pgEnum("integration_provider", [
   "aws",
+  "gcp",
   "github",
   "slack",
   "sentry",

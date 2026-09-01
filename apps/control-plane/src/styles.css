@@ -603,6 +603,77 @@ body:has(.appShell--investigation) {
   line-height: 18px;
 }
 
+.appShell--settings .integrationCard--managed {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+}
+
+.appShell--settings .integrationCard--managed .integrationCard__body {
+  flex: 1;
+}
+
+.appShell--settings .integrationCard__accounts {
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  list-style: none;
+}
+
+.appShell--settings .integrationCard__accounts li {
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+}
+
+.appShell--settings .integrationCard__accounts li > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.appShell--settings .integrationCard__accounts li strong {
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appShell--settings .integrationCard__accounts li small {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appShell--settings .integrationCard__accountStatus {
+  flex: 0 0 auto;
+  color: var(--ds-text-muted);
+  font-size: 10px;
+}
+
+.appShell--settings .integrationCard__accountActions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 5px;
+}
+
+.appShell--settings .integrationCard__actions {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .appShell--settings .integrationCard__arrow {
   right: 17px;
   bottom: 17px;

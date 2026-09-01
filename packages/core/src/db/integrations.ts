@@ -201,6 +201,24 @@ export async function setIntegrationAccountStatus(
     .where(eq(integrationAccounts.id, integrationAccountId));
 }
 
+export async function deleteIntegrationAccount(input: {
+  integrationAccountId: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+}): Promise<boolean> {
+  const deleted = await getDatabase()
+    .delete(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return deleted.length > 0;
+}
+
 export async function getOrganizationIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;

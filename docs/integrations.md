@@ -237,6 +237,38 @@ Self-hosted deployments must also set `AWS_INTEGRATION_PRINCIPAL_ARN` to a
 stable broker role that the runtime can assume. The broker must allow
 `sts:AssumeRole` only on customer roles named `ResponderInvestigationRole`.
 
+## Google Cloud
+
+Google Cloud is optional read-only context for investigations. A workspace
+owner enters a project ID and numeric project number, which they can find in
+the [Google Cloud project selector](https://console.cloud.google.com/cloud-resource-manager),
+then downloads a generated setup script. No Google OAuth project-listing
+session is required.
+
+Each project is a separate integration account. The setup script verifies that
+its project ID and number match before changing IAM.
+
+The script enables the IAM, Security Token Service, Service Account
+Credentials, Cloud Asset Inventory, Logging, and Monitoring APIs. It creates a
+fixed `responder-investigation` service account and a customer-owned Workload
+Identity Federation pool/provider that trusts the configured Responder AWS
+broker. The service-account binding is restricted to one encrypted, randomly
+generated broker session name. It grants only MCP Tool User, Cloud Asset
+Viewer, Logs Viewer, Monitoring Viewer, and Service Usage Consumer.
+
+During an investigation, Responder assumes the broker with that connection's
+stable session name, exchanges the AWS identity for a short-lived Google token,
+and impersonates the customer service account. It never asks for or stores a
+service-account key. Google Cloud Asset Inventory, Logging, and Monitoring run
+through Google's managed remote MCP servers. Responder exposes only tools that
+the servers explicitly annotate read-only; the customer IAM roles remain the
+authorization boundary.
+
+This integration requires `AWS_INTEGRATION_PRINCIPAL_ARN`, the same stable
+broker role used by AWS context. Self-hosted deployments must run on AWS with
+permission to assume that role. Native Google Cloud alert ingestion is a
+separate integration boundary.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

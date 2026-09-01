@@ -4,6 +4,7 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   AgentOptions["accounts"][number]["provider"]
 >([
   "aws",
+  "gcp",
   "sentry",
   "datadog",
   "axiom",
