@@ -42,12 +42,18 @@ Configure a distributed Slack app with:
 - Bot scopes: `app_mentions:read`, `channels:history`, `channels:join`,
   `channels:read`, `chat:write`, `chat:write.public`, `groups:history`,
   `groups:read`, and `reactions:write`
-- User scopes: `channels:history` and `groups:history`
+- User scope: `search:read`
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
 
-Reconnect existing installations after changing scopes. Private channels
-require the bot to be invited.
+Responder searches selected channels on demand through Slack's
+`search.messages` Web API method. The worker rejects Slack search modifiers,
+adds the selected channel constraint itself, and drops any result whose channel
+ID does not match the agent's immutable configuration. Identical searches share
+one in-memory request and result within an investigation; message content is not
+cached across investigations. Reconnect existing installations after changing
+scopes. The connecting user must be able to search each selected channel, and
+private channels also require the bot to be invited.
 
 Watched channels accept app-authored CloudWatch alarm notifications from AWS
 and Amazon Q Developer in chat applications. Responder starts investigations

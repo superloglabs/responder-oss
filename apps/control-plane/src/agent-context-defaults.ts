@@ -21,6 +21,14 @@ export interface DefaultAgentContext {
 }
 
 export function defaultAgentContext(options: AgentOptions): DefaultAgentContext {
+  const firstSlackAccount = options.accounts.find(
+    (account) => account.provider === "slack" && account.slackContextAvailable,
+  );
+  const firstSlackChannel = options.resources.find(
+    (resource) =>
+      resource.kind === "slack_channel" &&
+      resource.integrationAccountId === firstSlackAccount?.id,
+  );
   const firstVercelProject = options.resources.find(
     (resource) => resource.kind === "vercel_project",
   );
@@ -40,7 +48,10 @@ export function defaultAgentContext(options: AgentOptions): DefaultAgentContext 
 
   return {
     contextAccountIds,
-    contextResourceIds: firstVercelProject ? [firstVercelProject.id] : [],
+    contextResourceIds: [
+      ...(firstSlackChannel ? [firstSlackChannel.id] : []),
+      ...(firstVercelProject ? [firstVercelProject.id] : []),
+    ],
     repositoryIds: options.repositories[0] ? [options.repositories[0].id] : [],
   };
 }

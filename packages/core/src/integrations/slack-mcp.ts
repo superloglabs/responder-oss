@@ -1,9 +1,4 @@
-export const SLACK_MCP_URL = "https://mcp.slack.com/mcp";
-
-export const SLACK_CONTEXT_MCP_TOOLS = [
-  "slack_read_channel",
-  "slack_read_thread",
-] as const;
+export const SLACK_CONTEXT_MCP_TOOLS = ["slack_search_channel"] as const;
 
 export function slackContextToolAccess(input: {
   allowedChannelIds: ReadonlySet<string>;

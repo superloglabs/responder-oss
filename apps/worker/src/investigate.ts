@@ -74,7 +74,7 @@ import {
   traceEvent,
 } from "./trace.js";
 import { createSentryMcpServer } from "./sentry.js";
-import { createSlackMcpServer } from "./slack.js";
+import { createSlackSearchServer } from "./slack.js";
 import {
   createUpstashCliTools,
   createUpstashMcpServer,
@@ -528,7 +528,7 @@ export async function runInvestigationAgent(
     ? createLinearMcpServer(linearConnection)
     : null;
   const slackServer = slackConnection
-    ? createSlackMcpServer(slackConnection)
+    ? createSlackSearchServer(slackConnection)
     : null;
   const upstashServer = upstashConnection
     ? createUpstashMcpServer(upstashConnection)

@@ -291,7 +291,6 @@ async function validateConfigurationResources(
         accountMetadata: integrationAccounts.metadata,
         kind: integrationResources.kind,
         provider: integrationAccounts.provider,
-        resourceMetadata: integrationResources.metadata,
       })
       .from(integrationResources)
       .innerJoin(
@@ -345,11 +344,8 @@ async function validateConfigurationResources(
           )
         : [],
     );
-    const missingScope = slackContextRows.some((resource) =>
-      resource.resourceMetadata.isPrivate === true
-        ? !userScopes.has("groups:history")
-        : !userScopes.has("channels:history"),
-    );
+    const missingScope =
+      slackContextRows.length > 0 && !userScopes.has("search:read");
     if (missingScope) {
       throw new AgentConfigurationError(
         "Reconnect Slack to use selected channels as agent context",
@@ -747,8 +743,7 @@ export async function listAgentOptions(organizationId: string) {
       slackContextAvailable:
         account.provider === "slack" &&
         Array.isArray(metadata.userScopes) &&
-        metadata.userScopes.includes("channels:history") &&
-        metadata.userScopes.includes("groups:history"),
+        metadata.userScopes.includes("search:read"),
     }));
   const accountIds = accounts.map((account) => account.id);
 

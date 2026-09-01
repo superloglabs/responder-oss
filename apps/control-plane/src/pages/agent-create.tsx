@@ -287,6 +287,7 @@ function createInitialDraft(
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
   const vercelProjects = resourcesOfKind(options, "vercel_project");
+  const contextResources = [...slackChannels, ...vercelProjects];
   const githubAccounts = accountsFor(options, "github");
   const firstSentryAccount =
     sentryAccounts.find((account) =>
@@ -388,10 +389,10 @@ function createInitialDraft(
       (isEditing ? defaultContext.contextAccountIds : []),
     contextResourceIds:
       saved.contextResourceIds?.filter((id) =>
-        vercelProjects.some((resource) => resource.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       configured.contextResourceIds?.filter((id) =>
-        vercelProjects.some((resource) => resource.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       (isEditing ? defaultContext.contextResourceIds : []),
     workspaceSecretRecordIds,
@@ -463,6 +464,7 @@ export function AgentCreatePage() {
   ).get("integration_account_id");
   const contextIntegrationJustConnected =
     sentryJustConnected ||
+    slackJustConnected ||
     githubJustConnected ||
     datadogJustConnected ||
     axiomJustConnected ||
@@ -494,6 +496,7 @@ export function AgentCreatePage() {
     isEditing ? 4 : normalizedInitialStep,
   );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
+  const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
   const [vercelAccountId, setVercelAccountId] = useState(
     returnedIntegrationAccountId ?? "",
@@ -581,6 +584,7 @@ export function AgentCreatePage() {
     if (
       !githubDialogOpen &&
       !linearDialogOpen &&
+      !slackContextDialogOpen &&
       !vercelDialogOpen &&
       !connectionSettingsOpen &&
       !secretDialogOpen
@@ -591,6 +595,7 @@ export function AgentCreatePage() {
       if (event.key === "Escape") {
         setGithubDialogOpen(false);
         setLinearDialogOpen(false);
+        setSlackContextDialogOpen(false);
         setVercelDialogOpen(false);
         setConnectionSettingsOpen(null);
         if (!creatingSecret) {
@@ -610,6 +615,7 @@ export function AgentCreatePage() {
     githubDialogOpen,
     linearDialogOpen,
     secretDialogOpen,
+    slackContextDialogOpen,
     vercelDialogOpen,
   ]);
 
@@ -643,6 +649,27 @@ export function AgentCreatePage() {
           !loadedDraft.contextAccountIds.includes(connectedSentry.id)
         ) {
           loadedDraft.contextAccountIds.push(connectedSentry.id);
+        }
+        const connectedSlackAccount = accountsFor(loadedOptions, "slack").find(
+          (account) => account.slackContextAvailable,
+        );
+        const connectedSlackChannel = resourcesOfKind(
+          loadedOptions,
+          "slack_channel",
+        ).find(
+          (channel) =>
+            channel.integrationAccountId === connectedSlackAccount?.id,
+        );
+        if (
+          slackJustConnected &&
+          connectedSlackChannel &&
+          !loadedDraft.contextResourceIds.some((id) =>
+            loadedOptions.resources.some(
+              (resource) => resource.id === id && resource.kind === "slack_channel",
+            ),
+          )
+        ) {
+          loadedDraft.contextResourceIds.push(connectedSlackChannel.id);
         }
         const connectedGithubRepository = loadedOptions.repositories.find(
           (repository) =>
@@ -873,6 +900,10 @@ export function AgentCreatePage() {
     () => accountsFor(options, "github"),
     [options],
   );
+  const slackAccounts = useMemo(
+    () => accountsFor(options, "slack"),
+    [options],
+  );
   const sentryProjects = useMemo(
     () => resourcesOfKind(options, "sentry_project"),
     [options],
@@ -1040,6 +1071,11 @@ export function AgentCreatePage() {
             )
               ? current.outputChannelResourceId
               : freshChannels[0]?.id ?? "",
+            contextResourceIds: current.contextResourceIds.filter(
+              (id) =>
+                !slackChannels.some((channel) => channel.id === id) ||
+                freshChannelIds.has(id),
+            ),
           };
         });
       })
@@ -1125,6 +1161,26 @@ export function AgentCreatePage() {
     });
   }
 
+  function toggleSlackContextResource(resourceId: string) {
+    const resource = slackChannels.find((channel) => channel.id === resourceId);
+    if (!resource) return;
+    const selected = currentDraft.contextResourceIds.includes(resourceId);
+    updateDraft({
+      contextResourceIds: selected
+        ? currentDraft.contextResourceIds.filter((id) => id !== resourceId)
+        : [
+            ...currentDraft.contextResourceIds.filter((id) => {
+              const channel = slackChannels.find((item) => item.id === id);
+              return (
+                !channel ||
+                channel.integrationAccountId === resource.integrationAccountId
+              );
+            }),
+            resourceId,
+          ],
+    });
+  }
+
   function toggleVercelProject(resourceId: string) {
     const resource = vercelProjects.find(
       (project) => project.id === resourceId,
@@ -1153,6 +1209,34 @@ export function AgentCreatePage() {
           (id) => !currentDraft.contextAccountIds.includes(id),
         ),
       ],
+    });
+  }
+
+  function toggleSlackContextIntegration() {
+    const selectedSlackIds = new Set(
+      slackChannels
+        .filter((channel) => currentDraft.contextResourceIds.includes(channel.id))
+        .map((channel) => channel.id),
+    );
+    if (selectedSlackIds.size > 0) {
+      updateDraft({
+        contextResourceIds: currentDraft.contextResourceIds.filter(
+          (id) => !selectedSlackIds.has(id),
+        ),
+      });
+      return;
+    }
+    const firstAccount = slackAccounts.find((account) => account.slackContextAvailable);
+    const firstChannel = slackChannels.find(
+      (channel) => channel.integrationAccountId === firstAccount?.id,
+    );
+    if (!firstChannel) {
+      setSlackContextDialogOpen(true);
+      void refreshSlackChannels();
+      return;
+    }
+    updateDraft({
+      contextResourceIds: [...currentDraft.contextResourceIds, firstChannel.id],
     });
   }
 
@@ -1415,6 +1499,9 @@ export function AgentCreatePage() {
   const sentryConnected = sentryProjects.length > 0;
   const outputChannelSelected = effectiveOutputMode === "output_channel";
   const vercelContextConnected = selectedVercelProjects.length > 0;
+  const selectedSlackContextChannels = slackChannels.filter((channel) =>
+    draft.contextResourceIds.includes(channel.id),
+  );
   const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
     draft.workspaceSecretRecordIds.includes(secret.id),
   );
@@ -1423,6 +1510,7 @@ export function AgentCreatePage() {
     sentryAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    Number(selectedSlackContextChannels.length > 0) +
     datadogAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1450,10 +1538,10 @@ export function AgentCreatePage() {
     ).length;
   const normalizedIntegrationQuery = integrationQuery.trim().toLocaleLowerCase();
   const visibleContextIntegrations = integrations.filter((integration) => {
-    if (integration.id === "slack") return false;
     if (
       integration.accountCount > 0 &&
       integration.id !== "sentry" &&
+      integration.id !== "slack" &&
       !MULTI_ACCOUNT_CONTEXT_PROVIDERS.has(integration.id)
     ) {
       return false;
@@ -1931,6 +2019,120 @@ export function AgentCreatePage() {
                       />
                     );
                   })}
+
+                  {slackAccounts.length > 0 ? (
+                    <ContextRow
+                      action={
+                        <ContextIntegrationControls
+                          enabled={selectedSlackContextChannels.length > 0}
+                          label="Slack"
+                          onConfigure={() => {
+                            setSlackContextDialogOpen(true);
+                            void refreshSlackChannels();
+                          }}
+                          onToggle={toggleSlackContextIntegration}
+                        />
+                      }
+                      detail={
+                        selectedSlackContextChannels.length > 0
+                          ? `${selectedSlackContextChannels.length} ${
+                              selectedSlackContextChannels.length === 1
+                                ? "channel"
+                                : "channels"
+                            } selected · Searchable messages`
+                          : `${slackAccounts[0]!.displayName} · Choose channels for search`
+                      }
+                      label="Slack"
+                      provider="slack"
+                    />
+                  ) : null}
+
+                  {slackContextDialogOpen ? (
+                    <div
+                      className="configurationDialogBackdrop"
+                      onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) {
+                          setSlackContextDialogOpen(false);
+                        }
+                      }}
+                    >
+                      <section
+                        aria-labelledby="slack-context-configuration-title"
+                        aria-modal="true"
+                        className="configurationDialog"
+                        role="dialog"
+                      >
+                        <header className="configurationDialog__header">
+                          <ProviderMark provider="slack" />
+                          <span className="configurationDialog__copy">
+                            <strong id="slack-context-configuration-title">
+                              Configure Slack search
+                            </strong>
+                            <small>
+                              Choose one or more channels this agent may search.
+                            </small>
+                          </span>
+                          <IconButton
+                            aria-label="Close Slack context configuration"
+                            autoFocus
+                            onClick={() => setSlackContextDialogOpen(false)}
+                            size="small"
+                            variant="ghost"
+                          >
+                            ×
+                          </IconButton>
+                        </header>
+                        <div className="configurationDialog__body">
+                          <div className="projectPicker slackContextPicker">
+                            <span>Channels</span>
+                            <div>
+                              {slackChannels
+                                .filter((channel) =>
+                                  slackAccounts.some(
+                                    (account) =>
+                                      account.id === channel.integrationAccountId &&
+                                      account.slackContextAvailable,
+                                  ),
+                                )
+                                .map((channel) => {
+                                  const account = slackAccounts.find(
+                                    (item) => item.id === channel.integrationAccountId,
+                                  );
+                                  return (
+                                    <Checkbox
+                                      checked={draft.contextResourceIds.includes(channel.id)}
+                                      description={
+                                        slackAccounts.length > 1
+                                          ? account?.displayName
+                                          : undefined
+                                      }
+                                      key={channel.id}
+                                      label={slackChannelLabel(channel.displayName)}
+                                      onChange={() =>
+                                        toggleSlackContextResource(channel.id)
+                                      }
+                                    />
+                                  );
+                                })}
+                            </div>
+                          </div>
+                          {slackRefreshError ? (
+                            <Alert role="alert" title={slackRefreshError} tone="danger" />
+                          ) : null}
+                        </div>
+                        <footer className="configurationDialog__footer">
+                          <span>{selectedSlackContextChannels.length} selected</span>
+                          <Button
+                            onClick={() => setSlackContextDialogOpen(false)}
+                            size="small"
+                            variant="primary"
+                          >
+                            Done
+                          </Button>
+                        </footer>
+                      </section>
+                    </div>
+                  ) : null}
 
                   {githubAccounts.length > 0 ? (
                     <ContextRow

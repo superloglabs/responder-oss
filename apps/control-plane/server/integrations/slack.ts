@@ -55,7 +55,7 @@ const SLACK_BOT_SCOPES = [
   "reactions:write",
 ].join(",");
 
-const SLACK_USER_SCOPES = ["channels:history", "groups:history"].join(",");
+const SLACK_USER_SCOPES = "search:read";
 
 export class SlackChannelJoinError extends Error {
   constructor(public readonly slackCode: string) {
