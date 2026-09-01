@@ -208,6 +208,57 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("refreshes an existing connected Sentry installation before fresh authorization", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(getRecoverableSentryIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "encrypted-credentials",
+      externalAccountId: "40000000-0000-4000-8000-000000000000",
+      metadata: { organizationSlug: "example" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "old-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "old-refresh-token",
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("refreshed-credentials");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            id: "1",
+            token: "new-token",
+            refreshToken: "new-refresh-token",
+            expiresAt: "2099-01-01T01:00:00.000Z",
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json([
+            { id: "1", name: "Backend", platform: "node", slug: "backend" },
+          ]),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 200 })),
+    );
+
+    const response = await app.request("/api/integrations/sentry/start");
+
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).searchParams.get("status"))
+      .toBe("connected");
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "refreshed-credentials",
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      }),
+    );
+  });
+
   it("falls back to fresh Sentry authorization when an old retry fails", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("SENTRY_APP_SLUG", "responder-test");

@@ -459,7 +459,11 @@ export async function getRecoverableSentryIntegrationAccount(
       and(
         eq(integrationAccounts.organizationId, organizationId),
         eq(integrationAccounts.provider, "sentry"),
-        inArray(integrationAccounts.status, ["pending", "error"]),
+        // A reconnect can be requested while the account is still marked
+        // connected (for example when the provider revoked its refresh
+        // token). Keep the existing installation eligible so the route can
+        // refresh it in place instead of starting a duplicate install flow.
+        inArray(integrationAccounts.status, ["connected", "pending", "error"]),
         isNotNull(integrationAccounts.encryptedCredentials),
       ),
     )
