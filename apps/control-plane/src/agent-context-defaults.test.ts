@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AgentOptions } from "./agents-api";
-import { defaultAgentContext } from "./agent-context-defaults";
+import {
+  defaultAgentContext,
+  resolveSlackSearchContext,
+} from "./agent-context-defaults";
 
 const OPTIONS: AgentOptions = {
   accounts: [
@@ -108,5 +111,43 @@ describe("defaultAgentContext", () => {
     expect(defaults.contextAccountIds).toHaveLength(20);
     expect(defaults.contextAccountIds).toContain("vercel-1");
     expect(defaults.contextResourceIds).toEqual(["vercel-project-1"]);
+  });
+});
+
+describe("resolveSlackSearchContext", () => {
+  it("returns channels belonging to Slack connections with search access", () => {
+    expect(resolveSlackSearchContext(OPTIONS)).toMatchObject({
+      connectedAccounts: [
+        expect.objectContaining({ id: "slack-1" }),
+      ],
+      searchableAccounts: [
+        expect.objectContaining({ id: "slack-1" }),
+      ],
+      searchableChannels: [
+        expect.objectContaining({ id: "slack-channel-1" }),
+        expect.objectContaining({ id: "slack-channel-2" }),
+      ],
+      reconnectRequired: false,
+    });
+  });
+
+  it("reports when an existing Slack connection needs the search permission", () => {
+    const options: AgentOptions = {
+      ...OPTIONS,
+      accounts: OPTIONS.accounts.map((account) =>
+        account.id === "slack-1"
+          ? { ...account, slackContextAvailable: false }
+          : account,
+      ),
+    };
+
+    expect(resolveSlackSearchContext(options)).toMatchObject({
+      connectedAccounts: [
+        expect.objectContaining({ id: "slack-1" }),
+      ],
+      searchableAccounts: [],
+      searchableChannels: [],
+      reconnectRequired: true,
+    });
   });
 });

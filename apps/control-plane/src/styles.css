@@ -7694,6 +7694,39 @@ body:has(.appShell--create) {
   color: var(--ds-text-secondary);
 }
 
+.appShell--create .slackContextPicker__empty {
+  width: 100%;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.appShell--create .slackContextPicker__empty > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.appShell--create .slackContextPicker__empty strong {
+  color: var(--ds-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.appShell--create .slackContextPicker__empty small {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.appShell--create .slackContextPicker__empty > .dsButton {
+  flex: 0 0 auto;
+}
+
 .appShell--create .requiredOutput__label small,
 .appShell--create .contextToolbar small,
 .appShell--create .contextRow__copy > small {
