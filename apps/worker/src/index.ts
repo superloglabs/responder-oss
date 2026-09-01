@@ -19,6 +19,7 @@ import {
 } from "@responder/core/jobs";
 import {
   appendInvestigationTraceEvent,
+  completeInvestigation,
   completeSlackThreadInvestigationTurn,
   failInvestigation,
   failInvestigationReplayRequest,
@@ -45,7 +46,10 @@ import {
   slackProgressFromTrace,
   type SlackInvestigationTraceItem,
 } from "@responder/core/integrations/slack-live-progress";
-import { deliverSlackThreadInvestigationResponse } from "@responder/core/integrations/slack-delivery";
+import {
+  deliverSlackIssueFollowupResponse,
+  deliverSlackThreadInvestigationResponse,
+} from "@responder/core/integrations/slack-delivery";
 import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
@@ -436,12 +440,27 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
     `openai-daytona:${job.id}`,
   );
   if (investigationState === "completed") {
-    const deliveryWarnings = await deliverPersistedInvestigationAfterFailure({
-      deliveryRunId: job.id,
-      investigationFailed: false,
-      investigationId: payload.investigationId,
-      replay: payload.replay,
-    });
+    let deliveryWarnings: string[] = [];
+    if (payload.slackIssueFollowup) {
+      const report = await getInvestigationReportMarkdown(payload.investigationId);
+      if (report) {
+        await deliverSlackIssueFollowupResponse({
+          channelId: payload.slackIssueFollowup.channelId,
+          deliveryRunId: job.id,
+          originalInvestigationId: payload.slackIssueFollowup.originalInvestigationId,
+          response: report,
+          threadTimestamp: payload.slackIssueFollowup.threadTimestamp,
+          updatedIssueIds: payload.slackIssueFollowup.issueIds,
+        });
+      }
+    } else {
+      deliveryWarnings = await deliverPersistedInvestigationAfterFailure({
+        deliveryRunId: job.id,
+        investigationFailed: false,
+        investigationId: payload.investigationId,
+        replay: payload.replay,
+      });
+    }
     await reportIncompleteSlackDelivery({
       deliveryWarnings,
       investigationId: payload.investigationId,
@@ -575,12 +594,25 @@ await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
         });
       },
     );
-    const deliveryWarnings = await completeInvestigationRun({
-      deliveryRunId: job.id,
-      investigationId: payload.investigationId,
-      replay: payload.replay,
-      report: result.report,
-    });
+    let deliveryWarnings: string[] = [];
+    if (payload.slackIssueFollowup) {
+      await completeInvestigation(payload.investigationId, result.report);
+      await deliverSlackIssueFollowupResponse({
+        channelId: payload.slackIssueFollowup.channelId,
+        deliveryRunId: job.id,
+        originalInvestigationId: payload.slackIssueFollowup.originalInvestigationId,
+        response: result.report,
+        threadTimestamp: payload.slackIssueFollowup.threadTimestamp,
+        updatedIssueIds: result.updatedIssueIds ?? [],
+      });
+    } else {
+      deliveryWarnings = await completeInvestigationRun({
+        deliveryRunId: job.id,
+        investigationId: payload.investigationId,
+        replay: payload.replay,
+        report: result.report,
+      });
+    }
     await reportIncompleteSlackDelivery({
       deliveryWarnings,
       investigationId: payload.investigationId,

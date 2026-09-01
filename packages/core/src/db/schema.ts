@@ -495,6 +495,51 @@ export const slackInvestigationSessions = pgTable(
   ],
 );
 
+/**
+ * Durable bindings between Slack issue cards and their originating
+ * investigation. These cover both Slack-sourced alert threads and issue
+ * cards posted directly to an output channel.
+ */
+export const slackInvestigationThreadLinks = pgTable(
+  "slack_investigation_thread_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    investigationId: uuid("investigation_id")
+      .notNull()
+      .references(() => investigations.id, { onDelete: "cascade" }),
+    issueId: uuid("issue_id")
+      .notNull()
+      .references(() => issues.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    integrationAccountId: uuid("integration_account_id")
+      .notNull()
+      .references(() => integrationAccounts.id, { onDelete: "cascade" }),
+    threadTimestamp: text("thread_timestamp").notNull(),
+    messageTimestamp: text("message_timestamp").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_investigation_thread_links_message_idx").on(
+      table.integrationAccountId,
+      table.channelId,
+      table.messageTimestamp,
+    ),
+    index("slack_investigation_thread_links_thread_idx").on(
+      table.integrationAccountId,
+      table.channelId,
+      table.threadTimestamp,
+    ),
+    index("slack_investigation_thread_links_investigation_idx").on(
+      table.investigationId,
+    ),
+  ],
+);
+
 export const investigations = pgTable(
   "investigations",
   {

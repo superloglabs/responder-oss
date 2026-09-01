@@ -46,9 +46,11 @@ import {
   investigationReplayRequests,
   investigationTraceEvents,
   investigations,
+  issues,
   repositories,
   runtimeProfiles,
   slackInvestigationSessions,
+  slackInvestigationThreadLinks,
   webhookReceipts,
   type InvestigationInput,
   type InvestigationSlackMessageSnapshot,
@@ -337,6 +339,125 @@ export async function recordInvestigationSlackSource(
     ...snapshot,
     source,
   }));
+}
+
+export async function recordSlackInvestigationThreadLink(input: {
+  channelId: string;
+  integrationAccountId: string;
+  investigationId: string;
+  issueId: string;
+  messageTimestamp: string;
+  organizationId: string;
+  teamId: string;
+  threadTimestamp: string;
+}): Promise<void> {
+  await getDatabase()
+    .insert(slackInvestigationThreadLinks)
+    .values(input)
+    .onConflictDoNothing({
+      target: [
+        slackInvestigationThreadLinks.integrationAccountId,
+        slackInvestigationThreadLinks.channelId,
+        slackInvestigationThreadLinks.messageTimestamp,
+      ],
+    });
+}
+
+export async function findSlackIssueThread(input: {
+  channelId: string;
+  teamId: string;
+  threadTimestamp: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      agentId: investigations.agentId,
+      agentConfigVersionId: investigations.agentConfigVersionId,
+      agentModel: agentConfigVersions.model,
+      agentPrompt: agentConfigVersions.prompt,
+      agentPrMode: agentConfigVersions.prMode,
+      channelId: slackInvestigationThreadLinks.channelId,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      id: investigations.id,
+      issueId: slackInvestigationThreadLinks.issueId,
+      issueTitle: issues.title,
+      issueDescription: issues.description,
+      issueRootCause: issues.rootCause,
+      issueRemediation: issues.remediation,
+      issueRemediations: issues.remediations,
+      investigationInput: investigations.input,
+      organizationId: investigations.organizationId,
+      reportMarkdown: investigations.reportMarkdown,
+      teamId: slackInvestigationThreadLinks.teamId,
+      threadTimestamp: slackInvestigationThreadLinks.threadTimestamp,
+      integrationAccountId: slackInvestigationThreadLinks.integrationAccountId,
+    })
+    .from(slackInvestigationThreadLinks)
+    .innerJoin(
+      investigations,
+      eq(investigations.id, slackInvestigationThreadLinks.investigationId),
+    )
+    .innerJoin(issues, eq(issues.id, slackInvestigationThreadLinks.issueId))
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+    )
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(
+          integrationAccounts.id,
+          slackInvestigationThreadLinks.integrationAccountId,
+        ),
+        eq(integrationAccounts.organizationId, investigations.organizationId),
+        eq(integrationAccounts.externalAccountId, input.teamId),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(
+      and(
+        eq(slackInvestigationThreadLinks.teamId, input.teamId),
+        eq(slackInvestigationThreadLinks.channelId, input.channelId),
+        eq(
+          slackInvestigationThreadLinks.threadTimestamp,
+          input.threadTimestamp,
+        ),
+      ),
+    )
+    .orderBy(desc(investigations.createdAt));
+  if (rows.length === 0) return null;
+  const first = rows[0]!;
+  return {
+    ...first,
+    issueIds: [...new Set(rows.map((row) => row.issueId))],
+    issues: rows.map((row) => ({
+      id: row.issueId,
+      title: row.issueTitle,
+      description: row.issueDescription,
+      rootCause: row.issueRootCause,
+      remediation: row.issueRemediation,
+      remediations: row.issueRemediations,
+    })),
+  };
+}
+
+export async function getSlackInvestigationThreadLinks(investigationId: string) {
+  return getDatabase()
+    .select({
+      issueId: slackInvestigationThreadLinks.issueId,
+      channelId: slackInvestigationThreadLinks.channelId,
+      integrationAccountId: slackInvestigationThreadLinks.integrationAccountId,
+      teamId: slackInvestigationThreadLinks.teamId,
+      threadTimestamp: slackInvestigationThreadLinks.threadTimestamp,
+      messageTimestamp: slackInvestigationThreadLinks.messageTimestamp,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(slackInvestigationThreadLinks)
+    .innerJoin(
+      integrationAccounts,
+      eq(integrationAccounts.id, slackInvestigationThreadLinks.integrationAccountId),
+    )
+    .where(eq(slackInvestigationThreadLinks.investigationId, investigationId));
 }
 
 export async function recordInvestigationSlackReply(

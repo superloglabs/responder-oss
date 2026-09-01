@@ -10,6 +10,8 @@ import {
 } from "../db/issues.js";
 import {
   recordInvestigationSlackReply,
+  getSlackInvestigationThreadLinks,
+  recordSlackInvestigationThreadLink,
   setInvestigationSlackReaction,
 } from "../db/investigations.js";
 import { registerIssuePullRequestSlackMessage } from "../db/pull-requests.js";
@@ -204,11 +206,65 @@ function issueSlackMessage(
     : slackIssueMessage(
         issue,
         context.investigationId,
-        context.prMode === "manual" &&
-          issue.remediations.some(
-            (remediation) => remediation.type === "code_change",
-          ),
+        canCreateIssuePullRequest(context, issue),
       );
+}
+
+function canCreateIssuePullRequest(
+  context: SlackInvestigationDeliveryContext,
+  issue: DeliveryIssue,
+): boolean {
+  return context.prMode === "manual" &&
+    issue.remediations.some((remediation) => remediation.type === "code_change");
+}
+
+export function slackIssueFollowupMessage(input: {
+  context: SlackInvestigationDeliveryContext | null;
+  response: string;
+  updatedIssueIds: string[];
+}): { blocks: unknown[]; text: string } {
+  const issues = input.context?.issues.filter((issue) =>
+    input.updatedIssueIds.includes(issue.id)
+  ) ?? [];
+  const remediationText = issues.length > 0
+    ? issues.map((issue) =>
+      `Updated remediation — ${issue.title}\n${issue.remediation}`
+    ).join("\n\n")
+    : "No issue remediation was changed; the investigation needs clarification before making a safe update.";
+  const text = `${input.response}\n\n${remediationText}`.slice(0, 100_000);
+  const blocks: unknown[] = [{
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: truncateSlackBlock(input.response),
+    },
+  }];
+
+  if (issues.length === 0) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: remediationText },
+    });
+  } else {
+    for (const issue of issues) {
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Updated remediation — ${escapeSlack(issue.title)}*`,
+        },
+      });
+      blocks.push(...slackRemediationCarousel({
+        canCreatePullRequest: input.context
+          ? canCreateIssuePullRequest(input.context, issue)
+          : false,
+        issueId: issue.id,
+        remediations: issue.remediations,
+      }));
+    }
+  }
+
+  return { blocks, text };
 }
 
 async function registerPullRequestMessage(input: {
@@ -622,6 +678,18 @@ async function deliverSourceThread(
         slackTimestamp: messageTimestamp,
         text: message.text,
       });
+      if (context.source.teamId && context.organizationId) {
+        await recordSlackInvestigationThreadLink({
+          channelId: context.source.channelId,
+          integrationAccountId: context.source.integrationAccountId,
+          investigationId: context.investigationId,
+          issueId: issue.id,
+          messageTimestamp,
+          organizationId: context.organizationId,
+          teamId: context.source.teamId,
+          threadTimestamp: context.source.threadTimestamp,
+        });
+      }
       await registerPullRequestMessage({
         channelId: context.source.channelId,
         integrationAccountId: context.source.integrationAccountId,
@@ -722,6 +790,18 @@ async function deliverOutputChannel(
       issue,
       messageTimestamp,
     });
+    if (messageTimestamp && context.output.teamId && context.organizationId) {
+      await recordSlackInvestigationThreadLink({
+        channelId: context.output.channelId,
+        integrationAccountId: context.output.integrationAccountId,
+        investigationId: context.investigationId,
+        issueId: issue.id,
+        messageTimestamp,
+        organizationId: context.organizationId,
+        teamId: context.output.teamId,
+        threadTimestamp: messageTimestamp,
+      });
+    }
   }
 }
 
@@ -740,4 +820,48 @@ export async function deliverInvestigationToSlack(
       ? [slackDeliveryErrorMessage(result.reason)]
       : [],
   );
+}
+
+/** Post follow-up feedback and the revised remediation back into the original issue thread. */
+export async function deliverSlackIssueFollowupResponse(input: {
+  channelId: string;
+  deliveryRunId: string;
+  originalInvestigationId: string;
+  response: string;
+  threadTimestamp: string;
+  updatedIssueIds: string[];
+}): Promise<void> {
+  const links = await getSlackInvestigationThreadLinks(input.originalInvestigationId);
+  if (links.length === 0) return;
+  const context = await getSlackInvestigationDeliveryContext(input.originalInvestigationId);
+  const link = links.find(
+    (candidate) =>
+      candidate.channelId === input.channelId &&
+      candidate.threadTimestamp === input.threadTimestamp,
+  ) ?? links[0]!;
+  if (!link.encryptedCredentials) return;
+  const credentials = accessToken(link.encryptedCredentials);
+  const message = slackIssueFollowupMessage({
+    context,
+    response: input.response,
+    updatedIssueIds: input.updatedIssueIds,
+  });
+  const timestamp = await postSlackMessage({
+    accessToken: credentials,
+    blocks: message.blocks,
+    channelId: link.channelId,
+    clientMessageId: slackDeliveryClientMessageId(input.deliveryRunId, "issue-followup"),
+    text: message.text,
+    threadTimestamp: link.threadTimestamp,
+  });
+  if (timestamp) {
+    await recordInvestigationSlackReply(input.originalInvestigationId, {
+      attachments: [],
+      authorName: "Responder",
+      blocks: message.blocks,
+      key: `issue-followup:${input.deliveryRunId}`,
+      slackTimestamp: timestamp,
+      text: message.text,
+    });
+  }
 }

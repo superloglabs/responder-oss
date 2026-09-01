@@ -62,6 +62,14 @@ async function getBoss() {
 
 export async function queueInvestigation(
   request: InvestigationRequest,
+  options?: {
+    slackIssueFollowup?: {
+      originalInvestigationId: string;
+      issueIds: string[];
+      channelId: string;
+      threadTimestamp: string;
+    };
+  },
 ): Promise<QueueResult> {
   const input = toInvestigationInput(request);
   const result = await beginInvestigation(request.agentId, input);
@@ -121,6 +129,9 @@ export async function queueInvestigation(
         queuedAt: new Date().toISOString(),
         request,
         runtimeProfileId: result.runtimeProfileId,
+        ...(options?.slackIssueFollowup
+          ? { slackIssueFollowup: options.slackIssueFollowup }
+          : {}),
       },
       { singletonKey: result.investigationId },
     );
