@@ -75,6 +75,7 @@ const CATEGORY_DESCRIPTIONS: Record<IntegrationCategory, string> = {
 
 const MULTI_INSTANCE_PROVIDERS = new Set<ProviderId>([
   "aws",
+  "gcp",
   "custom_mcp",
   "langfuse",
 ]);
@@ -149,6 +150,13 @@ const INTEGRATIONS: StoryboardIntegration[] = [
     id: "aws",
     name: "AWS",
     searchTerms: "cloud infrastructure services iam accounts",
+  },
+  {
+    category: "Data & infrastructure",
+    description: "Asset inventory, logs, metrics, and alerting state",
+    id: "gcp",
+    name: "Google Cloud",
+    searchTerms: "gcp cloud infrastructure projects logs metrics assets",
   },
   {
     category: "Data & infrastructure",
@@ -776,7 +784,7 @@ export function AgentContextStoryboardPage() {
     const existing = instances.filter((connection) => connection.provider === integration.id);
     const nextNumber = existing.length + 1;
     const label = MULTI_INSTANCE_PROVIDERS.has(integration.id) && existing.length > 0
-      ? `New ${integration.id === "langfuse" ? "project" : integration.id === "aws" ? "account" : "MCP server"} ${nextNumber}`
+      ? `New ${integration.id === "langfuse" || integration.id === "gcp" ? "project" : integration.id === "aws" ? "account" : "MCP server"} ${nextNumber}`
       : integration.name;
     const configuration =
       integration.id === "github" ||

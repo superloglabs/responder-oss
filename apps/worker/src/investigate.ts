@@ -6,6 +6,7 @@ import {
 } from "@openai/agents-extensions/sandbox/daytona";
 import {
   getRuntimeAwsConnections,
+  getRuntimeGcpConnections,
   getRuntimeAxiomConnection,
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
@@ -41,6 +42,7 @@ import {
   loadAwsAlarmSkillContext,
 } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
+import { createGcpMcpServers } from "./gcp.js";
 import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
@@ -127,6 +129,7 @@ export function investigationTraceWriteFailure(
 
 export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
+  gcpConnections?: ReadonlyArray<{ accountId: string }>;
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
@@ -136,6 +139,8 @@ export function contextServerConnectFailureEvent(input: {
 }) {
   const protectedProvider = input.serverName.startsWith("aws-")
     ? "AWS"
+    : input.serverName.startsWith("gcp-")
+      ? "GCP"
     : input.serverName.startsWith("langfuse-")
       ? "Langfuse"
       : input.serverName.startsWith("upstash-")
@@ -147,6 +152,10 @@ export function contextServerConnectFailureEvent(input: {
       ? input.awsConnections?.find(
           (connection) => input.serverName === `aws-${connection.accountId}`,
         )?.accountId
+      : input.serverName.startsWith("gcp-")
+        ? input.gcpConnections?.find(
+            (connection) => input.serverName.startsWith(`gcp-${connection.accountId}-`),
+          )?.accountId
       : input.serverName.startsWith("langfuse-")
         ? input.langfuseConnections?.find(
             (connection) =>
@@ -270,6 +279,7 @@ export function investigationInstructions(input: {
   awsAlarmTriggered?: boolean;
   awsAccountNames?: string[];
   awsSkillContext?: string;
+  gcpProjectNames?: string[];
   customMcpNames?: string[];
   axiomConnected?: boolean;
   datadogConnected: boolean;
@@ -292,6 +302,7 @@ export function investigationInstructions(input: {
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
+  const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
@@ -306,6 +317,7 @@ export function investigationInstructions(input: {
     langfuseProjectNames.length > 0 ||
     vercelAccountIds.length > 0 ||
     awsAccountNames.length > 0 ||
+    gcpProjectNames.length > 0 ||
     customMcpNames.length > 0;
   return [
     input.runtimeSystemPrompt,
@@ -322,6 +334,9 @@ export function investigationInstructions(input: {
       : null,
     awsAccountNames.length > 0
       ? "Prefer the typed aws_inspect_cloudwatch_alarm, aws_inspect_cloudwatch_metric, aws_query_cloudwatch_logs, aws_inspect_sqs_queue, and aws_inspect_lambda_function tools for AWS evidence. If aws___run_script is necessary, use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and inspect every nested api_calls result. An outer success status does not mean the nested AWS calls succeeded; retry failed nested calls with corrected operation names."
+      : null,
+    gcpProjectNames.length > 0
+      ? `Use the connected read-only Google Cloud Asset Inventory, Logging, and Monitoring tools to inspect relevant resources and telemetry before concluding. Connected GCP projects: ${gcpProjectNames.join(", ")}. Never request secret values or attempt to change cloud resources.`
       : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
@@ -472,6 +487,7 @@ export async function runInvestigationAgent(
   const [
     runtimeProfile,
     awsConnections,
+    gcpConnections,
     axiomConnection,
     datadogConnection,
     sentryConnection,
@@ -486,6 +502,7 @@ export async function runInvestigationAgent(
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
+    getRuntimeGcpConnections(job.config.id),
     getRuntimeAxiomConnection(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
     loadSentryConnectionForInvestigation({
@@ -508,6 +525,9 @@ export async function runInvestigationAgent(
   ]);
   const awsServers = await Promise.all(
     awsConnections.map((connection) => createAwsMcpServer(connection, environment)),
+  );
+  const gcpServers = gcpConnections.flatMap((connection) =>
+    createGcpMcpServers(connection, environment)
   );
   const datadogServer = datadogConnection
     ? createDatadogMcpServer(datadogConnection)
@@ -547,6 +567,7 @@ export async function runInvestigationAgent(
     upstashServer,
     ...langfuseServers,
     ...awsServers,
+    ...gcpServers,
     ...customMcpServers,
   ].filter(
     (server): server is NonNullable<typeof server> => server !== null,
@@ -571,6 +592,7 @@ export async function runInvestigationAgent(
             JSON.stringify(
               contextServerConnectFailureEvent({
                 awsConnections,
+                gcpConnections,
                 customMcpConnections,
                 error,
                 investigationId: job.investigationId,
@@ -585,6 +607,9 @@ export async function runInvestigationAgent(
           }
           if (server.name.startsWith("aws-")) {
             throw new Error("Unable to connect to AWS context");
+          }
+          if (server.name.startsWith("gcp-")) {
+            throw new Error("Unable to connect to GCP context");
           }
           if (server.name.startsWith("langfuse-")) {
             throw new Error("Unable to connect to Langfuse context");
@@ -687,6 +712,9 @@ export async function runInvestigationAgent(
           `${connection.displayName} (${connection.roleArn.split(":")[4] ?? "unknown"})`,
       ),
       awsSkillContext,
+      gcpProjectNames: gcpConnections.map(
+        (connection) => `${connection.displayName} (${connection.projectId})`,
+      ),
       axiomConnected: axiomServer !== null,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,

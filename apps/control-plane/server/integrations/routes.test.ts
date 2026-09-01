@@ -7,6 +7,7 @@ import {
 import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
+  deleteIntegrationAccount,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
@@ -26,6 +27,10 @@ import {
   createAwsExternalId,
   verifyAwsInvestigationRole,
 } from "../../../../packages/core/src/integrations/aws.js";
+import {
+  createGcpSessionName,
+  verifyGcpProject,
+} from "../../../../packages/core/src/integrations/gcp.js";
 import {
   beginCustomMcpOAuth,
   finishCustomMcpOAuth,
@@ -58,6 +63,7 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
+  deleteIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccountByExternalId: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
@@ -83,6 +89,17 @@ vi.mock("../../../../packages/core/src/integrations/aws.js", async (importOrigin
     createAwsCloudFormationTemplateUrl: vi.fn(),
     createAwsExternalId: vi.fn(),
     verifyAwsInvestigationRole: vi.fn(),
+  };
+});
+
+vi.mock("../../../../packages/core/src/integrations/gcp.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/gcp.js")
+  >();
+  return {
+    ...actual,
+    createGcpSessionName: vi.fn(),
+    verifyGcpProject: vi.fn(),
   };
 });
 
@@ -1366,6 +1383,110 @@ describe("integration callback routing", () => {
     await expect(response.json()).resolves.toMatchObject({
       redirectUrl:
         "https://responder.example/agents/new?integration=aws&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+  });
+
+  it("prepares a keyless read-only GCP setup script", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(createGcpSessionName).mockReturnValue(
+      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-gcp-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/gcp/connect", {
+      body: JSON.stringify({
+        projectId: "responder-production",
+        projectNumber: "123456789012",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      projectId: "responder-production",
+      script: expect.stringContaining("roles/cloudasset.viewer"),
+    });
+    expect(body.script).toContain("roles/mcp.toolUser");
+    expect(body.script).toContain(
+      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      projectId: "responder-production",
+      projectNumber: "123456789012",
+      sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "GCP · responder-production",
+        externalAccountId: "responder-production",
+        provider: "gcp",
+        status: "pending",
+      }),
+    );
+  });
+
+  it("removes one GCP project account without touching other providers", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/gcp/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ removed: true });
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+  });
+
+  it("verifies federated GCP access before connecting the project", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-gcp-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      projectId: "responder-production",
+      projectNumber: "123456789012",
+      sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    });
+    vi.mocked(verifyGcpProject).mockResolvedValue(undefined);
+    vi.mocked(setIntegrationAccountStatus).mockResolvedValue(undefined);
+
+    const response = await app.request("/api/integrations/gcp/verify", {
+      body: JSON.stringify({
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+        returnTo: "/agents/new",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(verifyGcpProject).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "responder-production" }),
+    );
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "connected",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      redirectUrl:
+        "https://responder.example/agents/new?integration=gcp&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
     });
   });
 

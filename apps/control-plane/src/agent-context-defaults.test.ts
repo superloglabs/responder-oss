@@ -11,6 +11,7 @@ const OPTIONS: AgentOptions = {
     { id: "axiom-1", provider: "axiom", displayName: "Production" },
     { id: "aws-1", provider: "aws", displayName: "Production" },
     { id: "aws-2", provider: "aws", displayName: "Staging" },
+    { id: "gcp-1", provider: "gcp", displayName: "Production" },
     {
       id: "slack-1",
       provider: "slack",
@@ -58,7 +59,14 @@ const OPTIONS: AgentOptions = {
 describe("defaultAgentContext", () => {
   it("enables direct connections and supported resource providers", () => {
     expect(defaultAgentContext(OPTIONS)).toEqual({
-      contextAccountIds: ["sentry-1", "axiom-1", "aws-1", "aws-2", "vercel-1"],
+      contextAccountIds: [
+        "sentry-1",
+        "axiom-1",
+        "aws-1",
+        "aws-2",
+        "gcp-1",
+        "vercel-1",
+      ],
       contextResourceIds: ["slack-channel-1", "vercel-project-1"],
       repositoryIds: ["repository-1"],
     });

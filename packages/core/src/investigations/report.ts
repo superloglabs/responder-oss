@@ -33,6 +33,7 @@ export const issueEvidenceSchema = z.object({
   source: z.enum([
     "alert",
     "aws",
+    "gcp",
     "datadog",
     "axiom",
     "sentry",

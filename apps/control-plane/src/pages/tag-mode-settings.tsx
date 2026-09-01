@@ -10,6 +10,7 @@ import {
   type SlackThreadModeConfiguration,
 } from "../agents-api";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
+import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
@@ -73,11 +74,13 @@ const contextProviderMetadata: Record<
   slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
   linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
   aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
+  gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
   upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
   custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
 };
 const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "aws",
+  "gcp",
   "custom_mcp",
   "langfuse",
 ]);
@@ -85,6 +88,7 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
 const contextProviderOrder: ContextAccount["provider"][] = [
   "sentry",
   "aws",
+  "gcp",
   "upstash",
   "langfuse",
   "datadog",
@@ -107,6 +111,8 @@ function accountDetail(account: ContextAccount): string {
       return `${prefix}Issues, events, and traces`;
     case "aws":
       return "Infrastructure, telemetry, configuration, and service health";
+    case "gcp":
+      return "Asset inventory, logs, metrics, and alerting state";
     case "upstash":
       return `${prefix}Redis, Vector, Search, QStash, and Workflow`;
     case "langfuse":
@@ -144,6 +150,7 @@ export function TagModeSettingsPage() {
   const [connectingProvider, setConnectingProvider] =
     useState<IntegrationSummary["id"] | null>(null);
   const [connectingAws, setConnectingAws] = useState(false);
+  const [connectingGcp, setConnectingGcp] = useState(false);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
@@ -320,6 +327,10 @@ export function TagModeSettingsPage() {
       setConnectingAws(true);
       return;
     }
+    if (integration.id === "gcp") {
+      setConnectingGcp(true);
+      return;
+    }
     if (integration.id === "datadog") {
       setChoosingDatadogSite(true);
       return;
@@ -419,6 +430,12 @@ export function TagModeSettingsPage() {
         connectUrl={integrations.find((item) => item.id === "aws")?.connectUrl ?? ""}
         onCancel={() => setConnectingAws(false)}
         open={connectingAws}
+        returnTo="/settings/tag-mode"
+      />
+      <GcpConnectionDialog
+        connectUrl={integrations.find((item) => item.id === "gcp")?.connectUrl ?? ""}
+        onCancel={() => setConnectingGcp(false)}
+        open={connectingGcp}
         returnTo="/settings/tag-mode"
       />
       <section className="settingsHeading">

@@ -69,6 +69,7 @@ export interface AgentOptions {
     id: string;
     provider:
       | "aws"
+      | "gcp"
       | "github"
       | "slack"
       | "sentry"
@@ -130,6 +131,7 @@ export interface AgentListItem {
 export interface IntegrationSummary {
   id:
     | "aws"
+    | "gcp"
     | "github"
     | "slack"
     | "sentry"
@@ -202,6 +204,7 @@ export interface IssueEvidence {
   source:
     | "alert"
     | "aws"
+    | "gcp"
     | "datadog"
     | "axiom"
     | "sentry"

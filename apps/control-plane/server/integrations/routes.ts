@@ -8,6 +8,7 @@ import {
 import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
+  deleteIntegrationAccount,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
@@ -117,6 +118,14 @@ import {
   createAwsExternalId,
   verifyAwsInvestigationRole,
 } from "../../../../packages/core/src/integrations/aws.js";
+import {
+  createGcpSessionName,
+  gcpConnectionCredentialsSchema,
+  gcpProjectIdSchema,
+  gcpProjectNumberSchema,
+  gcpSetupScript,
+  verifyGcpProject,
+} from "../../../../packages/core/src/integrations/gcp.js";
 
 const providerSchema = z.enum(productIntegrationIds);
 const awsConnectionSchema = z.object({
@@ -127,10 +136,29 @@ const awsVerificationSchema = z.object({
   integrationAccountId: z.uuid(),
   returnTo: z.string().max(2_048).optional(),
 });
+const gcpConnectionSchema = z.object({
+  projectId: gcpProjectIdSchema,
+  projectNumber: gcpProjectNumberSchema,
+  returnTo: z.string().max(2_048).optional(),
+});
+const gcpVerificationSchema = z.object({
+  integrationAccountId: z.uuid(),
+  returnTo: z.string().max(2_048).optional(),
+});
 
 function recoverAwsConnectionCredentials(encryptedCredentials: string) {
   try {
     return awsConnectionCredentialsSchema.safeParse(
+      decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function recoverGcpConnectionCredentials(encryptedCredentials: string) {
+  try {
+    return gcpConnectionCredentialsSchema.safeParse(
       decryptCredentials<Record<string, unknown>>(encryptedCredentials),
     );
   } catch {
@@ -220,6 +248,7 @@ type BrowserOAuthProvider =
   | "axiom"
   | "clickstack"
   | "custom_mcp"
+  | "gcp"
   | "github"
   | "linear"
   | "sentry"
@@ -582,10 +611,19 @@ export const integrationRoutes = new Hono()
                 : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
+            ...(definition.id === "gcp"
+              ? {
+                  projectId: account.externalAccountId,
+                  ...(typeof account.metadata.projectNumber === "string"
+                    ? { projectNumber: account.metadata.projectNumber }
+                    : {}),
+                }
+              : {}),
           })),
           connectUrl:
             definition.implemented && configured
               ? definition.id === "aws" ||
+                  definition.id === "gcp" ||
                   definition.id === "datadog" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
@@ -728,6 +766,7 @@ export const integrationRoutes = new Hono()
     }
     if (
       parsedProvider.data === "aws" ||
+      parsedProvider.data === "gcp" ||
       parsedProvider.data === "datadog" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash" ||
@@ -1031,6 +1070,156 @@ export const integrationRoutes = new Hono()
         {
           error:
             "Responder could not assume the role yet. Wait for the CloudFormation stack to finish, then try again.",
+        },
+        401,
+      );
+    }
+  })
+  .delete("/gcp/:integrationAccountId", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
+    if (!accountId.success) {
+      return context.json({ error: "The Google Cloud account is invalid" }, 400);
+    }
+    const deleted = await deleteIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+    if (!deleted) {
+      return context.json({ error: "Google Cloud project connection not found" }, 404);
+    }
+    return context.json({ removed: true });
+  })
+  .post("/gcp/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = gcpConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Enter a valid Google Cloud project ID and project number" },
+        400,
+      );
+    }
+
+    try {
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId: parsed.data.projectId,
+        organizationId: tenant.organizationId,
+        provider: "gcp",
+      });
+      const existingCredentials = existing?.encryptedCredentials
+        ? recoverGcpConnectionCredentials(existing.encryptedCredentials)
+        : null;
+      const credentials = {
+        projectId: parsed.data.projectId,
+        projectNumber: parsed.data.projectNumber,
+        sessionName: existingCredentials?.success
+          ? existingCredentials.data.sessionName
+          : createGcpSessionName(),
+      };
+      const accountId =
+        existing?.status === "connected" && existingCredentials?.success &&
+          existingCredentials.data.projectNumber === parsed.data.projectNumber
+          ? existing.id
+          : await upsertIntegrationAccount({
+              organizationId: tenant.organizationId,
+              provider: "gcp",
+              externalAccountId: parsed.data.projectId,
+              displayName: `GCP · ${parsed.data.projectId}`,
+              encryptedCredentials: encryptCredentials(credentials),
+              credentialKeyVersion: 1,
+              metadata: {
+                permissionRoles: [
+                  "roles/cloudasset.viewer",
+                  "roles/logging.viewer",
+                  "roles/monitoring.viewer",
+                ],
+                projectNumber: parsed.data.projectNumber,
+                serviceAccountId: "responder-investigation",
+              },
+              status: "pending",
+            });
+      return context.json({
+        accountId,
+        projectId: parsed.data.projectId,
+        script: gcpSetupScript(credentials),
+      });
+    } catch (error) {
+      logCallbackError("GCP", error, {
+        organizationId: tenant.organizationId,
+        stage: "setup",
+      });
+      return context.json(
+        { error: "Unable to prepare the Google Cloud connection" },
+        502,
+      );
+    }
+  })
+  .post("/gcp/verify", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = gcpVerificationSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "The Google Cloud setup session is invalid" }, 400);
+    }
+
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: parsed.data.integrationAccountId,
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+    if (!account?.encryptedCredentials) {
+      return context.json({ error: "Start the Google Cloud connection again" }, 404);
+    }
+    try {
+      const credentials = gcpConnectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      await verifyGcpProject(credentials);
+      await setIntegrationAccountStatus(account.id, "connected");
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: account.id,
+          provider: "gcp",
+        },
+      });
+      return context.json({
+        accountId: account.id,
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(
+            parsed.data.returnTo ?? "/settings",
+            "gcp",
+            "connected",
+          ),
+          account.id,
+        ),
+      });
+    } catch (error) {
+      await setIntegrationAccountStatus(account.id, "error");
+      logCallbackError("GCP", error, {
+        accountId: account.id,
+        organizationId: tenant.organizationId,
+        stage: "verify",
+      });
+      return context.json(
+        {
+          error:
+            "Responder could not use the Google Cloud identity yet. Wait for the setup script to finish, then try again.",
         },
         401,
       );

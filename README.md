@@ -33,7 +33,7 @@ maintained separately.
 ## What it does
 
 - Watches selected Slack channels and Sentry projects for new alerts.
-- Connects GitHub, Slack, Sentry, Datadog, Axiom, AWS, Upstash, Langfuse,
+- Connects GitHub, Slack, Sentry, Datadog, Axiom, AWS, Google Cloud, Upstash, Langfuse,
   Vercel, ClickStack,
   and custom MCP servers.
 - Investigates incidents with a versioned operator-managed runtime profile.
