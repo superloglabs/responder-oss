@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   beginInvestigation: vi.fn(),
+  beginSlackThreadInvestigation: vi.fn(),
   bossSend: vi.fn(),
   bossStart: vi.fn(),
   bossStop: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("../../../../packages/core/src/billing/notifications.js", () => ({
 
 vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   beginInvestigation: mocks.beginInvestigation,
+  beginSlackThreadInvestigation: mocks.beginSlackThreadInvestigation,
   discardPendingInvestigation: mocks.discardPendingInvestigation,
   failInvestigation: mocks.failInvestigation,
   getRuntimeAgentConfig: mocks.getRuntimeAgentConfig,
@@ -71,6 +73,7 @@ vi.mock("../../../../packages/core/src/jobs.js", async (importOriginal) => {
 import {
   closeInvestigationQueue,
   queueInvestigation,
+  queueSlackThreadInvestigation,
   queueInvestigationRetry,
   queueIssueRemediation,
 } from "./queue.js";
@@ -117,6 +120,11 @@ describe("investigation queue", () => {
     await closeInvestigationQueue();
     vi.clearAllMocks();
     mocks.beginInvestigation.mockResolvedValue(created);
+    mocks.beginSlackThreadInvestigation.mockResolvedValue({
+      ...created,
+      configurationChanged: false,
+      slackInvestigationSessionId: "22222222-2222-4222-8222-222222222222",
+    });
     mocks.consumeInvestigation.mockResolvedValue({
       allowed: true,
       configured: false,
@@ -210,6 +218,50 @@ describe("investigation queue", () => {
     );
     expect(mocks.bossSend).not.toHaveBeenCalled();
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("captures Tag mode usage for a newly queued Slack turn", async () => {
+    const tagRequest = {
+      agentId: created.config.agentId,
+      attributes: {
+        channelId: "C123",
+        slackUserId: "U123",
+        slackUserName: "Ada Lovelace",
+        teamId: "T123",
+      },
+      body: "Investigate checkout latency",
+      externalEventId: "EvMention:agent-1",
+      provider: "slack" as const,
+      title: "Investigate checkout latency",
+    };
+    const thread = {
+      channelId: "C123",
+      teamId: "T123",
+      threadTimestamp: "1785500001.000200",
+    };
+
+    await expect(queueSlackThreadInvestigation(tagRequest, thread)).resolves.toEqual({
+      investigationId: created.investigationId,
+      jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
+    });
+
+    expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith({
+      distinctId: "slack:T123:U123",
+      event: "tag mode used",
+      organizationId: created.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_id: created.config.agentId,
+        channel_id: "C123",
+        investigation_id: created.investigationId,
+        slack_user_id: "U123",
+        user_name: "Ada Lovelace",
+        surface: "slack",
+        team_id: "T123",
+        thread_timestamp: "1785500001.000200",
+      },
+    });
   });
 
   it("charges and enqueues a rerun with its refreshed configuration", async () => {

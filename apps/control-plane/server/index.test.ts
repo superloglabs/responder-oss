@@ -808,6 +808,7 @@ describe("control-plane API", () => {
         ts: "1700000006.000002",
         thread_ts: "1700000006.000001",
         user: "U123",
+        username: "Ada Lovelace",
         text: "<@U-RESPONDER> investigate checkout latency",
       },
     });
@@ -837,6 +838,7 @@ describe("control-plane API", () => {
           channelId: "C123",
           integrationAccountId: "04040404-0404-4404-8404-040404040404",
           slackUserId: "U123",
+          slackUserName: "Ada Lovelace",
           teamId: "T123",
           threadTimestamp: "1700000006.000001",
         }),

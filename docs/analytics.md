@@ -18,6 +18,7 @@ activity can be separated from other products sharing the PostHog project.
 | `investigation created` | A new investigation or replay is persisted and accepted for processing | `investigation_id`, `agent_id`, `provider`, `is_replay`, `source_investigation_id` |
 | `investigation feedback submitted` | A Slack user rates a completed investigation response | `investigation_id`, `agent_id`, `feedback`, `organization_id`, `organization_name`, `slack_user_id`, `user_name`, `team_id`, `channel_id`, `surface` |
 | `investigation rerun` | A finished investigation is accepted for another run with the active Agent configuration | `investigation_id`, `agent_id`, `agent_config_version_id`, `provider` |
+| `tag mode used` | A new `@Responder` mention is accepted as a Tag mode investigation turn | `investigation_id`, `agent_id`, `slack_user_id`, `user_name`, `team_id`, `channel_id`, `thread_timestamp`, `surface`, `organization_name` |
 
 Events associated with a workspace include `organization_id` and the PostHog
 `organization` group. Authenticated events use the Better Auth user ID as their
