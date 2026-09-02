@@ -16,6 +16,15 @@ export const supabaseProjectRefSchema = z
   .trim()
   .regex(/^[a-z0-9]{20}$/u, "Enter a valid 20-character Supabase project ID");
 
+export const supabaseProjectSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  organizationId: z.string().trim().min(1).max(200),
+  organizationSlug: z.string().trim().min(1).max(200),
+  ref: supabaseProjectRefSchema,
+});
+
+export type SupabaseProject = z.infer<typeof supabaseProjectSchema>;
+
 const supabaseOAuthStateSchema = z.object({
   clientInformation: z.record(z.string(), z.unknown()).optional(),
   codeVerifier: z.string().min(1).optional(),
@@ -44,6 +53,30 @@ export const SUPABASE_ACCESS_MODE_LABELS: Record<SupabaseAccessMode, string> = {
   read_only: "Logs and read-only data",
   read_write: "Full database SQL access",
 };
+
+export function supabaseDiscoveryMcpUrl(): string {
+  const url = new URL("/mcp", SUPABASE_MCP_ORIGIN);
+  url.searchParams.set("features", "account");
+  url.searchParams.set("read_only", "true");
+  return url.toString();
+}
+
+export function parseSupabaseProjects(input: unknown): SupabaseProject[] {
+  const result = z.object({
+    projects: z.array(z.object({
+      name: z.string(),
+      organization_id: z.string(),
+      organization_slug: z.string(),
+      ref: supabaseProjectRefSchema,
+    })).max(1_000),
+  }).parse(input);
+  return result.projects.map((project) => supabaseProjectSchema.parse({
+    name: project.name,
+    organizationId: project.organization_id,
+    organizationSlug: project.organization_slug,
+    ref: project.ref,
+  }));
+}
 
 const SUPABASE_LOG_TOOLS = ["get_logs", "query_logs"] as const;
 const SUPABASE_DATABASE_TOOLS = [
@@ -106,7 +139,10 @@ export function supabaseExternalAccountId(input: {
 
 export function supabaseDisplayName(input: {
   accessMode: SupabaseAccessMode;
+  projectName?: string;
   projectRef: string;
 }): string {
-  return `${supabaseProjectRefSchema.parse(input.projectRef)} · ${SUPABASE_ACCESS_MODE_LABELS[input.accessMode]}`;
+  const projectRef = supabaseProjectRefSchema.parse(input.projectRef);
+  const projectName = input.projectName?.trim();
+  return `${projectName ? `${projectName} (${projectRef})` : projectRef} · ${SUPABASE_ACCESS_MODE_LABELS[input.accessMode]}`;
 }

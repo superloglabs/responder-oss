@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSupabaseCredentials,
+  parseSupabaseProjects,
   hasRequiredSupabaseTools,
   supabaseAllowedTools,
   supabaseDisplayName,
+  supabaseDiscoveryMcpUrl,
   supabaseExternalAccountId,
   supabaseMcpUrl,
 } from "./supabase.js";
@@ -11,6 +13,28 @@ import {
 const projectRef = "abcdefghijklmnopqrst";
 
 describe("Supabase integration", () => {
+  it("builds a read-only account scope for OAuth project discovery", () => {
+    expect(supabaseDiscoveryMcpUrl()).toBe(
+      "https://mcp.supabase.com/mcp?features=account&read_only=true",
+    );
+  });
+
+  it("normalizes Supabase's project discovery response", () => {
+    expect(parseSupabaseProjects({
+      projects: [{
+        name: "Production",
+        organization_id: "organization-id",
+        organization_slug: "acme",
+        ref: projectRef,
+      }],
+    })).toEqual([{
+      name: "Production",
+      organizationId: "organization-id",
+      organizationSlug: "acme",
+      ref: projectRef,
+    }]);
+  });
+
   it("builds a project-scoped logs-only URL", () => {
     expect(supabaseMcpUrl({ accessMode: "logs", projectRef })).toBe(
       "https://mcp.supabase.com/mcp?project_ref=abcdefghijklmnopqrst&features=debugging&read_only=true",
@@ -75,5 +99,10 @@ describe("Supabase integration", () => {
     expect(supabaseDisplayName({ accessMode: "read_write", projectRef })).toBe(
       "abcdefghijklmnopqrst · Full database SQL access",
     );
+    expect(supabaseDisplayName({
+      accessMode: "logs",
+      projectName: "Production",
+      projectRef,
+    })).toBe("Production (abcdefghijklmnopqrst) · Logs only");
   });
 });

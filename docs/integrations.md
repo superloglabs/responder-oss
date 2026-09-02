@@ -216,11 +216,13 @@ project keys outside the repository investigation sandbox.
 
 ## Supabase
 
-Connect Supabase from Settings with the 20-character project ID, choose an
-access level, then approve the project through Supabase OAuth. The hosted MCP
-server dynamically registers the OAuth client, so no deployment-level Supabase
-client ID, secret, service-role key, or database password is required. The
-OAuth callback is:
+Connect Supabase from Settings by choosing an access level and continuing to
+Supabase OAuth. The user authorizes an organization, then Responder discovers
+its projects through the hosted MCP server. A sole project is selected
+automatically; otherwise the user chooses from a project picker. The hosted MCP
+server dynamically registers the OAuth client, so no project ID,
+deployment-level Supabase client ID, secret, service-role key, or database
+password is required. The OAuth callback is:
 
 ```text
 <public>/api/integrations/supabase/callback
@@ -236,13 +238,16 @@ account. Agents can select one or more of these connections:
 - **Full database SQL access** exposes the same reviewed database tools without
   the read-only parameter, so `execute_sql` can change project data or schema.
 
-Responder constructs the hosted MCP URL from the saved project and access level;
-it never accepts that URL from the browser. The worker applies a second exact
-tool allowlist and blocks the dedicated migration, Edge Function deployment,
-branching, project administration, and every unreviewed tool in all modes.
-Because raw SQL can still perform DDL in the full-access preset, blocking the
-dedicated migration tool is not a schema-change boundary. OAuth tokens remain
-encrypted outside the repository investigation sandbox.
+Project discovery uses a temporary `features=account&read_only=true` MCP scope
+and calls only `list_projects`. Project choices and OAuth credentials remain in
+a tenant-bound, ten-minute server-side state while the picker is open. Responder
+then constructs the project-scoped hosted MCP URL from the authorized project
+and access level; it never accepts that URL from the browser. The worker applies
+a second exact tool allowlist and blocks the dedicated migration, Edge Function
+deployment, branching, project administration, and every unreviewed tool in all
+modes. Because raw SQL can still perform DDL in the full-access preset, blocking
+the dedicated migration tool is not a schema-change boundary. OAuth tokens
+remain encrypted outside the repository investigation sandbox.
 
 For read-only data access, Supabase's handling of the MCP `read_only` parameter
 is the database mutation boundary: Responder cannot independently determine

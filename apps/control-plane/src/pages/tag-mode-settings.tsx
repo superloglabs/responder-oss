@@ -22,6 +22,7 @@ import {
 import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import { RepositoryIcon, SearchIcon } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
@@ -171,7 +172,10 @@ export function TagModeSettingsPage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const [connectingSupabase, setConnectingSupabase] = useState(false);
+  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const [connectingSupabase, setConnectingSupabase] = useState(
+    Boolean(supabaseSelectionState),
+  );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [configuration, setConfiguration] =
     useState<SlackThreadModeConfiguration>(defaultConfiguration);
@@ -446,6 +450,7 @@ export function TagModeSettingsPage() {
         onCancel={() => setConnectingSupabase(false)}
         open={connectingSupabase}
         returnTo="/settings/tag-mode"
+        selectionState={supabaseSelectionState}
       />
       <ClickStackConnectionDialog
         connectUrl={integrations.find((item) => item.id === "clickstack")?.connectUrl ?? ""}

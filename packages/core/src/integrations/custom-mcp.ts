@@ -516,6 +516,41 @@ export async function listCustomMcpTools(input: {
   }
 }
 
+export async function callCustomMcpTool(input: {
+  accessToken: string;
+  arguments?: Record<string, unknown>;
+  mcpUrl: string;
+  name: string;
+}): Promise<unknown> {
+  const url = await validateCustomMcpUrl(input.mcpUrl, {
+    allowLocal: process.env.NODE_ENV !== "production",
+  });
+  const transport = new StreamableHTTPClientTransport(url, {
+    fetch: safeCustomMcpFetch,
+    requestInit: {
+      headers: { authorization: `Bearer ${input.accessToken}` },
+    },
+  });
+  const client = new Client({ name: "responder-connection-setup", version: "1" });
+  try {
+    await client.connect(transport);
+    const result = await client.callTool({
+      arguments: input.arguments ?? {},
+      name: input.name,
+    });
+    if ("toolResult" in result) return result.toolResult;
+    if (result.isError) throw new Error(`MCP tool ${input.name} failed`);
+    if (result.structuredContent) return result.structuredContent;
+    const text = result.content.find((item) => item.type === "text");
+    if (!text || text.type !== "text") {
+      throw new Error(`MCP tool ${input.name} returned no structured result`);
+    }
+    return JSON.parse(text.text) as unknown;
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 export async function verifyCustomMcpConnection(input: {
   accessToken: string;
   mcpUrl: string;

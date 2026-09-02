@@ -44,6 +44,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -453,6 +454,7 @@ function connectionNotice(): {
   const provider = search.get("integration");
   const status = search.get("status");
   if (!provider || !status) return null;
+  if (provider === "supabase" && status === "select_project") return null;
 
   const name = providerDisplayName(provider);
   if (status === "connected") {
@@ -564,7 +566,10 @@ export function AgentCreatePage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const [connectingSupabase, setConnectingSupabase] = useState(false);
+  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const [connectingSupabase, setConnectingSupabase] = useState(
+    Boolean(supabaseSelectionState),
+  );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
   const [connectingGcp, setConnectingGcp] = useState(false);
@@ -1760,6 +1765,7 @@ export function AgentCreatePage() {
         onCancel={() => setConnectingSupabase(false)}
         open={connectingSupabase}
         returnTo={returnTo}
+        selectionState={supabaseSelectionState}
       />
       <ClickStackConnectionDialog
         connectUrl={integrationFor("clickstack")?.connectUrl ?? ""}

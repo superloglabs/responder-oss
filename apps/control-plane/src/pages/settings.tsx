@@ -10,6 +10,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -89,6 +90,7 @@ function connectionNotice(): {
   const provider = search.get("integration");
   const status = search.get("status");
   if (!provider || !status) return null;
+  if (provider === "supabase" && status === "select_project") return null;
 
   const name = providerDisplayName(provider);
   if (status === "connected") {
@@ -378,7 +380,10 @@ function DefaultIntegrationCard({
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const [connectingSupabase, setConnectingSupabase] = useState(false);
+  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const [connectingSupabase, setConnectingSupabase] = useState(
+    integration.id === "supabase" && Boolean(supabaseSelectionState),
+  );
   const [connectingDash0, setConnectingDash0] = useState(false);
   const returnedAccountId = new URLSearchParams(window.location.search).get(
     "integration_account_id",
@@ -503,6 +508,7 @@ function DefaultIntegrationCard({
         onCancel={() => setConnectingSupabase(false)}
         open={connectingSupabase}
         returnTo="/settings"
+        selectionState={supabaseSelectionState}
       />
       <Dash0ConnectionDialog
         connectUrl={integration.connectUrl ?? ""}

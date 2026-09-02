@@ -6,6 +6,7 @@ import { getDatabase } from "./client.js";
 import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
+  getIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
@@ -219,6 +220,39 @@ describe("integration account tenancy", () => {
       "axiom",
       account.organizationId,
       "20000000-0000-4000-8000-000000000000",
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
+  });
+
+  it("reads a live tenant-owned OAuth state without consuming it", async () => {
+    const stateRow = {
+      organizationId: account.organizationId,
+      userId: "20000000-0000-4000-8000-000000000000",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "encrypted-credentials" },
+      returnTo: "/settings",
+    };
+    const limit = vi.fn().mockResolvedValue([stateRow]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { limit };
+    });
+    const from = vi.fn(() => ({ where }));
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({ from })),
+    } as never);
+
+    await expect(getIntegrationConnectionState("supabase", "selection-state", {
+      organizationId: account.organizationId,
+      userId: stateRow.userId,
+    })).resolves.toEqual(stateRow);
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.params).toEqual([
+      createHash("sha256").update("selection-state").digest("hex"),
+      "supabase",
+      account.organizationId,
+      stateRow.userId,
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     ]);
   });
