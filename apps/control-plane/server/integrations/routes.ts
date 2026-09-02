@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
@@ -32,6 +33,11 @@ import {
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import {
+  createDash0WebhookSecret,
+  normalizeDash0McpUrl,
+  parseDash0Credentials,
+} from "../../../../packages/core/src/integrations/dash0.js";
 import { getActiveTenant } from "../tenant.js";
 import {
   getIntegrationDefinition,
@@ -105,7 +111,11 @@ import {
   listVercelProjects,
   vercelInstallUrl,
 } from "./vercel.js";
-import { integrationCallbackUrl, settingsRedirect } from "./urls.js";
+import {
+  dash0WebhookUrl,
+  integrationCallbackUrl,
+  settingsRedirect,
+} from "./urls.js";
 import {
   awsAccountIdSchema,
   awsCloudFormationQuickCreateUrl,
@@ -199,6 +209,10 @@ const datadogConnectionSchema = z.object({
   returnTo: z.string().max(2_048).optional(),
   site: z.string().min(1),
 });
+const dash0ConnectionSchema = z.object({
+  mcpUrl: z.string().trim().url().max(2_048),
+  returnTo: z.string().max(2_048).optional(),
+});
 const upstashConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4_096),
   email: z.string().trim().email().max(320),
@@ -248,6 +262,7 @@ type BrowserOAuthProvider =
   | "axiom"
   | "clickstack"
   | "custom_mcp"
+  | "dash0"
   | "gcp"
   | "github"
   | "linear"
@@ -370,7 +385,7 @@ function safeCustomMcpErrorMessage(error: unknown): string {
 }
 
 function logCustomMcpError(
-  stage: "callback" | "connect",
+  stage: "callback" | "connect" | "webhook-config",
   error: unknown,
   accountId?: string,
 ): void {
@@ -625,6 +640,7 @@ export const integrationRoutes = new Hono()
               ? definition.id === "aws" ||
                   definition.id === "gcp" ||
                   definition.id === "datadog" ||
+                  definition.id === "dash0" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
                   definition.id === "langfuse"
@@ -768,6 +784,7 @@ export const integrationRoutes = new Hono()
       parsedProvider.data === "aws" ||
       parsedProvider.data === "gcp" ||
       parsedProvider.data === "datadog" ||
+      parsedProvider.data === "dash0" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash" ||
       parsedProvider.data === "langfuse"
@@ -1291,6 +1308,208 @@ export const integrationRoutes = new Hono()
         { error: "Unable to verify the Datadog connection" },
         502,
       );
+    }
+  })
+  .post("/dash0/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = dash0ConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter the MCP endpoint copied from Dash0" }, 400);
+    }
+
+    let accountId: string | undefined;
+    try {
+      const mcpUrl = await normalizeDash0McpUrl(parsed.data.mcpUrl);
+      const externalAccountId = randomUUID();
+      const webhookSecret = createDash0WebhookSecret();
+      accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "dash0",
+        externalAccountId,
+        displayName: "Dash0",
+        encryptedCredentials: encryptCredentials({
+          authType: "oauth",
+          mcpUrl,
+          oauth: {},
+          webhookSecret,
+        }),
+        credentialKeyVersion: 1,
+        metadata: { authType: "oauth", mcpUrl },
+        status: "pending",
+      });
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "dash0",
+        codeVerifier: JSON.stringify({ accountId, externalAccountId }),
+        returnTo: parsed.data.returnTo,
+        routingUrl: integrationCallbackUrl("dash0"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl,
+        redirectUrl: integrationCallbackUrl("dash0"),
+      });
+      const updated = await updateIntegrationAccountCredentials({
+        encryptedCredentials: encryptCredentials({
+          authType: "oauth",
+          mcpUrl,
+          oauth: oauthResult.oauth,
+          webhookSecret,
+        }),
+        integrationAccountId: accountId,
+        organizationId: tenant.organizationId,
+        provider: "dash0",
+        status: "pending",
+      });
+      if (!updated) throw new Error("The pending Dash0 connection was not updated");
+      return context.json({ redirectUrl: oauthResult.authorizationUrl });
+    } catch (error) {
+      if (accountId) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      logCustomMcpError("connect", error, accountId);
+      return context.json({ error: "Unable to start Dash0 OAuth" }, 502);
+    }
+  })
+  .get("/dash0/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "dash0", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "dash0",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "dash0", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({ accountId: z.uuid(), externalAccountId: z.uuid() })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "dash0",
+      });
+      if (!account?.encryptedCredentials || account.status !== "pending") {
+        throw new Error("The pending Dash0 connection was not found");
+      }
+      const credentials = parseDash0Credentials(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("dash0"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Dash0 OAuth access token is missing");
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const connectedAccountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "dash0",
+        externalAccountId: callbackState.externalAccountId,
+        displayName: "Dash0",
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        credentialKeyVersion: 1,
+        metadata: {
+          authType: "oauth",
+          mcpUrl: credentials.mcpUrl,
+          toolCount,
+        },
+        status: "connected",
+      });
+      if (connectedAccountId !== accountId) {
+        throw new Error("The Dash0 connection changed during OAuth");
+      }
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "dash0",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "dash0", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "dash0",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/dash0/:accountId/webhook-config", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("accountId"));
+    if (!accountId.success) {
+      return context.json({ error: "Dash0 connection not found" }, 404);
+    }
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "dash0",
+    });
+    if (!account?.encryptedCredentials || account.status !== "connected") {
+      return context.json({ error: "Dash0 connection not found" }, 404);
+    }
+    try {
+      const credentials = parseDash0Credentials(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      context.header("cache-control", "no-store");
+      return context.json({
+        authorization: `Bearer ${credentials.webhookSecret}`,
+        webhookUrl: dash0WebhookUrl(accountId.data),
+      });
+    } catch (error) {
+      logCustomMcpError("webhook-config", error, accountId.data);
+      return context.json({ error: "Unable to load Dash0 webhook setup" }, 500);
     }
   })
   .get("/axiom/callback", async (context) => {

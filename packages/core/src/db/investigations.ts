@@ -15,6 +15,7 @@ import {
   parseCustomMcpCredentials,
   refreshCustomMcpOAuth,
 } from "../integrations/custom-mcp.js";
+import { parseDash0Credentials } from "../integrations/dash0.js";
 import {
   CLICKSTACK_CLOUD_MCP_URL,
   CLICKSTACK_CLOUD_OAUTH_ISSUER,
@@ -1175,6 +1176,13 @@ export interface RuntimeAxiomConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeDash0Connection {
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  mcpUrl: string;
+}
+
 export interface RuntimeCustomMcpConnection {
   accessToken: string;
   accountId: string;
@@ -1539,7 +1547,9 @@ export async function getRuntimeGcpConnections(
   return connections;
 }
 
-function mcpOAuthRedirectUrl(provider: "axiom" | "custom_mcp" | "linear"): string {
+function mcpOAuthRedirectUrl(
+  provider: "axiom" | "custom_mcp" | "dash0" | "linear",
+): string {
   const baseUrl =
     process.env.RESPONDER_PUBLIC_URL ??
     process.env.BETTER_AUTH_URL ??
@@ -1796,6 +1806,94 @@ export function getRuntimeCustomMcpConnections(
   versionId: string,
 ): Promise<RuntimeCustomMcpConnection[]> {
   return getRuntimeMcpConnections(versionId, "custom_mcp");
+}
+
+export async function getRuntimeDash0Connections(
+  versionId: string,
+): Promise<RuntimeDash0Connection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config) return [];
+  const triggerAccountId =
+    config.trigger === "dash0_alert"
+      ? config.triggerConfig.integrationAccountId
+      : null;
+  const accountIds = [
+    ...new Set([
+      ...config.contextAccountIds,
+      ...(triggerAccountId ? [triggerAccountId] : []),
+    ]),
+  ];
+  if (accountIds.length === 0) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "dash0"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, accountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeDash0Connection[] = [];
+
+  for (const accountId of accountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseDash0Credentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("dash0"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Dash0 OAuth connection");
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessToken,
+            accountId: account.id,
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "dash0",
+    });
+    if (connection) connections.push(connection);
+  }
+
+  return connections;
 }
 
 export async function getRuntimeLinearConnection(

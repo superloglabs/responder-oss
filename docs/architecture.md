@@ -41,7 +41,8 @@ types. `drizzle/` contains the ordered schema history.
   `CREDENTIAL_ENCRYPTION_KEY`. Only the control plane and worker should receive
   that key.
 - Slack, GitHub, and Sentry webhook signatures are checked against the untouched
-  request body. Retries are deduplicated with provider-specific keys.
+  request body. Dash0 webhooks require a random per-connection bearer secret.
+  Retries are deduplicated with provider-specific keys.
 - App-authored CloudWatch `ALARM` notifications in watched Slack channels use
   the existing Slack trigger. The control plane normalizes available alarm
   identity and location fields, ignores recovery states, and the worker uses
@@ -53,6 +54,9 @@ types. `drizzle/` contains the ordered schema history.
   Inventory, Logging, and Monitoring tools annotated read-only.
 - Remote MCP destinations must use HTTPS and resolve to public addresses.
   Redirects are revalidated and authorization is not forwarded across origins.
+- Dash0 uses dynamic OAuth client registration with encrypted, refreshable,
+  organization-scoped tokens. Its MCP endpoint is restricted to Dash0 hosts;
+  only tools annotated read-only are exposed and Agent0 delegation is blocked.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.

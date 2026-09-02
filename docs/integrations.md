@@ -108,6 +108,32 @@ Connect Datadog from Settings and choose the matching Datadog site. Alerts can
 arrive through a watched Slack channel, while investigations use Datadog's MCP
 endpoint for the connected site.
 
+## Dash0
+
+Connect Dash0 from Settings with the organization MCP endpoint shown under
+**Organization settings → Endpoints → MCP**. Responder dynamically registers an
+OAuth client, redirects the member through Dash0 consent, and refreshes the
+short-lived organization-scoped tokens outside the investigation sandbox. The
+OAuth callback is:
+
+```text
+<public>/api/integrations/dash0/callback
+```
+
+No deployment-level Dash0 client ID, secret, or static auth token is required.
+Each Dash0 organization is a separate integration account. The worker exposes
+only MCP tools explicitly annotated as read-only and blocks Agent0 delegation
+tools, so investigations query Dash0 telemetry directly without consuming
+Agent0 investigation credits.
+
+After OAuth completes, copy the generated webhook URL and Authorization header
+from Responder into a Dash0 **Webhook** notification channel under
+**Organization settings → Notification Channels**. Assign that channel directly
+to check rules or route alerts to it by labels. Responder authenticates the
+channel with a per-connection bearer secret and starts agents configured for
+that Dash0 account only when it receives `alert.ongoing`; resolved, superseded,
+and closed notifications are acknowledged without starting investigations.
+
 ## Axiom
 
 Connect Axiom from Settings through the hosted MCP server's browser OAuth flow.

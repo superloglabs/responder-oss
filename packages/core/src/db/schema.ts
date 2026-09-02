@@ -54,6 +54,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "slack",
   "sentry",
   "datadog",
+  "dash0",
   "axiom",
   "clickstack",
   "upstash",
@@ -73,6 +74,7 @@ export const integrationResourceKind = pgEnum("integration_resource_kind", [
 export const triggerKind = pgEnum("trigger_kind", [
   "sentry_issue",
   "datadog_monitor",
+  "dash0_alert",
   "slack_channel",
   "slack_mention",
 ]);
@@ -161,6 +163,9 @@ export type AgentTriggerConfig =
   | {
       integrationAccountId: string;
       monitorIds: string[];
+    }
+  | {
+      integrationAccountId: string;
     }
   | {
       integrationAccountId: string;
@@ -390,7 +395,7 @@ export const agentVersionSecrets = pgTable(
 );
 
 export interface InvestigationInput {
-  provider: "sentry" | "datadog" | "slack";
+  provider: "sentry" | "datadog" | "dash0" | "slack";
   externalEventId: string;
   title: string;
   body: string;

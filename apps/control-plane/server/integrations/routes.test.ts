@@ -38,6 +38,7 @@ import {
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations/dash0.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -113,6 +114,16 @@ vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
   validateCustomMcpUrl: vi.fn(),
   verifyCustomMcpConnection: vi.fn(),
 }));
+
+vi.mock("../../../../packages/core/src/integrations/dash0.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/dash0.js")
+  >();
+  return {
+    ...actual,
+    normalizeDash0McpUrl: vi.fn(),
+  };
+});
 
 vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
   createLinearPkce: vi.fn(),
@@ -2125,6 +2136,142 @@ describe("integration callback routing", () => {
         "?integration=axiom&status=error&reason=cancelled",
     );
     expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it("starts Dash0 OAuth for the organization MCP endpoint", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(normalizeDash0McpUrl).mockResolvedValue(
+      "https://mcp.eu-west-1.aws.dash0.com/mcp",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://auth.dash0.com/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+
+    const response = await app.request("/api/integrations/dash0/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+        returnTo: "/agents/new",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      redirectUrl: "https://auth.dash0.com/authorize",
+    });
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "dash0",
+        returnTo: "/agents/new",
+        routingUrl: "https://responder.example/api/integrations/dash0/callback",
+        userId: tenant.user.id,
+      }),
+    );
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+      redirectUrl: "https://responder.example/api/integrations/dash0/callback",
+    });
+  });
+
+  it("finishes Dash0 OAuth and preserves its webhook secret", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: {},
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "pending-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+      oauth: { codeVerifier: "pkce-verifier" },
+      webhookSecret: "s".repeat(43),
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(12);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/dash0/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=dash0&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oauth: expect.objectContaining({
+          tokens: expect.objectContaining({ access_token: "oauth-access-token" }),
+        }),
+        webhookSecret: "s".repeat(43),
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "Dash0",
+        provider: "dash0",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("returns the authenticated Dash0 webhook configuration", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "connected-credentials",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+      oauth: { tokens: { access_token: "access-token" } },
+      webhookSecret: "s".repeat(43),
+    });
+
+    const response = await app.request(
+      "/api/integrations/dash0/30000000-0000-4000-8000-000000000000/webhook-config",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      authorization: `Bearer ${"s".repeat(43)}`,
+      webhookUrl:
+        "https://responder.example/api/webhooks/dash0/30000000-0000-4000-8000-000000000000",
+    });
   });
 
   it("validates and encrypts an Upstash account API key", async () => {

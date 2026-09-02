@@ -25,6 +25,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   custom_mcp: "MCP",
   clickstack: "ClickStack / HyperDX",
   datadog: "Datadog",
+  dash0: "Dash0",
   github: "GitHub",
   linear: "Linear",
   langfuse: "Langfuse",
@@ -131,6 +132,12 @@ function summarizeInput(
         title: "Every monitor alert",
       };
     }
+    case "dash0_alert":
+      return {
+        detail: account ?? "Connected Dash0 organization",
+        eyebrow: "Input · Dash0",
+        title: "Every ongoing failed check",
+      };
   }
 }
 

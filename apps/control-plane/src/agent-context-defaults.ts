@@ -7,6 +7,7 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   "gcp",
   "sentry",
   "datadog",
+  "dash0",
   "axiom",
   "clickstack",
   "upstash",

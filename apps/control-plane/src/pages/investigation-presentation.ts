@@ -43,6 +43,7 @@ export function providerLabel(
 ): string {
   const labels = {
     datadog: "Datadog",
+    dash0: "Dash0",
     sentry: "Sentry",
     slack: "Slack",
   } as const;

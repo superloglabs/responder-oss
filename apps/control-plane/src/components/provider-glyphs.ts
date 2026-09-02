@@ -4,6 +4,7 @@ export const providerGlyphs = {
   clickstack: { label: "ClickStack", logo: "clickstack" },
   custom_mcp: { label: "Custom MCP", text: "MCP" },
   datadog: { label: "Datadog", logo: "datadog" },
+  dash0: { label: "Dash0", text: "D0" },
   github: { label: "GitHub", logo: "github" },
   gcp: { label: "Google Cloud", logo: "google" },
   google: { label: "Google", logo: "google" },
