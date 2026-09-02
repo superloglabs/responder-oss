@@ -232,6 +232,12 @@ export function isDatadogRecoveryMessage(body: string): boolean {
   );
 }
 
+export function isPostHogInactiveMessage(body: string): boolean {
+  return /\b(?:has resolved|has recovered|was resolved|was auto-disabled|couldn['’]t evaluate)\b/iu.test(
+    slackMessageTitle(body),
+  );
+}
+
 export function isResolvedSlackAlert(body: string): boolean {
   return /^(?:✅|:white_check_mark:)\s*/iu.test(slackMessageTitle(body));
 }
@@ -266,7 +272,7 @@ export function isSentryIssueAlert(
   );
 }
 
-type SlackAlertProvider = "app" | "aws" | "datadog" | "sentry";
+type SlackAlertProvider = "app" | "aws" | "datadog" | "posthog" | "sentry";
 
 export type SlackAwsAlarm = {
   alarmName?: string;
@@ -355,6 +361,7 @@ export function shouldIgnoreResolvedSlackAlert(
   if (alertProvider === "aws") {
     return slackAwsAlarm({ body, senderName })?.state !== "ALARM";
   }
+  if (alertProvider === "posthog") return isPostHogInactiveMessage(body);
   return (
     alertProvider === "app" &&
     (isResolvedSlackAlert(body) ||
@@ -398,12 +405,16 @@ export function slackAlertProvider(input: {
   }
   if (senderName) {
     if (/\bdatadog\b/i.test(senderName)) return "datadog";
+    if (/\bposthog\b/i.test(senderName)) return "posthog";
     if (/\bsentry\b/i.test(senderName)) return "sentry";
     return /\balert\b/i.test(input.body) ? "app" : null;
   }
 
   if (/https:\/\/[^>\s]*datadoghq\.(?:com|eu)\//i.test(input.body)) {
     return "datadog";
+  }
+  if (/https:\/\/[^>\s]*posthog\.com\//i.test(input.body)) {
+    return "posthog";
   }
   if (/https:\/\/[^>\s]*sentry\.io\//i.test(input.body)) {
     return "sentry";

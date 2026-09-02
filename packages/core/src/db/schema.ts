@@ -55,6 +55,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "sentry",
   "datadog",
   "dash0",
+  "posthog",
   "axiom",
   "clickstack",
   "upstash",

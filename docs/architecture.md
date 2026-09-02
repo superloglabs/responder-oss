@@ -57,6 +57,10 @@ types. `drizzle/` contains the ordered schema history.
 - Dash0 uses dynamic OAuth client registration with encrypted, refreshable,
   organization-scoped tokens. Its MCP endpoint is restricted to Dash0 hosts;
   only tools annotated read-only are exposed and Agent0 delegation is blocked.
+- PostHog uses dynamic OAuth client registration against its hosted MCP endpoint.
+  The endpoint is fixed to read-only tools and a bounded set of observability and
+  analytics features, and the worker additionally requires the MCP read-only annotation.
+  PostHog alerts enter through watched Slack channels rather than a second webhook path.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.

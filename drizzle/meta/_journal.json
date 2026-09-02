@@ -274,6 +274,13 @@
       "when": 1788353622098,
       "tag": "0038_bind_no_issue_slack_threads",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788356539623,
+      "tag": "0039_add_posthog_context",
+      "breakpoints": true
     }
   ]
 }
