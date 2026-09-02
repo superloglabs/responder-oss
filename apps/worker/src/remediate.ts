@@ -1,185 +1,146 @@
 import {
-  MaxTurnsExceededError,
-  run,
-  setDefaultOpenAIKey,
-  setTracingDisabled,
-} from "@openai/agents";
-import { Capabilities, SandboxAgent } from "@openai/agents/sandbox";
-import {
   DaytonaSandboxClient,
   type DaytonaSandboxSession,
 } from "@openai/agents-extensions/sandbox/daytona";
-import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
-import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
-import { daytonaClientOptions } from "@responder/core/daytona-config";
-import type { RemediationJob } from "@responder/core/jobs";
-import { renderIssueFixPrompt } from "@responder/core/investigations/report";
+import { captureAnalyticsEvent } from "@responder/core/analytics";
 import {
-  safeInvestigationError,
-  sandboxAgentConfig,
-} from "./investigate.js";
-import { createPullRequestTool } from "./pull-request.js";
-import { checkoutRuntimeRepositories } from "./repositories.js";
+  getRuntimeRepositories,
+  type RuntimeRepository,
+} from "@responder/core/db/investigations";
+import {
+  getExecutableIssuePullRequest,
+  markIssuePullRequestCreated,
+  markIssuePullRequestStarted,
+} from "@responder/core/db/pull-requests";
+import {
+  daytonaClientOptions,
+  requireDaytonaClientConfig,
+} from "@responder/core/daytona-config";
+import type { RemediationJob } from "@responder/core/jobs";
+import type { IssueRemediationSubmission } from "@responder/core/investigations/report";
+import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
+import {
+  createPullRequestFromSandbox,
+} from "./github-pull-request.js";
+import { checkoutRuntimeRepository } from "./repositories.js";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
-  prepareDaytonaSandbox,
+  prepareDaytonaPatchSandbox,
 } from "./sandbox.js";
-import {
-  redactDaytonaSecretPlaceholders,
-  workspaceSecretUsageInstructions,
-} from "./secret-safety.js";
 
-export const remediationMaxTurns = 40;
-export const remediationApplyPatchPathInstruction =
-  "When using apply_patch, use the full absolute checkout path shown above. Repository-relative paths are resolved from the workspace root and may target the wrong location.";
-export const remediationFailureMechanismInstruction =
-  "For the pull request failure mechanism, explain what failed and why in one or two very short sentences. Use extremely simple language that anyone can understand at a glance. Use no jargon, acronyms, code names, or implementation details.";
+type CodeChangeRemediation = Extract<
+  IssueRemediationSubmission,
+  { type: "code_change" }
+>;
 
-export interface RemediationApplyPatchFailure {
-  callId: string;
-  error: string;
-  operation?: "create_file" | "delete_file" | "update_file";
-  path?: string;
+interface SelectedProposedChange {
+  diff: string;
+  pullRequest?: { body: string; title: string };
+  repository: RuntimeRepository;
 }
 
-export interface RemediationRunDiagnostics {
-  applyPatchFailures: RemediationApplyPatchFailure[];
-  completedTurns: number;
-  maxTurns: number | null;
-}
-
-const maxStoredApplyPatchFailures = 10;
-
-function safeApplyPatchFailure(
-  output: string | undefined,
-  environment: NodeJS.ProcessEnv,
-): string {
-  if (!output?.trim()) {
-    return "apply_patch failed without an error message";
-  }
-  const safeOutput = safeInvestigationError(new Error(output), environment);
-  const invalidEofContext = safeOutput.match(
-    /^Invalid EOF Context(?:\s+(\d+))?(?::|$)/,
-  );
-  if (invalidEofContext) {
-    return `Invalid EOF Context${invalidEofContext[1] ? ` ${invalidEofContext[1]}` : ""}`;
+export function selectProposedChange(
+  remediation: IssueRemediationSubmission | undefined,
+  targetRepository: string | undefined,
+  repositories: RuntimeRepository[],
+): SelectedProposedChange {
+  if (remediation?.type !== "code_change") {
+    throw new Error("The pull request does not have a proposed code diff");
   }
 
-  const invalidContext = safeOutput.match(
-    /^Invalid Context(?:\s+(\d+))?(?::|$)/,
-  );
-  if (invalidContext) {
-    return `Invalid Context${invalidContext[1] ? ` ${invalidContext[1]}` : ""}`;
-  }
-
-  if (/^Invalid Add File Line:/.test(safeOutput)) {
-    return "Invalid add-file patch line";
-  }
-  if (/^Invalid Line:/.test(safeOutput)) {
-    return "Invalid patch line";
-  }
-  if (/^Cannot create file because it already exists:/.test(safeOutput)) {
-    return "File already exists";
-  }
-  if (/^Nothing in this section/.test(safeOutput)) {
-    return "Patch section did not match";
-  }
-  if (/^applyDiff: chunk\.origIndex/.test(safeOutput)) {
-    return "Invalid patch chunk position";
-  }
-  if (/overlapping (?:patch )?chunks/i.test(safeOutput)) {
-    return "Overlapping patch chunks";
-  }
-  if (/not a regular file/i.test(safeOutput)) {
-    return "Patch target is not a regular file";
-  }
-  if (/workspace escape/i.test(safeOutput)) {
-    return "Patch target is outside the workspace";
-  }
-  if (/directory target/i.test(safeOutput)) {
-    return "Patch target is a directory";
-  }
-  if (/remote editor operation failed/i.test(safeOutput)) {
-    return "Remote editor operation failed";
-  }
-  return "Unclassified apply_patch failure";
-}
-
-export function remediationRunDiagnostics(
-  error: unknown,
-  environment: NodeJS.ProcessEnv = process.env,
-): RemediationRunDiagnostics | undefined {
-  if (!(error instanceof MaxTurnsExceededError) || !error.state) {
-    return undefined;
-  }
-
-  try {
-    const state = error.state.toJSON();
-    const operations = new Map<
-      string,
-      {
-        operation: "create_file" | "delete_file" | "update_file";
-        path: string;
-      }
-    >();
-
-    for (const item of state.generatedItems) {
-      if (
-        item.type !== "tool_call_item" ||
-        item.rawItem.type !== "apply_patch_call"
-      ) {
-        continue;
-      }
-      operations.set(item.rawItem.callId, {
-        operation: item.rawItem.operation.type,
-        path: item.rawItem.operation.path,
-      });
+  let change: CodeChangeRemediation["changes"][number] | undefined;
+  if (targetRepository) {
+    change = remediation.changes.find(
+      (candidate) => candidate.repository === targetRepository,
+    );
+    if (!change && remediation.changes.length === 1) {
+      const onlyChange = remediation.changes[0];
+      if (onlyChange?.repository === null) change = onlyChange;
     }
+  } else if (remediation.changes.length === 1) {
+    change = remediation.changes[0];
+  }
+  if (!change) {
+    throw new Error("The pull request does not have one target repository diff");
+  }
 
-    const applyPatchFailures = state.generatedItems
-      .flatMap((item): RemediationApplyPatchFailure[] => {
-        if (
-          item.type !== "tool_call_output_item" ||
-          item.rawItem.type !== "apply_patch_call_output" ||
-          item.rawItem.status !== "failed"
-        ) {
-          return [];
-        }
-        const operation = operations.get(item.rawItem.callId);
-        const output =
-          item.rawItem.output ||
-          (typeof item.output === "string" ? item.output : undefined);
-        return [
-          {
-            callId: item.rawItem.callId,
-            error: safeApplyPatchFailure(output, environment),
-            ...(operation ?? {}),
-          },
-        ];
-      })
-      .slice(-maxStoredApplyPatchFailures);
+  const repositoryName = targetRepository ?? change.repository;
+  const repository = repositoryName
+    ? repositories.find((candidate) => candidate.fullName === repositoryName)
+    : repositories.length === 1
+      ? repositories[0]
+      : undefined;
+  if (!repository) {
+    throw new Error("The proposed diff does not identify one attached repository");
+  }
+  if (change.repository && change.repository !== repository.fullName) {
+    throw new Error("The proposed diff does not match the target repository");
+  }
+  return {
+    diff: change.diff,
+    ...(change.pullRequest ? { pullRequest: change.pullRequest } : {}),
+    repository,
+  };
+}
 
-    return {
-      applyPatchFailures,
-      completedTurns: Math.max(0, state.currentTurn - 1),
-      maxTurns: state.maxTurns,
-    };
-  } catch {
-    return undefined;
+export function proposedPullRequestContent(
+  remediation: CodeChangeRemediation,
+  selected: SelectedProposedChange,
+): { body: string; title: string } {
+  return selected.pullRequest ?? {
+    body: remediation.description,
+    title: remediation.title,
+  };
+}
+
+function commandSucceeded(output: string): boolean {
+  return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
+}
+
+export async function applyProposedDiff(
+  session: DaytonaSandboxSession,
+  repositoryPath: string,
+  diff: string,
+): Promise<void> {
+  const patchPath = "/home/daytona/workspace/.responder/proposed.patch";
+  await session.materializeEntry({
+    entry: { type: "file", content: `${diff.trim()}\n` },
+    path: patchPath,
+  });
+  const output = await session.execCommand({
+    cmd: `git apply --whitespace=nowarn ${patchPath}`,
+    maxOutputTokens: 2_000,
+    workdir: repositoryPath,
+  });
+  if (!commandSucceeded(output)) {
+    throw new Error("The proposed diff no longer applies cleanly");
   }
 }
 
-export async function runRemediationAgent(
+export async function runProposedRemediation(
   job: RemediationJob,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
-  const config = sandboxAgentConfig(environment);
-  setDefaultOpenAIKey(config.openAiApiKey);
-  setTracingDisabled(true);
-  const runtimeProfile = await getRuntimeProfile(job.runtimeProfileId);
-  const workspaceSecrets = await getRuntimeWorkspaceSecrets(job.config.id);
+  const request = await getExecutableIssuePullRequest({
+    agentConfigVersionId: job.config.id,
+    investigationId: job.investigationId,
+    issueId: job.issue.id,
+    organizationId: job.config.organizationId,
+    requestId: job.remediationRequestId,
+  });
+  const repositories = await getRuntimeRepositories(job.config.id);
+  const selected = selectProposedChange(
+    request.selectedRemediation ?? job.selectedRemediation,
+    job.targetRepository,
+    repositories,
+  );
+
+  await markIssuePullRequestStarted(request.requestId);
+  await refreshIssuePullRequestSlackMessages(request.requestId);
+
+  const config = requireDaytonaClientConfig(environment);
   const sandboxName = `responder-remediation-${job.remediationRequestId}`;
   const client = new DaytonaSandboxClient({
     ...daytonaClientOptions(config),
@@ -190,71 +151,57 @@ export async function runRemediationAgent(
 
   try {
     session = await createDaytonaSandboxSession(client, config, sandboxName);
-    await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
-    await prepareDaytonaSandbox(session);
-    const repositories = await checkoutRuntimeRepositories(
+    await configureDaytonaSandboxLifecycle(session, config);
+    await prepareDaytonaPatchSandbox(session);
+    const checkout = await checkoutRuntimeRepository(
       session,
       job.config.id,
+      selected.repository.fullName,
     );
-    if (repositories.length === 0) {
-      throw new Error("No repositories are attached to this Agent version");
+    await applyProposedDiff(session, checkout.path, selected.diff);
+
+    const remediation = request.selectedRemediation ?? job.selectedRemediation;
+    if (remediation?.type !== "code_change") {
+      throw new Error("The pull request does not have a proposed code diff");
     }
-    const pullRequestTool = createPullRequestTool({
-      agentConfigVersionId: job.config.id,
-      investigationId: job.investigationId,
-      organizationId: job.config.organizationId,
-      pullRequestRequestId: job.remediationRequestId,
-      repositories,
-      session,
-      targetRepository: job.targetRepository,
-    });
-    const agent = new SandboxAgent({
-      name: "Responder issue fixer",
-      model: config.model,
-      instructions: [
-        runtimeProfile?.systemPrompt,
-        job.config.prompt,
-        renderIssueFixPrompt(
-          job.issue,
-          job.selectedRemediation,
-          job.targetRepository,
-        ),
-        "The selected repositories are already checked out:",
-        ...repositories.map(
-          (repository) =>
-            `- ${repository.repository}: ${repository.path} (${repository.branch} at ${repository.sha})`,
-        ),
-        remediationApplyPatchPathInstruction,
-        job.selectedRemediation?.type === "code_change"
-          ? `Use the proposed diff as the starting point. Verify it against the current checkout, adjust it when needed, make the smallest safe fix in ${job.targetRepository ? `the target repository ${job.targetRepository}` : "one selected repository"}, and run the narrowest useful checks.`
-          : `Inspect the relevant code, make the smallest safe fix in ${job.targetRepository ? `the target repository ${job.targetRepository}` : "one selected repository"}, and run the narrowest useful checks.`,
-        remediationFailureMechanismInstruction,
-        `Call create_pull_request for ${job.targetRepository ? `the target repository ${job.targetRepository}` : "exactly one of the selected repository names shown above"}.`,
-        `Then call create_pull_request with issue ID ${job.issue.id}. Do not finish without creating the pull request or clearly explaining why no safe code fix is possible.`,
-        "Do not expose credentials or secret values. The pull request is the only allowed external change.",
-        workspaceSecretUsageInstructions(workspaceSecrets),
-      ]
-        .filter((instruction): instruction is string => Boolean(instruction))
-        .join("\n\n"),
-      capabilities: Capabilities.default(),
-      tools: [pullRequestTool],
-    });
-    const result = await run(
-      agent,
-      renderIssueFixPrompt(
-        job.issue,
-        job.selectedRemediation,
-        job.targetRepository,
-      ),
+    const pullRequest = proposedPullRequestContent(remediation, selected);
+    const result = await createPullRequestFromSandbox(
       {
-        maxTurns: remediationMaxTurns,
-        sandbox: { session },
+        baseBranch: checkout.branch,
+        baseSha: checkout.sha,
+        body: pullRequest.body,
+        installationId: selected.repository.installationId,
+        repository: selected.repository.fullName,
+        repositoryPath: checkout.path,
+        requestId: request.requestId,
+        title: pullRequest.title,
+        workspaceBaseSha: checkout.workspaceBaseSha,
       },
+      session,
     );
-    if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
-      throw new Error("OpenAI agent returned an empty remediation result");
-    }
-    return redactDaytonaSecretPlaceholders(result.finalOutput.trim());
+    await markIssuePullRequestCreated({
+      requestId: request.requestId,
+      repositoryFullName: selected.repository.fullName,
+      branch: result.branch,
+      pullRequestNumber: result.number,
+      pullRequestUrl: result.url,
+    });
+    await refreshIssuePullRequestSlackMessages(request.requestId);
+    await captureAnalyticsEvent({
+      distinctId: `investigation:${job.investigationId}`,
+      event: "pr opened",
+      organizationId: job.config.organizationId,
+      properties: {
+        $process_person_profile: false,
+        agent_config_version_id: job.config.id,
+        investigation_id: job.investigationId,
+        issue_id: job.issue.id,
+        pr_number: result.number,
+        pr_url: result.url,
+        repository: selected.repository.fullName,
+      },
+    });
+    return result.url;
   } finally {
     if (session) {
       await closeDaytonaSandbox(session, config, {

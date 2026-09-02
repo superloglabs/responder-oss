@@ -151,7 +151,7 @@ describe("sandbox agent configuration", () => {
     ]);
   });
 
-  it("keeps investigation instructions read-only in every PR mode", () => {
+  it("lets investigations prepare and validate code without publishing it", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",
       clickStackConnected: false,
@@ -168,9 +168,10 @@ describe("sandbox agent configuration", () => {
       sentryConnected: true,
     });
 
-    expect(instructions).toContain("read-only repository inspection tools");
-    expect(instructions).toContain("only for investigation and reporting");
-    expect(instructions).toContain("remediation, when enabled, runs separately");
+    expect(instructions).toContain("sandbox filesystem and shell tools");
+    expect(instructions).toContain("modify repository files");
+    expect(instructions).toContain("checks you judge useful");
+    expect(instructions).toContain("do not push branches");
     expect(instructions).not.toContain("call create_pull_request");
     expect(instructions).toContain("posts the report to Slack");
     expect(instructions).toContain(
@@ -179,6 +180,8 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain(
       "Keep each remediation description to at most one sentence.",
     );
+    expect(instructions).toContain("ready-for-review pull request title");
+    expect(instructions).toContain("published later without another model pass");
   });
 
   it("keeps Slack thread turns sandbox-only without issue or PR workflows", () => {

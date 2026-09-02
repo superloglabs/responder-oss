@@ -1,42 +1,12 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildPullRequestBody,
-  createPullRequestFromSandbox,
-} from "./github-pull-request.js";
+import { createPullRequestFromSandbox } from "./github-pull-request.js";
 
 function commandResult(exitCode: number, output = "") {
   return `Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code ${exitCode}\nOutput:\n${output}`;
 }
 
 describe("GitHub pull requests from Daytona", () => {
-  it("builds a simple failure explanation with deterministic issue links", () => {
-    expect(
-      buildPullRequestBody({
-        failureMechanism:
-          "The page expected a value that was missing, so it stopped loading.",
-        responderIssueUrl: "https://responder.example/issues/issue-1",
-        sentryIssueUrl: "https://example.sentry.io/issues/42/",
-        summary: "## Summary\nHandle the missing value.",
-        testing: "## Testing\nUnit tests pass.",
-      }),
-    ).toBe(
-      "## Summary\nHandle the missing value.\n\n## Issue\nThe page expected a value that was missing, so it stopped loading.\n\n[Responder issue](<https://responder.example/issues/issue-1>) · [Sentry issue](<https://example.sentry.io/issues/42/>)\n\n## Testing\nUnit tests pass.",
-    );
-  });
-
-  it("omits issue links when they are unavailable", () => {
-    expect(
-      buildPullRequestBody({
-        failureMechanism: "A missing value made the page stop loading.",
-        summary: "Handle the missing value.",
-        testing: "Unit tests pass.",
-      }),
-    ).toContain(
-      "## Issue\nA missing value made the page stop loading.\n\n## Testing",
-    );
-  });
-
   it("publishes changed sandbox files without putting the GitHub token in Daytona", async () => {
     const execCommand = vi
       .fn()

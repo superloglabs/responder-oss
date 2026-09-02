@@ -394,21 +394,21 @@ export function investigationInstructions(input: {
       : null,
     input.threadMode
       ? "Use the sandbox tools and attached code to investigate the request."
-      : "Use the read-only repository inspection tools to list, search, and read attached repository files.",
+      : "Use the sandbox filesystem and shell tools to inspect and work in attached repository checkouts.",
     input.threadMode
       ? null
-      : "This run is only for investigation and reporting. Do not modify repository code or create pull requests. Pull request remediation, when enabled, runs separately after the report is saved.",
+      : "This run may prepare code remediation locally. You may modify repository files and run the checks you judge useful, but do not push branches, create pull requests, or make any other external code change. A later job publishes the exact saved diff.",
     "Do not expose credentials or secret values.",
     workspaceSecretUsageInstructions(workspaceSecrets),
     input.threadMode
       ? "This is an ad-hoc Slack thread investigation. Never create or update issues, tickets, branches, commits, or pull requests. You may use the sandbox for notes, experiments, and local code changes, but nothing in it is published."
       : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
     input.issueFollowup
-      ? "This is a follow-up to an existing Slack issue investigation. Use the supplied prior investigation context and the latest Slack feedback to decide which bound issue remediations need to change. Do not create new issues, tickets, or pull requests. Call update_issue_remediation for each affected issue, and do not update unrelated issues. If the feedback is ambiguous, ask for clarification instead of guessing."
+      ? "This is a follow-up to an existing Slack issue investigation. Use the supplied prior investigation context and the latest Slack feedback to decide which bound issue remediations need to change. For an updated code remediation, make the change locally, run the checks you judge useful, and save the exact final diff plus your ready-for-review pull request title and body. Do not create new issues, tickets, or pull requests. Call update_issue_remediation for each affected issue, and do not update unrelated issues. If the feedback is ambiguous, ask for clarification instead of guessing."
       : null,
     input.threadMode || input.issueFollowup
       ? null
-      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. A code_change must contain a changes array with one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
+      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. For a code_change, first make the smallest safe change in the attached checkout, choose and run the checks appropriate for that change, and inspect the final git diff. Its changes array must contain one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Author the ready-for-review pull request title and complete Markdown body in each change's pullRequest field, including only the context and check results you decide belong there. The saved diff and pull request content are published later without another model pass or project checks. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system.",
     input.threadMode
       ? null
       : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",

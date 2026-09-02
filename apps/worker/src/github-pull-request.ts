@@ -48,45 +48,6 @@ function branchSlug(title: string): string {
   return slug || "issue";
 }
 
-function pullRequestSection(heading: string, content: string): string {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const withoutLeadingHeading = content
-    .trim()
-    .replace(
-      new RegExp(
-        `^#{1,6}[ \\t]+${escapedHeading}(?:[ \\t]+[^\\n]*)?\\r?\\n+`,
-        "i",
-      ),
-      "",
-    )
-    .trim();
-  return `## ${heading}\n${withoutLeadingHeading}`;
-}
-
-export function buildPullRequestBody(input: {
-  failureMechanism: string;
-  responderIssueUrl?: string;
-  sentryIssueUrl?: string;
-  summary: string;
-  testing: string;
-}): string {
-  const issueLinks = [
-    input.responderIssueUrl
-      ? `[Responder issue](<${input.responderIssueUrl}>)`
-      : null,
-    input.sentryIssueUrl ? `[Sentry issue](<${input.sentryIssueUrl}>)` : null,
-  ].filter((link): link is string => Boolean(link));
-  return [
-    pullRequestSection("Summary", input.summary),
-    "",
-    "## Issue",
-    input.failureMechanism.trim(),
-    ...(issueLinks.length > 0 ? ["", issueLinks.join(" · ")] : []),
-    "",
-    pullRequestSection("Testing", input.testing),
-  ].join("\n");
-}
-
 function execResult(output: string): { exitCode: number; stdout: string } {
   const match = /(?:^|\n)Process exited with code (\d+)(?:\n|$)/u.exec(output);
   return {
