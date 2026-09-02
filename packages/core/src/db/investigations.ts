@@ -346,7 +346,7 @@ export async function recordSlackInvestigationThreadLink(input: {
   channelId: string;
   integrationAccountId: string;
   investigationId: string;
-  issueId: string;
+  issueId: string | null;
   messageTimestamp: string;
   organizationId: string;
   teamId: string;
@@ -379,6 +379,7 @@ export async function findSlackIssueThread(input: {
       channelId: slackInvestigationThreadLinks.channelId,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
       id: investigations.id,
+      investigationTitle: investigations.title,
       issueId: slackInvestigationThreadLinks.issueId,
       issueTitle: issues.title,
       issueDescription: issues.description,
@@ -397,7 +398,7 @@ export async function findSlackIssueThread(input: {
       investigations,
       eq(investigations.id, slackInvestigationThreadLinks.investigationId),
     )
-    .innerJoin(issues, eq(issues.id, slackInvestigationThreadLinks.issueId))
+    .leftJoin(issues, eq(issues.id, slackInvestigationThreadLinks.issueId))
     .innerJoin(
       agentConfigVersions,
       eq(agentConfigVersions.id, investigations.agentConfigVersionId),
@@ -428,17 +429,27 @@ export async function findSlackIssueThread(input: {
     .orderBy(desc(investigations.createdAt));
   if (rows.length === 0) return null;
   const first = rows[0]!;
+  const linkedIssues = rows.flatMap((row) =>
+    row.issueId &&
+      row.issueTitle &&
+      row.issueDescription &&
+      row.issueRemediation &&
+      row.issueRemediations
+      ? [{
+          id: row.issueId,
+          title: row.issueTitle,
+          description: row.issueDescription,
+          rootCause: row.issueRootCause,
+          remediation: row.issueRemediation,
+          remediations: row.issueRemediations,
+        }]
+      : []
+  );
   return {
     ...first,
-    issueIds: [...new Set(rows.map((row) => row.issueId))],
-    issues: rows.map((row) => ({
-      id: row.issueId,
-      title: row.issueTitle,
-      description: row.issueDescription,
-      rootCause: row.issueRootCause,
-      remediation: row.issueRemediation,
-      remediations: row.issueRemediations,
-    })),
+    issueTitle: linkedIssues[0]?.title ?? first.investigationTitle,
+    issueIds: [...new Set(linkedIssues.map((issue) => issue.id))],
+    issues: linkedIssues,
   };
 }
 

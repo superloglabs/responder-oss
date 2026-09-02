@@ -40,6 +40,29 @@ const slackCredentialsSchema = z.object({
 
 type DeliveryIssue = SlackInvestigationDeliveryContext["issues"][number];
 
+export function slackNoIssueThreadLink(
+  context: SlackInvestigationDeliveryContext,
+  messageTimestamp: string,
+) {
+  if (
+    context.issues.length > 0 ||
+    !context.source?.teamId ||
+    !context.organizationId
+  ) {
+    return null;
+  }
+  return {
+    channelId: context.source.channelId,
+    integrationAccountId: context.source.integrationAccountId,
+    investigationId: context.investigationId,
+    issueId: null,
+    messageTimestamp,
+    organizationId: context.organizationId,
+    teamId: context.source.teamId,
+    threadTimestamp: context.source.threadTimestamp,
+  };
+}
+
 export function slackDeliveryClientMessageId(
   deliveryRunId: string,
   deliveryKey: string,
@@ -643,6 +666,10 @@ async function deliverSourceThread(
       slackTimestamp: messageTimestamp,
       text: summaryMessage.text,
     });
+    const noIssueThreadLink = slackNoIssueThreadLink(context, messageTimestamp);
+    if (noIssueThreadLink) {
+      await recordSlackInvestigationThreadLink(noIssueThreadLink);
+    }
   } catch (error) {
     console.error(
       JSON.stringify({

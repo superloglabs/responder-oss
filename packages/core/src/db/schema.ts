@@ -516,7 +516,6 @@ export const slackInvestigationThreadLinks = pgTable(
       .notNull()
       .references(() => investigations.id, { onDelete: "cascade" }),
     issueId: uuid("issue_id")
-      .notNull()
       .references(() => issues.id, { onDelete: "cascade" }),
     teamId: text("team_id").notNull(),
     channelId: text("channel_id").notNull(),

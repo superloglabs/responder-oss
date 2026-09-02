@@ -182,6 +182,38 @@ describe("background jobs", () => {
     ).toBe("16161616-1616-4616-8616-161616161616");
   });
 
+  it("accepts a no-issue Slack follow-up job", () => {
+    const job = investigationJobSchema.parse({
+      kind: "investigation",
+      config: {
+        agentId: "13131313-1313-4313-8313-131313131313",
+        id: "08080808-0808-4808-8808-080808080808",
+        model: "instance/default",
+        organizationId: "15151515-1515-4515-8515-151515151515",
+        prMode: "manual",
+        prompt: "Investigate carefully.",
+      },
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      queuedAt: "2026-09-02T08:00:00.000Z",
+      request: {
+        agentId: "13131313-1313-4313-8313-131313131313",
+        body: "Reconsider the no-issue conclusion.",
+        externalEventId: "event-2",
+        provider: "slack",
+        title: "Follow-up",
+      },
+      runtimeProfileId: "19191919-1919-4919-8919-191919191919",
+      slackIssueFollowup: {
+        channelId: "C123",
+        issueIds: [],
+        originalInvestigationId: "17171717-1717-4717-8717-171717171717",
+        threadTimestamp: "1788350000.000100",
+      },
+    });
+
+    expect(job.slackIssueFollowup?.issueIds).toEqual([]);
+  });
+
   it("accepts a remediation job", () => {
     expect(
       remediationJobSchema.parse({

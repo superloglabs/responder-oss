@@ -198,10 +198,42 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("Never create or update issues");
     expect(instructions).toContain("nothing in it is published");
     expect(instructions).toContain("response directly to the Slack thread");
-    expect(instructions).toContain("reconsider prior conclusions and the proposed remediation");
+    expect(instructions).not.toContain("search_existing_issues");
+    expect(instructions).not.toContain("submit_investigation_report");
+  });
+
+  it("restricts issue follow-ups to updating their bound issues", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Reconsider the remediation.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      issueFollowupIssueCount: 1,
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("Call update_issue_remediation");
+    expect(instructions).toContain("do not update unrelated issues");
     expect(instructions).toContain("provide the updated remediation");
     expect(instructions).not.toContain("search_existing_issues");
     expect(instructions).not.toContain("submit_investigation_report");
+  });
+
+  it("lets a no-issue follow-up submit a new structured conclusion", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Reconsider the earlier conclusion.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      issueFollowupIssueCount: 0,
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("previously identified no issues");
+    expect(instructions).toContain("Reconsider that conclusion");
+    expect(instructions).toContain("search_existing_issues");
+    expect(instructions).toContain("submit_investigation_report");
+    expect(instructions).toContain("create or attach issues only when the new evidence supports them");
   });
 
   it("keeps ClickStack investigation access read-only", () => {

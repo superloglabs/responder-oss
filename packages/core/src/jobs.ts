@@ -60,7 +60,7 @@ export const investigationJobSchema = z.object({
   runtimeProfileId: z.uuid(),
   slackIssueFollowup: z.object({
     originalInvestigationId: z.uuid(),
-    issueIds: z.array(z.uuid()).min(1),
+    issueIds: z.array(z.uuid()),
     channelId: z.string().min(1),
     threadTimestamp: z.string().min(1),
   }).optional(),
