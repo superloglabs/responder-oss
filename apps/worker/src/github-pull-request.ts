@@ -9,6 +9,9 @@ import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 const githubBlobSchema = z.object({ sha: z.string().min(1) });
 const githubTreeSchema = z.object({ sha: z.string().min(1) });
 const githubCommitSchema = z.object({ sha: z.string().min(1) });
+const githubCommitDetailsSchema = z.object({
+  tree: z.object({ sha: z.string().min(1) }),
+});
 const githubPullRequestSchema = z.object({
   number: z.number().int().positive(),
   html_url: z.string().url(),
@@ -213,6 +216,14 @@ export async function createPullRequestFromSandbox(
   const token = await dependencies.createInstallationToken(input.installationId);
   const apiRepository = repositoryApiPath(input.repository);
   const apiBase = `https://api.github.com/repos/${apiRepository}`;
+  const baseCommit = githubCommitDetailsSchema.parse(
+    await githubJson(
+      dependencies.fetch,
+      token,
+      `${apiBase}/git/commits/${encodeURIComponent(input.baseSha)}`,
+      { method: "GET" },
+    ),
+  );
   const treeEntries: Array<{
     path: string;
     mode: "100644" | "100755";
@@ -240,7 +251,7 @@ export async function createPullRequestFromSandbox(
   const tree = githubTreeSchema.parse(
     await githubJson(dependencies.fetch, token, `${apiBase}/git/trees`, {
       method: "POST",
-      body: JSON.stringify({ base_tree: input.baseSha, tree: treeEntries }),
+      body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree: treeEntries }),
     }),
   );
   const commit = githubCommitSchema.parse(

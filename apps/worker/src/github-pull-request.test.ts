@@ -19,6 +19,7 @@ describe("GitHub pull requests from Daytona", () => {
     } as unknown as DaytonaSandboxSession;
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ tree: { sha: "base-tree-sha" } }))
       .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
       .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
       .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
@@ -53,6 +54,10 @@ describe("GitHub pull requests from Daytona", () => {
       url: "https://github.com/acme/app/pull/42",
     });
     expect(JSON.stringify(execCommand.mock.calls)).not.toContain("github-secret");
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.github.com/repos/acme/app/git/commits/${"a".repeat(40)}`,
+      expect.objectContaining({ method: "GET" }),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/repos/acme/app/git/blobs",
       expect.objectContaining({
@@ -114,6 +119,7 @@ describe("GitHub pull requests from Daytona", () => {
     } as unknown as DaytonaSandboxSession;
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ tree: { sha: "base-tree-sha" } }))
       .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
       .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
       .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
@@ -143,7 +149,13 @@ describe("GitHub pull requests from Daytona", () => {
         },
       ),
     ).resolves.toMatchObject({ number: 42 });
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/acme/app/git/trees",
+      expect.objectContaining({
+        body: expect.stringContaining('"base_tree":"base-tree-sha"'),
+      }),
+    );
   });
 
   it("rejects a pull request title containing a workspace secret placeholder", async () => {
