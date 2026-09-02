@@ -187,6 +187,7 @@ export async function createPullRequestFromSandbox(
     repository: string;
     repositoryPath: string;
     requestId: string;
+    scanChangedFileContents?: boolean;
     title: string;
     workspaceBaseSha: string;
   },
@@ -202,7 +203,7 @@ export async function createPullRequestFromSandbox(
   assertNoDaytonaSecretPlaceholders(input.title, "Pull request title");
   for (const file of files) {
     assertNoDaytonaSecretPlaceholders(file.path, "Changed file path");
-    if (file.content) {
+    if (input.scanChangedFileContents !== false && file.content) {
       assertNoDaytonaSecretPlaceholders(
         file.content,
         `Changed file ${file.path}`,

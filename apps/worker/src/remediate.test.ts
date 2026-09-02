@@ -174,4 +174,21 @@ describe("proposed diff remediation", () => {
       applyProposedDiff(session, "/workspace/acme/api", "invalid diff"),
     ).rejects.toThrow("The proposed diff no longer applies cleanly");
   });
+
+  it("rejects a proposed diff containing a workspace secret placeholder", async () => {
+    const session = {
+      execCommand: vi.fn(),
+      materializeEntry: vi.fn(),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(
+      applyProposedDiff(
+        session,
+        "/workspace/acme/api",
+        "diff --git a/key.ts b/key.ts\n+dtn_secret_1234-abcd",
+      ),
+    ).rejects.toThrow("Proposed diff cannot contain a workspace secret placeholder");
+    expect(session.materializeEntry).not.toHaveBeenCalled();
+    expect(session.execCommand).not.toHaveBeenCalled();
+  });
 });
