@@ -8,6 +8,7 @@ import {
   slackInvestigationSummaryMessage,
   slackIssueFollowupMessage,
   slackIssueMessage,
+  slackNoIssueThreadLink,
 } from "./slack-delivery.js";
 
 describe("Slack issue delivery", () => {
@@ -39,6 +40,30 @@ describe("Slack issue delivery", () => {
       type: "section",
       text: { type: "mrkdwn", text: message.text },
     }]);
+  });
+
+  it("binds a no-issue summary to its investigation thread", () => {
+    const link = slackNoIssueThreadLink({
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      issues: [],
+      organizationId: "17171717-1717-4717-8717-171717171717",
+      source: {
+        channelId: "C123",
+        encryptedCredentials: "encrypted",
+        integrationAccountId: "18181818-1818-4818-8818-181818181818",
+        messageTimestamp: null,
+        reactionTimestamp: "1788350000.000100",
+        teamId: "T123",
+        threadTimestamp: "1788350000.000100",
+      },
+    } as never, "1788350001.000200");
+
+    expect(link).toEqual(expect.objectContaining({
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      issueId: null,
+      messageTimestamp: "1788350001.000200",
+      threadTimestamp: "1788350000.000100",
+    }));
   });
 
   it("uses stable, destination-specific message IDs for retry deduplication", () => {

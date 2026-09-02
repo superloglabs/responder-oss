@@ -1,0 +1,1 @@
+ALTER TABLE "slack_investigation_thread_links" ALTER COLUMN "issue_id" DROP NOT NULL;

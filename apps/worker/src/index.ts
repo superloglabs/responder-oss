@@ -442,7 +442,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
   );
   if (investigationState === "completed") {
     let deliveryWarnings: string[] = [];
-    if (payload.slackIssueFollowup) {
+    if (payload.slackIssueFollowup?.issueIds.length) {
       const report = await getInvestigationReportMarkdown(payload.investigationId);
       if (report) {
         await deliverSlackIssueFollowupResponse({
@@ -596,7 +596,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
       },
     );
     let deliveryWarnings: string[] = [];
-    if (payload.slackIssueFollowup) {
+    if (payload.slackIssueFollowup?.issueIds.length) {
       await completeInvestigation(payload.investigationId, result.report);
       await deliverSlackIssueFollowupResponse({
         channelId: payload.slackIssueFollowup.channelId,

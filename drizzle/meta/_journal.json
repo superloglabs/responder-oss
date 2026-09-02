@@ -267,6 +267,13 @@
       "when": 1788339547447,
       "tag": "0037_classy_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788353622098,
+      "tag": "0038_bind_no_issue_slack_threads",
+      "breakpoints": true
     }
   ]
 }
