@@ -10,6 +10,7 @@ import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   deleteIntegrationAccount,
+  getIntegrationConnectionState,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
@@ -28,8 +29,11 @@ import {
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
   beginCustomMcpOAuth,
+  callCustomMcpTool,
   finishCustomMcpOAuth,
+  listCustomMcpTools,
   parseCustomMcpCredentials,
+  type StoredCustomMcpOAuthState,
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
@@ -140,6 +144,20 @@ import {
   gcpSetupScript,
   verifyGcpProject,
 } from "../../../../packages/core/src/integrations/gcp.js";
+import {
+  hasRequiredSupabaseTools,
+  parseSupabaseProjects,
+  supabaseAccessModeSchema,
+  type SupabaseAccessMode,
+  supabaseCredentialsSchema,
+  supabaseDiscoveryMcpUrl,
+  supabaseDisplayName,
+  supabaseExternalAccountId,
+  supabaseMcpUrl,
+  type SupabaseProject,
+  supabaseProjectRefSchema,
+  supabaseProjectSchema,
+} from "../../../../packages/core/src/integrations/supabase.js";
 
 const providerSchema = z.enum(productIntegrationIds);
 const awsConnectionSchema = z.object({
@@ -228,6 +246,20 @@ const langfuseConnectionSchema = z.object({
   returnTo: z.string().max(2_048).optional(),
   secretKey: z.string().trim().min(1).max(4_096),
 });
+const supabaseConnectionSchema = z.object({
+  accessMode: supabaseAccessModeSchema,
+  returnTo: z.string().max(2_048).optional(),
+});
+const supabaseProjectSelectionSchema = z.object({
+  projectRef: supabaseProjectRefSchema,
+  selectionState: z.string().min(1).max(8_192),
+});
+const supabaseOAuthSetupSchema = supabaseCredentialsSchema.omit({
+  projectRef: true,
+});
+const supabaseSelectionCredentialsSchema = supabaseOAuthSetupSchema.extend({
+  projects: z.array(supabaseProjectSchema).min(2).max(1_000),
+});
 const customMcpConnectionSchema = z.discriminatedUnion("authType", [
   z.object({
     apiToken: z.string().trim().min(1).max(16_384),
@@ -273,6 +305,7 @@ type BrowserOAuthProvider =
   | "posthog"
   | "sentry"
   | "slack"
+  | "supabase"
   | "vercel";
 
 async function consumeBrowserOAuthConnectionState(input: {
@@ -443,6 +476,77 @@ function withIntegrationAccountId(url: string, accountId: string): string {
   const redirect = new URL(url);
   redirect.searchParams.set("integration_account_id", accountId);
   return redirect.toString();
+}
+
+function withSupabaseSelectionState(
+  url: string,
+  selectionState: string,
+): string {
+  const redirect = new URL(url);
+  redirect.searchParams.set("selection_state", selectionState);
+  return redirect.toString();
+}
+
+async function completeSupabaseConnection(input: {
+  accessMode: SupabaseAccessMode;
+  oauth: StoredCustomMcpOAuthState;
+  organizationId: string;
+  project: SupabaseProject;
+  userId: string;
+}): Promise<string> {
+  const mcpUrl = supabaseMcpUrl({
+    accessMode: input.accessMode,
+    projectRef: input.project.ref,
+  });
+  const accessToken = input.oauth.tokens?.access_token;
+  if (!accessToken) throw new Error("The Supabase OAuth access token is missing");
+  const tools = await listCustomMcpTools({ accessToken, mcpUrl });
+  if (!hasRequiredSupabaseTools({ accessMode: input.accessMode, tools })) {
+    throw new Error("Supabase did not expose the required context tools");
+  }
+  const accountId = await upsertIntegrationAccount({
+    organizationId: input.organizationId,
+    provider: "supabase",
+    externalAccountId: supabaseExternalAccountId({
+      accessMode: input.accessMode,
+      projectRef: input.project.ref,
+    }),
+    displayName: supabaseDisplayName({
+      accessMode: input.accessMode,
+      projectName: input.project.name,
+      projectRef: input.project.ref,
+    }),
+    encryptedCredentials: encryptCredentials({
+      accessMode: input.accessMode,
+      authType: "oauth",
+      mcpUrl,
+      oauth: input.oauth,
+      projectRef: input.project.ref,
+    }),
+    credentialKeyVersion: 1,
+    metadata: {
+      accessMode: input.accessMode,
+      mcpUrl,
+      organizationId: input.project.organizationId,
+      organizationSlug: input.project.organizationSlug,
+      projectName: input.project.name,
+      projectRef: input.project.ref,
+    },
+    status: "connected",
+  });
+  await captureAnalyticsEvent({
+    distinctId: input.userId,
+    event: "integration connected",
+    organizationId: input.organizationId,
+    properties: {
+      access_mode: input.accessMode,
+      integration_account_id: accountId,
+      provider: "supabase",
+      project_ref: input.project.ref,
+      tool_count: tools.length,
+    },
+  });
+  return accountId;
 }
 
 async function completeSentrySetup(input: {
@@ -648,7 +752,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "dash0" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
-                  definition.id === "langfuse"
+                  definition.id === "langfuse" ||
+                  definition.id === "supabase"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -792,7 +897,8 @@ export const integrationRoutes = new Hono()
       parsedProvider.data === "dash0" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash" ||
-      parsedProvider.data === "langfuse"
+      parsedProvider.data === "langfuse" ||
+      parsedProvider.data === "supabase"
     ) {
       return context.json(
         { error: `Use the ${definition.name} connection endpoint` },
@@ -1930,6 +2036,250 @@ export const integrationRoutes = new Hono()
         { error: "Unable to verify the Langfuse connection" },
         502,
       );
+    }
+  })
+  .post("/supabase/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = supabaseConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Choose a valid Supabase access level" }, 400);
+    }
+
+    try {
+      const mcpUrl = supabaseDiscoveryMcpUrl();
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "supabase",
+        returnTo: parsed.data.returnTo,
+        routingUrl: integrationCallbackUrl("supabase"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            accessMode: parsed.data.accessMode,
+            authType: "oauth",
+            mcpUrl,
+            oauth: oauthResult.oauth,
+          }),
+        },
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        state: connectionState,
+        userId: tenant.user.id,
+      });
+      if (!updated) throw new Error("The Supabase OAuth state was not updated");
+      return context.json({ redirectUrl: oauthResult.authorizationUrl });
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return context.json(
+        { error: "Unable to start Supabase authorization" },
+        502,
+      );
+    }
+  })
+  .get("/supabase/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "supabase", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "supabase",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "supabase", "error", "invalid_state"),
+        );
+      }
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const pendingCredentials = z
+        .object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const credentials = supabaseOAuthSetupSchema.parse(
+        decryptCredentials<Record<string, unknown>>(
+          pendingCredentials.encryptedCredentials,
+        ),
+      );
+      if (credentials.mcpUrl !== supabaseDiscoveryMcpUrl()) {
+        throw new Error("The Supabase project discovery scope is invalid");
+      }
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth as StoredCustomMcpOAuthState,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Supabase OAuth access token is missing");
+      const projects = parseSupabaseProjects(
+        await callCustomMcpTool({
+          accessToken,
+          mcpUrl: credentials.mcpUrl,
+          name: "list_projects",
+        }),
+      );
+      if (projects.length === 0) {
+        throw new Error("Supabase returned no projects for the authorized organization");
+      }
+      if (projects.length === 1) {
+        const accountId = await completeSupabaseConnection({
+          accessMode: credentials.accessMode,
+          oauth,
+          organizationId: connectionState.organizationId,
+          project: projects[0]!,
+          userId: connectionState.userId,
+        });
+        return context.redirect(
+          withIntegrationAccountId(
+            settingsRedirect(connectionState.returnTo, "supabase", "connected"),
+            accountId,
+          ),
+        );
+      }
+      const selectionState = await createIntegrationConnectionState({
+        organizationId: connectionState.organizationId,
+        provider: "supabase",
+        userId: connectionState.userId,
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            ...credentials,
+            oauth,
+            projects,
+          }),
+        },
+        returnTo: connectionState.returnTo,
+      });
+      return context.redirect(
+        withSupabaseSelectionState(
+          settingsRedirect(
+            connectionState.returnTo,
+            "supabase",
+            "select_project",
+          ),
+          selectionState,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error);
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "supabase",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/supabase/projects", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const state = context.req.query("state");
+    if (!state) {
+      return context.json({ error: "Project selection expired" }, 400);
+    }
+    try {
+      const connectionState = await getIntegrationConnectionState(
+        "supabase",
+        state,
+        { organizationId: tenant.organizationId, userId: tenant.user.id },
+      );
+      if (!connectionState) {
+        return context.json({ error: "Project selection expired" }, 410);
+      }
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const selection = supabaseSelectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(
+          metadata.encryptedCredentials,
+        ),
+      );
+      if (selection.mcpUrl !== supabaseDiscoveryMcpUrl()) {
+        throw new Error("The Supabase project discovery scope is invalid");
+      }
+      return context.json({
+        accessMode: selection.accessMode,
+        projects: selection.projects,
+      });
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return context.json({ error: "Unable to load Supabase projects" }, 502);
+    }
+  })
+  .post("/supabase/select-project", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = supabaseProjectSelectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Choose a valid Supabase project" }, 400);
+    }
+    try {
+      const connectionState = await consumeIntegrationConnectionState(
+        "supabase",
+        parsed.data.selectionState,
+        { organizationId: tenant.organizationId, userId: tenant.user.id },
+      );
+      if (!connectionState) {
+        return context.json({ error: "Project selection expired" }, 410);
+      }
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const selection = supabaseSelectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(
+          metadata.encryptedCredentials,
+        ),
+      );
+      if (selection.mcpUrl !== supabaseDiscoveryMcpUrl()) {
+        throw new Error("The Supabase project discovery scope is invalid");
+      }
+      const project = selection.projects.find(
+        (candidate) => candidate.ref === parsed.data.projectRef,
+      );
+      if (!project) {
+        return context.json({ error: "Choose an authorized Supabase project" }, 403);
+      }
+      const accountId = await completeSupabaseConnection({
+        accessMode: selection.accessMode,
+        oauth: selection.oauth as StoredCustomMcpOAuthState,
+        organizationId: connectionState.organizationId,
+        project,
+        userId: connectionState.userId,
+      });
+      return context.json({
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "supabase", "connected"),
+          accountId,
+        ),
+      });
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return context.json({ error: "Unable to connect Supabase project" }, 502);
     }
   })
   .post("/custom-mcp/connect", async (context) => {

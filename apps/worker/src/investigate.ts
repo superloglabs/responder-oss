@@ -17,6 +17,7 @@ import {
   getRuntimeLangfuseConnections,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
+  getRuntimeSupabaseConnections,
   getRuntimeUpstashConnection,
   getRuntimeVercelConnections,
   getSlackInvestigationSessionRuntime,
@@ -81,6 +82,7 @@ import {
 } from "./trace.js";
 import { createSentryMcpServer } from "./sentry.js";
 import { createSlackSearchServer } from "./slack.js";
+import { createSupabaseMcpServer } from "./supabase.js";
 import {
   createUpstashCliTools,
   createUpstashMcpServer,
@@ -139,6 +141,7 @@ export function contextServerConnectFailureEvent(input: {
   dash0Connections?: ReadonlyArray<{ accountId: string }>;
   postHogConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
+  supabaseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
   investigationId: string;
   serverName: string;
@@ -152,6 +155,8 @@ export function contextServerConnectFailureEvent(input: {
         ? "Dash0"
         : input.serverName.startsWith("langfuse-")
           ? "Langfuse"
+          : input.serverName.startsWith("supabase-")
+            ? "Supabase"
           : input.serverName.startsWith("upstash-")
             ? "Upstash"
             : null;
@@ -180,6 +185,11 @@ export function contextServerConnectFailureEvent(input: {
                 (connection) =>
                   input.serverName === `langfuse-${connection.accountId}`,
               )?.accountId
+            : input.serverName.startsWith("supabase-")
+              ? input.supabaseConnections?.find(
+                  (connection) =>
+                    input.serverName === `supabase-${connection.accountId}`,
+                )?.accountId
             : input.customMcpConnections.find(
                 (connection) =>
                   input.serverName === `custom-mcp-${connection.accountId}`,
@@ -313,6 +323,10 @@ export function investigationInstructions(input: {
   sentryUnavailable?: boolean;
   linearConnected?: boolean;
   langfuseProjectNames?: string[];
+  supabaseConnections?: Array<{
+    accessMode: "logs" | "read_only" | "read_write";
+    displayName: string;
+  }>;
   slackChannels?: Array<{ id: string; name: string }>;
   upstashConnected?: boolean;
   workspaceSecrets?: Array<{
@@ -329,6 +343,7 @@ export function investigationInstructions(input: {
   const postHogAccountNames = input.postHogAccountNames ?? [];
   const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
+  const supabaseConnections = input.supabaseConnections ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
   const vercelAccountIds = input.vercelAccountIds ?? [];
@@ -344,6 +359,7 @@ export function investigationInstructions(input: {
     input.clickStackConnected ||
     input.upstashConnected ||
     langfuseProjectNames.length > 0 ||
+    supabaseConnections.length > 0 ||
     vercelAccountIds.length > 0 ||
     awsAccountNames.length > 0 ||
     gcpProjectNames.length > 0 ||
@@ -393,6 +409,20 @@ export function investigationInstructions(input: {
       : null,
     langfuseProjectNames.length > 0
       ? `Use the connected read-only Langfuse tools to inspect relevant traces, observations, scores, metrics, prompts, and alerts before concluding. Start with bounded observation or metric searches, then inspect specific observations for evidence. Never create or modify Langfuse prompts, scores, datasets, annotations, alerts, or other resources. Connected Langfuse projects: ${langfuseProjectNames.join(", ")}.`
+      : null,
+    supabaseConnections.length > 0
+      ? [
+          "Use the connected Supabase tools only when the project is relevant to the investigation.",
+          ...supabaseConnections.map((connection) => {
+            if (connection.accessMode === "logs") {
+              return `- ${connection.displayName}: inspect project logs only; database tools are not available.`;
+            }
+            if (connection.accessMode === "read_only") {
+              return `- ${connection.displayName}: inspect project logs, schema metadata, and data with read-only SQL. Never attempt to modify data or schema.`;
+            }
+            return `- ${connection.displayName}: project logs and database SQL are available. Only modify data when the investigation explicitly requires it and the change is necessary; never modify schema or platform configuration.`;
+          }),
+        ].join("\n")
       : null,
     input.linearConnected
       ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
@@ -548,6 +578,7 @@ export async function runInvestigationAgent(
     slackConnection,
     upstashConnection,
     langfuseConnections,
+    supabaseConnections,
     workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
@@ -573,6 +604,7 @@ export async function runInvestigationAgent(
     getRuntimeSlackConnection(job.config.id),
     getRuntimeUpstashConnection(job.config.id),
     getRuntimeLangfuseConnections(job.config.id),
+    getRuntimeSupabaseConnections(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
   const awsServers = await Promise.all(
@@ -611,6 +643,7 @@ export async function runInvestigationAgent(
     ? createUpstashCliTools(upstashConnection)
     : [];
   const langfuseServers = langfuseConnections.map(createLangfuseMcpServer);
+  const supabaseServers = supabaseConnections.map(createSupabaseMcpServer);
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -622,6 +655,7 @@ export async function runInvestigationAgent(
     ...dash0Servers,
     ...postHogServers,
     ...langfuseServers,
+    ...supabaseServers,
     ...awsServers,
     ...gcpServers,
     ...customMcpServers,
@@ -656,6 +690,7 @@ export async function runInvestigationAgent(
                 investigationId: job.investigationId,
                 langfuseConnections,
                 serverName: server.name,
+                supabaseConnections,
                 upstashConnection,
               }),
             ),
@@ -674,6 +709,9 @@ export async function runInvestigationAgent(
           }
           if (server.name.startsWith("langfuse-")) {
             throw new Error("Unable to connect to Langfuse context");
+          }
+          if (server.name.startsWith("supabase-")) {
+            throw new Error("Unable to connect to Supabase context");
           }
           throw error;
         }
@@ -801,6 +839,10 @@ export async function runInvestigationAgent(
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,
       ),
+      supabaseConnections: supabaseConnections.map((connection) => ({
+        accessMode: connection.accessMode,
+        displayName: connection.displayName,
+      })),
       repositoryInstructions,
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,

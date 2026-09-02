@@ -8,6 +8,7 @@ import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   deleteIntegrationAccount,
+  getIntegrationConnectionState,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
@@ -33,7 +34,9 @@ import {
 } from "../../../../packages/core/src/integrations/gcp.js";
 import {
   beginCustomMcpOAuth,
+  callCustomMcpTool,
   finishCustomMcpOAuth,
+  listCustomMcpTools,
   parseCustomMcpCredentials,
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
@@ -66,6 +69,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
   deleteIntegrationAccount: vi.fn(),
+  getIntegrationConnectionState: vi.fn(),
   getOrganizationIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccountByExternalId: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
@@ -107,7 +111,9 @@ vi.mock("../../../../packages/core/src/integrations/gcp.js", async (importOrigin
 
 vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
   beginCustomMcpOAuth: vi.fn(),
+  callCustomMcpTool: vi.fn(),
   finishCustomMcpOAuth: vi.fn(),
+  listCustomMcpTools: vi.fn(),
   parseCustomMcpCredentials: vi.fn(),
   safeCustomMcpFetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
     fetch(input, init)
@@ -981,6 +987,10 @@ describe("integration callback routing", () => {
       "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
     ],
     [
+      "supabase",
+      "/api/integrations/supabase/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
       "github",
       "/api/integrations/github/callback?state=oauth-state&code=oauth-code",
     ],
@@ -1187,6 +1197,22 @@ describe("integration callback routing", () => {
       expect.objectContaining({
         id: "langfuse",
         connectUrl: "/api/integrations/langfuse/connect",
+      }),
+    );
+  });
+
+  it("offers the Supabase project connection endpoint", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "supabase",
+        connectUrl: "/api/integrations/supabase/connect",
       }),
     );
   });
@@ -1500,6 +1526,296 @@ describe("integration callback routing", () => {
       redirectUrl:
         "https://responder.example/agents/new?integration=gcp&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
     });
+  });
+
+  it("starts Supabase OAuth with a server-generated project discovery scope", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://api.supabase.com/v1/oauth/authorize?state=oauth-state",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request("/api/integrations/supabase/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        accessMode: "read_only",
+        returnTo: "/agents/new",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      redirectUrl: "https://api.supabase.com/v1/oauth/authorize?state=oauth-state",
+    });
+    const mcpUrl =
+      "https://mcp.supabase.com/mcp?features=account&read_only=true";
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      provider: "supabase",
+      returnTo: "/agents/new",
+      routingUrl:
+        "https://responder.example/api/integrations/supabase/callback",
+      userId: tenant.user.id,
+    });
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl,
+      redirectUrl:
+        "https://responder.example/api/integrations/supabase/callback",
+    });
+    expect(updateIntegrationConnectionStateMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        state: "oauth-state",
+        userId: tenant.user.id,
+      }),
+    );
+  });
+
+  it("discovers and automatically connects a sole Supabase project", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      metadata: { encryptedCredentials: "encrypted-pending-credentials" },
+      codeVerifier: null,
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessMode: "read_only",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(callCustomMcpTool).mockResolvedValue({
+      projects: [{
+        id: "project-id",
+        ref: "abcdefghijklmnopqrst",
+        organization_id: "organization-id",
+        organization_slug: "acme",
+        name: "Production",
+        status: "ACTIVE_HEALTHY",
+        created_at: "2026-09-01T00:00:00Z",
+        region: "eu-west-1",
+      }],
+    });
+    vi.mocked(listCustomMcpTools).mockResolvedValue([
+      "get_logs",
+      "execute_sql",
+      "list_extensions",
+      "list_tables",
+      "apply_migration",
+    ]);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-final-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/supabase/callback?code=authorization-code&state=oauth-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new?integration=supabase&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(callCustomMcpTool).toHaveBeenCalledWith({
+      accessToken: "oauth-access-token",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      name: "list_projects",
+    });
+    expect(listCustomMcpTools).toHaveBeenCalledWith({
+      accessToken: "oauth-access-token",
+      mcpUrl:
+        "https://mcp.supabase.com/mcp?project_ref=abcdefghijklmnopqrst&features=debugging%2Cdatabase&read_only=true",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName:
+          "Production (abcdefghijklmnopqrst) · Logs and read-only data",
+        encryptedCredentials: "encrypted-final-credentials",
+        externalAccountId: "abcdefghijklmnopqrst:read_only",
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("keeps OAuth server-side while the user chooses among Supabase projects", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      metadata: { encryptedCredentials: "encrypted-pending-credentials" },
+      codeVerifier: null,
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessMode: "logs",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(callCustomMcpTool).mockResolvedValue({
+      projects: [
+        {
+          ref: "abcdefghijklmnopqrst",
+          organization_id: "organization-id",
+          organization_slug: "acme",
+          name: "Production",
+        },
+        {
+          ref: "zyxwvutsrqponmlkjihg",
+          organization_id: "organization-id",
+          organization_slug: "acme",
+          name: "Staging",
+        },
+      ],
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("selection-state");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-selection");
+
+    const response = await app.request(
+      "/api/integrations/supabase/callback?code=authorization-code&state=oauth-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings?integration=supabase&status=select_project&selection_state=selection-state",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      metadata: { encryptedCredentials: "encrypted-selection" },
+      organizationId: tenant.organizationId,
+      provider: "supabase",
+      returnTo: "/settings",
+      userId: tenant.user.id,
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("returns and connects only a project saved in the Supabase selection state", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    const selection = {
+      accessMode: "logs",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { tokens: { access_token: "oauth-access-token" } },
+      projects: [
+        {
+          ref: "abcdefghijklmnopqrst",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Production",
+        },
+        {
+          ref: "zyxwvutsrqponmlkjihg",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Staging",
+        },
+      ],
+    };
+    const connectionState = {
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      metadata: { encryptedCredentials: "encrypted-selection" },
+      codeVerifier: null,
+    };
+    vi.mocked(getIntegrationConnectionState).mockResolvedValue(connectionState);
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(connectionState);
+    vi.mocked(decryptCredentials).mockReturnValue(selection);
+
+    const projectsResponse = await app.request(
+      "/api/integrations/supabase/projects?state=selection-state",
+    );
+    expect(projectsResponse.status).toBe(200);
+    await expect(projectsResponse.json()).resolves.toEqual({
+      accessMode: "logs",
+      projects: selection.projects,
+    });
+
+    vi.mocked(listCustomMcpTools).mockResolvedValue(["get_logs"]);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-final-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    const selectResponse = await app.request(
+      "/api/integrations/supabase/select-project",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectRef: "abcdefghijklmnopqrst",
+          selectionState: "selection-state",
+        }),
+      },
+    );
+    expect(selectResponse.status).toBe(200);
+    await expect(selectResponse.json()).resolves.toEqual({
+      redirectUrl:
+        "https://responder.example/settings?integration=supabase&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+  });
+
+  it("rejects a Supabase project that was not returned by OAuth discovery", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      metadata: { encryptedCredentials: "encrypted-selection" },
+      codeVerifier: null,
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessMode: "logs",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { tokens: { access_token: "oauth-access-token" } },
+      projects: [
+        {
+          ref: "abcdefghijklmnopqrst",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Production",
+        },
+        {
+          ref: "zyxwvutsrqponmlkjihg",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Staging",
+        },
+      ],
+    });
+
+    const response = await app.request(
+      "/api/integrations/supabase/select-project",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectRef: "unauthorizedproj1234",
+          selectionState: "selection-state",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(listCustomMcpTools).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("validates and encrypts a custom MCP API token", async () => {

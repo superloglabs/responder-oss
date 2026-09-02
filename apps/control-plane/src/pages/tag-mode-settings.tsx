@@ -21,6 +21,8 @@ import {
 } from "../components/agent-context-controls";
 import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import { RepositoryIcon, SearchIcon } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
@@ -78,6 +80,7 @@ const contextProviderMetadata: Record<
   aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
   gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
   upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
+  supabase: { category: "Data & infrastructure", searchTerms: "postgres database sql logs" },
   custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
 };
 const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
@@ -85,6 +88,7 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "gcp",
   "custom_mcp",
   "langfuse",
+  "supabase",
   "dash0",
   "posthog",
 ]);
@@ -95,6 +99,7 @@ const contextProviderOrder: ContextAccount["provider"][] = [
   "gcp",
   "upstash",
   "langfuse",
+  "supabase",
   "datadog",
   "dash0",
   "posthog",
@@ -123,6 +128,8 @@ function accountDetail(account: ContextAccount): string {
       return `${prefix}Redis, Vector, Search, QStash, and Workflow`;
     case "langfuse":
       return "Traces, observations, scores, metrics, prompts, and alerts";
+    case "supabase":
+      return "Project logs and scoped PostgreSQL access";
     case "datadog":
       return `${prefix}Logs, traces, monitors, and service health`;
     case "dash0":
@@ -165,6 +172,10 @@ export function TagModeSettingsPage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const [connectingSupabase, setConnectingSupabase] = useState(
+    Boolean(supabaseSelectionState),
+  );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [configuration, setConfiguration] =
     useState<SlackThreadModeConfiguration>(defaultConfiguration);
@@ -357,6 +368,10 @@ export function TagModeSettingsPage() {
       setConnectingLangfuse(true);
       return;
     }
+    if (integration.id === "supabase") {
+      setConnectingSupabase(true);
+      return;
+    }
     if (integration.id === "clickstack") {
       setConnectingClickStack(true);
       return;
@@ -429,6 +444,13 @@ export function TagModeSettingsPage() {
         onCancel={() => setConnectingLangfuse(false)}
         open={connectingLangfuse}
         returnTo="/settings/tag-mode"
+      />
+      <SupabaseConnectionDialog
+        connectUrl={integrations.find((item) => item.id === "supabase")?.connectUrl ?? ""}
+        onCancel={() => setConnectingSupabase(false)}
+        open={connectingSupabase}
+        returnTo="/settings/tag-mode"
+        selectionState={supabaseSelectionState}
       />
       <ClickStackConnectionDialog
         connectUrl={integrations.find((item) => item.id === "clickstack")?.connectUrl ?? ""}

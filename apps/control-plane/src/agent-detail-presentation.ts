@@ -30,6 +30,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   github: "GitHub",
   linear: "Linear",
   langfuse: "Langfuse",
+  supabase: "Supabase",
   sentry: "Sentry",
   slack: "Slack",
   upstash: "Upstash",

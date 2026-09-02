@@ -78,6 +78,7 @@ const MULTI_INSTANCE_PROVIDERS = new Set<ProviderId>([
   "gcp",
   "custom_mcp",
   "langfuse",
+  "supabase",
 ]);
 
 const INTEGRATIONS: StoryboardIntegration[] = [
@@ -115,6 +116,13 @@ const INTEGRATIONS: StoryboardIntegration[] = [
     id: "langfuse",
     name: "Langfuse",
     searchTerms: "llm ai traces prompts evaluations projects",
+  },
+  {
+    category: "Data & infrastructure",
+    description: "Project logs and scoped PostgreSQL access",
+    id: "supabase",
+    name: "Supabase",
+    searchTerms: "database sql postgres logs",
   },
   {
     category: "Code & deployment",

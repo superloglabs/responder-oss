@@ -35,6 +35,10 @@ import {
 } from "../integrations/linear.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
 import { parseLangfuseCredentials } from "../integrations/langfuse.js";
+import {
+  parseSupabaseCredentials,
+  type SupabaseAccessMode,
+} from "../integrations/supabase.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
 import { getDatabase } from "./client.js";
 import {
@@ -1225,6 +1229,15 @@ export interface RuntimeLangfuseConnection {
   secretKey: string;
 }
 
+export interface RuntimeSupabaseConnection {
+  accessMode: SupabaseAccessMode;
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  mcpUrl: string;
+  projectRef: string;
+}
+
 export interface RuntimeVercelConnection {
   accessToken: string;
   accountId: string;
@@ -1567,7 +1580,13 @@ export async function getRuntimeGcpConnections(
 }
 
 function mcpOAuthRedirectUrl(
-  provider: "axiom" | "custom_mcp" | "dash0" | "linear" | "posthog",
+  provider:
+    | "axiom"
+    | "custom_mcp"
+    | "dash0"
+    | "linear"
+    | "posthog"
+    | "supabase",
 ): string {
   const baseUrl =
     process.env.RESPONDER_PUBLIC_URL ??
@@ -2583,6 +2602,82 @@ export async function getRuntimeLangfuseConnections(
       publicKey: credentials.publicKey,
       secretKey: credentials.secretKey,
     });
+  }
+  return connections;
+}
+
+export async function getRuntimeSupabaseConnections(
+  versionId: string,
+): Promise<RuntimeSupabaseConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "supabase"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeSupabaseConnection[] = [];
+  for (const accountId of config.contextAccountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseSupabaseCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("supabase"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Supabase OAuth connection");
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessMode: credentials.accessMode,
+            accessToken,
+            accountId: account.id,
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+            projectRef: credentials.projectRef,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "supabase",
+      statusOnError: () => "error",
+    });
+    if (connection) connections.push(connection);
   }
   return connections;
 }
