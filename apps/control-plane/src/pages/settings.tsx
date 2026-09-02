@@ -35,6 +35,7 @@ interface IntegrationSummary {
     | "sentry"
     | "datadog"
     | "dash0"
+    | "posthog"
     | "axiom"
     | "upstash"
     | "langfuse"
@@ -236,6 +237,7 @@ export function SettingsPage() {
       "sentry",
       "datadog",
       "dash0",
+      "posthog",
       "axiom",
       "upstash",
       "langfuse",

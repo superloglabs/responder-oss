@@ -39,6 +39,7 @@ import {
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations/dash0.js";
+import { POSTHOG_MCP_URL } from "../../../../packages/core/src/integrations/posthog.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -2272,6 +2273,117 @@ describe("integration callback routing", () => {
       webhookUrl:
         "https://responder.example/api/webhooks/dash0/30000000-0000-4000-8000-000000000000",
     });
+  });
+
+  it("starts PostHog OAuth against the fixed read-only MCP endpoint", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://us.posthog.com/oauth/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/posthog/start?returnTo=%2Fagents%2Fnew",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://us.posthog.com/oauth/authorize",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "posthog",
+        returnTo: "/agents/new",
+        routingUrl: "https://responder.example/api/integrations/posthog/callback",
+        userId: tenant.user.id,
+      }),
+    );
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: POSTHOG_MCP_URL,
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authType: "oauth",
+        mcpUrl: POSTHOG_MCP_URL,
+        oauth: { codeVerifier: "pkce-verifier" },
+      }),
+    );
+  });
+
+  it("finishes PostHog OAuth", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: {},
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "pending-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(14);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=posthog&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(finishCustomMcpOAuth).toHaveBeenCalledWith({
+      authorizationCode: "oauth-code",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oauth: expect.objectContaining({
+          tokens: expect.objectContaining({ access_token: "oauth-access-token" }),
+        }),
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "PostHog",
+        provider: "posthog",
+        status: "connected",
+      }),
+    );
   });
 
   it("validates and encrypts an Upstash account API key", async () => {

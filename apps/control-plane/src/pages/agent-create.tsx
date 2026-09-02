@@ -105,6 +105,7 @@ const CONTEXT_PROVIDER_METADATA: Record<
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
   datadog: { category: "Observability", searchTerms: "apm logs monitors" },
   dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
+  posthog: { category: "Observability", searchTerms: "analytics errors logs traces replays alerts" },
   axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
   clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
   langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
@@ -124,6 +125,7 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "custom_mcp",
   "langfuse",
   "dash0",
+  "posthog",
 ]);
 
 const EMPTY_OPTIONS: AgentOptions = {
@@ -483,6 +485,7 @@ export function AgentCreatePage() {
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const dash0JustConnected = successfulConnectionReturn("dash0");
+  const postHogJustConnected = successfulConnectionReturn("posthog");
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
@@ -501,6 +504,7 @@ export function AgentCreatePage() {
     githubJustConnected ||
     datadogJustConnected ||
     dash0JustConnected ||
+    postHogJustConnected ||
     axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
@@ -752,6 +756,20 @@ export function AgentCreatePage() {
           loadedDraft.dash0AccountId = connectedDash0.id;
           setDash0WebhookAccountId(connectedDash0.id);
         }
+        const connectedPostHog = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "posthog",
+            )
+          : accountsFor(loadedOptions, "posthog")[0];
+        if (
+          postHogJustConnected &&
+          connectedPostHog &&
+          !loadedDraft.contextAccountIds.includes(connectedPostHog.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedPostHog.id);
+        }
         const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
         if (
           axiomJustConnected &&
@@ -897,6 +915,7 @@ export function AgentCreatePage() {
     customMcpJustConnected,
     datadogJustConnected,
     dash0JustConnected,
+    postHogJustConnected,
     draftStorageKey,
     githubJustConnected,
     isEditing,
@@ -944,6 +963,10 @@ export function AgentCreatePage() {
   );
   const dash0Accounts = useMemo(
     () => accountsFor(options, "dash0"),
+    [options],
+  );
+  const postHogAccounts = useMemo(
+    () => accountsFor(options, "posthog"),
     [options],
   );
   const axiomAccounts = useMemo(
@@ -1552,7 +1575,7 @@ export function AgentCreatePage() {
           ? "Investigates new and regressed errors and reports actionable findings."
           : trigger.kind === "dash0_alert"
             ? "Investigates ongoing failed checks from Dash0 and reports actionable findings."
-          : `Investigates alerts posted in ${slackChannelLabel(selectedSlackInput!.displayName)}.`),
+            : `Investigates alerts posted in ${slackChannelLabel(selectedSlackInput!.displayName)}.`),
       model: existingConfiguration?.model ?? "instance/default",
       instructions: currentDraft.instructions.trim(),
       enabled: existingConfiguration?.enabled ?? true,
@@ -1621,6 +1644,9 @@ export function AgentCreatePage() {
       draft.contextAccountIds.includes(account.id),
     ).length +
     dash0Accounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    postHogAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
     axiomAccounts.filter((account) =>
@@ -2885,6 +2911,25 @@ export function AgentCreatePage() {
                         key={account.id}
                         label={label}
                         provider="dash0"
+                      />
+                    );
+                  })}
+                  {postHogAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = postHogAccounts.length > 1 ? account.displayName : "PostHog";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Errors, logs, traces, replays, and product analytics`}
+                        key={account.id}
+                        label={label}
+                        provider="posthog"
                       />
                     );
                   })}

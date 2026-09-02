@@ -11,6 +11,7 @@ import {
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
   getRuntimeDash0Connections,
+  getRuntimePostHogConnections,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
@@ -47,6 +48,7 @@ import { createGcpMcpServers } from "./gcp.js";
 import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createDash0McpServer } from "./dash0.js";
+import { createPostHogMcpServer } from "./posthog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
@@ -135,6 +137,7 @@ export function contextServerConnectFailureEvent(input: {
   gcpConnections?: ReadonlyArray<{ accountId: string }>;
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
   dash0Connections?: ReadonlyArray<{ accountId: string }>;
+  postHogConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
   investigationId: string;
@@ -167,6 +170,11 @@ export function contextServerConnectFailureEvent(input: {
               (connection) =>
                 input.serverName === `dash0-${connection.accountId}`,
             )?.accountId
+          : input.serverName.startsWith("posthog-")
+            ? input.postHogConnections?.find(
+                (connection) =>
+                  input.serverName === `posthog-${connection.accountId}`,
+              )?.accountId
           : input.serverName.startsWith("langfuse-")
             ? input.langfuseConnections?.find(
                 (connection) =>
@@ -296,6 +304,7 @@ export function investigationInstructions(input: {
   axiomConnected?: boolean;
   datadogConnected: boolean;
   dash0AccountNames?: string[];
+  postHogAccountNames?: string[];
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
@@ -317,6 +326,7 @@ export function investigationInstructions(input: {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
   const dash0AccountNames = input.dash0AccountNames ?? [];
+  const postHogAccountNames = input.postHogAccountNames ?? [];
   const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const slackChannels = input.slackChannels ?? [];
@@ -328,6 +338,7 @@ export function investigationInstructions(input: {
   const observabilityConnected =
     input.datadogConnected ||
     dash0AccountNames.length > 0 ||
+    postHogAccountNames.length > 0 ||
     input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
@@ -361,6 +372,9 @@ export function investigationInstructions(input: {
       : null,
     dash0AccountNames.length > 0
       ? `Use the connected read-only Dash0 tools to inspect relevant services, failed checks, logs, metrics, and traces before concluding. Never create or modify Dash0 resources and do not delegate the investigation to Agent0. Connected Dash0 organizations: ${dash0AccountNames.join(", ")}.`
+      : null,
+    postHogAccountNames.length > 0
+      ? `Use the connected read-only PostHog tools to inspect the matching alert, errors, logs, traces, replays, and product impact before concluding. Never create, update, or delete PostHog resources. Connected PostHog projects: ${postHogAccountNames.join(", ")}.`
       : null,
     input.axiomConnected
       ? "Use the connected read-only Axiom tools to inspect telemetry relevant to the Slack alert, including logs, traces, metrics, and surrounding service activity, before concluding. Never create, update, or delete Axiom resources."
@@ -525,6 +539,7 @@ export async function runInvestigationAgent(
     axiomConnection,
     datadogConnection,
     dash0Connections,
+    postHogConnections,
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
@@ -541,6 +556,7 @@ export async function runInvestigationAgent(
     getRuntimeAxiomConnection(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
     getRuntimeDash0Connections(job.config.id),
+    getRuntimePostHogConnections(job.config.id),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -572,6 +588,7 @@ export async function runInvestigationAgent(
     ? createAxiomMcpServer(axiomConnection)
     : null;
   const dash0Servers = dash0Connections.map(createDash0McpServer);
+  const postHogServers = postHogConnections.map(createPostHogMcpServer);
   const sentryServer = sentryConnection
     ? createSentryMcpServer(sentryConnection, {
         investigationId: job.investigationId,
@@ -603,6 +620,7 @@ export async function runInvestigationAgent(
     slackServer,
     upstashServer,
     ...dash0Servers,
+    ...postHogServers,
     ...langfuseServers,
     ...awsServers,
     ...gcpServers,
@@ -633,6 +651,7 @@ export async function runInvestigationAgent(
                 gcpConnections,
                 customMcpConnections,
                 dash0Connections,
+                postHogConnections,
                 error,
                 investigationId: job.investigationId,
                 langfuseConnections,
@@ -769,6 +788,9 @@ export async function runInvestigationAgent(
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,
       dash0AccountNames: dash0Connections.map(
+        (connection) => connection.displayName,
+      ),
+      postHogAccountNames: postHogConnections.map(
         (connection) => connection.displayName,
       ),
       repositories,

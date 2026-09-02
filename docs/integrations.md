@@ -134,6 +134,30 @@ channel with a per-connection bearer secret and starts agents configured for
 that Dash0 account only when it receives `alert.ongoing`; resolved, superseded,
 and closed notifications are acknowledged without starting investigations.
 
+## PostHog
+
+Connect PostHog from Settings. Responder dynamically registers an OAuth client
+against PostHog's hosted MCP endpoint and refreshes the project-scoped tokens
+outside the investigation sandbox. The OAuth callback is:
+
+```text
+<public>/api/integrations/posthog/callback
+```
+
+No deployment-level PostHog client ID, API key, or static token is required.
+The MCP connection is forced into read-only tools mode and limited to alerts,
+dashboards, error tracking, events, insights, logs, replay, replay vision, SQL,
+tracing, and web analytics. The worker also rejects any tool that is not
+explicitly annotated read-only.
+
+Configure the PostHog alerts Responder should investigate with a **Slack**
+notification destination that points to a watched channel. Responder recognizes
+messages from the PostHog Slack app, queues the channel's configured agent, and
+marks the Slack input as PostHog-originated. Resolved, recovered, auto-disabled, and
+errored lifecycle messages are acknowledged without starting investigations.
+The connected PostHog project remains read-only investigation context; alert
+delivery does not require a second public webhook or shared secret.
+
 ## Axiom
 
 Connect Axiom from Settings through the hosted MCP server's browser OAuth flow.

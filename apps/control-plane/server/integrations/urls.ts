@@ -11,6 +11,7 @@ export function integrationCallbackUrl(
     | "datadog"
     | "github"
     | "linear"
+    | "posthog"
     | "sentry"
     | "slack"
     | "vercel",

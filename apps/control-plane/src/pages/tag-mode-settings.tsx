@@ -67,6 +67,7 @@ const contextProviderMetadata: Record<
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
   datadog: { category: "Observability", searchTerms: "apm logs monitors" },
   dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
+  posthog: { category: "Observability", searchTerms: "analytics errors logs traces replays alerts" },
   axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
   clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
   langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
@@ -85,6 +86,7 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "custom_mcp",
   "langfuse",
   "dash0",
+  "posthog",
 ]);
 
 const contextProviderOrder: ContextAccount["provider"][] = [
@@ -94,6 +96,8 @@ const contextProviderOrder: ContextAccount["provider"][] = [
   "upstash",
   "langfuse",
   "datadog",
+  "dash0",
+  "posthog",
   "axiom",
   "linear",
   "custom_mcp",
@@ -121,6 +125,10 @@ function accountDetail(account: ContextAccount): string {
       return "Traces, observations, scores, metrics, prompts, and alerts";
     case "datadog":
       return `${prefix}Logs, traces, monitors, and service health`;
+    case "dash0":
+      return `${prefix}Logs, metrics, traces, checks, and dashboards`;
+    case "posthog":
+      return `${prefix}Errors, logs, traces, replays, and product analytics`;
     case "axiom":
       return `${prefix}Logs, traces, metrics, and monitor history`;
     case "linear":

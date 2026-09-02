@@ -38,6 +38,10 @@ import {
   normalizeDash0McpUrl,
   parseDash0Credentials,
 } from "../../../../packages/core/src/integrations/dash0.js";
+import {
+  parsePostHogCredentials,
+  POSTHOG_MCP_URL,
+} from "../../../../packages/core/src/integrations/posthog.js";
 import { getActiveTenant } from "../tenant.js";
 import {
   getIntegrationDefinition,
@@ -266,6 +270,7 @@ type BrowserOAuthProvider =
   | "gcp"
   | "github"
   | "linear"
+  | "posthog"
   | "sentry"
   | "slack"
   | "vercel";
@@ -927,6 +932,67 @@ export const integrationRoutes = new Hono()
         );
       }
     }
+    if (parsedProvider.data === "posthog") {
+      let accountId: string | undefined;
+      try {
+        const externalAccountId = randomUUID();
+        accountId = await upsertIntegrationAccount({
+          organizationId: tenant.organizationId,
+          provider: "posthog",
+          externalAccountId,
+          displayName: "PostHog",
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: POSTHOG_MCP_URL,
+            oauth: {},
+          }),
+          credentialKeyVersion: 1,
+          metadata: { authType: "oauth", mcpUrl: POSTHOG_MCP_URL },
+          status: "pending",
+        });
+        const connectionState = await createIntegrationConnectionState({
+          organizationId: tenant.organizationId,
+          userId: tenant.user.id,
+          provider: "posthog",
+          codeVerifier: JSON.stringify({ accountId, externalAccountId }),
+          returnTo: context.req.query("returnTo"),
+          routingUrl: integrationCallbackUrl("posthog"),
+        });
+        const oauthResult = await beginCustomMcpOAuth({
+          connectionState,
+          mcpUrl: POSTHOG_MCP_URL,
+          redirectUrl: integrationCallbackUrl("posthog"),
+        });
+        const updated = await updateIntegrationAccountCredentials({
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: POSTHOG_MCP_URL,
+            oauth: oauthResult.oauth,
+          }),
+          integrationAccountId: accountId,
+          organizationId: tenant.organizationId,
+          provider: "posthog",
+          status: "pending",
+        });
+        if (!updated) throw new Error("The pending PostHog connection was not updated");
+        return context.redirect(oauthResult.authorizationUrl);
+      } catch (error) {
+        if (accountId) {
+          await setIntegrationAccountStatus(accountId, "error").catch(
+            () => undefined,
+          );
+        }
+        logCustomMcpError("connect", error, accountId);
+        return context.redirect(
+          settingsRedirect(
+            context.req.query("returnTo") ?? "/settings",
+            "posthog",
+            "error",
+            "connection_failed",
+          ),
+        );
+      }
+    }
     const state = await createIntegrationConnectionState({
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
@@ -1510,6 +1576,107 @@ export const integrationRoutes = new Hono()
     } catch (error) {
       logCustomMcpError("webhook-config", error, accountId.data);
       return context.json({ error: "Unable to load Dash0 webhook setup" }, 500);
+    }
+  })
+  .get("/posthog/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "posthog", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "posthog",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "posthog", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({ accountId: z.uuid(), externalAccountId: z.uuid() })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "posthog",
+      });
+      if (!account?.encryptedCredentials || account.status !== "pending") {
+        throw new Error("The pending PostHog connection was not found");
+      }
+      const credentials = parsePostHogCredentials(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("posthog"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The PostHog OAuth access token is missing");
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const connectedAccountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "posthog",
+        externalAccountId: callbackState.externalAccountId,
+        displayName: "PostHog",
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        credentialKeyVersion: 1,
+        metadata: {
+          authType: "oauth",
+          mcpUrl: credentials.mcpUrl,
+          toolCount,
+        },
+        status: "connected",
+      });
+      if (connectedAccountId !== accountId) {
+        throw new Error("The PostHog connection changed during OAuth");
+      }
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "posthog",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "posthog", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "posthog",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
     }
   })
   .get("/axiom/callback", async (context) => {

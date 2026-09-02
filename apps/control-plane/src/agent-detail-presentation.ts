@@ -26,6 +26,7 @@ const providerLabels: Record<AgentOptions["accounts"][number]["provider"], strin
   clickstack: "ClickStack / HyperDX",
   datadog: "Datadog",
   dash0: "Dash0",
+  posthog: "PostHog",
   github: "GitHub",
   linear: "Linear",
   langfuse: "Langfuse",

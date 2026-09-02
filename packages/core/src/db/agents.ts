@@ -26,6 +26,7 @@ type Provider =
   | "sentry"
   | "datadog"
   | "dash0"
+  | "posthog"
   | "axiom";
 
 export class AgentConfigurationError extends Error {
@@ -307,6 +308,7 @@ async function validateConfigurationResources(
         "sentry",
         "datadog",
         "dash0",
+        "posthog",
         "axiom",
         "clickstack",
         "upstash",
