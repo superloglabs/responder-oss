@@ -111,6 +111,24 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("identifies Supabase connection failures without exposing OAuth details", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("request failed with bearer-token"),
+        investigationId: "investigation-123",
+        serverName: "supabase-account-supabase",
+        supabaseConnections: [{ accountId: "account-supabase" }],
+      }),
+    ).toEqual({
+      accountId: "account-supabase",
+      error: "Unable to connect to Supabase context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "supabase-account-supabase",
+    });
+  });
+
   it("requires both service keys", () => {
     expect(() => sandboxAgentConfig({})).toThrow("OPENAI_API_KEY is required");
     expect(() =>
@@ -298,6 +316,28 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("connected read-only Langfuse tools");
     expect(instructions).toContain("Example / Production");
     expect(instructions).toContain("Never create or modify Langfuse");
+    expect(instructions).not.toContain("No observability data source is connected");
+  });
+
+  it("describes each Supabase access boundary", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      supabaseConnections: [
+        { accessMode: "logs", displayName: "logs-project" },
+        { accessMode: "read_only", displayName: "read-project" },
+        { accessMode: "read_write", displayName: "write-project" },
+      ],
+    });
+
+    expect(instructions).toContain("logs-project: inspect project logs only");
+    expect(instructions).toContain("read-project: inspect project logs, schema metadata");
+    expect(instructions).toContain("Never attempt to modify data or schema");
+    expect(instructions).toContain("write-project: project logs and database SQL");
+    expect(instructions).toContain("never modify schema or platform configuration");
     expect(instructions).not.toContain("No observability data source is connected");
   });
 

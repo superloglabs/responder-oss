@@ -29,6 +29,7 @@ const providers = [
   ["axiom", "Axiom"],
   ["upstash", "Upstash"],
   ["langfuse", "Langfuse"],
+  ["supabase", "Supabase"],
   ["linear", "Linear"],
   ["vercel", "Vercel"],
   ["custom_mcp", "Custom MCP"],
@@ -134,4 +135,30 @@ test("prepares a Google Cloud connection", async ({ page }) => {
     page.getByRole("heading", { name: "Create the investigation identities" }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Download script" })).toBeVisible();
+});
+
+test("starts Supabase OAuth with the selected project access", async ({ page }) => {
+  await mockSettingsApis(page);
+  let requestBody: unknown;
+  await page.route("**/api/integrations/supabase/start", async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        redirectUrl: "/settings?integration=supabase&status=connected",
+      },
+    });
+  });
+  await page.goto("/settings");
+
+  await page.getByRole("button", { name: /Supabase/ }).click();
+  await page.getByLabel("Project ID").fill("abcdefghijklmnopqrst");
+  await page.getByLabel("Agent access").selectOption("read_only");
+  await page.getByRole("button", { name: "Continue with Supabase" }).click();
+
+  await expect.poll(() => requestBody).toEqual({
+    accessMode: "read_only",
+    projectRef: "abcdefghijklmnopqrst",
+    returnTo: "/settings",
+  });
+  await expect(page).toHaveURL(/integration=supabase&status=connected/u);
 });

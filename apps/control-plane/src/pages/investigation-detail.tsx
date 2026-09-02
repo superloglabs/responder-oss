@@ -134,6 +134,7 @@ function humanizeToolName(value: unknown): string {
     langfuse: "Langfuse",
     sentry: "Sentry",
     slack: "Slack",
+    supabase: "Supabase",
     superlog: "Superlog",
     upstash: "Upstash",
   };

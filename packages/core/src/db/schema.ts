@@ -60,6 +60,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "clickstack",
   "upstash",
   "langfuse",
+  "supabase",
   "vercel",
   "custom_mcp",
   "linear",

@@ -281,6 +281,13 @@
       "when": 1788356539623,
       "tag": "0039_add_posthog_context",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788357088137,
+      "tag": "0040_curly_lockjaw",
+      "breakpoints": true
     }
   ]
 }

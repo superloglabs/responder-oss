@@ -214,6 +214,43 @@ Responder bounds unscoped observation searches to the latest 24 hours, limits
 result sizes and concurrency, redacts credential-shaped output, and keeps the
 project keys outside the repository investigation sandbox.
 
+## Supabase
+
+Connect Supabase from Settings with the 20-character project ID, choose an
+access level, then approve the project through Supabase OAuth. The hosted MCP
+server dynamically registers the OAuth client, so no deployment-level Supabase
+client ID, secret, service-role key, or database password is required. The
+OAuth callback is:
+
+```text
+<public>/api/integrations/supabase/callback
+```
+
+Each project and access-level combination is stored as a separate integration
+account. Agents can select one or more of these connections:
+
+- **Logs only** enables the debugging feature and exposes the reviewed Supabase
+  log retrieval and query tools available on the hosted server.
+- **Logs and read-only data** also enables database tools with Supabase's
+  `read_only=true` boundary, exposing SQL queries and schema inspection.
+- **Full database SQL access** exposes the same reviewed database tools without
+  the read-only parameter, so `execute_sql` can change project data or schema.
+
+Responder constructs the hosted MCP URL from the saved project and access level;
+it never accepts that URL from the browser. The worker applies a second exact
+tool allowlist and blocks the dedicated migration, Edge Function deployment,
+branching, project administration, and every unreviewed tool in all modes.
+Because raw SQL can still perform DDL in the full-access preset, blocking the
+dedicated migration tool is not a schema-change boundary. OAuth tokens remain
+encrypted outside the repository investigation sandbox.
+
+For read-only data access, Supabase's handling of the MCP `read_only` parameter
+is the database mutation boundary: Responder cannot independently determine
+whether arbitrary SQL is read-only. Treat full database SQL access as production
+write access and grant it only to agents whose investigation workflow needs it.
+Supabase recommends using its MCP server with development or test projects; if
+you connect production, prefer logs-only or read-only access.
+
 ## ClickStack
 
 ClickStack Cloud uses `https://mcp.clickhouse.cloud/clickstack` with OAuth and

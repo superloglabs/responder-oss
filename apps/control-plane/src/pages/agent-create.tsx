@@ -43,6 +43,7 @@ import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -116,6 +117,7 @@ const CONTEXT_PROVIDER_METADATA: Record<
   aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
   gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
   upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
+  supabase: { category: "Data & infrastructure", searchTerms: "postgres database sql logs" },
   custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
 };
 
@@ -124,6 +126,7 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "gcp",
   "custom_mcp",
   "langfuse",
+  "supabase",
   "dash0",
   "posthog",
 ]);
@@ -489,6 +492,7 @@ export function AgentCreatePage() {
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
+  const supabaseJustConnected = successfulConnectionReturn("supabase");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const linearJustConnected = successfulConnectionReturn("linear");
@@ -508,6 +512,7 @@ export function AgentCreatePage() {
     axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
+    supabaseJustConnected ||
     vercelJustConnected ||
     customMcpJustConnected ||
     clickStackJustConnected ||
@@ -559,6 +564,7 @@ export function AgentCreatePage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const [connectingSupabase, setConnectingSupabase] = useState(false);
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
   const [connectingGcp, setConnectingGcp] = useState(false);
@@ -818,6 +824,18 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(returnedIntegrationAccountId);
         }
+        if (
+          supabaseJustConnected &&
+          returnedIntegrationAccountId &&
+          loadedOptions.accounts.some(
+            (account) =>
+              account.id === returnedIntegrationAccountId &&
+              account.provider === "supabase",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(returnedIntegrationAccountId)
+        ) {
+          loadedDraft.contextAccountIds.push(returnedIntegrationAccountId);
+        }
         const connectedClickStack = accountsFor(
           loadedOptions,
           "clickstack",
@@ -921,6 +939,7 @@ export function AgentCreatePage() {
     isEditing,
     upstashJustConnected,
     langfuseJustConnected,
+    supabaseJustConnected,
     linearJustConnected,
     returnedIntegrationAccountId,
     sentryJustConnected,
@@ -983,6 +1002,10 @@ export function AgentCreatePage() {
   );
   const langfuseAccounts = useMemo(
     () => accountsFor(options, "langfuse"),
+    [options],
+  );
+  const supabaseAccounts = useMemo(
+    () => accountsFor(options, "supabase"),
     [options],
   );
   const clickStackAccounts = useMemo(
@@ -1241,7 +1264,8 @@ export function AgentCreatePage() {
       provider === "dash0" ||
       provider === "clickstack" ||
       provider === "upstash" ||
-      provider === "langfuse"
+      provider === "langfuse" ||
+      provider === "supabase"
     ) {
       saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       if (provider === "aws") setConnectingAws(true);
@@ -1250,6 +1274,7 @@ export function AgentCreatePage() {
       else if (provider === "dash0") setConnectingDash0(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
       else if (provider === "langfuse") setConnectingLangfuse(true);
+      else if (provider === "supabase") setConnectingSupabase(true);
       else setConnectingUpstash(true);
       return;
     }
@@ -1658,6 +1683,9 @@ export function AgentCreatePage() {
     langfuseAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    supabaseAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     Number(vercelContextConnected) +
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
@@ -1725,6 +1753,12 @@ export function AgentCreatePage() {
         connectUrl={integrationFor("langfuse")?.connectUrl ?? ""}
         onCancel={() => setConnectingLangfuse(false)}
         open={connectingLangfuse}
+        returnTo={returnTo}
+      />
+      <SupabaseConnectionDialog
+        connectUrl={integrationFor("supabase")?.connectUrl ?? ""}
+        onCancel={() => setConnectingSupabase(false)}
+        open={connectingSupabase}
         returnTo={returnTo}
       />
       <ClickStackConnectionDialog
@@ -2753,6 +2787,26 @@ export function AgentCreatePage() {
                         key={account.id}
                         label={account.displayName}
                         provider="langfuse"
+                      />
+                    );
+                  })}
+
+                  {supabaseAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail="Project logs and scoped PostgreSQL access"
+                        key={account.id}
+                        label={account.displayName}
+                        provider="supabase"
                       />
                     );
                   })}

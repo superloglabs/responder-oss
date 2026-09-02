@@ -9,6 +9,7 @@ import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -39,6 +40,7 @@ interface IntegrationSummary {
     | "axiom"
     | "upstash"
     | "langfuse"
+    | "supabase"
     | "vercel"
     | "custom_mcp"
     | "clickstack"
@@ -241,6 +243,7 @@ export function SettingsPage() {
       "axiom",
       "upstash",
       "langfuse",
+      "supabase",
       "linear",
       "vercel",
       "custom_mcp",
@@ -375,6 +378,7 @@ function DefaultIntegrationCard({
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const [connectingSupabase, setConnectingSupabase] = useState(false);
   const [connectingDash0, setConnectingDash0] = useState(false);
   const returnedAccountId = new URLSearchParams(window.location.search).get(
     "integration_account_id",
@@ -408,6 +412,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "langfuse") {
       setConnectingLangfuse(true);
+      return;
+    }
+    if (integration.id === "supabase") {
+      setConnectingSupabase(true);
       return;
     }
     if (integration.id === "clickstack") {
@@ -488,6 +496,12 @@ function DefaultIntegrationCard({
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConnectingLangfuse(false)}
         open={connectingLangfuse}
+        returnTo="/settings"
+      />
+      <SupabaseConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingSupabase(false)}
+        open={connectingSupabase}
         returnTo="/settings"
       />
       <Dash0ConnectionDialog

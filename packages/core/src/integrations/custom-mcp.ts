@@ -493,10 +493,10 @@ export async function refreshCustomMcpOAuth(input: {
   return provider.snapshot();
 }
 
-export async function verifyCustomMcpConnection(input: {
+export async function listCustomMcpTools(input: {
   accessToken: string;
   mcpUrl: string;
-}): Promise<number> {
+}): Promise<string[]> {
   const url = await validateCustomMcpUrl(input.mcpUrl, {
     allowLocal: process.env.NODE_ENV !== "production",
   });
@@ -510,8 +510,15 @@ export async function verifyCustomMcpConnection(input: {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    return tools.tools.length;
+    return tools.tools.map((tool) => tool.name);
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+export async function verifyCustomMcpConnection(input: {
+  accessToken: string;
+  mcpUrl: string;
+}): Promise<number> {
+  return (await listCustomMcpTools(input)).length;
 }

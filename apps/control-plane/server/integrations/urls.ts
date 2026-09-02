@@ -14,6 +14,7 @@ export function integrationCallbackUrl(
     | "posthog"
     | "sentry"
     | "slack"
+    | "supabase"
     | "vercel",
 ): string {
   const callbackBaseUrl =

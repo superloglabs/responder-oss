@@ -29,6 +29,7 @@ import { disableAgentsWithUnavailableRepositories } from "../../../../packages/c
 import {
   beginCustomMcpOAuth,
   finishCustomMcpOAuth,
+  listCustomMcpTools,
   parseCustomMcpCredentials,
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
@@ -140,6 +141,15 @@ import {
   gcpSetupScript,
   verifyGcpProject,
 } from "../../../../packages/core/src/integrations/gcp.js";
+import {
+  hasRequiredSupabaseTools,
+  parseSupabaseCredentials,
+  supabaseAccessModeSchema,
+  supabaseDisplayName,
+  supabaseExternalAccountId,
+  supabaseMcpUrl,
+  supabaseProjectRefSchema,
+} from "../../../../packages/core/src/integrations/supabase.js";
 
 const providerSchema = z.enum(productIntegrationIds);
 const awsConnectionSchema = z.object({
@@ -228,6 +238,11 @@ const langfuseConnectionSchema = z.object({
   returnTo: z.string().max(2_048).optional(),
   secretKey: z.string().trim().min(1).max(4_096),
 });
+const supabaseConnectionSchema = z.object({
+  accessMode: supabaseAccessModeSchema,
+  projectRef: supabaseProjectRefSchema,
+  returnTo: z.string().max(2_048).optional(),
+});
 const customMcpConnectionSchema = z.discriminatedUnion("authType", [
   z.object({
     apiToken: z.string().trim().min(1).max(16_384),
@@ -273,6 +288,7 @@ type BrowserOAuthProvider =
   | "posthog"
   | "sentry"
   | "slack"
+  | "supabase"
   | "vercel";
 
 async function consumeBrowserOAuthConnectionState(input: {
@@ -648,7 +664,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "dash0" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
-                  definition.id === "langfuse"
+                  definition.id === "langfuse" ||
+                  definition.id === "supabase"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -792,7 +809,8 @@ export const integrationRoutes = new Hono()
       parsedProvider.data === "dash0" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash" ||
-      parsedProvider.data === "langfuse"
+      parsedProvider.data === "langfuse" ||
+      parsedProvider.data === "supabase"
     ) {
       return context.json(
         { error: `Use the ${definition.name} connection endpoint` },
@@ -1929,6 +1947,209 @@ export const integrationRoutes = new Hono()
       return context.json(
         { error: "Unable to verify the Langfuse connection" },
         502,
+      );
+    }
+  })
+  .post("/supabase/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = supabaseConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Enter a valid Supabase project ID and access level" },
+        400,
+      );
+    }
+
+    let accountId: string | undefined;
+    let preserveExistingAccount = false;
+    try {
+      const mcpUrl = supabaseMcpUrl(parsed.data);
+      const externalAccountId = supabaseExternalAccountId(parsed.data);
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId,
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+      });
+      preserveExistingAccount = existing?.status === "connected";
+      accountId = existing?.id ?? await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        externalAccountId,
+        displayName: supabaseDisplayName(parsed.data),
+        encryptedCredentials: encryptCredentials({
+          accessMode: parsed.data.accessMode,
+          authType: "oauth",
+          mcpUrl,
+          oauth: {},
+          projectRef: parsed.data.projectRef,
+        }),
+        credentialKeyVersion: 1,
+        metadata: {
+          accessMode: parsed.data.accessMode,
+          mcpUrl,
+          projectRef: parsed.data.projectRef,
+        },
+        status: "pending",
+      });
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "supabase",
+        codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
+        returnTo: parsed.data.returnTo,
+        routingUrl: integrationCallbackUrl("supabase"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            accessMode: parsed.data.accessMode,
+            authType: "oauth",
+            mcpUrl,
+            oauth: oauthResult.oauth,
+            projectRef: parsed.data.projectRef,
+          }),
+        },
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        state: connectionState,
+        userId: tenant.user.id,
+      });
+      if (!updated) throw new Error("The Supabase OAuth state was not updated");
+      return context.json({ redirectUrl: oauthResult.authorizationUrl });
+    } catch (error) {
+      logCustomMcpError("connect", error, accountId);
+      if (accountId && !preserveExistingAccount) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.json(
+        { error: "Unable to start Supabase authorization" },
+        502,
+      );
+    }
+  })
+  .get("/supabase/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "supabase", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    let preserveExistingAccount = false;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "supabase",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "supabase", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({
+          accountId: z.uuid(),
+          preserveExistingAccount: z.boolean().default(false),
+        })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      preserveExistingAccount = callbackState.preserveExistingAccount;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "supabase",
+      });
+      if (!account || (!preserveExistingAccount && account.status !== "pending")) {
+        throw new Error("The pending Supabase connection was not found");
+      }
+      const pendingCredentials = z
+        .object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const credentials = parseSupabaseCredentials(
+        decryptCredentials<Record<string, unknown>>(
+          pendingCredentials.encryptedCredentials,
+        ),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Supabase OAuth access token is missing");
+      const tools = await listCustomMcpTools({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      if (!hasRequiredSupabaseTools({
+        accessMode: credentials.accessMode,
+        tools,
+      })) {
+        throw new Error("Supabase did not expose the required context tools");
+      }
+      const updated = await updateIntegrationAccountCredentials({
+        encryptedCredentials: encryptCredentials({
+          ...credentials,
+          oauth,
+        }),
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "supabase",
+        status: "connected",
+      });
+      if (!updated) throw new Error("The Supabase connection was not updated");
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          access_mode: credentials.accessMode,
+          integration_account_id: accountId,
+          provider: "supabase",
+          project_ref: credentials.projectRef,
+          tool_count: tools.length,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "supabase", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId && !preserveExistingAccount) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "supabase",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
       );
     }
   })
