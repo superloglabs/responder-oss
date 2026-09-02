@@ -57,13 +57,20 @@ export function SupabaseConnectionDialog({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const cancel = useCallback(() => {
+    if (selectingProject) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("integration");
+      url.searchParams.delete("status");
+      url.searchParams.delete("selection_state");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
     setProjects([]);
     setProjectRef("");
     setAccessMode("logs");
     setError(null);
     setIsSubmitting(false);
     onCancel();
-  }, [onCancel]);
+  }, [onCancel, selectingProject]);
 
   useEffect(() => {
     if (!open || !selectionState) return;
