@@ -35,6 +35,7 @@ export const issueEvidenceSchema = z.object({
     "aws",
     "gcp",
     "datadog",
+    "dash0",
     "axiom",
     "sentry",
     "clickstack",

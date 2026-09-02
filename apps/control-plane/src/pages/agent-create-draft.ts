@@ -1,6 +1,6 @@
 import type { AgentOptions, AgentPrMode } from "../agents-api";
 
-export type InputKind = "sentry_issue" | "slack_channel";
+export type InputKind = "sentry_issue" | "dash0_alert" | "slack_channel";
 export type OutputMode = "thread" | "output_channel";
 export type Severity = "SEV-1" | "SEV-2" | "SEV-3";
 
@@ -8,6 +8,7 @@ export interface CreateDraft {
   inputKind: InputKind;
   sentryAccountId: string;
   sentryProjectResourceIds: string[];
+  dash0AccountId: string;
   slackInputResourceId: string;
   outputMode: OutputMode;
   outputChannelResourceId: string;
@@ -39,6 +40,7 @@ export function draftForSessionStorage(
     inputKind: draft.inputKind,
     sentryAccountId: draft.sentryAccountId,
     sentryProjectResourceIds: draft.sentryProjectResourceIds,
+    dash0AccountId: draft.dash0AccountId,
     slackInputResourceId: draft.slackInputResourceId,
     outputMode: draft.outputMode,
     outputChannelResourceId: draft.outputChannelResourceId,

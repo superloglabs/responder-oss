@@ -244,6 +244,29 @@ export async function getOrganizationIntegrationAccount(input: {
   return rows[0] ?? null;
 }
 
+export async function getConnectedIntegrationAccountCredential(input: {
+  integrationAccountId: string;
+  provider: IntegrationProvider;
+}) {
+  const rows = await getDatabase()
+    .select({
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      organizationId: integrationAccounts.organizationId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.provider, input.provider),
+        eq(integrationAccounts.status, "connected"),
+        isNotNull(integrationAccounts.encryptedCredentials),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function getOrganizationIntegrationAccountByExternalId(input: {
   externalAccountId: string;
   organizationId: string;

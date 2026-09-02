@@ -66,6 +66,7 @@ const contextProviderMetadata: Record<
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
   datadog: { category: "Observability", searchTerms: "apm logs monitors" },
+  dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
   axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
   clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
   langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
@@ -83,6 +84,7 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "gcp",
   "custom_mcp",
   "langfuse",
+  "dash0",
 ]);
 
 const contextProviderOrder: ContextAccount["provider"][] = [

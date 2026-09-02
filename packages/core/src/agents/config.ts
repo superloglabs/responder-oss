@@ -34,6 +34,10 @@ export const agentTriggerSchema = z.discriminatedUnion("kind", [
     monitorIds: z.array(externalResourceId).min(1, "Choose at least one Datadog monitor"),
   }),
   z.object({
+    kind: z.literal("dash0_alert"),
+    integrationAccountId,
+  }),
+  z.object({
     kind: z.literal("slack_channel"),
     integrationAccountId,
     channelId: externalResourceId,

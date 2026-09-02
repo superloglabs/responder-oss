@@ -1,6 +1,7 @@
 export type TriggerKind =
   | "sentry_issue"
   | "datadog_monitor"
+  | "dash0_alert"
   | "slack_channel"
   | "slack_mention";
 
@@ -16,6 +17,10 @@ export type AgentTrigger =
       kind: "datadog_monitor";
       integrationAccountId: string;
       monitorIds: string[];
+    }
+  | {
+      kind: "dash0_alert";
+      integrationAccountId: string;
     }
   | {
       kind: "slack_channel";
@@ -74,6 +79,7 @@ export interface AgentOptions {
       | "slack"
       | "sentry"
       | "datadog"
+      | "dash0"
       | "axiom"
       | "clickstack"
       | "upstash"
@@ -136,6 +142,7 @@ export interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "dash0"
     | "axiom"
     | "upstash"
     | "langfuse"
@@ -175,7 +182,7 @@ export interface AgentDetail {
     title: string;
     status: "pending" | "investigating" | "resolved" | "failed";
     input: {
-      provider: "sentry" | "datadog" | "slack";
+      provider: "sentry" | "datadog" | "dash0" | "slack";
       externalEventId: string;
       title: string;
       body: string;
@@ -206,6 +213,7 @@ export interface IssueEvidence {
     | "aws"
     | "gcp"
     | "datadog"
+    | "dash0"
     | "axiom"
     | "sentry"
     | "clickstack"
@@ -329,7 +337,7 @@ export interface InvestigationDetail {
   title: string;
   status: "pending" | "investigating" | "resolved" | "failed";
   input: {
-    provider: "sentry" | "datadog" | "slack";
+    provider: "sentry" | "datadog" | "dash0" | "slack";
     externalEventId: string;
     title: string;
     body: string;
@@ -616,6 +624,8 @@ export function triggerLabel(trigger: TriggerKind | null): string {
       return "Every Sentry error";
     case "datadog_monitor":
       return "Datadog monitor";
+    case "dash0_alert":
+      return "Dash0 failed check";
     case "slack_channel":
       return "Slack channel";
     case "slack_mention":

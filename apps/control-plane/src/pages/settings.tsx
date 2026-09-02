@@ -9,6 +9,10 @@ import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import {
+  Dash0ConnectionDialog,
+  Dash0WebhookSetupDialog,
+} from "../components/dash0-connection-dialog";
 import { ArrowIcon, ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
@@ -30,6 +34,7 @@ interface IntegrationSummary {
     | "slack"
     | "sentry"
     | "datadog"
+    | "dash0"
     | "axiom"
     | "upstash"
     | "langfuse"
@@ -230,6 +235,7 @@ export function SettingsPage() {
       "gcp",
       "sentry",
       "datadog",
+      "dash0",
       "axiom",
       "upstash",
       "langfuse",
@@ -367,6 +373,15 @@ function DefaultIntegrationCard({
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const [connectingDash0, setConnectingDash0] = useState(false);
+  const returnedAccountId = new URLSearchParams(window.location.search).get(
+    "integration_account_id",
+  );
+  const [configuringDash0Webhook, setConfiguringDash0Webhook] = useState(
+    integration.id === "dash0" &&
+      new URLSearchParams(window.location.search).get("integration") === "dash0" &&
+      new URLSearchParams(window.location.search).get("status") === "connected",
+  );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
 
@@ -374,6 +389,11 @@ function DefaultIntegrationCard({
     if (!actionUrl || isConnecting) return;
     if (integration.id === "datadog") {
       setChoosingDatadogSite(true);
+      return;
+    }
+    if (integration.id === "dash0") {
+      if (integration.state === "connected") setConfiguringDash0Webhook(true);
+      else setConnectingDash0(true);
       return;
     }
     if (integration.id === "custom_mcp") {
@@ -467,6 +487,19 @@ function DefaultIntegrationCard({
         onCancel={() => setConnectingLangfuse(false)}
         open={connectingLangfuse}
         returnTo="/settings"
+      />
+      <Dash0ConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingDash0(false)}
+        open={connectingDash0}
+        returnTo="/settings"
+      />
+      <Dash0WebhookSetupDialog
+        accountId={
+          returnedAccountId ?? integration.accounts[0]?.id ?? ""
+        }
+        onClose={() => setConfiguringDash0Webhook(false)}
+        open={configuringDash0Webhook}
       />
       <ClickStackConnectionDialog
         connectUrl={integration.connectUrl ?? ""}

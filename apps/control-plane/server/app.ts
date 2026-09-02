@@ -25,6 +25,7 @@ import { queueInvestigation } from "./investigations/queue.js";
 import { getActiveTenant } from "./tenant.js";
 import { githubWebhookRoutes } from "./webhooks/github.js";
 import { sentryWebhookRoutes } from "./webhooks/sentry.js";
+import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 
 const sessionCookiePattern =
@@ -395,6 +396,7 @@ export const app = instrumentedApp
   .route("/api/integrations", integrationRoutes)
   .route("/api/webhooks/github", githubWebhookRoutes)
   .route("/api/webhooks/sentry", sentryWebhookRoutes)
+  .route("/api/webhooks/dash0", dash0WebhookRoutes)
   .route("/api/webhooks/slack", slackWebhookRoutes)
   .post("/api/investigations", async (context) => {
     const authorization = context.req.header("authorization") ?? null;

@@ -7,6 +7,7 @@ export function integrationCallbackUrl(
     | "axiom"
     | "clickstack"
     | "custom_mcp"
+    | "dash0"
     | "datadog"
     | "github"
     | "linear"
@@ -17,6 +18,15 @@ export function integrationCallbackUrl(
   const callbackBaseUrl =
     process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
   return `${callbackBaseUrl}/api/integrations/${provider}/callback`;
+}
+
+export function dash0WebhookUrl(integrationAccountId: string): string {
+  const callbackBaseUrl =
+    process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
+  return new URL(
+    `/api/webhooks/dash0/${encodeURIComponent(integrationAccountId)}`,
+    callbackBaseUrl,
+  ).toString();
 }
 
 export function settingsRedirect(

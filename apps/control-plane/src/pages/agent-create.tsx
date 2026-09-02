@@ -44,6 +44,10 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import {
+  Dash0ConnectionDialog,
+  Dash0WebhookSetupDialog,
+} from "../components/dash0-connection-dialog";
+import {
   ChevronDownIcon,
   ProviderGlyph,
   RepositoryIcon,
@@ -100,6 +104,7 @@ const CONTEXT_PROVIDER_METADATA: Record<
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
   datadog: { category: "Observability", searchTerms: "apm logs monitors" },
+  dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
   axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
   clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
   langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
@@ -118,6 +123,7 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "gcp",
   "custom_mcp",
   "langfuse",
+  "dash0",
 ]);
 
 const EMPTY_OPTIONS: AgentOptions = {
@@ -226,6 +232,10 @@ function draftFromConfiguration(
     configuration.trigger.kind === "slack_channel"
       ? configuration.trigger
       : null;
+  const dash0Trigger =
+    configuration.trigger.kind === "dash0_alert"
+      ? configuration.trigger
+      : null;
   const outputReporting =
     configuration.reporting.mode === "thread"
       ? null
@@ -235,7 +245,11 @@ function draftFromConfiguration(
   );
 
   return {
-    inputKind: sentryTrigger ? "sentry_issue" : "slack_channel",
+    inputKind: sentryTrigger
+      ? "sentry_issue"
+      : dash0Trigger
+        ? "dash0_alert"
+        : "slack_channel",
     sentryAccountId: sentryTrigger?.integrationAccountId,
     sentryProjectResourceIds: sentryTrigger
       ? options.resources
@@ -247,6 +261,7 @@ function draftFromConfiguration(
           )
           .map((resource) => resource.id)
       : undefined,
+    dash0AccountId: dash0Trigger?.integrationAccountId,
     slackInputResourceId: slackTrigger
       ? options.resources.find(
           (resource) =>
@@ -291,6 +306,7 @@ function createInitialDraft(
   const configured = draftFromConfiguration(options, configuration);
   const defaultContext = defaultAgentContext(options);
   const sentryAccounts = accountsFor(options, "sentry");
+  const dash0Accounts = accountsFor(options, "dash0");
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
   const vercelProjects = resourcesOfKind(options, "vercel_project");
@@ -340,6 +356,14 @@ function createInitialDraft(
         sentryProjects.some((project) => project.id === id),
       ) ??
       projectsForAccount.slice(0, 1).map((project) => project.id),
+    dash0AccountId:
+      dash0Accounts.some((account) => account.id === saved.dash0AccountId)
+        ? saved.dash0AccountId!
+        : dash0Accounts.some(
+              (account) => account.id === configured.dash0AccountId,
+            )
+          ? configured.dash0AccountId!
+          : dash0Accounts[0]?.id ?? "",
     slackInputResourceId:
       slackChannels.some((channel) => channel.id === saved.slackInputResourceId)
         ? saved.slackInputResourceId!
@@ -458,6 +482,7 @@ export function AgentCreatePage() {
   const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
+  const dash0JustConnected = successfulConnectionReturn("dash0");
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
@@ -475,6 +500,7 @@ export function AgentCreatePage() {
     slackJustConnected ||
     githubJustConnected ||
     datadogJustConnected ||
+    dash0JustConnected ||
     axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
@@ -532,6 +558,10 @@ export function AgentCreatePage() {
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
   const [connectingGcp, setConnectingGcp] = useState(false);
+  const [connectingDash0, setConnectingDash0] = useState(false);
+  const [dash0WebhookAccountId, setDash0WebhookAccountId] = useState(
+    dash0JustConnected ? returnedIntegrationAccountId ?? "" : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [refreshingGithubRepositories, setRefreshingGithubRepositories] =
     useState(false);
@@ -706,6 +736,22 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedDatadog.id);
         }
+        const connectedDash0 = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "dash0",
+            )
+          : accountsFor(loadedOptions, "dash0")[0];
+        if (
+          dash0JustConnected &&
+          connectedDash0 &&
+          !loadedDraft.contextAccountIds.includes(connectedDash0.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedDash0.id);
+          loadedDraft.dash0AccountId = connectedDash0.id;
+          setDash0WebhookAccountId(connectedDash0.id);
+        }
         const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
         if (
           axiomJustConnected &&
@@ -850,6 +896,7 @@ export function AgentCreatePage() {
     clickStackJustConnected,
     customMcpJustConnected,
     datadogJustConnected,
+    dash0JustConnected,
     draftStorageKey,
     githubJustConnected,
     isEditing,
@@ -893,6 +940,10 @@ export function AgentCreatePage() {
   );
   const datadogAccounts = useMemo(
     () => accountsFor(options, "datadog"),
+    [options],
+  );
+  const dash0Accounts = useMemo(
+    () => accountsFor(options, "dash0"),
     [options],
   );
   const axiomAccounts = useMemo(
@@ -983,6 +1034,9 @@ export function AgentCreatePage() {
   const activeSentryAccount =
     sentryAccounts.find((account) => account.id === draft.sentryAccountId) ??
     sentryAccounts[0];
+  const activeDash0Account =
+    dash0Accounts.find((account) => account.id === draft.dash0AccountId) ??
+    dash0Accounts[0];
   const activeGithubAccount =
     githubAccounts.find((account) => account.id === draft.githubAccountId) ??
     githubAccounts[0];
@@ -1028,6 +1082,8 @@ export function AgentCreatePage() {
   const inputRequirement =
     draft.inputKind === "sentry_issue" && selectedSentryProjects.length === 0
       ? "Connect Sentry and choose at least one project."
+      : draft.inputKind === "dash0_alert" && !activeDash0Account
+        ? "Connect Dash0 and choose an account."
       : draft.inputKind === "slack_channel" && !selectedSlackInput
         ? "Connect Slack and choose an alert channel."
         : null;
@@ -1159,6 +1215,7 @@ export function AgentCreatePage() {
       provider === "aws" ||
       provider === "gcp" ||
       provider === "datadog" ||
+      provider === "dash0" ||
       provider === "clickstack" ||
       provider === "upstash" ||
       provider === "langfuse"
@@ -1167,6 +1224,7 @@ export function AgentCreatePage() {
       if (provider === "aws") setConnectingAws(true);
       else if (provider === "gcp") setConnectingGcp(true);
       else if (provider === "datadog") setChoosingDatadogSite(true);
+      else if (provider === "dash0") setConnectingDash0(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
       else if (provider === "langfuse") setConnectingLangfuse(true);
       else setConnectingUpstash(true);
@@ -1460,7 +1518,12 @@ export function AgentCreatePage() {
               (project) => project.externalId,
             ),
           }
-        : {
+        : currentDraft.inputKind === "dash0_alert"
+          ? {
+              kind: "dash0_alert" as const,
+              integrationAccountId: activeDash0Account!.id,
+            }
+          : {
             kind: "slack_channel" as const,
             integrationAccountId: selectedSlackInput!.integrationAccountId,
             channelId: selectedSlackInput!.externalId,
@@ -1478,13 +1541,17 @@ export function AgentCreatePage() {
     const inputLabel =
       trigger.kind === "sentry_issue"
         ? "Sentry error"
-        : slackChannelLabel(selectedSlackInput!.displayName);
+        : trigger.kind === "dash0_alert"
+          ? "Dash0 alert"
+          : slackChannelLabel(selectedSlackInput!.displayName);
     const configuration: AgentConfiguration = {
       name: existingConfiguration?.name ?? `${inputLabel} responder`,
       description:
         existingConfiguration?.description ??
         (trigger.kind === "sentry_issue"
           ? "Investigates new and regressed errors and reports actionable findings."
+          : trigger.kind === "dash0_alert"
+            ? "Investigates ongoing failed checks from Dash0 and reports actionable findings."
           : `Investigates alerts posted in ${slackChannelLabel(selectedSlackInput!.displayName)}.`),
       model: existingConfiguration?.model ?? "instance/default",
       instructions: currentDraft.instructions.trim(),
@@ -1553,6 +1620,9 @@ export function AgentCreatePage() {
     datadogAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    dash0Accounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     axiomAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1601,6 +1671,17 @@ export function AgentCreatePage() {
         onCancel={() => setChoosingDatadogSite(false)}
         open={choosingDatadogSite}
         returnTo={returnTo}
+      />
+      <Dash0ConnectionDialog
+        connectUrl={integrationFor("dash0")?.connectUrl ?? ""}
+        onCancel={() => setConnectingDash0(false)}
+        open={connectingDash0}
+        returnTo={returnTo}
+      />
+      <Dash0WebhookSetupDialog
+        accountId={dash0WebhookAccountId}
+        onClose={() => setDash0WebhookAccountId("")}
+        open={Boolean(dash0WebhookAccountId)}
       />
       <CustomMcpConnectionDialog
         connectUrl={integrationFor("custom_mcp")?.connectUrl ?? ""}
@@ -1782,6 +1863,19 @@ export function AgentCreatePage() {
                 value="sentry_issue"
               />
               <ChoiceCard
+                checked={draft.inputKind === "dash0_alert"}
+                description="Run whenever Dash0 reports an ongoing failed check."
+                name="inputKind"
+                onChange={() =>
+                  updateDraft({
+                    inputKind: "dash0_alert",
+                    outputMode: "output_channel",
+                  })
+                }
+                title="Every Dash0 failed check"
+                value="dash0_alert"
+              />
+              <ChoiceCard
                 checked={draft.inputKind === "slack_channel"}
                 description="Run when an alert is posted in a channel."
                 name="inputKind"
@@ -1867,6 +1961,41 @@ export function AgentCreatePage() {
                 title="Connect Sentry to continue"
               />
             )
+          ) : draft.inputKind === "dash0_alert" ? (
+            activeDash0Account ? (
+              <div className="connectedSetup">
+                <ProviderMark provider="dash0" />
+                <SelectField
+                  className="createField createField--account"
+                  label="Dash0 organization · connected"
+                  onChange={(accountId) =>
+                    updateDraft({ dash0AccountId: accountId })
+                  }
+                  options={dash0Accounts.map((account) => ({
+                    label: account.displayName,
+                    value: account.id,
+                  }))}
+                  value={activeDash0Account.id}
+                />
+                <Button
+                  onClick={() => setDash0WebhookAccountId(activeDash0Account.id)}
+                  size="small"
+                  type="button"
+                  variant="secondary"
+                >
+                  Webhook setup
+                </Button>
+              </div>
+            ) : (
+              <ConnectionPrompt
+                actionLabel="Set up"
+                integration={integrationFor("dash0")}
+                isConnecting={connectingDash0}
+                onConnect={() => connect("dash0")}
+                provider="dash0"
+                title="Connect Dash0 to continue"
+              />
+            )
           ) : slackConnected ? (
               <Panel
                 className="connectedSetup connectedSetup--channel"
@@ -1934,12 +2063,12 @@ export function AgentCreatePage() {
               description="Where should results be posted?"
               title="Output"
             >
-          {draft.inputKind === "sentry_issue" ? (
+          {draft.inputKind !== "slack_channel" ? (
             <div className="requiredOutput">
               <div className="requiredOutput__label">
                 <span className="radioMark radioMark--selected" />
                 <strong>Post to an output channel</strong>
-                <small>Required for Sentry input</small>
+                <small>Required for provider alerts</small>
               </div>
               {slackConnected ? (
                 <ChannelPicker
@@ -2739,6 +2868,26 @@ export function AgentCreatePage() {
                       />
                     );
                   })}
+                  {dash0Accounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = dash0Accounts.length > 1 ? account.displayName : "Dash0";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setDash0WebhookAccountId(account.id)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Logs, metrics, traces, checks, and dashboards`}
+                        key={account.id}
+                        label={label}
+                        provider="dash0"
+                      />
+                    );
+                  })}
                   {axiomAccounts.map((account) => {
                     const connected = draft.contextAccountIds.includes(account.id);
                     const label = axiomAccounts.length > 1 ? account.displayName : "Axiom";
@@ -3456,7 +3605,7 @@ function ConnectionPrompt({
   integration: IntegrationSummary | undefined;
   isConnecting: boolean;
   onConnect: () => void;
-  provider: "slack" | "sentry";
+  provider: "dash0" | "slack" | "sentry";
   title: string;
 }) {
   const comingSoon = integration?.state === "coming_soon";

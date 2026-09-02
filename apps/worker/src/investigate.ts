@@ -10,6 +10,7 @@ import {
   getRuntimeAxiomConnection,
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
+  getRuntimeDash0Connections,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
@@ -45,6 +46,7 @@ import { createAwsInspectionTools } from "./aws-inspection-tools.js";
 import { createGcpMcpServers } from "./gcp.js";
 import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
+import { createDash0McpServer } from "./dash0.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
@@ -132,6 +134,7 @@ export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
   gcpConnections?: ReadonlyArray<{ accountId: string }>;
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
+  dash0Connections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
   investigationId: string;
@@ -142,11 +145,13 @@ export function contextServerConnectFailureEvent(input: {
     ? "AWS"
     : input.serverName.startsWith("gcp-")
       ? "GCP"
-    : input.serverName.startsWith("langfuse-")
-      ? "Langfuse"
-      : input.serverName.startsWith("upstash-")
-        ? "Upstash"
-        : null;
+      : input.serverName.startsWith("dash0-")
+        ? "Dash0"
+        : input.serverName.startsWith("langfuse-")
+          ? "Langfuse"
+          : input.serverName.startsWith("upstash-")
+            ? "Upstash"
+            : null;
   const accountId = input.serverName.startsWith("upstash-")
     ? input.upstashConnection?.accountId
     : input.serverName.startsWith("aws-")
@@ -157,14 +162,20 @@ export function contextServerConnectFailureEvent(input: {
         ? input.gcpConnections?.find(
             (connection) => input.serverName.startsWith(`gcp-${connection.accountId}-`),
           )?.accountId
-      : input.serverName.startsWith("langfuse-")
-        ? input.langfuseConnections?.find(
-            (connection) =>
-              input.serverName === `langfuse-${connection.accountId}`,
-          )?.accountId
-        : input.customMcpConnections.find(
-            (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
-          )?.accountId;
+        : input.serverName.startsWith("dash0-")
+          ? input.dash0Connections?.find(
+              (connection) =>
+                input.serverName === `dash0-${connection.accountId}`,
+            )?.accountId
+          : input.serverName.startsWith("langfuse-")
+            ? input.langfuseConnections?.find(
+                (connection) =>
+                  input.serverName === `langfuse-${connection.accountId}`,
+              )?.accountId
+            : input.customMcpConnections.find(
+                (connection) =>
+                  input.serverName === `custom-mcp-${connection.accountId}`,
+              )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
     error: protectedProvider
@@ -284,6 +295,7 @@ export function investigationInstructions(input: {
   customMcpNames?: string[];
   axiomConnected?: boolean;
   datadogConnected: boolean;
+  dash0AccountNames?: string[];
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
@@ -304,6 +316,7 @@ export function investigationInstructions(input: {
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
+  const dash0AccountNames = input.dash0AccountNames ?? [];
   const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const slackChannels = input.slackChannels ?? [];
@@ -312,6 +325,7 @@ export function investigationInstructions(input: {
   const repositoryInstructions = input.repositoryInstructions ?? [];
   const observabilityConnected =
     input.datadogConnected ||
+    dash0AccountNames.length > 0 ||
     input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
@@ -342,6 +356,9 @@ export function investigationInstructions(input: {
       : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
+      : null,
+    dash0AccountNames.length > 0
+      ? `Use the connected read-only Dash0 tools to inspect relevant services, failed checks, logs, metrics, and traces before concluding. Never create or modify Dash0 resources and do not delegate the investigation to Agent0. Connected Dash0 organizations: ${dash0AccountNames.join(", ")}.`
       : null,
     input.axiomConnected
       ? "Use the connected read-only Axiom tools to inspect telemetry relevant to the Slack alert, including logs, traces, metrics, and surrounding service activity, before concluding. Never create, update, or delete Axiom resources."
@@ -498,6 +515,7 @@ export async function runInvestigationAgent(
     gcpConnections,
     axiomConnection,
     datadogConnection,
+    dash0Connections,
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
@@ -513,6 +531,7 @@ export async function runInvestigationAgent(
     getRuntimeGcpConnections(job.config.id),
     getRuntimeAxiomConnection(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
+    getRuntimeDash0Connections(job.config.id),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -543,6 +562,7 @@ export async function runInvestigationAgent(
   const axiomServer = axiomConnection
     ? createAxiomMcpServer(axiomConnection)
     : null;
+  const dash0Servers = dash0Connections.map(createDash0McpServer);
   const sentryServer = sentryConnection
     ? createSentryMcpServer(sentryConnection, {
         investigationId: job.investigationId,
@@ -573,6 +593,7 @@ export async function runInvestigationAgent(
     linearServer,
     slackServer,
     upstashServer,
+    ...dash0Servers,
     ...langfuseServers,
     ...awsServers,
     ...gcpServers,
@@ -602,6 +623,7 @@ export async function runInvestigationAgent(
                 awsConnections,
                 gcpConnections,
                 customMcpConnections,
+                dash0Connections,
                 error,
                 investigationId: job.investigationId,
                 langfuseConnections,
@@ -618,6 +640,9 @@ export async function runInvestigationAgent(
           }
           if (server.name.startsWith("gcp-")) {
             throw new Error("Unable to connect to GCP context");
+          }
+          if (server.name.startsWith("dash0-")) {
+            throw new Error("Unable to connect to Dash0 context");
           }
           if (server.name.startsWith("langfuse-")) {
             throw new Error("Unable to connect to Langfuse context");
@@ -734,6 +759,9 @@ export async function runInvestigationAgent(
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,
+      dash0AccountNames: dash0Connections.map(
+        (connection) => connection.displayName,
+      ),
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
