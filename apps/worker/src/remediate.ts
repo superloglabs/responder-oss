@@ -19,9 +19,7 @@ import {
 import type { RemediationJob } from "@responder/core/jobs";
 import type { IssueRemediationSubmission } from "@responder/core/investigations/report";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
-import {
-  createPullRequestFromSandbox,
-} from "./github-pull-request.js";
+import { createPullRequestFromSandbox } from "./github-pull-request.js";
 import { checkoutRuntimeRepository } from "./repositories.js";
 import {
   closeDaytonaSandbox,
@@ -29,6 +27,7 @@ import {
   createDaytonaSandboxSession,
   prepareDaytonaPatchSandbox,
 } from "./sandbox.js";
+import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
 type CodeChangeRemediation = Extract<
   IssueRemediationSubmission,
@@ -104,6 +103,7 @@ export async function applyProposedDiff(
   repositoryPath: string,
   diff: string,
 ): Promise<void> {
+  assertNoDaytonaSecretPlaceholders(diff, "Proposed diff");
   const patchPath = "/home/daytona/workspace/.responder/proposed.patch";
   await session.materializeEntry({
     entry: { type: "file", content: `${diff.trim()}\n` },
@@ -174,6 +174,10 @@ export async function runProposedRemediation(
         repository: selected.repository.fullName,
         repositoryPath: checkout.path,
         requestId: request.requestId,
+        // This sandbox receives no workspace secrets. The exact stored diff is
+        // scanned before application, so an unchanged placeholder fixture in a
+        // touched file is safe and must not block publication.
+        scanChangedFileContents: false,
         title: pullRequest.title,
         workspaceBaseSha: checkout.workspaceBaseSha,
       },

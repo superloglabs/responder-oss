@@ -99,6 +99,53 @@ describe("GitHub pull requests from Daytona", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("allows an existing placeholder fixture when the stored diff was scanned", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(commandResult(0, "src/config.ts\0"))
+        .mockResolvedValueOnce(commandResult(0, "present"))
+        .mockResolvedValueOnce(commandResult(1)),
+      readFile: vi
+        .fn()
+        .mockResolvedValue(
+          new TextEncoder().encode('export const fixture = "dtn_secret_1234-abcd";'),
+        ),
+    } as unknown as DaytonaSandboxSession;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
+      .mockResolvedValueOnce(Response.json({ ref: "refs/heads/fix" }))
+      .mockResolvedValueOnce(
+        Response.json({ number: 42, html_url: "https://github.com/acme/app/pull/42" }),
+      );
+
+    await expect(
+      createPullRequestFromSandbox(
+        {
+          baseBranch: "main",
+          baseSha: "a".repeat(40),
+          body: "Pull request body",
+          installationId: 123,
+          repository: "acme/app",
+          repositoryPath: "/home/daytona/workspace/repositories/acme/app",
+          requestId: "12345678-1234-1234-1234-123456789012",
+          scanChangedFileContents: false,
+          title: "Fix: Broken route",
+          workspaceBaseSha: "b".repeat(40),
+        },
+        session,
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+        },
+      ),
+    ).resolves.toMatchObject({ number: 42 });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
   it("rejects a pull request title containing a workspace secret placeholder", async () => {
     const session = {
       execCommand: vi
