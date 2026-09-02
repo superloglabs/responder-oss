@@ -3,7 +3,7 @@ import {
   updateIssueRemediations,
 } from "@responder/core/db/issues";
 import {
-  issueRemediationSubmissionSchema,
+  authoredIssueRemediationsSchema,
 } from "@responder/core/investigations/report";
 import { z } from "zod";
 
@@ -18,7 +18,7 @@ export function createIssueRemediationUpdateTool(input: {
       "Replace the proposed remediation options for an existing issue after follow-up feedback. Only update an issue when the new evidence changes its remediation; do not create issues or pull requests.",
     parameters: z.object({
       issueId: z.uuid(),
-      remediations: z.array(issueRemediationSubmissionSchema).min(1).max(10),
+      remediations: authoredIssueRemediationsSchema,
     }),
     async execute(request) {
       if (!input.allowedIssueIds.has(request.issueId)) {

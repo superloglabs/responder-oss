@@ -310,3 +310,36 @@ export async function prepareDaytonaSandbox(
     );
   }
 }
+
+/** Prepare only the tools needed to apply and publish a proposed diff. */
+export async function prepareDaytonaPatchSandbox(
+  session: DaytonaSandboxSession,
+): Promise<void> {
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      "if command -v git >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then exit 0; fi",
+      "if ! command -v apt-get >/dev/null 2>&1; then echo 'git or tar is unavailable and apt-get is missing' >&2; exit 1; fi",
+      "if [ \"$(id -u)\" -eq 0 ]; then",
+      "  apt-get update -qq",
+      "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git tar",
+      "elif command -v sudo >/dev/null 2>&1; then",
+      "  sudo apt-get update -qq",
+      "  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git tar",
+      "else",
+      "  echo 'git and tar installation require root access' >&2",
+      "  exit 1",
+      "fi",
+      "command -v git >/dev/null",
+      "command -v tar >/dev/null",
+    ].join("\n"),
+    maxOutputTokens: 2_000,
+    workdir: "/home/daytona/workspace",
+  });
+  if (!execSucceeded(output)) {
+    const detail = output.split("\nOutput:\n", 2)[1]?.trim();
+    throw new Error(
+      `Unable to install git and tar in Daytona${detail ? `: ${detail}` : ""}`,
+    );
+  }
+}

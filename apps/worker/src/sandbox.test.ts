@@ -5,6 +5,7 @@ import {
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
   type DaytonaCleanupDependencies,
+  prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
 } from "./sandbox.js";
 
@@ -53,6 +54,20 @@ function cleanupHarness(options?: {
 }
 
 describe("Daytona sandbox preparation", () => {
+  it("prepares only git and tar for direct diff publication", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: abc123\nProcess exited with code 0\nOutput:\n",
+      ),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareDaytonaPatchSandbox(session)).resolves.toBeUndefined();
+    const command = vi.mocked(session.execCommand).mock.calls[0]?.[0].cmd;
+    expect(command).toContain("command -v git");
+    expect(command).toContain("command -v tar");
+    expect(command).not.toMatch(/(?:node|python|bun|ripgrep|unzip)/i);
+  });
+
   it("ensures investigation tools are installed before the agent starts", async () => {
     const session = {
       execCommand: vi.fn().mockResolvedValue(

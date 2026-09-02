@@ -621,6 +621,36 @@ export async function checkoutRuntimeRepositories(
   );
 }
 
+export async function checkoutRuntimeRepository(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  repositoryFullName: string,
+  dependencies: RepositoryCheckoutDependencies = defaultDependencies,
+): Promise<CheckedOutRepository> {
+  const repositories = await dependencies.getRepositories(versionId);
+  const repository = repositories.find(
+    (candidate) => candidate.fullName === repositoryFullName,
+  );
+  if (!repository) {
+    throw new Error(
+      `Repository ${repositoryFullName} is not attached to this Agent version`,
+    );
+  }
+  const checkedOut = await checkoutRuntimeRepositoriesWithRefs(
+    session,
+    versionId,
+    new Map(),
+    {
+      ...dependencies,
+      getRepositories: async () => [repository],
+    },
+  );
+  if (!checkedOut[0]) {
+    throw new Error(`Unable to check out ${repositoryFullName}`);
+  }
+  return checkedOut[0];
+}
+
 export async function refreshRuntimeRepositories(
   session: DaytonaSandboxSession,
   versionId: string,
