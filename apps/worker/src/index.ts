@@ -1,5 +1,6 @@
 import {
   createJobBoss,
+  investigationLocalConcurrency,
   investigationQueue,
   linearTicketJobSchema,
   linearTicketQueue,
@@ -428,7 +429,7 @@ await boss.work(
 await migrateLegacyInvestigationHeartbeats(boss, {
   handoffWaitMs: legacyHeartbeatHandoffWaitMs(),
 });
-await boss.work(investigationQueue, { localConcurrency: 1 }, async ([job]) => {
+await boss.work(investigationQueue, { localConcurrency: investigationLocalConcurrency }, async ([job]) => {
   const payload = responderJobSchema.parse(job.data);
   if (payload.kind === "remediation") {
     // Drain jobs queued by older workers while all new remediations use the

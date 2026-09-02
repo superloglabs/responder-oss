@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createJobBoss,
   investigationJobSchema,
+  investigationLocalConcurrency,
   investigationQueue,
   linearTicketQueue,
   migrateLegacyInvestigationHeartbeats,
@@ -15,6 +16,10 @@ import {
 } from "./jobs.js";
 
 describe("background jobs", () => {
+  it("allows two investigations to run concurrently on each worker", () => {
+    expect(investigationLocalConcurrency).toBe(2);
+  });
+
   it("migrates queued legacy investigations without reclassifying active work", async () => {
     const executeSql = vi
       .fn()
