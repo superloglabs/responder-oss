@@ -1,8 +1,8 @@
-import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import { useMemo } from "react";
 import type { IssueRemediation } from "../agents-api";
 import { useColorTheme } from "../color-theme";
+import { remediationFileGroups } from "./remediation-diff-files";
 
 export function RemediationDiff({
   remediation,
@@ -10,28 +10,15 @@ export function RemediationDiff({
   remediation: IssueRemediation & { type: "code_change" };
 }) {
   const { theme } = useColorTheme();
-  const changes = useMemo(() => remediation.changes, [remediation.changes]);
-  const files = useMemo(
-    () => changes.flatMap((change, changeIndex) => {
-      try {
-        return parsePatchFiles(
-          change.diff,
-          `remediation-${remediation.id}-${changeIndex}`,
-          true,
-        ).flatMap((patch) =>
-          patch.files.map((file) => ({ file, repository: change.repository })),
-        );
-      } catch {
-        return [];
-      }
-    }),
-    [changes, remediation.id],
+  const fileGroups = useMemo(
+    () => remediationFileGroups(remediation),
+    [remediation],
   );
 
-  if (files.length === 0) {
+  if (fileGroups.length === 0) {
     return (
       <pre className="remediationDiff__fallback">
-        {changes.map((change) =>
+        {remediation.changes.map((change) =>
           `${change.repository ? `# ${change.repository}\n` : ""}${change.diff}`,
         ).join("\n\n")}
       </pre>
@@ -40,19 +27,27 @@ export function RemediationDiff({
 
   return (
     <div className="remediationDiff">
-      {files.map(({ file, repository }, index) => (
-        <div key={`${remediation.id}-${index}`}>
-          {repository ? <h4>{repository}</h4> : null}
-          <FileDiff
-            className="remediationDiff__file"
-            fileDiff={file}
-            options={{
-              diffIndicators: "bars",
-              diffStyle: "unified",
-              overflow: "scroll",
-              themeType: theme,
-            }}
-          />
+      {fileGroups.map((group, groupIndex) => (
+        <div
+          className="remediationDiff__repository"
+          key={`${remediation.id}-${group.repository ?? "unknown"}-${groupIndex}`}
+        >
+          {group.repository ? <h4>{group.repository}</h4> : null}
+          <div className="remediationDiff__files">
+            {group.files.map((file, fileIndex) => (
+              <FileDiff
+                className="remediationDiff__file"
+                fileDiff={file}
+                key={`${remediation.id}-${groupIndex}-${fileIndex}`}
+                options={{
+                  diffIndicators: "bars",
+                  diffStyle: "unified",
+                  overflow: "scroll",
+                  themeType: theme,
+                }}
+              />
+            ))}
+          </div>
         </div>
       ))}
     </div>
