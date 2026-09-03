@@ -229,7 +229,10 @@ export async function deleteIntegrationAccount(input: {
         sql`exists (
           select 1 from ${agentConfigVersions}, ${integrationAccounts}
           where ${agentConfigVersions.id} = ${agents.activeVersionId}
-            and ${agentConfigVersions.triggerConfig} ->> 'integrationAccountId' = ${integrationAccounts.id}::text
+            and (
+              ${agentConfigVersions.triggerConfig} ->> 'integrationAccountId' = ${integrationAccounts.id}::text
+              or ${agentConfigVersions.contextAccountIds} @> jsonb_build_array(${integrationAccounts.id}::text)
+            )
             and ${integrationAccounts.id} = ${input.integrationAccountId}
             and ${integrationAccounts.organizationId} = ${input.organizationId}
             and ${integrationAccounts.provider} = ${input.provider}

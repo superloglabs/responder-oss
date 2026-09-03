@@ -96,7 +96,10 @@ describe("integration account tenancy", () => {
   it("disables agents before deleting their integration account", async () => {
     const updateWhere = vi.fn().mockResolvedValue(undefined);
     const returning = vi.fn().mockResolvedValue([{ id: "account-1" }]);
-    const deleteWhere = vi.fn(() => ({ returning }));
+    const deleteWhere = vi.fn((condition: unknown) => {
+      void condition;
+      return { returning };
+    });
     const database = {
       delete: vi.fn(() => ({ where: deleteWhere })),
       update: vi.fn(() => ({
@@ -122,6 +125,17 @@ describe("integration account tenancy", () => {
     expect(disableQuery.params).toEqual([
       account.organizationId,
       true,
+      "account-1",
+      account.organizationId,
+      "sentry",
+    ]);
+    expect(disableQuery.sql).toContain(
+      '"context_account_ids" @> jsonb_build_array',
+    );
+    const deleteQuery = new PgDialect().sqlToQuery(
+      deleteWhere.mock.calls[0]![0] as never,
+    );
+    expect(deleteQuery.params).toEqual([
       "account-1",
       account.organizationId,
       "sentry",
@@ -172,7 +186,13 @@ describe("integration account tenancy", () => {
   });
 
   it("targets one Sentry account when reconnecting among several", async () => {
-    const limit = vi.fn().mockResolvedValue([]);
+    const recoverableAccount = {
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: null,
+      externalAccountId: "40000000-0000-4000-8000-000000000000",
+      metadata: { organizationSlug: "example" },
+    };
+    const limit = vi.fn().mockResolvedValue([recoverableAccount]);
     const where = vi.fn((condition: unknown) => {
       void condition;
       return { limit };
@@ -183,10 +203,12 @@ describe("integration account tenancy", () => {
       })),
     } as never);
 
-    await getRecoverableSentryIntegrationAccount(
-      account.organizationId,
-      "30000000-0000-4000-8000-000000000000",
-    );
+    await expect(
+      getRecoverableSentryIntegrationAccount(
+        account.organizationId,
+        "30000000-0000-4000-8000-000000000000",
+      ),
+    ).resolves.toEqual(recoverableAccount);
 
     const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
     expect(query.params).toEqual([
@@ -197,6 +219,7 @@ describe("integration account tenancy", () => {
       "pending",
       "error",
     ]);
+    expect(limit).toHaveBeenCalledWith(1);
   });
 
   it("serializes rotating credential updates without holding a transaction", async () => {

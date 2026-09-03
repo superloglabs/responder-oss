@@ -350,6 +350,7 @@ describe("integration callback routing", () => {
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location")!);
+    expect(location.searchParams.get("status")).toBe("error");
     expect(location.searchParams.get("reason")).toBe(
       "manual_uninstall_required",
     );
