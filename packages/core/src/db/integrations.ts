@@ -1,7 +1,19 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, count, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
+  agentConfigVersions,
+  agents,
   integrationAccounts,
   integrationConnectionStates,
   integrationProvider,
@@ -206,7 +218,29 @@ export async function deleteIntegrationAccount(input: {
   organizationId: string;
   provider: IntegrationProvider;
 }): Promise<boolean> {
-  const deleted = await getDatabase()
+  const database = getDatabase();
+  await database
+    .update(agents)
+    .set({ enabled: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(agents.organizationId, input.organizationId),
+        eq(agents.enabled, true),
+        sql`exists (
+          select 1 from ${agentConfigVersions}, ${integrationAccounts}
+          where ${agentConfigVersions.id} = ${agents.activeVersionId}
+            and (
+              ${agentConfigVersions.triggerConfig} ->> 'integrationAccountId' = ${integrationAccounts.id}::text
+              or ${agentConfigVersions.contextAccountIds} @> jsonb_build_array(${integrationAccounts.id}::text)
+            )
+            and ${integrationAccounts.id} = ${input.integrationAccountId}
+            and ${integrationAccounts.organizationId} = ${input.organizationId}
+            and ${integrationAccounts.provider} = ${input.provider}
+        )`,
+      ),
+    );
+
+  const deleted = await database
     .delete(integrationAccounts)
     .where(
       and(
@@ -217,6 +251,34 @@ export async function deleteIntegrationAccount(input: {
     )
     .returning({ id: integrationAccounts.id });
   return deleted.length > 0;
+}
+
+export async function deleteIntegrationAccountsByExternalId(input: {
+  externalAccountId: string;
+  provider: IntegrationProvider;
+}): Promise<number> {
+  const accounts = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      organizationId: integrationAccounts.organizationId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.externalAccountId, input.externalAccountId),
+        eq(integrationAccounts.provider, input.provider),
+      ),
+    );
+  const deleted = await Promise.all(
+    accounts.map((account) =>
+      deleteIntegrationAccount({
+        integrationAccountId: account.id,
+        organizationId: account.organizationId,
+        provider: input.provider,
+      }),
+    ),
+  );
+  return deleted.filter(Boolean).length;
 }
 
 export async function getOrganizationIntegrationAccount(input: {
@@ -487,6 +549,7 @@ export async function setIntegrationAccountStatusIfCredentialsMatch(input: {
 
 export async function getRecoverableSentryIntegrationAccount(
   organizationId: string,
+  integrationAccountId?: string,
 ) {
   const rows = await getDatabase()
     .select({
@@ -500,12 +563,17 @@ export async function getRecoverableSentryIntegrationAccount(
       and(
         eq(integrationAccounts.organizationId, organizationId),
         eq(integrationAccounts.provider, "sentry"),
+        integrationAccountId
+          ? eq(integrationAccounts.id, integrationAccountId)
+          : undefined,
         // A reconnect can be requested while the account is still marked
         // connected (for example when the provider revoked its refresh
         // token). Keep the existing installation eligible so the route can
         // refresh it in place instead of starting a duplicate install flow.
         inArray(integrationAccounts.status, ["connected", "pending", "error"]),
-        isNotNull(integrationAccounts.encryptedCredentials),
+        integrationAccountId
+          ? undefined
+          : isNotNull(integrationAccounts.encryptedCredentials),
       ),
     )
     .limit(1);

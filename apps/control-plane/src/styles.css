@@ -674,6 +674,31 @@ body:has(.appShell--investigation) {
   gap: 8px;
 }
 
+.appShell--settings .integrationCard__hint {
+  display: block;
+  margin-top: 12px;
+}
+
+.appShell--settings .integrationCard__manualAction {
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 38%, transparent);
+  border-radius: var(--ds-radius-small);
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.appShell--settings .integrationCard__manualAction p {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 10px;
+}
+
+.appShell--settings .integrationCard__manualAction > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .appShell--settings .integrationCard__arrow {
   right: 17px;
   bottom: 17px;

@@ -2,11 +2,16 @@ import { createHash, createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { findAgentsForSentryIssue } from "../../../../packages/core/src/db/agents.js";
+import { deleteIntegrationAccountsByExternalId } from "../../../../packages/core/src/db/integrations.js";
 import { queueInvestigation } from "../investigations/queue.js";
 import { sentryWebhookRoutes, verifySentrySignature } from "./sentry.js";
 
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   findAgentsForSentryIssue: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
+  deleteIntegrationAccountsByExternalId: vi.fn(),
 }));
 
 vi.mock("../investigations/queue.js", () => ({
@@ -198,9 +203,44 @@ describe("Sentry issue webhooks", () => {
     expect(findAgentsForSentryIssue).not.toHaveBeenCalled();
   });
 
-  it("ignores signed non-issue resources without querying agents", async () => {
+  it("removes local connections after a signed Sentry uninstall", async () => {
     vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
-    const body = JSON.stringify({ action: "created" });
+    vi.mocked(deleteIntegrationAccountsByExternalId).mockResolvedValue(1);
+    const body = JSON.stringify({
+      action: "deleted",
+      installation: { uuid: "60000000-0000-4000-8000-000000000000" },
+    });
+    const signature = createHmac("sha256", "sentry-secret")
+      .update(body, "utf8")
+      .digest("hex");
+
+    const response = await app.request("/api/webhooks/sentry", {
+      method: "POST",
+      body,
+      headers: {
+        "sentry-hook-resource": "installation",
+        "sentry-hook-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      removedAccounts: 1,
+    });
+    expect(deleteIntegrationAccountsByExternalId).toHaveBeenCalledWith({
+      externalAccountId: "60000000-0000-4000-8000-000000000000",
+      provider: "sentry",
+    });
+    expect(findAgentsForSentryIssue).not.toHaveBeenCalled();
+  });
+
+  it("ignores other signed Sentry installation events", async () => {
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    const body = JSON.stringify({
+      action: "created",
+      installation: { uuid: "60000000-0000-4000-8000-000000000000" },
+    });
     const signature = createHmac("sha256", "sentry-secret")
       .update(body, "utf8")
       .digest("hex");
@@ -216,7 +256,7 @@ describe("Sentry issue webhooks", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
-    expect(findAgentsForSentryIssue).not.toHaveBeenCalled();
+    expect(deleteIntegrationAccountsByExternalId).not.toHaveBeenCalled();
   });
 
   it("returns a retryable failure when an agent handoff fails", async () => {

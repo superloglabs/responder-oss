@@ -7,3 +7,16 @@ export function integrationActionUrl(integration: {
     ? integration.configurationUrl ?? integration.connectUrl
     : integration.connectUrl;
 }
+
+export function sentryConnectionUrl(
+  connectUrl: string,
+  options: { accountId?: string; freshInstall?: boolean } = {},
+): string {
+  const url = new URL(connectUrl, "https://responder.local");
+  url.searchParams.set("returnTo", "/settings");
+  if (options.accountId) {
+    url.searchParams.set("integrationAccountId", options.accountId);
+  }
+  if (options.freshInstall) url.searchParams.set("mode", "install");
+  return `${url.pathname}${url.search}`;
+}
