@@ -320,6 +320,11 @@ export const app = instrumentedApp
     callbackUrl.pathname = "/api/integrations/github/callback";
     return context.redirect(callbackUrl.toString());
   })
+  .get("/sentry/oauth/callback", (context) => {
+    const callbackUrl = new URL(context.req.url);
+    callbackUrl.pathname = "/api/integrations/sentry/callback";
+    return context.redirect(callbackUrl.toString());
+  })
   .get("/api/superuser/users", async (context) => {
     const auth = getAuth();
     const session = await auth.api

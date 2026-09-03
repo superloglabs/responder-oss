@@ -245,6 +245,25 @@ describe("control-plane API", () => {
     );
   });
 
+  it("routes the legacy Sentry callback to the integration flow", async () => {
+    const response = await app.request(
+      "https://responder.example/sentry/oauth/callback" +
+        "?code=sentry-code" +
+        "&installationId=00000000-0000-4000-8000-000000000000" +
+        "&orgSlug=customer" +
+        "&state=responder-v1.callback.nonce",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/api/integrations/sentry/callback" +
+        "?code=sentry-code" +
+        "&installationId=00000000-0000-4000-8000-000000000000" +
+        "&orgSlug=customer" +
+        "&state=responder-v1.callback.nonce",
+    );
+  });
+
   it("rejects unauthenticated investigation requests", async () => {
     const response = await app.request("/api/investigations", {
       method: "POST",
