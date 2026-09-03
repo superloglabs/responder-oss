@@ -545,6 +545,7 @@ describe("integration providers", () => {
         exp: expect.any(Number),
         iat: expect.any(Number),
         iss: "sentry-client",
+        sub: "sentry-client",
         jti: expect.any(String),
       }),
     );

@@ -71,6 +71,7 @@ function sentryClientSecretJwt(clientId: string, clientSecret: string): string {
       exp: issuedAt + 60,
       iat: issuedAt,
       iss: clientId,
+      sub: clientId,
       jti: randomUUID(),
     }),
   );
