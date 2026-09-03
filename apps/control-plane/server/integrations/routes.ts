@@ -477,12 +477,22 @@ async function completeSentrySetup(input: {
   return projects.length;
 }
 
-async function retrySentrySetup(organizationId: string): Promise<{
+async function retrySentrySetup(
+  organizationId: string,
+  integrationAccountId?: string,
+): Promise<{
   accountId: string;
   resourceCount: number;
 } | null> {
-  const account = await getRecoverableSentryIntegrationAccount(organizationId);
-  if (!account?.encryptedCredentials) return null;
+  const account = await getRecoverableSentryIntegrationAccount(
+    organizationId,
+    integrationAccountId,
+  );
+  if (!account) return null;
+  if (!account.encryptedCredentials) {
+    if (integrationAccountId) throw new StoredSentryConnectionError();
+    return null;
+  }
   let expectedEncryptedCredentials = account.encryptedCredentials;
   try {
     const fresh = await getFreshSentryCredentials({
@@ -883,8 +893,22 @@ export const integrationRoutes = new Hono()
       );
     }
     if (parsedProvider.data === "sentry") {
+      const requestedAccountId = context.req.query("integrationAccountId");
+      const parsedAccountId = requestedAccountId
+        ? z.uuid().safeParse(requestedAccountId)
+        : null;
+      if (parsedAccountId && !parsedAccountId.success) {
+        return context.json({ error: "The Sentry account is invalid" }, 400);
+      }
       try {
-        const retriedAccount = await retrySentrySetup(tenant.organizationId);
+        const retriedAccount = context.req.query("mode") === "install"
+          ? null
+          : parsedAccountId?.data
+            ? await retrySentrySetup(
+                tenant.organizationId,
+                parsedAccountId.data,
+              )
+            : await retrySentrySetup(tenant.organizationId);
         if (retriedAccount) {
           await captureAnalyticsEvent({
             distinctId: tenant.user.id,
@@ -2815,20 +2839,30 @@ export const integrationRoutes = new Hono()
     }
 
     let accountId: string | null = null;
+    let accountChanged = false;
     try {
-      accountId = await upsertIntegrationAccount({
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId: parsedCallback.data.installationId,
         organizationId: connectionState.organizationId,
         provider: "sentry",
-        externalAccountId: parsedCallback.data.installationId,
-        displayName: parsedCallback.data.orgSlug,
-        status: "pending",
-        encryptedCredentials: null,
-        credentialKeyVersion: null,
-        metadata: {
-          installationId: parsedCallback.data.installationId,
-          organizationSlug: parsedCallback.data.orgSlug,
-        },
       });
+      accountId = existing?.id ?? null;
+      if (!accountId) {
+        accountChanged = true;
+        accountId = await upsertIntegrationAccount({
+          organizationId: connectionState.organizationId,
+          provider: "sentry",
+          externalAccountId: parsedCallback.data.installationId,
+          displayName: parsedCallback.data.orgSlug,
+          status: "pending",
+          encryptedCredentials: null,
+          credentialKeyVersion: null,
+          metadata: {
+            installationId: parsedCallback.data.installationId,
+            organizationSlug: parsedCallback.data.orgSlug,
+          },
+        });
+      }
       const authorization = await exchangeSentryGrant(parsedCallback.data);
       accountId = await upsertIntegrationAccount({
         organizationId: connectionState.organizationId,
@@ -2848,6 +2882,7 @@ export const integrationRoutes = new Hono()
           organizationSlug: parsedCallback.data.orgSlug,
         },
       });
+      accountChanged = true;
       const resourceCount = await completeSentrySetup({
         accessToken: authorization.token,
         accountId,
@@ -2869,7 +2904,7 @@ export const integrationRoutes = new Hono()
         settingsRedirect(connectionState.returnTo, "sentry", "connected"),
       );
     } catch (error) {
-      if (accountId) {
+      if (accountId && accountChanged) {
         await setIntegrationAccountStatus(accountId, "error").catch(
           (statusError: unknown) => {
             logCallbackError("Sentry status update", statusError);

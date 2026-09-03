@@ -18,7 +18,10 @@ import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
-import { integrationActionUrl } from "./settings-presentation";
+import {
+  integrationActionUrl,
+  sentryConnectionUrl,
+} from "./settings-presentation";
 
 type IntegrationState =
   | "available"
@@ -684,12 +687,13 @@ function SentryIntegrationCard({
   const canConnect = Boolean(integration.connectUrl);
   const health = displayedSentryHealth(integration, sentryHealth);
 
-  function startConnection() {
+  function startConnection(options: {
+    accountId?: string;
+    freshInstall?: boolean;
+  } = {}) {
     if (!integration.connectUrl || isConnecting) return;
     setIsConnecting(true);
-    const url = new URL(integration.connectUrl, window.location.origin);
-    url.searchParams.set("returnTo", "/settings");
-    window.location.assign(`${url.pathname}${url.search}`);
+    window.location.assign(sentryConnectionUrl(integration.connectUrl, options));
   }
 
   async function removeConnection(accountId: string, localOnly = false) {
@@ -723,7 +727,7 @@ function SentryIntegrationCard({
       }
       if (localOnly) {
         window.location.assign(
-          "/api/integrations/sentry/start?returnTo=/settings",
+          "/api/integrations/sentry/start?mode=install&returnTo=/settings",
         );
       } else {
         window.location.reload();
@@ -781,7 +785,7 @@ function SentryIntegrationCard({
                   <button
                     className="button button--secondary button--small"
                     disabled={isConnecting}
-                    onClick={startConnection}
+                    onClick={() => startConnection({ accountId: account.id })}
                     type="button"
                   >
                     Reconnect
@@ -791,7 +795,7 @@ function SentryIntegrationCard({
                     disabled={removingAccountId === account.id}
                     onClick={() => {
                       if (!window.confirm(
-                        `Disconnect ${account.displayName}? Responder will uninstall the app from this Sentry organization and remove its projects.`,
+                        `Disconnect ${account.displayName}? Responder will uninstall the app from this Sentry organization, remove its projects, and pause agents triggered by it.`,
                       )) return;
                       setManualRemoval(null);
                       void removeConnection(account.id);
@@ -841,7 +845,7 @@ function SentryIntegrationCard({
             aria-busy={isConnecting}
             className="button button--primary button--small"
             disabled={isConnecting}
-            onClick={startConnection}
+            onClick={() => startConnection({ freshInstall: true })}
             type="button"
           >
             {integration.accountCount > 0 ? "Connect organization" : "Connect Sentry"}

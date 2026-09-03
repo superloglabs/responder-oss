@@ -83,7 +83,9 @@ has sufficient permission. With the recommended read-only organization
 permission, it instead links an organization manager to Sentry's integration
 settings and resumes reconnection after they confirm the uninstall. Signed
 installation-deleted webhooks remove the matching local connection
-automatically.
+automatically. Disconnecting an integration pauses agents whose active trigger
+uses that account, so they cannot silently wait on an installation that no
+longer exists.
 
 ## GitHub
 

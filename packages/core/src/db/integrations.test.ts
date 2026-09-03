@@ -6,7 +6,9 @@ import { getDatabase } from "./client.js";
 import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
+  deleteIntegrationAccount,
   deleteIntegrationAccountsByExternalId,
+  getRecoverableSentryIntegrationAccount,
   IntegrationAccountCredentialSupersededError,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
@@ -91,18 +93,65 @@ describe("integration account tenancy", () => {
     expect(updateWhere).toHaveBeenCalledOnce();
   });
 
+  it("disables agents before deleting their integration account", async () => {
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const returning = vi.fn().mockResolvedValue([{ id: "account-1" }]);
+    const deleteWhere = vi.fn(() => ({ returning }));
+    const database = {
+      delete: vi.fn(() => ({ where: deleteWhere })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({ where: updateWhere })),
+      })),
+    };
+    vi.mocked(getDatabase).mockReturnValue(database as never);
+
+    await expect(
+      deleteIntegrationAccount({
+        integrationAccountId: "account-1",
+        organizationId: account.organizationId,
+        provider: "sentry",
+      }),
+    ).resolves.toBe(true);
+
+    expect(database.update.mock.invocationCallOrder[0]).toBeLessThan(
+      database.delete.mock.invocationCallOrder[0]!,
+    );
+    const disableQuery = new PgDialect().sqlToQuery(
+      updateWhere.mock.calls[0]![0] as never,
+    );
+    expect(disableQuery.params).toEqual([
+      account.organizationId,
+      true,
+      "account-1",
+      account.organizationId,
+      "sentry",
+    ]);
+  });
+
   it("removes every local account for a deleted provider installation", async () => {
+    const accounts = [
+      { id: "account-1", organizationId: account.organizationId },
+      {
+        id: "account-2",
+        organizationId: "10000000-0000-4000-8000-000000000001",
+      },
+    ];
+    const selectWhere = vi.fn().mockResolvedValue(accounts);
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
     const returning = vi.fn().mockResolvedValue([
       { id: "account-1" },
-      { id: "account-2" },
     ]);
-    const where = vi.fn((condition: unknown) => {
-      void condition;
-      return { returning };
-    });
-    vi.mocked(getDatabase).mockReturnValue({
-      delete: vi.fn(() => ({ where })),
-    } as never);
+    const deleteWhere = vi.fn(() => ({ returning }));
+    const database = {
+      delete: vi.fn(() => ({ where: deleteWhere })),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where: selectWhere })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({ where: updateWhere })),
+      })),
+    };
+    vi.mocked(getDatabase).mockReturnValue(database as never);
 
     await expect(
       deleteIntegrationAccountsByExternalId({
@@ -111,10 +160,42 @@ describe("integration account tenancy", () => {
       }),
     ).resolves.toBe(2);
 
-    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    const query = new PgDialect().sqlToQuery(
+      selectWhere.mock.calls[0]![0] as never,
+    );
     expect(query.params).toEqual([
       "40000000-0000-4000-8000-000000000000",
       "sentry",
+    ]);
+    expect(database.update).toHaveBeenCalledTimes(2);
+    expect(database.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it("targets one Sentry account when reconnecting among several", async () => {
+    const limit = vi.fn().mockResolvedValue([]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { limit };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where })),
+      })),
+    } as never);
+
+    await getRecoverableSentryIntegrationAccount(
+      account.organizationId,
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.params).toEqual([
+      account.organizationId,
+      "sentry",
+      "30000000-0000-4000-8000-000000000000",
+      "connected",
+      "pending",
+      "error",
     ]);
   });
 
