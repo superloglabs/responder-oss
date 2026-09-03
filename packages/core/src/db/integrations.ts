@@ -219,6 +219,22 @@ export async function deleteIntegrationAccount(input: {
   return deleted.length > 0;
 }
 
+export async function deleteIntegrationAccountsByExternalId(input: {
+  externalAccountId: string;
+  provider: IntegrationProvider;
+}): Promise<number> {
+  const deleted = await getDatabase()
+    .delete(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.externalAccountId, input.externalAccountId),
+        eq(integrationAccounts.provider, input.provider),
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return deleted.length;
+}
+
 export async function getOrganizationIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;

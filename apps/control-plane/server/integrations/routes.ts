@@ -92,11 +92,13 @@ import {
   registerClickStackCloudClient,
 } from "./clickstack.js";
 import {
+  deleteSentryInstallation,
   exchangeSentryGrant,
   listSentryProjects,
   refreshSentryGrant,
   SentryApiError,
   sentryErrorNeedsReconnect,
+  sentryIntegrationSettingsUrl,
   sentryInstallUrl,
   verifySentryInstallation,
 } from "./sentry.js";
@@ -767,6 +769,81 @@ export const integrationRoutes = new Hono()
 
     return context.json({ accounts: checkedAccounts });
   })
+  .delete("/sentry/:integrationAccountId", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
+    if (!accountId.success) {
+      return context.json({ error: "The Sentry account is invalid" }, 400);
+    }
+    const localOnly = context.req.query("localOnly") === "true";
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "sentry",
+    });
+    if (!account) {
+      if (localOnly) return context.json({ removed: true });
+      return context.json({ error: "Sentry connection not found" }, 404);
+    }
+
+    const manualUninstallUrl = sentryIntegrationSettingsUrl(
+      typeof account.metadata.organizationSlug === "string"
+        ? account.metadata.organizationSlug
+        : "",
+    );
+    if (localOnly) {
+      await deleteIntegrationAccount({
+        integrationAccountId: account.id,
+        organizationId: tenant.organizationId,
+        provider: "sentry",
+      });
+      return context.json({ removed: true });
+    }
+
+    try {
+      if (!account.encryptedCredentials) {
+        throw new StoredSentryConnectionError();
+      }
+      const fresh = await getFreshSentryCredentials({
+        accountId: account.id,
+        allowedStatuses: ["connected", "error", "pending"],
+        organizationId: tenant.organizationId,
+      });
+      await deleteSentryInstallation(
+        fresh.credentials.accessToken,
+        fresh.credentials.installationId,
+      );
+      await deleteIntegrationAccount({
+        integrationAccountId: account.id,
+        organizationId: tenant.organizationId,
+        provider: "sentry",
+      });
+      return context.json({ removed: true });
+    } catch (error) {
+      if (
+        error instanceof StoredSentryConnectionError ||
+        sentryErrorNeedsReconnect(error)
+      ) {
+        return context.json(
+          {
+            action: "manual_uninstall_required" as const,
+            error:
+              "Sentry requires an organization admin to uninstall this connection before it can be reconnected.",
+            manualUninstallUrl,
+          },
+          409,
+        );
+      }
+      logCallbackError("Sentry uninstall", error, {
+        integrationAccountId: account.id,
+        organizationId: tenant.organizationId,
+      });
+      return context.json({ error: "Unable to disconnect Sentry" }, 502);
+    }
+  })
   .get("/:provider/start", async (context) => {
     const parsedProvider = providerSchema.safeParse(context.req.param("provider"));
     if (!parsedProvider.success) {
@@ -829,6 +906,19 @@ export const integrationRoutes = new Hono()
         }
       } catch (error) {
         logCallbackError("Sentry retry", error);
+        if (
+          error instanceof StoredSentryConnectionError ||
+          sentryErrorNeedsReconnect(error)
+        ) {
+          return context.redirect(
+            settingsRedirect(
+              context.req.query("returnTo") ?? "/settings",
+              "sentry",
+              "error",
+              "manual_uninstall_required",
+            ),
+          );
+        }
       }
     }
     if (parsedProvider.data === "linear") {
@@ -2726,6 +2816,19 @@ export const integrationRoutes = new Hono()
 
     let accountId: string | null = null;
     try {
+      accountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "sentry",
+        externalAccountId: parsedCallback.data.installationId,
+        displayName: parsedCallback.data.orgSlug,
+        status: "pending",
+        encryptedCredentials: null,
+        credentialKeyVersion: null,
+        metadata: {
+          installationId: parsedCallback.data.installationId,
+          organizationSlug: parsedCallback.data.orgSlug,
+        },
+      });
       const authorization = await exchangeSentryGrant(parsedCallback.data);
       accountId = await upsertIntegrationAccount({
         organizationId: connectionState.organizationId,

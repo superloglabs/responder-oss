@@ -288,7 +288,7 @@ describe("integration callback routing", () => {
     );
   });
 
-  it("falls back to fresh Sentry authorization when an old retry fails", async () => {
+  it("guides stale Sentry installations through uninstall before reconnect", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
     vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
@@ -302,20 +302,123 @@ describe("integration callback routing", () => {
     vi.mocked(decryptCredentials).mockImplementation(() => {
       throw new Error("cannot decrypt");
     });
-    vi.mocked(createIntegrationConnectionState).mockResolvedValue("fresh-state");
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const response = await app.request("/api/integrations/sentry/start");
 
     expect(response.status).toBe(302);
-    expect(new URL(response.headers.get("location")!).searchParams.get("state"))
-      .toBe("fresh-state");
+    const location = new URL(response.headers.get("location")!);
+    expect(location.searchParams.get("status")).toBe("error");
+    expect(location.searchParams.get("reason")).toBe(
+      "manual_uninstall_required",
+    );
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
     expect(setIntegrationAccountStatusIfCredentialsMatch).toHaveBeenCalledWith({
       encryptedCredentials: "broken-credentials",
       integrationAccountId: "30000000-0000-4000-8000-000000000000",
       organizationId: tenant.organizationId,
       provider: "sentry",
       status: "error",
+    });
+  });
+
+  it("uninstalls Sentry before removing the tenant-owned connection", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {
+        installationId: "40000000-0000-4000-8000-000000000000",
+        organizationSlug: "example-team",
+      },
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "installation-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "refresh-token",
+    });
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue(true);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request(
+      "/api/integrations/sentry/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ removed: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://sentry.io/api/0/sentry-app-installations/40000000-0000-4000-8000-000000000000/",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "sentry",
+    });
+  });
+
+  it("requires manual Sentry uninstall when its token lacks permission", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: { organizationSlug: "example-team" },
+      status: "error",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "installation-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "refresh-token",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 403 })),
+    );
+
+    const response = await app.request(
+      "/api/integrations/sentry/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      action: "manual_uninstall_required",
+      error:
+        "Sentry requires an organization admin to uninstall this connection before it can be reconnected.",
+      manualUninstallUrl:
+        "https://example-team.sentry.io/settings/integrations/",
+    });
+    expect(deleteIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("removes a stale local Sentry connection after manual uninstall", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: null,
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: { organizationSlug: "example-team" },
+      status: "error",
+    });
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request(
+      "/api/integrations/sentry/30000000-0000-4000-8000-000000000000?localOnly=true",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ removed: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "sentry",
     });
   });
 
@@ -593,6 +696,7 @@ describe("integration callback routing", () => {
     vi.mocked(upsertIntegrationAccount).mockResolvedValue(
       "30000000-0000-4000-8000-000000000000",
     );
+    vi.mocked(setIntegrationAccountStatus).mockResolvedValue(undefined);
     vi.stubGlobal(
       "fetch",
       vi
@@ -784,6 +888,57 @@ describe("integration callback routing", () => {
       "https://responder.example/settings?integration=sentry&status=finishing",
     );
     expect(consumeIntegrationConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed Sentry installation visible so it can be disconnected", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: {},
+    });
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await app.request(
+      "/api/integrations/sentry/callback" +
+        "?state=oauth-state&code=oauth-code" +
+        "&installationId=40000000-0000-4000-8000-000000000000" +
+        "&orgSlug=example-team",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=sentry&status=error&reason=connection_failed",
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      provider: "sentry",
+      externalAccountId: "40000000-0000-4000-8000-000000000000",
+      displayName: "example-team",
+      status: "pending",
+      encryptedCredentials: null,
+      credentialKeyVersion: null,
+      metadata: {
+        installationId: "40000000-0000-4000-8000-000000000000",
+        organizationSlug: "example-team",
+      },
+    });
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "error",
+    );
   });
 
   it("offers GitHub App installation as the first connection flow", async () => {

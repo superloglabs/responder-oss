@@ -6,6 +6,7 @@ import { getDatabase } from "./client.js";
 import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
+  deleteIntegrationAccountsByExternalId,
   IntegrationAccountCredentialSupersededError,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
@@ -88,6 +89,33 @@ describe("integration account tenancy", () => {
 
     await expect(upsertIntegrationAccount(account)).resolves.toBe("account-1");
     expect(updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it("removes every local account for a deleted provider installation", async () => {
+    const returning = vi.fn().mockResolvedValue([
+      { id: "account-1" },
+      { id: "account-2" },
+    ]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { returning };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      delete: vi.fn(() => ({ where })),
+    } as never);
+
+    await expect(
+      deleteIntegrationAccountsByExternalId({
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+        provider: "sentry",
+      }),
+    ).resolves.toBe(2);
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.params).toEqual([
+      "40000000-0000-4000-8000-000000000000",
+      "sentry",
+    ]);
   });
 
   it("serializes rotating credential updates without holding a transaction", async () => {

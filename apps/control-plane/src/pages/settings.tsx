@@ -117,6 +117,8 @@ function connectionNotice(): {
       ? "That account is already connected to another workspace."
       : reason === "cancelled"
         ? "The connection was cancelled."
+        : reason === "manual_uninstall_required"
+          ? "This installation must be disconnected before Sentry will allow it to reconnect."
         : "The connection could not be completed.";
   return { tone: "error", message: `${name}: ${detail}` };
 }
@@ -356,6 +358,14 @@ function IntegrationCard({
 }) {
   if (integration.id === "gcp") {
     return <GcpIntegrationCard integration={integration} />;
+  }
+  if (integration.id === "sentry") {
+    return (
+      <SentryIntegrationCard
+        integration={integration}
+        sentryHealth={sentryHealth}
+      />
+    );
   }
   return <DefaultIntegrationCard integration={integration} sentryHealth={sentryHealth} />;
 }
@@ -652,6 +662,194 @@ function GcpIntegrationCard({
         open={dialogOpen}
         returnTo="/settings"
       />
+    </article>
+  );
+}
+
+function SentryIntegrationCard({
+  integration,
+  sentryHealth,
+}: {
+  integration: IntegrationSummary;
+  sentryHealth: SentryHealth | null;
+}) {
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [manualRemoval, setManualRemoval] = useState<{
+    accountId: string;
+    manualUninstallUrl: string;
+    message: string;
+  } | null>(null);
+  const canConnect = Boolean(integration.connectUrl);
+  const health = displayedSentryHealth(integration, sentryHealth);
+
+  function startConnection() {
+    if (!integration.connectUrl || isConnecting) return;
+    setIsConnecting(true);
+    const url = new URL(integration.connectUrl, window.location.origin);
+    url.searchParams.set("returnTo", "/settings");
+    window.location.assign(`${url.pathname}${url.search}`);
+  }
+
+  async function removeConnection(accountId: string, localOnly = false) {
+    setRemoveError(null);
+    setRemovingAccountId(accountId);
+    try {
+      const suffix = localOnly ? "?localOnly=true" : "";
+      const response = await fetch(
+        `/api/integrations/sentry/${accountId}${suffix}`,
+        { method: "DELETE" },
+      );
+      const body = (await response.json().catch(() => null)) as {
+        action?: string;
+        error?: string;
+        manualUninstallUrl?: string;
+      } | null;
+      if (
+        response.status === 409 &&
+        body?.action === "manual_uninstall_required" &&
+        body.manualUninstallUrl
+      ) {
+        setManualRemoval({
+          accountId,
+          manualUninstallUrl: body.manualUninstallUrl,
+          message: body.error ?? "Uninstall Responder in Sentry to continue.",
+        });
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(body?.error ?? "Unable to disconnect Sentry");
+      }
+      if (localOnly) {
+        window.location.assign(
+          "/api/integrations/sentry/start?returnTo=/settings",
+        );
+      } else {
+        window.location.reload();
+      }
+    } catch (cause) {
+      setRemoveError(
+        cause instanceof Error ? cause.message : "Unable to disconnect Sentry",
+      );
+    } finally {
+      setRemovingAccountId(null);
+    }
+  }
+
+  return (
+    <article className="integrationCard integrationCard--managed">
+      <div className="integrationCard__top">
+        <ProviderGlyph
+          className="integrationLogo integrationLogo--sentry"
+          decorative
+          provider="sentry"
+        />
+        {health === "needs_reconnect" ? (
+          <span className="connectedBadge connectedBadge--warning">Action needed</span>
+        ) : health === "unavailable" ? (
+          <span className="connectedBadge connectedBadge--muted">Not verified</span>
+        ) : health === "checking" ? (
+          <span className="connectedBadge connectedBadge--muted">Checking</span>
+        ) : health === "working" ? (
+          <span className="connectedBadge">Working</span>
+        ) : integration.accountCount > 0 ? (
+          <span className="connectedBadge">Connected</span>
+        ) : null}
+      </div>
+      <div className="integrationCard__body">
+        <strong>Sentry</strong>
+        <small>{integrationDetail(integration, sentryHealth)}</small>
+        {integration.accounts.length > 0 ? (
+          <ul className="integrationCard__accounts" aria-label="Connected Sentry organizations">
+            {integration.accounts.map((account) => (
+              <li key={account.id}>
+                <span>
+                  <strong>{account.displayName}</strong>
+                  <small>
+                    {account.resourceCount} project{account.resourceCount === 1 ? "" : "s"}
+                  </small>
+                </span>
+                <span className="integrationCard__accountStatus">
+                  {account.status === "connected"
+                    ? "Connected"
+                    : account.status === "pending"
+                      ? "Pending"
+                      : "Error"}
+                </span>
+                <span className="integrationCard__accountActions">
+                  <button
+                    className="button button--secondary button--small"
+                    disabled={isConnecting}
+                    onClick={startConnection}
+                    type="button"
+                  >
+                    Reconnect
+                  </button>
+                  <button
+                    className="button button--secondary button--small"
+                    disabled={removingAccountId === account.id}
+                    onClick={() => {
+                      if (!window.confirm(
+                        `Disconnect ${account.displayName}? Responder will uninstall the app from this Sentry organization and remove its projects.`,
+                      )) return;
+                      setManualRemoval(null);
+                      void removeConnection(account.id);
+                    }}
+                    type="button"
+                  >
+                    {removingAccountId === account.id ? "Disconnecting…" : "Disconnect"}
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <small className="integrationCard__hint">
+            If Sentry says Responder is already installed, uninstall it from that
+            Sentry organization before trying again.
+          </small>
+        )}
+      </div>
+      {manualRemoval ? (
+        <div className="integrationCard__manualAction" role="alert">
+          <p>{manualRemoval.message}</p>
+          <div>
+            <a
+              className="button button--secondary button--small"
+              href={manualRemoval.manualUninstallUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open Sentry settings
+            </a>
+            <button
+              className="button button--primary button--small"
+              disabled={removingAccountId === manualRemoval.accountId}
+              onClick={() => void removeConnection(manualRemoval.accountId, true)}
+              type="button"
+            >
+              I’ve uninstalled it — reconnect
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {removeError ? <p className="siteDialog__error">{removeError}</p> : null}
+      <div className="integrationCard__actions">
+        {canConnect ? (
+          <button
+            aria-busy={isConnecting}
+            className="button button--primary button--small"
+            disabled={isConnecting}
+            onClick={startConnection}
+            type="button"
+          >
+            {integration.accountCount > 0 ? "Connect organization" : "Connect Sentry"}
+          </button>
+        ) : (
+          <small>Provider configuration required</small>
+        )}
+      </div>
     </article>
   );
 }

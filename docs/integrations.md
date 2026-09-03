@@ -77,7 +77,13 @@ Create a public Sentry integration with:
   `SENTRY_CLIENT_SECRET`
 
 Responder validates `Sentry-Hook-Signature`, synchronizes visible projects,
-and triggers only agents whose installation and project match.
+and triggers only agents whose installation and project match. The Settings
+page can disconnect an installation through Sentry when its installation token
+has sufficient permission. With the recommended read-only organization
+permission, it instead links an organization manager to Sentry's integration
+settings and resumes reconnection after they confirm the uninstall. Signed
+installation-deleted webhooks remove the matching local connection
+automatically.
 
 ## GitHub
 
