@@ -7,7 +7,10 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { defaultLinearIssueTemplate } from "@responder/core/agents/config";
+import {
+  AGENT_PROMPT_MAX_LENGTH,
+  defaultLinearIssueTemplate,
+} from "@responder/core/agents/config";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   type AgentConfiguration,
@@ -3457,9 +3460,9 @@ export function AgentCreatePage() {
                     ? promptRequirement ?? undefined
                     : undefined
                 }
-                hint={`The agent can use only the context connected above · ${draft.instructions.length.toLocaleString()} / 4,000`}
+                hint={`The agent can use only the context connected above · ${draft.instructions.length.toLocaleString()} / ${AGENT_PROMPT_MAX_LENGTH.toLocaleString()}`}
                 label="Agent prompt"
-                maxLength={4_000}
+                maxLength={AGENT_PROMPT_MAX_LENGTH}
                 onChange={(event) =>
                   updateDraft({ instructions: event.target.value })
                 }

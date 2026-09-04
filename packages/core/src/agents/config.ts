@@ -3,6 +3,7 @@ import { z } from "zod";
 const integrationAccountId = z.uuid("Choose a connected account");
 const externalResourceId = z.string().trim().min(1);
 const reportSeverity = z.enum(["SEV-1", "SEV-2", "SEV-3"]);
+export const AGENT_PROMPT_MAX_LENGTH = 400_000;
 export const defaultLinearIssueTemplate = [
   "## Responder issue",
   "[{{issue_id}}]({{issue_url}})",
@@ -72,7 +73,11 @@ export const agentConfigurationSchema = z
     name: z.string().trim().min(1, "Name is required").max(80),
     description: z.string().trim().max(500).default(""),
     model: z.string().trim().min(1, "Model is required").max(160),
-    instructions: z.string().trim().min(1, "Instructions are required").max(20_000),
+    instructions: z
+      .string()
+      .trim()
+      .min(1, "Instructions are required")
+      .max(AGENT_PROMPT_MAX_LENGTH),
     enabled: z.boolean().default(true),
     prMode: agentPrModeSchema.default("disabled"),
     repositoryIds: z.array(z.uuid()).max(100).default([]),
@@ -125,7 +130,11 @@ export const agentConfigurationSchema = z
 export const slackThreadModeConfigurationSchema = z.object({
   enabled: z.boolean().default(false),
   model: z.string().trim().min(1, "Model is required").max(160),
-  instructions: z.string().trim().min(1, "Instructions are required").max(20_000),
+  instructions: z
+    .string()
+    .trim()
+    .min(1, "Instructions are required")
+    .max(AGENT_PROMPT_MAX_LENGTH),
   repositoryIds: z.array(z.uuid()).max(100).default([]),
   contextAccountIds: z.array(z.uuid()).max(20).default([]),
   contextResourceIds: z.array(z.uuid()).max(100).default([]),
