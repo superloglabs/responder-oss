@@ -37,6 +37,8 @@ maintained separately.
   Vercel, ClickStack,
   and custom MCP servers.
 - Investigates incidents with a versioned operator-managed runtime profile.
+- Builds a reusable Markdown and D2 knowledge base for each attached GitHub repository,
+  checks repository heads daily, and gives investigations read-only knowledge tools.
 - Produces structured reports, issues, Slack updates, and optional remediation
   pull requests.
 - Separates every organization's data, credentials, resources, and jobs.
@@ -59,8 +61,9 @@ public tunnel is configured, claims it for the current worktree. Open the
 dashboard, create an account, and create the first workspace.
 
 The UI and authentication flow work without provider credentials. Set
-`DAYTONA_API_KEY` to store workspace secrets or run investigations, and set
-`OPENAI_API_KEY` to run investigations. Restart the stack after changing
+`DAYTONA_API_KEY` to store workspace secrets, run investigations, or build
+codebase knowledge, and set `OPENAI_API_KEY` to run investigations or knowledge
+generation. Restart the stack after changing
 `.env.local`. See [.env.example](.env.example) for all configuration.
 
 Provider OAuth and webhooks require a public HTTPS origin. The local tunnel

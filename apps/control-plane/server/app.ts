@@ -21,6 +21,7 @@ import {
 import { billingRoutes } from "./billing/routes.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
+import { knowledgeRoutes } from "./knowledge/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
 import { getActiveTenant } from "./tenant.js";
 import { githubWebhookRoutes } from "./webhooks/github.js";
@@ -398,6 +399,7 @@ export const app = instrumentedApp
   .route("/api/agents", agentRoutes)
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)
+  .route("/api/knowledge", knowledgeRoutes)
   .route("/api/integrations", integrationRoutes)
   .route("/api/webhooks/github", githubWebhookRoutes)
   .route("/api/webhooks/sentry", sentryWebhookRoutes)

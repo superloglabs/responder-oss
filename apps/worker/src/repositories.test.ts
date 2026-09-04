@@ -10,6 +10,7 @@ import {
   checkoutRuntimeRepositories,
   checkoutRuntimeRepositoriesAtRefs,
   refreshRuntimeRepositories,
+  resolveRuntimeRepositoryHeads,
   repositoryWorkspacePath,
 } from "./repositories.js";
 
@@ -34,6 +35,56 @@ function missingGitmodules() {
 }
 
 describe("Daytona repository checkout", () => {
+  it("resolves lightweight repository heads without downloading archives", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ sha }), { status: 200 }),
+    );
+    await expect(
+      resolveRuntimeRepositoryHeads("version-id", {
+        createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+        fetch: fetchMock,
+        getRepositories: vi.fn().mockResolvedValue([
+          {
+            defaultBranch: "main",
+            fullName: "example-org/example-repo",
+            installationId: 123,
+            private: true,
+          },
+        ]),
+      }),
+    ).resolves.toEqual([
+      {
+        branch: "main",
+        repository: "example-org/example-repo",
+        sha,
+      },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/commits/main");
+    expect(fetchMock.mock.calls[0]?.[0]).not.toContain("tarball");
+  });
+
+  it("retries transient repository head failures with bounded backoff", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sha }), { status: 200 }));
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    await expect(resolveRuntimeRepositoryHeads("version-id", {
+      createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+      fetch: fetchMock,
+      getRepositories: vi.fn().mockResolvedValue([{
+        defaultBranch: "main",
+        fullName: "example-org/example-repo",
+        installationId: 123,
+        private: true,
+      }]),
+      wait,
+    })).resolves.toEqual([expect.objectContaining({ sha })]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(250);
+  });
+
   it("downloads an exact pull request head without resolving the default branch", async () => {
     const session = fakeSession();
     const fetchMock = vi

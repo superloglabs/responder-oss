@@ -19,6 +19,8 @@ export const slackThreadInvestigationQueue =
 export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
 export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
+export const codebaseKnowledgeQueue = "responder-codebase-knowledge-v2";
+export const codebaseKnowledgeDailyCron = "0 3 * * *";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -29,6 +31,24 @@ export const workerHealthJobSchema = z.object({
 });
 
 export type WorkerHealthJob = z.infer<typeof workerHealthJobSchema>;
+
+export const codebaseKnowledgeJobSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("codebase_knowledge_sweep"),
+    requestedAt: z.iso.datetime(),
+  }),
+  z.object({
+    kind: z.literal("codebase_knowledge_refresh"),
+    force: z.boolean().default(false),
+    organizationId: z.uuid(),
+    repositoryId: z.uuid(),
+    requestedAt: z.iso.datetime(),
+  }),
+]);
+
+export type CodebaseKnowledgeJob = z.infer<
+  typeof codebaseKnowledgeJobSchema
+>;
 
 const runtimeAgentJobConfigSchema = z.object({
     agentId: z.uuid(),
@@ -248,6 +268,15 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryBackoff: true,
       retryDelay: 60,
       retryLimit: 5,
+    }),
+    boss.createQueue(codebaseKnowledgeQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 7_200,
+      notify: true,
+      policy: "exclusive",
+      retryBackoff: true,
+      retryDelay: 60,
+      retryLimit: 2,
     }),
   ]);
   // createQueue leaves an existing queue unchanged. Reconcile the heartbeat

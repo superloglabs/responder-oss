@@ -29,6 +29,15 @@ The worker claims durable jobs from Postgres, resolves the investigation's
 pinned agent and runtime versions, creates an isolated repository workspace,
 runs the investigation, and persists the resulting trace and report.
 
+For repositories attached to standard agents, the worker maintains one atomic
+codebase knowledge snapshot per GitHub repository. A daily scheduled sweep resolves GitHub
+default-branch heads without downloading repository archives. It runs the
+knowledge-generation sandbox only when a head changed. Agent creation, agent
+repository changes, and a tenant-requested manual refresh use the same
+exclusive per-repository queue. Each successful snapshot stores 8–12 Markdown
+guides, 8–12 restricted-syntax D2 diagrams, and the exact repository revisions
+that support them.
+
 `packages/core` is the shared boundary. It owns the schema, tenant-aware data
 access, credential encryption, provider clients, queue contracts, and report
 types. `drizzle/` contains the ordered schema history.
@@ -71,6 +80,11 @@ types. `drizzle/` contains the ordered schema history.
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without
   buffering the complete archive in worker memory.
+- Knowledge generation uses the same credential-free repository snapshot
+  boundary and never mounts workspace secrets. Tenant APIs scope snapshots by
+  organization. Investigation runs can list, search, and read only snapshots
+  for repositories tied to their pinned agent configuration version, and are instructed to
+  verify incident-specific claims against their current source checkout.
 - Pull-request review follow-ups accept only new top-level bot comments on PRs
   created by Responder. Comment text is untrusted input, human comments are
   ignored, and the controlled publisher can only fast-forward the existing PR
@@ -98,6 +112,9 @@ transitions rather than assuming a job runs exactly once.
 Review follow-ups are serialized per pull request. Each pass reloads unresolved
 bot threads and the current PR head, so redundant queued comment events exit
 without repeating replies.
+Codebase knowledge refreshes are serialized per repository. Agents that share a
+repository reuse the same snapshot. Failures retain the last usable snapshot
+while recording the refresh error.
 
 ## Deployment contract
 

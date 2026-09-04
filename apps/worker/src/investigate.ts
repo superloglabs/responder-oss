@@ -23,6 +23,7 @@ import {
   SentryConnectionUnavailableError,
   type RuntimeSentryConnection,
 } from "@responder/core/db/investigations";
+import { listRuntimeCodebaseKnowledge } from "@responder/core/db/knowledge-base";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
 import {
@@ -91,6 +92,7 @@ import {
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
+import { createCodebaseKnowledgeTools } from "./codebase-knowledge-tools.js";
 
 export interface SandboxAgentConfig extends DaytonaClientConfig {
   model: string;
@@ -322,6 +324,7 @@ export function investigationInstructions(input: {
   vercelAccountIds?: string[];
   threadMode?: boolean;
   issueFollowupIssueCount?: number;
+  codebaseKnowledgeAvailable?: boolean;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
@@ -419,6 +422,9 @@ export function investigationInstructions(input: {
           "Inspect the relevant files before claiming a code-level root cause.",
         ].join("\n")
       : "No repositories are attached to this Agent version. Clearly distinguish code-level hypotheses from verified root causes.",
+    input.codebaseKnowledgeAvailable
+      ? "A generated codebase knowledge base is available through list_codebase_knowledge, search_codebase_knowledge, and read_codebase_knowledge. Use it to navigate architecture and flows quickly, but verify incident-specific claims against the current checked-out source because the knowledge snapshot may be up to one day old."
+      : null,
     repositoryInstructions.length > 0
       ? [
           "Read the repository instruction file(s) that apply to the files you inspect:",
@@ -549,6 +555,7 @@ export async function runInvestigationAgent(
     upstashConnection,
     langfuseConnections,
     workspaceSecrets,
+    codebaseKnowledge,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
@@ -574,6 +581,7 @@ export async function runInvestigationAgent(
     getRuntimeUpstashConnection(job.config.id),
     getRuntimeLangfuseConnections(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
+    listRuntimeCodebaseKnowledge(job.config.id),
   ]);
   const awsServers = await Promise.all(
     awsConnections.map((connection) => createAwsMcpServer(connection, environment)),
@@ -768,6 +776,7 @@ export async function runInvestigationAgent(
       repositories,
       session,
     });
+    const codebaseKnowledgeTools = createCodebaseKnowledgeTools(codebaseKnowledge);
     const vercelTools = createVercelTools(vercelConnections);
     const awsInspectionTools = createAwsInspectionTools(awsConnections, {
       environment,
@@ -810,6 +819,7 @@ export async function runInvestigationAgent(
       ...(issueFollowup
         ? { issueFollowupIssueCount: issueFollowup.issueIds.length }
         : {}),
+    codebaseKnowledgeAvailable: codebaseKnowledgeTools.length > 0,
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -835,6 +845,7 @@ export async function runInvestigationAgent(
             : [issueSearchTool, reportTool!]),
         ...awsInspectionTools,
         ...repositoryInspectionTools,
+        ...codebaseKnowledgeTools,
         ...upstashTools,
         ...vercelTools,
       ],

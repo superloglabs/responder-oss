@@ -51,6 +51,7 @@ import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
 } from "./daytona-secrets.js";
+import { requestCodebaseKnowledgeRefreshesForAgent } from "../knowledge/queue.js";
 
 const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
@@ -242,6 +243,30 @@ function configurationError(error: unknown): {
     };
   }
   throw error;
+}
+
+async function queueKnowledgeAfterAgentSave(input: {
+  agentId: string;
+  organizationId: string;
+  repositoryCount: number;
+}): Promise<void> {
+  if (input.repositoryCount === 0) return;
+  try {
+    await requestCodebaseKnowledgeRefreshesForAgent({
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+    });
+  } catch (error) {
+    // The queue helper leaves a failed repository snapshot behind. The daily
+    // sweep retries it, so an unavailable worker must not roll back an Agent
+    // configuration that was already saved successfully.
+    console.error(JSON.stringify({
+      agentId: input.agentId,
+      error: error instanceof Error ? error.message : String(error),
+      event: "codebase_knowledge_initial_queue_failed",
+      organizationId: input.organizationId,
+    }));
+  }
 }
 
 export const agentRoutes = new Hono()
@@ -448,6 +473,11 @@ export const agentRoutes = new Hono()
         userId: tenant.user.id,
         configuration: parsed.data,
       });
+      await queueKnowledgeAfterAgentSave({
+        agentId,
+        organizationId: tenant.organizationId,
+        repositoryCount: parsed.data.repositoryIds.length,
+      });
       await captureAnalyticsEvent({
         distinctId: tenant.user.id,
         event: "agent created",
@@ -632,6 +662,11 @@ export const agentRoutes = new Hono()
         organizationId: tenant.organizationId,
         userId: tenant.user.id,
         configuration: parsed.data,
+      });
+      await queueKnowledgeAfterAgentSave({
+        agentId: context.req.param("agentId"),
+        organizationId: tenant.organizationId,
+        repositoryCount: parsed.data.repositoryIds.length,
       });
       return context.json({ agentId: context.req.param("agentId") });
     } catch (error) {
