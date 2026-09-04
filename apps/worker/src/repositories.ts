@@ -17,6 +17,7 @@ import {
   createGitHubInstallationToken,
   githubAppHeaders,
 } from "@responder/core/integrations/github";
+import type { CodebaseKnowledgeRepositoryRevision } from "@responder/core/knowledge-base";
 const defaultMaxArchiveBytes = 5 * 1024 * 1024 * 1024;
 const repositoryDownloadTimeoutMs = 10 * 60_000;
 const repositoryUploadTimeoutSeconds = 30 * 60;
@@ -145,6 +146,104 @@ const defaultDependencies: RepositoryCheckoutDependencies = {
   fetch,
   getRepositories: getRuntimeRepositories,
 };
+
+export interface RepositoryHeadDependencies {
+  createInstallationToken: (installationId: number) => Promise<string>;
+  fetch: typeof fetch;
+  getRepositories: (versionId: string) => Promise<RuntimeRepository[]>;
+  wait?: (milliseconds: number) => Promise<void>;
+}
+
+const defaultHeadDependencies: RepositoryHeadDependencies = {
+  createInstallationToken: createGitHubInstallationToken,
+  fetch,
+  getRepositories: getRuntimeRepositories,
+};
+
+function waitForRepositoryHeadRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchRepositoryHead(
+  repository: RuntimeRepository,
+  token: string,
+  dependencies: RepositoryHeadLookupDependencies,
+): Promise<Response> {
+  const branch = encodeURIComponent(repository.defaultBranch);
+  const url = `https://api.github.com/repos/${repository.fullName}/commits/${branch}`;
+  const waitForRetry = dependencies.wait ?? waitForRepositoryHeadRetry;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await dependencies.fetch(url, {
+        headers: githubAppHeaders(token),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.ok) return response;
+      const retryable = response.status === 403 || response.status === 408 ||
+        response.status === 429 || response.status >= 500;
+      await response.body?.cancel();
+      if (!retryable || attempt === 2) break;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+    await waitForRetry(250 * (2 ** attempt));
+  }
+  throw new Error(
+    `Unable to resolve ${repository.fullName}@${repository.defaultBranch}`,
+  );
+}
+
+export type RepositoryHeadLookupDependencies = Omit<
+  RepositoryHeadDependencies,
+  "getRepositories"
+>;
+
+export async function resolveRepositoryHead(
+  repository: RuntimeRepository,
+  dependencies: RepositoryHeadLookupDependencies = {
+    createInstallationToken: createGitHubInstallationToken,
+    fetch,
+  },
+): Promise<CodebaseKnowledgeRepositoryRevision> {
+  const revisions = await resolveRuntimeRepositoryHeads(repository.fullName, {
+    ...dependencies,
+    getRepositories: async () => [repository],
+  });
+  const revision = revisions[0];
+  if (!revision) throw new Error(`Unable to resolve ${repository.fullName}`);
+  return revision;
+}
+
+export async function resolveRuntimeRepositoryHeads(
+  versionId: string,
+  dependencies: RepositoryHeadDependencies = defaultHeadDependencies,
+): Promise<CodebaseKnowledgeRepositoryRevision[]> {
+  const repositories = await dependencies.getRepositories(versionId);
+  const tokens = new Map<number, string>();
+  const revisions: CodebaseKnowledgeRepositoryRevision[] = [];
+  for (const repository of repositories) {
+    let token = tokens.get(repository.installationId);
+    if (!token) {
+      token = await dependencies.createInstallationToken(
+        repository.installationId,
+      );
+      tokens.set(repository.installationId, token);
+    }
+    const response = await fetchRepositoryHead(repository, token, dependencies);
+    const commit = (await response.json()) as { sha?: unknown };
+    if (typeof commit.sha !== "string" || !/^[a-f0-9]{40}$/i.test(commit.sha)) {
+      throw new Error(`GitHub returned an invalid commit for ${repository.fullName}`);
+    }
+    revisions.push({
+      branch: repository.defaultBranch,
+      repository: repository.fullName,
+      sha: commit.sha,
+    });
+  }
+  return revisions.sort((left, right) =>
+    left.repository.localeCompare(right.repository),
+  );
+}
 
 async function writeRepositoryArchiveWithLimit(
   repositoryDirectory: string,
@@ -695,6 +794,34 @@ export async function checkoutRuntimeRepositoriesAtRefs(
     references,
     dependencies,
   );
+}
+
+export type RepositoryCheckoutAtRefDependencies = Omit<
+  RepositoryCheckoutDependencies,
+  "getRepositories"
+>;
+
+export async function checkoutRepositoryAtRef(
+  session: DaytonaSandboxSession,
+  repository: RuntimeRepository,
+  reference: RuntimeRepositoryReference,
+  dependencies: RepositoryCheckoutAtRefDependencies = {
+    createInstallationToken: createGitHubInstallationToken,
+    fetch,
+  },
+): Promise<CheckedOutRepository> {
+  const checkedOut = await checkoutRuntimeRepositoriesAtRefs(
+    session,
+    repository.fullName,
+    new Map([[repository.fullName, reference]]),
+    {
+      ...dependencies,
+      getRepositories: async () => [repository],
+    },
+  );
+  const result = checkedOut[0];
+  if (!result) throw new Error(`Unable to check out ${repository.fullName}`);
+  return result;
 }
 
 async function checkoutRuntimeRepositoriesWithRefs(

@@ -201,6 +201,45 @@ export interface AgentDetail {
   }>;
 }
 
+export interface CodebaseKnowledgeBase {
+  status: "queued" | "generating" | "ready" | "failed";
+  overview: string | null;
+  documents: Array<{
+    slug: string;
+    title: string;
+    summary: string;
+    markdown: string;
+    sourcePaths: string[];
+  }>;
+  diagrams: Array<{
+    slug: string;
+    title: string;
+    summary: string;
+    d2: string;
+    sourcePaths: string[];
+  }>;
+  repositoryRevisions: Array<{
+    repository: string;
+    branch: string;
+    sha: string;
+  }>;
+  failureReason: string | null;
+  requestedAt: string;
+  checkedAt: string | null;
+  generatedAt: string | null;
+  updatedAt: string;
+}
+
+export interface CodebaseKnowledgeRepository {
+  repository: {
+    id: string;
+    defaultBranch: string;
+    fullName: string;
+    private: boolean;
+  };
+  knowledge: CodebaseKnowledgeBase | null;
+}
+
 export interface InvestigationTraceEvent {
   type: string;
   data?: unknown;
@@ -452,6 +491,32 @@ export async function fetchAgent(agentId: string): Promise<AgentDetail> {
     `/api/agents/${encodeURIComponent(agentId)}`,
   );
   return response.agent;
+}
+
+export async function fetchCodebaseKnowledgeRepositories(): Promise<
+  CodebaseKnowledgeRepository[]
+> {
+  const response = await apiJson<{
+    repositories: CodebaseKnowledgeRepository[];
+  }>("/api/knowledge");
+  return response.repositories;
+}
+
+export async function fetchCodebaseKnowledgeRepository(
+  repositoryId: string,
+): Promise<CodebaseKnowledgeRepository> {
+  return apiJson<CodebaseKnowledgeRepository>(
+    `/api/knowledge/${encodeURIComponent(repositoryId)}`,
+  );
+}
+
+export async function refreshCodebaseKnowledge(
+  repositoryId: string,
+): Promise<{ queued: boolean }> {
+  return apiJson<{ queued: boolean }>(
+    `/api/knowledge/${encodeURIComponent(repositoryId)}/refresh`,
+    { method: "POST" },
+  );
 }
 
 export async function setAgentEnabled(

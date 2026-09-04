@@ -49,15 +49,37 @@ async function getBoss() {
         }),
       );
     });
-    await nextBoss.start();
-    await prepareWorkerQueues(nextBoss);
-    boss = nextBoss;
-    return nextBoss;
+    let started = false;
+    try {
+      await nextBoss.start();
+      started = true;
+      await prepareWorkerQueues(nextBoss);
+      boss = nextBoss;
+      return nextBoss;
+    } catch (error) {
+      if (started) {
+        await nextBoss.stop({ graceful: true, timeout: 10_000 }).catch(
+          (stopError: unknown) => {
+            console.error(JSON.stringify({
+              error: stopError instanceof Error
+                ? stopError.message
+                : String(stopError),
+              event: "api_job_queue_startup_cleanup_error",
+            }));
+          },
+        );
+      }
+      throw error;
+    }
   })().catch((error: unknown) => {
     bossStart = undefined;
     throw error;
   });
   return bossStart;
+}
+
+export async function getControlPlaneJobBoss() {
+  return getBoss();
 }
 
 export async function queueInvestigation(

@@ -1,4 +1,7 @@
 import {
+  codebaseKnowledgeDailyCron,
+  codebaseKnowledgeJobSchema,
+  codebaseKnowledgeQueue,
   createJobBoss,
   investigationLocalConcurrency,
   investigationQueue,
@@ -18,6 +21,7 @@ import {
   workerHealthJobSchema,
   workerHealthQueue,
 } from "@responder/core/jobs";
+import { queueDailyCodebaseKnowledgeRefreshes } from "@responder/core/knowledge-base-queue";
 import {
   appendInvestigationTraceEvent,
   completeInvestigation,
@@ -76,6 +80,7 @@ import {
 import { processRemediationJob } from "./remediation-job.js";
 import { processPullRequestReviewJob } from "./pull-request-review-job.js";
 import { loadResponderSecrets } from "@responder/core/secrets";
+import { runCodebaseKnowledgeRefresh } from "./codebase-knowledge.js";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -296,6 +301,51 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 await boss.start();
 await prepareWorkerQueues(boss);
+await boss.schedule(
+  codebaseKnowledgeQueue,
+  codebaseKnowledgeDailyCron,
+  {
+    kind: "codebase_knowledge_sweep",
+    requestedAt: new Date().toISOString(),
+  },
+  {
+    key: "daily-codebase-knowledge-sweep",
+    singletonKey: "daily-codebase-knowledge-sweep",
+    tz: "UTC",
+  },
+);
+await boss.work(codebaseKnowledgeQueue, { localConcurrency: 1 }, async ([job]) => {
+  const payload = codebaseKnowledgeJobSchema.parse(job.data);
+  if (payload.kind === "codebase_knowledge_sweep") {
+    const queued = await queueDailyCodebaseKnowledgeRefreshes({
+      send: (name, data, options) => boss.send(name, data, options),
+    });
+    console.log(JSON.stringify({
+      event: "codebase_knowledge_sweep_complete",
+      jobId: job.id,
+      queued: queued.filter((result) => result.jobId !== null).length,
+    }));
+    return { queued: queued.filter((result) => result.jobId !== null).length };
+  }
+  try {
+    const result = await runCodebaseKnowledgeRefresh(payload, process.env);
+    console.log(JSON.stringify({
+      event: "codebase_knowledge_refresh_complete",
+      generated: result.generated,
+      jobId: job.id,
+      reason: result.reason,
+      repositoryId: payload.repositoryId,
+    }));
+    return result;
+  } catch (error) {
+    await reportWorkerException(error, {
+      jobId: job.id,
+      operation: "knowledge_base",
+      organizationId: payload.organizationId,
+    });
+    throw error;
+  }
+});
 await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
   const payload = workerHealthJobSchema.parse(job.data);
   const processedAt = new Date().toISOString();
