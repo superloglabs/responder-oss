@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { AGENT_PROMPT_MAX_LENGTH } from "@responder/core/agents/config";
 import { useNavigate } from "react-router-dom";
 import {
   fetchAgentOptions,
@@ -698,7 +699,7 @@ export function TagModeSettingsPage() {
             <TextAreaField
               className="tagModeSettings__promptField"
               label="Agent prompt"
-              maxLength={20_000}
+              maxLength={AGENT_PROMPT_MAX_LENGTH}
               onChange={(event) => update({ instructions: event.target.value })}
               rows={4}
               value={configuration.instructions}
