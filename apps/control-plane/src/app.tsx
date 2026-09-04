@@ -13,10 +13,13 @@ import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
   BlogIndexPage,
+  DpaPage,
   HomePage,
   PrivacyPage,
   PricingPage,
   ProductUpdateArticlePage,
+  SecurityPage,
+  SubprocessorsPage,
   TeamPage,
   TermsPage,
 } from "./edition-pages";
@@ -52,6 +55,9 @@ export function App() {
       <Route element={<TeamPage />} path="/team" />
       <Route element={<PrivacyPage />} path="/privacy" />
       <Route element={<TermsPage />} path="/tos" />
+      <Route element={<DpaPage />} path="/dpa" />
+      <Route element={<SecurityPage />} path="/security" />
+      <Route element={<SubprocessorsPage />} path="/subprocessors" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}
