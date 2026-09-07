@@ -6,11 +6,13 @@ import {
   authoredIssueRemediationsSchema,
 } from "@responder/core/investigations/report";
 import { z } from "zod";
+import { attachRepositoryBasesToRemediations } from "./remediation-bases.js";
 
 export function createIssueRemediationUpdateTool(input: {
   allowedIssueIds: ReadonlySet<string>;
   onUpdated: (issueId: string) => void;
   organizationId: string;
+  repositories?: Array<{ branch: string; repository: string; sha: string }>;
 }) {
   return tool({
     name: "update_issue_remediation",
@@ -27,7 +29,12 @@ export function createIssueRemediationUpdateTool(input: {
       const updated = await updateIssueRemediations({
         issueId: request.issueId,
         organizationId: input.organizationId,
-        remediations: request.remediations,
+        remediations: input.repositories
+          ? attachRepositoryBasesToRemediations(
+              request.remediations,
+              input.repositories,
+            )
+          : request.remediations,
       });
       if (!updated) throw new Error("Issue is unavailable for remediation update");
       input.onUpdated(updated.id);

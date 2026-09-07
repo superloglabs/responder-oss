@@ -750,6 +750,7 @@ export async function runInvestigationAgent(
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
           environment,
+          repositories,
           onAutomaticPullRequestRequests,
           onLinearTicketRequests,
         });
@@ -762,6 +763,7 @@ export async function runInvestigationAgent(
           allowedIssueIds: new Set(issueFollowup.issueIds),
           onUpdated: (issueId) => updatedIssueIds.add(issueId),
           organizationId: job.config.organizationId,
+          repositories,
         })
       : null;
     const repositoryInspectionTools = createRepositoryInspectionTools({

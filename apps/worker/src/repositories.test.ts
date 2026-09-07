@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import {
   checkoutRuntimeRepository,
+  checkoutRuntimeRepositoryAtRef,
   checkoutRuntimeRepositories,
   checkoutRuntimeRepositoriesAtRefs,
   refreshRuntimeRepositories,
@@ -177,6 +178,44 @@ describe("Daytona repository checkout", () => {
 
     expect(JSON.stringify(fetchMock.mock.calls)).toContain("example-org/api");
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("example-org/web");
+  });
+
+  it("checks out a remediation from its recorded repository base", async () => {
+    const session = fakeSession();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(missingGitmodules())
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
+      );
+
+    await expect(
+      checkoutRuntimeRepositoryAtRef(
+        session,
+        "version-id",
+        "example-org/api",
+        { branch: "main", sha },
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+          getRepositories: vi.fn().mockResolvedValue([
+            {
+              defaultBranch: "main",
+              fullName: "example-org/api",
+              installationId: 123,
+              private: true,
+            },
+          ]),
+          uploadArchive: uploadArchive(),
+        },
+      ),
+    ).resolves.toEqual(expect.objectContaining({ branch: "main", sha }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.github.com/repos/example-org/api/tarball/${sha}`,
+      expect.anything(),
+    );
   });
 
   it("uses an exact Git checkout when the parent commit declares submodules", async () => {

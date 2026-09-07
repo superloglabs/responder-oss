@@ -83,6 +83,15 @@ const codeChangePartSchema = z.object({
     .max(200)
     .nullable()
     .describe("Attached repository that receives this change."),
+  base: z
+    .object({
+      branch: z.string().trim().min(1),
+      sha: z.string().regex(/^[a-f0-9]{40}$/i),
+    })
+    .optional()
+    .describe(
+      "Repository snapshot recorded by Responder after submission. Omit this field.",
+    ),
   diff: z
     .string()
     .trim()
