@@ -627,6 +627,38 @@ export async function checkoutRuntimeRepository(
   repositoryFullName: string,
   dependencies: RepositoryCheckoutDependencies = defaultDependencies,
 ): Promise<CheckedOutRepository> {
+  return checkoutRuntimeRepositoryWithRef(
+    session,
+    versionId,
+    repositoryFullName,
+    undefined,
+    dependencies,
+  );
+}
+
+export async function checkoutRuntimeRepositoryAtRef(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  repositoryFullName: string,
+  reference: RuntimeRepositoryReference,
+  dependencies: RepositoryCheckoutDependencies = defaultDependencies,
+): Promise<CheckedOutRepository> {
+  return checkoutRuntimeRepositoryWithRef(
+    session,
+    versionId,
+    repositoryFullName,
+    reference,
+    dependencies,
+  );
+}
+
+async function checkoutRuntimeRepositoryWithRef(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  repositoryFullName: string,
+  reference: RuntimeRepositoryReference | undefined,
+  dependencies: RepositoryCheckoutDependencies,
+): Promise<CheckedOutRepository> {
   const repositories = await dependencies.getRepositories(versionId);
   const repository = repositories.find(
     (candidate) => candidate.fullName === repositoryFullName,
@@ -639,7 +671,7 @@ export async function checkoutRuntimeRepository(
   const checkedOut = await checkoutRuntimeRepositoriesWithRefs(
     session,
     versionId,
-    new Map(),
+    reference ? new Map([[repositoryFullName, reference]]) : new Map(),
     {
       ...dependencies,
       getRepositories: async () => [repository],

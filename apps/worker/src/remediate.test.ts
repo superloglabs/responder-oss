@@ -72,6 +72,21 @@ describe("proposed diff remediation", () => {
     });
   });
 
+  it("selects the repository base stored with the diff", () => {
+    const proposed = remediation([{ diff: "api diff", repository: "acme/api" }]);
+    if (proposed.type !== "code_change") throw new Error("Expected code change");
+    proposed.changes[0]!.base = {
+      branch: "main",
+      sha: "a".repeat(40),
+    };
+
+    expect(selectProposedChange(proposed, "acme/api", repositories)).toEqual({
+      base: { branch: "main", sha: "a".repeat(40) },
+      diff: "api diff",
+      repository: repositories[0],
+    });
+  });
+
   it("publishes the agent-authored title and body without adding testing text", () => {
     const proposed = remediation([{
       diff: "api diff",

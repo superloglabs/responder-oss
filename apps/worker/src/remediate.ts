@@ -20,7 +20,10 @@ import type { RemediationJob } from "@responder/core/jobs";
 import type { IssueRemediationSubmission } from "@responder/core/investigations/report";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { createPullRequestFromSandbox } from "./github-pull-request.js";
-import { checkoutRuntimeRepository } from "./repositories.js";
+import {
+  checkoutRuntimeRepository,
+  checkoutRuntimeRepositoryAtRef,
+} from "./repositories.js";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
@@ -35,6 +38,7 @@ type CodeChangeRemediation = Extract<
 >;
 
 interface SelectedProposedChange {
+  base?: { branch: string; sha: string };
   diff: string;
   pullRequest?: { body: string; title: string };
   repository: RuntimeRepository;
@@ -78,6 +82,7 @@ export function selectProposedChange(
     throw new Error("The proposed diff does not match the target repository");
   }
   return {
+    ...(change.base ? { base: change.base } : {}),
     diff: change.diff,
     ...(change.pullRequest ? { pullRequest: change.pullRequest } : {}),
     repository,
@@ -153,11 +158,18 @@ export async function runProposedRemediation(
     session = await createDaytonaSandboxSession(client, config, sandboxName);
     await configureDaytonaSandboxLifecycle(session, config);
     await prepareDaytonaPatchSandbox(session);
-    const checkout = await checkoutRuntimeRepository(
-      session,
-      job.config.id,
-      selected.repository.fullName,
-    );
+    const checkout = selected.base
+      ? await checkoutRuntimeRepositoryAtRef(
+          session,
+          job.config.id,
+          selected.repository.fullName,
+          selected.base,
+        )
+      : await checkoutRuntimeRepository(
+          session,
+          job.config.id,
+          selected.repository.fullName,
+        );
     await applyProposedDiff(session, checkout.path, selected.diff);
 
     const remediation = request.selectedRemediation ?? job.selectedRemediation;

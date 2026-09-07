@@ -7,6 +7,7 @@ import {
   type InvestigationReportSubmission,
 } from "@responder/core/investigations/report";
 import { embedNewIssues } from "./issue-embeddings.js";
+import { attachRepositoryBasesToReport } from "./remediation-bases.js";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
 const submitInvestigationReportDescription =
@@ -64,12 +65,16 @@ export async function submitInvestigationReportForRun(input: {
   investigationId: string;
   organizationId: string;
   report: InvestigationReportSubmission;
+  repositories?: Array<{ branch: string; repository: string; sha: string }>;
   environment?: NodeJS.ProcessEnv;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>;
 }) {
-  assertNoDaytonaSecretPlaceholders(input.report, "Investigation report");
-  const newIssues = input.report.issues.filter(
+  const report = input.repositories
+    ? attachRepositoryBasesToReport(input.report, input.repositories)
+    : input.report;
+  assertNoDaytonaSecretPlaceholders(report, "Investigation report");
+  const newIssues = report.issues.filter(
     (issue) => issue.resolution === "new",
   );
   const newIssueEmbeddings = await embedNewIssues(
@@ -80,7 +85,7 @@ export async function submitInvestigationReportForRun(input: {
     investigationId: input.investigationId,
     organizationId: input.organizationId,
     submission: {
-      report: input.report,
+      report,
       newIssueEmbeddings,
     },
   });
@@ -111,6 +116,7 @@ export async function submitInvestigationReportForRun(input: {
 export function createSubmitInvestigationReportTool(input: {
   investigationId: string;
   organizationId: string;
+  repositories?: Array<{ branch: string; repository: string; sha: string }>;
   environment?: NodeJS.ProcessEnv;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>;
@@ -124,6 +130,7 @@ export function createSubmitInvestigationReportTool(input: {
         investigationId: input.investigationId,
         organizationId: input.organizationId,
         report,
+        repositories: input.repositories,
         environment: input.environment,
         onAutomaticPullRequestRequests:
           input.onAutomaticPullRequestRequests,
