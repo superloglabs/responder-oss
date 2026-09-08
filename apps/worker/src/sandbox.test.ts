@@ -148,6 +148,33 @@ describe("Daytona sandbox cleanup", () => {
     expect(creator.create).toHaveBeenCalledOnce();
   });
 
+  it("retries transient sandbox creation failures", async () => {
+    const harness = cleanupHarness({ missing: true });
+    const gatewayError = Object.assign(new Error("bad gateway"), {
+      name: "DaytonaBadGatewayError",
+      statusCode: 502,
+    });
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const creator = {
+      create: vi
+        .fn()
+        .mockRejectedValueOnce(gatewayError)
+        .mockResolvedValue(createdSession),
+    };
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(creator.create).toHaveBeenCalledTimes(2);
+    expect(harness.sleep).toHaveBeenCalledWith(500);
+  });
+
   it("cleans up a sandbox that appears after creation times out", async () => {
     const harness = cleanupHarness({ missing: true });
     const timeout = new Error("sandbox creation timed out");
