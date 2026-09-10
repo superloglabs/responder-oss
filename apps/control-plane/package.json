@@ -26,7 +26,7 @@
     "@sentry/react": "10.69.0",
     "@xyflow/react": "^12.11.2",
     "better-auth": "1.6.25",
-    "hono": "4.12.34",
+    "hono": "4.13.5",
     "posthog-js": "^1.416.1",
     "react": "19.2.6",
     "react-dom": "19.2.6",
