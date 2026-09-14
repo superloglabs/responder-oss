@@ -1,9 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
   canImpersonateSupportUser,
+  configuredAuthTrustedOrigins,
   configuredSuperuserEmails,
   platformRoleForIdentity,
 } from "./auth.js";
+
+describe("configuredAuthTrustedOrigins", () => {
+  it("trusts the configured auth and public callback origins", () => {
+    expect(
+      configuredAuthTrustedOrigins({
+        BETTER_AUTH_URL: "https://responder.local",
+        RESPONDER_PUBLIC_URL: "https://responder.example",
+      } as NodeJS.ProcessEnv),
+    ).toEqual([
+      "https://responder.local",
+      "https://responder.example",
+    ]);
+  });
+
+  it("defaults the auth origin and removes duplicates", () => {
+    expect(configuredAuthTrustedOrigins({} as NodeJS.ProcessEnv)).toEqual([
+      "http://localhost:3000",
+    ]);
+    expect(
+      configuredAuthTrustedOrigins({
+        BETTER_AUTH_URL: "https://responder.example",
+        RESPONDER_PUBLIC_URL: "https://responder.example",
+      } as NodeJS.ProcessEnv),
+    ).toEqual(["https://responder.example"]);
+  });
+});
 
 describe("configuredSuperuserEmails", () => {
   it("normalizes and deduplicates the server-side allowlist", () => {

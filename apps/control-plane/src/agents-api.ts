@@ -186,7 +186,7 @@ export interface AgentDetail {
     title: string;
     status: "pending" | "investigating" | "resolved" | "failed";
     input: {
-      provider: "sentry" | "datadog" | "dash0" | "slack";
+      provider: "sentry" | "datadog" | "dash0" | "slack" | "scan";
       externalEventId: string;
       title: string;
       body: string;

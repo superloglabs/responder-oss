@@ -10,6 +10,10 @@ initializeServerMonitoring();
 
 const { productionApp } = await import("./production-app.js");
 const { closeInvestigationQueue } = await import("./investigations/queue.js");
+const { startScanScheduler, stopScanScheduler } = await import(
+  "./scans/scheduler.js"
+);
+startScanScheduler();
 
 const port = Number(
   process.env.PORT ?? process.env.CONTROL_PLANE_API_PORT ?? 3000,
@@ -58,6 +62,7 @@ function shutdown(signal: NodeJS.Signals) {
       );
       process.exitCode = 1;
     }
+    await stopScanScheduler();
     await closeInvestigationQueue().catch((queueError: unknown) => {
       console.error(
         JSON.stringify({

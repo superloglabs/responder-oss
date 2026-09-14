@@ -101,7 +101,7 @@ export const issueRelationship = pgEnum("issue_relationship", [
 ]);
 
 export type RuntimeProfileModelOptions = Record<string, unknown>;
-export type AgentPurpose = "standard" | "slack_thread";
+export type AgentPurpose = "standard" | "slack_thread" | "scan";
 export type InvestigationExecutionMode = "standard" | "slack_thread";
 
 export const runtimeProfiles = pgTable(
@@ -154,6 +154,9 @@ export const agents = pgTable(
     uniqueIndex("agents_organization_slack_thread_idx")
       .on(table.organizationId)
       .where(sql`${table.purpose} = 'slack_thread'`),
+    uniqueIndex("agents_organization_scan_idx")
+      .on(table.organizationId)
+      .where(sql`${table.purpose} = 'scan'`),
   ],
 );
 
@@ -334,6 +337,46 @@ export const repositories = pgTable(
   ],
 );
 
+export const scanConfigurations = pgTable(
+  "scan_configurations",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .unique()
+      .references(() => agents.id, { onDelete: "set null" }),
+    frequencyHours: integer("frequency_hours"),
+    slackChannelResourceId: uuid("slack_channel_resource_id").references(
+      () => integrationResources.id,
+      { onDelete: "set null" },
+    ),
+    contextAccountIds: jsonb("context_account_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    contextResourceIds: jsonb("context_resource_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    repositoryIds: jsonb("repository_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    updatedBy: uuid("updated_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("scan_configurations_due_idx").on(table.nextRunAt)],
+);
+
 export const agentVersionRepositories = pgTable(
   "agent_version_repositories",
   {
@@ -397,7 +440,7 @@ export const agentVersionSecrets = pgTable(
 );
 
 export interface InvestigationInput {
-  provider: "sentry" | "datadog" | "dash0" | "slack";
+  provider: "sentry" | "datadog" | "dash0" | "slack" | "scan";
   externalEventId: string;
   title: string;
   body: string;

@@ -202,6 +202,25 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("published later without another model pass");
   });
 
+  it("keeps proactive scans read-only while retaining issue deduplication", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect connected production context.",
+      clickStackConnected: false,
+      datadogConnected: true,
+      repositories: [],
+      scanMode: true,
+      sentryConnected: true,
+    });
+
+    expect(instructions).toContain("requested scan window");
+    expect(instructions).toContain("currently active");
+    expect(instructions).toContain("observation-only scan");
+    expect(instructions).toContain("search_existing_issues");
+    expect(instructions).toContain("external_action remediation options");
+    expect(instructions).not.toContain("modify repository files");
+    expect(instructions).not.toContain("ready-for-review pull request title");
+  });
+
   it("keeps Slack thread turns sandbox-only without issue or PR workflows", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Investigate what the person asked.",

@@ -31,6 +31,18 @@ describe("investigation input", () => {
     ).toThrow();
   });
 
+  it("accepts proactive scan runs", () => {
+    const parsed = investigationRequestSchema.parse({
+      agentId: "06060606-0606-4606-8606-060606060606",
+      provider: "scan",
+      externalEventId: "scheduled:workspace:2026-09-14T09:00:00.000Z",
+      title: "Production scan",
+      body: "Inspect the configured sources for active issues.",
+    });
+
+    expect(investigationPrompt(parsed)).toContain("# scan event");
+  });
+
   it("renders normalized AWS alarm context for a Slack-triggered investigation", () => {
     const prompt = investigationPrompt({
       attributes: {

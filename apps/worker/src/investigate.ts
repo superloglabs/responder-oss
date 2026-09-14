@@ -336,6 +336,7 @@ export function investigationInstructions(input: {
   vercelAccountIds?: string[];
   threadMode?: boolean;
   issueFollowupIssueCount?: number;
+  scanMode?: boolean;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
@@ -367,7 +368,9 @@ export function investigationInstructions(input: {
   return [
     input.runtimeSystemPrompt,
     input.agentPrompt,
-    "Investigate only the alert and context provided by Responder.",
+    input.scanMode
+      ? "Proactively survey the connected sources within the requested scan window. Report only concrete problems that are currently active."
+      : "Investigate only the alert and context provided by Responder.",
     awsAccountNames.length > 0
       ? `Use the connected read-only AWS tools to inspect relevant infrastructure, configuration, telemetry, and service health before concluding. Connected AWS accounts: ${awsAccountNames.join(", ")}. Never request secret values.`
       : null,
@@ -457,10 +460,14 @@ export function investigationInstructions(input: {
       : null,
     input.threadMode
       ? "Use the sandbox tools and attached code to investigate the request."
-      : "Use the sandbox filesystem and shell tools to inspect and work in attached repository checkouts.",
+      : input.scanMode
+        ? "Use the sandbox filesystem and shell tools to inspect attached repository checkouts without changing them."
+        : "Use the sandbox filesystem and shell tools to inspect and work in attached repository checkouts.",
     input.threadMode
       ? null
-      : "This run may prepare code remediation locally. You may modify repository files and run the checks you judge useful, but do not push branches, create pull requests, or make any other external code change. A later job publishes the exact saved diff.",
+      : input.scanMode
+        ? "This is an observation-only scan. Do not modify files or source systems, and do not create branches, commits, tickets, or pull requests."
+        : "This run may prepare code remediation locally. You may modify repository files and run the checks you judge useful, but do not push branches, create pull requests, or make any other external code change. A later job publishes the exact saved diff.",
     "Do not expose credentials or secret values.",
     workspaceSecretUsageInstructions(workspaceSecrets),
     input.threadMode
@@ -475,7 +482,9 @@ export function investigationInstructions(input: {
         : null,
     input.threadMode || issueUpdateFollowup
       ? null
-      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. For a code_change, first make the smallest safe change in the attached checkout, choose and run the checks appropriate for that change, and inspect the final git diff. Its changes array must contain one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Author the ready-for-review pull request title and complete Markdown body in each change's pullRequest field, including only the context and check results you decide belong there. The saved diff and pull request content are published later without another model pass or project checks. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system.",
+      : input.scanMode
+        ? "For every new issue, submit one or more concise external_action remediation options. Describe the next action for a human and include a self-contained prompt they can pass to an agent with access to the relevant system. Do not prepare code changes during a scan."
+        : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. For a code_change, first make the smallest safe change in the attached checkout, choose and run the checks appropriate for that change, and inspect the final git diff. Its changes array must contain one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Author the ready-for-review pull request title and complete Markdown body in each change's pullRequest field, including only the context and check results you decide belong there. The saved diff and pull request content are published later without another model pass or project checks. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system.",
     input.threadMode
       ? null
       : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
@@ -851,6 +860,7 @@ export async function runInvestigationAgent(
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
+      scanMode: investigationInput.provider === "scan",
       ...(issueFollowup
         ? { issueFollowupIssueCount: issueFollowup.issueIds.length }
         : {}),

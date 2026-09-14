@@ -10171,3 +10171,553 @@ a.issueLine:focus-visible {
     height: 30px;
   }
 }
+
+/* Scans design iteration */
+html:has(.appShell--scans),
+body:has(.appShell--scans) {
+  background: var(--ds-canvas);
+}
+
+.appShell--scans {
+  gap: 40px;
+  background: var(--ds-canvas);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+}
+
+.scansSetup,
+.scansSettings {
+  display: flex;
+  flex-direction: column;
+}
+
+.scansSetup {
+  gap: 32px;
+}
+
+.scansSettings {
+  gap: 24px;
+}
+
+.scansHeading {
+  min-height: 0;
+  padding-block-end: 0;
+  align-items: flex-end;
+}
+
+.scansHeading h1 {
+  color: var(--ds-text-primary);
+  font-size: 33px;
+  font-weight: 500;
+  line-height: 45px;
+  letter-spacing: normal;
+  text-wrap: balance;
+}
+
+.scansHeading p {
+  margin-block-start: 9px;
+  color: var(--ds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-wrap: pretty;
+}
+
+.scanControls {
+  width: min(100%, 720px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scanControls .dsField__label {
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.scanControls .dsSelect__trigger {
+  background: var(--ds-surface-base);
+}
+
+.scanSources,
+.recentScans {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.scanSourceSummary {
+  min-height: 64px;
+  padding-block: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.scanSourceSummary__providers {
+  display: flex;
+  padding-inline-start: 2px;
+}
+
+.scanSourceSummary__providers .providerMark {
+  background: var(--ds-surface-base);
+  box-shadow: 0 0 0 3px var(--ds-canvas);
+}
+
+.scanSourceSummary__providers .providerMark + .providerMark {
+  margin-inline-start: -8px;
+}
+
+.scanSourceSummary__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scanSourceSummary__copy strong {
+  color: var(--ds-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.scanSourceSummary__copy small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.scanSourceSummary__copy small:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scanSectionHeading h2 {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 25px;
+}
+
+.scanSectionHeading p {
+  margin: 3px 0 0;
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.scanSourcesDialog {
+  width: min(840px, 100%);
+  border: 0;
+  background: var(--ds-surface-base);
+}
+
+.scanSourcesDialog__mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+  color: var(--ds-text-secondary);
+}
+
+.scanSourcesDialog__mark svg {
+  width: 14px;
+  height: 14px;
+}
+
+.scanSourcesDialog .configurationDialog__body {
+  overscroll-behavior: contain;
+}
+
+.scanSourcesDialog .configurationDialog__header {
+  padding-block: 20px 12px;
+  border-block-end: 0;
+}
+
+.scanSourcesDialog .configurationDialog__body {
+  padding-block: 12px 20px;
+}
+
+.scanSourcesDialog .configurationDialog__footer {
+  padding-block: 12px 16px;
+  border-block-start: 0;
+  background: var(--ds-surface-base);
+  box-shadow: 0 -18px 30px -26px rgb(0 0 0 / 55%);
+}
+
+.appShell--scans .contextPanel {
+  gap: 24px;
+}
+
+.appShell--scans .contextToolbar {
+  padding-block-end: 0;
+}
+
+.appShell--scans .contextToolbar strong,
+.appShell--scans .contextIntegrationCatalog__header strong {
+  color: var(--ds-text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.appShell--scans .contextToolbar small,
+.appShell--scans .contextIntegrationCatalog__header small {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.appShell--scans .contextList {
+  border: 0;
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.appShell--scans .contextRow {
+  border-block-end: 0;
+}
+
+.appShell--scans .contextRow__copy strong {
+  color: var(--ds-text-secondary);
+}
+
+.appShell--scans .contextRow__copy > small {
+  color: var(--ds-text-muted);
+}
+
+.appShell--scans .contextIntegrationCatalog {
+  padding-block-start: 8px;
+  gap: 20px;
+  border-block-start: 0;
+}
+
+.appShell--scans .contextIntegrationCatalog__header {
+  align-items: center;
+}
+
+.appShell--scans .contextIntegrationSearch {
+  width: min(280px, 45%);
+  height: 36px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-surface-raised);
+}
+
+.appShell--scans .contextIntegrationCategories {
+  gap: 24px;
+}
+
+.appShell--scans .contextIntegrationCategory {
+  gap: 9px;
+}
+
+.appShell--scans .contextIntegrationGrid {
+  gap: 8px;
+}
+
+.appShell--scans .contextIntegrationCard {
+  min-height: 76px;
+  padding: 12px 14px;
+  gap: 11px;
+  border: 0;
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+}
+
+.appShell--scans .contextIntegrationCard__copy strong {
+  color: var(--ds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.appShell--scans .contextIntegrationCard__copy small {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.appShell--scans .contextIntegrationCard .dsButton {
+  min-height: 32px;
+  padding-inline: 12px;
+}
+
+.scanResourceList {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+}
+
+.scanResourceList legend {
+  width: 100%;
+  padding-block-end: 8px;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.scanResourceList .dsChoice {
+  min-height: 54px;
+  padding-inline: 12px;
+  border-block-start: 0;
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+}
+
+.appShell--scans .contextConnectionSummary {
+  border: 0;
+}
+
+.recentScans {
+  padding-block-end: 28px;
+}
+
+.scanHistoryTable .dsDataTable,
+.scanFindingsTable .dsDataTable {
+  border: 0;
+}
+
+.scanHistoryTable .dsDataTable th,
+.scanHistoryTable .dsDataTable td,
+.scanFindingsTable .dsDataTable th,
+.scanFindingsTable .dsDataTable td {
+  border-block-end: 1px solid var(--ds-border-subtle);
+}
+
+.scanHistoryTable .dsDataTable tbody tr:last-child td,
+.scanFindingsTable .dsDataTable tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+.scanHistoryTable .dsDataTable td {
+  height: 48px;
+}
+
+.scanTableTitle {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ds-text-primary);
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.scanTableTitle time,
+.scanTableFindings {
+  font-variant-numeric: tabular-nums;
+}
+
+.scanTableTitle:hover {
+  color: var(--ds-text-primary);
+}
+
+.scanTableTitle:focus-visible,
+.scanDetailBack:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--ds-text-primary);
+  outline-offset: 2px;
+}
+
+.scanTableFindings {
+  color: var(--ds-text-secondary);
+}
+
+.scanDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding-block-end: 28px;
+}
+
+.scanDetailBack {
+  width: max-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ds-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.scanDetailBack:hover {
+  color: var(--ds-text-primary);
+}
+
+.scanDetailBack svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(180deg);
+}
+
+.scanDetailHeading {
+  min-height: 0;
+  padding-block: 0;
+}
+
+.scanDetailHeading h1 {
+  color: var(--ds-text-primary);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 40px;
+  letter-spacing: normal;
+}
+
+.scanDetailHeading p {
+  margin-block-start: 6px;
+  color: var(--ds-text-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.scanDetailStats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.scanDetailStats div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.scanDetailStats dt {
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.scanDetailStats dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-size: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scanDetailStats div:last-child dd {
+  font-size: 15px;
+}
+
+.scanFindings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.scanFindingsTable .dsDataTable td {
+  height: 58px;
+}
+
+.scanFindingsTable .issueTableSeverity {
+  border: 0;
+}
+
+.scanFindingTitle,
+.scanFindingResult {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scanFindingTitle strong,
+.scanFindingResult strong {
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scanFindingTitle small,
+.scanFindingResult small {
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: 10.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .appShell--scans {
+    gap: 32px;
+  }
+
+  .scansSetup {
+    gap: 24px;
+  }
+
+  .scansHeading {
+    min-height: 0;
+    padding-block: 0;
+    align-items: stretch;
+  }
+
+  .scansHeading h1 {
+    font-size: 30px;
+    line-height: 40px;
+  }
+
+  .scansHeading .dsButton {
+    width: 100%;
+  }
+
+  .scanControls,
+  .appShell--scans .contextIntegrationGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .scanSourceSummary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .scanSourceSummary > .dsButton {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+
+  .appShell--scans .contextIntegrationCatalog__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .appShell--scans .contextIntegrationSearch {
+    width: 100%;
+  }
+
+  .appShell--scans .contextIntegrationSearch input {
+    font-size: 16px;
+  }
+
+  .scanDetail {
+    gap: 24px;
+  }
+
+  .scanDetailStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 16px;
+  }
+}
