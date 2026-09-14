@@ -73,6 +73,18 @@ describe("ProviderGlyph", () => {
     expect(markup).not.toContain(">LF</span>");
   });
 
+  it("renders the official Supabase mark instead of a text abbreviation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "supabase" }),
+    );
+
+    expect(markup).toContain('aria-label="Supabase"');
+    expect(markup).toContain('class="providerGlyph__logo"');
+    expect(markup).toContain("#249361");
+    expect(markup).toContain("#3ECF8E");
+    expect(markup).not.toContain(">SB</span>");
+  });
+
   it("renders the official AWS mark instead of a text abbreviation", () => {
     const markup = renderToStaticMarkup(
       createElement(ProviderGlyph, { provider: "aws" }),

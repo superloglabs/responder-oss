@@ -13,7 +13,7 @@ export const providerGlyphs = {
   langfuse: { label: "Langfuse", logo: "langfuse" },
   sentry: { label: "Sentry", logo: "sentry" },
   slack: { label: "Slack", logo: "slack" },
-  supabase: { label: "Supabase", text: "SB" },
+  supabase: { label: "Supabase", logo: "supabase" },
   upstash: { label: "Upstash", logo: "upstash" },
   vercel: { label: "Vercel", text: "▲" },
 } as const;
