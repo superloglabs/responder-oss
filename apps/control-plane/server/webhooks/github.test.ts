@@ -153,6 +153,7 @@ describe("GitHub pull request webhooks", () => {
       repositoryFullName: "acme/api",
       pullRequestNumber: 42,
     });
+    expect(markSuggestionPullRequestMerged).not.toHaveBeenCalled();
     expect(refreshIssuePullRequestSlackMessages).toHaveBeenCalledWith("req-1");
     expect(captureAnalyticsEvent).toHaveBeenCalledWith(
       expect.objectContaining({

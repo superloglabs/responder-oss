@@ -85,6 +85,11 @@ export async function searchCanonicalSuggestions(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: SuggestionSearchDependencies = defaultSearchDependencies,
 ) {
+  const textMatchesPromise = dependencies.searchText(
+    input.organizationId,
+    input.query,
+    input.limit,
+  );
   let embedding: SuggestionEmbedding;
   let candidates: Candidate[];
   try {
@@ -95,18 +100,12 @@ export async function searchCanonicalSuggestions(
   } catch {
     return {
       mode: "text" as const,
-      suggestions: (await dependencies.searchText(
-        input.organizationId,
-        input.query,
-        input.limit,
-      )).map((candidate) => serialize(candidate, null)),
+      suggestions: (await textMatchesPromise).map((candidate) =>
+        serialize(candidate, null)
+      ),
     };
   }
-  const textMatches = await dependencies.searchText(
-    input.organizationId,
-    input.query,
-    input.limit,
-  );
+  const textMatches = await textMatchesPromise;
   const semantic = rankSuggestionCandidates(
     candidates,
     embedding.vector,

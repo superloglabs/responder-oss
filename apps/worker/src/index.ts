@@ -213,6 +213,10 @@ function drainAbandonedRemediationRequests(): Promise<void> {
             requestId: requestIds[index],
           }),
         );
+        await reportWorkerException(result.reason, {
+          operation: "remediation",
+          requestId: requestIds[index]!,
+        });
       }
       return requestIds;
     }),

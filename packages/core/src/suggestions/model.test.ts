@@ -65,7 +65,11 @@ describe("suggestion submission", () => {
         title: "Instrument investigation queue wait time",
         description: "Records queue wait time when an investigation starts.",
         changes: [
-          { repository: null, diff, pullRequest: { title: "First", body: "First" } },
+          {
+            repository: "acme/responder",
+            diff,
+            pullRequest: { title: "First", body: "First" },
+          },
           { repository: null, diff, pullRequest: { title: "Second", body: "Second" } },
         ],
       },
@@ -76,7 +80,7 @@ describe("suggestion submission", () => {
     expect(result.error.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          message: "At most one code change may omit its repository",
+          message: "Code changes with multiple entries must name each repository",
         }),
       ]),
     );

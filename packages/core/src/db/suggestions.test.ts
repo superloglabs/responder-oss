@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  legacySuggestionFingerprint,
   suggestionEmbeddingText,
   suggestionFingerprint,
   suggestionSearchPattern,
@@ -31,15 +32,20 @@ describe("suggestion search data", () => {
   });
 
   it("keeps title, subtitle, and detail boundaries in the fingerprint", () => {
-    expect(suggestionFingerprint({
-      title: "Record queue.",
-      subtitle: "Wait time is invisible.",
+    const first = {
+      title: "Record queue",
+      subtitle: "wait time is invisible.",
       detail: "Details",
-    })).not.toBe(suggestionFingerprint({
-      title: "Record.",
-      subtitle: "Queue wait time is invisible.",
+    };
+    const second = {
+      title: "Record",
+      subtitle: "queue wait time is invisible.",
       detail: "Details",
-    }));
+    };
+    expect(suggestionFingerprint(first)).not.toBe(suggestionFingerprint(second));
+    expect(legacySuggestionFingerprint(first)).toBe(
+      legacySuggestionFingerprint(second),
+    );
   });
 
   it("escapes text-search wildcard and escape characters", () => {

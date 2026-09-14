@@ -39,6 +39,15 @@ export function suggestionFingerprint(input: SuggestionSubmission): string {
   return createHash("sha256").update(normalizedSuggestionText(input)).digest("hex");
 }
 
+export function legacySuggestionFingerprint(input: SuggestionSubmission): string {
+  const normalized = [input.title, input.subtitle, input.detail]
+    .join("\n")
+    .toLocaleLowerCase("en-US")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return createHash("sha256").update(normalized).digest("hex");
+}
+
 export function suggestionEmbeddingText(input: Pick<
   SuggestionSubmission,
   "detail" | "subtitle" | "title"
@@ -134,6 +143,7 @@ export async function createSuggestionIfMissing(input: {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.organizationId}))`);
     const fingerprint = suggestionFingerprint(input.suggestion);
+    const legacyFingerprint = legacySuggestionFingerprint(input.suggestion);
     const exactRows = await tx
       .select({
         id: suggestions.id,
@@ -149,7 +159,10 @@ export async function createSuggestionIfMissing(input: {
       .where(
         and(
           eq(suggestions.organizationId, input.organizationId),
-          eq(suggestions.fingerprint, fingerprint),
+          or(
+            eq(suggestions.fingerprint, fingerprint),
+            eq(suggestions.fingerprint, legacyFingerprint),
+          ),
         ),
       )
       .limit(1);
@@ -219,6 +232,7 @@ export async function listSuggestions(
   } = {},
 ) {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const cursorCreatedAt = sql<Date>`date_trunc('milliseconds', ${suggestions.createdAt})`;
   const rows = await getDatabase()
     .select({
       id: suggestions.id,
@@ -232,11 +246,11 @@ export async function listSuggestions(
       and(
         eq(suggestions.organizationId, organizationId),
         ...(options.cursor
-          ? [sql`(${suggestions.createdAt}, ${suggestions.id}) < (${options.cursor.createdAt}, ${options.cursor.id})`]
+          ? [sql`(${cursorCreatedAt}, ${suggestions.id}) < (${options.cursor.createdAt}, ${options.cursor.id})`]
           : []),
       ),
     )
-    .orderBy(desc(suggestions.createdAt), desc(suggestions.id))
+    .orderBy(desc(cursorCreatedAt), desc(suggestions.id))
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page.at(-1);

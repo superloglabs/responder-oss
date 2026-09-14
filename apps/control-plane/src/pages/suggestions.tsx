@@ -257,10 +257,13 @@ export function SuggestionsPage() {
   }>({ suggestionId: "", tab: "description" });
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openedIds, setOpenedIds] = useState<string[]>([]);
+  const [viewedPullRequestIndex, setViewedPullRequestIndex] = useState(0);
   const selected = suggestionId
     ? isStoryboard
       ? storyboardSuggestions.find((item) => item.id === suggestionId) ?? null
-      : detail
+      : detail?.id === suggestionId
+        ? detail
+        : null
     : null;
   const activeRequests = pullRequests.filter((request) =>
     ["queued", "creating", "created", "merged"].includes(request.status),
@@ -348,9 +351,11 @@ export function SuggestionsPage() {
   async function openPullRequest() {
     if (!selected) return;
     if (openedPullRequests.length > 0) {
-      for (const request of openedPullRequests) {
-        window.open(request.pullRequestUrl!, "_blank", "noopener,noreferrer");
-      }
+      const request = openedPullRequests[
+        viewedPullRequestIndex % openedPullRequests.length
+      ]!;
+      window.open(request.pullRequestUrl!, "_blank", "noopener,noreferrer");
+      setViewedPullRequestIndex((current) => current + 1);
       return;
     }
     setOpeningId(selected.id);
@@ -461,14 +466,16 @@ export function SuggestionsPage() {
                   )}
                   {pendingPullRequests.length > 0
                     ? `Opening ${
-                        activeRequests.length === 1
+                        pendingPullRequests.length === 1
                           ? "pull request"
-                          : `${activeRequests.length} pull requests`
+                          : `${pendingPullRequests.length} pull requests`
                       }`
                     : openedPullRequests.length > 0
-                      ? `View ${openedPullRequests.length === 1
-                          ? "pull request"
-                          : `${openedPullRequests.length} pull requests`}`
+                      ? openedPullRequests.length === 1
+                        ? "View pull request"
+                        : `View pull request ${
+                            (viewedPullRequestIndex % openedPullRequests.length) + 1
+                          } of ${openedPullRequests.length}`
                     : hasOpenedPullRequest
                       ? "Pull request opened"
                     : openingId === selected.id

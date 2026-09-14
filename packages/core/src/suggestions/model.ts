@@ -14,6 +14,16 @@ export const suggestionCodeChangeSchema = codeChangeRemediationSchema
         path: ["changes", index, "pullRequest"],
       });
     });
+    if (
+      change.changes.length > 1 &&
+      change.changes.some((part) => part.repository === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Code changes with multiple entries must name each repository",
+        path: ["changes"],
+      });
+    }
   });
 
 export const suggestionSubmissionSchema = z.object({
@@ -47,16 +57,6 @@ export const suggestionSubmissionSchema = z.object({
       code: "custom",
       message: "Subtitle must add information beyond the title",
       path: ["subtitle"],
-    });
-  }
-  const unresolvedRepositories = suggestion.codeChange?.changes.filter(
-    (change) => change.repository === null,
-  ) ?? [];
-  if (unresolvedRepositories.length > 1) {
-    context.addIssue({
-      code: "custom",
-      message: "At most one code change may omit its repository",
-      path: ["codeChange", "changes"],
     });
   }
 });
