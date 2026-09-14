@@ -7,6 +7,7 @@ import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
 import {
   getInvestigationForSlackAction,
+  findSlackIssueThread,
   recordInvestigationSlackMessage,
   recordInvestigationSlackSource,
   removeInvestigationSlackReply,
@@ -231,6 +232,12 @@ export function isDatadogRecoveryMessage(body: string): boolean {
   );
 }
 
+export function isPostHogInactiveMessage(body: string): boolean {
+  return /\b(?:has resolved|has recovered|was resolved|was auto-disabled|couldn['’]t evaluate)\b/iu.test(
+    slackMessageTitle(body),
+  );
+}
+
 export function isResolvedSlackAlert(body: string): boolean {
   return /^(?:✅|:white_check_mark:)\s*/iu.test(slackMessageTitle(body));
 }
@@ -265,7 +272,7 @@ export function isSentryIssueAlert(
   );
 }
 
-type SlackAlertProvider = "app" | "aws" | "datadog" | "sentry";
+type SlackAlertProvider = "app" | "aws" | "datadog" | "posthog" | "sentry";
 
 export type SlackAwsAlarm = {
   alarmName?: string;
@@ -354,6 +361,7 @@ export function shouldIgnoreResolvedSlackAlert(
   if (alertProvider === "aws") {
     return slackAwsAlarm({ body, senderName })?.state !== "ALARM";
   }
+  if (alertProvider === "posthog") return isPostHogInactiveMessage(body);
   return (
     alertProvider === "app" &&
     (isResolvedSlackAlert(body) ||
@@ -397,12 +405,16 @@ export function slackAlertProvider(input: {
   }
   if (senderName) {
     if (/\bdatadog\b/i.test(senderName)) return "datadog";
+    if (/\bposthog\b/i.test(senderName)) return "posthog";
     if (/\bsentry\b/i.test(senderName)) return "sentry";
     return /\balert\b/i.test(input.body) ? "app" : null;
   }
 
   if (/https:\/\/[^>\s]*datadoghq\.(?:com|eu)\//i.test(input.body)) {
     return "datadog";
+  }
+  if (/https:\/\/[^>\s]*posthog\.com\//i.test(input.body)) {
+    return "posthog";
   }
   if (/https:\/\/[^>\s]*sentry\.io\//i.test(input.body)) {
     return "sentry";
@@ -793,6 +805,68 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   const body = event.type === "app_mention"
     ? rawMessageBody.replace(/^\s*<@[A-Z0-9]+>\s*/iu, "").trim() || rawMessageBody
     : rawMessageBody;
+  if (event.type === "app_mention" && event.thread_ts) {
+    const linked = await findSlackIssueThread({
+      channelId: event.channel,
+      teamId: callback.data.team_id,
+      threadTimestamp: event.thread_ts,
+    }).catch(() => null);
+    if (linked) {
+      const priorIssues = linked.issues
+        .map((issue) => [
+          `Issue ${issue.id}: ${issue.title}`,
+          `Description: ${issue.description}`,
+          `Root cause: ${issue.rootCause || "Not established"}`,
+          `Current remediation: ${issue.remediation}`,
+          `Remediation options: ${JSON.stringify(issue.remediations)}`,
+        ].join("\n"))
+        .join("\n\n");
+      const priorContext = [
+        "This is follow-up feedback on an existing issue investigation.",
+        `Original investigation ID: ${linked.id}`,
+        linked.reportMarkdown ? `Original report:\n${linked.reportMarkdown}` : null,
+        priorIssues,
+        `Latest Slack feedback from ${event.user ?? "a teammate"}:\n${body}`,
+      ].filter((value): value is string => Boolean(value)).join("\n\n");
+      const result = await queueInvestigation(
+        {
+          agentId: linked.agentId,
+          provider: "slack",
+          externalEventId: `${callback.data.event_id}:${linked.agentId}`,
+          title: `Follow-up: ${linked.issueTitle}`,
+          body: priorContext,
+          sourceUrl: `https://slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`,
+          attributes: {
+            channelId: event.channel,
+            integrationAccountId: linked.integrationAccountId,
+            slackEventId: callback.data.event_id,
+            teamId: callback.data.team_id,
+            threadTimestamp: event.thread_ts,
+            timestamp: event.ts,
+            originalInvestigationId: linked.id,
+          },
+        },
+        {
+          slackIssueFollowup: {
+            originalInvestigationId: linked.id,
+            issueIds: linked.issueIds,
+            channelId: event.channel,
+            threadTimestamp: event.thread_ts,
+          },
+        },
+      );
+      if (result.kind === "blocked") {
+        throw new Error("Monthly investigation allowance exhausted");
+      }
+      return context.json({
+        ok: true,
+        matchedAgents: 1,
+        followup: true,
+        investigationId: result.investigationId,
+      });
+    }
+  }
+  let matches: Awaited<ReturnType<typeof findAgentsForSlackEvent>> = [];
   let alertProvider: SlackAlertProvider | null = null;
   let awsAlarm: SlackAwsAlarm | null = null;
   if (event.type === "message") {
@@ -828,6 +902,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       awsAlarm = slackAwsAlarm({ body, senderName });
     }
     if (
+      alertProvider &&
       shouldIgnoreResolvedSlackAlert(
         alertProvider,
         body,
@@ -899,13 +974,13 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     }
   }
 
-  const matches = await findAgentsForSlackEvent({
+  matches = await findAgentsForSlackEvent({
     teamId: callback.data.team_id,
     channelId: event.channel,
     eventType: event.type,
     userId: event.user,
     senderAppId: event.app_id ?? event.bot_profile?.app_id,
-  });
+  }) ?? [];
   await Promise.all(
     matches.map(async (match) => {
       const result = await forwardSlackEvent({

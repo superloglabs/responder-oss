@@ -2,8 +2,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ProviderGlyph } from "./icons";
+import { contextProviderMetadata } from "./provider-glyphs";
 
 describe("ProviderGlyph", () => {
+  it("keeps Supabase discovery metadata with its canonical provider metadata", () => {
+    expect(contextProviderMetadata.supabase).toEqual({
+      category: "Data & infrastructure",
+      searchTerms: "postgres database sql logs",
+    });
+  });
+
   it.each([
     ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],
@@ -73,6 +81,18 @@ describe("ProviderGlyph", () => {
     expect(markup).not.toContain(">LF</span>");
   });
 
+  it("renders the official Supabase mark instead of a text abbreviation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "supabase" }),
+    );
+
+    expect(markup).toContain('aria-label="Supabase"');
+    expect(markup).toContain('class="providerGlyph__logo"');
+    expect(markup).toContain("#249361");
+    expect(markup).toContain("#3ECF8E");
+    expect(markup).not.toContain(">SB</span>");
+  });
+
   it("renders the official AWS mark instead of a text abbreviation", () => {
     const markup = renderToStaticMarkup(
       createElement(ProviderGlyph, { provider: "aws" }),
@@ -82,5 +102,16 @@ describe("ProviderGlyph", () => {
     expect(markup).toContain("providerGlyph--aws");
     expect(markup).toContain('class="providerGlyph__asset"');
     expect(markup).not.toContain(">AWS</span>");
+  });
+
+  it("renders the Google mark for Google Cloud", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "gcp" }),
+    );
+
+    expect(markup).toContain('aria-label="Google Cloud"');
+    expect(markup).toContain("providerGlyph--gcp");
+    expect(markup).toContain("#4285f4");
+    expect(markup).not.toContain(">GCP</span>");
   });
 });

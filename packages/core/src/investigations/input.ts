@@ -3,7 +3,7 @@ import type { InvestigationInput } from "../db/schema.js";
 
 export const investigationRequestSchema = z.object({
   agentId: z.uuid(),
-  provider: z.enum(["sentry", "datadog", "slack"]),
+  provider: z.enum(["sentry", "datadog", "dash0", "slack"]),
   externalEventId: z.string().min(1).max(512),
   title: z.string().min(1).max(500),
   body: z.string().min(1).max(100_000),

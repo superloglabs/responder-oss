@@ -33,12 +33,16 @@ export const issueEvidenceSchema = z.object({
   source: z.enum([
     "alert",
     "aws",
+    "gcp",
     "datadog",
+    "dash0",
+    "posthog",
     "axiom",
     "sentry",
     "clickstack",
     "upstash",
     "langfuse",
+    "supabase",
     "github",
     "slack",
     "vercel",
@@ -80,6 +84,15 @@ const codeChangePartSchema = z.object({
     .max(200)
     .nullable()
     .describe("Attached repository that receives this change."),
+  base: z
+    .object({
+      branch: z.string().trim().min(1),
+      sha: z.string().regex(/^[a-f0-9]{40}$/i),
+    })
+    .optional()
+    .describe(
+      "Repository snapshot recorded by Responder after submission. Omit this field.",
+    ),
   diff: z
     .string()
     .trim()
@@ -95,6 +108,27 @@ const codeChangePartSchema = z.object({
     )
     .describe(
       "Complete unified git diff for this repository, including diff --git, ---/+++, and hunk headers.",
+    ),
+  pullRequest: z
+    .object({
+      title: z
+        .string()
+        .trim()
+        .min(1)
+        .max(240)
+        .describe("Ready-for-review pull request title."),
+      body: z
+        .string()
+        .trim()
+        .min(1)
+        .max(12_000)
+        .describe(
+          "Complete Markdown pull request body. Decide what context and validation results belong here.",
+        ),
+    })
+    .optional()
+    .describe(
+      "Agent-authored pull request content. Required for newly proposed changes; optional only for remediations saved by older versions.",
     ),
 });
 
@@ -149,6 +183,27 @@ export type IssueRemediation = IssueRemediationSubmission & { id: string };
 
 export type CodeChangePart = z.infer<typeof codeChangePartSchema>;
 
+export const authoredIssueRemediationsSchema = z
+  .array(issueRemediationSubmissionSchema)
+  .min(1)
+  .max(10)
+  .superRefine((remediations, context) => {
+    remediations.forEach((remediation, remediationIndex) => {
+      if (remediation.type !== "code_change") return;
+      remediation.changes.forEach((change, changeIndex) => {
+        if (change.pullRequest) return;
+        context.addIssue({
+          code: "custom",
+          message: "New code changes require agent-authored pull request content",
+          path: [remediationIndex, "changes", changeIndex, "pullRequest"],
+        });
+      });
+    });
+  })
+  .describe(
+    "Concrete remediation options with complete pull request content for every new code change.",
+  );
+
 export function codeChangeParts(
   remediation: Extract<IssueRemediationSubmission, { type: "code_change" }>,
 ): CodeChangePart[] {
@@ -179,13 +234,9 @@ const newIssueSubmissionSchema = z.object({
     .max(30)
     .describe("Ordered events that explain how the issue unfolded."),
   severity: issueSeveritySchema,
-  remediations: z
-    .array(issueRemediationSubmissionSchema)
-    .min(1)
-    .max(10)
-    .describe(
-      "Concrete remediation options. Use code_change only after inspecting the relevant files; use external_action for configuration, deployment, data, or other work outside the attached repositories.",
-    ),
+  remediations: authoredIssueRemediationsSchema.describe(
+    "Concrete remediation options. Use code_change only after inspecting and editing the relevant files and running the checks you choose; use external_action for configuration, deployment, data, or other work outside the attached repositories.",
+  ),
   evidence: z.array(issueEvidenceSchema).min(1).max(30),
 });
 

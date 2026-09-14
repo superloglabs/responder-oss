@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   disableAgentsWithUnavailableRepositories,
+  findAgentsForDash0Alert,
   findAgentsForSentryIssue,
   findAgentsForSlackEvent,
 } from "./agents.js";
@@ -114,6 +115,35 @@ describe("Sentry issue routing", () => {
     ).resolves.toEqual([
       { agentId: "agent-1", organizationId: "organization-1" },
       { agentId: "agent-2", organizationId: "organization-2" },
+    ]);
+  });
+});
+
+describe("Dash0 alert routing", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("routes alerts only to agents using the addressed account", async () => {
+    returnAgents([
+      {
+        agentId: "agent-1",
+        integrationAccountId: "dash0-account-1",
+        organizationId: "organization-1",
+        trigger: "dash0_alert",
+        triggerConfig: { integrationAccountId: "dash0-account-1" },
+      },
+      {
+        agentId: "agent-2",
+        integrationAccountId: "dash0-account-1",
+        organizationId: "organization-1",
+        trigger: "slack_channel",
+        triggerConfig: { integrationAccountId: "slack-account-1" },
+      },
+    ]);
+
+    await expect(findAgentsForDash0Alert("dash0-account-1")).resolves.toEqual([
+      { agentId: "agent-1", organizationId: "organization-1" },
     ]);
   });
 });

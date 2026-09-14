@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const dnsMocks = vi.hoisted(() => ({
@@ -27,7 +28,11 @@ import {
   githubAuthorizeUrl,
   githubInstallUrl,
 } from "./github.js";
-import { listSentryProjects, sentryInstallUrl } from "./sentry.js";
+import {
+  listSentryProjects,
+  refreshSentryGrant,
+  sentryInstallUrl,
+} from "./sentry.js";
 import {
   exchangeSlackCode,
   joinSlackChannel,
@@ -361,9 +366,7 @@ describe("integration providers", () => {
     expect(scopes).toContain("chat:write");
     expect(scopes).toContain("chat:write.public");
     const userScopes = url.searchParams.get("user_scope")?.split(",") ?? [];
-    expect(userScopes).toEqual(
-      expect.arrayContaining(["channels:history", "groups:history"]),
-    );
+    expect(userScopes).toEqual(["search:read"]);
   });
 
   it("joins a selected public Slack channel", async () => {
@@ -381,7 +384,7 @@ describe("integration providers", () => {
     );
   });
 
-  it("captures the Slack user token used by the hosted MCP", async () => {
+  it("captures the Slack user token used for channel search", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("SLACK_CLIENT_ID", "slack-client");
     vi.stubEnv("SLACK_CLIENT_SECRET", "slack-secret");
@@ -400,7 +403,7 @@ describe("integration providers", () => {
             id: "U123",
             access_token: "xoxp-user-token",
             token_type: "user",
-            scope: "channels:history,groups:history",
+            scope: "search:read",
           },
         }),
       ),
@@ -410,7 +413,7 @@ describe("integration providers", () => {
       access_token: "xoxb-bot-token",
       authed_user: {
         access_token: "xoxp-user-token",
-        scope: "channels:history,groups:history",
+        scope: "search:read",
       },
     });
   });
@@ -501,6 +504,60 @@ describe("integration providers", () => {
       "https://sentry.io/sentry-apps/responder-test/external-install/",
     );
     expect(url.searchParams.get("state")).toBe("state-token");
+  });
+
+  it("recovers an existing Sentry installation with a client-secret JWT", async () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "1",
+          token: "fresh-token",
+          refreshToken: "fresh-refresh-token",
+          expiresAt: "2026-09-01T12:00:00Z",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      refreshSentryGrant({
+        installationId: "40000000-0000-4000-8000-000000000000",
+        refreshToken: "revoked-refresh-token",
+      }),
+    ).resolves.toMatchObject({ token: "fresh-token" });
+
+    const [, manualRequest] = fetchMock.mock.calls;
+    const jwt = (manualRequest[1].headers.authorization as string).slice(7);
+    const [encodedHeader, encodedPayload, encodedSignature] = jwt.split(".");
+    expect(JSON.parse(Buffer.from(encodedHeader, "base64url").toString())).toEqual({
+      alg: "HS256",
+      typ: "JWT",
+    });
+    const jwtPayload = JSON.parse(
+      Buffer.from(encodedPayload, "base64url").toString(),
+    );
+    expect(jwtPayload).toEqual(
+      expect.objectContaining({
+        exp: expect.any(Number),
+        iat: expect.any(Number),
+        iss: "sentry-client",
+        sub: "sentry-client",
+        jti: expect.any(String),
+      }),
+    );
+    expect(jwtPayload.exp - jwtPayload.iat).toBe(60);
+    expect(encodedSignature).toBe(
+      createHmac("sha256", "sentry-secret")
+        .update(`${encodedHeader}.${encodedPayload}`)
+        .digest("base64url"),
+    );
+    expect(JSON.parse(manualRequest[1].body as string)).toEqual({
+      grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer",
+    });
   });
 
   it("follows trusted regional Sentry project pagination", async () => {

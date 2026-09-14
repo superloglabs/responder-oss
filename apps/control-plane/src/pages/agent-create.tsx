@@ -7,7 +7,10 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { defaultLinearIssueTemplate } from "@responder/core/agents/config";
+import {
+  AGENT_PROMPT_MAX_LENGTH,
+  defaultLinearIssueTemplate,
+} from "@responder/core/agents/config";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   type AgentConfiguration,
@@ -22,7 +25,11 @@ import {
   saveAgent,
   slackChannelLabel,
 } from "../agents-api";
-import { defaultAgentContext } from "../agent-context-defaults";
+import {
+  defaultAgentContext,
+  filterSlackSearchChannels,
+  resolveSlackSearchContext,
+} from "../agent-context-defaults";
 import { AppShell } from "../components/app-shell";
 import {
   AgentContextIntegrationControls as ContextIntegrationControls,
@@ -35,9 +42,16 @@ import {
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
+import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
+import {
+  Dash0ConnectionDialog,
+  Dash0WebhookSetupDialog,
+} from "../components/dash0-connection-dialog";
 import {
   ChevronDownIcon,
   ProviderGlyph,
@@ -45,6 +59,9 @@ import {
   SearchIcon,
 } from "../components/icons";
 import {
+  contextCategoryDescriptions as CONTEXT_CATEGORY_DESCRIPTIONS,
+  contextCategoryOrder as CONTEXT_CATEGORY_ORDER,
+  contextProviderMetadata as CONTEXT_PROVIDER_METADATA,
   providerDisplayName,
 } from "../components/provider-glyphs";
 import {
@@ -69,48 +86,14 @@ import {
 } from "./agent-create-draft";
 
 type CreateStep = 1 | 2 | 3 | 4;
-type ContextCategory =
-  | "Observability"
-  | "Code & deployment"
-  | "Communication & workflow"
-  | "Data & infrastructure";
-
-const CONTEXT_CATEGORY_ORDER: ContextCategory[] = [
-  "Observability",
-  "Code & deployment",
-  "Communication & workflow",
-  "Data & infrastructure",
-];
-
-const CONTEXT_CATEGORY_DESCRIPTIONS: Record<ContextCategory, string> = {
-  Observability: "Errors, logs, traces, and service health",
-  "Code & deployment": "Source code, releases, and runtime changes",
-  "Communication & workflow": "Team conversations and incident follow-up",
-  "Data & infrastructure": "Cloud resources, databases, and custom tools",
-};
-
-const CONTEXT_PROVIDER_METADATA: Record<
-  IntegrationSummary["id"],
-  { category: ContextCategory; searchTerms: string }
-> = {
-  sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
-  datadog: { category: "Observability", searchTerms: "apm logs monitors" },
-  axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
-  clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
-  langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
-  github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
-  vercel: { category: "Code & deployment", searchTerms: "deployments projects hosting" },
-  slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
-  linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
-  aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
-  upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
-  custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
-};
-
 const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "aws",
+  "gcp",
   "custom_mcp",
   "langfuse",
+  "supabase",
+  "dash0",
+  "posthog",
 ]);
 
 const EMPTY_OPTIONS: AgentOptions = {
@@ -219,6 +202,10 @@ function draftFromConfiguration(
     configuration.trigger.kind === "slack_channel"
       ? configuration.trigger
       : null;
+  const dash0Trigger =
+    configuration.trigger.kind === "dash0_alert"
+      ? configuration.trigger
+      : null;
   const outputReporting =
     configuration.reporting.mode === "thread"
       ? null
@@ -228,7 +215,11 @@ function draftFromConfiguration(
   );
 
   return {
-    inputKind: sentryTrigger ? "sentry_issue" : "slack_channel",
+    inputKind: sentryTrigger
+      ? "sentry_issue"
+      : dash0Trigger
+        ? "dash0_alert"
+        : "slack_channel",
     sentryAccountId: sentryTrigger?.integrationAccountId,
     sentryProjectResourceIds: sentryTrigger
       ? options.resources
@@ -240,6 +231,7 @@ function draftFromConfiguration(
           )
           .map((resource) => resource.id)
       : undefined,
+    dash0AccountId: dash0Trigger?.integrationAccountId,
     slackInputResourceId: slackTrigger
       ? options.resources.find(
           (resource) =>
@@ -284,9 +276,11 @@ function createInitialDraft(
   const configured = draftFromConfiguration(options, configuration);
   const defaultContext = defaultAgentContext(options);
   const sentryAccounts = accountsFor(options, "sentry");
+  const dash0Accounts = accountsFor(options, "dash0");
   const sentryProjects = resourcesOfKind(options, "sentry_project");
   const slackChannels = resourcesOfKind(options, "slack_channel");
   const vercelProjects = resourcesOfKind(options, "vercel_project");
+  const contextResources = [...slackChannels, ...vercelProjects];
   const githubAccounts = accountsFor(options, "github");
   const firstSentryAccount =
     sentryAccounts.find((account) =>
@@ -332,6 +326,14 @@ function createInitialDraft(
         sentryProjects.some((project) => project.id === id),
       ) ??
       projectsForAccount.slice(0, 1).map((project) => project.id),
+    dash0AccountId:
+      dash0Accounts.some((account) => account.id === saved.dash0AccountId)
+        ? saved.dash0AccountId!
+        : dash0Accounts.some(
+              (account) => account.id === configured.dash0AccountId,
+            )
+          ? configured.dash0AccountId!
+          : dash0Accounts[0]?.id ?? "",
     slackInputResourceId:
       slackChannels.some((channel) => channel.id === saved.slackInputResourceId)
         ? saved.slackInputResourceId!
@@ -388,10 +390,10 @@ function createInitialDraft(
       (isEditing ? defaultContext.contextAccountIds : []),
     contextResourceIds:
       saved.contextResourceIds?.filter((id) =>
-        vercelProjects.some((resource) => resource.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       configured.contextResourceIds?.filter((id) =>
-        vercelProjects.some((resource) => resource.id === id),
+        contextResources.some((resource) => resource.id === id),
       ) ??
       (isEditing ? defaultContext.contextResourceIds : []),
     workspaceSecretRecordIds,
@@ -416,6 +418,7 @@ function connectionNotice(): {
   const provider = search.get("integration");
   const status = search.get("status");
   if (!provider || !status) return null;
+  if (provider === "supabase" && status === "select_project") return null;
 
   const name = providerDisplayName(provider);
   if (status === "connected") {
@@ -450,29 +453,38 @@ export function AgentCreatePage() {
   const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
   const datadogJustConnected = successfulConnectionReturn("datadog");
+  const dash0JustConnected = successfulConnectionReturn("dash0");
+  const postHogJustConnected = successfulConnectionReturn("posthog");
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
+  const supabaseJustConnected = successfulConnectionReturn("supabase");
   const customMcpJustConnected = successfulConnectionReturn("custom_mcp");
   const clickStackJustConnected = successfulConnectionReturn("clickstack");
   const linearJustConnected = successfulConnectionReturn("linear");
   const vercelJustConnected = successfulConnectionReturn("vercel");
   const awsJustConnected = successfulConnectionReturn("aws");
+  const gcpJustConnected = successfulConnectionReturn("gcp");
   const returnedIntegrationAccountId = new URLSearchParams(
     window.location.search,
   ).get("integration_account_id");
   const contextIntegrationJustConnected =
     sentryJustConnected ||
+    slackJustConnected ||
     githubJustConnected ||
     datadogJustConnected ||
+    dash0JustConnected ||
+    postHogJustConnected ||
     axiomJustConnected ||
     upstashJustConnected ||
     langfuseJustConnected ||
+    supabaseJustConnected ||
     vercelJustConnected ||
     customMcpJustConnected ||
     clickStackJustConnected ||
     linearJustConnected ||
-    awsJustConnected;
+    awsJustConnected ||
+    gcpJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [existingConfiguration, setExistingConfiguration] =
@@ -494,6 +506,7 @@ export function AgentCreatePage() {
     isEditing ? 4 : normalizedInitialStep,
   );
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
+  const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
   const [vercelAccountId, setVercelAccountId] = useState(
     returnedIntegrationAccountId ?? "",
@@ -504,6 +517,7 @@ export function AgentCreatePage() {
     linearJustConnected ? returnedIntegrationAccountId ?? "" : "",
   );
   const [repositoryQuery, setRepositoryQuery] = useState("");
+  const [slackContextQuery, setSlackContextQuery] = useState("");
   const [integrationQuery, setIntegrationQuery] = useState("");
   const [connectionSettingsOpen, setConnectionSettingsOpen] = useState<
     AgentOptions["accounts"][number] | null
@@ -516,8 +530,17 @@ export function AgentCreatePage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const [connectingSupabase, setConnectingSupabase] = useState(
+    Boolean(supabaseSelectionState),
+  );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
+  const [connectingGcp, setConnectingGcp] = useState(false);
+  const [connectingDash0, setConnectingDash0] = useState(false);
+  const [dash0WebhookAccountId, setDash0WebhookAccountId] = useState(
+    dash0JustConnected ? returnedIntegrationAccountId ?? "" : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [refreshingGithubRepositories, setRefreshingGithubRepositories] =
     useState(false);
@@ -581,6 +604,7 @@ export function AgentCreatePage() {
     if (
       !githubDialogOpen &&
       !linearDialogOpen &&
+      !slackContextDialogOpen &&
       !vercelDialogOpen &&
       !connectionSettingsOpen &&
       !secretDialogOpen
@@ -591,6 +615,7 @@ export function AgentCreatePage() {
       if (event.key === "Escape") {
         setGithubDialogOpen(false);
         setLinearDialogOpen(false);
+        setSlackContextDialogOpen(false);
         setVercelDialogOpen(false);
         setConnectionSettingsOpen(null);
         if (!creatingSecret) {
@@ -610,6 +635,7 @@ export function AgentCreatePage() {
     githubDialogOpen,
     linearDialogOpen,
     secretDialogOpen,
+    slackContextDialogOpen,
     vercelDialogOpen,
   ]);
 
@@ -644,6 +670,27 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedSentry.id);
         }
+        const connectedSlackAccount = accountsFor(loadedOptions, "slack").find(
+          (account) => account.slackContextAvailable,
+        );
+        const connectedSlackChannel = resourcesOfKind(
+          loadedOptions,
+          "slack_channel",
+        ).find(
+          (channel) =>
+            channel.integrationAccountId === connectedSlackAccount?.id,
+        );
+        if (
+          slackJustConnected &&
+          connectedSlackChannel &&
+          !loadedDraft.contextResourceIds.some((id) =>
+            loadedOptions.resources.some(
+              (resource) => resource.id === id && resource.kind === "slack_channel",
+            ),
+          )
+        ) {
+          loadedDraft.contextResourceIds.push(connectedSlackChannel.id);
+        }
         const connectedGithubRepository = loadedOptions.repositories.find(
           (repository) =>
             !returnedIntegrationAccountId ||
@@ -667,6 +714,36 @@ export function AgentCreatePage() {
           !loadedDraft.contextAccountIds.includes(connectedDatadog.id)
         ) {
           loadedDraft.contextAccountIds.push(connectedDatadog.id);
+        }
+        const connectedDash0 = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "dash0",
+            )
+          : accountsFor(loadedOptions, "dash0")[0];
+        if (
+          dash0JustConnected &&
+          connectedDash0 &&
+          !loadedDraft.contextAccountIds.includes(connectedDash0.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedDash0.id);
+          loadedDraft.dash0AccountId = connectedDash0.id;
+          setDash0WebhookAccountId(connectedDash0.id);
+        }
+        const connectedPostHog = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "posthog",
+            )
+          : accountsFor(loadedOptions, "posthog")[0];
+        if (
+          postHogJustConnected &&
+          connectedPostHog &&
+          !loadedDraft.contextAccountIds.includes(connectedPostHog.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedPostHog.id);
         }
         const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
         if (
@@ -711,6 +788,18 @@ export function AgentCreatePage() {
             (account) =>
               account.id === returnedIntegrationAccountId &&
               account.provider === "langfuse",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(returnedIntegrationAccountId)
+        ) {
+          loadedDraft.contextAccountIds.push(returnedIntegrationAccountId);
+        }
+        if (
+          supabaseJustConnected &&
+          returnedIntegrationAccountId &&
+          loadedOptions.accounts.some(
+            (account) =>
+              account.id === returnedIntegrationAccountId &&
+              account.provider === "supabase",
           ) &&
           !loadedDraft.contextAccountIds.includes(returnedIntegrationAccountId)
         ) {
@@ -776,6 +865,17 @@ export function AgentCreatePage() {
         ) {
           loadedDraft.contextAccountIds.push(connectedAwsId);
         }
+        const connectedGcpId = returnedIntegrationAccountId;
+        if (
+          gcpJustConnected &&
+          connectedGcpId &&
+          loadedOptions.accounts.some(
+            (account) => account.id === connectedGcpId && account.provider === "gcp",
+          ) &&
+          !loadedDraft.contextAccountIds.includes(connectedGcpId)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedGcpId);
+        }
         setDraft(loadedDraft);
       })
       .catch((caught: unknown) => {
@@ -797,14 +897,18 @@ export function AgentCreatePage() {
     agentId,
     axiomJustConnected,
     awsJustConnected,
+    gcpJustConnected,
     clickStackJustConnected,
     customMcpJustConnected,
     datadogJustConnected,
+    dash0JustConnected,
+    postHogJustConnected,
     draftStorageKey,
     githubJustConnected,
     isEditing,
     upstashJustConnected,
     langfuseJustConnected,
+    supabaseJustConnected,
     linearJustConnected,
     returnedIntegrationAccountId,
     sentryJustConnected,
@@ -837,8 +941,20 @@ export function AgentCreatePage() {
     () => accountsFor(options, "aws"),
     [options],
   );
+  const gcpAccounts = useMemo(
+    () => accountsFor(options, "gcp"),
+    [options],
+  );
   const datadogAccounts = useMemo(
     () => accountsFor(options, "datadog"),
+    [options],
+  );
+  const dash0Accounts = useMemo(
+    () => accountsFor(options, "dash0"),
+    [options],
+  );
+  const postHogAccounts = useMemo(
+    () => accountsFor(options, "posthog"),
     [options],
   );
   const axiomAccounts = useMemo(
@@ -857,6 +973,10 @@ export function AgentCreatePage() {
     () => accountsFor(options, "langfuse"),
     [options],
   );
+  const supabaseAccounts = useMemo(
+    () => accountsFor(options, "supabase"),
+    [options],
+  );
   const clickStackAccounts = useMemo(
     () => accountsFor(options, "clickstack"),
     [options],
@@ -873,6 +993,18 @@ export function AgentCreatePage() {
     () => accountsFor(options, "github"),
     [options],
   );
+  const slackSearchContext = useMemo(
+    () => resolveSlackSearchContext(options),
+    [options],
+  );
+  const slackAccounts = slackSearchContext.connectedAccounts;
+  const searchableSlackAccounts = slackSearchContext.searchableAccounts;
+  const searchableSlackChannels = slackSearchContext.searchableChannels;
+  const filteredSlackContextChannels = filterSlackSearchChannels(
+    searchableSlackChannels,
+    slackContextQuery,
+  );
+  const slackSearchReconnectRequired = slackSearchContext.reconnectRequired;
   const sentryProjects = useMemo(
     () => resourcesOfKind(options, "sentry_project"),
     [options],
@@ -917,6 +1049,9 @@ export function AgentCreatePage() {
   const activeSentryAccount =
     sentryAccounts.find((account) => account.id === draft.sentryAccountId) ??
     sentryAccounts[0];
+  const activeDash0Account =
+    dash0Accounts.find((account) => account.id === draft.dash0AccountId) ??
+    dash0Accounts[0];
   const activeGithubAccount =
     githubAccounts.find((account) => account.id === draft.githubAccountId) ??
     githubAccounts[0];
@@ -962,6 +1097,8 @@ export function AgentCreatePage() {
   const inputRequirement =
     draft.inputKind === "sentry_issue" && selectedSentryProjects.length === 0
       ? "Connect Sentry and choose at least one project."
+      : draft.inputKind === "dash0_alert" && !activeDash0Account
+        ? "Connect Dash0 and choose an account."
       : draft.inputKind === "slack_channel" && !selectedSlackInput
         ? "Connect Slack and choose an alert channel."
         : null;
@@ -1040,6 +1177,11 @@ export function AgentCreatePage() {
             )
               ? current.outputChannelResourceId
               : freshChannels[0]?.id ?? "",
+            contextResourceIds: current.contextResourceIds.filter(
+              (id) =>
+                !slackChannels.some((channel) => channel.id === id) ||
+                freshChannelIds.has(id),
+            ),
           };
         });
       })
@@ -1086,16 +1228,22 @@ export function AgentCreatePage() {
     }
     if (
       provider === "aws" ||
+      provider === "gcp" ||
       provider === "datadog" ||
+      provider === "dash0" ||
       provider === "clickstack" ||
       provider === "upstash" ||
-      provider === "langfuse"
+      provider === "langfuse" ||
+      provider === "supabase"
     ) {
       saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       if (provider === "aws") setConnectingAws(true);
+      else if (provider === "gcp") setConnectingGcp(true);
       else if (provider === "datadog") setChoosingDatadogSite(true);
+      else if (provider === "dash0") setConnectingDash0(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
       else if (provider === "langfuse") setConnectingLangfuse(true);
+      else if (provider === "supabase") setConnectingSupabase(true);
       else setConnectingUpstash(true);
       return;
     }
@@ -1122,6 +1270,26 @@ export function AgentCreatePage() {
         ? currentDraft.contextAccountIds.filter((id) => id !== accountId)
         : [...currentDraft.contextAccountIds, accountId],
       ...(removing && isLinear ? { createLinearTickets: false } : {}),
+    });
+  }
+
+  function toggleSlackContextResource(resourceId: string) {
+    const resource = slackChannels.find((channel) => channel.id === resourceId);
+    if (!resource) return;
+    const selected = currentDraft.contextResourceIds.includes(resourceId);
+    updateDraft({
+      contextResourceIds: selected
+        ? currentDraft.contextResourceIds.filter((id) => id !== resourceId)
+        : [
+            ...currentDraft.contextResourceIds.filter((id) => {
+              const channel = slackChannels.find((item) => item.id === id);
+              return (
+                !channel ||
+                channel.integrationAccountId === resource.integrationAccountId
+              );
+            }),
+            resourceId,
+          ],
     });
   }
 
@@ -1153,6 +1321,36 @@ export function AgentCreatePage() {
           (id) => !currentDraft.contextAccountIds.includes(id),
         ),
       ],
+    });
+  }
+
+  function toggleSlackContextIntegration() {
+    const selectedSlackIds = new Set(
+      slackChannels
+        .filter((channel) => currentDraft.contextResourceIds.includes(channel.id))
+        .map((channel) => channel.id),
+    );
+    if (selectedSlackIds.size > 0) {
+      updateDraft({
+        contextResourceIds: currentDraft.contextResourceIds.filter(
+          (id) => !selectedSlackIds.has(id),
+        ),
+      });
+      return;
+    }
+    const firstAccount = searchableSlackAccounts[0];
+    const firstChannel = searchableSlackChannels.find(
+      (channel) => channel.integrationAccountId === firstAccount?.id,
+    );
+    if (!firstChannel) {
+      setSlackContextDialogOpen(true);
+      if (!slackSearchReconnectRequired) {
+        void refreshSlackChannels();
+      }
+      return;
+    }
+    updateDraft({
+      contextResourceIds: [...currentDraft.contextResourceIds, firstChannel.id],
     });
   }
 
@@ -1337,7 +1535,12 @@ export function AgentCreatePage() {
               (project) => project.externalId,
             ),
           }
-        : {
+        : currentDraft.inputKind === "dash0_alert"
+          ? {
+              kind: "dash0_alert" as const,
+              integrationAccountId: activeDash0Account!.id,
+            }
+          : {
             kind: "slack_channel" as const,
             integrationAccountId: selectedSlackInput!.integrationAccountId,
             channelId: selectedSlackInput!.externalId,
@@ -1355,14 +1558,18 @@ export function AgentCreatePage() {
     const inputLabel =
       trigger.kind === "sentry_issue"
         ? "Sentry error"
-        : slackChannelLabel(selectedSlackInput!.displayName);
+        : trigger.kind === "dash0_alert"
+          ? "Dash0 alert"
+          : slackChannelLabel(selectedSlackInput!.displayName);
     const configuration: AgentConfiguration = {
       name: existingConfiguration?.name ?? `${inputLabel} responder`,
       description:
         existingConfiguration?.description ??
         (trigger.kind === "sentry_issue"
           ? "Investigates new and regressed errors and reports actionable findings."
-          : `Investigates alerts posted in ${slackChannelLabel(selectedSlackInput!.displayName)}.`),
+          : trigger.kind === "dash0_alert"
+            ? "Investigates ongoing failed checks from Dash0 and reports actionable findings."
+            : `Investigates alerts posted in ${slackChannelLabel(selectedSlackInput!.displayName)}.`),
       model: existingConfiguration?.model ?? "instance/default",
       instructions: currentDraft.instructions.trim(),
       enabled: existingConfiguration?.enabled ?? true,
@@ -1415,6 +1622,9 @@ export function AgentCreatePage() {
   const sentryConnected = sentryProjects.length > 0;
   const outputChannelSelected = effectiveOutputMode === "output_channel";
   const vercelContextConnected = selectedVercelProjects.length > 0;
+  const selectedSlackContextChannels = slackChannels.filter((channel) =>
+    draft.contextResourceIds.includes(channel.id),
+  );
   const selectedWorkspaceSecrets = options.secrets.filter((secret) =>
     draft.workspaceSecretRecordIds.includes(secret.id),
   );
@@ -1423,7 +1633,14 @@ export function AgentCreatePage() {
     sentryAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    Number(selectedSlackContextChannels.length > 0) +
     datadogAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    dash0Accounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    postHogAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
     axiomAccounts.filter((account) =>
@@ -1435,11 +1652,17 @@ export function AgentCreatePage() {
     langfuseAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    supabaseAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     Number(vercelContextConnected) +
     customMcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
     awsAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    gcpAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
     clickStackAccounts.filter((account) =>
@@ -1450,9 +1673,10 @@ export function AgentCreatePage() {
     ).length;
   const normalizedIntegrationQuery = integrationQuery.trim().toLocaleLowerCase();
   const visibleContextIntegrations = integrations.filter((integration) => {
-    if (integration.id === "slack") return false;
     if (
       integration.accountCount > 0 &&
+      integration.id !== "sentry" &&
+      integration.id !== "slack" &&
       !MULTI_ACCOUNT_CONTEXT_PROVIDERS.has(integration.id)
     ) {
       return false;
@@ -1462,6 +1686,7 @@ export function AgentCreatePage() {
       .toLocaleLowerCase()
       .includes(normalizedIntegrationQuery);
   });
+  const supabaseConnectUrl = integrationFor("supabase")?.connectUrl ?? "";
 
   return (
     <AppShell active="agents" density="create">
@@ -1470,6 +1695,17 @@ export function AgentCreatePage() {
         onCancel={() => setChoosingDatadogSite(false)}
         open={choosingDatadogSite}
         returnTo={returnTo}
+      />
+      <Dash0ConnectionDialog
+        connectUrl={integrationFor("dash0")?.connectUrl ?? ""}
+        onCancel={() => setConnectingDash0(false)}
+        open={connectingDash0}
+        returnTo={returnTo}
+      />
+      <Dash0WebhookSetupDialog
+        accountId={dash0WebhookAccountId}
+        onClose={() => setDash0WebhookAccountId("")}
+        open={Boolean(dash0WebhookAccountId)}
       />
       <CustomMcpConnectionDialog
         connectUrl={integrationFor("custom_mcp")?.connectUrl ?? ""}
@@ -1489,6 +1725,13 @@ export function AgentCreatePage() {
         open={connectingLangfuse}
         returnTo={returnTo}
       />
+      <SupabaseConnectionDialog
+        connectUrl={supabaseConnectUrl}
+        onCancel={() => setConnectingSupabase(false)}
+        open={connectingSupabase && Boolean(supabaseConnectUrl)}
+        returnTo={returnTo}
+        selectionState={supabaseSelectionState}
+      />
       <ClickStackConnectionDialog
         connectUrl={integrationFor("clickstack")?.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
@@ -1499,6 +1742,12 @@ export function AgentCreatePage() {
         connectUrl={integrationFor("aws")?.connectUrl ?? ""}
         onCancel={() => setConnectingAws(false)}
         open={connectingAws}
+        returnTo={returnTo}
+      />
+      <GcpConnectionDialog
+        connectUrl={integrationFor("gcp")?.connectUrl ?? ""}
+        onCancel={() => setConnectingGcp(false)}
+        open={connectingGcp}
         returnTo={returnTo}
       />
       <section className="createAgentHeading">
@@ -1645,6 +1894,19 @@ export function AgentCreatePage() {
                 value="sentry_issue"
               />
               <ChoiceCard
+                checked={draft.inputKind === "dash0_alert"}
+                description="Run whenever Dash0 reports an ongoing failed check."
+                name="inputKind"
+                onChange={() =>
+                  updateDraft({
+                    inputKind: "dash0_alert",
+                    outputMode: "output_channel",
+                  })
+                }
+                title="Every Dash0 failed check"
+                value="dash0_alert"
+              />
+              <ChoiceCard
                 checked={draft.inputKind === "slack_channel"}
                 description="Run when an alert is posted in a channel."
                 name="inputKind"
@@ -1730,6 +1992,41 @@ export function AgentCreatePage() {
                 title="Connect Sentry to continue"
               />
             )
+          ) : draft.inputKind === "dash0_alert" ? (
+            activeDash0Account ? (
+              <div className="connectedSetup">
+                <ProviderMark provider="dash0" />
+                <SelectField
+                  className="createField createField--account"
+                  label="Dash0 organization · connected"
+                  onChange={(accountId) =>
+                    updateDraft({ dash0AccountId: accountId })
+                  }
+                  options={dash0Accounts.map((account) => ({
+                    label: account.displayName,
+                    value: account.id,
+                  }))}
+                  value={activeDash0Account.id}
+                />
+                <Button
+                  onClick={() => setDash0WebhookAccountId(activeDash0Account.id)}
+                  size="small"
+                  type="button"
+                  variant="secondary"
+                >
+                  Webhook setup
+                </Button>
+              </div>
+            ) : (
+              <ConnectionPrompt
+                actionLabel="Set up"
+                integration={integrationFor("dash0")}
+                isConnecting={connectingDash0}
+                onConnect={() => connect("dash0")}
+                provider="dash0"
+                title="Connect Dash0 to continue"
+              />
+            )
           ) : slackConnected ? (
               <Panel
                 className="connectedSetup connectedSetup--channel"
@@ -1797,12 +2094,12 @@ export function AgentCreatePage() {
               description="Where should results be posted?"
               title="Output"
             >
-          {draft.inputKind === "sentry_issue" ? (
+          {draft.inputKind !== "slack_channel" ? (
             <div className="requiredOutput">
               <div className="requiredOutput__label">
                 <span className="radioMark radioMark--selected" />
                 <strong>Post to an output channel</strong>
-                <small>Required for Sentry input</small>
+                <small>Required for provider alerts</small>
               </div>
               {slackConnected ? (
                 <ChannelPicker
@@ -1930,6 +2227,250 @@ export function AgentCreatePage() {
                       />
                     );
                   })}
+
+                  {slackAccounts.length > 0 ? (
+                    <ContextRow
+                      action={
+                        <ContextIntegrationControls
+                          enabled={selectedSlackContextChannels.length > 0}
+                          label="Slack"
+                          onConfigure={() => {
+                            setSlackContextDialogOpen(true);
+                            if (!slackSearchReconnectRequired) {
+                              void refreshSlackChannels();
+                            }
+                          }}
+                          onToggle={toggleSlackContextIntegration}
+                        />
+                      }
+                      detail={
+                        selectedSlackContextChannels.length > 0
+                          ? `${selectedSlackContextChannels.length} ${
+                              selectedSlackContextChannels.length === 1
+                                ? "channel"
+                                : "channels"
+                            } selected · Searchable messages`
+                          : slackSearchReconnectRequired
+                            ? `${slackAccounts[0]!.displayName} · Reconnect to enable channel search`
+                            : `${slackAccounts[0]!.displayName} · Choose channels for search`
+                      }
+                      label="Slack"
+                      provider="slack"
+                    />
+                  ) : null}
+
+                  {slackContextDialogOpen ? (
+                    <div
+                      className="configurationDialogBackdrop"
+                      onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) {
+                          setSlackContextDialogOpen(false);
+                        }
+                      }}
+                    >
+                      <section
+                        aria-labelledby="slack-context-configuration-title"
+                        aria-modal="true"
+                        className="configurationDialog"
+                        role="dialog"
+                      >
+                        <header className="configurationDialog__header">
+                          <ProviderMark provider="slack" />
+                          <span className="configurationDialog__copy">
+                            <strong id="slack-context-configuration-title">
+                              Configure Slack search
+                            </strong>
+                            <small>
+                              Choose one or more channels this agent may search.
+                            </small>
+                          </span>
+                          <IconButton
+                            aria-label="Close Slack context configuration"
+                            onClick={() => setSlackContextDialogOpen(false)}
+                            size="small"
+                            variant="ghost"
+                          >
+                            ×
+                          </IconButton>
+                        </header>
+                        <div className="configurationDialog__body">
+                          <div className="slackContextPicker">
+                            {!slackSearchReconnectRequired &&
+                            searchableSlackChannels.length > 0 ? (
+                              <>
+                                <div className="slackContextSearch">
+                                  <SearchIcon />
+                                  <label
+                                    className="srOnly"
+                                    htmlFor="slack-context-channel-search"
+                                  >
+                                    Search Slack channels
+                                  </label>
+                                  <input
+                                    aria-describedby="slack-context-result-count"
+                                    autoComplete="off"
+                                    autoFocus
+                                    id="slack-context-channel-search"
+                                    onChange={(event) =>
+                                      setSlackContextQuery(event.target.value)
+                                    }
+                                    placeholder="Search channels…"
+                                    type="search"
+                                    value={slackContextQuery}
+                                  />
+                                  {slackContextQuery ? (
+                                    <button
+                                      aria-label="Clear Slack channel search"
+                                      onClick={() => setSlackContextQuery("")}
+                                      type="button"
+                                    >
+                                      ×
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <div className="slackContextPicker__meta">
+                                  <span>All channels</span>
+                                  <span
+                                    aria-live="polite"
+                                    id="slack-context-result-count"
+                                    role="status"
+                                  >
+                                    {refreshingSlackChannels
+                                      ? "Refreshing channels…"
+                                      : slackContextQuery.trim()
+                                        ? `${filteredSlackContextChannels.length} ${
+                                            filteredSlackContextChannels.length === 1
+                                              ? "result"
+                                              : "results"
+                                          }`
+                                        : `${searchableSlackChannels.length} ${
+                                            searchableSlackChannels.length === 1
+                                              ? "channel"
+                                              : "channels"
+                                          }`}
+                                  </span>
+                                </div>
+                                <fieldset className="slackContextChannelList">
+                                  <legend className="srOnly">Slack channels</legend>
+                                  {filteredSlackContextChannels.map((channel) => {
+                                    const account = slackAccounts.find(
+                                      (item) =>
+                                        item.id === channel.integrationAccountId,
+                                    );
+                                    return (
+                                      <Checkbox
+                                        checked={draft.contextResourceIds.includes(
+                                          channel.id,
+                                        )}
+                                        className="slackContextChannelRow"
+                                        description={
+                                          slackAccounts.length > 1
+                                            ? account?.displayName
+                                            : undefined
+                                        }
+                                        key={channel.id}
+                                        label={slackChannelLabel(channel.displayName)}
+                                        onChange={() =>
+                                          toggleSlackContextResource(channel.id)
+                                        }
+                                      />
+                                    );
+                                  })}
+                                  {filteredSlackContextChannels.length === 0 ? (
+                                    <div className="slackContextPicker__noResults">
+                                      <span>
+                                        <strong>
+                                          No channels match “{slackContextQuery.trim()}”
+                                        </strong>
+                                        <small>
+                                          Try another channel name or clear the search.
+                                        </small>
+                                      </span>
+                                      <Button
+                                        onClick={() => setSlackContextQuery("")}
+                                        size="small"
+                                        type="button"
+                                        variant="secondary"
+                                      >
+                                        Clear search
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                </fieldset>
+                              </>
+                            ) : null}
+                            {slackSearchReconnectRequired ? (
+                              <div className="slackContextPicker__empty">
+                                <span>
+                                  <strong>Reconnect Slack to search messages</strong>
+                                  <small>
+                                    Your existing connection needs permission to search
+                                    the channels you select.
+                                  </small>
+                                </span>
+                                <Button
+                                  disabled={connectingProvider === "slack"}
+                                  loading={connectingProvider === "slack"}
+                                  onClick={() => connect("slack")}
+                                  size="small"
+                                  type="button"
+                                  variant="primary"
+                                >
+                                  {connectingProvider === "slack"
+                                    ? "Reconnecting…"
+                                    : "Reconnect Slack"}
+                                </Button>
+                              </div>
+                            ) : null}
+                            {!slackSearchReconnectRequired &&
+                            searchableSlackChannels.length === 0 ? (
+                              <div className="slackContextPicker__empty">
+                                <span>
+                                  <strong>
+                                    {refreshingSlackChannels
+                                      ? "Refreshing Slack channels…"
+                                      : "No Slack channels are available"}
+                                  </strong>
+                                  <small>
+                                    {refreshingSlackChannels
+                                      ? "This should only take a moment."
+                                      : "Invite Responder to a channel, then refresh the list."}
+                                  </small>
+                                </span>
+                                {!refreshingSlackChannels ? (
+                                  <Button
+                                    onClick={() => void refreshSlackChannels()}
+                                    size="small"
+                                    type="button"
+                                    variant="secondary"
+                                  >
+                                    Refresh
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                          {slackRefreshError ? (
+                            <Alert role="alert" title={slackRefreshError} tone="danger" />
+                          ) : null}
+                        </div>
+                        <footer className="configurationDialog__footer">
+                          <span>
+                            {slackSearchReconnectRequired
+                              ? "Reconnect required"
+                              : `${selectedSlackContextChannels.length} selected`}
+                          </span>
+                          <Button
+                            onClick={() => setSlackContextDialogOpen(false)}
+                            size="small"
+                            variant="primary"
+                          >
+                            Done
+                          </Button>
+                        </footer>
+                      </section>
+                    </div>
+                  ) : null}
 
                   {githubAccounts.length > 0 ? (
                     <ContextRow
@@ -2161,6 +2702,25 @@ export function AgentCreatePage() {
                       />
                     );
                   })}
+                  {gcpAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail="Asset inventory, logs, metrics, and alerting state"
+                        key={account.id}
+                        label={account.displayName}
+                        provider="gcp"
+                      />
+                    );
+                  })}
                   {upstashAccounts.map((account) => {
                     const connected = draft.contextAccountIds.includes(account.id);
                     const label = upstashAccounts.length > 1 ? account.displayName : "Upstash";
@@ -2198,6 +2758,26 @@ export function AgentCreatePage() {
                         key={account.id}
                         label={account.displayName}
                         provider="langfuse"
+                      />
+                    );
+                  })}
+
+                  {supabaseAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={account.displayName}
+                            onConfigure={() => setConnectionSettingsOpen(account)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail="Project logs and scoped PostgreSQL access"
+                        key={account.id}
+                        label={account.displayName}
+                        provider="supabase"
                       />
                     );
                   })}
@@ -2336,6 +2916,45 @@ export function AgentCreatePage() {
                         key={account.id}
                         label={label}
                         provider="datadog"
+                      />
+                    );
+                  })}
+                  {dash0Accounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = dash0Accounts.length > 1 ? account.displayName : "Dash0";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onConfigure={() => setDash0WebhookAccountId(account.id)}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Logs, metrics, traces, checks, and dashboards`}
+                        key={account.id}
+                        label={label}
+                        provider="dash0"
+                      />
+                    );
+                  })}
+                  {postHogAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = postHogAccounts.length > 1 ? account.displayName : "PostHog";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            enabled={connected}
+                            label={label}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Errors, logs, traces, replays, and product analytics`}
+                        key={account.id}
+                        label={label}
+                        provider="posthog"
                       />
                     );
                   })}
@@ -2863,9 +3482,9 @@ export function AgentCreatePage() {
                     ? promptRequirement ?? undefined
                     : undefined
                 }
-                hint={`The agent can use only the context connected above · ${draft.instructions.length.toLocaleString()} / 4,000`}
+                hint={`The agent can use only the context connected above · ${draft.instructions.length.toLocaleString()} / ${AGENT_PROMPT_MAX_LENGTH.toLocaleString()}`}
                 label="Agent prompt"
-                maxLength={4_000}
+                maxLength={AGENT_PROMPT_MAX_LENGTH}
                 onChange={(event) =>
                   updateDraft({ instructions: event.target.value })
                 }
@@ -3056,7 +3675,7 @@ function ConnectionPrompt({
   integration: IntegrationSummary | undefined;
   isConnecting: boolean;
   onConnect: () => void;
-  provider: "slack" | "sentry";
+  provider: "dash0" | "slack" | "sentry";
   title: string;
 }) {
   const comingSoon = integration?.state === "coming_soon";

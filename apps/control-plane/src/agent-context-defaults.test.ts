@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AgentOptions } from "./agents-api";
-import { defaultAgentContext } from "./agent-context-defaults";
+import {
+  defaultAgentContext,
+  filterSlackSearchChannels,
+  resolveSlackSearchContext,
+} from "./agent-context-defaults";
 
 const OPTIONS: AgentOptions = {
   accounts: [
@@ -8,6 +12,7 @@ const OPTIONS: AgentOptions = {
     { id: "axiom-1", provider: "axiom", displayName: "Production" },
     { id: "aws-1", provider: "aws", displayName: "Production" },
     { id: "aws-2", provider: "aws", displayName: "Staging" },
+    { id: "gcp-1", provider: "gcp", displayName: "Production" },
     {
       id: "slack-1",
       provider: "slack",
@@ -55,8 +60,15 @@ const OPTIONS: AgentOptions = {
 describe("defaultAgentContext", () => {
   it("enables direct connections and supported resource providers", () => {
     expect(defaultAgentContext(OPTIONS)).toEqual({
-      contextAccountIds: ["sentry-1", "axiom-1", "aws-1", "aws-2", "vercel-1"],
-      contextResourceIds: ["vercel-project-1"],
+      contextAccountIds: [
+        "sentry-1",
+        "axiom-1",
+        "aws-1",
+        "aws-2",
+        "gcp-1",
+        "vercel-1",
+      ],
+      contextResourceIds: ["slack-channel-1", "vercel-project-1"],
       repositoryIds: ["repository-1"],
     });
   });
@@ -108,5 +120,59 @@ describe("defaultAgentContext", () => {
     expect(defaults.contextAccountIds).toHaveLength(20);
     expect(defaults.contextAccountIds).toContain("vercel-1");
     expect(defaults.contextResourceIds).toEqual(["vercel-project-1"]);
+  });
+});
+
+describe("resolveSlackSearchContext", () => {
+  it("returns channels belonging to Slack connections with search access", () => {
+    expect(resolveSlackSearchContext(OPTIONS)).toMatchObject({
+      connectedAccounts: [
+        expect.objectContaining({ id: "slack-1" }),
+      ],
+      searchableAccounts: [
+        expect.objectContaining({ id: "slack-1" }),
+      ],
+      searchableChannels: [
+        expect.objectContaining({ id: "slack-channel-1" }),
+        expect.objectContaining({ id: "slack-channel-2" }),
+      ],
+      reconnectRequired: false,
+    });
+  });
+
+  it("reports when an existing Slack connection needs the search permission", () => {
+    const options: AgentOptions = {
+      ...OPTIONS,
+      accounts: OPTIONS.accounts.map((account) =>
+        account.id === "slack-1"
+          ? { ...account, slackContextAvailable: false }
+          : account,
+      ),
+    };
+
+    expect(resolveSlackSearchContext(options)).toMatchObject({
+      connectedAccounts: [
+        expect.objectContaining({ id: "slack-1" }),
+      ],
+      searchableAccounts: [],
+      searchableChannels: [],
+      reconnectRequired: true,
+    });
+  });
+});
+
+describe("filterSlackSearchChannels", () => {
+  const channels = OPTIONS.resources.filter(
+    (resource) => resource.kind === "slack_channel",
+  );
+
+  it("matches channel names case-insensitively with an optional hash prefix", () => {
+    expect(filterSlackSearchChannels(channels, " #PLAT ")).toEqual([
+      expect.objectContaining({ id: "slack-channel-2" }),
+    ]);
+  });
+
+  it("returns every channel for an empty query", () => {
+    expect(filterSlackSearchChannels(channels, "   ")).toEqual(channels);
   });
 });

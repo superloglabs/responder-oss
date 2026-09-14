@@ -4,12 +4,12 @@ import { slackContextToolAccess } from "./slack-mcp.js";
 const allowedChannelIds = new Set(["C123", "C456"]);
 
 describe("Slack MCP context scope", () => {
-  it("allows read tools for selected channels", () => {
+  it("allows searches for selected channels", () => {
     expect(
       slackContextToolAccess({
         allowedChannelIds,
         args: { channel_id: "C123" },
-        toolName: "slack_read_channel",
+        toolName: "slack_search_channel",
       }),
     ).toEqual({ allowed: true });
   });
@@ -19,7 +19,7 @@ describe("Slack MCP context scope", () => {
       slackContextToolAccess({
         allowedChannelIds,
         args: { channel_id: "C999" },
-        toolName: "slack_read_thread",
+        toolName: "slack_search_channel",
       }),
     ).toEqual({
       allowed: false,
@@ -32,7 +32,7 @@ describe("Slack MCP context scope", () => {
       slackContextToolAccess({
         allowedChannelIds,
         args: { channel_id: "C123" },
-        toolName: "slack_send_message",
+        toolName: "slack_read_channel",
       }),
     ).toEqual({ allowed: false, reason: "Slack context is read-only" });
   });

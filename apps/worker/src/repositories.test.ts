@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import {
+  checkoutRuntimeRepository,
+  checkoutRuntimeRepositoryAtRef,
   checkoutRuntimeRepositories,
   checkoutRuntimeRepositoriesAtRefs,
   refreshRuntimeRepositories,
@@ -132,6 +134,87 @@ describe("Daytona repository checkout", () => {
           authorization: "Bearer github-secret",
         }),
       }),
+    );
+  });
+
+  it("checks out only the repository assigned to a pull request", async () => {
+    const session = fakeSession();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sha }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(missingGitmodules())
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
+      );
+
+    await expect(
+      checkoutRuntimeRepository(
+        session,
+        "version-id",
+        "example-org/api",
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+          getRepositories: vi.fn().mockResolvedValue([
+            {
+              defaultBranch: "main",
+              fullName: "example-org/web",
+              installationId: 123,
+              private: true,
+            },
+            {
+              defaultBranch: "main",
+              fullName: "example-org/api",
+              installationId: 123,
+              private: true,
+            },
+          ]),
+          uploadArchive: uploadArchive(),
+        },
+      ),
+    ).resolves.toEqual(expect.objectContaining({ repository: "example-org/api" }));
+
+    expect(JSON.stringify(fetchMock.mock.calls)).toContain("example-org/api");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("example-org/web");
+  });
+
+  it("checks out a remediation from its recorded repository base", async () => {
+    const session = fakeSession();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(missingGitmodules())
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }),
+      );
+
+    await expect(
+      checkoutRuntimeRepositoryAtRef(
+        session,
+        "version-id",
+        "example-org/api",
+        { branch: "main", sha },
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+          getRepositories: vi.fn().mockResolvedValue([
+            {
+              defaultBranch: "main",
+              fullName: "example-org/api",
+              installationId: 123,
+              private: true,
+            },
+          ]),
+          uploadArchive: uploadArchive(),
+        },
+      ),
+    ).resolves.toEqual(expect.objectContaining({ branch: "main", sha }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.github.com/repos/example-org/api/tarball/${sha}`,
+      expect.anything(),
     );
   });
 

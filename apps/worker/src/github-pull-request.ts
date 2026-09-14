@@ -9,6 +9,9 @@ import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 const githubBlobSchema = z.object({ sha: z.string().min(1) });
 const githubTreeSchema = z.object({ sha: z.string().min(1) });
 const githubCommitSchema = z.object({ sha: z.string().min(1) });
+const githubCommitDetailsSchema = z.object({
+  tree: z.object({ sha: z.string().min(1) }),
+});
 const githubPullRequestSchema = z.object({
   number: z.number().int().positive(),
   html_url: z.string().url(),
@@ -46,45 +49,6 @@ function branchSlug(title: string): string {
     .replace(/^-|-$/g, "")
     .slice(0, 42);
   return slug || "issue";
-}
-
-function pullRequestSection(heading: string, content: string): string {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const withoutLeadingHeading = content
-    .trim()
-    .replace(
-      new RegExp(
-        `^#{1,6}[ \\t]+${escapedHeading}(?:[ \\t]+[^\\n]*)?\\r?\\n+`,
-        "i",
-      ),
-      "",
-    )
-    .trim();
-  return `## ${heading}\n${withoutLeadingHeading}`;
-}
-
-export function buildPullRequestBody(input: {
-  failureMechanism: string;
-  responderIssueUrl?: string;
-  sentryIssueUrl?: string;
-  summary: string;
-  testing: string;
-}): string {
-  const issueLinks = [
-    input.responderIssueUrl
-      ? `[Responder issue](<${input.responderIssueUrl}>)`
-      : null,
-    input.sentryIssueUrl ? `[Sentry issue](<${input.sentryIssueUrl}>)` : null,
-  ].filter((link): link is string => Boolean(link));
-  return [
-    pullRequestSection("Summary", input.summary),
-    "",
-    "## Issue",
-    input.failureMechanism.trim(),
-    ...(issueLinks.length > 0 ? ["", issueLinks.join(" · ")] : []),
-    "",
-    pullRequestSection("Testing", input.testing),
-  ].join("\n");
 }
 
 function execResult(output: string): { exitCode: number; stdout: string } {
@@ -226,6 +190,7 @@ export async function createPullRequestFromSandbox(
     repository: string;
     repositoryPath: string;
     requestId: string;
+    scanChangedFileContents?: boolean;
     title: string;
     workspaceBaseSha: string;
   },
@@ -241,7 +206,7 @@ export async function createPullRequestFromSandbox(
   assertNoDaytonaSecretPlaceholders(input.title, "Pull request title");
   for (const file of files) {
     assertNoDaytonaSecretPlaceholders(file.path, "Changed file path");
-    if (file.content) {
+    if (input.scanChangedFileContents !== false && file.content) {
       assertNoDaytonaSecretPlaceholders(
         file.content,
         `Changed file ${file.path}`,
@@ -251,6 +216,14 @@ export async function createPullRequestFromSandbox(
   const token = await dependencies.createInstallationToken(input.installationId);
   const apiRepository = repositoryApiPath(input.repository);
   const apiBase = `https://api.github.com/repos/${apiRepository}`;
+  const baseCommit = githubCommitDetailsSchema.parse(
+    await githubJson(
+      dependencies.fetch,
+      token,
+      `${apiBase}/git/commits/${encodeURIComponent(input.baseSha)}`,
+      { method: "GET" },
+    ),
+  );
   const treeEntries: Array<{
     path: string;
     mode: "100644" | "100755";
@@ -278,7 +251,7 @@ export async function createPullRequestFromSandbox(
   const tree = githubTreeSchema.parse(
     await githubJson(dependencies.fetch, token, `${apiBase}/git/trees`, {
       method: "POST",
-      body: JSON.stringify({ base_tree: input.baseSha, tree: treeEntries }),
+      body: JSON.stringify({ base_tree: baseCommit.tree.sha, tree: treeEntries }),
     }),
   );
   const commit = githubCommitSchema.parse(

@@ -7,6 +7,8 @@ import {
 import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
+  deleteIntegrationAccount,
+  getIntegrationConnectionState,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
@@ -27,12 +29,20 @@ import {
   verifyAwsInvestigationRole,
 } from "../../../../packages/core/src/integrations/aws.js";
 import {
+  createGcpSessionName,
+  verifyGcpProject,
+} from "../../../../packages/core/src/integrations/gcp.js";
+import {
   beginCustomMcpOAuth,
+  callCustomMcpTool,
   finishCustomMcpOAuth,
+  listCustomMcpTools,
   parseCustomMcpCredentials,
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations/dash0.js";
+import { POSTHOG_MCP_URL } from "../../../../packages/core/src/integrations/posthog.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -58,6 +68,8 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
+  deleteIntegrationAccount: vi.fn(),
+  getIntegrationConnectionState: vi.fn(),
   getOrganizationIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccountByExternalId: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
@@ -86,9 +98,22 @@ vi.mock("../../../../packages/core/src/integrations/aws.js", async (importOrigin
   };
 });
 
+vi.mock("../../../../packages/core/src/integrations/gcp.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/gcp.js")
+  >();
+  return {
+    ...actual,
+    createGcpSessionName: vi.fn(),
+    verifyGcpProject: vi.fn(),
+  };
+});
+
 vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
   beginCustomMcpOAuth: vi.fn(),
+  callCustomMcpTool: vi.fn(),
   finishCustomMcpOAuth: vi.fn(),
+  listCustomMcpTools: vi.fn(),
   parseCustomMcpCredentials: vi.fn(),
   safeCustomMcpFetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
     fetch(input, init)
@@ -96,6 +121,16 @@ vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
   validateCustomMcpUrl: vi.fn(),
   verifyCustomMcpConnection: vi.fn(),
 }));
+
+vi.mock("../../../../packages/core/src/integrations/dash0.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/dash0.js")
+  >();
+  return {
+    ...actual,
+    normalizeDash0McpUrl: vi.fn(),
+  };
+});
 
 vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
   createLinearPkce: vi.fn(),
@@ -189,7 +224,7 @@ describe("integration callback routing", () => {
     });
   });
 
-  it("starts a fresh Sentry authorization when reconnecting", async () => {
+  it("tries automatic Sentry recovery before fresh authorization", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
     vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
@@ -203,7 +238,60 @@ describe("integration callback routing", () => {
     expect(response.status).toBe(302);
     expect(new URL(response.headers.get("location")!).searchParams.get("state"))
       .toBe("fresh-state");
-    expect(getRecoverableSentryIntegrationAccount).not.toHaveBeenCalled();
+    expect(getRecoverableSentryIntegrationAccount).toHaveBeenCalledWith(
+      tenant.organizationId,
+    );
+  });
+
+  it("refreshes an existing connected Sentry installation before fresh authorization", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(getRecoverableSentryIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "encrypted-credentials",
+      externalAccountId: "40000000-0000-4000-8000-000000000000",
+      metadata: { organizationSlug: "example" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "old-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "old-refresh-token",
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("refreshed-credentials");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            id: "1",
+            token: "new-token",
+            refreshToken: "new-refresh-token",
+            expiresAt: "2099-01-01T01:00:00.000Z",
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json([
+            { id: "1", name: "Backend", platform: "node", slug: "backend" },
+          ]),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 200 })),
+    );
+
+    const response = await app.request("/api/integrations/sentry/start");
+
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).searchParams.get("status"))
+      .toBe("connected");
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "refreshed-credentials",
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      }),
+    );
   });
 
   it("falls back to fresh Sentry authorization when an old retry fails", async () => {
@@ -294,6 +382,68 @@ describe("integration callback routing", () => {
     });
   });
 
+  it("recovers a revoked Sentry token during a connection check", async () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        encryptedCredentials: "encrypted-credentials",
+        metadata: { organizationSlug: "example" },
+      },
+    ]);
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "revoked-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      installationId: "40000000-0000-4000-8000-000000000000",
+      refreshToken: "revoked-refresh-token",
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("recovered-credentials");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "1",
+          token: "recovered-token",
+          refreshToken: "recovered-refresh-token",
+          expiresAt: "2099-01-01T01:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          { id: "1", name: "Backend", platform: "node", slug: "backend" },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request("/api/integrations/sentry/check", {
+      method: "POST",
+    });
+
+    expect(await response.json()).toEqual({
+      accounts: [
+        {
+          id: "30000000-0000-4000-8000-000000000000",
+          resourceCount: 1,
+          status: "working",
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls[2]?.[1]?.headers.authorization).toMatch(
+      /^Bearer /,
+    );
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "recovered-credentials",
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      }),
+    );
+    expect(setIntegrationAccountStatusIfCredentialsMatch).not.toHaveBeenCalled();
+  });
+
   it("discards a Sentry check superseded by reconnect", async () => {
     vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
       {
@@ -336,6 +486,9 @@ describe("integration callback routing", () => {
   });
 
   it("marks a Sentry account for reconnect after a live authorization failure", async () => {
+    vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
+    vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
     vi.mocked(listConnectedSentryIntegrationAccounts).mockResolvedValue([
       {
         id: "30000000-0000-4000-8000-000000000000",
@@ -834,6 +987,10 @@ describe("integration callback routing", () => {
       "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
     ],
     [
+      "supabase",
+      "/api/integrations/supabase/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
       "github",
       "/api/integrations/github/callback?state=oauth-state&code=oauth-code",
     ],
@@ -902,7 +1059,7 @@ describe("integration callback routing", () => {
     );
   });
 
-  it("offers a fresh Sentry reconnect when an account already exists", async () => {
+  it("offers automatic Sentry recovery when an account already exists", async () => {
     vi.stubEnv("SENTRY_APP_SLUG", "responder-test");
     vi.stubEnv("SENTRY_CLIENT_ID", "sentry-client");
     vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
@@ -926,7 +1083,7 @@ describe("integration callback routing", () => {
     expect(body.integrations).toContainEqual(
       expect.objectContaining({
         id: "sentry",
-        connectUrl: "/api/integrations/sentry/start?mode=reconnect",
+        connectUrl: "/api/integrations/sentry/start",
       }),
     );
   });
@@ -1040,6 +1197,22 @@ describe("integration callback routing", () => {
       expect.objectContaining({
         id: "langfuse",
         connectUrl: "/api/integrations/langfuse/connect",
+      }),
+    );
+  });
+
+  it("offers the Supabase project connection endpoint", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "supabase",
+        connectUrl: "/api/integrations/supabase/connect",
       }),
     );
   });
@@ -1249,6 +1422,400 @@ describe("integration callback routing", () => {
       redirectUrl:
         "https://responder.example/agents/new?integration=aws&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
     });
+  });
+
+  it("prepares a keyless read-only GCP setup script", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(createGcpSessionName).mockReturnValue(
+      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-gcp-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/gcp/connect", {
+      body: JSON.stringify({
+        projectId: "responder-production",
+        projectNumber: "123456789012",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      projectId: "responder-production",
+      script: expect.stringContaining("roles/cloudasset.viewer"),
+    });
+    expect(body.script).toContain("roles/mcp.toolUser");
+    expect(body.script).toContain(
+      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      projectId: "responder-production",
+      projectNumber: "123456789012",
+      sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "GCP · responder-production",
+        externalAccountId: "responder-production",
+        provider: "gcp",
+        status: "pending",
+      }),
+    );
+  });
+
+  it("removes one GCP project account without touching other providers", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/gcp/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ removed: true });
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+  });
+
+  it("verifies federated GCP access before connecting the project", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-gcp-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      projectId: "responder-production",
+      projectNumber: "123456789012",
+      sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    });
+    vi.mocked(verifyGcpProject).mockResolvedValue(undefined);
+    vi.mocked(setIntegrationAccountStatus).mockResolvedValue(undefined);
+
+    const response = await app.request("/api/integrations/gcp/verify", {
+      body: JSON.stringify({
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+        returnTo: "/agents/new",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(verifyGcpProject).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "responder-production" }),
+    );
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "connected",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      redirectUrl:
+        "https://responder.example/agents/new?integration=gcp&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+  });
+
+  it("starts Supabase OAuth with a server-generated project discovery scope", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://api.supabase.com/v1/oauth/authorize?state=oauth-state",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request("/api/integrations/supabase/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        accessMode: "read_only",
+        returnTo: "/agents/new",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      redirectUrl: "https://api.supabase.com/v1/oauth/authorize?state=oauth-state",
+    });
+    const mcpUrl =
+      "https://mcp.supabase.com/mcp?features=account&read_only=true";
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      provider: "supabase",
+      returnTo: "/agents/new",
+      routingUrl:
+        "https://responder.example/api/integrations/supabase/callback",
+      userId: tenant.user.id,
+    });
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl,
+      redirectUrl:
+        "https://responder.example/api/integrations/supabase/callback",
+    });
+    expect(updateIntegrationConnectionStateMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        state: "oauth-state",
+        userId: tenant.user.id,
+      }),
+    );
+  });
+
+  it("discovers and automatically connects a sole Supabase project", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      metadata: { encryptedCredentials: "encrypted-pending-credentials" },
+      codeVerifier: null,
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessMode: "read_only",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(callCustomMcpTool).mockResolvedValue({
+      projects: [{
+        id: "project-id",
+        ref: "abcdefghijklmnopqrst",
+        organization_id: "organization-id",
+        organization_slug: "acme",
+        name: "Production",
+        status: "ACTIVE_HEALTHY",
+        created_at: "2026-09-01T00:00:00Z",
+        region: "eu-west-1",
+      }],
+    });
+    vi.mocked(listCustomMcpTools).mockResolvedValue([
+      "get_logs",
+      "execute_sql",
+      "list_extensions",
+      "list_tables",
+      "apply_migration",
+    ]);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-final-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/supabase/callback?code=authorization-code&state=oauth-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new?integration=supabase&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(callCustomMcpTool).toHaveBeenCalledWith({
+      accessToken: "oauth-access-token",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      name: "list_projects",
+    });
+    expect(listCustomMcpTools).toHaveBeenCalledWith({
+      accessToken: "oauth-access-token",
+      mcpUrl:
+        "https://mcp.supabase.com/mcp?project_ref=abcdefghijklmnopqrst&features=debugging%2Cdatabase&read_only=true",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName:
+          "Production (abcdefghijklmnopqrst) · Logs and read-only data",
+        encryptedCredentials: "encrypted-final-credentials",
+        externalAccountId: "abcdefghijklmnopqrst:read_only",
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("keeps OAuth server-side while the user chooses among Supabase projects", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      metadata: { encryptedCredentials: "encrypted-pending-credentials" },
+      codeVerifier: null,
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessMode: "logs",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(callCustomMcpTool).mockResolvedValue({
+      projects: [
+        {
+          ref: "abcdefghijklmnopqrst",
+          organization_id: "organization-id",
+          organization_slug: "acme",
+          name: "Production",
+        },
+        {
+          ref: "zyxwvutsrqponmlkjihg",
+          organization_id: "organization-id",
+          organization_slug: "acme",
+          name: "Staging",
+        },
+      ],
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("selection-state");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-selection");
+
+    const response = await app.request(
+      "/api/integrations/supabase/callback?code=authorization-code&state=oauth-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings?integration=supabase&status=select_project&selection_state=selection-state",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      metadata: { encryptedCredentials: "encrypted-selection" },
+      organizationId: tenant.organizationId,
+      provider: "supabase",
+      returnTo: "/settings",
+      userId: tenant.user.id,
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("returns and connects only a project saved in the Supabase selection state", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    const selection = {
+      accessMode: "logs",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { tokens: { access_token: "oauth-access-token" } },
+      projects: [
+        {
+          ref: "abcdefghijklmnopqrst",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Production",
+        },
+        {
+          ref: "zyxwvutsrqponmlkjihg",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Staging",
+        },
+      ],
+    };
+    const connectionState = {
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      metadata: { encryptedCredentials: "encrypted-selection" },
+      codeVerifier: null,
+    };
+    vi.mocked(getIntegrationConnectionState).mockResolvedValue(connectionState);
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(connectionState);
+    vi.mocked(decryptCredentials).mockReturnValue(selection);
+
+    const projectsResponse = await app.request(
+      "/api/integrations/supabase/projects?state=selection-state",
+    );
+    expect(projectsResponse.status).toBe(200);
+    await expect(projectsResponse.json()).resolves.toEqual({
+      accessMode: "logs",
+      projects: selection.projects,
+    });
+
+    vi.mocked(listCustomMcpTools).mockResolvedValue(["get_logs"]);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-final-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    const selectResponse = await app.request(
+      "/api/integrations/supabase/select-project",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectRef: "abcdefghijklmnopqrst",
+          selectionState: "selection-state",
+        }),
+      },
+    );
+    expect(selectResponse.status).toBe(200);
+    await expect(selectResponse.json()).resolves.toEqual({
+      redirectUrl:
+        "https://responder.example/settings?integration=supabase&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+  });
+
+  it("rejects a Supabase project that was not returned by OAuth discovery", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      metadata: { encryptedCredentials: "encrypted-selection" },
+      codeVerifier: null,
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessMode: "logs",
+      authType: "oauth",
+      mcpUrl: "https://mcp.supabase.com/mcp?features=account&read_only=true",
+      oauth: { tokens: { access_token: "oauth-access-token" } },
+      projects: [
+        {
+          ref: "abcdefghijklmnopqrst",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Production",
+        },
+        {
+          ref: "zyxwvutsrqponmlkjihg",
+          organizationId: "organization-id",
+          organizationSlug: "acme",
+          name: "Staging",
+        },
+      ],
+    });
+
+    const response = await app.request(
+      "/api/integrations/supabase/select-project",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectRef: "unauthorizedproj1234",
+          selectionState: "selection-state",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(listCustomMcpTools).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("validates and encrypts a custom MCP API token", async () => {
@@ -1886,6 +2453,253 @@ describe("integration callback routing", () => {
         "?integration=axiom&status=error&reason=cancelled",
     );
     expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it("starts Dash0 OAuth for the organization MCP endpoint", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(normalizeDash0McpUrl).mockResolvedValue(
+      "https://mcp.eu-west-1.aws.dash0.com/mcp",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://auth.dash0.com/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+
+    const response = await app.request("/api/integrations/dash0/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+        returnTo: "/agents/new",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      redirectUrl: "https://auth.dash0.com/authorize",
+    });
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "dash0",
+        returnTo: "/agents/new",
+        routingUrl: "https://responder.example/api/integrations/dash0/callback",
+        userId: tenant.user.id,
+      }),
+    );
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+      redirectUrl: "https://responder.example/api/integrations/dash0/callback",
+    });
+  });
+
+  it("finishes Dash0 OAuth and preserves its webhook secret", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: {},
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "pending-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+      oauth: { codeVerifier: "pkce-verifier" },
+      webhookSecret: "s".repeat(43),
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(12);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/dash0/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=dash0&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oauth: expect.objectContaining({
+          tokens: expect.objectContaining({ access_token: "oauth-access-token" }),
+        }),
+        webhookSecret: "s".repeat(43),
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "Dash0",
+        provider: "dash0",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("returns the authenticated Dash0 webhook configuration", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "connected-credentials",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: "https://mcp.eu-west-1.aws.dash0.com/mcp",
+      oauth: { tokens: { access_token: "access-token" } },
+      webhookSecret: "s".repeat(43),
+    });
+
+    const response = await app.request(
+      "/api/integrations/dash0/30000000-0000-4000-8000-000000000000/webhook-config",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      authorization: `Bearer ${"s".repeat(43)}`,
+      webhookUrl:
+        "https://responder.example/api/webhooks/dash0/30000000-0000-4000-8000-000000000000",
+    });
+  });
+
+  it("starts PostHog OAuth against the fixed read-only MCP endpoint", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://us.posthog.com/oauth/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/posthog/start?returnTo=%2Fagents%2Fnew",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://us.posthog.com/oauth/authorize",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: tenant.organizationId,
+        provider: "posthog",
+        returnTo: "/agents/new",
+        routingUrl: "https://responder.example/api/integrations/posthog/callback",
+        userId: tenant.user.id,
+      }),
+    );
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: POSTHOG_MCP_URL,
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authType: "oauth",
+        mcpUrl: POSTHOG_MCP_URL,
+        oauth: { codeVerifier: "pkce-verifier" },
+      }),
+    );
+  });
+
+  it("finishes PostHog OAuth", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: {},
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "pending-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(14);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=posthog&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(finishCustomMcpOAuth).toHaveBeenCalledWith({
+      authorizationCode: "oauth-code",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oauth: expect.objectContaining({
+          tokens: expect.objectContaining({ access_token: "oauth-access-token" }),
+        }),
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "PostHog",
+        provider: "posthog",
+        status: "connected",
+      }),
+    );
   });
 
   it("validates and encrypts an Upstash account API key", async () => {

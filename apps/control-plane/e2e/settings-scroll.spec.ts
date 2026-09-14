@@ -23,11 +23,13 @@ const providers = [
   ["github", "GitHub"],
   ["slack", "Slack"],
   ["aws", "AWS"],
+  ["gcp", "Google Cloud"],
   ["sentry", "Sentry"],
   ["datadog", "Datadog"],
   ["axiom", "Axiom"],
   ["upstash", "Upstash"],
   ["langfuse", "Langfuse"],
+  ["supabase", "Supabase"],
   ["linear", "Linear"],
   ["vercel", "Vercel"],
   ["custom_mcp", "Custom MCP"],
@@ -79,7 +81,7 @@ async function mockSettingsApis(page: Page) {
           accountCount: 0,
           resourceCount: 0,
           accounts: [],
-          connectUrl: `/api/integrations/${id}/start`,
+          connectUrl: `/api/integrations/${id}/${id === "supabase" ? "connect" : "start"}`,
           configurationUrl: null,
         })),
       },
@@ -109,4 +111,99 @@ test("scrolls to integrations below the viewport", async ({ page }) => {
 
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   await expect(lastIntegration).toBeInViewport();
+});
+
+test("prepares a Google Cloud connection", async ({ page }) => {
+  await mockSettingsApis(page);
+  await page.route("**/api/integrations/gcp/start", (route) =>
+    route.fulfill({
+      json: {
+        accountId: "33333333-3333-4333-8333-333333333333",
+        projectId: "responder-production",
+        script: "#!/usr/bin/env bash\necho ready\n",
+      },
+    }),
+  );
+  await page.goto("/settings");
+
+  await page.getByRole("button", { name: "Add project manually" }).click();
+  await page.getByLabel("Project ID").fill("responder-production");
+  await page.getByLabel("Project number").fill("123456789012");
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Create the investigation identities" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download script" })).toBeVisible();
+});
+
+test("starts Supabase OAuth with the selected access level", async ({ page }) => {
+  await mockSettingsApis(page);
+  let requestBody: unknown;
+  await page.route("**/api/integrations/supabase/connect", async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        redirectUrl: "/settings?integration=supabase&status=connected",
+      },
+    });
+  });
+  await page.goto("/settings");
+
+  await page.getByRole("button", { name: /Supabase/ }).click();
+  await page.getByLabel("Agent access").selectOption("read_only");
+  await page.getByRole("button", { name: "Continue with Supabase" }).click();
+
+  await expect.poll(() => requestBody).toEqual({
+    accessMode: "read_only",
+    returnTo: "/settings",
+  });
+  await expect(page).toHaveURL(/integration=supabase&status=connected/u);
+});
+
+test("selects a Supabase project after OAuth discovery", async ({ page }) => {
+  await mockSettingsApis(page);
+  await page.route("**/api/integrations/supabase/projects?**", (route) =>
+    route.fulfill({
+      json: {
+        accessMode: "logs",
+        projects: [
+          {
+            name: "Production",
+            organizationId: "organization-id",
+            organizationSlug: "acme",
+            ref: "abcdefghijklmnopqrst",
+          },
+          {
+            name: "Staging",
+            organizationId: "organization-id",
+            organizationSlug: "acme",
+            ref: "zyxwvutsrqponmlkjihg",
+          },
+        ],
+      },
+    }),
+  );
+  let requestBody: unknown;
+  await page.route("**/api/integrations/supabase/select-project", async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        redirectUrl: "/settings?integration=supabase&status=connected",
+      },
+    });
+  });
+
+  await page.goto(
+    "/settings?integration=supabase&status=select_project&selection_state=selection-state",
+  );
+  await expect(page.getByRole("heading", { name: "Choose a project" })).toBeVisible();
+  await page.getByLabel("Supabase project").selectOption("zyxwvutsrqponmlkjihg");
+  await page.getByRole("button", { name: "Connect project" }).click();
+
+  await expect.poll(() => requestBody).toEqual({
+    projectRef: "zyxwvutsrqponmlkjihg",
+    selectionState: "selection-state",
+  });
+  await expect(page).toHaveURL(/integration=supabase&status=connected/u);
 });

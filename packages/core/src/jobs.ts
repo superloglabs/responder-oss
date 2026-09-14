@@ -21,6 +21,7 @@ export const remediationQueue = "responder-remediations-v2";
 export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
 
 export const investigationHeartbeatSeconds = 60;
+export const investigationLocalConcurrency = 2;
 
 export const workerHealthJobSchema = z.object({
   marker: z.string().min(1),
@@ -57,6 +58,12 @@ export const investigationJobSchema = z.object({
   request: investigationRequestSchema,
   replay: z.boolean().default(false),
   runtimeProfileId: z.uuid(),
+  slackIssueFollowup: z.object({
+    originalInvestigationId: z.uuid(),
+    issueIds: z.array(z.uuid()),
+    channelId: z.string().min(1),
+    threadTimestamp: z.string().min(1),
+  }).optional(),
 });
 
 export type InvestigationJob = z.infer<typeof investigationJobSchema>;

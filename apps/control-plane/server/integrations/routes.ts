@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
@@ -8,6 +9,8 @@ import {
 import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
+  deleteIntegrationAccount,
+  getIntegrationConnectionState,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getRecoverableSentryIntegrationAccount,
@@ -26,11 +29,23 @@ import {
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
   beginCustomMcpOAuth,
+  callCustomMcpTool,
   finishCustomMcpOAuth,
+  listCustomMcpTools,
   parseCustomMcpCredentials,
+  type StoredCustomMcpOAuthState,
   validateCustomMcpUrl,
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import {
+  createDash0WebhookSecret,
+  normalizeDash0McpUrl,
+  parseDash0Credentials,
+} from "../../../../packages/core/src/integrations/dash0.js";
+import {
+  parsePostHogCredentials,
+  POSTHOG_MCP_URL,
+} from "../../../../packages/core/src/integrations/posthog.js";
 import { getActiveTenant } from "../tenant.js";
 import {
   getIntegrationDefinition,
@@ -104,7 +119,11 @@ import {
   listVercelProjects,
   vercelInstallUrl,
 } from "./vercel.js";
-import { integrationCallbackUrl, settingsRedirect } from "./urls.js";
+import {
+  dash0WebhookUrl,
+  integrationCallbackUrl,
+  settingsRedirect,
+} from "./urls.js";
 import {
   awsAccountIdSchema,
   awsCloudFormationQuickCreateUrl,
@@ -117,6 +136,28 @@ import {
   createAwsExternalId,
   verifyAwsInvestigationRole,
 } from "../../../../packages/core/src/integrations/aws.js";
+import {
+  createGcpSessionName,
+  gcpConnectionCredentialsSchema,
+  gcpProjectIdSchema,
+  gcpProjectNumberSchema,
+  gcpSetupScript,
+  verifyGcpProject,
+} from "../../../../packages/core/src/integrations/gcp.js";
+import {
+  hasRequiredSupabaseTools,
+  parseSupabaseProjects,
+  supabaseAccessModeSchema,
+  type SupabaseAccessMode,
+  supabaseCredentialsSchema,
+  supabaseDiscoveryMcpUrl,
+  supabaseDisplayName,
+  supabaseExternalAccountId,
+  supabaseMcpUrl,
+  type SupabaseProject,
+  supabaseProjectRefSchema,
+  supabaseProjectSchema,
+} from "../../../../packages/core/src/integrations/supabase.js";
 
 const providerSchema = z.enum(productIntegrationIds);
 const awsConnectionSchema = z.object({
@@ -127,10 +168,29 @@ const awsVerificationSchema = z.object({
   integrationAccountId: z.uuid(),
   returnTo: z.string().max(2_048).optional(),
 });
+const gcpConnectionSchema = z.object({
+  projectId: gcpProjectIdSchema,
+  projectNumber: gcpProjectNumberSchema,
+  returnTo: z.string().max(2_048).optional(),
+});
+const gcpVerificationSchema = z.object({
+  integrationAccountId: z.uuid(),
+  returnTo: z.string().max(2_048).optional(),
+});
 
 function recoverAwsConnectionCredentials(encryptedCredentials: string) {
   try {
     return awsConnectionCredentialsSchema.safeParse(
+      decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function recoverGcpConnectionCredentials(encryptedCredentials: string) {
+  try {
+    return gcpConnectionCredentialsSchema.safeParse(
       decryptCredentials<Record<string, unknown>>(encryptedCredentials),
     );
   } catch {
@@ -171,6 +231,10 @@ const datadogConnectionSchema = z.object({
   returnTo: z.string().max(2_048).optional(),
   site: z.string().min(1),
 });
+const dash0ConnectionSchema = z.object({
+  mcpUrl: z.string().trim().url().max(2_048),
+  returnTo: z.string().max(2_048).optional(),
+});
 const upstashConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4_096),
   email: z.string().trim().email().max(320),
@@ -181,6 +245,20 @@ const langfuseConnectionSchema = z.object({
   publicKey: z.string().trim().min(1).max(512),
   returnTo: z.string().max(2_048).optional(),
   secretKey: z.string().trim().min(1).max(4_096),
+});
+const supabaseConnectionSchema = z.object({
+  accessMode: supabaseAccessModeSchema,
+  returnTo: z.string().max(2_048).optional(),
+});
+const supabaseProjectSelectionSchema = z.object({
+  projectRef: supabaseProjectRefSchema,
+  selectionState: z.string().min(1).max(8_192),
+});
+const supabaseOAuthSetupSchema = supabaseCredentialsSchema.omit({
+  projectRef: true,
+});
+const supabaseSelectionCredentialsSchema = supabaseOAuthSetupSchema.extend({
+  projects: z.array(supabaseProjectSchema).min(2).max(1_000),
 });
 const customMcpConnectionSchema = z.discriminatedUnion("authType", [
   z.object({
@@ -220,10 +298,14 @@ type BrowserOAuthProvider =
   | "axiom"
   | "clickstack"
   | "custom_mcp"
+  | "dash0"
+  | "gcp"
   | "github"
   | "linear"
+  | "posthog"
   | "sentry"
   | "slack"
+  | "supabase"
   | "vercel";
 
 async function consumeBrowserOAuthConnectionState(input: {
@@ -341,7 +423,7 @@ function safeCustomMcpErrorMessage(error: unknown): string {
 }
 
 function logCustomMcpError(
-  stage: "callback" | "connect",
+  stage: "callback" | "connect" | "webhook-config",
   error: unknown,
   accountId?: string,
 ): void {
@@ -396,6 +478,77 @@ function withIntegrationAccountId(url: string, accountId: string): string {
   return redirect.toString();
 }
 
+function withSupabaseSelectionState(
+  url: string,
+  selectionState: string,
+): string {
+  const redirect = new URL(url);
+  redirect.searchParams.set("selection_state", selectionState);
+  return redirect.toString();
+}
+
+async function completeSupabaseConnection(input: {
+  accessMode: SupabaseAccessMode;
+  oauth: StoredCustomMcpOAuthState;
+  organizationId: string;
+  project: SupabaseProject;
+  userId: string;
+}): Promise<string> {
+  const mcpUrl = supabaseMcpUrl({
+    accessMode: input.accessMode,
+    projectRef: input.project.ref,
+  });
+  const accessToken = input.oauth.tokens?.access_token;
+  if (!accessToken) throw new Error("The Supabase OAuth access token is missing");
+  const tools = await listCustomMcpTools({ accessToken, mcpUrl });
+  if (!hasRequiredSupabaseTools({ accessMode: input.accessMode, tools })) {
+    throw new Error("Supabase did not expose the required context tools");
+  }
+  const accountId = await upsertIntegrationAccount({
+    organizationId: input.organizationId,
+    provider: "supabase",
+    externalAccountId: supabaseExternalAccountId({
+      accessMode: input.accessMode,
+      projectRef: input.project.ref,
+    }),
+    displayName: supabaseDisplayName({
+      accessMode: input.accessMode,
+      projectName: input.project.name,
+      projectRef: input.project.ref,
+    }),
+    encryptedCredentials: encryptCredentials({
+      accessMode: input.accessMode,
+      authType: "oauth",
+      mcpUrl,
+      oauth: input.oauth,
+      projectRef: input.project.ref,
+    }),
+    credentialKeyVersion: 1,
+    metadata: {
+      accessMode: input.accessMode,
+      mcpUrl,
+      organizationId: input.project.organizationId,
+      organizationSlug: input.project.organizationSlug,
+      projectName: input.project.name,
+      projectRef: input.project.ref,
+    },
+    status: "connected",
+  });
+  await captureAnalyticsEvent({
+    distinctId: input.userId,
+    event: "integration connected",
+    organizationId: input.organizationId,
+    properties: {
+      access_mode: input.accessMode,
+      integration_account_id: accountId,
+      provider: "supabase",
+      project_ref: input.project.ref,
+      tool_count: tools.length,
+    },
+  });
+  return accountId;
+}
+
 async function completeSentrySetup(input: {
   accessToken: string;
   accountId: string;
@@ -437,6 +590,7 @@ async function retrySentrySetup(organizationId: string): Promise<{
     const fresh = await getFreshSentryCredentials({
       accountId: account.id,
       allowedStatuses: ["connected", "error", "pending"],
+      forceRefresh: true,
       organizationId,
     });
     expectedEncryptedCredentials = fresh.encryptedCredentials;
@@ -470,6 +624,7 @@ async function retrySentrySetup(organizationId: string): Promise<{
 async function getFreshSentryCredentials(input: {
   accountId: string;
   allowedStatuses?: Array<"connected" | "error" | "pending">;
+  forceRefresh?: boolean;
   organizationId: string;
 }) {
   const fresh = await withIntegrationAccountCredentialLease({
@@ -488,7 +643,11 @@ async function getFreshSentryCredentials(input: {
       const expiresAt = current.expiresAt
         ? Date.parse(current.expiresAt)
         : Number.POSITIVE_INFINITY;
-      if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+      if (
+        !input.forceRefresh &&
+        Number.isFinite(expiresAt) &&
+        expiresAt > Date.now() + 60_000
+      ) {
         return {
           value: { credentials: current, encryptedCredentials },
         };
@@ -576,21 +735,32 @@ export const integrationRoutes = new Hono()
                 : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
+            ...(definition.id === "gcp"
+              ? {
+                  projectId: account.externalAccountId,
+                  ...(typeof account.metadata.projectNumber === "string"
+                    ? { projectNumber: account.metadata.projectNumber }
+                    : {}),
+                }
+              : {}),
           })),
           connectUrl:
             definition.implemented && configured
               ? definition.id === "aws" ||
+                  definition.id === "gcp" ||
                   definition.id === "datadog" ||
+                  definition.id === "dash0" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
-                  definition.id === "langfuse"
+                  definition.id === "langfuse" ||
+                  definition.id === "supabase"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
                 : definition.id === "github" && providerAccounts.length === 0
                   ? "/api/integrations/github/start?mode=install"
                 : definition.id === "sentry" && providerAccounts.length > 0
-                  ? "/api/integrations/sentry/start?mode=reconnect"
+                  ? "/api/integrations/sentry/start"
                   : `/api/integrations/${definition.id}/start`
               : null,
           configurationUrl:
@@ -630,10 +800,25 @@ export const integrationRoutes = new Hono()
           });
           expectedEncryptedCredentials = fresh.encryptedCredentials;
           const organizationSlug = getSentryOrganizationSlug(account.metadata);
-          const projects = await listSentryProjects(
-            fresh.credentials.accessToken,
-            organizationSlug,
-          );
+          let projects;
+          try {
+            projects = await listSentryProjects(
+              fresh.credentials.accessToken,
+              organizationSlug,
+            );
+          } catch (error) {
+            if (!sentryErrorNeedsReconnect(error)) throw error;
+            const recovered = await getFreshSentryCredentials({
+              accountId: account.id,
+              forceRefresh: true,
+              organizationId: tenant.organizationId,
+            });
+            expectedEncryptedCredentials = recovered.encryptedCredentials;
+            projects = await listSentryProjects(
+              recovered.credentials.accessToken,
+              organizationSlug,
+            );
+          }
           const updated = await replaceIntegrationResourcesIfCredentialsMatch({
             encryptedCredentials: expectedEncryptedCredentials,
             integrationAccountId: account.id,
@@ -707,10 +892,13 @@ export const integrationRoutes = new Hono()
     }
     if (
       parsedProvider.data === "aws" ||
+      parsedProvider.data === "gcp" ||
       parsedProvider.data === "datadog" ||
+      parsedProvider.data === "dash0" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash" ||
-      parsedProvider.data === "langfuse"
+      parsedProvider.data === "langfuse" ||
+      parsedProvider.data === "supabase"
     ) {
       return context.json(
         { error: `Use the ${definition.name} connection endpoint` },
@@ -723,10 +911,7 @@ export const integrationRoutes = new Hono()
         405,
       );
     }
-    if (
-      parsedProvider.data === "sentry" &&
-      context.req.query("mode") !== "reconnect"
-    ) {
+    if (parsedProvider.data === "sentry") {
       try {
         const retriedAccount = await retrySentrySetup(tenant.organizationId);
         if (retriedAccount) {
@@ -847,6 +1032,67 @@ export const integrationRoutes = new Hono()
           settingsRedirect(
             context.req.query("returnTo") ?? "/settings",
             "axiom",
+            "error",
+            "connection_failed",
+          ),
+        );
+      }
+    }
+    if (parsedProvider.data === "posthog") {
+      let accountId: string | undefined;
+      try {
+        const externalAccountId = randomUUID();
+        accountId = await upsertIntegrationAccount({
+          organizationId: tenant.organizationId,
+          provider: "posthog",
+          externalAccountId,
+          displayName: "PostHog",
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: POSTHOG_MCP_URL,
+            oauth: {},
+          }),
+          credentialKeyVersion: 1,
+          metadata: { authType: "oauth", mcpUrl: POSTHOG_MCP_URL },
+          status: "pending",
+        });
+        const connectionState = await createIntegrationConnectionState({
+          organizationId: tenant.organizationId,
+          userId: tenant.user.id,
+          provider: "posthog",
+          codeVerifier: JSON.stringify({ accountId, externalAccountId }),
+          returnTo: context.req.query("returnTo"),
+          routingUrl: integrationCallbackUrl("posthog"),
+        });
+        const oauthResult = await beginCustomMcpOAuth({
+          connectionState,
+          mcpUrl: POSTHOG_MCP_URL,
+          redirectUrl: integrationCallbackUrl("posthog"),
+        });
+        const updated = await updateIntegrationAccountCredentials({
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: POSTHOG_MCP_URL,
+            oauth: oauthResult.oauth,
+          }),
+          integrationAccountId: accountId,
+          organizationId: tenant.organizationId,
+          provider: "posthog",
+          status: "pending",
+        });
+        if (!updated) throw new Error("The pending PostHog connection was not updated");
+        return context.redirect(oauthResult.authorizationUrl);
+      } catch (error) {
+        if (accountId) {
+          await setIntegrationAccountStatus(accountId, "error").catch(
+            () => undefined,
+          );
+        }
+        logCustomMcpError("connect", error, accountId);
+        return context.redirect(
+          settingsRedirect(
+            context.req.query("returnTo") ?? "/settings",
+            "posthog",
             "error",
             "connection_failed",
           ),
@@ -1018,6 +1264,156 @@ export const integrationRoutes = new Hono()
       );
     }
   })
+  .delete("/gcp/:integrationAccountId", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
+    if (!accountId.success) {
+      return context.json({ error: "The Google Cloud account is invalid" }, 400);
+    }
+    const deleted = await deleteIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+    if (!deleted) {
+      return context.json({ error: "Google Cloud project connection not found" }, 404);
+    }
+    return context.json({ removed: true });
+  })
+  .post("/gcp/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = gcpConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Enter a valid Google Cloud project ID and project number" },
+        400,
+      );
+    }
+
+    try {
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId: parsed.data.projectId,
+        organizationId: tenant.organizationId,
+        provider: "gcp",
+      });
+      const existingCredentials = existing?.encryptedCredentials
+        ? recoverGcpConnectionCredentials(existing.encryptedCredentials)
+        : null;
+      const credentials = {
+        projectId: parsed.data.projectId,
+        projectNumber: parsed.data.projectNumber,
+        sessionName: existingCredentials?.success
+          ? existingCredentials.data.sessionName
+          : createGcpSessionName(),
+      };
+      const accountId =
+        existing?.status === "connected" && existingCredentials?.success &&
+          existingCredentials.data.projectNumber === parsed.data.projectNumber
+          ? existing.id
+          : await upsertIntegrationAccount({
+              organizationId: tenant.organizationId,
+              provider: "gcp",
+              externalAccountId: parsed.data.projectId,
+              displayName: `GCP · ${parsed.data.projectId}`,
+              encryptedCredentials: encryptCredentials(credentials),
+              credentialKeyVersion: 1,
+              metadata: {
+                permissionRoles: [
+                  "roles/cloudasset.viewer",
+                  "roles/logging.viewer",
+                  "roles/monitoring.viewer",
+                ],
+                projectNumber: parsed.data.projectNumber,
+                serviceAccountId: "responder-investigation",
+              },
+              status: "pending",
+            });
+      return context.json({
+        accountId,
+        projectId: parsed.data.projectId,
+        script: gcpSetupScript(credentials),
+      });
+    } catch (error) {
+      logCallbackError("GCP", error, {
+        organizationId: tenant.organizationId,
+        stage: "setup",
+      });
+      return context.json(
+        { error: "Unable to prepare the Google Cloud connection" },
+        502,
+      );
+    }
+  })
+  .post("/gcp/verify", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = gcpVerificationSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "The Google Cloud setup session is invalid" }, 400);
+    }
+
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: parsed.data.integrationAccountId,
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+    if (!account?.encryptedCredentials) {
+      return context.json({ error: "Start the Google Cloud connection again" }, 404);
+    }
+    try {
+      const credentials = gcpConnectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      await verifyGcpProject(credentials);
+      await setIntegrationAccountStatus(account.id, "connected");
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: account.id,
+          provider: "gcp",
+        },
+      });
+      return context.json({
+        accountId: account.id,
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(
+            parsed.data.returnTo ?? "/settings",
+            "gcp",
+            "connected",
+          ),
+          account.id,
+        ),
+      });
+    } catch (error) {
+      await setIntegrationAccountStatus(account.id, "error");
+      logCallbackError("GCP", error, {
+        accountId: account.id,
+        organizationId: tenant.organizationId,
+        stage: "verify",
+      });
+      return context.json(
+        {
+          error:
+            "Responder could not use the Google Cloud identity yet. Wait for the setup script to finish, then try again.",
+        },
+        401,
+      );
+    }
+  })
   .post("/datadog/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -1083,6 +1479,309 @@ export const integrationRoutes = new Hono()
       return context.json(
         { error: "Unable to verify the Datadog connection" },
         502,
+      );
+    }
+  })
+  .post("/dash0/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = dash0ConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter the MCP endpoint copied from Dash0" }, 400);
+    }
+
+    let accountId: string | undefined;
+    try {
+      const mcpUrl = await normalizeDash0McpUrl(parsed.data.mcpUrl);
+      const externalAccountId = randomUUID();
+      const webhookSecret = createDash0WebhookSecret();
+      accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "dash0",
+        externalAccountId,
+        displayName: "Dash0",
+        encryptedCredentials: encryptCredentials({
+          authType: "oauth",
+          mcpUrl,
+          oauth: {},
+          webhookSecret,
+        }),
+        credentialKeyVersion: 1,
+        metadata: { authType: "oauth", mcpUrl },
+        status: "pending",
+      });
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "dash0",
+        codeVerifier: JSON.stringify({ accountId, externalAccountId }),
+        returnTo: parsed.data.returnTo,
+        routingUrl: integrationCallbackUrl("dash0"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl,
+        redirectUrl: integrationCallbackUrl("dash0"),
+      });
+      const updated = await updateIntegrationAccountCredentials({
+        encryptedCredentials: encryptCredentials({
+          authType: "oauth",
+          mcpUrl,
+          oauth: oauthResult.oauth,
+          webhookSecret,
+        }),
+        integrationAccountId: accountId,
+        organizationId: tenant.organizationId,
+        provider: "dash0",
+        status: "pending",
+      });
+      if (!updated) throw new Error("The pending Dash0 connection was not updated");
+      return context.json({ redirectUrl: oauthResult.authorizationUrl });
+    } catch (error) {
+      if (accountId) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      logCustomMcpError("connect", error, accountId);
+      return context.json({ error: "Unable to start Dash0 OAuth" }, 502);
+    }
+  })
+  .get("/dash0/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "dash0", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "dash0",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "dash0", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({ accountId: z.uuid(), externalAccountId: z.uuid() })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "dash0",
+      });
+      if (!account?.encryptedCredentials || account.status !== "pending") {
+        throw new Error("The pending Dash0 connection was not found");
+      }
+      const credentials = parseDash0Credentials(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("dash0"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Dash0 OAuth access token is missing");
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const connectedAccountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "dash0",
+        externalAccountId: callbackState.externalAccountId,
+        displayName: "Dash0",
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        credentialKeyVersion: 1,
+        metadata: {
+          authType: "oauth",
+          mcpUrl: credentials.mcpUrl,
+          toolCount,
+        },
+        status: "connected",
+      });
+      if (connectedAccountId !== accountId) {
+        throw new Error("The Dash0 connection changed during OAuth");
+      }
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "dash0",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "dash0", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "dash0",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/dash0/:accountId/webhook-config", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("accountId"));
+    if (!accountId.success) {
+      return context.json({ error: "Dash0 connection not found" }, 404);
+    }
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "dash0",
+    });
+    if (!account?.encryptedCredentials || account.status !== "connected") {
+      return context.json({ error: "Dash0 connection not found" }, 404);
+    }
+    try {
+      const credentials = parseDash0Credentials(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      context.header("cache-control", "no-store");
+      return context.json({
+        authorization: `Bearer ${credentials.webhookSecret}`,
+        webhookUrl: dash0WebhookUrl(accountId.data),
+      });
+    } catch (error) {
+      logCustomMcpError("webhook-config", error, accountId.data);
+      return context.json({ error: "Unable to load Dash0 webhook setup" }, 500);
+    }
+  })
+  .get("/posthog/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "posthog", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "posthog",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "posthog", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({ accountId: z.uuid(), externalAccountId: z.uuid() })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "posthog",
+      });
+      if (!account?.encryptedCredentials || account.status !== "pending") {
+        throw new Error("The pending PostHog connection was not found");
+      }
+      const credentials = parsePostHogCredentials(
+        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("posthog"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The PostHog OAuth access token is missing");
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const connectedAccountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "posthog",
+        externalAccountId: callbackState.externalAccountId,
+        displayName: "PostHog",
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        credentialKeyVersion: 1,
+        metadata: {
+          authType: "oauth",
+          mcpUrl: credentials.mcpUrl,
+          toolCount,
+        },
+        status: "connected",
+      });
+      if (connectedAccountId !== accountId) {
+        throw new Error("The PostHog connection changed during OAuth");
+      }
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "posthog",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "posthog", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "posthog",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
       );
     }
   })
@@ -1337,6 +2036,250 @@ export const integrationRoutes = new Hono()
         { error: "Unable to verify the Langfuse connection" },
         502,
       );
+    }
+  })
+  .post("/supabase/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = supabaseConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Choose a valid Supabase access level" }, 400);
+    }
+
+    try {
+      const mcpUrl = supabaseDiscoveryMcpUrl();
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "supabase",
+        returnTo: parsed.data.returnTo,
+        routingUrl: integrationCallbackUrl("supabase"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            accessMode: parsed.data.accessMode,
+            authType: "oauth",
+            mcpUrl,
+            oauth: oauthResult.oauth,
+          }),
+        },
+        organizationId: tenant.organizationId,
+        provider: "supabase",
+        state: connectionState,
+        userId: tenant.user.id,
+      });
+      if (!updated) throw new Error("The Supabase OAuth state was not updated");
+      return context.json({ redirectUrl: oauthResult.authorizationUrl });
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return context.json(
+        { error: "Unable to start Supabase authorization" },
+        502,
+      );
+    }
+  })
+  .get("/supabase/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "supabase", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "supabase",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "supabase", "error", "invalid_state"),
+        );
+      }
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const pendingCredentials = z
+        .object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const credentials = supabaseOAuthSetupSchema.parse(
+        decryptCredentials<Record<string, unknown>>(
+          pendingCredentials.encryptedCredentials,
+        ),
+      );
+      if (credentials.mcpUrl !== supabaseDiscoveryMcpUrl()) {
+        throw new Error("The Supabase project discovery scope is invalid");
+      }
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth as StoredCustomMcpOAuthState,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Supabase OAuth access token is missing");
+      const projects = parseSupabaseProjects(
+        await callCustomMcpTool({
+          accessToken,
+          mcpUrl: credentials.mcpUrl,
+          name: "list_projects",
+        }),
+      );
+      if (projects.length === 0) {
+        throw new Error("Supabase returned no projects for the authorized organization");
+      }
+      if (projects.length === 1) {
+        const accountId = await completeSupabaseConnection({
+          accessMode: credentials.accessMode,
+          oauth,
+          organizationId: connectionState.organizationId,
+          project: projects[0]!,
+          userId: connectionState.userId,
+        });
+        return context.redirect(
+          withIntegrationAccountId(
+            settingsRedirect(connectionState.returnTo, "supabase", "connected"),
+            accountId,
+          ),
+        );
+      }
+      const selectionState = await createIntegrationConnectionState({
+        organizationId: connectionState.organizationId,
+        provider: "supabase",
+        userId: connectionState.userId,
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            ...credentials,
+            oauth,
+            projects,
+          }),
+        },
+        returnTo: connectionState.returnTo,
+      });
+      return context.redirect(
+        withSupabaseSelectionState(
+          settingsRedirect(
+            connectionState.returnTo,
+            "supabase",
+            "select_project",
+          ),
+          selectionState,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error);
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "supabase",
+          "error",
+          context.req.query("error") ? "cancelled" : "connection_failed",
+        ),
+      );
+    }
+  })
+  .get("/supabase/projects", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const state = context.req.query("state");
+    if (!state) {
+      return context.json({ error: "Project selection expired" }, 400);
+    }
+    try {
+      const connectionState = await getIntegrationConnectionState(
+        "supabase",
+        state,
+        { organizationId: tenant.organizationId, userId: tenant.user.id },
+      );
+      if (!connectionState) {
+        return context.json({ error: "Project selection expired" }, 410);
+      }
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const selection = supabaseSelectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(
+          metadata.encryptedCredentials,
+        ),
+      );
+      if (selection.mcpUrl !== supabaseDiscoveryMcpUrl()) {
+        throw new Error("The Supabase project discovery scope is invalid");
+      }
+      return context.json({
+        accessMode: selection.accessMode,
+        projects: selection.projects,
+      });
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return context.json({ error: "Unable to load Supabase projects" }, 502);
+    }
+  })
+  .post("/supabase/select-project", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = supabaseProjectSelectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Choose a valid Supabase project" }, 400);
+    }
+    try {
+      const connectionState = await consumeIntegrationConnectionState(
+        "supabase",
+        parsed.data.selectionState,
+        { organizationId: tenant.organizationId, userId: tenant.user.id },
+      );
+      if (!connectionState) {
+        return context.json({ error: "Project selection expired" }, 410);
+      }
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const selection = supabaseSelectionCredentialsSchema.parse(
+        decryptCredentials<Record<string, unknown>>(
+          metadata.encryptedCredentials,
+        ),
+      );
+      if (selection.mcpUrl !== supabaseDiscoveryMcpUrl()) {
+        throw new Error("The Supabase project discovery scope is invalid");
+      }
+      const project = selection.projects.find(
+        (candidate) => candidate.ref === parsed.data.projectRef,
+      );
+      if (!project) {
+        return context.json({ error: "Choose an authorized Supabase project" }, 403);
+      }
+      const accountId = await completeSupabaseConnection({
+        accessMode: selection.accessMode,
+        oauth: selection.oauth as StoredCustomMcpOAuthState,
+        organizationId: connectionState.organizationId,
+        project,
+        userId: connectionState.userId,
+      });
+      return context.json({
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "supabase", "connected"),
+          accountId,
+        ),
+      });
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return context.json({ error: "Unable to connect Supabase project" }, 502);
     }
   })
   .post("/custom-mcp/connect", async (context) => {

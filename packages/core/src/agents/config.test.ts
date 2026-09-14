@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentConfigurationSchema,
+  AGENT_PROMPT_MAX_LENGTH,
   slackThreadModeConfigurationSchema,
 } from "./config.js";
 
@@ -52,6 +53,21 @@ describe("agent configuration", () => {
     expect(parsed.data?.secretIds).toEqual([]);
     expect(parsed.data?.createLinearTickets).toBe(false);
     expect(parsed.data?.linearIssueTemplate).toContain("{{issue_id}}");
+  });
+
+  it("allows custom prompts up to 400,000 characters", () => {
+    const maximumPrompt = agentConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      instructions: "a".repeat(AGENT_PROMPT_MAX_LENGTH),
+    });
+    const oversizedPrompt = agentConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      instructions: "a".repeat(AGENT_PROMPT_MAX_LENGTH + 1),
+    });
+
+    expect(maximumPrompt.success).toBe(true);
+    expect(oversizedPrompt.success).toBe(false);
+    expect(oversizedPrompt.error?.issues[0]?.path).toEqual(["instructions"]);
   });
 
   it("requires a non-empty Linear template when ticket settings are supplied", () => {

@@ -137,6 +137,28 @@ interface StsTemporaryCredentials {
   sessionToken: string;
 }
 
+export async function assumeAwsIntegrationBroker(
+  options: {
+    environment?: NodeJS.ProcessEnv;
+    sessionName?: string;
+  } = {},
+): Promise<AwsTemporaryCredentials> {
+  const principalArn = awsIntegrationPrincipalArn(options.environment);
+  const sessionSuffix = (options.sessionName ?? randomBytes(8).toString("hex"))
+    .replace(/[^A-Za-z0-9+=,.@_-]/g, "-")
+    .slice(0, 64);
+  const brokerResult = await new STSClient({
+    region: AWS_MCP_SIGNING_REGION,
+  }).send(
+    new AssumeRoleCommand({
+      DurationSeconds: 3600,
+      RoleArn: principalArn,
+      RoleSessionName: sessionSuffix,
+    }),
+  );
+  return temporaryCredentials(brokerResult.Credentials, "broker");
+}
+
 function temporaryCredentials(
   credentials: Credentials | undefined,
   stage: string,
@@ -172,20 +194,13 @@ export async function assumeAwsInvestigationRole(
   } = {},
 ): Promise<AwsTemporaryCredentials> {
   const parsed = awsConnectionCredentialsSchema.parse(connection);
-  const principalArn = awsIntegrationPrincipalArn(options.environment);
   const sessionSuffix = (options.sessionName ?? randomBytes(8).toString("hex"))
     .replace(/[^A-Za-z0-9+=,.@_-]/g, "-")
     .slice(0, 40);
-  const brokerResult = await new STSClient({
-    region: AWS_MCP_SIGNING_REGION,
-  }).send(
-    new AssumeRoleCommand({
-      DurationSeconds: 3600,
-      RoleArn: principalArn,
-      RoleSessionName: `responder-broker-${sessionSuffix}`,
-    }),
-  );
-  const broker = temporaryCredentials(brokerResult.Credentials, "broker");
+  const broker = await assumeAwsIntegrationBroker({
+    environment: options.environment,
+    sessionName: `responder-broker-${sessionSuffix}`,
+  });
   const customerResult = await new STSClient({
     credentials: {
       accessKeyId: broker.accessKeyId,

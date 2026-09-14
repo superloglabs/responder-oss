@@ -1,7 +1,7 @@
-import type { MCPServer } from "@openai/agents";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeSlackConnection } from "@responder/core/db/investigations";
-import { ScopedSlackMcpServer } from "./slack.js";
+import { searchSlackChannel } from "@responder/core/integrations/slack-search";
+import { SlackSearchMcpServer } from "./slack.js";
 
 const activeSpan = vi.hoisted(() => ({
   recordException: vi.fn(),
@@ -12,6 +12,12 @@ vi.mock("@opentelemetry/api", () => ({
   SpanStatusCode: { ERROR: 2 },
   trace: { getActiveSpan: () => activeSpan },
 }));
+vi.mock("@responder/core/integrations/slack-search", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("@responder/core/integrations/slack-search")
+  >();
+  return { ...original, searchSlackChannel: vi.fn() };
+});
 
 const connection: RuntimeSlackConnection = {
   accountId: "account-1",
@@ -19,79 +25,114 @@ const connection: RuntimeSlackConnection = {
     { id: "C123", name: "incidents" },
     { id: "C456", name: "engineering" },
   ],
-  mcpUrl: "https://mcp.slack.com/mcp",
   userAccessToken: "user-token",
 };
 
-function upstreamServer() {
-  const callTool = vi.fn().mockResolvedValue([{ type: "text", text: "ok" }]);
-  const tools = [
-    { name: "slack_read_channel" },
-    { name: "slack_read_thread" },
-    { name: "slack_send_message" },
-    { name: "slack_search_public" },
-  ] as Awaited<ReturnType<MCPServer["listTools"]>>;
-  const server = {
-    cacheToolsList: true,
-    callTool,
-    close: vi.fn().mockResolvedValue(undefined),
-    connect: vi.fn().mockResolvedValue(undefined),
-    invalidateToolsCache: vi.fn().mockResolvedValue(undefined),
-    listTools: vi.fn().mockResolvedValue(tools),
-    name: "slack-upstream",
-  } as MCPServer;
-  return { callTool, server };
-}
+const searchResult = {
+  channel: { id: "C123", name: "incidents" },
+  matches: [
+    {
+      permalink: "https://example.slack.com/archives/C123/p1",
+      text: "database timeout",
+      timestamp: "1.000001",
+      userId: "U123",
+    },
+  ],
+  query: "database timeout",
+  totalMatches: 1,
+};
 
-describe("scoped Slack MCP server", () => {
-  it("exposes only read tools that can be channel-scoped", async () => {
-    const { server } = upstreamServer();
-    const scoped = new ScopedSlackMcpServer(server, connection);
+describe("Slack channel search server", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-    await expect(scoped.listTools()).resolves.toEqual([
-      expect.objectContaining({ name: "slack_read_channel" }),
-      expect.objectContaining({ name: "slack_read_thread" }),
+  it("exposes one search tool with the selected channel IDs", async () => {
+    const server = new SlackSearchMcpServer(connection);
+
+    await expect(server.listTools()).resolves.toEqual([
+      expect.objectContaining({
+        name: "slack_search_channel",
+        inputSchema: expect.objectContaining({
+          properties: expect.objectContaining({
+            channel_id: expect.objectContaining({ enum: ["C123", "C456"] }),
+          }),
+        }),
+      }),
     ]);
   });
 
-  it("forwards selected channel reads", async () => {
-    const { callTool, server } = upstreamServer();
-    const scoped = new ScopedSlackMcpServer(server, connection);
+  it("searches a selected channel with normalized arguments", async () => {
+    vi.mocked(searchSlackChannel).mockResolvedValue(searchResult);
+    const server = new SlackSearchMcpServer(connection);
 
-    await scoped.callTool("slack_read_channel", { channel_id: "C123" });
+    await expect(
+      server.callTool("slack_search_channel", {
+        channel_id: "C123",
+        query: "  database   timeout ",
+      }),
+    ).resolves.toEqual([
+      { type: "text", text: JSON.stringify(searchResult) },
+    ]);
+    expect(searchSlackChannel).toHaveBeenCalledWith({
+      accessToken: "user-token",
+      channel: { id: "C123", name: "incidents" },
+      limit: 10,
+      query: "database timeout",
+      signal: undefined,
+    });
+  });
 
-    expect(callTool).toHaveBeenCalledWith(
-      "slack_read_channel",
-      { channel_id: "C123" },
-      undefined,
-      undefined,
-    );
+  it("reuses identical searches within an investigation", async () => {
+    vi.mocked(searchSlackChannel).mockResolvedValue(searchResult);
+    const server = new SlackSearchMcpServer(connection);
+    const args = { channel_id: "C123", limit: 10, query: "database timeout" };
+
+    await server.callTool("slack_search_channel", args);
+    await server.callTool("slack_search_channel", args);
+
+    expect(searchSlackChannel).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes failed searches from the investigation cache", async () => {
+    vi.mocked(searchSlackChannel)
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce(searchResult);
+    const server = new SlackSearchMcpServer(connection);
+    const args = { channel_id: "C123", query: "database timeout" };
+
+    await expect(
+      server.callTool("slack_search_channel", args),
+    ).rejects.toThrow("temporary failure");
+    await expect(
+      server.callTool("slack_search_channel", args),
+    ).resolves.toBeDefined();
+
+    expect(searchSlackChannel).toHaveBeenCalledTimes(2);
   });
 
   it("blocks unselected channels before calling Slack", async () => {
-    const { callTool, server } = upstreamServer();
-    const scoped = new ScopedSlackMcpServer(server, connection);
+    const server = new SlackSearchMcpServer(connection);
     const logError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      scoped.callTool("slack_read_channel", { channel_id: "C999" }),
+      server.callTool("slack_search_channel", {
+        channel_id: "C999",
+        query: "database timeout",
+      }),
     ).rejects.toThrow("Slack channel is not selected");
-    expect(callTool).not.toHaveBeenCalled();
+    expect(searchSlackChannel).not.toHaveBeenCalled();
     expect(activeSpan.recordException).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Slack channel is not selected for this agent",
       }),
     );
-    expect(activeSpan.setStatus).toHaveBeenCalledWith({
-      code: 2,
-      message: "Slack channel is not selected for this agent",
-    });
     expect(logError).toHaveBeenCalledWith(
       JSON.stringify({
-        event: "slack_mcp_tool_blocked",
+        event: "slack_search_tool_blocked",
         reason: "Slack channel is not selected for this agent",
         serverName: "slack-account-1",
-        toolName: "slack_read_channel",
+        toolName: "slack_search_channel",
       }),
     );
   });

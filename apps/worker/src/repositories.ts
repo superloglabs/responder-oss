@@ -621,6 +621,68 @@ export async function checkoutRuntimeRepositories(
   );
 }
 
+export async function checkoutRuntimeRepository(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  repositoryFullName: string,
+  dependencies: RepositoryCheckoutDependencies = defaultDependencies,
+): Promise<CheckedOutRepository> {
+  return checkoutRuntimeRepositoryWithRef(
+    session,
+    versionId,
+    repositoryFullName,
+    undefined,
+    dependencies,
+  );
+}
+
+export async function checkoutRuntimeRepositoryAtRef(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  repositoryFullName: string,
+  reference: RuntimeRepositoryReference,
+  dependencies: RepositoryCheckoutDependencies = defaultDependencies,
+): Promise<CheckedOutRepository> {
+  return checkoutRuntimeRepositoryWithRef(
+    session,
+    versionId,
+    repositoryFullName,
+    reference,
+    dependencies,
+  );
+}
+
+async function checkoutRuntimeRepositoryWithRef(
+  session: DaytonaSandboxSession,
+  versionId: string,
+  repositoryFullName: string,
+  reference: RuntimeRepositoryReference | undefined,
+  dependencies: RepositoryCheckoutDependencies,
+): Promise<CheckedOutRepository> {
+  const repositories = await dependencies.getRepositories(versionId);
+  const repository = repositories.find(
+    (candidate) => candidate.fullName === repositoryFullName,
+  );
+  if (!repository) {
+    throw new Error(
+      `Repository ${repositoryFullName} is not attached to this Agent version`,
+    );
+  }
+  const checkedOut = await checkoutRuntimeRepositoriesWithRefs(
+    session,
+    versionId,
+    reference ? new Map([[repositoryFullName, reference]]) : new Map(),
+    {
+      ...dependencies,
+      getRepositories: async () => [repository],
+    },
+  );
+  if (!checkedOut[0]) {
+    throw new Error(`Unable to check out ${repositoryFullName}`);
+  }
+  return checkedOut[0];
+}
+
 export async function refreshRuntimeRepositories(
   session: DaytonaSandboxSession,
   versionId: string,

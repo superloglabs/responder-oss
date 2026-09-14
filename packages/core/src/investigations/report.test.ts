@@ -85,6 +85,10 @@ describe("investigation report", () => {
             changes: [{
               repository: null,
               diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1,2 @@\n+if (!value) return;\n use(value);",
+              pullRequest: {
+                title: "Restore the missing route guard",
+                body: "Guard the optional value before the route uses it.\n\nThe focused route test passes.",
+              },
             }],
           },
           {
@@ -99,6 +103,18 @@ describe("investigation report", () => {
     });
 
     expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const issue = parsed.data.issues[0];
+      const remediation = issue?.resolution === "new"
+        ? issue.remediations[0]
+        : undefined;
+      expect(remediation?.type === "code_change"
+        ? remediation.changes[0]?.pullRequest
+        : undefined).toEqual({
+        title: "Restore the missing route guard",
+        body: "Guard the optional value before the route uses it.\n\nThe focused route test passes.",
+      });
+    }
   });
 
   it("accepts one code remediation containing changes for several repositories", () => {
@@ -124,10 +140,18 @@ describe("investigation report", () => {
             {
               repository: "acme/app",
               diff: "diff --git a/src/config.ts b/src/config.ts\n--- a/src/config.ts\n+++ b/src/config.ts\n@@ -1 +1,2 @@\n+export const channelId = \"chan\";",
+              pullRequest: {
+                title: "Propagate the channel from the app",
+                body: "Forward the resolved channel to the SDK.",
+              },
             },
             {
               repository: "acme/sdk",
               diff: "diff --git a/src/events.ts b/src/events.ts\n--- a/src/events.ts\n+++ b/src/events.ts\n@@ -1 +1,2 @@\n+export const channelId = \"chan\";",
+              pullRequest: {
+                title: "Accept the resolved channel in the SDK",
+                body: "Carry the app's resolved channel into produced events.",
+              },
             },
           ],
         }],
@@ -136,6 +160,48 @@ describe("investigation report", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it("requires pull request content for newly authored code changes", () => {
+    const parsed = investigationReportSubmissionSchema.safeParse({
+      schemaVersion: 1,
+      headline: "Route needs a guard",
+      summary: "The missing guard causes the route to fail.",
+      issues: [{
+        resolution: "new",
+        title: "Missing route guard",
+        description: "The route uses an optional value without checking it.",
+        rootCause: "A route change removed the optional-value guard.",
+        timeline: [{
+          title: "Request reached the route",
+          description: "The request reached the route without the optional value.",
+        }],
+        severity: "SEV-2",
+        remediations: [{
+          type: "code_change",
+          title: "Restore the route guard",
+          description: "Return early when the optional value is absent.",
+          changes: [{
+            repository: "acme/app",
+            diff: "diff --git a/src/route.ts b/src/route.ts\n--- a/src/route.ts\n+++ b/src/route.ts\n@@ -1 +1,2 @@\n+if (!value) return;\n use(value);",
+          }],
+        }],
+        evidence: [evidence],
+      }],
+    });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.path).toEqual([
+        "issues",
+        0,
+        "remediations",
+        0,
+        "changes",
+        0,
+        "pullRequest",
+      ]);
+    }
   });
 
   it("renders only the targeted repository change for a remediation job", () => {

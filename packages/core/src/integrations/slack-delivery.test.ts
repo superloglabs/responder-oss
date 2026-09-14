@@ -6,7 +6,9 @@ import {
   slackDeliveryClientMessageId,
   slackDeliveryErrorMessage,
   slackInvestigationSummaryMessage,
+  slackIssueFollowupMessage,
   slackIssueMessage,
+  slackNoIssueThreadLink,
 } from "./slack-delivery.js";
 
 describe("Slack issue delivery", () => {
@@ -38,6 +40,30 @@ describe("Slack issue delivery", () => {
       type: "section",
       text: { type: "mrkdwn", text: message.text },
     }]);
+  });
+
+  it("binds a no-issue summary to its investigation thread", () => {
+    const link = slackNoIssueThreadLink({
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      issues: [],
+      organizationId: "17171717-1717-4717-8717-171717171717",
+      source: {
+        channelId: "C123",
+        encryptedCredentials: "encrypted",
+        integrationAccountId: "18181818-1818-4818-8818-181818181818",
+        messageTimestamp: null,
+        reactionTimestamp: "1788350000.000100",
+        teamId: "T123",
+        threadTimestamp: "1788350000.000100",
+      },
+    } as never, "1788350001.000200");
+
+    expect(link).toEqual(expect.objectContaining({
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      issueId: null,
+      messageTimestamp: "1788350001.000200",
+      threadTimestamp: "1788350000.000100",
+    }));
   });
 
   it("uses stable, destination-specific message IDs for retry deduplication", () => {
@@ -331,5 +357,71 @@ describe("Slack issue delivery", () => {
         }),
       ]),
     );
+  });
+
+  it("renders updated remediations with the same actionable carousel", () => {
+    const issueId = "07070707-0707-4707-8707-070707070707";
+    const codeRemediationId = "24242424-2424-4424-8424-242424242424";
+    const externalRemediationId = "26262626-2626-4626-8626-262626262626";
+    const message = slackIssueFollowupMessage({
+      context: {
+        investigationId: "16161616-1616-4616-8616-161616161616",
+        issues: [{
+          id: issueId,
+          title: "Malformed cart payload",
+          description: "Malformed payloads fail during parsing.",
+          rootCause: "Input is parsed before it is validated.",
+          timeline: [],
+          severity: "SEV-2",
+          remediation: "Validate the payload, warn, and return 400.",
+          remediations: [{
+            id: codeRemediationId,
+            type: "code_change",
+            title: "Validate before parsing",
+            description: "Return a structured 400 for malformed input.",
+            changes: [{ repository: null, diff: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b" }],
+          }, {
+            id: externalRemediationId,
+            type: "external_action",
+            title: "Adjust the monitor",
+            description: "Exclude expected validation warnings.",
+            agentPrompt: "Exclude warning-level validation logs from the monitor.",
+          }],
+          pullRequest: null,
+          relationship: "new",
+          evidence: [],
+        }],
+        prMode: "manual",
+        source: null,
+        output: null,
+        organizationId: "17171717-1717-4717-8717-171717171717",
+      } as never,
+      response: "I revised the proposal to retain a warning.",
+      updatedIssueIds: [issueId],
+    });
+
+    expect(message.blocks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "carousel",
+        elements: [
+          expect.objectContaining({
+            actions: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: "create_issue_pull_request",
+                text: expect.objectContaining({ text: "Open PR" }),
+              }),
+            ]),
+          }),
+          expect.objectContaining({
+            actions: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: "copy_issue_prompt",
+                text: expect.objectContaining({ text: "Copy prompt" }),
+              }),
+            ]),
+          }),
+        ],
+      }),
+    ]));
   });
 });

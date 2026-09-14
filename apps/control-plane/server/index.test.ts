@@ -9,6 +9,7 @@ import {
 } from "./app.js";
 import {
   isResolvedSlackAlert,
+  isPostHogInactiveMessage,
   isSentryIssueAlert,
   isSlackErrorRecap,
   isSlackIssueResolutionMessage,
@@ -244,6 +245,25 @@ describe("control-plane API", () => {
     );
   });
 
+  it("routes the legacy Sentry callback to the integration flow", async () => {
+    const response = await app.request(
+      "https://responder.example/sentry/oauth/callback" +
+        "?code=sentry-code" +
+        "&installationId=00000000-0000-4000-8000-000000000000" +
+        "&orgSlug=customer" +
+        "&state=responder-v1.callback.nonce",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/api/integrations/sentry/callback" +
+        "?code=sentry-code" +
+        "&installationId=00000000-0000-4000-8000-000000000000" +
+        "&orgSlug=customer" +
+        "&state=responder-v1.callback.nonce",
+    );
+  });
+
   it("rejects unauthenticated investigation requests", async () => {
     const response = await app.request("/api/investigations", {
       method: "POST",
@@ -411,6 +431,14 @@ describe("control-plane API", () => {
     ).toBe("sentry");
     expect(
       slackAlertProvider({
+        body: "🔴 Log alert 'Checkout errors' is firing",
+        botAppId: "A-POSTHOG",
+        botId: "B-POSTHOG",
+        botName: "PostHog",
+      }),
+    ).toBe("posthog");
+    expect(
+      slackAlertProvider({
         body: "Look at https://app.datadoghq.eu/logs",
       }),
     ).toBeNull();
@@ -548,6 +576,17 @@ describe("control-plane API", () => {
       botName: undefined,
       expectedProvider: "sentry",
       subtype: "thread_broadcast",
+    },
+    {
+      name: "PostHog firing logs alert",
+      body: [
+        "🔴 Log alert 'Checkout errors' is firing",
+        "Threshold breached: 42 logs in 5m",
+        "<https://us.posthog.com/project/1/logs|View logs>",
+      ].join("\n"),
+      botName: "PostHog",
+      expectedProvider: "posthog",
+      subtype: undefined,
     },
     {
       name: "generic self-hosted HyperDX alert",
@@ -1066,6 +1105,18 @@ describe("control-plane API", () => {
     expect(shouldIgnoreResolvedSlackAlert("aws", body, "AWS")).toBe(true);
     expect(shouldIgnoreResolvedSlackAlert("datadog", body)).toBe(false);
     expect(shouldIgnoreResolvedSlackAlert("sentry", body)).toBe(false);
+  });
+
+  it("ignores inactive PostHog alert lifecycle messages", () => {
+    const resolved = "🟢 Log alert 'Checkout errors' has resolved";
+    const disabled = "⚠️ Replay vision alert 'Rage clicks' was auto-disabled";
+    const firing = "🔴 Log alert 'Checkout errors' is firing";
+
+    expect(isPostHogInactiveMessage(resolved)).toBe(true);
+    expect(isPostHogInactiveMessage(disabled)).toBe(true);
+    expect(isPostHogInactiveMessage(firing)).toBe(false);
+    expect(shouldIgnoreResolvedSlackAlert("posthog", resolved)).toBe(true);
+    expect(shouldIgnoreResolvedSlackAlert("posthog", firing)).toBe(false);
   });
 
   it("recognizes error recap titles without hiding individual alerts", () => {

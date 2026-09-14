@@ -4,12 +4,16 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   AgentOptions["accounts"][number]["provider"]
 >([
   "aws",
+  "gcp",
   "sentry",
   "datadog",
+  "dash0",
+  "posthog",
   "axiom",
   "clickstack",
   "upstash",
   "langfuse",
+  "supabase",
   "custom_mcp",
   "linear",
 ]);
@@ -20,7 +24,54 @@ export interface DefaultAgentContext {
   repositoryIds: string[];
 }
 
+export interface SlackSearchContext {
+  connectedAccounts: AgentOptions["accounts"];
+  searchableAccounts: AgentOptions["accounts"];
+  searchableChannels: AgentOptions["resources"];
+  reconnectRequired: boolean;
+}
+
+export function resolveSlackSearchContext(options: AgentOptions): SlackSearchContext {
+  const connectedAccounts = options.accounts.filter(
+    (account) => account.provider === "slack",
+  );
+  const searchableAccounts = connectedAccounts.filter(
+    (account) => account.slackContextAvailable,
+  );
+  const searchableAccountIds = new Set(
+    searchableAccounts.map((account) => account.id),
+  );
+
+  return {
+    connectedAccounts,
+    searchableAccounts,
+    searchableChannels: options.resources.filter(
+      (resource) =>
+        resource.kind === "slack_channel" &&
+        searchableAccountIds.has(resource.integrationAccountId),
+    ),
+    reconnectRequired:
+      connectedAccounts.length > 0 && searchableAccounts.length === 0,
+  };
+}
+
+export function filterSlackSearchChannels(
+  channels: AgentOptions["resources"],
+  query: string,
+): AgentOptions["resources"] {
+  const normalizedQuery = query.trim().toLocaleLowerCase().replace(/^#/, "");
+  if (!normalizedQuery) return channels;
+
+  return channels.filter((channel) =>
+    channel.displayName
+      .toLocaleLowerCase()
+      .replace(/^#/, "")
+      .includes(normalizedQuery),
+  );
+}
+
 export function defaultAgentContext(options: AgentOptions): DefaultAgentContext {
+  const firstSlackChannel = resolveSlackSearchContext(options).searchableChannels[0];
   const firstVercelProject = options.resources.find(
     (resource) => resource.kind === "vercel_project",
   );
@@ -40,7 +91,10 @@ export function defaultAgentContext(options: AgentOptions): DefaultAgentContext 
 
   return {
     contextAccountIds,
-    contextResourceIds: firstVercelProject ? [firstVercelProject.id] : [],
+    contextResourceIds: [
+      ...(firstSlackChannel ? [firstSlackChannel.id] : []),
+      ...(firstVercelProject ? [firstVercelProject.id] : []),
+    ],
     repositoryIds: options.repositories[0] ? [options.repositories[0].id] : [],
   };
 }

@@ -20,7 +20,14 @@ import {
 } from "./schema.js";
 import { listWorkspaceSecrets } from "./workspace-secrets.js";
 
-type Provider = "github" | "slack" | "sentry" | "datadog" | "axiom";
+type Provider =
+  | "github"
+  | "slack"
+  | "sentry"
+  | "datadog"
+  | "dash0"
+  | "posthog"
+  | "axiom";
 
 export class AgentConfigurationError extends Error {
   constructor(
@@ -49,7 +56,8 @@ export async function findAgentsForSlackEvent(input: {
     trigger: "slack_channel" | "slack_mention" | "slack_thread";
   }>
 > {
-  const rows = await getDatabase()
+  const db = getDatabase();
+  const rows = await db
     .select({
       agentId: agents.id,
       organizationId: agents.organizationId,
@@ -161,6 +169,45 @@ export async function findAgentsForSentryIssue(input: {
     }));
 }
 
+export async function findAgentsForDash0Alert(
+  integrationAccountId: string,
+): Promise<Array<{ agentId: string; organizationId: string }>> {
+  const rows = await getDatabase()
+    .select({
+      agentId: agents.id,
+      organizationId: agents.organizationId,
+      integrationAccountId: integrationAccounts.id,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agents)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, agents.activeVersionId),
+    )
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.id, integrationAccountId),
+        eq(integrationAccounts.organizationId, agents.organizationId),
+        eq(integrationAccounts.provider, "dash0"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(eq(agents.enabled, true));
+
+  return rows
+    .filter(
+      (row) =>
+        row.trigger === "dash0_alert" &&
+        row.triggerConfig.integrationAccountId === row.integrationAccountId,
+    )
+    .map((row) => ({
+      agentId: row.agentId,
+      organizationId: row.organizationId,
+    }));
+}
+
 function requiredTriggerProvider(
   trigger: AgentConfiguration["trigger"],
 ): Provider {
@@ -169,6 +216,8 @@ function requiredTriggerProvider(
       return "sentry";
     case "datadog_monitor":
       return "datadog";
+    case "dash0_alert":
+      return "dash0";
     case "slack_channel":
     case "slack_mention":
       return "slack";
@@ -178,12 +227,14 @@ function requiredTriggerProvider(
 function triggerResources(trigger: AgentConfiguration["trigger"]): {
   kind: "slack_channel" | "sentry_project" | "datadog_monitor";
   externalIds: string[];
-} {
+} | null {
   switch (trigger.kind) {
     case "sentry_issue":
       return { kind: "sentry_project", externalIds: trigger.projectIds };
     case "datadog_monitor":
       return { kind: "datadog_monitor", externalIds: trigger.monitorIds };
+    case "dash0_alert":
+      return null;
     case "slack_channel":
       return { kind: "slack_channel", externalIds: [trigger.channelId] };
     case "slack_mention":
@@ -253,12 +304,16 @@ async function validateConfigurationResources(
       !account ||
       ![
         "aws",
+        "gcp",
         "sentry",
         "datadog",
+        "dash0",
+        "posthog",
         "axiom",
         "clickstack",
         "upstash",
         "langfuse",
+        "supabase",
         "vercel",
         "custom_mcp",
         "linear",
@@ -291,7 +346,6 @@ async function validateConfigurationResources(
         accountMetadata: integrationAccounts.metadata,
         kind: integrationResources.kind,
         provider: integrationAccounts.provider,
-        resourceMetadata: integrationResources.metadata,
       })
       .from(integrationResources)
       .innerJoin(
@@ -345,11 +399,8 @@ async function validateConfigurationResources(
           )
         : [],
     );
-    const missingScope = slackContextRows.some((resource) =>
-      resource.resourceMetadata.isPrivate === true
-        ? !userScopes.has("groups:history")
-        : !userScopes.has("channels:history"),
-    );
+    const missingScope =
+      slackContextRows.length > 0 && !userScopes.has("search:read");
     if (missingScope) {
       throw new AgentConfigurationError(
         "Reconnect Slack to use selected channels as agent context",
@@ -371,33 +422,35 @@ async function validateConfigurationResources(
   }
 
   const requiredResources = triggerResources(configuration.trigger);
-  const triggerExternalIds = new Set(requiredResources.externalIds);
-  if (triggerExternalIds.size !== requiredResources.externalIds.length) {
-    throw new AgentConfigurationError(
-      "Trigger resources must be unique",
-      "resource_not_found",
-    );
-  }
-  if (triggerExternalIds.size > 0) {
-    const resourceRows = await db
-      .select({ externalId: integrationResources.externalId })
-      .from(integrationResources)
-      .where(
-        and(
-          eq(
-            integrationResources.integrationAccountId,
-            configuration.trigger.integrationAccountId,
-          ),
-          eq(integrationResources.kind, requiredResources.kind),
-          eq(integrationResources.available, true),
-          inArray(integrationResources.externalId, [...triggerExternalIds]),
-        ),
-      );
-    if (resourceRows.length !== triggerExternalIds.size) {
+  if (requiredResources) {
+    const triggerExternalIds = new Set(requiredResources.externalIds);
+    if (triggerExternalIds.size !== requiredResources.externalIds.length) {
       throw new AgentConfigurationError(
-        "One or more trigger resources are unavailable",
+        "Trigger resources must be unique",
         "resource_not_found",
       );
+    }
+    if (triggerExternalIds.size > 0) {
+      const resourceRows = await db
+        .select({ externalId: integrationResources.externalId })
+        .from(integrationResources)
+        .where(
+          and(
+            eq(
+              integrationResources.integrationAccountId,
+              configuration.trigger.integrationAccountId,
+            ),
+            eq(integrationResources.kind, requiredResources.kind),
+            eq(integrationResources.available, true),
+            inArray(integrationResources.externalId, [...triggerExternalIds]),
+          ),
+        );
+      if (resourceRows.length !== triggerExternalIds.size) {
+        throw new AgentConfigurationError(
+          "One or more trigger resources are unavailable",
+          "resource_not_found",
+        );
+      }
     }
   }
 
@@ -747,8 +800,7 @@ export async function listAgentOptions(organizationId: string) {
       slackContextAvailable:
         account.provider === "slack" &&
         Array.isArray(metadata.userScopes) &&
-        metadata.userScopes.includes("channels:history") &&
-        metadata.userScopes.includes("groups:history"),
+        metadata.userScopes.includes("search:read"),
     }));
   const accountIds = accounts.map((account) => account.id);
 

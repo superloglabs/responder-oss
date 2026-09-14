@@ -42,12 +42,18 @@ Configure a distributed Slack app with:
 - Bot scopes: `app_mentions:read`, `channels:history`, `channels:join`,
   `channels:read`, `chat:write`, `chat:write.public`, `groups:history`,
   `groups:read`, and `reactions:write`
-- User scopes: `channels:history` and `groups:history`
+- User scope: `search:read`
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
 
-Reconnect existing installations after changing scopes. Private channels
-require the bot to be invited.
+Responder searches selected channels on demand through Slack's
+`search.messages` Web API method. The worker rejects Slack search modifiers,
+adds the selected channel constraint itself, and drops any result whose channel
+ID does not match the agent's immutable configuration. Identical searches share
+one in-memory request and result within an investigation; message content is not
+cached across investigations. Reconnect existing installations after changing
+scopes. The connecting user must be able to search each selected channel, and
+private channels also require the bot to be invited.
 
 Watched channels accept app-authored CloudWatch alarm notifications from AWS
 and Amazon Q Developer in chat applications. Responder starts investigations
@@ -101,6 +107,56 @@ review comments are never handled automatically.
 Connect Datadog from Settings and choose the matching Datadog site. Alerts can
 arrive through a watched Slack channel, while investigations use Datadog's MCP
 endpoint for the connected site.
+
+## Dash0
+
+Connect Dash0 from Settings with the organization MCP endpoint shown under
+**Organization settings → Endpoints → MCP**. Responder dynamically registers an
+OAuth client, redirects the member through Dash0 consent, and refreshes the
+short-lived organization-scoped tokens outside the investigation sandbox. The
+OAuth callback is:
+
+```text
+<public>/api/integrations/dash0/callback
+```
+
+No deployment-level Dash0 client ID, secret, or static auth token is required.
+Each Dash0 organization is a separate integration account. The worker exposes
+only MCP tools explicitly annotated as read-only and blocks Agent0 delegation
+tools, so investigations query Dash0 telemetry directly without consuming
+Agent0 investigation credits.
+
+After OAuth completes, copy the generated webhook URL and Authorization header
+from Responder into a Dash0 **Webhook** notification channel under
+**Organization settings → Notification Channels**. Assign that channel directly
+to check rules or route alerts to it by labels. Responder authenticates the
+channel with a per-connection bearer secret and starts agents configured for
+that Dash0 account only when it receives `alert.ongoing`; resolved, superseded,
+and closed notifications are acknowledged without starting investigations.
+
+## PostHog
+
+Connect PostHog from Settings. Responder dynamically registers an OAuth client
+against PostHog's hosted MCP endpoint and refreshes the project-scoped tokens
+outside the investigation sandbox. The OAuth callback is:
+
+```text
+<public>/api/integrations/posthog/callback
+```
+
+No deployment-level PostHog client ID, API key, or static token is required.
+The MCP connection is forced into read-only tools mode and limited to alerts,
+dashboards, error tracking, events, insights, logs, replay, replay vision, SQL,
+tracing, and web analytics. The worker also rejects any tool that is not
+explicitly annotated read-only.
+
+Configure the PostHog alerts Responder should investigate with a **Slack**
+notification destination that points to a watched channel. Responder recognizes
+messages from the PostHog Slack app, queues the channel's configured agent, and
+marks the Slack input as PostHog-originated. Resolved, recovered, auto-disabled, and
+errored lifecycle messages are acknowledged without starting investigations.
+The connected PostHog project remains read-only investigation context; alert
+delivery does not require a second public webhook or shared secret.
 
 ## Axiom
 
@@ -157,6 +213,48 @@ metrics, prompts, and alerts. New upstream tools are unavailable until reviewed.
 Responder bounds unscoped observation searches to the latest 24 hours, limits
 result sizes and concurrency, redacts credential-shaped output, and keeps the
 project keys outside the repository investigation sandbox.
+
+## Supabase
+
+Connect Supabase from Settings by choosing an access level and continuing to
+Supabase OAuth. The user authorizes an organization, then Responder discovers
+its projects through the hosted MCP server. A sole project is selected
+automatically; otherwise the user chooses from a project picker. The hosted MCP
+server dynamically registers the OAuth client, so no project ID,
+deployment-level Supabase client ID, secret, service-role key, or database
+password is required. The OAuth callback is:
+
+```text
+<public>/api/integrations/supabase/callback
+```
+
+Each project and access-level combination is stored as a separate integration
+account. Agents can select one or more of these connections:
+
+- **Logs only** enables the debugging feature and exposes the reviewed Supabase
+  log retrieval and query tools available on the hosted server.
+- **Logs and read-only data** also enables database tools with Supabase's
+  `read_only=true` boundary, exposing SQL queries and schema inspection.
+- **Full database SQL access** exposes the same reviewed database tools without
+  the read-only parameter, so `execute_sql` can change project data or schema.
+
+Project discovery uses a temporary `features=account&read_only=true` MCP scope
+and calls only `list_projects`. Project choices and OAuth credentials remain in
+a tenant-bound, ten-minute server-side state while the picker is open. Responder
+then constructs the project-scoped hosted MCP URL from the authorized project
+and access level; it never accepts that URL from the browser. The worker applies
+a second exact tool allowlist and blocks the dedicated migration, Edge Function
+deployment, branching, project administration, and every unreviewed tool in all
+modes. Because raw SQL can still perform DDL in the full-access preset, blocking
+the dedicated migration tool is not a schema-change boundary. OAuth tokens
+remain encrypted outside the repository investigation sandbox.
+
+For read-only data access, Supabase's handling of the MCP `read_only` parameter
+is the database mutation boundary: Responder cannot independently determine
+whether arbitrary SQL is read-only. Treat full database SQL access as production
+write access and grant it only to agents whose investigation workflow needs it.
+Supabase recommends using its MCP server with development or test projects; if
+you connect production, prefer logs-only or read-only access.
 
 ## ClickStack
 
@@ -230,6 +328,38 @@ offers a pre-filled template as a file download for manual upload.
 Self-hosted deployments must also set `AWS_INTEGRATION_PRINCIPAL_ARN` to a
 stable broker role that the runtime can assume. The broker must allow
 `sts:AssumeRole` only on customer roles named `ResponderInvestigationRole`.
+
+## Google Cloud
+
+Google Cloud is optional read-only context for investigations. A workspace
+owner enters a project ID and numeric project number, which they can find in
+the [Google Cloud project selector](https://console.cloud.google.com/cloud-resource-manager),
+then downloads a generated setup script. No Google OAuth project-listing
+session is required.
+
+Each project is a separate integration account. The setup script verifies that
+its project ID and number match before changing IAM.
+
+The script enables the IAM, Security Token Service, Service Account
+Credentials, Cloud Asset Inventory, Logging, and Monitoring APIs. It creates a
+fixed `responder-investigation` service account and a customer-owned Workload
+Identity Federation pool/provider that trusts the configured Responder AWS
+broker. The service-account binding is restricted to one encrypted, randomly
+generated broker session name. It grants only MCP Tool User, Cloud Asset
+Viewer, Logs Viewer, Monitoring Viewer, and Service Usage Consumer.
+
+During an investigation, Responder assumes the broker with that connection's
+stable session name, exchanges the AWS identity for a short-lived Google token,
+and impersonates the customer service account. It never asks for or stores a
+service-account key. Google Cloud Asset Inventory, Logging, and Monitoring run
+through Google's managed remote MCP servers. Responder exposes only tools that
+the servers explicitly annotate read-only; the customer IAM roles remain the
+authorization boundary.
+
+This integration requires `AWS_INTEGRATION_PRINCIPAL_ARN`, the same stable
+broker role used by AWS context. Self-hosted deployments must run on AWS with
+permission to assume that role. Native Google Cloud alert ingestion is a
+separate integration boundary.
 
 ## Custom MCP servers
 

@@ -4,6 +4,7 @@ import {
   type AgentOptions,
   slackChannelLabel,
 } from "./agents-api";
+import { providerDisplayName } from "./components/provider-glyphs";
 
 export interface AgentPipelineCard {
   detail?: string;
@@ -17,21 +18,6 @@ export interface AgentPipelinePresentation {
   input: AgentPipelineCard;
   output: AgentPipelineCard;
 }
-
-const providerLabels: Record<AgentOptions["accounts"][number]["provider"], string> = {
-  aws: "AWS",
-  axiom: "Axiom",
-  custom_mcp: "MCP",
-  clickstack: "ClickStack / HyperDX",
-  datadog: "Datadog",
-  github: "GitHub",
-  linear: "Linear",
-  langfuse: "Langfuse",
-  sentry: "Sentry",
-  slack: "Slack",
-  upstash: "Upstash",
-  vercel: "Vercel",
-};
 
 function unique(values: string[]) {
   return [...new Set(values)];
@@ -130,6 +116,12 @@ function summarizeInput(
         title: "Every monitor alert",
       };
     }
+    case "dash0_alert":
+      return {
+        detail: account ?? "Connected Dash0 organization",
+        eyebrow: "Input · Dash0",
+        title: "Every ongoing failed check",
+      };
   }
 }
 
@@ -141,7 +133,7 @@ function summarizeContext(
   const providers = unique(
     configuration.contextAccountIds.flatMap((accountId) => {
       const account = options.accounts.find((candidate) => candidate.id === accountId);
-      return account ? [providerLabels[account.provider]] : [];
+      return account ? [providerDisplayName(account.provider)] : [];
     }),
   );
   const repositoryNames = repositories.map((repository) => repository.fullName);

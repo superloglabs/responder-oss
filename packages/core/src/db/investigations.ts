@@ -15,6 +15,8 @@ import {
   parseCustomMcpCredentials,
   refreshCustomMcpOAuth,
 } from "../integrations/custom-mcp.js";
+import { parseDash0Credentials } from "../integrations/dash0.js";
+import { parsePostHogCredentials } from "../integrations/posthog.js";
 import {
   CLICKSTACK_CLOUD_MCP_URL,
   CLICKSTACK_CLOUD_OAUTH_ISSUER,
@@ -23,6 +25,7 @@ import {
   normalizeClickStackMcpUrl,
 } from "../integrations/clickstack.js";
 import { awsConnectionCredentialsSchema } from "../integrations/aws.js";
+import { gcpConnectionCredentialsSchema } from "../integrations/gcp.js";
 import {
   type LinearOAuthCredentials,
   linearAccessTokenNeedsRefresh,
@@ -30,9 +33,12 @@ import {
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
 } from "../integrations/linear.js";
-import { SLACK_MCP_URL } from "../integrations/slack-mcp.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
 import { parseLangfuseCredentials } from "../integrations/langfuse.js";
+import {
+  parseSupabaseCredentials,
+  type SupabaseAccessMode,
+} from "../integrations/supabase.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
 import { getDatabase } from "./client.js";
 import {
@@ -46,9 +52,11 @@ import {
   investigationReplayRequests,
   investigationTraceEvents,
   investigations,
+  issues,
   repositories,
   runtimeProfiles,
   slackInvestigationSessions,
+  slackInvestigationThreadLinks,
   webhookReceipts,
   type InvestigationInput,
   type InvestigationSlackMessageSnapshot,
@@ -82,7 +90,6 @@ export interface RuntimeRepository {
 export interface RuntimeSlackConnection {
   accountId: string;
   channels: Array<{ id: string; name: string }>;
-  mcpUrl: string;
   userAccessToken: string;
 }
 
@@ -338,6 +345,136 @@ export async function recordInvestigationSlackSource(
     ...snapshot,
     source,
   }));
+}
+
+export async function recordSlackInvestigationThreadLink(input: {
+  channelId: string;
+  integrationAccountId: string;
+  investigationId: string;
+  issueId: string | null;
+  messageTimestamp: string;
+  organizationId: string;
+  teamId: string;
+  threadTimestamp: string;
+}): Promise<void> {
+  await getDatabase()
+    .insert(slackInvestigationThreadLinks)
+    .values(input)
+    .onConflictDoNothing({
+      target: [
+        slackInvestigationThreadLinks.integrationAccountId,
+        slackInvestigationThreadLinks.channelId,
+        slackInvestigationThreadLinks.messageTimestamp,
+      ],
+    });
+}
+
+export async function findSlackIssueThread(input: {
+  channelId: string;
+  teamId: string;
+  threadTimestamp: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      agentId: investigations.agentId,
+      agentConfigVersionId: investigations.agentConfigVersionId,
+      agentModel: agentConfigVersions.model,
+      agentPrompt: agentConfigVersions.prompt,
+      agentPrMode: agentConfigVersions.prMode,
+      channelId: slackInvestigationThreadLinks.channelId,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      id: investigations.id,
+      investigationTitle: investigations.title,
+      issueId: slackInvestigationThreadLinks.issueId,
+      issueTitle: issues.title,
+      issueDescription: issues.description,
+      issueRootCause: issues.rootCause,
+      issueRemediation: issues.remediation,
+      issueRemediations: issues.remediations,
+      investigationInput: investigations.input,
+      organizationId: investigations.organizationId,
+      reportMarkdown: investigations.reportMarkdown,
+      teamId: slackInvestigationThreadLinks.teamId,
+      threadTimestamp: slackInvestigationThreadLinks.threadTimestamp,
+      integrationAccountId: slackInvestigationThreadLinks.integrationAccountId,
+    })
+    .from(slackInvestigationThreadLinks)
+    .innerJoin(
+      investigations,
+      eq(investigations.id, slackInvestigationThreadLinks.investigationId),
+    )
+    .leftJoin(issues, eq(issues.id, slackInvestigationThreadLinks.issueId))
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+    )
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(
+          integrationAccounts.id,
+          slackInvestigationThreadLinks.integrationAccountId,
+        ),
+        eq(integrationAccounts.organizationId, investigations.organizationId),
+        eq(integrationAccounts.externalAccountId, input.teamId),
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(
+      and(
+        eq(slackInvestigationThreadLinks.teamId, input.teamId),
+        eq(slackInvestigationThreadLinks.channelId, input.channelId),
+        eq(
+          slackInvestigationThreadLinks.threadTimestamp,
+          input.threadTimestamp,
+        ),
+      ),
+    )
+    .orderBy(desc(investigations.createdAt));
+  if (rows.length === 0) return null;
+  const first = rows[0]!;
+  const linkedIssues = rows.flatMap((row) =>
+    row.issueId &&
+      row.issueTitle &&
+      row.issueDescription &&
+      row.issueRemediation &&
+      row.issueRemediations
+      ? [{
+          id: row.issueId,
+          title: row.issueTitle,
+          description: row.issueDescription,
+          rootCause: row.issueRootCause,
+          remediation: row.issueRemediation,
+          remediations: row.issueRemediations,
+        }]
+      : []
+  );
+  return {
+    ...first,
+    issueTitle: linkedIssues[0]?.title ?? first.investigationTitle,
+    issueIds: [...new Set(linkedIssues.map((issue) => issue.id))],
+    issues: linkedIssues,
+  };
+}
+
+export async function getSlackInvestigationThreadLinks(investigationId: string) {
+  return getDatabase()
+    .select({
+      issueId: slackInvestigationThreadLinks.issueId,
+      channelId: slackInvestigationThreadLinks.channelId,
+      integrationAccountId: slackInvestigationThreadLinks.integrationAccountId,
+      teamId: slackInvestigationThreadLinks.teamId,
+      threadTimestamp: slackInvestigationThreadLinks.threadTimestamp,
+      messageTimestamp: slackInvestigationThreadLinks.messageTimestamp,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(slackInvestigationThreadLinks)
+    .innerJoin(
+      integrationAccounts,
+      eq(integrationAccounts.id, slackInvestigationThreadLinks.integrationAccountId),
+    )
+    .where(eq(slackInvestigationThreadLinks.investigationId, investigationId));
 }
 
 export async function recordInvestigationSlackReply(
@@ -1055,6 +1192,20 @@ export interface RuntimeAxiomConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeDash0Connection {
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  mcpUrl: string;
+}
+
+export interface RuntimePostHogConnection {
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  mcpUrl: string;
+}
+
 export interface RuntimeCustomMcpConnection {
   accessToken: string;
   accountId: string;
@@ -1076,6 +1227,15 @@ export interface RuntimeLangfuseConnection {
   projectId: string;
   publicKey: string;
   secretKey: string;
+}
+
+export interface RuntimeSupabaseConnection {
+  accessMode: SupabaseAccessMode;
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  mcpUrl: string;
+  projectRef: string;
 }
 
 export interface RuntimeVercelConnection {
@@ -1363,7 +1523,71 @@ export async function getRuntimeAwsConnections(
   return connections;
 }
 
-function mcpOAuthRedirectUrl(provider: "axiom" | "custom_mcp" | "linear"): string {
+export interface RuntimeGcpConnection {
+  accountId: string;
+  displayName: string;
+  projectId: string;
+  projectNumber: string;
+  sessionName: string;
+}
+
+export async function getRuntimeGcpConnections(
+  versionId: string,
+): Promise<RuntimeGcpConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "gcp"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeGcpConnection[] = [];
+
+  for (const accountId of config.contextAccountIds) {
+    const account = accountsById.get(accountId);
+    if (!account?.encryptedCredentials) continue;
+    const credentials = gcpConnectionCredentialsSchema.parse(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    connections.push({
+      accountId: account.id,
+      displayName: account.displayName,
+      ...credentials,
+    });
+  }
+  return connections;
+}
+
+function mcpOAuthRedirectUrl(
+  provider:
+    | "axiom"
+    | "custom_mcp"
+    | "dash0"
+    | "linear"
+    | "posthog"
+    | "supabase",
+): string {
   const baseUrl =
     process.env.RESPONDER_PUBLIC_URL ??
     process.env.BETTER_AUTH_URL ??
@@ -1620,6 +1844,173 @@ export function getRuntimeCustomMcpConnections(
   versionId: string,
 ): Promise<RuntimeCustomMcpConnection[]> {
   return getRuntimeMcpConnections(versionId, "custom_mcp");
+}
+
+export async function getRuntimeDash0Connections(
+  versionId: string,
+): Promise<RuntimeDash0Connection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config) return [];
+  const triggerAccountId =
+    config.trigger === "dash0_alert"
+      ? config.triggerConfig.integrationAccountId
+      : null;
+  const accountIds = [
+    ...new Set([
+      ...config.contextAccountIds,
+      ...(triggerAccountId ? [triggerAccountId] : []),
+    ]),
+  ];
+  if (accountIds.length === 0) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "dash0"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, accountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeDash0Connection[] = [];
+
+  for (const accountId of accountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseDash0Credentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("dash0"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Dash0 OAuth connection");
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessToken,
+            accountId: account.id,
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "dash0",
+    });
+    if (connection) connections.push(connection);
+  }
+
+  return connections;
+}
+
+export async function getRuntimePostHogConnections(
+  versionId: string,
+): Promise<RuntimePostHogConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config) return [];
+  const accountIds = [...new Set(config.contextAccountIds)];
+  if (accountIds.length === 0) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "posthog"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, accountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimePostHogConnection[] = [];
+
+  for (const accountId of accountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parsePostHogCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("posthog"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the PostHog OAuth connection");
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessToken,
+            accountId: account.id,
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "posthog",
+    });
+    if (connection) connections.push(connection);
+  }
+
+  return connections;
 }
 
 export async function getRuntimeLinearConnection(
@@ -2215,6 +2606,81 @@ export async function getRuntimeLangfuseConnections(
   return connections;
 }
 
+export async function getRuntimeSupabaseConnections(
+  versionId: string,
+): Promise<RuntimeSupabaseConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "supabase"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeSupabaseConnection[] = [];
+  for (const accountId of config.contextAccountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseSupabaseCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("supabase"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Supabase OAuth connection");
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessMode: credentials.accessMode,
+            accessToken,
+            accountId: account.id,
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+            projectRef: credentials.projectRef,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "supabase",
+    });
+    if (connection) connections.push(connection);
+  }
+  return connections;
+}
+
 export async function getRuntimeSlackConnection(
   versionId: string,
 ): Promise<RuntimeSlackConnection | null> {
@@ -2306,7 +2772,6 @@ export async function getRuntimeSlackConnection(
       const resource = resourcesById.get(resourceId)!;
       return { id: resource.externalId, name: resource.displayName };
     }),
-    mcpUrl: SLACK_MCP_URL,
     userAccessToken: credentials.data.userAccessToken,
   };
 }

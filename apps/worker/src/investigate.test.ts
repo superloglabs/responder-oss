@@ -75,6 +75,24 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("identifies GCP connection failures without exposing federated credentials", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("request failed with federated access token"),
+        gcpConnections: [{ accountId: "account-gcp" }],
+        investigationId: "investigation-123",
+        serverName: "gcp-account-gcp-logging",
+      }),
+    ).toEqual({
+      accountId: "account-gcp",
+      error: "Unable to connect to GCP context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "gcp-account-gcp-logging",
+    });
+  });
+
   it("identifies Langfuse connection failures without exposing project keys", () => {
     expect(
       contextServerConnectFailureEvent({
@@ -90,6 +108,24 @@ describe("sandbox agent configuration", () => {
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "langfuse-account-langfuse",
+    });
+  });
+
+  it("identifies Supabase connection failures without exposing OAuth details", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("request failed with bearer-token"),
+        investigationId: "investigation-123",
+        serverName: "supabase-account-supabase",
+        supabaseConnections: [{ accountId: "account-supabase" }],
+      }),
+    ).toEqual({
+      accountId: "account-supabase",
+      error: "Unable to connect to Supabase context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "supabase-account-supabase",
     });
   });
 
@@ -133,7 +169,7 @@ describe("sandbox agent configuration", () => {
     ]);
   });
 
-  it("keeps investigation instructions read-only in every PR mode", () => {
+  it("lets investigations prepare and validate code without publishing it", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",
       clickStackConnected: false,
@@ -150,9 +186,10 @@ describe("sandbox agent configuration", () => {
       sentryConnected: true,
     });
 
-    expect(instructions).toContain("read-only repository inspection tools");
-    expect(instructions).toContain("only for investigation and reporting");
-    expect(instructions).toContain("remediation, when enabled, runs separately");
+    expect(instructions).toContain("sandbox filesystem and shell tools");
+    expect(instructions).toContain("modify repository files");
+    expect(instructions).toContain("checks you judge useful");
+    expect(instructions).toContain("do not push branches");
     expect(instructions).not.toContain("call create_pull_request");
     expect(instructions).toContain("posts the report to Slack");
     expect(instructions).toContain(
@@ -161,6 +198,8 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain(
       "Keep each remediation description to at most one sentence.",
     );
+    expect(instructions).toContain("ready-for-review pull request title");
+    expect(instructions).toContain("published later without another model pass");
   });
 
   it("keeps Slack thread turns sandbox-only without issue or PR workflows", () => {
@@ -179,6 +218,40 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("response directly to the Slack thread");
     expect(instructions).not.toContain("search_existing_issues");
     expect(instructions).not.toContain("submit_investigation_report");
+  });
+
+  it("restricts issue follow-ups to updating their bound issues", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Reconsider the remediation.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      issueFollowupIssueCount: 1,
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("Call update_issue_remediation");
+    expect(instructions).toContain("do not update unrelated issues");
+    expect(instructions).toContain("provide the updated remediation");
+    expect(instructions).not.toContain("search_existing_issues");
+    expect(instructions).not.toContain("submit_investigation_report");
+  });
+
+  it("lets a no-issue follow-up submit a new structured conclusion", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Reconsider the earlier conclusion.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      issueFollowupIssueCount: 0,
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("previously identified no issues");
+    expect(instructions).toContain("Reconsider that conclusion");
+    expect(instructions).toContain("search_existing_issues");
+    expect(instructions).toContain("submit_investigation_report");
+    expect(instructions).toContain("create or attach issues only when the new evidence supports them");
   });
 
   it("keeps ClickStack investigation access read-only", () => {
@@ -243,6 +316,31 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("connected read-only Langfuse tools");
     expect(instructions).toContain("Example / Production");
     expect(instructions).toContain("Never create or modify Langfuse");
+    expect(instructions).not.toContain("No observability data source is connected");
+  });
+
+  it("describes each Supabase access boundary", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      supabaseConnections: [
+        { accessMode: "logs", displayName: "logs-project" },
+        { accessMode: "read_only", displayName: "read-project" },
+        { accessMode: "read_write", displayName: "write-project" },
+      ],
+    });
+
+    expect(instructions).toContain("logs-project: inspect project logs only");
+    expect(instructions).toContain("read-project: inspect project logs, schema metadata");
+    expect(instructions).toContain("Never attempt to modify data or schema");
+    expect(instructions).toContain("write-project: project logs and database SQL");
+    expect(instructions).toContain(
+      "Only modify data or schema when the investigation explicitly requires it",
+    );
+    expect(instructions).toContain("never modify platform configuration");
     expect(instructions).not.toContain("No observability data source is connected");
   });
 
@@ -320,6 +418,23 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("exact PascalCase AWS API operation names");
     expect(instructions).toContain("outer success status");
     expect(instructions).toContain("# AWS Observability");
+  });
+
+  it("keeps GCP investigation access read-only", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      gcpProjectNames: ["GCP · production (production-123)"],
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("Google Cloud Asset Inventory");
+    expect(instructions).toContain("GCP · production (production-123)");
+    expect(instructions).toContain("Never request secret values");
+    expect(instructions).toContain("Never request secret values or attempt to change");
+    expect(instructions).not.toContain("No observability data source is connected");
   });
 
   it("stores the exact initial message that is sent to the agent", () => {

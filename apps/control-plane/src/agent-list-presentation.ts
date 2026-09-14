@@ -6,6 +6,7 @@ export function integrationsForAgent(agent: AgentListItem): string[] {
   const integrations = new Set<string>();
   if (agent.trigger === "sentry_issue") integrations.add("Sentry");
   if (agent.trigger === "datadog_monitor") integrations.add("Datadog");
+  if (agent.trigger === "dash0_alert") integrations.add("Dash0");
   if (agent.trigger === "slack_channel" || agent.trigger === "slack_mention") {
     integrations.add("Slack");
   }

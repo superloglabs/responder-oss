@@ -6,14 +6,18 @@ import {
 } from "@openai/agents-extensions/sandbox/daytona";
 import {
   getRuntimeAwsConnections,
+  getRuntimeGcpConnections,
   getRuntimeAxiomConnection,
   getRuntimeCustomMcpConnections,
   getRuntimeDatadogConnection,
+  getRuntimeDash0Connections,
+  getRuntimePostHogConnections,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
+  getRuntimeSupabaseConnections,
   getRuntimeUpstashConnection,
   getRuntimeVercelConnections,
   getSlackInvestigationSessionRuntime,
@@ -41,8 +45,11 @@ import {
   loadAwsAlarmSkillContext,
 } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
+import { createGcpMcpServers } from "./gcp.js";
 import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
+import { createDash0McpServer } from "./dash0.js";
+import { createPostHogMcpServer } from "./posthog.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
@@ -74,7 +81,8 @@ import {
   traceEvent,
 } from "./trace.js";
 import { createSentryMcpServer } from "./sentry.js";
-import { createSlackMcpServer } from "./slack.js";
+import { createSlackSearchServer } from "./slack.js";
+import { createSupabaseMcpServer } from "./supabase.js";
 import {
   createUpstashCliTools,
   createUpstashMcpServer,
@@ -84,6 +92,7 @@ import {
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
+import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 
 export interface SandboxAgentConfig extends DaytonaClientConfig {
   model: string;
@@ -127,8 +136,12 @@ export function investigationTraceWriteFailure(
 
 export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
+  gcpConnections?: ReadonlyArray<{ accountId: string }>;
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
+  dash0Connections?: ReadonlyArray<{ accountId: string }>;
+  postHogConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
+  supabaseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
   investigationId: string;
   serverName: string;
@@ -136,25 +149,51 @@ export function contextServerConnectFailureEvent(input: {
 }) {
   const protectedProvider = input.serverName.startsWith("aws-")
     ? "AWS"
-    : input.serverName.startsWith("langfuse-")
-      ? "Langfuse"
-      : input.serverName.startsWith("upstash-")
-        ? "Upstash"
-        : null;
+    : input.serverName.startsWith("gcp-")
+      ? "GCP"
+      : input.serverName.startsWith("dash0-")
+        ? "Dash0"
+        : input.serverName.startsWith("langfuse-")
+          ? "Langfuse"
+          : input.serverName.startsWith("supabase-")
+            ? "Supabase"
+          : input.serverName.startsWith("upstash-")
+            ? "Upstash"
+            : null;
   const accountId = input.serverName.startsWith("upstash-")
     ? input.upstashConnection?.accountId
     : input.serverName.startsWith("aws-")
       ? input.awsConnections?.find(
           (connection) => input.serverName === `aws-${connection.accountId}`,
         )?.accountId
-      : input.serverName.startsWith("langfuse-")
-        ? input.langfuseConnections?.find(
-            (connection) =>
-              input.serverName === `langfuse-${connection.accountId}`,
+      : input.serverName.startsWith("gcp-")
+        ? input.gcpConnections?.find(
+            (connection) => input.serverName.startsWith(`gcp-${connection.accountId}-`),
           )?.accountId
-        : input.customMcpConnections.find(
-            (connection) => input.serverName === `custom-mcp-${connection.accountId}`,
-          )?.accountId;
+        : input.serverName.startsWith("dash0-")
+          ? input.dash0Connections?.find(
+              (connection) =>
+                input.serverName === `dash0-${connection.accountId}`,
+            )?.accountId
+          : input.serverName.startsWith("posthog-")
+            ? input.postHogConnections?.find(
+                (connection) =>
+                  input.serverName === `posthog-${connection.accountId}`,
+              )?.accountId
+          : input.serverName.startsWith("langfuse-")
+            ? input.langfuseConnections?.find(
+                (connection) =>
+                  input.serverName === `langfuse-${connection.accountId}`,
+              )?.accountId
+            : input.serverName.startsWith("supabase-")
+              ? input.supabaseConnections?.find(
+                  (connection) =>
+                    input.serverName === `supabase-${connection.accountId}`,
+                )?.accountId
+            : input.customMcpConnections.find(
+                (connection) =>
+                  input.serverName === `custom-mcp-${connection.accountId}`,
+              )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
     error: protectedProvider
@@ -270,9 +309,12 @@ export function investigationInstructions(input: {
   awsAlarmTriggered?: boolean;
   awsAccountNames?: string[];
   awsSkillContext?: string;
+  gcpProjectNames?: string[];
   customMcpNames?: string[];
   axiomConnected?: boolean;
   datadogConnected: boolean;
+  dash0AccountNames?: string[];
+  postHogAccountNames?: string[];
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
@@ -281,6 +323,10 @@ export function investigationInstructions(input: {
   sentryUnavailable?: boolean;
   linearConnected?: boolean;
   langfuseProjectNames?: string[];
+  supabaseConnections?: Array<{
+    accessMode: "logs" | "read_only" | "read_write";
+    displayName: string;
+  }>;
   slackChannels?: Array<{ id: string; name: string }>;
   upstashConnected?: boolean;
   workspaceSecrets?: Array<{
@@ -289,23 +335,34 @@ export function investigationInstructions(input: {
   }>;
   vercelAccountIds?: string[];
   threadMode?: boolean;
+  issueFollowupIssueCount?: number;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
+  const dash0AccountNames = input.dash0AccountNames ?? [];
+  const postHogAccountNames = input.postHogAccountNames ?? [];
+  const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
+  const supabaseConnections = input.supabaseConnections ?? [];
   const slackChannels = input.slackChannels ?? [];
   const workspaceSecrets = input.workspaceSecrets ?? [];
   const vercelAccountIds = input.vercelAccountIds ?? [];
   const repositoryInstructions = input.repositoryInstructions ?? [];
+  const issueUpdateFollowup = (input.issueFollowupIssueCount ?? 0) > 0;
+  const noIssueFollowup = input.issueFollowupIssueCount === 0;
   const observabilityConnected =
     input.datadogConnected ||
+    dash0AccountNames.length > 0 ||
+    postHogAccountNames.length > 0 ||
     input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
     input.upstashConnected ||
     langfuseProjectNames.length > 0 ||
+    supabaseConnections.length > 0 ||
     vercelAccountIds.length > 0 ||
     awsAccountNames.length > 0 ||
+    gcpProjectNames.length > 0 ||
     customMcpNames.length > 0;
   return [
     input.runtimeSystemPrompt,
@@ -323,8 +380,17 @@ export function investigationInstructions(input: {
     awsAccountNames.length > 0
       ? "Prefer the typed aws_inspect_cloudwatch_alarm, aws_inspect_cloudwatch_metric, aws_query_cloudwatch_logs, aws_inspect_sqs_queue, and aws_inspect_lambda_function tools for AWS evidence. If aws___run_script is necessary, use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and inspect every nested api_calls result. An outer success status does not mean the nested AWS calls succeeded; retry failed nested calls with corrected operation names."
       : null,
+    gcpProjectNames.length > 0
+      ? `Use the connected read-only Google Cloud Asset Inventory, Logging, and Monitoring tools to inspect relevant resources and telemetry before concluding. Connected GCP projects: ${gcpProjectNames.join(", ")}. Never request secret values or attempt to change cloud resources.`
+      : null,
     input.datadogConnected
       ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
+      : null,
+    dash0AccountNames.length > 0
+      ? `Use the connected read-only Dash0 tools to inspect relevant services, failed checks, logs, metrics, and traces before concluding. Never create or modify Dash0 resources and do not delegate the investigation to Agent0. Connected Dash0 organizations: ${dash0AccountNames.join(", ")}.`
+      : null,
+    postHogAccountNames.length > 0
+      ? `Use the connected read-only PostHog tools to inspect the matching alert, errors, logs, traces, replays, and product impact before concluding. Never create, update, or delete PostHog resources. Connected PostHog projects: ${postHogAccountNames.join(", ")}.`
       : null,
     input.axiomConnected
       ? "Use the connected read-only Axiom tools to inspect telemetry relevant to the Slack alert, including logs, traces, metrics, and surrounding service activity, before concluding. Never create, update, or delete Axiom resources."
@@ -343,6 +409,20 @@ export function investigationInstructions(input: {
       : null,
     langfuseProjectNames.length > 0
       ? `Use the connected read-only Langfuse tools to inspect relevant traces, observations, scores, metrics, prompts, and alerts before concluding. Start with bounded observation or metric searches, then inspect specific observations for evidence. Never create or modify Langfuse prompts, scores, datasets, annotations, alerts, or other resources. Connected Langfuse projects: ${langfuseProjectNames.join(", ")}.`
+      : null,
+    supabaseConnections.length > 0
+      ? [
+          "Use the connected Supabase tools only when the project is relevant to the investigation.",
+          ...supabaseConnections.map((connection) => {
+            if (connection.accessMode === "logs") {
+              return `- ${connection.displayName}: inspect project logs only; database tools are not available.`;
+            }
+            if (connection.accessMode === "read_only") {
+              return `- ${connection.displayName}: inspect project logs, schema metadata, and data with read-only SQL. Never attempt to modify data or schema.`;
+            }
+            return `- ${connection.displayName}: project logs and database SQL are available. Only modify data or schema when the investigation explicitly requires it and the change is necessary; never modify platform configuration.`;
+          }),
+        ].join("\n")
       : null,
     input.linearConnected
       ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
@@ -377,25 +457,34 @@ export function investigationInstructions(input: {
       : null,
     input.threadMode
       ? "Use the sandbox tools and attached code to investigate the request."
-      : "Use the read-only repository inspection tools to list, search, and read attached repository files.",
+      : "Use the sandbox filesystem and shell tools to inspect and work in attached repository checkouts.",
     input.threadMode
       ? null
-      : "This run is only for investigation and reporting. Do not modify repository code or create pull requests. Pull request remediation, when enabled, runs separately after the report is saved.",
+      : "This run may prepare code remediation locally. You may modify repository files and run the checks you judge useful, but do not push branches, create pull requests, or make any other external code change. A later job publishes the exact saved diff.",
     "Do not expose credentials or secret values.",
     workspaceSecretUsageInstructions(workspaceSecrets),
     input.threadMode
       ? "This is an ad-hoc Slack thread investigation. Never create or update issues, tickets, branches, commits, or pull requests. You may use the sandbox for notes, experiments, and local code changes, but nothing in it is published."
-      : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
-    input.threadMode
+      : issueUpdateFollowup
+        ? null
+        : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
+    issueUpdateFollowup
+      ? "This is a follow-up to an existing Slack issue investigation. Use the supplied prior investigation context and the latest Slack feedback to decide which bound issue remediations need to change. For an updated code remediation, make the change locally, run the checks you judge useful, and save the exact final diff plus your ready-for-review pull request title and body. Do not create new issues, tickets, or pull requests. Call update_issue_remediation for each affected issue, and do not update unrelated issues. If the feedback is ambiguous, ask for clarification instead of guessing."
+      : noIssueFollowup
+        ? "This is a follow-up to a Slack investigation that previously identified no issues. Reconsider that conclusion using the original report and latest feedback. Submit a normal structured report: create or attach issues only when the new evidence supports them, and otherwise keep the report issue-free."
+        : null,
+    input.threadMode || issueUpdateFollowup
       ? null
-      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. A code_change must contain a changes array with one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system. Do not claim that a proposed diff has been applied.",
+      : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. For a code_change, first make the smallest safe change in the attached checkout, choose and run the checks appropriate for that change, and inspect the final git diff. Its changes array must contain one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Author the ready-for-review pull request title and complete Markdown body in each change's pullRequest field, including only the context and check results you decide belong there. The saved diff and pull request content are published later without another model pass or project checks. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system.",
     input.threadMode
       ? null
       : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
     input.threadMode
       ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session."
-      : "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
-    input.threadMode
+      : issueUpdateFollowup
+        ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session. Treat every follow-up reply as new information: reconsider prior conclusions and the proposed remediation, explain what changed, and provide the updated remediation (including concrete code changes or steps when appropriate)."
+        : "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
+    input.threadMode || issueUpdateFollowup
       ? null
       : "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
     "Clearly say when the available evidence is insufficient.",
@@ -436,9 +525,13 @@ export async function runInvestigationAgent(
   report: string;
   previousResponseId?: string;
   sandboxSessionState?: Record<string, unknown>;
+  updatedIssueIds?: string[];
 }> {
   const threadMode = job.kind === "slack_thread_investigation";
   const replay = job.kind === "investigation" && job.replay;
+  const issueFollowup = job.kind === "investigation" ? job.slackIssueFollowup : undefined;
+  const issueUpdateFollowup = Boolean(issueFollowup?.issueIds.length);
+  const updatedIssueIds = new Set<string>();
   const investigationInput = toInvestigationInput(job.request);
   let sentryConnectionDegraded = false;
   const awsAlarmTriggered =
@@ -472,8 +565,11 @@ export async function runInvestigationAgent(
   const [
     runtimeProfile,
     awsConnections,
+    gcpConnections,
     axiomConnection,
     datadogConnection,
+    dash0Connections,
+    postHogConnections,
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
@@ -482,12 +578,16 @@ export async function runInvestigationAgent(
     slackConnection,
     upstashConnection,
     langfuseConnections,
+    supabaseConnections,
     workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
+    getRuntimeGcpConnections(job.config.id),
     getRuntimeAxiomConnection(job.config.id),
     getRuntimeDatadogConnection(job.config.id),
+    getRuntimeDash0Connections(job.config.id),
+    getRuntimePostHogConnections(job.config.id),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -504,10 +604,14 @@ export async function runInvestigationAgent(
     getRuntimeSlackConnection(job.config.id),
     getRuntimeUpstashConnection(job.config.id),
     getRuntimeLangfuseConnections(job.config.id),
+    getRuntimeSupabaseConnections(job.config.id),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
   const awsServers = await Promise.all(
     awsConnections.map((connection) => createAwsMcpServer(connection, environment)),
+  );
+  const gcpServers = gcpConnections.flatMap((connection) =>
+    createGcpMcpServers(connection, environment)
   );
   const datadogServer = datadogConnection
     ? createDatadogMcpServer(datadogConnection)
@@ -515,6 +619,8 @@ export async function runInvestigationAgent(
   const axiomServer = axiomConnection
     ? createAxiomMcpServer(axiomConnection)
     : null;
+  const dash0Servers = dash0Connections.map(createDash0McpServer);
+  const postHogServers = postHogConnections.map(createPostHogMcpServer);
   const sentryServer = sentryConnection
     ? createSentryMcpServer(sentryConnection, {
         investigationId: job.investigationId,
@@ -528,7 +634,7 @@ export async function runInvestigationAgent(
     ? createLinearMcpServer(linearConnection)
     : null;
   const slackServer = slackConnection
-    ? createSlackMcpServer(slackConnection)
+    ? createSlackSearchServer(slackConnection)
     : null;
   const upstashServer = upstashConnection
     ? createUpstashMcpServer(upstashConnection)
@@ -537,6 +643,7 @@ export async function runInvestigationAgent(
     ? createUpstashCliTools(upstashConnection)
     : [];
   const langfuseServers = langfuseConnections.map(createLangfuseMcpServer);
+  const supabaseServers = supabaseConnections.map(createSupabaseMcpServer);
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -545,8 +652,12 @@ export async function runInvestigationAgent(
     linearServer,
     slackServer,
     upstashServer,
+    ...dash0Servers,
+    ...postHogServers,
     ...langfuseServers,
+    ...supabaseServers,
     ...awsServers,
+    ...gcpServers,
     ...customMcpServers,
   ].filter(
     (server): server is NonNullable<typeof server> => server !== null,
@@ -571,11 +682,15 @@ export async function runInvestigationAgent(
             JSON.stringify(
               contextServerConnectFailureEvent({
                 awsConnections,
+                gcpConnections,
                 customMcpConnections,
+                dash0Connections,
+                postHogConnections,
                 error,
                 investigationId: job.investigationId,
                 langfuseConnections,
                 serverName: server.name,
+                supabaseConnections,
                 upstashConnection,
               }),
             ),
@@ -586,8 +701,17 @@ export async function runInvestigationAgent(
           if (server.name.startsWith("aws-")) {
             throw new Error("Unable to connect to AWS context");
           }
+          if (server.name.startsWith("gcp-")) {
+            throw new Error("Unable to connect to GCP context");
+          }
+          if (server.name.startsWith("dash0-")) {
+            throw new Error("Unable to connect to Dash0 context");
+          }
           if (server.name.startsWith("langfuse-")) {
             throw new Error("Unable to connect to Langfuse context");
+          }
+          if (server.name.startsWith("supabase-")) {
+            throw new Error("Unable to connect to Supabase context");
           }
           throw error;
         }
@@ -664,6 +788,7 @@ export async function runInvestigationAgent(
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
           environment,
+          repositories,
           onAutomaticPullRequestRequests,
           onLinearTicketRequests,
         });
@@ -671,6 +796,14 @@ export async function runInvestigationAgent(
       organizationId: job.config.organizationId,
       environment,
     });
+    const issueUpdateTool = issueUpdateFollowup && issueFollowup
+      ? createIssueRemediationUpdateTool({
+          allowedIssueIds: new Set(issueFollowup.issueIds),
+          onUpdated: (issueId) => updatedIssueIds.add(issueId),
+          organizationId: job.config.organizationId,
+          repositories,
+        })
+      : null;
     const repositoryInspectionTools = createRepositoryInspectionTools({
       repositories,
       session,
@@ -687,10 +820,19 @@ export async function runInvestigationAgent(
           `${connection.displayName} (${connection.roleArn.split(":")[4] ?? "unknown"})`,
       ),
       awsSkillContext,
+      gcpProjectNames: gcpConnections.map(
+        (connection) => `${connection.displayName} (${connection.projectId})`,
+      ),
       axiomConnected: axiomServer !== null,
       customMcpNames: customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,
+      dash0AccountNames: dash0Connections.map(
+        (connection) => connection.displayName,
+      ),
+      postHogAccountNames: postHogConnections.map(
+        (connection) => connection.displayName,
+      ),
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       sentryConnected: sentryServer !== null,
@@ -699,12 +841,19 @@ export async function runInvestigationAgent(
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,
       ),
+      supabaseConnections: supabaseConnections.map((connection) => ({
+        accessMode: connection.accessMode,
+        displayName: connection.displayName,
+      })),
       repositoryInstructions,
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
+      ...(issueFollowup
+        ? { issueFollowupIssueCount: issueFollowup.issueIds.length }
+        : {}),
     });
     // Save the same string passed to the agent so the trace never reconstructs it.
     await writeTrace(investigationInstructionsTraceEvent(instructions));
@@ -723,7 +872,11 @@ export async function runInvestigationAgent(
       mcpConfig: { includeServerInToolNames: true },
       mcpServers: contextServers,
       tools: [
-        ...(threadMode ? [] : [issueSearchTool, reportTool!]),
+        ...(threadMode
+          ? []
+          : issueUpdateFollowup
+            ? [issueUpdateTool!]
+            : [issueSearchTool, reportTool!]),
         ...awsInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,
@@ -772,6 +925,9 @@ export async function runInvestigationAgent(
     return {
       report,
       ...(result.lastResponseId ? { previousResponseId: result.lastResponseId } : {}),
+      ...(updatedIssueIds.size > 0
+        ? { updatedIssueIds: [...updatedIssueIds] }
+        : {}),
     };
   } catch (error) {
     await writeTrace(

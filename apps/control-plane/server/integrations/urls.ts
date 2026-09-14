@@ -7,11 +7,14 @@ export function integrationCallbackUrl(
     | "axiom"
     | "clickstack"
     | "custom_mcp"
+    | "dash0"
     | "datadog"
     | "github"
     | "linear"
+    | "posthog"
     | "sentry"
     | "slack"
+    | "supabase"
     | "vercel",
 ): string {
   const callbackBaseUrl =
@@ -19,10 +22,19 @@ export function integrationCallbackUrl(
   return `${callbackBaseUrl}/api/integrations/${provider}/callback`;
 }
 
+export function dash0WebhookUrl(integrationAccountId: string): string {
+  const callbackBaseUrl =
+    process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
+  return new URL(
+    `/api/webhooks/dash0/${encodeURIComponent(integrationAccountId)}`,
+    callbackBaseUrl,
+  ).toString();
+}
+
 export function settingsRedirect(
   returnTo: string,
   provider: string,
-  status: "connected" | "error" | "finishing",
+  status: "connected" | "error" | "finishing" | "select_project",
   reason?: string,
 ): string {
   const baseUrl = new URL(controlPlaneBaseUrl());

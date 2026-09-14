@@ -37,19 +37,7 @@ describe("remediation job terminal state", () => {
   });
 
   it("records the terminal failure even when monitoring is unavailable", async () => {
-    const agentError = new Error("agent failed");
-    const diagnostics = {
-      applyPatchFailures: [
-        {
-          callId: "call-1",
-          error: "Invalid Context 12",
-          operation: "update_file" as const,
-          path: "/workspace/repository/src/index.ts",
-        },
-      ],
-      completedTurns: 40,
-      maxTurns: 40,
-    };
+    const remediationError = new Error("diff failed");
     const failRequest = vi.fn().mockResolvedValue(undefined);
     const reportException = vi.fn(() => {
       throw new Error("monitoring unavailable");
@@ -62,27 +50,24 @@ describe("remediation job terminal state", () => {
       processRemediationJob("job-id", payload, {}, {
         failRequest,
         reportException,
-        runDiagnostics: vi.fn(() => diagnostics),
-        runAgent: vi.fn().mockRejectedValue(agentError),
+        runRemediation: vi.fn().mockRejectedValue(remediationError),
       }),
     ).resolves.toEqual({ requestId: payload.remediationRequestId });
 
     expect(failRequest).toHaveBeenCalledWith(
       payload.remediationRequestId,
-      "agent failed",
+      "diff failed",
     );
     expect(reportException).toHaveBeenCalledWith(
-      agentError,
+      remediationError,
       expect.objectContaining({
-        diagnostics,
         jobId: "job-id",
         requestId: payload.remediationRequestId,
       }),
     );
     expect(consoleError).toHaveBeenCalledWith(
       JSON.stringify({
-        diagnostics,
-        error: "agent failed",
+        error: "diff failed",
         event: "remediation_job_failed",
         jobId: "job-id",
         requestId: payload.remediationRequestId,
@@ -109,8 +94,7 @@ describe("remediation job terminal state", () => {
       processRemediationJob("job-id", payload, {}, {
         failRequest: vi.fn().mockRejectedValue(databaseError),
         reportException,
-        runDiagnostics: vi.fn(() => undefined),
-        runAgent: vi.fn().mockRejectedValue(new Error("agent failed")),
+        runRemediation: vi.fn().mockRejectedValue(new Error("diff failed")),
       }),
     ).rejects.toThrow("Unable to record remediation failure");
 
@@ -125,49 +109,27 @@ describe("remediation job terminal state", () => {
     );
   });
 
-  it("records a no-pull-request result without reporting an exception", async () => {
-    const failRequest = vi.fn().mockResolvedValue(undefined);
+  it("completes without a failure write after publishing the pull request", async () => {
+    const failRequest = vi.fn();
     const reportException = vi.fn();
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await expect(
       processRemediationJob("job-id", payload, {}, {
         failRequest,
         reportException,
-        runDiagnostics: vi.fn(() => undefined),
-        runAgent: vi.fn().mockResolvedValue("No safe change was available"),
+        runRemediation: vi.fn().mockResolvedValue("https://example.com/pull/1"),
       }),
     ).resolves.toEqual({ requestId: payload.remediationRequestId });
 
-    expect(failRequest).toHaveBeenCalledWith(
-      payload.remediationRequestId,
-      "Remediation finished without creating a pull request",
-    );
+    expect(failRequest).not.toHaveBeenCalled();
     expect(reportException).not.toHaveBeenCalled();
-  });
-
-  it("does not let unreadable diagnostics mask a remediation failure", async () => {
-    const agentError = new Error("agent failed");
-    const failRequest = vi.fn().mockResolvedValue(undefined);
-    const reportException = vi.fn().mockResolvedValue(undefined);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expect(
-      processRemediationJob("job-id", payload, {}, {
-        failRequest,
-        reportException,
-        runDiagnostics: vi.fn(() => {
-          throw new Error("unreadable diagnostics");
-        }),
-        runAgent: vi.fn().mockRejectedValue(agentError),
+    expect(consoleLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "remediation_job_complete",
+        jobId: "job-id",
+        requestId: payload.remediationRequestId,
       }),
-    ).resolves.toEqual({ requestId: payload.remediationRequestId });
-
-    expect(failRequest).toHaveBeenCalledWith(
-      payload.remediationRequestId,
-      "agent failed",
     );
-    expect(reportException).toHaveBeenCalledOnce();
-    expect(reportException.mock.calls[0]?.[1]).not.toHaveProperty("diagnostics");
   });
 });

@@ -106,6 +106,40 @@ export async function consumeIntegrationConnectionState(
   return rows[0] ?? null;
 }
 
+export async function getIntegrationConnectionState(
+  provider: IntegrationProvider,
+  state: string,
+  tenant: { organizationId: string; userId: string },
+): Promise<{
+  organizationId: string;
+  userId: string;
+  codeVerifier: string | null;
+  metadata: Record<string, unknown>;
+  returnTo: string;
+} | null> {
+  const rows = await getDatabase()
+    .select({
+      organizationId: integrationConnectionStates.organizationId,
+      userId: integrationConnectionStates.userId,
+      codeVerifier: integrationConnectionStates.codeVerifier,
+      metadata: integrationConnectionStates.metadata,
+      returnTo: integrationConnectionStates.returnTo,
+    })
+    .from(integrationConnectionStates)
+    .where(
+      and(
+        eq(integrationConnectionStates.stateHash, hashConnectionState(state)),
+        eq(integrationConnectionStates.provider, provider),
+        eq(integrationConnectionStates.organizationId, tenant.organizationId),
+        eq(integrationConnectionStates.userId, tenant.userId),
+        gt(integrationConnectionStates.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function updateIntegrationConnectionStateMetadata(input: {
   metadata: Record<string, unknown>;
   organizationId: string;
@@ -201,6 +235,24 @@ export async function setIntegrationAccountStatus(
     .where(eq(integrationAccounts.id, integrationAccountId));
 }
 
+export async function deleteIntegrationAccount(input: {
+  integrationAccountId: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+}): Promise<boolean> {
+  const deleted = await getDatabase()
+    .delete(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return deleted.length > 0;
+}
+
 export async function getOrganizationIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;
@@ -219,6 +271,29 @@ export async function getOrganizationIntegrationAccount(input: {
         eq(integrationAccounts.id, input.integrationAccountId),
         eq(integrationAccounts.organizationId, input.organizationId),
         eq(integrationAccounts.provider, input.provider),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
+export async function getConnectedIntegrationAccountCredential(input: {
+  integrationAccountId: string;
+  provider: IntegrationProvider;
+}) {
+  const rows = await getDatabase()
+    .select({
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      organizationId: integrationAccounts.organizationId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.provider, input.provider),
+        eq(integrationAccounts.status, "connected"),
+        isNotNull(integrationAccounts.encryptedCredentials),
       ),
     )
     .limit(1);
@@ -459,7 +534,11 @@ export async function getRecoverableSentryIntegrationAccount(
       and(
         eq(integrationAccounts.organizationId, organizationId),
         eq(integrationAccounts.provider, "sentry"),
-        inArray(integrationAccounts.status, ["pending", "error"]),
+        // A reconnect can be requested while the account is still marked
+        // connected (for example when the provider revoked its refresh
+        // token). Keep the existing installation eligible so the route can
+        // refresh it in place instead of starting a duplicate install flow.
+        inArray(integrationAccounts.status, ["connected", "pending", "error"]),
         isNotNull(integrationAccounts.encryptedCredentials),
       ),
     )

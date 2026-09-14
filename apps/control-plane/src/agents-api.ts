@@ -1,6 +1,7 @@
 export type TriggerKind =
   | "sentry_issue"
   | "datadog_monitor"
+  | "dash0_alert"
   | "slack_channel"
   | "slack_mention";
 
@@ -16,6 +17,10 @@ export type AgentTrigger =
       kind: "datadog_monitor";
       integrationAccountId: string;
       monitorIds: string[];
+    }
+  | {
+      kind: "dash0_alert";
+      integrationAccountId: string;
     }
   | {
       kind: "slack_channel";
@@ -69,14 +74,18 @@ export interface AgentOptions {
     id: string;
     provider:
       | "aws"
+      | "gcp"
       | "github"
       | "slack"
       | "sentry"
       | "datadog"
+      | "dash0"
+      | "posthog"
       | "axiom"
       | "clickstack"
       | "upstash"
       | "langfuse"
+      | "supabase"
       | "vercel"
       | "custom_mcp"
       | "linear";
@@ -130,13 +139,17 @@ export interface AgentListItem {
 export interface IntegrationSummary {
   id:
     | "aws"
+    | "gcp"
     | "github"
     | "slack"
     | "sentry"
     | "datadog"
+    | "dash0"
+    | "posthog"
     | "axiom"
     | "upstash"
     | "langfuse"
+    | "supabase"
     | "vercel"
     | "custom_mcp"
     | "clickstack"
@@ -173,7 +186,7 @@ export interface AgentDetail {
     title: string;
     status: "pending" | "investigating" | "resolved" | "failed";
     input: {
-      provider: "sentry" | "datadog" | "slack";
+      provider: "sentry" | "datadog" | "dash0" | "slack";
       externalEventId: string;
       title: string;
       body: string;
@@ -202,12 +215,16 @@ export interface IssueEvidence {
   source:
     | "alert"
     | "aws"
+    | "gcp"
     | "datadog"
+    | "dash0"
+    | "posthog"
     | "axiom"
     | "sentry"
     | "clickstack"
     | "upstash"
     | "langfuse"
+    | "supabase"
     | "github"
     | "slack"
     | "vercel"
@@ -326,7 +343,7 @@ export interface InvestigationDetail {
   title: string;
   status: "pending" | "investigating" | "resolved" | "failed";
   input: {
-    provider: "sentry" | "datadog" | "slack";
+    provider: "sentry" | "datadog" | "dash0" | "slack";
     externalEventId: string;
     title: string;
     body: string;
@@ -613,6 +630,8 @@ export function triggerLabel(trigger: TriggerKind | null): string {
       return "Every Sentry error";
     case "datadog_monitor":
       return "Datadog monitor";
+    case "dash0_alert":
+      return "Dash0 failed check";
     case "slack_channel":
       return "Slack channel";
     case "slack_mention":

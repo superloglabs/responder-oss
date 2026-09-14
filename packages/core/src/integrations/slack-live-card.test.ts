@@ -669,13 +669,13 @@ describe("Slack live investigation card", () => {
         {
           detail: JSON.stringify({
             channel_id: "C123",
-            thread_ts: "1785500000.000100",
-            limit: 50,
+            query: "database timeout",
+            limit: 10,
           }),
           id: "call-slack-thread",
           output: '{"messages":[]}',
           status: "complete",
-          title: "slack_read_thread",
+          title: "slack_search_channel",
         },
       ],
     });
@@ -750,8 +750,7 @@ describe("Slack live investigation card", () => {
             ],
           }),
           expect.objectContaining({
-            title:
-              "Read Slack thread `1785500000.000100` in `C123`",
+            title: "Search Slack channel `C123` for `database timeout`",
           }),
         ]),
       }),

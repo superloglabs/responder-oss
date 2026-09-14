@@ -1,93 +1,161 @@
-import {
-  MCPServerStreamableHttp,
-  type MCPCallToolOptions,
-  type MCPServer,
-} from "@openai/agents";
+import type { MCPCallToolOptions, MCPServer } from "@openai/agents";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { RuntimeSlackConnection } from "@responder/core/db/investigations";
 import {
   SLACK_CONTEXT_MCP_TOOLS,
   slackContextToolAccess,
 } from "@responder/core/integrations/slack-mcp";
+import {
+  normalizeSlackSearchQuery,
+  searchSlackChannel,
+  type SlackChannelSearchResult,
+} from "@responder/core/integrations/slack-search";
+import { z } from "zod";
 
-export class ScopedSlackMcpServer implements MCPServer {
+const SLACK_SEARCH_TOOL = SLACK_CONTEXT_MCP_TOOLS[0];
+const MAX_CACHED_SEARCHES = 20;
+
+const slackSearchToolInputSchema = z
+  .object({
+    channel_id: z.string().min(1),
+    limit: z.number().int().min(1).max(20).optional().default(10),
+    query: z.string().min(1).max(500),
+  })
+  .strict();
+
+export class SlackSearchMcpServer implements MCPServer {
   readonly cacheToolsList = true;
   readonly name: string;
-  readonly useStructuredContent = true;
-  private readonly allowedChannelIds: ReadonlySet<string>;
+  private readonly channelsById: ReadonlyMap<
+    string,
+    RuntimeSlackConnection["channels"][number]
+  >;
+  private readonly searchCache = new Map<
+    string,
+    Promise<SlackChannelSearchResult>
+  >();
 
-  constructor(
-    private readonly server: MCPServer,
-    connection: RuntimeSlackConnection,
-  ) {
+  constructor(private readonly connection: RuntimeSlackConnection) {
     this.name = `slack-${connection.accountId}`;
-    this.allowedChannelIds = new Set(
-      connection.channels.map((channel) => channel.id),
+    this.channelsById = new Map(
+      connection.channels.map((channel) => [channel.id, channel]),
     );
   }
 
-  connect(): Promise<void> {
-    return this.server.connect();
-  }
+  async connect(): Promise<void> {}
 
-  close(): Promise<void> {
-    return this.server.close();
+  async close(): Promise<void> {
+    this.searchCache.clear();
   }
 
   async listTools(): ReturnType<MCPServer["listTools"]> {
-    const tools = await this.server.listTools();
-    return tools.filter((tool) =>
-      (SLACK_CONTEXT_MCP_TOOLS as readonly string[]).includes(tool.name),
-    );
+    const channels = this.connection.channels
+      .map((channel) => `#${channel.name} (${channel.id})`)
+      .join(", ");
+    return [
+      {
+        name: SLACK_SEARCH_TOOL,
+        description:
+          "Search one Slack channel selected for this agent. Use concise keywords from the incident. Search modifiers are not accepted. " +
+          `Available channels: ${channels}.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            channel_id: {
+              type: "string",
+              enum: this.connection.channels.map((channel) => channel.id),
+              description: "Selected Slack channel ID",
+            },
+            query: {
+              type: "string",
+              minLength: 1,
+              maxLength: 500,
+              description: "Keywords or an exact error phrase without Slack modifiers",
+            },
+            limit: {
+              type: "integer",
+              minimum: 1,
+              maximum: 20,
+              default: 10,
+              description: "Maximum matching messages to return",
+            },
+          },
+          required: ["channel_id", "query"],
+          additionalProperties: false,
+        },
+      },
+    ];
   }
 
   async callTool(
     toolName: string,
     args: Record<string, unknown> | null,
-    meta?: Record<string, unknown> | null,
+    _meta?: Record<string, unknown> | null,
     options?: MCPCallToolOptions,
-  ) {
+  ): ReturnType<MCPServer["callTool"]> {
     const access = slackContextToolAccess({
-      allowedChannelIds: this.allowedChannelIds,
+      allowedChannelIds: new Set(this.channelsById.keys()),
       args,
       toolName,
     });
     if (!access.allowed) {
-      const error = new Error(access.reason);
-      const span = trace.getActiveSpan();
-      span?.recordException(error);
-      span?.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-      console.error(
-        JSON.stringify({
-          event: "slack_mcp_tool_blocked",
-          reason: access.reason,
-          serverName: this.name,
-          toolName,
-        }),
-      );
-      throw error;
+      this.recordBlockedTool(toolName, access.reason);
+      throw new Error(access.reason);
     }
-    return this.server.callTool(toolName, args, meta, options);
+
+    const parsed = slackSearchToolInputSchema.safeParse(args);
+    if (!parsed.success) {
+      throw new Error("Invalid Slack channel search arguments");
+    }
+    const channel = this.channelsById.get(parsed.data.channel_id);
+    if (!channel) {
+      throw new Error("Slack channel is not selected for this agent");
+    }
+    const query = normalizeSlackSearchQuery(parsed.data.query);
+    const cacheKey = JSON.stringify([channel.id, query, parsed.data.limit]);
+    let search = this.searchCache.get(cacheKey);
+    if (!search) {
+      search = searchSlackChannel({
+        accessToken: this.connection.userAccessToken,
+        channel,
+        limit: parsed.data.limit,
+        query,
+        signal: options?.signal,
+      });
+      if (this.searchCache.size < MAX_CACHED_SEARCHES) {
+        this.searchCache.set(cacheKey, search);
+        void search.catch(() => {
+          if (this.searchCache.get(cacheKey) === search) {
+            this.searchCache.delete(cacheKey);
+          }
+        });
+      }
+    }
+
+    const result = await search;
+    return [{ type: "text", text: JSON.stringify(result) }];
   }
 
-  invalidateToolsCache(): Promise<void> {
-    return this.server.invalidateToolsCache();
+  async invalidateToolsCache(): Promise<void> {}
+
+  private recordBlockedTool(toolName: string, reason: string): void {
+    const error = new Error(reason);
+    const span = trace.getActiveSpan();
+    span?.recordException(error);
+    span?.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+    console.error(
+      JSON.stringify({
+        event: "slack_search_tool_blocked",
+        reason,
+        serverName: this.name,
+        toolName,
+      }),
+    );
   }
 }
 
-export function createSlackMcpServer(
+export function createSlackSearchServer(
   connection: RuntimeSlackConnection,
 ): MCPServer {
-  const server = new MCPServerStreamableHttp({
-    cacheToolsList: true,
-    clientSessionTimeoutSeconds: 300,
-    name: "slack-upstream",
-    requestInit: {
-      headers: { authorization: `Bearer ${connection.userAccessToken}` },
-    },
-    timeout: 30_000,
-    url: connection.mcpUrl,
-    useStructuredContent: true,
-  });
-  return new ScopedSlackMcpServer(server, connection);
+  return new SlackSearchMcpServer(connection);
 }

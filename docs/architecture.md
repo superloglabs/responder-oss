@@ -41,19 +41,38 @@ types. `drizzle/` contains the ordered schema history.
   `CREDENTIAL_ENCRYPTION_KEY`. Only the control plane and worker should receive
   that key.
 - Slack, GitHub, and Sentry webhook signatures are checked against the untouched
-  request body. Retries are deduplicated with provider-specific keys.
+  request body. Dash0 webhooks require a random per-connection bearer secret.
+  Retries are deduplicated with provider-specific keys.
 - App-authored CloudWatch `ALARM` notifications in watched Slack channels use
   the existing Slack trigger. The control plane normalizes available alarm
   identity and location fields, ignores recovery states, and the worker uses
   only AWS accounts selected on the pinned Agent version as read-only context.
+- Google Cloud context uses customer-owned Workload Identity Federation and a
+  dedicated service account. A unique AWS broker session is the federated
+  principal, so Responder exchanges short-lived credentials without creating
+  or storing service-account keys. The worker exposes only managed Cloud Asset
+  Inventory, Logging, and Monitoring tools annotated read-only.
 - Remote MCP destinations must use HTTPS and resolve to public addresses.
   Redirects are revalidated and authorization is not forwarded across origins.
+- Dash0 uses dynamic OAuth client registration with encrypted, refreshable,
+  organization-scoped tokens. Its MCP endpoint is restricted to Dash0 hosts;
+  only tools annotated read-only are exposed and Agent0 delegation is blocked.
+- PostHog uses dynamic OAuth client registration against its hosted MCP endpoint.
+  The endpoint is fixed to read-only tools and a bounded set of observability and
+  analytics features, and the worker additionally requires the MCP read-only annotation.
+  PostHog alerts enter through watched Slack channels rather than a second webhook path.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.
 - Langfuse context uses encrypted project-scoped API keys outside the sandbox.
-  The worker connects to the project's MCP endpoint through the protected remote
-  fetch boundary and exposes only an exact read-only tool allowlist.
+- Supabase context uses encrypted OAuth sessions and a temporary read-only
+  account scope to discover projects after authorization. Responder then pins
+  agent access to the selected project and permission preset with
+  server-generated hosted MCP parameters and an exact worker-side tool
+  allowlist. Logs-only and read-only presets prevent database writes; read-only
+  SQL additionally relies on Supabase enforcing its `read_only` boundary. The
+  full SQL preset permits necessary data and schema changes while Supabase
+  administration and platform-configuration tools remain blocked.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without
