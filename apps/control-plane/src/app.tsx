@@ -9,6 +9,8 @@ import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
+import { ScanDetailPage } from "./pages/scan-detail";
+import { ScansPage } from "./pages/scans";
 import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
@@ -71,6 +73,11 @@ export function App() {
             element={<AgentContextStoryboardPage />}
             path="/_storyboards/agent-context"
           />
+          <Route element={<ScansPage />} path="/_storyboards/scans" />
+          <Route
+            element={<ScanDetailPage />}
+            path="/_storyboards/scans/:scanId"
+          />
           <Route
             element={<SuggestionsPage />}
             path="/_storyboards/suggestions/:suggestionId?"
@@ -85,6 +92,8 @@ export function App() {
         />
         <Route element={<AgentsPage />} path="/agents" />
         <Route element={<IssuesPage />} path="/issues" />
+        <Route element={<ScansPage />} path="/scans" />
+        <Route element={<ScanDetailPage />} path="/scans/:scanId" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />
         <Route element={<SuggestionsPage />} path="/suggestions/:suggestionId?" />
         <Route element={<AgentCreatePage />} path="/agents/new" />

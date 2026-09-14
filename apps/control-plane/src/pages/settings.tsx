@@ -443,6 +443,7 @@ function DefaultIntegrationCard({
         aria-busy={isConnecting}
         aria-disabled={!canConnect}
         className={`integrationCard ${integration.id === "github" ? "isFeatured" : ""}`}
+        id={`integration-${integration.id}`}
         disabled={!canConnect || isConnecting}
         onClick={() => startConnection()}
         type="button"
@@ -555,7 +556,10 @@ function GcpIntegrationCard({
   const canConnect = Boolean(integration.connectUrl);
 
   return (
-    <article className="integrationCard integrationCard--managed">
+    <article
+      className="integrationCard integrationCard--managed"
+      id={`integration-${integration.id}`}
+    >
       <div className="integrationCard__top">
         <ProviderGlyph
           className="integrationLogo integrationLogo--gcp"

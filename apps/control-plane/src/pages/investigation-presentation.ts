@@ -2,6 +2,7 @@ import type {
   InvestigationDetail,
   InvestigationTraceEvent,
 } from "../agents-api";
+import { providerDisplayName } from "../components/provider-glyphs";
 
 export type InvestigationBadgeTone =
   | "danger"
@@ -41,13 +42,7 @@ export function investigationStatusPresentation(
 export function providerLabel(
   provider: InvestigationDetail["input"]["provider"],
 ): string {
-  const labels = {
-    datadog: "Datadog",
-    dash0: "Dash0",
-    sentry: "Sentry",
-    slack: "Slack",
-  } as const;
-  return labels[provider];
+  return providerDisplayName(provider);
 }
 
 export function triggerContext(input: InvestigationDetail["input"]): string {

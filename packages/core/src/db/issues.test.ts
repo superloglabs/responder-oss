@@ -22,12 +22,19 @@ const secondIssueId = "20202020-2020-4020-8020-202020202020";
 const firstRemediationId = "11111111-1111-4111-8111-111111111111";
 const secondRemediationId = "22222222-2222-4222-8222-222222222222";
 
-function databaseDouble(status = "investigating") {
+function databaseDouble(
+  status = "investigating",
+  provider: "scan" | "slack" = "slack",
+) {
   const forUpdate = vi.fn().mockResolvedValue([{
     id: investigationId,
     status,
+    input: { provider },
     agentConfigVersionId,
     prMode: "always",
+    contextAccountIds: [],
+    createLinearTickets: true,
+    linearIssueTemplate: "{{description}}",
   }]);
   const investigationSelect = {
     innerJoin: vi.fn(),
@@ -172,6 +179,39 @@ describe("automatic pull requests from investigation reports", () => {
     ).rejects.toThrow("Investigation report has already been submitted");
     expect(tx.insert).not.toHaveBeenCalled();
     expect(queueAutomaticIssuePullRequests).not.toHaveBeenCalled();
+  });
+
+  it("never queues stored code remediations from a scan recurrence", async () => {
+    databaseDouble("investigating", "scan");
+    const evidence = [{
+      source: "other" as const,
+      title: "Observed failure",
+      detail: "The failure recurred during this scan.",
+    }];
+
+    const result = await submitInvestigationReport({
+      investigationId,
+      organizationId,
+      submission: {
+        newIssueEmbeddings: [],
+        report: {
+          schemaVersion: 1,
+          headline: "Existing issue recurred",
+          summary: "The scan matched an existing issue.",
+          issues: [firstIssueId, secondIssueId].map((issueId) => ({
+            evidence,
+            issueId,
+            resolution: "existing" as const,
+          })),
+        },
+      },
+    });
+
+    expect(queueAutomaticIssuePullRequests).not.toHaveBeenCalled();
+    expect(result.automaticPullRequestIssueIds).toEqual([]);
+    expect(result.automaticPullRequestRequestIds).toEqual([]);
+    expect(result.createLinearTickets).toBe(false);
+    expect(result.linearTicketRequests).toEqual([]);
   });
 });
 

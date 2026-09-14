@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, inArray } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, or } from "drizzle-orm";
 import type {
   AgentConfiguration,
   SlackThreadModeConfiguration,
@@ -81,7 +81,12 @@ export async function findAgentsForSlackEvent(input: {
         eq(integrationAccounts.status, "connected"),
       ),
     )
-    .where(eq(agents.enabled, true));
+    .where(
+      and(
+        eq(agents.enabled, true),
+        or(eq(agents.purpose, "standard"), eq(agents.purpose, "slack_thread")),
+      ),
+    );
 
   const useSlackThreadMode =
     input.eventType === "app_mention" &&
@@ -153,7 +158,7 @@ export async function findAgentsForSentryIssue(input: {
         eq(integrationAccounts.status, "connected"),
       ),
     )
-    .where(eq(agents.enabled, true));
+    .where(and(eq(agents.enabled, true), eq(agents.purpose, "standard")));
 
   return rows
     .filter(
@@ -194,7 +199,7 @@ export async function findAgentsForDash0Alert(
         eq(integrationAccounts.status, "connected"),
       ),
     )
-    .where(eq(agents.enabled, true));
+    .where(and(eq(agents.enabled, true), eq(agents.purpose, "standard")));
 
   return rows
     .filter(
@@ -551,7 +556,7 @@ export async function createAgent(input: {
   organizationId: string;
   userId: string;
   configuration: AgentConfiguration;
-  purpose?: "standard" | "slack_thread";
+  purpose?: "standard" | "slack_thread" | "scan";
 }): Promise<string> {
   await validateConfigurationResources(input.organizationId, input.configuration);
   const db = getDatabase();
@@ -625,7 +630,7 @@ export async function updateAgent(input: {
   organizationId: string;
   userId: string;
   configuration: AgentConfiguration;
-  purpose?: "standard" | "slack_thread";
+  purpose?: "standard" | "slack_thread" | "scan";
 }): Promise<void> {
   await validateConfigurationResources(input.organizationId, input.configuration);
   const db = getDatabase();

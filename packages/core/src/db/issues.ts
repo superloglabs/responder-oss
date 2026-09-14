@@ -159,6 +159,7 @@ export async function submitInvestigationReport(input: {
       .select({
         id: investigations.id,
         status: investigations.status,
+        input: investigations.input,
         agentConfigVersionId: investigations.agentConfigVersionId,
         prMode: agentConfigVersions.prMode,
         contextAccountIds: agentConfigVersions.contextAccountIds,
@@ -186,11 +187,26 @@ export async function submitInvestigationReport(input: {
     ) {
       throw new Error("Investigation report has already been submitted");
     }
+    if (
+      investigation.input.provider === "scan" &&
+      input.submission.report.issues.some(
+        (issue) =>
+          issue.resolution === "new" &&
+          issue.remediations.some(
+            (remediation) => remediation.type === "code_change",
+          ),
+      )
+    ) {
+      throw new Error("Scan reports cannot propose or publish code changes");
+    }
+    const observationOnly = investigation.input.provider === "scan";
 
     const hasNewIssues = input.submission.report.issues.some(
       (issue) => issue.resolution === "new",
     );
-    const linearAccount = investigation.createLinearTickets && hasNewIssues
+    const linearAccount = !observationOnly &&
+        investigation.createLinearTickets &&
+        hasNewIssues
       ? (
           await tx
             .select({ id: integrationAccounts.id })
@@ -208,7 +224,12 @@ export async function submitInvestigationReport(input: {
             .limit(1)
         )[0]
       : null;
-    if (investigation.createLinearTickets && hasNewIssues && !linearAccount) {
+    if (
+      !observationOnly &&
+      investigation.createLinearTickets &&
+      hasNewIssues &&
+      !linearAccount
+    ) {
       throw new Error("The configured Linear connection is unavailable");
     }
     const existingIds = input.submission.report.issues
@@ -308,6 +329,7 @@ export async function submitInvestigationReport(input: {
       }));
     });
     const automaticPullRequestRequests =
+      !observationOnly &&
       investigation.prMode === "always" &&
       candidateCodeRemediations.length > 0
         ? await queueAutomaticIssuePullRequests(tx, {
@@ -393,11 +415,12 @@ export async function submitInvestigationReport(input: {
           severity: issue.severity,
         };
       }),
-      createLinearTickets: investigation.createLinearTickets,
+      createLinearTickets:
+        !observationOnly && investigation.createLinearTickets,
       linearIssueTemplate: investigation.linearIssueTemplate,
       markdown,
       automaticPullRequestIssueIds:
-        investigation.prMode === "always"
+        !observationOnly && investigation.prMode === "always"
           ? automaticPullRequestRequests.map((request) => request.issueId)
           : [],
       automaticPullRequestRequestIds: automaticPullRequestRequests.map(

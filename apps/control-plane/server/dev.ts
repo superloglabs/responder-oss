@@ -10,6 +10,8 @@ const { initializeServerMonitoring } = await import("./monitoring.js");
 initializeServerMonitoring();
 
 const { app } = await import("./app.js");
+const { startScanScheduler } = await import("./scans/scheduler.js");
+startScanScheduler();
 
 serve(
   {

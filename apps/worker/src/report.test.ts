@@ -133,6 +133,61 @@ describe("investigation report submission", () => {
     expect(deliverInvestigationToSlack).not.toHaveBeenCalled();
   });
 
+  it("rejects code-change remediations from observation-only scans", async () => {
+    const report = {
+      schemaVersion: 1 as const,
+      headline: "Broken route",
+      summary: "The route failed.",
+      issues: [{
+        resolution: "new" as const,
+        title: "Broken route",
+        description: "The route throws.",
+        rootCause: "A guard is missing.",
+        timeline: [{
+          title: "Request reached the route",
+          description: "The request reached the route without the required value.",
+        }],
+        severity: "SEV-2" as const,
+        remediations: [{
+          type: "code_change" as const,
+          title: "Add the missing guard",
+          description: "Add a guard before reading the optional value.",
+          changes: [{
+            repository: "example/app",
+            diff: [
+              "diff --git a/src/route.ts b/src/route.ts",
+              "--- a/src/route.ts",
+              "+++ b/src/route.ts",
+              "@@ -1 +1 @@",
+              "-unsafe();",
+              "+safe();",
+            ].join("\n"),
+            pullRequest: {
+              title: "Guard the optional route value",
+              body: "Adds the missing validation.",
+            },
+          }],
+        }],
+        evidence: [{
+          source: "github" as const,
+          title: "Missing check",
+          detail: "The handler reads an optional value without checking it.",
+          file: "src/route.ts",
+          line: 42,
+        }],
+      }],
+    };
+
+    await expect(submitInvestigationReportForRun({
+      allowCodeChanges: false,
+      investigationId: "investigation-id",
+      organizationId: "organization-id",
+      report,
+    })).rejects.toThrow("Scan reports cannot propose or publish code changes");
+    expect(embedNewIssues).not.toHaveBeenCalled();
+    expect(submitInvestigationReport).not.toHaveBeenCalled();
+  });
+
   it("hands automatic pull request requests to separate remediation jobs", async () => {
     const onAutomaticPullRequestRequests = vi.fn().mockResolvedValue(undefined);
     vi.mocked(submitInvestigationReport).mockResolvedValue({

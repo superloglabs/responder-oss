@@ -163,7 +163,7 @@ export async function refreshGitHubRepositories(
   );
 }
 
-async function ensureSlackChannelMemberships(
+export async function ensureSlackChannelMemberships(
   organizationId: string,
   configuration: AgentConfiguration,
 ): Promise<void> {

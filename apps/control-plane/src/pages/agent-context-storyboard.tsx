@@ -11,7 +11,7 @@ import {
 } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 
-type ProviderId = Exclude<ProviderGlyphId, "google">;
+type ProviderId = Exclude<ProviderGlyphId, "google" | "scan">;
 type StoryboardScenario =
   | "empty"
   | "connected"

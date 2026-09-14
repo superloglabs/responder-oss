@@ -54,6 +54,19 @@ export function configuredSuperuserEmails(
   );
 }
 
+export function configuredAuthTrustedOrigins(
+  environment: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const baseURL = environment.BETTER_AUTH_URL ?? "http://localhost:3000";
+  return Array.from(
+    new Set(
+      [baseURL, environment.RESPONDER_PUBLIC_URL?.trim()].filter(
+        (origin): origin is string => Boolean(origin),
+      ),
+    ),
+  );
+}
+
 export function platformRoleForIdentity(
   identity: Pick<AuthUserSupportIdentity, "email" | "emailVerified">,
   superuserEmails: ReadonlySet<string>,
@@ -292,7 +305,7 @@ export function createResponderAuth() {
       }),
     ],
     secret,
-    trustedOrigins: [baseURL],
+    trustedOrigins: configuredAuthTrustedOrigins(),
     advanced: {
       cookiePrefix: "responder-auth",
       database: {

@@ -10,6 +10,7 @@ import {
   beginSlackThreadInvestigation,
   discardPendingInvestigation,
   failInvestigation,
+  getInvestigationForRetry,
   prepareInvestigationRetry,
 } from "../../../../packages/core/src/db/investigations.js";
 import {
@@ -66,6 +67,7 @@ async function getBoss() {
 export async function queueInvestigation(
   request: InvestigationRequest,
   options?: {
+    retryFailedDuplicate?: boolean;
     slackIssueFollowup?: {
       originalInvestigationId: string;
       issueIds: string[];
@@ -77,6 +79,19 @@ export async function queueInvestigation(
   const input = toInvestigationInput(request);
   const result = await beginInvestigation(request.agentId, input);
   if (!result.created) {
+    if (options?.retryFailedDuplicate) {
+      const existing = await getInvestigationForRetry({
+        agentId: request.agentId,
+        investigationId: result.investigationId,
+        organizationId: result.config.organizationId,
+      });
+      if (existing?.status === "failed") {
+        return queueInvestigationRetry({
+          investigationId: result.investigationId,
+          organizationId: result.config.organizationId,
+        });
+      }
+    }
     return { investigationId: result.investigationId, kind: "duplicate" };
   }
 
