@@ -56,6 +56,9 @@ import {
   SearchIcon,
 } from "../components/icons";
 import {
+  contextCategoryDescriptions as CONTEXT_CATEGORY_DESCRIPTIONS,
+  contextCategoryOrder as CONTEXT_CATEGORY_ORDER,
+  contextProviderMetadata as CONTEXT_PROVIDER_METADATA,
   providerDisplayName,
 } from "../components/provider-glyphs";
 import {
@@ -80,48 +83,6 @@ import {
 } from "./agent-create-draft";
 
 type CreateStep = 1 | 2 | 3 | 4;
-type ContextCategory =
-  | "Observability"
-  | "Code & deployment"
-  | "Communication & workflow"
-  | "Data & infrastructure";
-
-const CONTEXT_CATEGORY_ORDER: ContextCategory[] = [
-  "Observability",
-  "Code & deployment",
-  "Communication & workflow",
-  "Data & infrastructure",
-];
-
-const CONTEXT_CATEGORY_DESCRIPTIONS: Record<ContextCategory, string> = {
-  Observability: "Errors, logs, traces, and service health",
-  "Code & deployment": "Source code, releases, and runtime changes",
-  "Communication & workflow": "Team conversations and incident follow-up",
-  "Data & infrastructure": "Cloud resources, databases, and custom tools",
-};
-
-const CONTEXT_PROVIDER_METADATA: Record<
-  IntegrationSummary["id"],
-  { category: ContextCategory; searchTerms: string }
-> = {
-  sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
-  datadog: { category: "Observability", searchTerms: "apm logs monitors" },
-  dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
-  posthog: { category: "Observability", searchTerms: "analytics errors logs traces replays alerts" },
-  axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
-  clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
-  langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
-  github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
-  vercel: { category: "Code & deployment", searchTerms: "deployments projects hosting" },
-  slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
-  linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
-  aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
-  gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
-  upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
-  supabase: { category: "Data & infrastructure", searchTerms: "postgres database sql logs" },
-  custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
-};
-
 const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "aws",
   "gcp",
@@ -1722,6 +1683,7 @@ export function AgentCreatePage() {
       .toLocaleLowerCase()
       .includes(normalizedIntegrationQuery);
   });
+  const supabaseConnectUrl = integrationFor("supabase")?.connectUrl ?? "";
 
   return (
     <AppShell active="agents" density="create">
@@ -1761,9 +1723,9 @@ export function AgentCreatePage() {
         returnTo={returnTo}
       />
       <SupabaseConnectionDialog
-        connectUrl={integrationFor("supabase")?.connectUrl ?? ""}
+        connectUrl={supabaseConnectUrl}
         onCancel={() => setConnectingSupabase(false)}
-        open={connectingSupabase}
+        open={connectingSupabase && Boolean(supabaseConnectUrl)}
         returnTo={returnTo}
         selectionState={supabaseSelectionState}
       />

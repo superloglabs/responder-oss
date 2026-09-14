@@ -24,7 +24,12 @@ import { LangfuseConnectionDialog } from "../components/langfuse-connection-dial
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import { RepositoryIcon, SearchIcon } from "../components/icons";
-import { providerDisplayName } from "../components/provider-glyphs";
+import {
+  contextCategoryDescriptions,
+  contextCategoryOrder,
+  contextProviderMetadata,
+  providerDisplayName,
+} from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { Button, Checkbox, IconButton, TextAreaField } from "../design-system";
@@ -43,46 +48,7 @@ const defaultConfiguration: SlackThreadModeConfiguration = {
 
 type ContextAccount = AgentOptions["accounts"][number];
 type ConfigurationTarget = ContextAccount | "github" | "vercel" | "secrets";
-type ContextCategory =
-  | "Observability"
-  | "Code & deployment"
-  | "Communication & workflow"
-  | "Data & infrastructure";
-
 const tagModeDraftKey = "responder:tag-mode-settings-draft";
-const contextCategoryOrder: ContextCategory[] = [
-  "Observability",
-  "Code & deployment",
-  "Communication & workflow",
-  "Data & infrastructure",
-];
-const contextCategoryDescriptions: Record<ContextCategory, string> = {
-  Observability: "Errors, logs, traces, and service health",
-  "Code & deployment": "Source code, releases, and runtime changes",
-  "Communication & workflow": "Team conversations and incident follow-up",
-  "Data & infrastructure": "Cloud resources, databases, and custom tools",
-};
-const contextProviderMetadata: Record<
-  IntegrationSummary["id"],
-  { category: ContextCategory; searchTerms: string }
-> = {
-  sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
-  datadog: { category: "Observability", searchTerms: "apm logs monitors" },
-  dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
-  posthog: { category: "Observability", searchTerms: "analytics errors logs traces replays alerts" },
-  axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
-  clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
-  langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
-  github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
-  vercel: { category: "Code & deployment", searchTerms: "deployments projects hosting" },
-  slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
-  linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
-  aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
-  gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
-  upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
-  supabase: { category: "Data & infrastructure", searchTerms: "postgres database sql logs" },
-  custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
-};
 const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "aws",
   "gcp",
@@ -265,6 +231,8 @@ export function TagModeSettingsPage() {
       .toLocaleLowerCase()
       .includes(normalizedIntegrationQuery);
   });
+  const supabaseConnectUrl =
+    integrations.find((item) => item.id === "supabase")?.connectUrl ?? "";
 
   function update(patch: Partial<SlackThreadModeConfiguration>) {
     setConfiguration((current) => ({ ...current, ...patch }));
@@ -446,9 +414,9 @@ export function TagModeSettingsPage() {
         returnTo="/settings/tag-mode"
       />
       <SupabaseConnectionDialog
-        connectUrl={integrations.find((item) => item.id === "supabase")?.connectUrl ?? ""}
+        connectUrl={supabaseConnectUrl}
         onCancel={() => setConnectingSupabase(false)}
-        open={connectingSupabase}
+        open={connectingSupabase && Boolean(supabaseConnectUrl)}
         returnTo="/settings/tag-mode"
         selectionState={supabaseSelectionState}
       />

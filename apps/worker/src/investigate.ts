@@ -420,7 +420,7 @@ export function investigationInstructions(input: {
             if (connection.accessMode === "read_only") {
               return `- ${connection.displayName}: inspect project logs, schema metadata, and data with read-only SQL. Never attempt to modify data or schema.`;
             }
-            return `- ${connection.displayName}: project logs and database SQL are available. Only modify data when the investigation explicitly requires it and the change is necessary; never modify schema or platform configuration.`;
+            return `- ${connection.displayName}: project logs and database SQL are available. Only modify data or schema when the investigation explicitly requires it and the change is necessary; never modify platform configuration.`;
           }),
         ].join("\n")
       : null,

@@ -2,8 +2,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ProviderGlyph } from "./icons";
+import { contextProviderMetadata } from "./provider-glyphs";
 
 describe("ProviderGlyph", () => {
+  it("keeps Supabase discovery metadata with its canonical provider metadata", () => {
+    expect(contextProviderMetadata.supabase).toEqual({
+      category: "Data & infrastructure",
+      searchTerms: "postgres database sql logs",
+    });
+  });
+
   it.each([
     ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],

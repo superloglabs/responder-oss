@@ -69,10 +69,10 @@ types. `drizzle/` contains the ordered schema history.
   account scope to discover projects after authorization. Responder then pins
   agent access to the selected project and permission preset with
   server-generated hosted MCP parameters and an exact worker-side tool
-  allowlist; read-only SQL additionally relies on Supabase enforcing its
-  `read_only` boundary.
-  The worker connects to the project's MCP endpoint through the protected remote
-  fetch boundary and exposes only an exact read-only tool allowlist.
+  allowlist. Logs-only and read-only presets prevent database writes; read-only
+  SQL additionally relies on Supabase enforcing its `read_only` boundary. The
+  full SQL preset permits necessary data and schema changes while Supabase
+  administration and platform-configuration tools remain blocked.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without

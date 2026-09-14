@@ -131,9 +131,12 @@ describe("integration account tenancy", () => {
       .fn()
       .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
       .mockResolvedValueOnce([]);
-    const set = vi.fn(() => ({
-      where: vi.fn(() => ({ returning })),
-    }));
+    const set = vi.fn((_values: Record<string, unknown>) => {
+      void _values;
+      return {
+        where: vi.fn(() => ({ returning })),
+      };
+    });
     vi.mocked(getDatabase).mockReturnValue({
       update: vi.fn(() => ({ set })),
     } as never);
@@ -154,6 +157,36 @@ describe("integration account tenancy", () => {
     expect(set).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "error" }),
     );
+  });
+
+  it("releases a failed credential lease without changing connection status by default", async () => {
+    const returning = vi
+      .fn()
+      .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
+      .mockResolvedValueOnce([{ id: "account-1" }]);
+    const set = vi.fn((_values: Record<string, unknown>) => {
+      void _values;
+      return {
+        where: vi.fn(() => ({ returning })),
+      };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: "account-1",
+        operation: async () => {
+          throw new Error("temporary network failure");
+        },
+        organizationId: account.organizationId,
+        provider: "supabase",
+      }),
+    ).rejects.toThrow("temporary network failure");
+
+    expect(set.mock.calls.at(-1)?.[0]).not.toHaveProperty("status");
   });
 
   it("returns a newly connected GitHub account", async () => {

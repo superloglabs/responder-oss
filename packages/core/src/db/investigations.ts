@@ -2675,7 +2675,6 @@ export async function getRuntimeSupabaseConnections(
       },
       organizationId: config.organizationId,
       provider: "supabase",
-      statusOnError: () => "error",
     });
     if (connection) connections.push(connection);
   }

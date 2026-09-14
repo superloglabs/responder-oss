@@ -73,7 +73,7 @@ export function SupabaseConnectionDialog({
   }, [onCancel, selectingProject]);
 
   useEffect(() => {
-    if (!open || !selectionState) return;
+    if (!open || !selectionState || !connectUrl) return;
     let cancelled = false;
     const projectsUrl = new URL(
       supabaseEndpoint(connectUrl, "projects"),

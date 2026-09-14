@@ -81,7 +81,7 @@ async function mockSettingsApis(page: Page) {
           accountCount: 0,
           resourceCount: 0,
           accounts: [],
-          connectUrl: `/api/integrations/${id}/start`,
+          connectUrl: `/api/integrations/${id}/${id === "supabase" ? "connect" : "start"}`,
           configurationUrl: null,
         })),
       },
@@ -140,7 +140,7 @@ test("prepares a Google Cloud connection", async ({ page }) => {
 test("starts Supabase OAuth with the selected access level", async ({ page }) => {
   await mockSettingsApis(page);
   let requestBody: unknown;
-  await page.route("**/api/integrations/supabase/start", async (route) => {
+  await page.route("**/api/integrations/supabase/connect", async (route) => {
     requestBody = route.request().postDataJSON();
     await route.fulfill({
       json: {

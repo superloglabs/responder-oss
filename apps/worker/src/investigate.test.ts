@@ -337,7 +337,10 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("read-project: inspect project logs, schema metadata");
     expect(instructions).toContain("Never attempt to modify data or schema");
     expect(instructions).toContain("write-project: project logs and database SQL");
-    expect(instructions).toContain("never modify schema or platform configuration");
+    expect(instructions).toContain(
+      "Only modify data or schema when the investigation explicitly requires it",
+    );
+    expect(instructions).toContain("never modify platform configuration");
     expect(instructions).not.toContain("No observability data source is connected");
   });
 
