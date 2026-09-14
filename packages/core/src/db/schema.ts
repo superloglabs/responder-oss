@@ -21,6 +21,7 @@ import type {
   IssueTimelineEntry,
   StructuredInvestigationReport,
 } from "../investigations/report.js";
+import type { SuggestionCodeChange } from "../suggestions/model.js";
 import { organization, user } from "./auth-schema.js";
 
 /**
@@ -694,13 +695,104 @@ export const issues = pgTable(
   ],
 );
 
-export const activeIssuePullRequestIndexPredicate = sql.raw(
+export const suggestions = pgTable(
+  "suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    investigationId: uuid("investigation_id")
+      .notNull()
+      .references(() => investigations.id, { onDelete: "restrict" }),
+    agentConfigVersionId: uuid("agent_config_version_id")
+      .notNull()
+      .references(() => agentConfigVersions.id, { onDelete: "restrict" }),
+    title: text("title").notNull(),
+    subtitle: text("subtitle").notNull(),
+    detail: text("detail").notNull(),
+    codeChange: jsonb("code_change").$type<SuggestionCodeChange>(),
+    fingerprint: text("fingerprint").notNull(),
+    embedding: jsonb("embedding").$type<number[]>(),
+    embeddingModel: text("embedding_model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("suggestions_organization_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    uniqueIndex("suggestions_organization_fingerprint_idx").on(
+      table.organizationId,
+      table.fingerprint,
+    ),
+  ],
+);
+
+export const suggestionSettings = pgTable("suggestion_settings", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  autoOpenPullRequests: boolean("auto_open_pull_requests")
+    .notNull()
+    .default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const activePullRequestIndexPredicate = sql.raw(
   `"status" in ('queued', 'creating', 'created') and "repository_full_name" is null`,
 );
 
-export const activeIssuePullRequestRepositoryIndexPredicate = sql.raw(
+export const activePullRequestRepositoryIndexPredicate = sql.raw(
   `"status" in ('queued', 'creating', 'created') and "repository_full_name" is not null`,
 );
+
+export const suggestionPullRequests = pgTable(
+  "suggestion_pull_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    suggestionId: uuid("suggestion_id")
+      .notNull()
+      .references(() => suggestions.id, { onDelete: "cascade" }),
+    investigationId: uuid("investigation_id")
+      .notNull()
+      .references(() => investigations.id, { onDelete: "cascade" }),
+    agentConfigVersionId: uuid("agent_config_version_id")
+      .notNull()
+      .references(() => agentConfigVersions.id, { onDelete: "restrict" }),
+    repositoryFullName: text("repository_full_name"),
+    status: text("status")
+      .$type<"queued" | "creating" | "created" | "merged" | "failed">()
+      .notNull()
+      .default("queued"),
+    branch: text("branch"),
+    pullRequestNumber: integer("pull_request_number"),
+    pullRequestUrl: text("pull_request_url"),
+    eveSessionId: text("eve_session_id"),
+    failureReason: text("failure_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("suggestion_pull_requests_active_suggestion_idx")
+      .on(table.suggestionId)
+      .where(activePullRequestIndexPredicate),
+    uniqueIndex("suggestion_pull_requests_active_repository_idx")
+      .on(table.suggestionId, table.repositoryFullName)
+      .where(activePullRequestRepositoryIndexPredicate),
+    index("suggestion_pull_requests_suggestion_created_idx").on(
+      table.suggestionId,
+      table.createdAt,
+    ),
+    index("suggestion_pull_requests_investigation_idx").on(table.investigationId),
+  ],
+);
+
+export const activeIssuePullRequestIndexPredicate = activePullRequestIndexPredicate;
+export const activeIssuePullRequestRepositoryIndexPredicate =
+  activePullRequestRepositoryIndexPredicate;
 
 export const issuePullRequests = pgTable(
   "issue_pull_requests",

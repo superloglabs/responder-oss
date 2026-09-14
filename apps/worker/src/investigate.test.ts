@@ -200,6 +200,7 @@ describe("sandbox agent configuration", () => {
     );
     expect(instructions).toContain("ready-for-review pull request title");
     expect(instructions).toContain("published later without another model pass");
+    expect(instructions).toContain("search_observability_suggestions");
   });
 
   it("keeps Slack thread turns sandbox-only without issue or PR workflows", () => {
@@ -218,6 +219,7 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("response directly to the Slack thread");
     expect(instructions).not.toContain("search_existing_issues");
     expect(instructions).not.toContain("submit_investigation_report");
+    expect(instructions).not.toContain("search_observability_suggestions");
   });
 
   it("restricts issue follow-ups to updating their bound issues", () => {
@@ -235,6 +237,21 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("provide the updated remediation");
     expect(instructions).not.toContain("search_existing_issues");
     expect(instructions).not.toContain("submit_investigation_report");
+    expect(instructions).not.toContain("search_observability_suggestions");
+  });
+
+  it("does not offer suggestion operations during replay", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Replay the investigation.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      replay: true,
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).not.toContain("search_observability_suggestions");
+    expect(instructions).not.toContain("create_observability_suggestion");
   });
 
   it("lets a no-issue follow-up submit a new structured conclusion", () => {

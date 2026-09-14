@@ -337,6 +337,50 @@ export interface IssueDetailResponse {
   };
 }
 
+export type SuggestionCodeChange = Extract<
+  IssueRemediation,
+  { type: "code_change" }
+>;
+
+export interface SuggestionListItem {
+  codeChange: SuggestionCodeChange | null;
+  createdAt: string;
+  detail: string;
+  id: string;
+  subtitle: string;
+  title: string;
+}
+
+export interface SuggestionSummary {
+  codeChangeAvailable: boolean;
+  createdAt: string;
+  id: string;
+  subtitle: string;
+  title: string;
+}
+
+export interface SuggestionPullRequest {
+  id: string;
+  repositoryFullName: string | null;
+  status: "queued" | "creating" | "created" | "merged" | "failed";
+  branch: string | null;
+  pullRequestNumber: number | null;
+  pullRequestUrl: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface SuggestionDetailResponse {
+  suggestion: SuggestionListItem;
+  pullRequestState: { requests: SuggestionPullRequest[] };
+}
+
+export interface SuggestionSettings {
+  autoOpenPullRequests: boolean;
+}
+
 export interface InvestigationDetail {
   id: string;
   agentId: string;
@@ -492,6 +536,49 @@ export async function fetchIssues(
 export async function fetchIssue(issueId: string): Promise<IssueDetailResponse> {
   return apiJson<IssueDetailResponse>(
     `/api/issues/${encodeURIComponent(issueId)}`,
+  );
+}
+
+export async function fetchSuggestions(cursor?: string): Promise<{
+  suggestions: SuggestionSummary[];
+  nextCursor: string | null;
+  settings: SuggestionSettings;
+}> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiJson(`/api/suggestions${query}`);
+}
+
+export async function fetchSuggestion(
+  suggestionId: string,
+): Promise<SuggestionDetailResponse> {
+  return apiJson(`/api/suggestions/${encodeURIComponent(suggestionId)}`);
+}
+
+export async function saveSuggestionSettings(
+  settings: SuggestionSettings,
+): Promise<SuggestionSettings> {
+  const response = await apiJson<{ settings: SuggestionSettings }>(
+    "/api/suggestions/settings",
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(settings),
+    },
+  );
+  return response.settings;
+}
+
+export async function createSuggestionPullRequest(
+  suggestionId: string,
+): Promise<{
+  requestId: string;
+  requestIds: string[];
+  sessionId: string | null;
+  sessionIds: Array<string | null>;
+}> {
+  return apiJson(
+    `/api/suggestions/${encodeURIComponent(suggestionId)}/pull-requests`,
+    { method: "POST" },
   );
 }
 

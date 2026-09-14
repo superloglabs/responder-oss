@@ -13,6 +13,11 @@ import {
   markIssuePullRequestStarted,
 } from "@responder/core/db/pull-requests";
 import {
+  getExecutableSuggestionPullRequest,
+  markSuggestionPullRequestCreated,
+  markSuggestionPullRequestStarted,
+} from "@responder/core/db/suggestion-pull-requests";
+import {
   daytonaClientOptions,
   requireDaytonaClientConfig,
 } from "@responder/core/daytona-config";
@@ -128,22 +133,36 @@ export async function runProposedRemediation(
   job: RemediationJob,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
-  const request = await getExecutableIssuePullRequest({
-    agentConfigVersionId: job.config.id,
-    investigationId: job.investigationId,
-    issueId: job.issue.id,
-    organizationId: job.config.organizationId,
-    requestId: job.remediationRequestId,
-  });
+  const suggestionJob = "suggestion" in job;
+  const request = suggestionJob
+    ? await getExecutableSuggestionPullRequest({
+        agentConfigVersionId: job.config.id,
+        investigationId: job.investigationId,
+        organizationId: job.config.organizationId,
+        requestId: job.remediationRequestId,
+        suggestionId: job.suggestion.id,
+      })
+    : await getExecutableIssuePullRequest({
+        agentConfigVersionId: job.config.id,
+        investigationId: job.investigationId,
+        issueId: job.issue.id,
+        organizationId: job.config.organizationId,
+        requestId: job.remediationRequestId,
+      });
   const repositories = await getRuntimeRepositories(job.config.id);
   const selected = selectProposedChange(
-    request.selectedRemediation ?? job.selectedRemediation,
+    ("codeChange" in request ? request.codeChange : request.selectedRemediation) ??
+      job.selectedRemediation,
     job.targetRepository,
     repositories,
   );
 
-  await markIssuePullRequestStarted(request.requestId);
-  await refreshIssuePullRequestSlackMessages(request.requestId);
+  if (suggestionJob) {
+    await markSuggestionPullRequestStarted(request.requestId);
+  } else {
+    await markIssuePullRequestStarted(request.requestId);
+    await refreshIssuePullRequestSlackMessages(request.requestId);
+  }
 
   const config = requireDaytonaClientConfig(environment);
   const sandboxName = `responder-remediation-${job.remediationRequestId}`;
@@ -172,7 +191,9 @@ export async function runProposedRemediation(
         );
     await applyProposedDiff(session, checkout.path, selected.diff);
 
-    const remediation = request.selectedRemediation ?? job.selectedRemediation;
+    const remediation =
+      ("codeChange" in request ? request.codeChange : request.selectedRemediation) ??
+      job.selectedRemediation;
     if (remediation?.type !== "code_change") {
       throw new Error("The pull request does not have a proposed code diff");
     }
@@ -195,14 +216,19 @@ export async function runProposedRemediation(
       },
       session,
     );
-    await markIssuePullRequestCreated({
+    const createdInput = {
       requestId: request.requestId,
       repositoryFullName: selected.repository.fullName,
       branch: result.branch,
       pullRequestNumber: result.number,
       pullRequestUrl: result.url,
-    });
-    await refreshIssuePullRequestSlackMessages(request.requestId);
+    };
+    if (suggestionJob) {
+      await markSuggestionPullRequestCreated(createdInput);
+    } else {
+      await markIssuePullRequestCreated(createdInput);
+      await refreshIssuePullRequestSlackMessages(request.requestId);
+    }
     await captureAnalyticsEvent({
       distinctId: `investigation:${job.investigationId}`,
       event: "pr opened",
@@ -211,7 +237,9 @@ export async function runProposedRemediation(
         $process_person_profile: false,
         agent_config_version_id: job.config.id,
         investigation_id: job.investigationId,
-        issue_id: job.issue.id,
+        ...(suggestionJob
+          ? { suggestion_id: job.suggestion.id }
+          : { issue_id: job.issue.id }),
         pr_number: result.number,
         pr_url: result.url,
         repository: selected.repository.fullName,

@@ -4,6 +4,7 @@ import { databaseConnectionString } from "./db/client.js";
 import { investigationRequestSchema } from "./investigations/input.js";
 import { agentPrModeSchema } from "./agents/config.js";
 import {
+  codeChangeRemediationSchema,
   issueEvidenceSchema,
   issueRemediationSubmissionSchema,
   issueSeveritySchema,
@@ -79,17 +80,31 @@ export type SlackThreadInvestigationJob = z.infer<
   typeof slackThreadInvestigationJobSchema
 >;
 
-export const remediationJobSchema = z.object({
+const remediationJobBaseSchema = z.object({
   kind: z.literal("remediation"),
   config: runtimeAgentJobConfigSchema,
   investigationId: z.uuid(),
-  issue: remediationIssueSchema,
-  selectedRemediation: issueRemediationSubmissionSchema.optional(),
   queuedAt: z.iso.datetime(),
   remediationRequestId: z.uuid(),
   targetRepository: z.string().trim().min(1).optional(),
   runtimeProfileId: z.uuid(),
 });
+
+export const remediationJobSchema = z.union([
+  remediationJobBaseSchema.extend({
+    issue: remediationIssueSchema,
+    selectedRemediation: issueRemediationSubmissionSchema.optional(),
+  }),
+  remediationJobBaseSchema.extend({
+    suggestion: z.object({
+      id: z.uuid(),
+      title: z.string().min(1),
+      subtitle: z.string().min(1),
+      detail: z.string().min(1),
+    }),
+    selectedRemediation: codeChangeRemediationSchema,
+  }),
+]);
 
 export type RemediationJob = z.infer<typeof remediationJobSchema>;
 
@@ -120,7 +135,7 @@ export const linearTicketJobSchema = z.object({
   requestId: z.uuid(),
 });
 export type LinearTicketJob = z.infer<typeof linearTicketJobSchema>;
-export const responderJobSchema = z.discriminatedUnion("kind", [
+export const responderJobSchema = z.union([
   investigationJobSchema,
   remediationJobSchema,
 ]);

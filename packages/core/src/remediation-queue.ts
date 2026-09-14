@@ -7,6 +7,14 @@ import {
   recoverAbandonedIssuePullRequest,
   setIssuePullRequestSession,
 } from "./db/pull-requests.js";
+import {
+  claimSuggestionPullRequestForRemediation,
+  failSuggestionPullRequest,
+  getSuggestionPullRequestForRemediation,
+  listStaleCreatingSuggestionPullRequests,
+  recoverAbandonedSuggestionPullRequest,
+  setSuggestionPullRequestSession,
+} from "./db/suggestion-pull-requests.js";
 import { refreshIssuePullRequestSlackMessages } from "./integrations/slack-remediations.js";
 import {
   investigationQueue,
@@ -72,6 +80,24 @@ export async function recoverAbandonedIssueRemediations(
     }
   }
 
+  return recovered;
+}
+
+export async function recoverAbandonedSuggestionRemediations(
+  queue: RemediationRecoveryQueue,
+  now = new Date(),
+): Promise<string[]> {
+  const staleBefore = new Date(now.getTime() - abandonedRemediationRequestAgeMs);
+  const candidates = await listStaleCreatingSuggestionPullRequests(staleBefore);
+  const recovered: string[] = [];
+  for (const candidate of candidates) {
+    const key = `remediation:${candidate.requestId}`;
+    const jobs = await queue.findJobs(remediationQueue, { key });
+    if (jobs.some((job) => !terminalRemediationJobStates.has(job.state))) continue;
+    if (await recoverAbandonedSuggestionPullRequest(candidate.requestId, staleBefore)) {
+      recovered.push(candidate.requestId);
+    }
+  }
   return recovered;
 }
 
@@ -163,6 +189,77 @@ export async function queueIssueRemediationJob(
         error instanceof Error ? error.message : "Unable to start remediation",
       );
       await refreshIssuePullRequestSlackMessages(requestId);
+    }
+    throw error;
+  }
+}
+
+export async function queueSuggestionRemediationJob(
+  queue: RemediationJobQueue,
+  requestId: string,
+) {
+  let claimed = false;
+  try {
+    const remediation = await getSuggestionPullRequestForRemediation(requestId);
+    if (remediation.status !== "queued") {
+      throw new Error("Pull request request is no longer active");
+    }
+    const config = await getRuntimeAgentConfig(remediation.agentConfigVersionId);
+    if (!config) throw new Error("Agent configuration is unavailable");
+
+    await claimSuggestionPullRequestForRemediation(remediation.requestId);
+    claimed = true;
+    const jobId = await queue.send(
+      remediationQueue,
+      {
+        kind: "remediation",
+        config,
+        investigationId: remediation.investigationId,
+        suggestion: {
+          id: remediation.suggestionId,
+          title: remediation.suggestionTitle,
+          subtitle: remediation.suggestionSubtitle,
+          detail: remediation.suggestionDetail,
+        },
+        selectedRemediation: remediation.codeChange,
+        ...(remediation.repositoryFullName
+          ? { targetRepository: remediation.repositoryFullName }
+          : {}),
+        queuedAt: new Date().toISOString(),
+        remediationRequestId: remediation.requestId,
+        runtimeProfileId: remediation.runtimeProfileId,
+      },
+      { singletonKey: `remediation:${remediation.requestId}` },
+    );
+    if (!jobId) {
+      claimed = false;
+      throw new Error("The remediation job was not created");
+    }
+    try {
+      await setSuggestionPullRequestSession(
+        remediation.requestId,
+        `openai-daytona:${jobId}`,
+      );
+    } catch (error) {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "suggestion_remediation_session_record_failed",
+        jobId,
+        requestId: remediation.requestId,
+      }));
+    }
+    return { jobId, requestId: remediation.requestId };
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      event: "suggestion_remediation_queue_failed",
+      requestId,
+    }));
+    if (claimed) {
+      await failSuggestionPullRequest(
+        requestId,
+        error instanceof Error ? error.message : "Unable to start remediation",
+      );
     }
     throw error;
   }
