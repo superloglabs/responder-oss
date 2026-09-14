@@ -1,4 +1,9 @@
-const oauthReturnParameters = ["error", "error_description", "signed_up"];
+const oauthReturnParameters = [
+  "error",
+  "error_description",
+  "signed_up",
+  "signup_intent",
+];
 
 function cleanOAuthReturnUrl(currentUrl: string): URL {
   const url = new URL(currentUrl);
@@ -8,10 +13,16 @@ function cleanOAuthReturnUrl(currentUrl: string): URL {
   return url;
 }
 
-export function socialAuthUrls(currentUrl: string) {
+export function socialAuthUrls(
+  currentUrl: string,
+  explicitSignupIntent?: string,
+) {
   const returnUrl = cleanOAuthReturnUrl(currentUrl);
   const newUserUrl = new URL(returnUrl);
   newUserUrl.searchParams.set("signed_up", "1");
+  if (explicitSignupIntent) {
+    newUserUrl.searchParams.set("signup_intent", explicitSignupIntent);
+  }
 
   return {
     callbackURL: returnUrl.toString(),

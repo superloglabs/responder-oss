@@ -8,6 +8,7 @@ import {
 } from "../social-auth-url";
 import { trackXSignupPixel } from "../x-pixel";
 import {
+  explicitSignupIntent,
   explicitSignupStorageKey,
   legacySessionRoutingIntent,
   tryLegacyEmailSignIn,
@@ -73,9 +74,10 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
     // First-time social signups land with this marker so the X signup pixel
     // fires exactly once, in AuthGate. Stale OAuth parameters are removed so
     // retries do not accumulate duplicate errors in the return URL.
-    const returnUrls = socialAuthUrls(window.location.href);
+    const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
+    const returnUrls = socialAuthUrls(window.location.href, signupIntent);
     if (isCreatingAccount) {
-      sessionStorage.setItem(explicitSignupStorageKey, "1");
+      sessionStorage.setItem(explicitSignupStorageKey, `social:${signupIntent}`);
     }
     const result = await authClient.signIn.social({
       provider,
@@ -113,7 +115,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       // AuthGate clears a legacy marker after the newly-created session is
       // visible. Keeping this intent in sessionStorage closes the race between
       // Better Auth returning a session and the clear request completing.
-      sessionStorage.setItem(explicitSignupStorageKey, "1");
+      sessionStorage.setItem(explicitSignupStorageKey, "email");
     }
     const result = isCreatingAccount
       ? await authClient.signUp.email({
@@ -564,14 +566,21 @@ export function AuthGate({ children }: AuthGateProps) {
     if (!signedInUserId) return;
     const url = new URL(window.location.href);
     const newSocialUser = url.searchParams.get("signed_up") === "1";
+    const returnedSignupIntent = url.searchParams.get("signup_intent");
     const intent = legacySessionRoutingIntent({
-      explicitSignup: sessionStorage.getItem(explicitSignupStorageKey) === "1",
+      explicitSignup: explicitSignupIntent(
+        sessionStorage.getItem(explicitSignupStorageKey),
+        returnedSignupIntent,
+      ),
       newSocialUser,
     });
     sessionStorage.removeItem(explicitSignupStorageKey);
-    if (newSocialUser) {
+    if (newSocialUser || returnedSignupIntent) {
       url.searchParams.delete("signed_up");
+      url.searchParams.delete("signup_intent");
       window.history.replaceState(window.history.state, "", url);
+    }
+    if (intent.trackSocialSignup) {
       trackXSignupPixel(signedInUserId);
     }
     let cancelled = false;

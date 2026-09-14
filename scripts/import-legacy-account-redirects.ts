@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import { notInArray } from "drizzle-orm";
 import { closeDatabase, getDatabase } from "../packages/core/src/db/client.js";
 import { normalizeLegacyEmail } from "../packages/core/src/db/legacy-account-redirect.js";
 import { legacyAccountRedirect } from "../packages/core/src/db/schema.js";
@@ -89,7 +90,13 @@ await database.transaction(async (transaction) => {
   const now = new Date();
   await transaction
     .update(legacyAccountRedirect)
-    .set({ redirectEnabled: false, sourceSnapshot, updatedAt: now });
+    .set({ redirectEnabled: false, sourceSnapshot, updatedAt: now })
+    .where(
+      notInArray(
+        legacyAccountRedirect.emailNormalized,
+        rows.map((row) => row.emailNormalized),
+      ),
+    );
   for (let index = 0; index < rows.length; index += 100) {
     const batch = rows.slice(index, index + 100).map((row) => ({
       ...row,
