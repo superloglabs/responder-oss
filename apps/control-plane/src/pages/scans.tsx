@@ -347,8 +347,15 @@ function configurationWithSources(
   const visibleAccountIds = new Set(
     sources.flatMap((source) => source.accountId ? [source.accountId] : []),
   );
+  const hiddenConnectedAccountIds = new Set(
+    (options?.accounts ?? [])
+      .filter((account) => account.provider === "custom_mcp")
+      .map((account) => account.id),
+  );
   const preservedAccountIds = configuration.contextAccountIds.filter(
-    (accountId) => !visibleAccountIds.has(accountId),
+    (accountId) =>
+      !visibleAccountIds.has(accountId) &&
+      hiddenConnectedAccountIds.has(accountId),
   );
   const contextAccountIds = sources.flatMap((source) =>
     source.kind === "account" && source.enabled && source.accountId

@@ -195,10 +195,22 @@ describe("investigation queue", () => {
       created.investigationId,
     );
     expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
+    expect(mocks.reserveInvestigation).toHaveBeenCalledWith(
+      created.config.organizationId,
+      created.investigationId,
+    );
+    expect(mocks.finalizeInvestigationReservation).toHaveBeenCalledWith(
+      "rerun-reservation-1",
+      "confirm",
+    );
     expect(mocks.bossSend).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ investigationId: created.investigationId }),
-      { singletonKey: `infrastructure-retry:${created.investigationId}` },
+      {
+        singletonKey: expect.stringMatching(
+          new RegExp(`^retry:${created.investigationId}:\\d+$`),
+        ),
+      },
     );
   });
 

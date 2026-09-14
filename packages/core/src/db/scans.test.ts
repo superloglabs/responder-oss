@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   createScanInvestigationRequest,
+  releaseScanRunLease,
   ScanConfigurationError,
 } from "./scans.js";
 
@@ -126,5 +129,31 @@ describe("scan investigation requests", () => {
         code: "scan_already_running",
       }),
     );
+  });
+});
+
+describe("scan run leases", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("casts the scheduled completion time for PostgreSQL interval arithmetic", async () => {
+    const where = vi.fn().mockResolvedValue([]);
+    const set = vi.fn((values: Record<string, unknown>) => {
+      void values;
+      return { where };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await releaseScanRunLease({
+      advanceSchedule: true,
+      completedAt: new Date("2026-09-14T09:15:00.000Z"),
+      leaseId: "06060606-0606-4606-8606-060606060606",
+      organizationId: "organization-1",
+    });
+
+    const nextRunAt = set.mock.calls[0]![0].nextRunAt;
+    const query = new PgDialect().sqlToQuery(nextRunAt as SQL);
+    expect(query.sql).toContain("cast($1 as timestamptz)");
   });
 });

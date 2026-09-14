@@ -482,7 +482,7 @@ export async function releaseScanRunLease(input: {
         ? {
             nextRunAt: sql<Date | null>`case
               when ${scanConfigurations.frequencyHours} is null then null
-              else ${input.completedAt} + (${scanConfigurations.frequencyHours} * interval '1 hour')
+              else cast(${input.completedAt} as timestamptz) + (${scanConfigurations.frequencyHours} * interval '1 hour')
             end`,
           }
         : {}),
