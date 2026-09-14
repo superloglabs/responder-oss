@@ -186,6 +186,7 @@ describe("integration account tenancy", () => {
       }),
     ).rejects.toThrow("temporary network failure");
 
+    expect(set).toHaveBeenCalledTimes(2);
     expect(set.mock.calls.at(-1)?.[0]).not.toHaveProperty("status");
   });
 
