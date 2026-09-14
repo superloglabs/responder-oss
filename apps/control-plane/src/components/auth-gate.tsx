@@ -7,6 +7,12 @@ import {
   socialAuthUrls,
 } from "../social-auth-url";
 import { trackXSignupPixel } from "../x-pixel";
+import {
+  explicitSignupIntent,
+  explicitSignupStorageKey,
+  legacySessionRoutingIntent,
+  tryLegacyEmailSignIn,
+} from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { ProviderGlyph } from "./icons";
@@ -39,6 +45,11 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
   const [error, setError] = useState<string | null>(() =>
     socialAuthErrorMessage(window.location.search),
   );
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("error")) {
+      sessionStorage.removeItem(explicitSignupStorageKey);
+    }
+  }, []);
   let heading = isCreatingAccount ? "Create your account" : "Welcome back";
   let description = isCreatingAccount
     ? "Start a workspace for your incident response agents."
@@ -63,12 +74,19 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
     // First-time social signups land with this marker so the X signup pixel
     // fires exactly once, in AuthGate. Stale OAuth parameters are removed so
     // retries do not accumulate duplicate errors in the return URL.
-    const returnUrls = socialAuthUrls(window.location.href);
+    const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
+    const returnUrls = socialAuthUrls(window.location.href, signupIntent);
+    if (isCreatingAccount) {
+      sessionStorage.setItem(explicitSignupStorageKey, `social:${signupIntent}`);
+    }
     const result = await authClient.signIn.social({
       provider,
       ...returnUrls,
     });
     if (result.error || !result.data) {
+      if (isCreatingAccount) {
+        sessionStorage.removeItem(explicitSignupStorageKey);
+      }
       console.error(
         JSON.stringify({
           event: "social_sign_in_failed",
@@ -97,7 +115,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       // AuthGate clears a legacy marker after the newly-created session is
       // visible. Keeping this intent in sessionStorage closes the race between
       // Better Auth returning a session and the clear request completing.
-      sessionStorage.setItem("superlog_explicit_signup", "1");
+      sessionStorage.setItem(explicitSignupStorageKey, "email");
     }
     const result = isCreatingAccount
       ? await authClient.signUp.email({
@@ -107,9 +125,18 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
         })
       : await authClient.signIn.email({ email, password });
 
-    setIsSubmitting(false);
     if (result.error) {
-      if (isCreatingAccount) sessionStorage.removeItem("superlog_explicit_signup");
+      if (isCreatingAccount) {
+        sessionStorage.removeItem(explicitSignupStorageKey);
+      } else {
+        const targetUrl = await tryLegacyEmailSignIn(email, password);
+        if (targetUrl) {
+          console.info(JSON.stringify({ event: "legacy_email_handoff_success" }));
+          window.location.replace(targetUrl);
+          return;
+        }
+      }
+      setIsSubmitting(false);
       console.error(
         JSON.stringify({
           event: isCreatingAccount
@@ -121,6 +148,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       setError(result.error.message ?? "Authentication failed");
       return;
     }
+    setIsSubmitting(false);
     console.info(
       JSON.stringify({
         event: isCreatingAccount
@@ -537,45 +565,46 @@ export function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     if (!signedInUserId) return;
     const url = new URL(window.location.href);
-    const socialSignup = url.searchParams.get("signed_up") === "1";
-    const explicitSignup =
-      socialSignup || sessionStorage.getItem("superlog_explicit_signup") === "1";
-    if (!explicitSignup) return;
-    sessionStorage.removeItem("superlog_explicit_signup");
-    void fetch("/api/legacy-account-redirect/clear", {
-      credentials: "include",
-      method: "POST",
-    }).catch(() => undefined);
-    if (socialSignup) {
+    const newSocialUser = url.searchParams.get("signed_up") === "1";
+    const returnedSignupIntent = url.searchParams.get("signup_intent");
+    const intent = legacySessionRoutingIntent({
+      explicitSignup: explicitSignupIntent(
+        sessionStorage.getItem(explicitSignupStorageKey),
+        returnedSignupIntent,
+      ),
+      newSocialUser,
+    });
+    sessionStorage.removeItem(explicitSignupStorageKey);
+    if (newSocialUser || returnedSignupIntent) {
       url.searchParams.delete("signed_up");
+      url.searchParams.delete("signup_intent");
       window.history.replaceState(window.history.state, "", url);
+    }
+    if (intent.trackSocialSignup) {
       trackXSignupPixel(signedInUserId);
     }
-  }, [signedInUserId]);
-
-  useEffect(() => {
-    if (!signedInUserId) return;
-    const url = new URL(window.location.href);
-    if (
-      url.searchParams.get("signed_up") === "1" ||
-      sessionStorage.getItem("superlog_explicit_signup") === "1"
-    ) {
-      return;
-    }
     let cancelled = false;
-    void fetch("/api/legacy-account-redirect", { credentials: "include" })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return (await response.json()) as {
-          redirect?: boolean;
-          targetUrl?: string;
-        };
-      })
-      .then((routing) => {
-        if (cancelled || !routing?.redirect || !routing.targetUrl) return;
-        window.location.replace(routing.targetUrl);
-      })
-      .catch(() => undefined);
+    async function routeLegacyAccount() {
+      if (intent.clearMarker) {
+        await fetch("/api/legacy-account-redirect/clear", {
+          credentials: "include",
+          method: "POST",
+        }).catch(() => undefined);
+        return;
+      }
+      if (!intent.lookupMarker) return;
+      const response = await fetch("/api/legacy-account-redirect", {
+        credentials: "include",
+      }).catch(() => null);
+      if (!response?.ok) return;
+      const routing = (await response.json()) as {
+        redirect?: boolean;
+        targetUrl?: string;
+      };
+      if (cancelled || !routing.redirect || !routing.targetUrl) return;
+      window.location.replace(routing.targetUrl);
+    }
+    void routeLegacyAccount();
     return () => {
       cancelled = true;
     };

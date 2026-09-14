@@ -4,7 +4,8 @@ import { socialAuthErrorMessage, socialAuthUrls } from "./social-auth-url.js";
 describe("social auth return URLs", () => {
   it("removes stale callback state while preserving application parameters", () => {
     const urls = socialAuthUrls(
-      "https://responder.example/app?twclid=tracking&error=email_not_found&error=email_not_found&error_description=missing&signed_up=1",
+      "https://responder.example/app?twclid=tracking&error=email_not_found&error=email_not_found&error_description=missing&signed_up=1&signup_intent=stale",
+      "signup-attempt",
     );
 
     expect(urls.callbackURL).toBe(
@@ -14,7 +15,7 @@ describe("social auth return URLs", () => {
       "https://responder.example/app?twclid=tracking",
     );
     expect(urls.newUserCallbackURL).toBe(
-      "https://responder.example/app?twclid=tracking&signed_up=1",
+      "https://responder.example/app?twclid=tracking&signed_up=1&signup_intent=signup-attempt",
     );
   });
 });
