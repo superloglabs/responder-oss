@@ -18,7 +18,12 @@ const listQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
-const cursorSchema = z.object({ createdAt: z.iso.datetime(), id: z.uuid() });
+const cursorSchema = z.object({
+  createdAt: z.string().regex(
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?[+-]\d{2}(?::?\d{2})?$/u,
+  ),
+  id: z.uuid(),
+});
 
 function decodeCursor(value: string | undefined) {
   if (!value) return undefined;
@@ -26,16 +31,16 @@ function decodeCursor(value: string | undefined) {
     const parsed = cursorSchema.parse(
       JSON.parse(Buffer.from(value, "base64url").toString("utf8")),
     );
-    return { createdAt: new Date(parsed.createdAt), id: parsed.id };
+    return parsed;
   } catch {
     return null;
   }
 }
 
-function encodeCursor(cursor: { createdAt: Date; id: string } | null) {
+function encodeCursor(cursor: { createdAt: string; id: string } | null) {
   return cursor
     ? Buffer.from(JSON.stringify({
-        createdAt: cursor.createdAt.toISOString(),
+        createdAt: cursor.createdAt,
         id: cursor.id,
       })).toString("base64url")
     : null;

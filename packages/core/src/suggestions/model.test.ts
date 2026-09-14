@@ -55,7 +55,7 @@ describe("suggestion submission", () => {
     );
   });
 
-  it("rejects ambiguous code changes that omit more than one repository", () => {
+  it("rejects multi-entry code changes that omit a repository", () => {
     const result = suggestionSubmissionSchema.safeParse({
       title: "Record queue wait time for investigations.",
       subtitle: "Current traces begin after a worker claims a job, hiding queue pressure.",

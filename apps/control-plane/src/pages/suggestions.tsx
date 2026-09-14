@@ -257,7 +257,11 @@ export function SuggestionsPage() {
   }>({ suggestionId: "", tab: "description" });
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openedIds, setOpenedIds] = useState<string[]>([]);
-  const [viewedPullRequestIndex, setViewedPullRequestIndex] = useState(0);
+  const [failedDetailId, setFailedDetailId] = useState<string | null>(null);
+  const [pullRequestView, setPullRequestView] = useState({
+    suggestionId: "",
+    index: 0,
+  });
   const selected = suggestionId
     ? isStoryboard
       ? storyboardSuggestions.find((item) => item.id === suggestionId) ?? null
@@ -274,6 +278,9 @@ export function SuggestionsPage() {
   const openedPullRequests = activeRequests.filter(
     (request) => request.pullRequestUrl,
   );
+  const viewedPullRequestIndex = pullRequestView.suggestionId === suggestionId
+    ? pullRequestView.index
+    : 0;
   const hasOpenedPullRequest = Boolean(
     selected &&
       (openedIds.includes(selected.id) || openedPullRequests.length > 0),
@@ -297,6 +304,7 @@ export function SuggestionsPage() {
       ? fetchSuggestion(suggestionId).then((response) => {
           if (cancelled) return;
           setDetail(response.suggestion);
+          setFailedDetailId(null);
           setPullRequests(response.pullRequestState.requests);
         })
       : fetchSuggestions().then((response) => {
@@ -309,6 +317,7 @@ export function SuggestionsPage() {
     void request
       .catch((caught: unknown) => {
         if (!cancelled) {
+          if (suggestionId) setFailedDetailId(suggestionId);
           setError(
             caught instanceof Error ? caught.message : "Unable to load suggestions",
           );
@@ -355,7 +364,10 @@ export function SuggestionsPage() {
         viewedPullRequestIndex % openedPullRequests.length
       ]!;
       window.open(request.pullRequestUrl!, "_blank", "noopener,noreferrer");
-      setViewedPullRequestIndex((current) => current + 1);
+      setPullRequestView({
+        suggestionId: selected.id,
+        index: viewedPullRequestIndex + 1,
+      });
       return;
     }
     setOpeningId(selected.id);
@@ -414,7 +426,10 @@ export function SuggestionsPage() {
   }
 
   if (suggestionId) {
-    if (loading) {
+    if (
+      loading ||
+      (!isStoryboard && !selected && failedDetailId !== suggestionId)
+    ) {
       return (
         <AppShell active="suggestions" density="compact">
           <p className="suggestionDetail__loading">Loading suggestion…</p>

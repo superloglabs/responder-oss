@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  legacySuggestionFingerprint,
   suggestionEmbeddingText,
   suggestionFingerprint,
   suggestionSearchPattern,
@@ -43,9 +42,6 @@ describe("suggestion search data", () => {
       detail: "Details",
     };
     expect(suggestionFingerprint(first)).not.toBe(suggestionFingerprint(second));
-    expect(legacySuggestionFingerprint(first)).toBe(
-      legacySuggestionFingerprint(second),
-    );
   });
 
   it("escapes text-search wildcard and escape characters", () => {

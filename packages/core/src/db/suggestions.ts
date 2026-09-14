@@ -39,15 +39,6 @@ export function suggestionFingerprint(input: SuggestionSubmission): string {
   return createHash("sha256").update(normalizedSuggestionText(input)).digest("hex");
 }
 
-export function legacySuggestionFingerprint(input: SuggestionSubmission): string {
-  const normalized = [input.title, input.subtitle, input.detail]
-    .join("\n")
-    .toLocaleLowerCase("en-US")
-    .replace(/\s+/gu, " ")
-    .trim();
-  return createHash("sha256").update(normalized).digest("hex");
-}
-
 export function suggestionEmbeddingText(input: Pick<
   SuggestionSubmission,
   "detail" | "subtitle" | "title"
@@ -143,7 +134,6 @@ export async function createSuggestionIfMissing(input: {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.organizationId}))`);
     const fingerprint = suggestionFingerprint(input.suggestion);
-    const legacyFingerprint = legacySuggestionFingerprint(input.suggestion);
     const exactRows = await tx
       .select({
         id: suggestions.id,
@@ -159,10 +149,7 @@ export async function createSuggestionIfMissing(input: {
       .where(
         and(
           eq(suggestions.organizationId, input.organizationId),
-          or(
-            eq(suggestions.fingerprint, fingerprint),
-            eq(suggestions.fingerprint, legacyFingerprint),
-          ),
+          eq(suggestions.fingerprint, fingerprint),
         ),
       )
       .limit(1);
@@ -227,12 +214,11 @@ export async function createSuggestionIfMissing(input: {
 export async function listSuggestions(
   organizationId: string,
   options: {
-    cursor?: { createdAt: Date; id: string };
+    cursor?: { createdAt: string; id: string };
     limit?: number;
   } = {},
 ) {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
-  const cursorCreatedAt = sql<Date>`date_trunc('milliseconds', ${suggestions.createdAt})`;
   const rows = await getDatabase()
     .select({
       id: suggestions.id,
@@ -240,24 +226,32 @@ export async function listSuggestions(
       subtitle: suggestions.subtitle,
       codeChangeAvailable: sql<boolean>`${suggestions.codeChange} is not null`,
       createdAt: suggestions.createdAt,
+      cursorCreatedAt: sql<string>`${suggestions.createdAt}::text`,
     })
     .from(suggestions)
     .where(
       and(
         eq(suggestions.organizationId, organizationId),
         ...(options.cursor
-          ? [sql`(${cursorCreatedAt}, ${suggestions.id}) < (${options.cursor.createdAt}, ${options.cursor.id})`]
+          ? [sql`(${suggestions.createdAt}, ${suggestions.id}) < (${options.cursor.createdAt}::timestamptz, ${options.cursor.id})`]
           : []),
       ),
     )
-    .orderBy(desc(cursorCreatedAt), desc(suggestions.id))
+    .orderBy(desc(suggestions.createdAt), desc(suggestions.id))
     .limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const last = page.at(-1);
+  const pageRows = rows.slice(0, limit);
+  const page = pageRows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    subtitle: row.subtitle,
+    codeChangeAvailable: row.codeChangeAvailable,
+    createdAt: row.createdAt,
+  }));
+  const last = pageRows.at(-1);
   return {
     suggestions: page,
     nextCursor: rows.length > limit && last
-      ? { createdAt: last.createdAt, id: last.id }
+      ? { createdAt: last.cursorCreatedAt, id: last.id }
       : null,
   };
 }
