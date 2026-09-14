@@ -104,10 +104,10 @@ await database.transaction(async (transaction) => {
       .onConflictDoUpdate({
         target: legacyAccountRedirect.emailNormalized,
         set: {
-          // The old user id is stable for a normalized email. Keep the
-          // previously imported id on conflict and refresh routing metadata.
+          // Keep both the stable old user id and the user's current routing
+          // choice. An explicit signup clears redirectEnabled, and refreshing
+          // the source snapshot must not opt that user back into the handoff.
           oldUserId: legacyAccountRedirect.oldUserId,
-          redirectEnabled: true,
           sourceSnapshot,
           updatedAt: now,
         },
