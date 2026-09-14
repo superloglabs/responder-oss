@@ -29,8 +29,11 @@ import {
   githubInstallUrl,
 } from "./github.js";
 import {
+  deleteSentryInstallation,
   listSentryProjects,
   refreshSentryGrant,
+  SentryApiError,
+  sentryIntegrationSettingsUrl,
   sentryInstallUrl,
 } from "./sentry.js";
 import {
@@ -558,6 +561,71 @@ describe("integration providers", () => {
     expect(JSON.parse(manualRequest[1].body as string)).toEqual({
       grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer",
     });
+  });
+
+  it("uninstalls a Sentry App with its installation token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      deleteSentryInstallation(
+        "installation-token",
+        "40000000-0000-4000-8000-000000000000",
+      ),
+    ).resolves.toBe("deleted");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://sentry.io/api/0/sentry-app-installations/40000000-0000-4000-8000-000000000000/",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          authorization: "Bearer installation-token",
+        }),
+      }),
+    );
+  });
+
+  it("treats an already removed Sentry App as uninstalled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
+    );
+
+    await expect(
+      deleteSentryInstallation(
+        "installation-token",
+        "40000000-0000-4000-8000-000000000000",
+      ),
+    ).resolves.toBe("already_deleted");
+  });
+
+  it("preserves Sentry uninstall authorization failures for guided recovery", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 403 })),
+    );
+
+    await expect(
+      deleteSentryInstallation(
+        "installation-token",
+        "40000000-0000-4000-8000-000000000000",
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<SentryApiError>>({
+        httpStatus: 403,
+        operation: "installation",
+      }),
+    );
+  });
+
+  it("builds a safe Sentry organization integration settings URL", () => {
+    expect(sentryIntegrationSettingsUrl("example-team")).toBe(
+      "https://example-team.sentry.io/settings/integrations/",
+    );
+    expect(sentryIntegrationSettingsUrl("example.invalid/path")).toBe(
+      "https://sentry.io/settings/",
+    );
   });
 
   it("follows trusted regional Sentry project pagination", async () => {

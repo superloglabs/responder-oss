@@ -253,3 +253,36 @@ export async function verifySentryInstallation(
     );
   }
 }
+
+export async function deleteSentryInstallation(
+  accessToken: string,
+  installationId: string,
+): Promise<"deleted" | "already_deleted"> {
+  const response = await fetch(
+    `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(installationId)}/`,
+    {
+      method: "DELETE",
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+  if (response.status === 404) return "already_deleted";
+  if (!response.ok) {
+    throw new SentryApiError(
+      "Unable to uninstall Sentry integration",
+      response.status,
+      "installation",
+    );
+  }
+  return "deleted";
+}
+
+export function sentryIntegrationSettingsUrl(organizationSlug: string): string {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(organizationSlug)) {
+    return "https://sentry.io/settings/";
+  }
+  return `https://${organizationSlug}.sentry.io/settings/integrations/`;
+}

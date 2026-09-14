@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import { findAgentsForSentryIssue } from "../../../../packages/core/src/db/agents.js";
+import { deleteIntegrationAccountsByExternalId } from "../../../../packages/core/src/db/integrations.js";
 import { queueInvestigation } from "../investigations/queue.js";
 
 const sentryIssueSchema = z
@@ -39,6 +40,11 @@ const sentryIssueWebhookSchema = z.object({
   installation: z.object({ uuid: z.uuid() }),
   data: z.object({ issue: sentryIssueSchema }),
   actor: z.unknown().optional(),
+});
+
+const sentryInstallationDeletedWebhookSchema = z.object({
+  action: z.literal("deleted"),
+  installation: z.object({ uuid: z.uuid() }),
 });
 
 const investigationStartResponseSchema = z.object({
@@ -169,7 +175,22 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ error: "Invalid Sentry signature" }, 401);
   }
 
-  if (context.req.header("sentry-hook-resource") !== "issue") {
+  const resource = context.req.header("sentry-hook-resource");
+  if (resource === "installation") {
+    const parsed = sentryInstallationDeletedWebhookSchema.safeParse(
+      parseJson(rawBody),
+    );
+    if (!parsed.success) {
+      return context.json({ ok: true, ignored: true });
+    }
+    const removedAccounts = await deleteIntegrationAccountsByExternalId({
+      externalAccountId: parsed.data.installation.uuid,
+      provider: "sentry",
+    });
+    return context.json({ ok: true, removedAccounts });
+  }
+
+  if (resource !== "issue") {
     return context.json({ ok: true, ignored: true });
   }
 
