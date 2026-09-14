@@ -10,7 +10,7 @@ const pollIntervalMs = 30_000;
 let drain: Promise<void> | undefined;
 let poller: NodeJS.Timeout | undefined;
 
-async function runDueScans(): Promise<void> {
+export async function runDueScans(): Promise<void> {
   const dueScans = await claimDueScans();
   await Promise.all(
     dueScans.map(async (scan) => {
@@ -20,7 +20,7 @@ async function runDueScans(): Promise<void> {
         const request = await createScanInvestigationRequest({
           organizationId: scan.organizationId,
           scheduledFor: executionTime,
-          externalEventId: `scheduled:${scan.organizationId}:${scan.scheduledFor.toISOString()}`,
+          externalEventId: `scheduled:${scan.organizationId}:${scan.scheduledFor.toISOString()}:${scan.leaseId}`,
         });
         const result = await queueInvestigation(request);
         advanceSchedule = true;
