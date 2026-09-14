@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDatabase } from "./client.js";
+import { suggestionCodeChangeSchema } from "../suggestions/model.js";
 import {
   agentConfigVersions,
   agents,
@@ -52,12 +53,16 @@ export async function queueSuggestionPullRequests(input: {
         "suggestion_not_found",
       );
     }
-    if (!suggestion.codeChange) {
+    const parsedCodeChange = suggestionCodeChangeSchema.safeParse(
+      suggestion.codeChange,
+    );
+    if (!parsedCodeChange.success || !parsedCodeChange.data) {
       throw new SuggestionPullRequestError(
         "This suggestion does not have a code change",
         "not_available",
       );
     }
+    const codeChange = parsedCodeChange.data;
     const existing = await tx
       .select({ id: suggestionPullRequests.id })
       .from(suggestionPullRequests)
@@ -82,7 +87,7 @@ export async function queueSuggestionPullRequests(input: {
     const inserted = await tx
       .insert(suggestionPullRequests)
       .values(
-        suggestion.codeChange.changes.map((change) => ({
+        codeChange.changes.map((change) => ({
           suggestionId: suggestion.id,
           investigationId: suggestion.investigationId,
           agentConfigVersionId: suggestion.agentConfigVersionId,
@@ -91,7 +96,7 @@ export async function queueSuggestionPullRequests(input: {
       )
       .onConflictDoNothing()
       .returning({ id: suggestionPullRequests.id });
-    if (inserted.length !== suggestion.codeChange.changes.length) {
+    if (inserted.length !== codeChange.changes.length) {
       throw new SuggestionPullRequestError(
         "A pull request has already been requested for this suggestion",
         "already_requested",
@@ -137,13 +142,16 @@ export async function getSuggestionPullRequestForRemediation(requestId: string) 
       "request_not_found",
     );
   }
-  if (!request.codeChange) {
+  const parsedCodeChange = suggestionCodeChangeSchema.safeParse(
+    request.codeChange,
+  );
+  if (!parsedCodeChange.success) {
     throw new SuggestionPullRequestError(
       "This suggestion does not have a code change",
       "not_available",
     );
   }
-  const codeChange = request.codeChange;
+  const codeChange = parsedCodeChange.data;
   let runtimeProfileId = request.runtimeProfileId;
   if (!runtimeProfileId) {
     const activeProfiles = await getDatabase()
@@ -332,7 +340,8 @@ export async function listStaleCreatingSuggestionPullRequests(staleBefore: Date)
         lt(suggestionPullRequests.updatedAt, staleBefore),
       ),
     )
-    .orderBy(desc(suggestionPullRequests.updatedAt));
+    .orderBy(desc(suggestionPullRequests.updatedAt))
+    .limit(100);
 }
 
 export async function recoverAbandonedSuggestionPullRequest(

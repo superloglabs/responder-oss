@@ -25,11 +25,14 @@ export interface SuggestionSearchCandidate {
 }
 
 function normalizedSuggestionText(input: SuggestionSubmission): string {
-  return [input.title, input.subtitle, input.detail]
-    .join("\n")
-    .toLocaleLowerCase("en-US")
-    .replace(/\s+/gu, " ")
-    .trim();
+  return JSON.stringify(
+    [input.title, input.subtitle, input.detail].map((value) =>
+      value
+        .toLocaleLowerCase("en-US")
+        .replace(/\s+/gu, " ")
+        .trim()
+    ),
+  );
 }
 
 export function suggestionFingerprint(input: SuggestionSubmission): string {
@@ -41,6 +44,13 @@ export function suggestionEmbeddingText(input: Pick<
   "detail" | "subtitle" | "title"
 >): string {
   return `${input.title}\n${input.subtitle}\n${input.detail}`;
+}
+
+export function suggestionSearchPattern(query: string): string {
+  return `%${query.trim()
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_")}%`;
 }
 
 function cosineSimilarity(left: number[], right: number[]): number {
@@ -85,7 +95,7 @@ export async function searchSuggestionsByText(
   query: string,
   limit = 10,
 ): Promise<SuggestionSearchCandidate[]> {
-  const pattern = `%${query.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+  const pattern = suggestionSearchPattern(query);
   return getDatabase()
     .select({
       id: suggestions.id,
@@ -201,19 +211,41 @@ export async function createSuggestionIfMissing(input: {
   });
 }
 
-export async function listSuggestions(organizationId: string) {
-  return getDatabase()
+export async function listSuggestions(
+  organizationId: string,
+  options: {
+    cursor?: { createdAt: Date; id: string };
+    limit?: number;
+  } = {},
+) {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const rows = await getDatabase()
     .select({
       id: suggestions.id,
       title: suggestions.title,
       subtitle: suggestions.subtitle,
-      detail: suggestions.detail,
-      codeChange: suggestions.codeChange,
+      codeChangeAvailable: sql<boolean>`${suggestions.codeChange} is not null`,
       createdAt: suggestions.createdAt,
     })
     .from(suggestions)
-    .where(eq(suggestions.organizationId, organizationId))
-    .orderBy(desc(suggestions.createdAt));
+    .where(
+      and(
+        eq(suggestions.organizationId, organizationId),
+        ...(options.cursor
+          ? [sql`(${suggestions.createdAt}, ${suggestions.id}) < (${options.cursor.createdAt}, ${options.cursor.id})`]
+          : []),
+      ),
+    )
+    .orderBy(desc(suggestions.createdAt), desc(suggestions.id))
+    .limit(limit + 1);
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    suggestions: page,
+    nextCursor: rows.length > limit && last
+      ? { createdAt: last.createdAt, id: last.id }
+      : null,
+  };
 }
 
 export async function getSuggestionDetail(
@@ -288,6 +320,7 @@ export async function listQueuedSuggestionPullRequestIds(): Promise<string[]> {
   const rows = await getDatabase()
     .select({ id: suggestionPullRequests.id })
     .from(suggestionPullRequests)
-    .where(eq(suggestionPullRequests.status, "queued"));
+    .where(eq(suggestionPullRequests.status, "queued"))
+    .limit(100);
   return rows.map((row) => row.id);
 }

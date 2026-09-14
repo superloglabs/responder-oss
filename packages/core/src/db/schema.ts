@@ -740,11 +740,11 @@ export const suggestionSettings = pgTable("suggestion_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-const activeSuggestionPullRequestPredicate = sql.raw(
+export const activePullRequestIndexPredicate = sql.raw(
   `"status" in ('queued', 'creating', 'created') and "repository_full_name" is null`,
 );
 
-const activeSuggestionRepositoryPullRequestPredicate = sql.raw(
+export const activePullRequestRepositoryIndexPredicate = sql.raw(
   `"status" in ('queued', 'creating', 'created') and "repository_full_name" is not null`,
 );
 
@@ -778,10 +778,10 @@ export const suggestionPullRequests = pgTable(
   (table) => [
     uniqueIndex("suggestion_pull_requests_active_suggestion_idx")
       .on(table.suggestionId)
-      .where(activeSuggestionPullRequestPredicate),
+      .where(activePullRequestIndexPredicate),
     uniqueIndex("suggestion_pull_requests_active_repository_idx")
       .on(table.suggestionId, table.repositoryFullName)
-      .where(activeSuggestionRepositoryPullRequestPredicate),
+      .where(activePullRequestRepositoryIndexPredicate),
     index("suggestion_pull_requests_suggestion_created_idx").on(
       table.suggestionId,
       table.createdAt,
@@ -790,13 +790,9 @@ export const suggestionPullRequests = pgTable(
   ],
 );
 
-export const activeIssuePullRequestIndexPredicate = sql.raw(
-  `"status" in ('queued', 'creating', 'created') and "repository_full_name" is null`,
-);
-
-export const activeIssuePullRequestRepositoryIndexPredicate = sql.raw(
-  `"status" in ('queued', 'creating', 'created') and "repository_full_name" is not null`,
-);
+export const activeIssuePullRequestIndexPredicate = activePullRequestIndexPredicate;
+export const activeIssuePullRequestRepositoryIndexPredicate =
+  activePullRequestRepositoryIndexPredicate;
 
 export const issuePullRequests = pgTable(
   "issue_pull_requests",

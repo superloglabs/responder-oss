@@ -196,11 +196,24 @@ function drainAbandonedRemediationRequests(): Promise<void> {
     recoverAbandonedIssueRemediations(boss),
     recoverAbandonedSuggestionRemediations(boss),
     listQueuedSuggestionPullRequestIds().then(async (requestIds) => {
-      await Promise.all(
+      const results = await Promise.allSettled(
         requestIds.map((requestId) =>
           queueSuggestionRemediationJob(remediationJobQueue, requestId),
         ),
       );
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") continue;
+        console.error(
+          JSON.stringify({
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            event: "suggestion_remediation_recovery_queue_failed",
+            requestId: requestIds[index],
+          }),
+        );
+      }
       return requestIds;
     }),
   ])
@@ -610,10 +623,31 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
         });
       },
       async (requestIds) => {
-        await Promise.all(
+        const queued = await Promise.allSettled(
           requestIds.map((requestId) =>
             queueSuggestionRemediationJob(remediationJobQueue, requestId),
           ),
+        );
+        await Promise.all(
+          queued.map(async (result, index) => {
+            if (result.status === "fulfilled") return;
+            const requestId = requestIds[index]!;
+            const error = result.reason;
+            console.error(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : String(error),
+                event: "automatic_suggestion_remediation_queue_failed",
+                investigationId: payload.investigationId,
+                requestId,
+              }),
+            );
+            await reportWorkerException(error, {
+              investigationId: payload.investigationId,
+              operation: "remediation",
+              organizationId: payload.config.organizationId,
+              requestId,
+            });
+          }),
         );
       },
     );

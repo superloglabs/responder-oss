@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { rankSuggestionCandidates } from "./suggestion-embeddings.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  rankSuggestionCandidates,
+  searchCanonicalSuggestions,
+} from "./suggestion-embeddings.js";
 
 const createdAt = new Date("2026-09-14T12:00:00.000Z");
 
@@ -38,5 +41,22 @@ describe("suggestion embeddings", () => {
       similarity: 1,
       createdAt: createdAt.toISOString(),
     });
+  });
+
+  it("runs text search once when embedding creation fails", async () => {
+    const searchText = vi.fn().mockResolvedValue([
+      candidate("text", null, null),
+    ]);
+
+    await expect(searchCanonicalSuggestions(
+      { organizationId: "org-1", query: "queue", limit: 5 },
+      {},
+      {
+        createEmbedding: vi.fn().mockRejectedValue(new Error("unavailable")),
+        listCandidates: vi.fn().mockResolvedValue([]),
+        searchText,
+      },
+    )).resolves.toMatchObject({ mode: "text" });
+    expect(searchText).toHaveBeenCalledTimes(1);
   });
 });

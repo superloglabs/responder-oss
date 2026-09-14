@@ -340,6 +340,7 @@ export function investigationInstructions(input: {
   vercelAccountIds?: string[];
   threadMode?: boolean;
   issueFollowupIssueCount?: number;
+  replay?: boolean;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
@@ -472,7 +473,7 @@ export function investigationInstructions(input: {
       : issueUpdateFollowup
         ? null
         : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
-    input.threadMode
+    input.threadMode || input.replay || issueUpdateFollowup
       ? null
       : "If missing telemetry materially blocks or slows the investigation, search_observability_suggestions before proposing anything. If no semantically equivalent suggestion exists, call create_observability_suggestion with a one-sentence title, a distinct one-sentence subtitle, and detailed Markdown. Include codeChange only after preparing and validating a complete patch in an attached repository. Do not create suggestions for merely nice-to-have telemetry or use them as a substitute for finishing the investigation.",
     issueUpdateFollowup
@@ -806,7 +807,7 @@ export async function runInvestigationAgent(
       organizationId: job.config.organizationId,
       environment,
     });
-    const suggestionTools = !threadMode && !replay
+    const suggestionTools = !threadMode && !replay && !issueUpdateFollowup
       ? [
           createSearchSuggestionsTool({
             organizationId: job.config.organizationId,
@@ -878,6 +879,7 @@ export async function runInvestigationAgent(
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
+      replay,
       ...(issueFollowup
         ? { issueFollowupIssueCount: issueFollowup.issueIds.length }
         : {}),

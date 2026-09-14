@@ -1,26 +1,24 @@
 import { z } from "zod";
-import { codeChangeRemediationSchema } from "../investigations/report.js";
+import {
+  codeChangeRemediationSchema,
+  oneSentenceSchema,
+} from "../investigations/report.js";
 
-const sentenceSegmenter = new Intl.Segmenter("en", {
-  granularity: "sentence",
-});
-
-function sentence(maxLength: number, description: string) {
-  return z
-    .string()
-    .trim()
-    .min(1)
-    .max(maxLength)
-    .refine(
-      (value) => [...sentenceSegmenter.segment(value)].length <= 1,
-      "Must contain at most one sentence",
-    )
-    .describe(description);
-}
+export const suggestionCodeChangeSchema = codeChangeRemediationSchema
+  .superRefine((change, context) => {
+    change.changes.forEach((part, index) => {
+      if (part.pullRequest) return;
+      context.addIssue({
+        code: "custom",
+        message: "New code changes require agent-authored pull request content",
+        path: ["changes", index, "pullRequest"],
+      });
+    });
+  });
 
 export const suggestionSubmissionSchema = z.object({
-  title: sentence(200, "One-sentence title for the observability improvement."),
-  subtitle: sentence(
+  title: oneSentenceSchema(200, "One-sentence title for the observability improvement."),
+  subtitle: oneSentenceSchema(
     500,
     "One non-repetitive sentence explaining the observability gap and its impact.",
   ),
@@ -32,17 +30,7 @@ export const suggestionSubmissionSchema = z.object({
     .describe(
       "Detailed Markdown explaining why the change helps, how to implement it, and how to validate it. Code snippets are allowed.",
     ),
-  codeChange: codeChangeRemediationSchema
-    .superRefine((change, context) => {
-      change.changes.forEach((part, index) => {
-        if (part.pullRequest) return;
-        context.addIssue({
-          code: "custom",
-          message: "New code changes require agent-authored pull request content",
-          path: ["changes", index, "pullRequest"],
-        });
-      });
-    })
+  codeChange: suggestionCodeChangeSchema
     .optional()
     .describe(
       "Optional complete code change using the same patch shape as an Issue code remediation.",
@@ -59,6 +47,16 @@ export const suggestionSubmissionSchema = z.object({
       code: "custom",
       message: "Subtitle must add information beyond the title",
       path: ["subtitle"],
+    });
+  }
+  const unresolvedRepositories = suggestion.codeChange?.changes.filter(
+    (change) => change.repository === null,
+  ) ?? [];
+  if (unresolvedRepositories.length > 1) {
+    context.addIssue({
+      code: "custom",
+      message: "At most one code change may omit its repository",
+      path: ["codeChange", "changes"],
     });
   }
 });

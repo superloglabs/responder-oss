@@ -351,6 +351,14 @@ export interface SuggestionListItem {
   title: string;
 }
 
+export interface SuggestionSummary {
+  codeChangeAvailable: boolean;
+  createdAt: string;
+  id: string;
+  subtitle: string;
+  title: string;
+}
+
 export interface SuggestionPullRequest {
   id: string;
   repositoryFullName: string | null;
@@ -531,11 +539,13 @@ export async function fetchIssue(issueId: string): Promise<IssueDetailResponse> 
   );
 }
 
-export async function fetchSuggestions(): Promise<{
-  suggestions: SuggestionListItem[];
+export async function fetchSuggestions(cursor?: string): Promise<{
+  suggestions: SuggestionSummary[];
+  nextCursor: string | null;
   settings: SuggestionSettings;
 }> {
-  return apiJson("/api/suggestions");
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiJson(`/api/suggestions${query}`);
 }
 
 export async function fetchSuggestion(

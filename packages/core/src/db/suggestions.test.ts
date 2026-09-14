@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { suggestionEmbeddingText, suggestionFingerprint } from "./suggestions.js";
+import {
+  suggestionEmbeddingText,
+  suggestionFingerprint,
+  suggestionSearchPattern,
+} from "./suggestions.js";
 
 describe("suggestion search data", () => {
   it("normalizes equivalent prose for exact deduplication", () => {
@@ -24,5 +28,22 @@ describe("suggestion search data", () => {
     })).toBe(
       "Record queue wait time.\nQueue pressure is invisible.\n## Why\n\nThis helps.",
     );
+  });
+
+  it("keeps title, subtitle, and detail boundaries in the fingerprint", () => {
+    expect(suggestionFingerprint({
+      title: "Record queue.",
+      subtitle: "Wait time is invisible.",
+      detail: "Details",
+    })).not.toBe(suggestionFingerprint({
+      title: "Record.",
+      subtitle: "Queue wait time is invisible.",
+      detail: "Details",
+    }));
+  });
+
+  it("escapes text-search wildcard and escape characters", () => {
+    expect(suggestionSearchPattern("src\\worker_file%"))
+      .toBe("%src\\\\worker\\_file\\%%");
   });
 });

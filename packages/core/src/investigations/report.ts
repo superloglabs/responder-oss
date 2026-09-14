@@ -6,7 +6,7 @@ const sentenceSegmenter = new Intl.Segmenter("en", {
   granularity: "sentence",
 });
 
-function oneSentenceSchema(maxLength: number, description: string) {
+export function oneSentenceSchema(maxLength: number, description: string) {
   return z
     .string()
     .trim()

@@ -54,4 +54,31 @@ describe("suggestion submission", () => {
       ]),
     );
   });
+
+  it("rejects ambiguous code changes that omit more than one repository", () => {
+    const result = suggestionSubmissionSchema.safeParse({
+      title: "Record queue wait time for investigations.",
+      subtitle: "Current traces begin after a worker claims a job, hiding queue pressure.",
+      detail: "## Why this helps\n\nQueue wait time separates capacity pressure from slow providers.",
+      codeChange: {
+        type: "code_change",
+        title: "Instrument investigation queue wait time",
+        description: "Records queue wait time when an investigation starts.",
+        changes: [
+          { repository: null, diff, pullRequest: { title: "First", body: "First" } },
+          { repository: null, diff, pullRequest: { title: "Second", body: "Second" } },
+        ],
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "At most one code change may omit its repository",
+        }),
+      ]),
+    );
+  });
 });

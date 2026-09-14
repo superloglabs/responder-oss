@@ -57,6 +57,18 @@ async function createEmbedding(
   return { model, vector };
 }
 
+export interface SuggestionSearchDependencies {
+  createEmbedding: typeof createEmbedding;
+  listCandidates: typeof listSuggestionSearchCandidates;
+  searchText: typeof searchSuggestionsByText;
+}
+
+const defaultSearchDependencies: SuggestionSearchDependencies = {
+  createEmbedding,
+  listCandidates: listSuggestionSearchCandidates,
+  searchText: searchSuggestionsByText,
+};
+
 export async function embedSuggestion(
   suggestion: { title: string; subtitle: string; detail: string },
   environment: NodeJS.ProcessEnv = process.env,
@@ -71,37 +83,44 @@ export async function embedSuggestion(
 export async function searchCanonicalSuggestions(
   input: { organizationId: string; query: string; limit: number },
   environment: NodeJS.ProcessEnv = process.env,
+  dependencies: SuggestionSearchDependencies = defaultSearchDependencies,
 ) {
+  let embedding: SuggestionEmbedding;
+  let candidates: Candidate[];
   try {
-    const [embedding, candidates, textMatches] = await Promise.all([
-      createEmbedding(input.query, environment),
-      listSuggestionSearchCandidates(input.organizationId),
-      searchSuggestionsByText(input.organizationId, input.query, input.limit),
+    [embedding, candidates] = await Promise.all([
+      dependencies.createEmbedding(input.query, environment),
+      dependencies.listCandidates(input.organizationId),
     ]);
-    const semantic = rankSuggestionCandidates(
-      candidates,
-      embedding.vector,
-      embedding.model,
-      input.limit,
-    );
-    const seen = new Set(semantic.map((candidate) => candidate.id));
-    return {
-      mode: "semantic" as const,
-      suggestions: [
-        ...semantic,
-        ...textMatches
-          .filter((candidate) => !seen.has(candidate.id))
-          .map((candidate) => serialize(candidate, null)),
-      ].slice(0, input.limit),
-    };
   } catch {
     return {
       mode: "text" as const,
-      suggestions: (await searchSuggestionsByText(
+      suggestions: (await dependencies.searchText(
         input.organizationId,
         input.query,
         input.limit,
       )).map((candidate) => serialize(candidate, null)),
     };
   }
+  const textMatches = await dependencies.searchText(
+    input.organizationId,
+    input.query,
+    input.limit,
+  );
+  const semantic = rankSuggestionCandidates(
+    candidates,
+    embedding.vector,
+    embedding.model,
+    input.limit,
+  );
+  const seen = new Set(semantic.map((candidate) => candidate.id));
+  return {
+    mode: "semantic" as const,
+    suggestions: [
+      ...semantic,
+      ...textMatches
+        .filter((candidate) => !seen.has(candidate.id))
+        .map((candidate) => serialize(candidate, null)),
+    ].slice(0, input.limit),
+  };
 }

@@ -184,6 +184,10 @@ describe("GitHub pull request webhooks", () => {
     const response = await post(pullRequestEvent());
 
     await expect(response.json()).resolves.toEqual({ ok: true, matched: true });
+    expect(markSuggestionPullRequestMerged).toHaveBeenCalledWith({
+      repositoryFullName: "acme/api",
+      pullRequestNumber: 42,
+    });
     expect(refreshIssuePullRequestSlackMessages).not.toHaveBeenCalled();
     expect(captureAnalyticsEvent).toHaveBeenCalledWith(
       expect.objectContaining({

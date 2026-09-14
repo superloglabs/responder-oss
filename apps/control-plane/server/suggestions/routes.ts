@@ -14,6 +14,32 @@ import { queueSuggestionRemediation } from "../investigations/queue.js";
 import { getActiveTenant } from "../tenant.js";
 
 const settingsSchema = z.object({ autoOpenPullRequests: z.boolean() });
+const listQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const cursorSchema = z.object({ createdAt: z.iso.datetime(), id: z.uuid() });
+
+function decodeCursor(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    const parsed = cursorSchema.parse(
+      JSON.parse(Buffer.from(value, "base64url").toString("utf8")),
+    );
+    return { createdAt: new Date(parsed.createdAt), id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeCursor(cursor: { createdAt: Date; id: string } | null) {
+  return cursor
+    ? Buffer.from(JSON.stringify({
+        createdAt: cursor.createdAt.toISOString(),
+        id: cursor.id,
+      })).toString("base64url")
+    : null;
+}
 
 export const suggestionRoutes = new Hono()
   .get("/", async (context) => {
@@ -21,11 +47,26 @@ export const suggestionRoutes = new Hono()
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
     }
-    const [suggestions, settings] = await Promise.all([
-      listSuggestions(tenant.organizationId),
+    const query = listQuerySchema.safeParse(context.req.query());
+    if (!query.success) {
+      return context.json({ error: "Invalid suggestion list query" }, 400);
+    }
+    const cursor = decodeCursor(query.data.cursor);
+    if (cursor === null) {
+      return context.json({ error: "Invalid suggestion cursor" }, 400);
+    }
+    const [page, settings] = await Promise.all([
+      listSuggestions(tenant.organizationId, {
+        limit: query.data.limit,
+        ...(cursor ? { cursor } : {}),
+      }),
       getSuggestionSettings(tenant.organizationId),
     ]);
-    return context.json({ suggestions, settings });
+    return context.json({
+      suggestions: page.suggestions,
+      nextCursor: encodeCursor(page.nextCursor),
+      settings,
+    });
   })
   .patch("/settings", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
@@ -70,11 +111,18 @@ export const suggestionRoutes = new Hono()
       const jobs = await Promise.all(
         requests.map((request) => queueSuggestionRemediation(request.id)),
       );
+      const firstJob = jobs[0];
+      if (!firstJob) {
+        throw new SuggestionPullRequestError(
+          "This suggestion does not have a code change",
+          "not_available",
+        );
+      }
       return context.json(
         {
-          requestId: jobs[0]!.requestId,
+          requestId: firstJob.requestId,
           requestIds: jobs.map((job) => job.requestId),
-          sessionId: `openai-daytona:${jobs[0]!.jobId}`,
+          sessionId: `openai-daytona:${firstJob.jobId}`,
           sessionIds: jobs.map((job) => `openai-daytona:${job.jobId}`),
         },
         202,

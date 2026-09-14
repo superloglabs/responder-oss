@@ -7,8 +7,9 @@ import {
   fetchSuggestions,
   relativeTime,
   saveSuggestionSettings,
-  type IssueRemediation,
+  type SuggestionListItem,
   type SuggestionPullRequest,
+  type SuggestionSummary,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import {
@@ -25,24 +26,13 @@ const RemediationDiff = lazy(() =>
   })),
 );
 
-type CodeChange = Extract<IssueRemediation, { type: "code_change" }>;
-
-interface Suggestion {
-  codeChange?: CodeChange | null;
-  createdAt: string;
-  detail: string;
-  id: string;
-  subtitle: string;
-  title: string;
-}
-
 function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1_000).toISOString();
 }
 
 type SuggestionDetailTab = "code" | "description";
 
-const storyboardSuggestions: Suggestion[] = [
+const storyboardSuggestions: SuggestionListItem[] = [
   {
     codeChange: {
       changes: [
@@ -189,6 +179,7 @@ Keep tokens, response bodies, and full URLs out of the log record.
 - Trigger a safe failed request locally and correlate the log with its trace span.`,
   },
   {
+    codeChange: null,
     createdAt: hoursAgo(28),
     id: "mcp-correlation",
     subtitle:
@@ -217,6 +208,7 @@ await trace.record("tool.requested", {
 Confirm whether the correlation ID should remain stable when the model changes the tool input between attempts. The safer default is a new ID for materially different input and the same ID for transport-level retries.`,
   },
   {
+    codeChange: null,
     createdAt: hoursAgo(72),
     id: "slack-session-staleness",
     subtitle:
@@ -241,9 +233,20 @@ export function SuggestionsPage() {
   const location = useLocation();
   const isStoryboard = location.pathname.startsWith("/_storyboards/");
   const basePath = isStoryboard ? "/_storyboards/suggestions" : "/suggestions";
-  const [suggestions, setSuggestions] = useState<Suggestion[]>(
-    isStoryboard ? storyboardSuggestions : [],
+  const [suggestions, setSuggestions] = useState<SuggestionSummary[]>(
+    isStoryboard
+      ? storyboardSuggestions.map((suggestion) => ({
+          id: suggestion.id,
+          title: suggestion.title,
+          subtitle: suggestion.subtitle,
+          createdAt: suggestion.createdAt,
+          codeChangeAvailable: Boolean(suggestion.codeChange),
+        }))
+      : [],
   );
+  const [detail, setDetail] = useState<SuggestionListItem | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [pullRequests, setPullRequests] = useState<SuggestionPullRequest[]>([]);
   const [autoOpen, setAutoOpen] = useState(false);
   const [loading, setLoading] = useState(!isStoryboard);
@@ -254,15 +257,23 @@ export function SuggestionsPage() {
   }>({ suggestionId: "", tab: "description" });
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openedIds, setOpenedIds] = useState<string[]>([]);
-  const selected = suggestions.find((item) => item.id === suggestionId);
-  const activeRequest = pullRequests.find((request) =>
+  const selected = suggestionId
+    ? isStoryboard
+      ? storyboardSuggestions.find((item) => item.id === suggestionId) ?? null
+      : detail
+    : null;
+  const activeRequests = pullRequests.filter((request) =>
     ["queued", "creating", "created", "merged"].includes(request.status),
   );
-  const openedPullRequest = activeRequest?.pullRequestUrl
-    ? activeRequest
-    : undefined;
+  const pendingPullRequests = activeRequests.filter((request) =>
+    ["queued", "creating"].includes(request.status),
+  );
+  const openedPullRequests = activeRequests.filter(
+    (request) => request.pullRequestUrl,
+  );
   const hasOpenedPullRequest = Boolean(
-    selected && (openedIds.includes(selected.id) || openedPullRequest),
+    selected &&
+      (openedIds.includes(selected.id) || openedPullRequests.length > 0),
   );
   const activeDetailTab =
     selected?.codeChange && detailView.suggestionId === selected.id
@@ -282,12 +293,13 @@ export function SuggestionsPage() {
     const request = suggestionId
       ? fetchSuggestion(suggestionId).then((response) => {
           if (cancelled) return;
-          setSuggestions([response.suggestion]);
+          setDetail(response.suggestion);
           setPullRequests(response.pullRequestState.requests);
         })
       : fetchSuggestions().then((response) => {
           if (cancelled) return;
           setSuggestions(response.suggestions);
+          setNextCursor(response.nextCursor);
           setAutoOpen(response.settings.autoOpenPullRequests);
           setPullRequests([]);
         });
@@ -308,21 +320,37 @@ export function SuggestionsPage() {
   }, [isStoryboard, suggestionId]);
 
   useEffect(() => {
-    if (isStoryboard || !suggestionId || !activeRequest) return;
-    if (!["queued", "creating"].includes(activeRequest.status)) return;
+    if (isStoryboard || !suggestionId || pendingPullRequests.length === 0) return;
+    let cancelled = false;
     const timer = window.setInterval(() => {
-      void fetchSuggestion(suggestionId).then((response) => {
-        setSuggestions([response.suggestion]);
-        setPullRequests(response.pullRequestState.requests);
-      });
+      void fetchSuggestion(suggestionId)
+        .then((response) => {
+          if (cancelled) return;
+          setDetail(response.suggestion);
+          setPullRequests(response.pullRequestState.requests);
+        })
+        .catch((caught: unknown) => {
+          if (!cancelled) {
+            setError(
+              caught instanceof Error
+                ? caught.message
+                : "Unable to refresh pull requests",
+            );
+          }
+        });
     }, 2_000);
-    return () => window.clearInterval(timer);
-  }, [activeRequest, isStoryboard, suggestionId]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isStoryboard, pendingPullRequests.length, suggestionId]);
 
   async function openPullRequest() {
     if (!selected) return;
-    if (openedPullRequest?.pullRequestUrl) {
-      window.open(openedPullRequest.pullRequestUrl, "_blank", "noopener,noreferrer");
+    if (openedPullRequests.length > 0) {
+      for (const request of openedPullRequests) {
+        window.open(request.pullRequestUrl!, "_blank", "noopener,noreferrer");
+      }
       return;
     }
     setOpeningId(selected.id);
@@ -337,12 +365,31 @@ export function SuggestionsPage() {
     try {
       await createSuggestionPullRequest(selected.id);
       const response = await fetchSuggestion(selected.id);
-      setSuggestions([response.suggestion]);
+      setDetail(response.suggestion);
       setPullRequests(response.pullRequestState.requests);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to open pull request");
     } finally {
       setOpeningId(null);
+    }
+  }
+
+  async function loadMoreSuggestions() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const response = await fetchSuggestions(nextCursor);
+      setSuggestions((current) => [...current, ...response.suggestions]);
+      setNextCursor(response.nextCursor);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to load more suggestions",
+      );
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -387,7 +434,11 @@ export function SuggestionsPage() {
             ← Suggestions
           </Link>
           <header
-            className={`suggestionDetail__header${selected.codeChange ? "" : " suggestionDetail__header--withoutAction"}`}
+            className={`suggestionDetail__header${
+              selected.codeChange
+                ? ""
+                : " suggestionDetail__header--withoutAction"
+            }`}
           >
             <div className="suggestionDetail__headingCopy">
               <h1>{selected.title}</h1>
@@ -396,20 +447,32 @@ export function SuggestionsPage() {
             {selected.codeChange ? (
               <div aria-live="polite" className="suggestionDetail__action">
                 <Button
-                  disabled={Boolean(activeRequest && !openedPullRequest)}
-                  loading={openingId === selected.id || activeRequest?.status === "creating" || activeRequest?.status === "queued"}
+                  disabled={pendingPullRequests.length > 0}
+                  loading={
+                    openingId === selected.id || pendingPullRequests.length > 0
+                  }
                   onClick={() => void openPullRequest()}
                   variant="primary"
                 >
-                  {hasOpenedPullRequest ? <span aria-hidden="true">✓</span> : <PullRequestIcon />}
-                  {openedPullRequest
-                    ? "View pull request"
+                  {hasOpenedPullRequest ? (
+                    <span aria-hidden="true">✓</span>
+                  ) : (
+                    <PullRequestIcon />
+                  )}
+                  {pendingPullRequests.length > 0
+                    ? `Opening ${
+                        activeRequests.length === 1
+                          ? "pull request"
+                          : `${activeRequests.length} pull requests`
+                      }`
+                    : openedPullRequests.length > 0
+                      ? `View ${openedPullRequests.length === 1
+                          ? "pull request"
+                          : `${openedPullRequests.length} pull requests`}`
                     : hasOpenedPullRequest
                       ? "Pull request opened"
                     : openingId === selected.id
                       ? "Opening pull request"
-                      : activeRequest
-                        ? "Opening pull request"
                       : "Open pull request"}
                 </Button>
               </div>
@@ -422,7 +485,9 @@ export function SuggestionsPage() {
               <div className="suggestionDetail__tabs">
                 <Tabs<SuggestionDetailTab>
                   aria-label="Suggestion detail"
-                  onChange={(tab) => setDetailView({ suggestionId: selected.id, tab })}
+                  onChange={(tab) =>
+                    setDetailView({ suggestionId: selected.id, tab })
+                  }
                   options={[
                     { label: "Description", value: "description" },
                     { label: "Code", value: "code" },
@@ -438,7 +503,11 @@ export function SuggestionsPage() {
             >
               {activeDetailTab === "code" && selected.codeChange ? (
                 <Suspense
-                  fallback={<div className="remediationDiff__loading">Loading proposed diff…</div>}
+                  fallback={
+                    <div className="remediationDiff__loading">
+                      Loading proposed diff…
+                    </div>
+                  }
                 >
                   <RemediationDiff remediation={selected.codeChange} />
                 </Suspense>
@@ -459,7 +528,10 @@ export function SuggestionsPage() {
       <section className="suggestionsHeading">
         <div>
           <h1>Suggestions</h1>
-          <p>Improvements discovered when investigations run out of useful signals.</p>
+          <p>
+            Improvements discovered when investigations run out of useful
+            signals.
+          </p>
         </div>
         <Switch
           checked={autoOpen}
@@ -476,69 +548,87 @@ export function SuggestionsPage() {
       ) : suggestions.length === 0 ? (
         <section className="emptyState emptyState--list">
           <h2>No suggestions yet</h2>
-          <p>Suggestions will appear when an investigation finds an observability gap.</p>
+          <p>
+            Suggestions will appear when an investigation finds an observability
+            gap.
+          </p>
         </section>
       ) : (
-      <div className="suggestionsDataTable">
-        <DataTable<Suggestion>
-          aria-label="Observability suggestions"
-          columns={[
-            {
-              header: "Suggestion",
-              key: "suggestion",
-              render: (suggestion) => (
-                <Link className="suggestionTableTitle" to={`${basePath}/${suggestion.id}`}>
-                  <strong>{suggestion.title}</strong>
-                  <span>{suggestion.subtitle}</span>
-                </Link>
-              ),
-              width: "67%",
-            },
-            {
-              header: "Code change",
-              key: "codeChange",
-              render: (suggestion) => (
-                <span className="suggestionCodeAvailability">
-                  {suggestion.codeChange ? (
-                    <>
-                      <PullRequestIcon /> Available
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                </span>
-              ),
-              width: "16%",
-            },
-            {
-              header: "Created",
-              key: "created",
-              render: (suggestion) => (
-                <time dateTime={suggestion.createdAt}>{relativeTime(suggestion.createdAt)}</time>
-              ),
-              width: "12%",
-            },
-            {
-              align: "right",
-              header: "",
-              key: "open",
-              render: (suggestion) => (
-                <Link
-                  aria-label={`Open ${suggestion.title}`}
-                  className="suggestionsTable__arrow"
-                  to={`${basePath}/${suggestion.id}`}
-                >
-                  <ArrowIcon />
-                </Link>
-              ),
-              width: "5%",
-            },
-          ]}
-          getRowGroup={(suggestion) => dateGroupLabel(suggestion.createdAt)}
-          getRowKey={(suggestion) => suggestion.id}
-          rows={suggestions}
-        />
-      </div>
+        <div className="suggestionsDataTable">
+          <DataTable<SuggestionSummary>
+            aria-label="Observability suggestions"
+            columns={[
+              {
+                header: "Suggestion",
+                key: "suggestion",
+                render: (suggestion) => (
+                  <Link
+                    className="suggestionTableTitle"
+                    to={`${basePath}/${suggestion.id}`}
+                  >
+                    <strong>{suggestion.title}</strong>
+                    <span>{suggestion.subtitle}</span>
+                  </Link>
+                ),
+                width: "67%",
+              },
+              {
+                header: "Code change",
+                key: "codeChange",
+                render: (suggestion) => (
+                  <span className="suggestionCodeAvailability">
+                    {suggestion.codeChangeAvailable ? (
+                      <>
+                        <PullRequestIcon /> Available
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </span>
+                ),
+                width: "16%",
+              },
+              {
+                header: "Created",
+                key: "created",
+                render: (suggestion) => (
+                  <time dateTime={suggestion.createdAt}>
+                    {relativeTime(suggestion.createdAt)}
+                  </time>
+                ),
+                width: "12%",
+              },
+              {
+                align: "right",
+                header: "",
+                key: "open",
+                render: (suggestion) => (
+                  <Link
+                    aria-label={`Open ${suggestion.title}`}
+                    className="suggestionsTable__arrow"
+                    to={`${basePath}/${suggestion.id}`}
+                  >
+                    <ArrowIcon />
+                  </Link>
+                ),
+                width: "5%",
+              },
+            ]}
+            getRowGroup={(suggestion) => dateGroupLabel(suggestion.createdAt)}
+            getRowKey={(suggestion) => suggestion.id}
+            rows={suggestions}
+          />
+          {nextCursor ? (
+            <div className="suggestionsPagination">
+              <Button
+                loading={loadingMore}
+                onClick={() => void loadMoreSuggestions()}
+              >
+                Load more
+              </Button>
+            </div>
+          ) : null}
+        </div>
       )}
     </AppShell>
   );
