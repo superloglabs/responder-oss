@@ -3,7 +3,7 @@ import { IconButton } from "../design-system";
 import { CogIcon, ProviderGlyph } from "./icons";
 import type { ProviderGlyphId } from "./provider-glyphs";
 
-type ProviderId = Exclude<ProviderGlyphId, "google">;
+type ProviderId = Exclude<ProviderGlyphId, "google" | "scan">;
 
 export function AgentContextProviderMark({
   connected = false,

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -364,6 +365,8 @@ export const scanConfigurations = pgTable(
       .notNull()
       .default([]),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    runLeaseId: uuid("run_lease_id"),
+    runLeaseExpiresAt: timestamp("run_lease_expires_at", { withTimezone: true }),
     updatedBy: uuid("updated_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -374,7 +377,13 @@ export const scanConfigurations = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("scan_configurations_due_idx").on(table.nextRunAt)],
+  (table) => [
+    check(
+      "scan_configurations_frequency_hours_check",
+      sql`${table.frequencyHours} is null or ${table.frequencyHours} in (1, 6)`,
+    ),
+    index("scan_configurations_due_idx").on(table.nextRunAt),
+  ],
 );
 
 export const agentVersionRepositories = pgTable(

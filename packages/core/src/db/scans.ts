@@ -9,6 +9,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { AgentConfiguration } from "../agents/config.js";
 import { defaultLinearIssueTemplate } from "../agents/config.js";
 import type { InvestigationRequest } from "../investigations/input.js";
@@ -310,6 +311,7 @@ export async function hasActiveScanRun(organizationId: string): Promise<boolean>
       and(
         eq(investigations.organizationId, organizationId),
         eq(agents.purpose, "scan"),
+        eq(investigations.isReplay, false),
         inArray(investigations.status, ["pending", "investigating"]),
       ),
     )
@@ -331,6 +333,7 @@ export async function createScanInvestigationRequest(input: {
   const configuration = await getScanConfiguration(input.organizationId);
   const sourceCount =
     configuration.contextAccountIds.length +
+    configuration.contextResourceIds.length +
     Number(configuration.repositoryIds.length > 0);
   if (!configuration.agentId || !configuration.slackChannelResourceId || sourceCount === 0) {
     throw new ScanConfigurationError(
@@ -338,6 +341,10 @@ export async function createScanInvestigationRequest(input: {
       "configuration_incomplete",
     );
   }
+  await resolveSlackChannel(
+    input.organizationId,
+    configuration.slackChannelResourceId,
+  );
   const end = input.scheduledFor ?? new Date();
   const lookbackHours = configuration.frequencyHours ?? 1;
   const start = new Date(end.getTime() - lookbackHours * 60 * 60 * 1_000);
@@ -366,8 +373,20 @@ export async function claimDueScans(now = new Date(), limit = 20) {
         organizationId: scanConfigurations.organizationId,
         frequencyHours: scanConfigurations.frequencyHours,
         scheduledFor: scanConfigurations.nextRunAt,
+        slackChannelResourceId: scanConfigurations.slackChannelResourceId,
       })
       .from(scanConfigurations)
+      .innerJoin(
+        integrationResources,
+        eq(
+          integrationResources.id,
+          scanConfigurations.slackChannelResourceId,
+        ),
+      )
+      .innerJoin(
+        integrationAccounts,
+        eq(integrationAccounts.id, integrationResources.integrationAccountId),
+      )
       .where(
         and(
           isNotNull(scanConfigurations.agentId),
@@ -375,28 +394,106 @@ export async function claimDueScans(now = new Date(), limit = 20) {
           isNotNull(scanConfigurations.slackChannelResourceId),
           lte(scanConfigurations.nextRunAt, now),
           or(
+            sql`${scanConfigurations.runLeaseId} is null`,
+            lte(scanConfigurations.runLeaseExpiresAt, now),
+          ),
+          eq(integrationResources.kind, "slack_channel"),
+          eq(integrationResources.available, true),
+          eq(integrationAccounts.provider, "slack"),
+          eq(integrationAccounts.status, "connected"),
+          or(
             sql`jsonb_array_length(${scanConfigurations.contextAccountIds}) > 0`,
+            sql`jsonb_array_length(${scanConfigurations.contextResourceIds}) > 0`,
             sql`jsonb_array_length(${scanConfigurations.repositoryIds}) > 0`,
           ),
         ),
       )
       .orderBy(scanConfigurations.nextRunAt)
       .limit(limit)
-      .for("update", { skipLocked: true });
+      .for("update", { of: scanConfigurations, skipLocked: true });
 
+    const claimed: Array<{
+      frequencyHours: number;
+      leaseId: string;
+      organizationId: string;
+      scheduledFor: Date;
+      slackChannelResourceId: string;
+    }> = [];
     for (const row of rows) {
       if (!row.scheduledFor || !row.frequencyHours) continue;
+      const leaseId = randomUUID();
       await tx
         .update(scanConfigurations)
         .set({
-          nextRunAt: new Date(now.getTime() + row.frequencyHours * 60 * 60 * 1_000),
+          runLeaseId: leaseId,
+          runLeaseExpiresAt: new Date(now.getTime() + 5 * 60 * 1_000),
           updatedAt: now,
         })
         .where(eq(scanConfigurations.organizationId, row.organizationId));
+      claimed.push({
+        frequencyHours: row.frequencyHours,
+        leaseId,
+        organizationId: row.organizationId,
+        scheduledFor: row.scheduledFor,
+        slackChannelResourceId: row.slackChannelResourceId!,
+      });
     }
-    return rows.filter(
-      (row): row is typeof row & { frequencyHours: number; scheduledFor: Date } =>
-        Boolean(row.frequencyHours && row.scheduledFor),
-    );
+    return claimed;
   });
+}
+
+export async function acquireScanRunLease(
+  organizationId: string,
+  now = new Date(),
+): Promise<string | null> {
+  const leaseId = randomUUID();
+  const rows = await getDatabase()
+    .update(scanConfigurations)
+    .set({
+      runLeaseId: leaseId,
+      runLeaseExpiresAt: new Date(now.getTime() + 5 * 60 * 1_000),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(scanConfigurations.organizationId, organizationId),
+        or(
+          sql`${scanConfigurations.runLeaseId} is null`,
+          lte(scanConfigurations.runLeaseExpiresAt, now),
+        ),
+      ),
+    )
+    .returning({ leaseId: scanConfigurations.runLeaseId });
+  return rows[0]?.leaseId ?? null;
+}
+
+export async function releaseScanRunLease(input: {
+  organizationId: string;
+  leaseId: string;
+  completedAt?: Date;
+  advanceSchedule?: boolean;
+}): Promise<void> {
+  const configuration = input.advanceSchedule
+    ? await getScanConfiguration(input.organizationId)
+    : null;
+  const nextRunAt = configuration?.frequencyHours && input.completedAt
+    ? new Date(
+        input.completedAt.getTime() +
+          configuration.frequencyHours * 60 * 60 * 1_000,
+      )
+    : undefined;
+  await getDatabase()
+    .update(scanConfigurations)
+    .set({
+      runLeaseId: null,
+      runLeaseExpiresAt: null,
+      ...(nextRunAt ? { nextRunAt } : {}),
+      updatedAt: input.completedAt ?? new Date(),
+    })
+    .where(
+      and(
+        eq(scanConfigurations.organizationId, input.organizationId),
+        eq(scanConfigurations.runLeaseId, input.leaseId),
+      ),
+    );
 }

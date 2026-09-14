@@ -159,6 +159,7 @@ export async function submitInvestigationReport(input: {
       .select({
         id: investigations.id,
         status: investigations.status,
+        input: investigations.input,
         agentConfigVersionId: investigations.agentConfigVersionId,
         prMode: agentConfigVersions.prMode,
         contextAccountIds: agentConfigVersions.contextAccountIds,
@@ -185,6 +186,18 @@ export async function submitInvestigationReport(input: {
       investigation.status !== "investigating"
     ) {
       throw new Error("Investigation report has already been submitted");
+    }
+    if (
+      investigation.input.provider === "scan" &&
+      input.submission.report.issues.some(
+        (issue) =>
+          issue.resolution === "new" &&
+          issue.remediations.some(
+            (remediation) => remediation.type === "code_change",
+          ),
+      )
+    ) {
+      throw new Error("Scan reports cannot propose or publish code changes");
     }
 
     const hasNewIssues = input.submission.report.issues.some(

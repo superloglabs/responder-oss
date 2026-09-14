@@ -3673,12 +3673,24 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "next_run_at": {
+      "next_run_at": {
           "name": "next_run_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false
-        },
+        "notNull": false
+      },
+      "run_lease_id": {
+        "name": "run_lease_id",
+        "type": "uuid",
+        "primaryKey": false,
+        "notNull": false
+      },
+      "run_lease_expires_at": {
+        "name": "run_lease_expires_at",
+        "type": "timestamp with time zone",
+        "primaryKey": false,
+        "notNull": false
+      },
         "updated_by": {
           "name": "updated_by",
           "type": "uuid",
@@ -3782,7 +3794,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+  "checkConstraints": {
+    "scan_configurations_frequency_hours_check": {
+      "name": "scan_configurations_frequency_hours_check",
+      "value": "\"scan_configurations\".\"frequency_hours\" is null or \"scan_configurations\".\"frequency_hours\" in (1, 6)"
+    }
+  },
       "isRLSEnabled": false
     },
     "public.slack_investigation_sessions": {

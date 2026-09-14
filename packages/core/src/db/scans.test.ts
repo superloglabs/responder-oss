@@ -33,6 +33,23 @@ function configurationQuery(row: Record<string, unknown>) {
   return query;
 }
 
+function slackChannelQuery() {
+  const query = {
+    from: vi.fn(),
+    innerJoin: vi.fn(),
+    where: vi.fn(),
+    limit: vi.fn().mockResolvedValue([{
+      displayName: "incidents",
+      externalId: "C123",
+      integrationAccountId: "slack-account",
+    }]),
+  };
+  query.from.mockReturnValue(query);
+  query.innerJoin.mockReturnValue(query);
+  query.where.mockReturnValue(query);
+  return query;
+}
+
 describe("scan investigation requests", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -49,7 +66,8 @@ describe("scan investigation requests", () => {
         repositoryIds: ["repository-1"],
         nextRunAt: null,
         channelName: "incidents",
-      }));
+      }))
+      .mockReturnValueOnce(slackChannelQuery());
     vi.mocked(getDatabase).mockReturnValue({ select } as never);
     const scheduledFor = new Date("2026-09-14T09:00:00.000Z");
 
@@ -66,6 +84,31 @@ describe("scan investigation requests", () => {
       slackChannelName: "incidents",
       sourceCount: 3,
     });
+  });
+
+  it("accepts resource-scoped context as a scan source", async () => {
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(activeRunQuery([]))
+      .mockReturnValueOnce(configurationQuery({
+        agentId: "06060606-0606-4606-8606-060606060606",
+        frequencyHours: 1,
+        slackChannelResourceId: "07070707-0707-4707-8707-070707070707",
+        contextAccountIds: [],
+        contextResourceIds: ["resource-1"],
+        repositoryIds: [],
+        nextRunAt: null,
+        channelName: "incidents",
+      }))
+      .mockReturnValueOnce(slackChannelQuery());
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+
+    const request = await createScanInvestigationRequest({
+      organizationId: "organization-1",
+      externalEventId: "scan-resource",
+    });
+
+    expect(request.attributes?.sourceCount).toBe(1);
   });
 
   it("does not overlap an active scan", async () => {

@@ -26,6 +26,7 @@ function databaseDouble(status = "investigating") {
   const forUpdate = vi.fn().mockResolvedValue([{
     id: investigationId,
     status,
+    input: { provider: "slack" },
     agentConfigVersionId,
     prMode: "always",
   }]);

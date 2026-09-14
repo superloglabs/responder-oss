@@ -67,9 +67,20 @@ export async function submitInvestigationReportForRun(input: {
   report: InvestigationReportSubmission;
   repositories?: Array<{ branch: string; repository: string; sha: string }>;
   environment?: NodeJS.ProcessEnv;
+  allowCodeChanges?: boolean;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>;
 }) {
+  if (
+    input.allowCodeChanges === false &&
+    input.report.issues.some(
+      (issue) =>
+        issue.resolution === "new" &&
+        issue.remediations.some((remediation) => remediation.type === "code_change"),
+    )
+  ) {
+    throw new Error("Scan reports cannot propose or publish code changes");
+  }
   const report = input.repositories
     ? attachRepositoryBasesToReport(input.report, input.repositories)
     : input.report;
@@ -118,6 +129,7 @@ export function createSubmitInvestigationReportTool(input: {
   organizationId: string;
   repositories?: Array<{ branch: string; repository: string; sha: string }>;
   environment?: NodeJS.ProcessEnv;
+  allowCodeChanges?: boolean;
   onAutomaticPullRequestRequests?: (requestIds: string[]) => Promise<void>;
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>;
 }) {
@@ -132,6 +144,7 @@ export function createSubmitInvestigationReportTool(input: {
         report,
         repositories: input.repositories,
         environment: input.environment,
+        allowCodeChanges: input.allowCodeChanges,
         onAutomaticPullRequestRequests:
           input.onAutomaticPullRequestRequests,
         onLinearTicketRequests: input.onLinearTicketRequests,

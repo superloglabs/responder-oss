@@ -16,6 +16,18 @@ export const scanConfigurationSchema = z
         path: ["slackChannelResourceId"],
       });
     }
+    if (
+      configuration.frequencyHours !== null &&
+      configuration.contextAccountIds.length === 0 &&
+      configuration.contextResourceIds.length === 0 &&
+      configuration.repositoryIds.length === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Choose at least one connected integration before enabling scheduled scans",
+        path: ["contextAccountIds"],
+      });
+    }
   });
 
 export type ScanConfiguration = z.output<typeof scanConfigurationSchema>;

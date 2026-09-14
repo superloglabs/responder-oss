@@ -10,9 +10,18 @@ describe("scan configuration", () => {
         scanConfigurationSchema.parse({
           frequencyHours,
           slackChannelResourceId: channelId,
+          contextResourceIds: frequencyHours === null ? [] : [channelId],
         }).frequencyHours,
       ).toBe(frequencyHours);
     }
+  });
+
+  it("accepts resource-scoped context when scheduling is enabled", () => {
+    expect(scanConfigurationSchema.parse({
+      frequencyHours: 1,
+      slackChannelResourceId: channelId,
+      contextResourceIds: [channelId],
+    }).contextResourceIds).toEqual([channelId]);
   });
 
   it("requires a Slack channel when scheduling is enabled", () => {

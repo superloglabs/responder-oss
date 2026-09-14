@@ -40,6 +40,7 @@ import type {
   SlackThreadInvestigationJob,
 } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
+import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
 import {
   createAwsMcpServer,
   loadAwsAlarmSkillContext,
@@ -542,6 +543,7 @@ export async function runInvestigationAgent(
   const issueUpdateFollowup = Boolean(issueFollowup?.issueIds.length);
   const updatedIssueIds = new Set<string>();
   const investigationInput = toInvestigationInput(job.request);
+  const scanMode = investigationInput.provider === "scan";
   let sentryConnectionDegraded = false;
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
@@ -635,7 +637,11 @@ export async function runInvestigationAgent(
         investigationId: job.investigationId,
       })
     : null;
-  const customMcpServers = customMcpConnections.map(createCustomMcpServer);
+  // Custom MCP contracts cannot guarantee observation-only tools, so scans do
+  // not attach them. Interactive investigations retain the configured server.
+  const customMcpServers = scanMode
+    ? []
+    : customMcpConnections.map(createCustomMcpServer);
   const clickStackServer = clickStackConnection
     ? createClickStackMcpServer(clickStackConnection)
     : null;
@@ -652,7 +658,21 @@ export async function runInvestigationAgent(
     ? createUpstashCliTools(upstashConnection)
     : [];
   const langfuseServers = langfuseConnections.map(createLangfuseMcpServer);
-  const supabaseServers = supabaseConnections.map(createSupabaseMcpServer);
+  const effectiveSupabaseConnections = scanMode
+    ? supabaseConnections.map((connection) =>
+        connection.accessMode === "read_write"
+          ? {
+              ...connection,
+              accessMode: "read_only" as const,
+              mcpUrl: supabaseMcpUrl({
+                accessMode: "read_only",
+                projectRef: connection.projectRef,
+              }),
+            }
+          : connection,
+      )
+    : supabaseConnections;
+  const supabaseServers = effectiveSupabaseConnections.map(createSupabaseMcpServer);
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -798,8 +818,11 @@ export async function runInvestigationAgent(
           organizationId: job.config.organizationId,
           environment,
           repositories,
-          onAutomaticPullRequestRequests,
-          onLinearTicketRequests,
+          allowCodeChanges: !scanMode,
+          onAutomaticPullRequestRequests: scanMode
+            ? undefined
+            : onAutomaticPullRequestRequests,
+          onLinearTicketRequests: scanMode ? undefined : onLinearTicketRequests,
         });
     const issueSearchTool = createSearchExistingIssuesTool({
       organizationId: job.config.organizationId,
@@ -833,7 +856,9 @@ export async function runInvestigationAgent(
         (connection) => `${connection.displayName} (${connection.projectId})`,
       ),
       axiomConnected: axiomServer !== null,
-      customMcpNames: customMcpConnections.map((connection) => connection.displayName),
+      customMcpNames: scanMode
+        ? []
+        : customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
       datadogConnected: datadogServer !== null,
       dash0AccountNames: dash0Connections.map(
@@ -850,7 +875,7 @@ export async function runInvestigationAgent(
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,
       ),
-      supabaseConnections: supabaseConnections.map((connection) => ({
+      supabaseConnections: effectiveSupabaseConnections.map((connection) => ({
         accessMode: connection.accessMode,
         displayName: connection.displayName,
       })),
@@ -860,7 +885,7 @@ export async function runInvestigationAgent(
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
-      scanMode: investigationInput.provider === "scan",
+      scanMode,
       ...(issueFollowup
         ? { issueFollowupIssueCount: issueFollowup.issueIds.length }
         : {}),

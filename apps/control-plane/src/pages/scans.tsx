@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   fetchAgentOptions,
+  fetchIntegrations,
   type AgentOptions,
+  type IntegrationSummary,
 } from "../agents-api";
 import {
   fetchScans,
@@ -43,7 +45,7 @@ type ScanSource = {
   id: string;
   kind: "account" | "github" | "vercel";
   name: string;
-  provider: Exclude<ProviderGlyphId, "google">;
+  provider: Exclude<ProviderGlyphId, "google" | "scan">;
   resourceLabel: string;
   resources: Array<{
     description: string;
@@ -255,7 +257,8 @@ function configuredSources(
       (account) =>
         account.provider !== "slack" &&
         account.provider !== "github" &&
-        account.provider !== "vercel",
+        account.provider !== "vercel" &&
+        account.provider !== "custom_mcp",
     )
     .map((account): ScanSource => {
       const template = sourceTemplateByProvider.get(account.provider);
@@ -327,7 +330,10 @@ function configuredSources(
   );
   const unavailableSources = initialSources
     .filter(
-      (source) => source.provider !== "slack" && !connectedProviders.has(source.provider),
+      (source) =>
+        source.provider !== "slack" &&
+        source.provider !== "custom_mcp" &&
+        !connectedProviders.has(source.provider),
     )
     .map((source) => ({ ...source, connected: false, enabled: false }));
   return [...accountSources, ...githubSource, ...vercelSource, ...unavailableSources];
@@ -380,6 +386,7 @@ export function ScansPage() {
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const [configuration, setConfiguration] = useState(initialConfiguration);
   const [options, setOptions] = useState<AgentOptions | null>(null);
+  const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [sources, setSources] = useState(isStoryboard ? initialSources : []);
   const [runs, setRuns] = useState(isStoryboard ? scanRuns : []);
   const [integrationQuery, setIntegrationQuery] = useState("");
@@ -393,12 +400,13 @@ export function ScansPage() {
   useEffect(() => {
     if (isStoryboard) return;
     let cancelled = false;
-    void Promise.all([fetchAgentOptions(), fetchScans()])
-      .then(([loadedOptions, loadedScans]) => {
+    void Promise.all([fetchAgentOptions(), fetchScans(), fetchIntegrations()])
+      .then(([loadedOptions, loadedScans, loadedIntegrations]) => {
         if (cancelled) return;
         configurationRef.current = loadedScans.configuration;
         setConfiguration(loadedScans.configuration);
         setOptions(loadedOptions);
+        setIntegrations(loadedIntegrations);
         setSources(configuredSources(loadedOptions, loadedScans.configuration));
         setRuns(loadedScans.runs);
       })
@@ -432,14 +440,16 @@ export function ScansPage() {
     const version = ++saveVersionRef.current;
     setSaving(true);
     setError(null);
-    saveQueueRef.current = saveQueueRef.current
+    const save = saveQueueRef.current
       .catch(() => undefined)
       .then(() => saveScanConfiguration(next))
-      .catch((caught: unknown) => {
-        setError(caught instanceof Error ? caught.message : "Unable to save scan settings");
-      })
       .finally(() => {
         if (saveVersionRef.current === version) setSaving(false);
+      });
+    saveQueueRef.current = save;
+    void save.catch((caught: unknown) => {
+        if (saveVersionRef.current !== version) return;
+        setError(caught instanceof Error ? caught.message : "Unable to save scan settings");
       });
   }
 
@@ -491,6 +501,28 @@ export function ScansPage() {
     setSourcesDialogOpen(false);
     setConfigurationTarget(null);
     setIntegrationQuery("");
+  }
+
+  function integrationConnectionUrl(source: ScanSource): string {
+    const integration = integrations.find((candidate) => candidate.id === source.provider);
+    const connectionUrl = integration?.connectUrl;
+    const settingsDialogProviders = new Set([
+      "aws",
+      "gcp",
+      "datadog",
+      "dash0",
+      "custom_mcp",
+      "upstash",
+      "langfuse",
+      "supabase",
+      "clickstack",
+    ]);
+    if (!connectionUrl || settingsDialogProviders.has(source.provider)) {
+      return `/settings#integration-${source.provider}`;
+    }
+    const url = new URL(connectionUrl, window.location.origin);
+    url.searchParams.set("returnTo", "/scans");
+    return `${url.pathname}${url.search}`;
   }
 
   useEffect(() => {
@@ -580,11 +612,9 @@ export function ScansPage() {
   }, [configurationTarget, sourcesDialogOpen]);
 
   function updateSources(update: (current: ScanSource[]) => ScanSource[]) {
-    setSources((current) => {
-      const next = update(current);
-      persist(configurationWithSources(configurationRef.current, next, options));
-      return next;
-    });
+    const next = update(sources);
+    setSources(next);
+    persist(configurationWithSources(configurationRef.current, next, options));
   }
 
   function toggleSource(sourceId: string) {
@@ -933,12 +963,12 @@ export function ScansPage() {
                                       <small>{source.description}</small>
                                     </span>
                                     <footer>
-                                      <Link
+                                      <a
                                         className="dsButton dsButton--secondary dsButton--small"
-                                        to="/settings"
+                                        href={integrationConnectionUrl(source)}
                                       >
                                         Connect
-                                      </Link>
+                                      </a>
                                     </footer>
                                   </article>
                                 ))}

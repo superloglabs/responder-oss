@@ -46,6 +46,7 @@ export function providerLabel(
     dash0: "Dash0",
     sentry: "Sentry",
     slack: "Slack",
+    scan: "Scan",
   } as const;
   return labels[provider];
 }

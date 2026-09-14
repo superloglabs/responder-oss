@@ -29,23 +29,31 @@ export function ScanDetailPage() {
 
   useEffect(() => {
     if (isStoryboard || !scanId) return;
+    const requestedScanId = scanId;
     let cancelled = false;
-    void fetchScan(scanId)
-      .then((result) => {
+    let timer: number | undefined;
+    async function loadScan() {
+      try {
+        const result = await fetchScan(requestedScanId);
         if (cancelled) return;
         setScan(result.run);
         setFindings(result.findings);
-      })
-      .catch((caught: unknown) => {
+        setError(null);
+        if (result.run.status === "running") {
+          timer = window.setTimeout(() => void loadScan(), 5_000);
+        }
+      } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Unable to load scan");
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    }
+    void loadScan();
     return () => {
       cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [isStoryboard, scanId]);
 
@@ -106,8 +114,20 @@ export function ScanDetailPage() {
               </div>
               {findings.length === 0 ? (
                 <section className="emptyState emptyState--list">
-                  <h2>No active issues found</h2>
-                  <p>This scan did not identify a problem that needed filing.</p>
+                  <h2>
+                    {scan.status === "running"
+                      ? "Scan in progress"
+                      : scan.status === "failed"
+                        ? "Scan did not complete"
+                        : "No active issues found"}
+                  </h2>
+                  <p>
+                    {scan.status === "running"
+                      ? "Findings will appear here as soon as the scan completes."
+                      : scan.status === "failed"
+                        ? scan.failureReason ?? "Try running the scan again."
+                        : "This scan did not identify a problem that needed filing."}
+                  </p>
                 </section>
               ) : (
                 <div className="scanFindingsTable">

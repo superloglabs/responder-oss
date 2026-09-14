@@ -12,6 +12,7 @@ export const providerGlyphs = {
   linear: { label: "Linear", logo: "linear" },
   langfuse: { label: "Langfuse", logo: "langfuse" },
   sentry: { label: "Sentry", logo: "sentry" },
+  scan: { label: "Scan", text: "S" },
   slack: { label: "Slack", logo: "slack" },
   supabase: { label: "Supabase", logo: "supabase" },
   upstash: { label: "Upstash", logo: "upstash" },
@@ -41,7 +42,7 @@ export const contextCategoryDescriptions: Record<ContextCategory, string> = {
 };
 
 export const contextProviderMetadata: Record<
-  Exclude<ProviderGlyphId, "google">,
+  Exclude<ProviderGlyphId, "google" | "scan">,
   { category: ContextCategory; searchTerms: string }
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },

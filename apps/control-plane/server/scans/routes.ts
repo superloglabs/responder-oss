@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import { scanConfigurationSchema } from "@responder/core/scans/config";
 import { AgentConfigurationError } from "@responder/core/db/agents";
 import {
+  acquireScanRunLease,
   createScanInvestigationRequest,
   getScanConfiguration,
   getScanRun,
   listScanRuns,
   saveScanConfiguration,
+  releaseScanRunLease,
   scanAgentConfiguration,
   ScanConfigurationError,
 } from "@responder/core/db/scans";
@@ -93,7 +95,21 @@ export const scanRoutes = new Hono()
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
     }
+    let leaseId: string | null = null;
     try {
+      // Validate the configuration before acquiring the short-lived run lease
+      // so an unconfigured organization gets the actionable error.
+      await createScanInvestigationRequest({
+        organizationId: tenant.organizationId,
+        externalEventId: `manual-validation:${tenant.organizationId}`,
+      });
+      leaseId = await acquireScanRunLease(tenant.organizationId);
+      if (!leaseId) {
+        throw new ScanConfigurationError(
+          "A scan is already running",
+          "scan_already_running",
+        );
+      }
       const request = await createScanInvestigationRequest({
         organizationId: tenant.organizationId,
         externalEventId: `manual:${tenant.organizationId}:${crypto.randomUUID()}`,
@@ -124,6 +140,13 @@ export const scanRoutes = new Hono()
         },
         502,
       );
+    } finally {
+      if (leaseId) {
+        await releaseScanRunLease({
+          organizationId: tenant.organizationId,
+          leaseId,
+        });
+      }
     }
   })
   .get("/:scanId", async (context) => {

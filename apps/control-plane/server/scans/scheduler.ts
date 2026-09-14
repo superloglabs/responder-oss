@@ -1,6 +1,7 @@
 import {
   claimDueScans,
   createScanInvestigationRequest,
+  releaseScanRunLease,
   ScanConfigurationError,
 } from "@responder/core/db/scans";
 import { queueInvestigation } from "../investigations/queue.js";
@@ -13,13 +14,16 @@ async function runDueScans(): Promise<void> {
   const dueScans = await claimDueScans();
   await Promise.all(
     dueScans.map(async (scan) => {
+      let advanceSchedule = false;
       try {
+        const executionTime = new Date();
         const request = await createScanInvestigationRequest({
           organizationId: scan.organizationId,
-          scheduledFor: scan.scheduledFor,
+          scheduledFor: executionTime,
           externalEventId: `scheduled:${scan.organizationId}:${scan.scheduledFor.toISOString()}`,
         });
         const result = await queueInvestigation(request);
+        advanceSchedule = true;
         console.info(
           JSON.stringify({
             event: "scheduled_scan_queued",
@@ -27,7 +31,7 @@ async function runDueScans(): Promise<void> {
               result.kind === "blocked" ? null : result.investigationId,
             organizationId: scan.organizationId,
             outcome: result.kind,
-            scheduledFor: scan.scheduledFor.toISOString(),
+            scheduledFor: executionTime.toISOString(),
           }),
         );
       } catch (error) {
@@ -35,6 +39,7 @@ async function runDueScans(): Promise<void> {
           error instanceof ScanConfigurationError &&
           error.code === "scan_already_running"
         ) {
+          advanceSchedule = true;
           return;
         }
         console.error(
@@ -45,6 +50,13 @@ async function runDueScans(): Promise<void> {
             scheduledFor: scan.scheduledFor.toISOString(),
           }),
         );
+      } finally {
+        await releaseScanRunLease({
+          organizationId: scan.organizationId,
+          leaseId: scan.leaseId,
+          completedAt: new Date(),
+          advanceSchedule,
+        });
       }
     }),
   );

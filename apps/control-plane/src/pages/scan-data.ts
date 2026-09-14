@@ -32,6 +32,7 @@ export const scanRuns: ScanRun[] = [
     sources: 3,
     startedAt: "2026-09-14T09:00:00+02:00",
     startedLabel: "Today, 09:00",
+    slackChannelName: "incidents",
     status: "completed",
   },
   {
@@ -42,6 +43,7 @@ export const scanRuns: ScanRun[] = [
     sources: 3,
     startedAt: "2026-09-14T03:00:00+02:00",
     startedLabel: "Today, 03:00",
+    slackChannelName: "incidents",
     status: "completed",
   },
   {
@@ -52,6 +54,7 @@ export const scanRuns: ScanRun[] = [
     sources: 3,
     startedAt: "2026-09-13T21:00:00+02:00",
     startedLabel: "Yesterday, 21:00",
+    slackChannelName: "incidents",
     status: "completed",
   },
   {
@@ -62,11 +65,12 @@ export const scanRuns: ScanRun[] = [
     sources: 3,
     startedAt: "2026-09-13T15:00:00+02:00",
     startedLabel: "Yesterday, 15:00",
+    slackChannelName: "incidents",
     status: "completed",
   },
 ];
 
-const findingTemplates: Array<Omit<ScanFinding, "outcome"> & { provider: Exclude<ProviderGlyphId, "google"> }> = [
+const findingTemplates: Array<Omit<ScanFinding, "outcome"> & { provider: Exclude<ProviderGlyphId, "google" | "scan"> }> = [
   {
     evidence: "312 errors in responder-api after deploy 8c24d7",
     id: "finding-api-errors",

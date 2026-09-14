@@ -1,5 +1,6 @@
 import { apiErrorMessage, type IssueEvidence } from "./agents-api";
 import type { ScanFinding, ScanRun } from "./pages/scan-data";
+import { providerDisplayName } from "./components/provider-glyphs";
 
 export interface ScanConfiguration {
   frequencyHours: 1 | 6 | null;
@@ -68,8 +69,8 @@ function toScanRun(run: ScanRunResponse): ScanRun {
     id: run.id,
     slackChannelName: run.slackChannelName,
     sources: run.sourceCount,
-    startedAt: run.createdAt,
-    startedLabel: dateLabel(run.createdAt),
+    startedAt: run.startedAt ?? run.createdAt,
+    startedLabel: dateLabel(run.startedAt ?? run.createdAt),
     status:
       run.status === "pending" || run.status === "investigating"
         ? "running"
@@ -130,8 +131,8 @@ export async function fetchScan(scanId: string): Promise<{
       issueLabel: `Issue ${finding.id.slice(0, 8)}`,
       outcome: finding.relationship === "new" ? "filed" : "existing",
       severity: finding.severity,
-      source: evidence?.source && evidence.source !== "alert"
-        ? evidence.source
+      source: evidence?.source && evidence.source !== "alert" && evidence.source !== "other"
+        ? providerDisplayName(evidence.source)
         : "Scan",
       title: finding.title,
     };

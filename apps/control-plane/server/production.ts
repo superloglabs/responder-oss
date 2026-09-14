@@ -40,7 +40,7 @@ const server = serve(
 );
 
 let shuttingDown = false;
-function shutdown(signal: NodeJS.Signals) {
+async function shutdown(signal: NodeJS.Signals) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.info(JSON.stringify({ event: "control_plane_shutdown", signal }));
@@ -51,6 +51,7 @@ function shutdown(signal: NodeJS.Signals) {
   }, 25_000);
   timeout.unref();
 
+  await stopScanScheduler();
   server.close(async (error) => {
     clearTimeout(timeout);
     if (error) {
@@ -62,7 +63,6 @@ function shutdown(signal: NodeJS.Signals) {
       );
       process.exitCode = 1;
     }
-    await stopScanScheduler();
     await closeInvestigationQueue().catch((queueError: unknown) => {
       console.error(
         JSON.stringify({
@@ -79,5 +79,5 @@ function shutdown(signal: NodeJS.Signals) {
   });
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
