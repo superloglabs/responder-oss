@@ -21,6 +21,7 @@ import {
   TermsPage,
 } from "./edition-pages";
 import { SettingsPage } from "./pages/settings";
+import { SuggestionsPage } from "./pages/suggestions";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
 import { TagModeSettingsPage } from "./pages/tag-mode-settings";
@@ -64,6 +65,10 @@ export function App() {
             element={<AgentContextStoryboardPage />}
             path="/_storyboards/agent-context"
           />
+          <Route
+            element={<SuggestionsPage />}
+            path="/_storyboards/suggestions/:suggestionId?"
+          />
         </>
       ) : null}
       <Route element={<ProtectedApp />}>
@@ -75,6 +80,7 @@ export function App() {
         <Route element={<AgentsPage />} path="/agents" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />
+        <Route element={<SuggestionsPage />} path="/suggestions/:suggestionId?" />
         <Route element={<AgentCreatePage />} path="/agents/new" />
         <Route element={<AgentDetailPage />} path="/agents/:agentId" />
         <Route element={<AgentCreatePage />} path="/agents/:agentId/edit" />

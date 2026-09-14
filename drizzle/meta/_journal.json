@@ -288,6 +288,13 @@
       "when": 1788357088137,
       "tag": "0040_curly_lockjaw",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789405665683,
+      "tag": "0041_omniscient_changeling",
+      "breakpoints": true
     }
   ]
 }

@@ -604,12 +604,31 @@ export function Tabs<Value extends string>({
 }: TabsProps<Value>) {
   return (
     <div aria-label={ariaLabel} className="dsTabs" role="tablist">
-      {options.map((option) => (
+      {options.map((option, index) => (
         <button
           aria-selected={option.value === value}
           className="dsTabs__tab"
           key={option.value}
           onClick={() => onChange(option.value)}
+          onKeyDown={(event) => {
+            const direction = window.getComputedStyle(event.currentTarget).direction;
+            const previousKey = direction === "rtl" ? "ArrowRight" : "ArrowLeft";
+            const nextKey = direction === "rtl" ? "ArrowLeft" : "ArrowRight";
+            let nextIndex: number | null = null;
+
+            if (event.key === previousKey) nextIndex = (index - 1 + options.length) % options.length;
+            if (event.key === nextKey) nextIndex = (index + 1) % options.length;
+            if (event.key === "Home") nextIndex = 0;
+            if (event.key === "End") nextIndex = options.length - 1;
+            if (nextIndex === null) return;
+
+            event.preventDefault();
+            onChange(options[nextIndex].value);
+            const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+              "[role='tab']",
+            );
+            tabs?.[nextIndex]?.focus();
+          }}
           role="tab"
           tabIndex={option.value === value ? 0 : -1}
           type="button"

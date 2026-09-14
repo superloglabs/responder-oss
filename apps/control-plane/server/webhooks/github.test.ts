@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
+import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { queuePullRequestReview } from "../investigations/queue.js";
 import { githubWebhookRoutes, verifyGitHubSignature } from "./github.js";
@@ -13,6 +14,10 @@ vi.mock("@responder/core/analytics", () => ({
 
 vi.mock("@responder/core/db/pull-requests", () => ({
   markIssuePullRequestMerged: vi.fn(),
+}));
+
+vi.mock("@responder/core/db/suggestion-pull-requests", () => ({
+  markSuggestionPullRequestMerged: vi.fn(),
 }));
 
 vi.mock("@responder/core/integrations/slack-remediations", () => ({
@@ -164,6 +169,32 @@ describe("GitHub pull request webhooks", () => {
     );
   });
 
+  it("captures a pr merged event for a suggestion pull request", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(markIssuePullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markSuggestionPullRequestMerged).mockResolvedValue({
+      requestId: "req-2",
+      organizationId: "10000000-0000-4000-8000-000000000000",
+      suggestionId: "suggestion-1",
+      investigationId: "inv-1",
+      agentConfigVersionId: "cfg-1",
+      pullRequestUrl: "https://github.com/acme/api/pull/42",
+    });
+
+    const response = await post(pullRequestEvent());
+
+    await expect(response.json()).resolves.toEqual({ ok: true, matched: true });
+    expect(refreshIssuePullRequestSlackMessages).not.toHaveBeenCalled();
+    expect(captureAnalyticsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "pr merged",
+        properties: expect.objectContaining({
+          suggestion_id: "suggestion-1",
+        }),
+      }),
+    );
+  });
+
   it("ignores a pull request that was closed without merging", async () => {
     vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
 
@@ -240,6 +271,7 @@ describe("GitHub pull request webhooks", () => {
   it("does not capture an event when no matching pull request exists", async () => {
     vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
     vi.mocked(markIssuePullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markSuggestionPullRequestMerged).mockResolvedValue(null);
 
     const response = await post(pullRequestEvent());
 

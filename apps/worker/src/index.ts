@@ -32,8 +32,11 @@ import {
 } from "@responder/core/db/pull-requests";
 import {
   queueIssueRemediationJob,
+  queueSuggestionRemediationJob,
   recoverAbandonedIssueRemediations,
+  recoverAbandonedSuggestionRemediations,
 } from "@responder/core/remediation-queue";
+import { listQueuedSuggestionPullRequestIds } from "@responder/core/db/suggestions";
 import {
   queueLinearTicketJob,
   queuePendingLinearTicketJobs,
@@ -189,7 +192,19 @@ function drainLinearTicketRequests(): Promise<void> {
 
 function drainAbandonedRemediationRequests(): Promise<void> {
   if (remediationRecoveryDrain) return remediationRecoveryDrain;
-  remediationRecoveryDrain = recoverAbandonedIssueRemediations(boss)
+  remediationRecoveryDrain = Promise.all([
+    recoverAbandonedIssueRemediations(boss),
+    recoverAbandonedSuggestionRemediations(boss),
+    listQueuedSuggestionPullRequestIds().then(async (requestIds) => {
+      await Promise.all(
+        requestIds.map((requestId) =>
+          queueSuggestionRemediationJob(remediationJobQueue, requestId),
+        ),
+      );
+      return requestIds;
+    }),
+  ])
+    .then((groups) => groups.flat())
     .then((requestIds) => {
       if (requestIds.length === 0) return;
       console.error(JSON.stringify({
@@ -593,6 +608,13 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
           operation: "investigation",
           organizationId: payload.config.organizationId,
         });
+      },
+      async (requestIds) => {
+        await Promise.all(
+          requestIds.map((requestId) =>
+            queueSuggestionRemediationJob(remediationJobQueue, requestId),
+          ),
+        );
       },
     );
     let deliveryWarnings: string[] = [];

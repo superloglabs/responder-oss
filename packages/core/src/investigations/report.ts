@@ -132,7 +132,7 @@ const codeChangePartSchema = z.object({
     ),
 });
 
-const codeChangeRemediationSchema = z
+export const codeChangeRemediationSchema = z
   .object({
     type: z.literal("code_change"),
     title: remediationTitleSchema,
