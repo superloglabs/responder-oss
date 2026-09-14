@@ -33,21 +33,26 @@ export function ScanDetailPage() {
     let cancelled = false;
     let timer: number | undefined;
     async function loadScan() {
+      let pollAgain = false;
       try {
         const result = await fetchScan(requestedScanId);
         if (cancelled) return;
         setScan(result.run);
         setFindings(result.findings);
         setError(null);
-        if (result.run.status === "running") {
-          timer = window.setTimeout(() => void loadScan(), 5_000);
-        }
+        pollAgain = result.run.status === "running";
       } catch (caught) {
+        pollAgain = true;
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Unable to load scan");
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          if (pollAgain) {
+            timer = window.setTimeout(() => void loadScan(), 5_000);
+          }
+        }
       }
     }
     void loadScan();

@@ -33,6 +33,7 @@ describe("scan scheduler", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-14T09:15:00.000Z"));
     vi.mocked(claimDueScans).mockResolvedValue([dueScan]);
+    vi.mocked(releaseScanRunLease).mockResolvedValue(undefined);
     vi.mocked(createScanInvestigationRequest).mockResolvedValue({
       agentId: "agent-1",
       provider: "scan",
@@ -56,7 +57,10 @@ describe("scan scheduler", () => {
     expect(createScanInvestigationRequest).toHaveBeenCalledWith({
       organizationId: dueScan.organizationId,
       scheduledFor: new Date("2026-09-14T09:15:00.000Z"),
-      externalEventId: expect.stringContaining(dueScan.leaseId),
+      externalEventId: `scheduled:${dueScan.organizationId}:${dueScan.scheduledFor.toISOString()}`,
+    });
+    expect(queueInvestigation).toHaveBeenCalledWith(expect.any(Object), {
+      retryFailedDuplicate: true,
     });
     expect(releaseScanRunLease).toHaveBeenCalledWith(expect.objectContaining({
       advanceSchedule: true,

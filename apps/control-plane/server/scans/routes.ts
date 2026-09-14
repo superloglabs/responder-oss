@@ -145,6 +145,14 @@ export const scanRoutes = new Hono()
         await releaseScanRunLease({
           organizationId: tenant.organizationId,
           leaseId,
+        }).catch((releaseError: unknown) => {
+          console.error(JSON.stringify({
+            error: releaseError instanceof Error
+              ? releaseError.message
+              : String(releaseError),
+            event: "manual_scan_lease_release_failed",
+            organizationId: tenant.organizationId,
+          }));
         });
       }
     }

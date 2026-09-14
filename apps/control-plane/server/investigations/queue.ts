@@ -10,6 +10,7 @@ import {
   beginSlackThreadInvestigation,
   discardPendingInvestigation,
   failInvestigation,
+  getInvestigationForRetry,
   prepareInvestigationRetry,
 } from "../../../../packages/core/src/db/investigations.js";
 import { queueIssueRemediationJob } from "../../../../packages/core/src/remediation-queue.js";
@@ -63,6 +64,7 @@ async function getBoss() {
 export async function queueInvestigation(
   request: InvestigationRequest,
   options?: {
+    retryFailedDuplicate?: boolean;
     slackIssueFollowup?: {
       originalInvestigationId: string;
       issueIds: string[];
@@ -74,6 +76,54 @@ export async function queueInvestigation(
   const input = toInvestigationInput(request);
   const result = await beginInvestigation(request.agentId, input);
   if (!result.created) {
+    if (options?.retryFailedDuplicate) {
+      const existing = await getInvestigationForRetry({
+        agentId: request.agentId,
+        investigationId: result.investigationId,
+        organizationId: result.config.organizationId,
+      });
+      if (existing?.status === "failed") {
+        const retry = await prepareInvestigationRetry(result.investigationId);
+        try {
+          const jobId = await (await getBoss()).send(
+            investigationQueue,
+            {
+              kind: "investigation",
+              config: retry.config,
+              investigationId: retry.investigationId,
+              queuedAt: new Date().toISOString(),
+              request: {
+                agentId: retry.config.agentId,
+                body: retry.input.body,
+                externalEventId: retry.input.externalEventId,
+                provider: retry.input.provider,
+                title: retry.input.title,
+                ...(retry.input.sourceUrl
+                  ? { sourceUrl: retry.input.sourceUrl }
+                  : {}),
+                ...(retry.input.attributes
+                  ? { attributes: retry.input.attributes }
+                  : {}),
+              },
+              runtimeProfileId: retry.runtimeProfileId,
+            },
+            { singletonKey: `infrastructure-retry:${retry.investigationId}` },
+          );
+          if (!jobId) throw new Error("The investigation retry job was not created");
+          return {
+            investigationId: retry.investigationId,
+            jobId,
+            kind: "queued",
+          };
+        } catch (error) {
+          await failInvestigation(
+            retry.investigationId,
+            error instanceof Error ? error.message : "Unable to queue retry",
+          );
+          throw error;
+        }
+      }
+    }
     return { investigationId: result.investigationId, kind: "duplicate" };
   }
 

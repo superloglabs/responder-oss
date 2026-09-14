@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   failIssuePullRequest: vi.fn(),
   finalizeInvestigationReservation: vi.fn(),
   getIssuePullRequestForRemediation: vi.fn(),
+  getInvestigationForRetry: vi.fn(),
   getRuntimeAgentConfig: vi.fn(),
   notifyBillingLimitReached: vi.fn(),
   prepareInvestigationRetry: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   discardPendingInvestigation: mocks.discardPendingInvestigation,
   failInvestigation: mocks.failInvestigation,
   getRuntimeAgentConfig: mocks.getRuntimeAgentConfig,
+  getInvestigationForRetry: mocks.getInvestigationForRetry,
   prepareInvestigationRetry: mocks.prepareInvestigationRetry,
 }));
 
@@ -147,6 +149,7 @@ describe("investigation queue", () => {
       investigationId: created.investigationId,
       runtimeProfileId: created.runtimeProfileId,
     });
+    mocks.getInvestigationForRetry.mockResolvedValue(null);
     mocks.getIssuePullRequestForRemediation.mockResolvedValue(
       remediationRequest,
     );
@@ -171,6 +174,32 @@ describe("investigation queue", () => {
     expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
     expect(mocks.bossSend).not.toHaveBeenCalled();
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("requeues a failed infrastructure delivery with the durable event ID", async () => {
+    mocks.beginInvestigation.mockResolvedValue({ ...created, created: false });
+    mocks.getInvestigationForRetry.mockResolvedValue({
+      id: created.investigationId,
+      input: request,
+      status: "failed",
+    });
+
+    await expect(queueInvestigation(request, {
+      retryFailedDuplicate: true,
+    })).resolves.toEqual({
+      investigationId: created.investigationId,
+      jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
+    });
+    expect(mocks.prepareInvestigationRetry).toHaveBeenCalledWith(
+      created.investigationId,
+    );
+    expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
+    expect(mocks.bossSend).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ investigationId: created.investigationId }),
+      { singletonKey: `infrastructure-retry:${created.investigationId}` },
+    );
   });
 
   it("checks the monthly limit and adds a new job", async () => {

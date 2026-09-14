@@ -473,21 +473,19 @@ export async function releaseScanRunLease(input: {
   completedAt?: Date;
   advanceSchedule?: boolean;
 }): Promise<void> {
-  const configuration = input.advanceSchedule
-    ? await getScanConfiguration(input.organizationId)
-    : null;
-  const nextRunAt = configuration?.frequencyHours && input.completedAt
-    ? new Date(
-        input.completedAt.getTime() +
-          configuration.frequencyHours * 60 * 60 * 1_000,
-      )
-    : undefined;
   await getDatabase()
     .update(scanConfigurations)
     .set({
       runLeaseId: null,
       runLeaseExpiresAt: null,
-      ...(nextRunAt ? { nextRunAt } : {}),
+      ...(input.advanceSchedule && input.completedAt
+        ? {
+            nextRunAt: sql<Date | null>`case
+              when ${scanConfigurations.frequencyHours} is null then null
+              else ${input.completedAt} + (${scanConfigurations.frequencyHours} * interval '1 hour')
+            end`,
+          }
+        : {}),
       updatedAt: input.completedAt ?? new Date(),
     })
     .where(

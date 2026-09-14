@@ -344,6 +344,12 @@ function configurationWithSources(
   sources: ScanSource[],
   options: AgentOptions | null,
 ): ScanConfiguration {
+  const visibleAccountIds = new Set(
+    sources.flatMap((source) => source.accountId ? [source.accountId] : []),
+  );
+  const preservedAccountIds = configuration.contextAccountIds.filter(
+    (accountId) => !visibleAccountIds.has(accountId),
+  );
   const contextAccountIds = sources.flatMap((source) =>
     source.kind === "account" && source.enabled && source.accountId
       ? [source.accountId]
@@ -362,7 +368,13 @@ function configurationWithSources(
   );
   return {
     ...configuration,
-    contextAccountIds: [...new Set([...contextAccountIds, ...vercelAccountIds])],
+    contextAccountIds: [
+      ...new Set([
+        ...preservedAccountIds,
+        ...contextAccountIds,
+        ...vercelAccountIds,
+      ]),
+    ],
     contextResourceIds,
     repositoryIds,
   };
@@ -400,13 +412,12 @@ export function ScansPage() {
   useEffect(() => {
     if (isStoryboard) return;
     let cancelled = false;
-    void Promise.all([fetchAgentOptions(), fetchScans(), fetchIntegrations()])
-      .then(([loadedOptions, loadedScans, loadedIntegrations]) => {
+    void Promise.all([fetchAgentOptions(), fetchScans()])
+      .then(([loadedOptions, loadedScans]) => {
         if (cancelled) return;
         configurationRef.current = loadedScans.configuration;
         setConfiguration(loadedScans.configuration);
         setOptions(loadedOptions);
-        setIntegrations(loadedIntegrations);
         setSources(configuredSources(loadedOptions, loadedScans.configuration));
         setRuns(loadedScans.runs);
       })
@@ -418,6 +429,19 @@ export function ScansPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [isStoryboard]);
+
+  useEffect(() => {
+    if (isStoryboard) return;
+    let cancelled = false;
+    void fetchIntegrations()
+      .then((loadedIntegrations) => {
+        if (!cancelled) setIntegrations(loadedIntegrations);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };

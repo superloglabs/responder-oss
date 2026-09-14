@@ -20,9 +20,11 @@ export async function runDueScans(): Promise<void> {
         const request = await createScanInvestigationRequest({
           organizationId: scan.organizationId,
           scheduledFor: executionTime,
-          externalEventId: `scheduled:${scan.organizationId}:${scan.scheduledFor.toISOString()}:${scan.leaseId}`,
+          externalEventId: `scheduled:${scan.organizationId}:${scan.scheduledFor.toISOString()}`,
         });
-        const result = await queueInvestigation(request);
+        const result = await queueInvestigation(request, {
+          retryFailedDuplicate: true,
+        });
         advanceSchedule = true;
         console.info(
           JSON.stringify({
@@ -56,6 +58,14 @@ export async function runDueScans(): Promise<void> {
           leaseId: scan.leaseId,
           completedAt: new Date(),
           advanceSchedule,
+        }).catch((releaseError: unknown) => {
+          console.error(JSON.stringify({
+            error: releaseError instanceof Error
+              ? releaseError.message
+              : String(releaseError),
+            event: "scheduled_scan_lease_release_failed",
+            organizationId: scan.organizationId,
+          }));
         });
       }
     }),
