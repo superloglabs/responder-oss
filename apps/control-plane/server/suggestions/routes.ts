@@ -19,9 +19,7 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 const cursorSchema = z.object({
-  createdAt: z.string().regex(
-    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?[+-]\d{2}(?::?\d{2})?$/u,
-  ),
+  createdAt: z.iso.datetime({ offset: true }),
   id: z.uuid(),
 });
 

@@ -226,7 +226,7 @@ export async function listSuggestions(
       subtitle: suggestions.subtitle,
       codeChangeAvailable: sql<boolean>`${suggestions.codeChange} is not null`,
       createdAt: suggestions.createdAt,
-      cursorCreatedAt: sql<string>`${suggestions.createdAt}::text`,
+      cursorCreatedAt: sql<string>`to_char(${suggestions.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     })
     .from(suggestions)
     .where(
