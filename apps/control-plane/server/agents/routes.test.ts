@@ -32,6 +32,7 @@ import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
 } from "./daytona-secrets.js";
+import { requestCodebaseKnowledgeRefreshesForAgent } from "../knowledge/queue.js";
 import { agentRoutes, workspaceSecretInputSchema } from "./routes.js";
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
@@ -89,6 +90,9 @@ vi.mock("../investigations/queue.js", () => ({
 vi.mock("./daytona-secrets.js", () => ({
   createDaytonaWorkspaceSecret: vi.fn(),
   deleteDaytonaWorkspaceSecret: vi.fn(),
+}));
+vi.mock("../knowledge/queue.js", () => ({
+  requestCodebaseKnowledgeRefreshesForAgent: vi.fn(),
 }));
 
 const app = new Hono().route("/api/agents", agentRoutes);
@@ -167,6 +171,28 @@ describe("agent creation modes", () => {
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
       configuration: agentConfiguration,
+    });
+  });
+
+  it("queues initial knowledge generation when repositories are attached", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    const agentId = "30000000-0000-4000-8000-000000000000";
+    vi.mocked(createAgent).mockResolvedValue(agentId);
+    vi.mocked(requestCodebaseKnowledgeRefreshesForAgent).mockResolvedValue([]);
+
+    const response = await app.request("/api/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...agentConfiguration,
+        repositoryIds: ["50000000-0000-4000-8000-000000000000"],
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(requestCodebaseKnowledgeRefreshesForAgent).toHaveBeenCalledWith({
+      agentId,
+      organizationId: tenant.organizationId,
     });
   });
 

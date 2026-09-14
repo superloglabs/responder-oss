@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  codebaseKnowledgeJobSchema,
+  codebaseKnowledgeQueue,
   createJobBoss,
   investigationJobSchema,
   investigationLocalConcurrency,
@@ -86,6 +88,38 @@ describe("background jobs", () => {
       linearTicketQueue,
       expect.objectContaining({ policy: "exclusive" }),
     );
+  });
+
+  it("uses an exclusive queue for daily codebase knowledge refreshes", async () => {
+    const createQueue = vi.fn().mockResolvedValue(undefined);
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const updateQueue = vi.fn().mockResolvedValue(undefined);
+
+    await prepareWorkerQueues({
+      createQueue,
+      getDb: () => ({ executeSql }),
+      updateQueue,
+    } as never);
+
+    expect(createQueue).toHaveBeenCalledWith(
+      codebaseKnowledgeQueue,
+      expect.objectContaining({
+        expireInSeconds: 7_200,
+        policy: "exclusive",
+        retryLimit: 2,
+      }),
+    );
+    const parsedJob = codebaseKnowledgeJobSchema.parse({
+      kind: "codebase_knowledge_refresh",
+      organizationId: "15151515-1515-4515-8515-151515151515",
+      repositoryId: "13131313-1313-4313-8313-131313131313",
+      requestedAt: "2026-09-04T03:00:00.000Z",
+    });
+    expect(parsedJob.kind).toBe("codebase_knowledge_refresh");
+    if (parsedJob.kind !== "codebase_knowledge_refresh") {
+      throw new Error("Expected a refresh job");
+    }
+    expect(parsedJob.force).toBe(false);
   });
 
   it("detects interrupted investigations without shortening their runtime limit", async () => {

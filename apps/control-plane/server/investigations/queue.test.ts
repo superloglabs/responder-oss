@@ -72,6 +72,7 @@ vi.mock("../../../../packages/core/src/jobs.js", async (importOriginal) => {
 
 import {
   closeInvestigationQueue,
+  getControlPlaneJobBoss,
   queueInvestigation,
   queueSlackThreadInvestigation,
   queueInvestigationRetry,
@@ -137,6 +138,7 @@ describe("investigation queue", () => {
       reservationId: "rerun-reservation-1",
     });
     mocks.bossStart.mockResolvedValue(undefined);
+    mocks.bossStop.mockResolvedValue(undefined);
     mocks.captureAnalyticsEvent.mockResolvedValue(undefined);
     mocks.prepareWorkerQueues.mockResolvedValue(undefined);
     mocks.notifyBillingLimitReached.mockResolvedValue(undefined);
@@ -171,6 +173,16 @@ describe("investigation queue", () => {
     expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
     expect(mocks.bossSend).not.toHaveBeenCalled();
     expect(mocks.captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("stops a queue that fails during startup preparation", async () => {
+    mocks.prepareWorkerQueues.mockRejectedValueOnce(new Error("prepare failed"));
+
+    await expect(getControlPlaneJobBoss()).rejects.toThrow("prepare failed");
+    expect(mocks.bossStop).toHaveBeenCalledWith({
+      graceful: true,
+      timeout: 10_000,
+    });
   });
 
   it("checks the monthly limit and adds a new job", async () => {

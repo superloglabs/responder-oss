@@ -3,6 +3,8 @@ import { AuthGate } from "./components/auth-gate";
 import { AgentDetailPage } from "./pages/agent-detail";
 import { AgentCreatePage } from "./pages/agent-create";
 import { AgentContextStoryboardPage } from "./pages/agent-context-storyboard";
+import { CodebaseKnowledgePage } from "./pages/codebase-knowledge";
+import { CodebaseKnowledgeIndexPage } from "./pages/codebase-knowledge-index";
 import { AgentsPage } from "./pages/agents";
 import { BillingPage } from "./pages/billing";
 import { DesignLibraryPage } from "./pages/design-library";
@@ -40,6 +42,10 @@ function LegacyBillingRedirect() {
   return <Navigate replace to={{ pathname: "/settings/billing", search }} />;
 }
 
+function LegacyAgentKnowledgeRedirect() {
+  return <Navigate replace to="/knowledge" />;
+}
+
 export function App() {
   const { pathname } = useLocation();
   usePageMetadata(editionSeoMetadataForPath(pathname));
@@ -73,10 +79,13 @@ export function App() {
           path="/invite/:invitationId"
         />
         <Route element={<AgentsPage />} path="/agents" />
+        <Route element={<CodebaseKnowledgeIndexPage />} path="/knowledge" />
+        <Route element={<CodebaseKnowledgePage />} path="/knowledge/:repositoryId" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />
         <Route element={<AgentCreatePage />} path="/agents/new" />
         <Route element={<AgentDetailPage />} path="/agents/:agentId" />
+        <Route element={<LegacyAgentKnowledgeRedirect />} path="/agents/:agentId/knowledge" />
         <Route element={<AgentCreatePage />} path="/agents/:agentId/edit" />
         <Route element={<LegacyBillingRedirect />} path="/billing" />
         <Route

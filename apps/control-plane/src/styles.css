@@ -3273,6 +3273,284 @@ button:disabled {
   min-height: 34px;
 }
 
+.knowledgeContent > header > span {
+  color: var(--ds-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.knowledgeHeading {
+  padding: 8px 0 20px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.knowledgeHeading__back {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+}
+
+.knowledgeHeading__back:hover {
+  color: var(--ds-text-primary);
+}
+
+.knowledgeHeading h1 {
+  margin: 14px 0 0;
+  color: var(--ds-text-primary);
+  font-size: 33px;
+  font-weight: 500;
+  line-height: 42px;
+}
+
+.knowledgeHeading p {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: var(--ds-text-muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.knowledgeHeading__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.knowledgeLoading,
+.knowledgeEmpty {
+  color: var(--ds-text-muted);
+}
+
+.knowledgeEmpty h2 {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.knowledgeEmpty p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.knowledgeWorkspace {
+  min-height: 680px;
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.knowledgeNavigation {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.knowledgeNavigation h2 {
+  margin: 14px 10px 5px;
+  color: var(--ds-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.knowledgeNavigation h2:first-child {
+  margin-top: 0;
+}
+
+.knowledgeNavigation button {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-small);
+  background: transparent;
+  color: var(--ds-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.knowledgeNavigation button:hover,
+.knowledgeNavigation button.isActive {
+  border-color: var(--ds-border-subtle);
+  background: var(--ds-surface-raised);
+}
+
+.knowledgeNavigation button.isActive strong {
+  color: var(--ds-text-primary);
+}
+
+.knowledgeNavigation button strong,
+.knowledgeNavigation button span {
+  display: block;
+}
+
+.knowledgeNavigation button strong {
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.knowledgeNavigation button span {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeContent {
+  min-width: 0;
+}
+
+.knowledgeContent > header {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.knowledgeContent > header h2 {
+  margin: 6px 0 0;
+  color: var(--ds-text-primary);
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 34px;
+}
+
+.knowledgeContent > header p {
+  margin: 7px 0 0;
+  color: var(--ds-text-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.knowledgeMarkdown {
+  padding: 20px 4px;
+  color: var(--ds-text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.knowledgeMarkdown h1,
+.knowledgeMarkdown h2,
+.knowledgeMarkdown h3 {
+  color: var(--ds-text-primary);
+  font-weight: 500;
+}
+
+.knowledgeMarkdown h1 { font-size: 24px; }
+.knowledgeMarkdown h2 { margin-top: 28px; font-size: 19px; }
+.knowledgeMarkdown h3 { margin-top: 22px; font-size: 16px; }
+.knowledgeMarkdown pre,
+.knowledgeSource pre {
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+  font-family: var(--ds-font-mono);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.knowledgeMarkdown code,
+.knowledgePaths code {
+  font-family: var(--ds-font-mono);
+  font-size: 0.9em;
+}
+
+.knowledgeDiagram {
+  height: 520px;
+  margin-top: 20px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-medium);
+  background: var(--ds-surface-raised);
+}
+
+.knowledgeDiagram .react-flow__node {
+  width: 180px;
+  padding: 12px;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-base);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+  font-size: 12px;
+}
+
+.knowledgeDiagram .react-flow__edge-path,
+.knowledgeDiagram .react-flow__arrowhead polyline {
+  stroke: var(--ds-text-muted);
+}
+
+.knowledgeDiagram .react-flow__edge-text {
+  fill: var(--ds-text-muted);
+  font-size: 9px;
+}
+
+.knowledgeSource {
+  margin-top: 14px;
+  color: var(--ds-text-muted);
+  font-size: 12px;
+}
+
+.knowledgePaths {
+  padding-top: 18px;
+  border-top: 1px solid var(--ds-border-subtle);
+  color: var(--ds-text-muted);
+  font-size: 11px;
+}
+
+.knowledgePaths ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.knowledgeRevisions h2 {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.knowledgeRevisions ul {
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+}
+
+.knowledgeRevisions li {
+  padding: 8px 10px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-small);
+  font-size: 11px;
+}
+
+.knowledgeRevisions li strong,
+.knowledgeRevisions li span {
+  display: block;
+}
+
+.knowledgeRevisions li span,
+.knowledgeRevisions p {
+  margin-top: 3px;
+  color: var(--ds-text-muted);
+  font-family: var(--ds-font-mono);
+  font-size: 10px;
+}
+
 .investigationPage,
 .investigationPageState {
   width: min(100%, 960px);
@@ -9391,6 +9669,30 @@ a.issueLine:focus-visible {
 }
 
 @media (max-width: 760px) {
+  .knowledgeHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .knowledgeHeading__actions,
+  .knowledgeHeading__actions > .dsButton {
+    width: 100%;
+  }
+
+  .knowledgeHeading__actions {
+    justify-content: space-between;
+  }
+
+  .knowledgeWorkspace {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .knowledgeNavigation {
+    max-height: 320px;
+    overflow: auto;
+  }
+
   .agentConfiguration.dsPanel--padding-default {
     padding: 20px;
   }

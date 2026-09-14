@@ -21,6 +21,11 @@ import type {
   IssueTimelineEntry,
   StructuredInvestigationReport,
 } from "../investigations/report.js";
+import type {
+  CodebaseKnowledgeDiagram,
+  CodebaseKnowledgeDocument,
+  CodebaseKnowledgeRepositoryRevision,
+} from "../knowledge-base.js";
 import { organization, user } from "./auth-schema.js";
 
 /**
@@ -345,6 +350,47 @@ export const agentVersionRepositories = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.agentConfigVersionId, table.repositoryId] }),
+  ],
+);
+
+export type CodebaseKnowledgeStatus =
+  | "queued"
+  | "generating"
+  | "ready"
+  | "failed";
+
+export const codebaseKnowledgeBases = pgTable(
+  "codebase_knowledge_bases",
+  {
+    repositoryId: uuid("repository_id")
+      .primaryKey()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    status: text("status").$type<CodebaseKnowledgeStatus>().notNull(),
+    overview: text("overview"),
+    documents: jsonb("documents")
+      .$type<CodebaseKnowledgeDocument[]>()
+      .notNull()
+      .default([]),
+    diagrams: jsonb("diagrams")
+      .$type<CodebaseKnowledgeDiagram[]>()
+      .notNull()
+      .default([]),
+    repositoryRevisions: jsonb("repository_revisions")
+      .$type<CodebaseKnowledgeRepositoryRevision[]>()
+      .notNull()
+      .default([]),
+    failureReason: text("failure_reason"),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    generatedAt: timestamp("generated_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("codebase_knowledge_bases_status_idx").on(table.status),
   ],
 );
 
