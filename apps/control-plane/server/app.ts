@@ -28,6 +28,7 @@ import { sentryWebhookRoutes } from "./webhooks/sentry.js";
 import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 import { scanRoutes } from "./scans/routes.js";
+import { suggestionRoutes } from "./suggestions/routes.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -400,6 +401,7 @@ export const app = instrumentedApp
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)
+  .route("/api/suggestions", suggestionRoutes)
   .route("/api/integrations", integrationRoutes)
   .route("/api/webhooks/github", githubWebhookRoutes)
   .route("/api/webhooks/sentry", sentryWebhookRoutes)

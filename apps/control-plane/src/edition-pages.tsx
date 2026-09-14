@@ -32,3 +32,15 @@ export function PrivacyPage() {
 export function TermsPage() {
   return <Navigate replace to="/agents" />;
 }
+
+export function DpaPage() {
+  return <Navigate replace to="/agents" />;
+}
+
+export function SecurityPage() {
+  return <Navigate replace to="/agents" />;
+}
+
+export function SubprocessorsPage() {
+  return <Navigate replace to="/agents" />;
+}

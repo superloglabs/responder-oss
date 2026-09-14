@@ -6,7 +6,7 @@ const sentenceSegmenter = new Intl.Segmenter("en", {
   granularity: "sentence",
 });
 
-function oneSentenceSchema(maxLength: number, description: string) {
+export function oneSentenceSchema(maxLength: number, description: string) {
   return z
     .string()
     .trim()
@@ -132,7 +132,7 @@ const codeChangePartSchema = z.object({
     ),
 });
 
-const codeChangeRemediationSchema = z
+export const codeChangeRemediationSchema = z
   .object({
     type: z.literal("code_change"),
     title: remediationTitleSchema,

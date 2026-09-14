@@ -1,4 +1,5 @@
 import { failIssuePullRequest } from "@responder/core/db/pull-requests";
+import { failSuggestionPullRequest } from "@responder/core/db/suggestion-pull-requests";
 import type { RemediationJob } from "@responder/core/jobs";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { runProposedRemediation } from "./remediate.js";
@@ -7,6 +8,7 @@ import { reportWorkerException } from "./monitoring.js";
 
 interface RemediationJobDependencies {
   failRequest: typeof failIssuePullRequest;
+  failSuggestionRequest?: typeof failSuggestionPullRequest;
   reportException: typeof reportWorkerException;
   refreshSlack?: typeof refreshIssuePullRequestSlackMessages;
   runRemediation: typeof runProposedRemediation;
@@ -14,6 +16,7 @@ interface RemediationJobDependencies {
 
 const defaultDependencies: RemediationJobDependencies = {
   failRequest: failIssuePullRequest,
+  failSuggestionRequest: failSuggestionPullRequest,
   reportException: reportWorkerException,
   refreshSlack: refreshIssuePullRequestSlackMessages,
   runRemediation: runProposedRemediation,
@@ -39,7 +42,9 @@ export async function processRemediationJob(
     );
     const [recordingResult, reportingResult] = await Promise.allSettled([
       Promise.resolve().then(() =>
-        dependencies.failRequest(payload.remediationRequestId, message)
+        ("suggestion" in payload
+          ? dependencies.failSuggestionRequest ?? failSuggestionPullRequest
+          : dependencies.failRequest)(payload.remediationRequestId, message)
       ),
       Promise.resolve().then(() =>
         dependencies.reportException(error, {
@@ -84,7 +89,9 @@ export async function processRemediationJob(
       );
     }
 
-    await dependencies.refreshSlack?.(payload.remediationRequestId);
+    if (!("suggestion" in payload)) {
+      await dependencies.refreshSlack?.(payload.remediationRequestId);
+    }
     return { requestId: payload.remediationRequestId };
   }
 

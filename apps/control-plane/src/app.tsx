@@ -15,14 +15,18 @@ import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
   BlogIndexPage,
+  DpaPage,
   HomePage,
   PrivacyPage,
   PricingPage,
   ProductUpdateArticlePage,
+  SecurityPage,
+  SubprocessorsPage,
   TeamPage,
   TermsPage,
 } from "./edition-pages";
 import { SettingsPage } from "./pages/settings";
+import { SuggestionsPage } from "./pages/suggestions";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
 import { TagModeSettingsPage } from "./pages/tag-mode-settings";
@@ -54,6 +58,9 @@ export function App() {
       <Route element={<TeamPage />} path="/team" />
       <Route element={<PrivacyPage />} path="/privacy" />
       <Route element={<TermsPage />} path="/tos" />
+      <Route element={<DpaPage />} path="/dpa" />
+      <Route element={<SecurityPage />} path="/security" />
+      <Route element={<SubprocessorsPage />} path="/subprocessors" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}
@@ -71,6 +78,10 @@ export function App() {
             element={<ScanDetailPage />}
             path="/_storyboards/scans/:scanId"
           />
+          <Route
+            element={<SuggestionsPage />}
+            path="/_storyboards/suggestions/:suggestionId?"
+          />
         </>
       ) : null}
       <Route element={<ProtectedApp />}>
@@ -84,6 +95,7 @@ export function App() {
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />
+        <Route element={<SuggestionsPage />} path="/suggestions/:suggestionId?" />
         <Route element={<AgentCreatePage />} path="/agents/new" />
         <Route element={<AgentDetailPage />} path="/agents/:agentId" />
         <Route element={<AgentCreatePage />} path="/agents/:agentId/edit" />

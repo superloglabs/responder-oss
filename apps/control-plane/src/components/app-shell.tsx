@@ -7,7 +7,7 @@ import { BillingBanner } from "./billing-banner";
 import { ColorThemeToggle } from "./color-theme-toggle";
 
 interface AppShellProps {
-  active: "agents" | "issues" | "scans" | "settings";
+  active: "agents" | "issues" | "scans" | "settings" | "suggestions";
   children: ReactNode;
   density?:
     | "default"
@@ -138,6 +138,13 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               to="/scans"
             >
               Scans
+            </Link>
+            <Link
+              aria-current={active === "suggestions" ? "page" : undefined}
+              className={active === "suggestions" ? "isActive" : undefined}
+              to="/suggestions"
+            >
+              Suggestions
             </Link>
             <Link
               aria-current={active === "settings" ? "page" : undefined}

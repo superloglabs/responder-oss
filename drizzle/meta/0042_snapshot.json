@@ -1,6 +1,6 @@
 {
-  "id": "b0024340-3037-4ee9-b3c8-361df5c9df11",
-  "prevId": "d8a0658d-0588-494e-8f19-4b21353c9a64",
+  "id": "8d4b8edd-8440-43a2-bd6e-7cf0359d5c13",
+  "prevId": "b0024340-3037-4ee9-b3c8-361df5c9df11",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1085,6 +1085,22 @@
           ],
           "isUnique": true,
           "where": "\"agents\".\"purpose\" = 'slack_thread'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agents_organization_scan_idx": {
+          "name": "agents_organization_scan_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"agents\".\"purpose\" = 'scan'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3606,6 +3622,184 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.scan_configurations": {
+      "name": "scan_configurations",
+      "schema": "",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "frequency_hours": {
+          "name": "frequency_hours",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slack_channel_resource_id": {
+          "name": "slack_channel_resource_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "context_account_ids": {
+          "name": "context_account_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "context_resource_ids": {
+          "name": "context_resource_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "repository_ids": {
+          "name": "repository_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "next_run_at": {
+          "name": "next_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_lease_id": {
+          "name": "run_lease_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_lease_expires_at": {
+          "name": "run_lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "scan_configurations_due_idx": {
+          "name": "scan_configurations_due_idx",
+          "columns": [
+            {
+              "expression": "next_run_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "scan_configurations_organization_id_organization_id_fk": {
+          "name": "scan_configurations_organization_id_organization_id_fk",
+          "tableFrom": "scan_configurations",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "scan_configurations_agent_id_agents_id_fk": {
+          "name": "scan_configurations_agent_id_agents_id_fk",
+          "tableFrom": "scan_configurations",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "scan_configurations_slack_channel_resource_id_integration_resources_id_fk": {
+          "name": "scan_configurations_slack_channel_resource_id_integration_resources_id_fk",
+          "tableFrom": "scan_configurations",
+          "tableTo": "integration_resources",
+          "columnsFrom": [
+            "slack_channel_resource_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "scan_configurations_updated_by_user_id_fk": {
+          "name": "scan_configurations_updated_by_user_id_fk",
+          "tableFrom": "scan_configurations",
+          "tableTo": "user",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "scan_configurations_agent_id_unique": {
+          "name": "scan_configurations_agent_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "agent_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "scan_configurations_frequency_hours_check": {
+          "name": "scan_configurations_frequency_hours_check",
+          "value": "\"scan_configurations\".\"frequency_hours\" is null or \"scan_configurations\".\"frequency_hours\" in (1, 6)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.slack_investigation_sessions": {

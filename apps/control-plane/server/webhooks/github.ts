@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
+import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -149,14 +150,23 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ ok: true, ignored: true });
   }
 
-  const merged = await markIssuePullRequestMerged({
+  const mergedIssue = await markIssuePullRequestMerged({
     repositoryFullName: repository.full_name,
     pullRequestNumber: pullRequest.number,
   });
+  const mergedSuggestion = mergedIssue
+    ? null
+    : await markSuggestionPullRequestMerged({
+        repositoryFullName: repository.full_name,
+        pullRequestNumber: pullRequest.number,
+      });
+  const merged = mergedIssue ?? mergedSuggestion;
   if (!merged) {
     return context.json({ ok: true, matched: false });
   }
-  await refreshIssuePullRequestSlackMessages(merged.requestId);
+  if (mergedIssue) {
+    await refreshIssuePullRequestSlackMessages(merged.requestId);
+  }
 
   console.info(
     JSON.stringify({
@@ -174,7 +184,9 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
       $process_person_profile: false,
       agent_config_version_id: merged.agentConfigVersionId,
       investigation_id: merged.investigationId,
-      issue_id: merged.issueId,
+      ...(mergedIssue
+        ? { issue_id: mergedIssue.issueId }
+        : { suggestion_id: mergedSuggestion!.suggestionId }),
       pr_number: pullRequest.number,
       pr_url: merged.pullRequestUrl ?? pullRequest.html_url ?? null,
       repository: repository.full_name,

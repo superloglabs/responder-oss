@@ -94,6 +94,10 @@ import {
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
+import {
+  createSearchSuggestionsTool,
+  createSuggestionTool,
+} from "./suggestion-tools.js";
 
 export interface SandboxAgentConfig extends DaytonaClientConfig {
   model: string;
@@ -338,6 +342,7 @@ export function investigationInstructions(input: {
   threadMode?: boolean;
   issueFollowupIssueCount?: number;
   scanMode?: boolean;
+  replay?: boolean;
 }): string {
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
@@ -476,6 +481,9 @@ export function investigationInstructions(input: {
       : issueUpdateFollowup
         ? null
         : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
+    input.threadMode || input.replay || issueUpdateFollowup
+      ? null
+      : "If missing telemetry materially blocks or slows the investigation, search_observability_suggestions before proposing anything. If no semantically equivalent suggestion exists, call create_observability_suggestion with a one-sentence title, a distinct one-sentence subtitle, and detailed Markdown. Include codeChange only after preparing and validating a complete patch in an attached repository. Do not create suggestions for merely nice-to-have telemetry or use them as a substitute for finishing the investigation.",
     issueUpdateFollowup
       ? "This is a follow-up to an existing Slack issue investigation. Use the supplied prior investigation context and the latest Slack feedback to decide which bound issue remediations need to change. For an updated code remediation, make the change locally, run the checks you judge useful, and save the exact final diff plus your ready-for-review pull request title and body. Do not create new issues, tickets, or pull requests. Call update_issue_remediation for each affected issue, and do not update unrelated issues. If the feedback is ambiguous, ask for clarification instead of guessing."
       : noIssueFollowup
@@ -530,6 +538,9 @@ export async function runInvestigationAgent(
   onLinearTicketRequests?: (requestIds: string[]) => Promise<void>,
   onRecoverableSentryFailure?: (
     error: SentryConnectionUnavailableError,
+  ) => Promise<void>,
+  onAutomaticSuggestionPullRequestRequests?: (
+    requestIds: string[],
   ) => Promise<void>,
 ): Promise<{
   report: string;
@@ -828,6 +839,23 @@ export async function runInvestigationAgent(
       organizationId: job.config.organizationId,
       environment,
     });
+    const suggestionTools = !threadMode && !replay && !issueUpdateFollowup
+      ? [
+          createSearchSuggestionsTool({
+            organizationId: job.config.organizationId,
+            environment,
+          }),
+          createSuggestionTool({
+            agentConfigVersionId: job.config.id,
+            investigationId: job.investigationId,
+            organizationId: job.config.organizationId,
+            repositories,
+            environment,
+            onAutomaticPullRequestRequests:
+              onAutomaticSuggestionPullRequestRequests,
+          }),
+        ]
+      : [];
     const issueUpdateTool = issueUpdateFollowup && issueFollowup
       ? createIssueRemediationUpdateTool({
           allowedIssueIds: new Set(issueFollowup.issueIds),
@@ -886,6 +914,7 @@ export async function runInvestigationAgent(
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
       scanMode,
+      replay,
       ...(issueFollowup
         ? { issueFollowupIssueCount: issueFollowup.issueIds.length }
         : {}),
@@ -912,6 +941,7 @@ export async function runInvestigationAgent(
           : issueUpdateFollowup
             ? [issueUpdateTool!]
             : [issueSearchTool, reportTool!]),
+        ...suggestionTools,
         ...awsInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,
