@@ -491,6 +491,38 @@
   pointer-events: none;
 }
 
+.dsSelect__search {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 36px;
+  margin-block-end: 5px;
+  padding-inline: 10px;
+  border: 1px solid var(--ds-border-default);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--ds-surface-raised);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+  font-size: 12px;
+}
+
+.dsSelect__search:focus {
+  border-color: var(--ds-border-strong);
+}
+
+.dsSelect__search::placeholder {
+  color: var(--ds-text-muted);
+}
+
+.dsSelect__options {
+  position: relative;
+  z-index: 1;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .dsSelect__option {
   position: relative;
   z-index: 1;
@@ -540,6 +572,14 @@
 
 .dsSelect__check {
   color: var(--ds-text-muted);
+}
+
+.dsSelect__empty {
+  margin: 0;
+  padding: 12px 9px;
+  color: var(--ds-text-muted);
+  font-size: 11px;
+  line-height: 15px;
 }
 
 .dsField__hint,

@@ -10475,6 +10475,46 @@ body:has(.appShell--scans) {
   background: var(--ds-surface-raised);
 }
 
+.scanRepositoryPicker {
+  margin: 0;
+}
+
+.scanRepositoryPicker .repositorySearch {
+  min-height: 38px;
+  background: var(--ds-surface-raised);
+}
+
+.scanRepositoryPicker .repositorySearch input {
+  height: 36px;
+}
+
+.scanRepositoryPicker .repositoryConnectList {
+  max-height: 420px;
+  border: 0;
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-raised);
+}
+
+.scanRepositoryPicker .repositoryConnectRow {
+  min-height: 58px;
+  padding-inline: 12px;
+  grid-template-columns: 30px minmax(0, 1fr) 94px;
+  border-block-end: 1px solid var(--ds-border-subtle);
+}
+
+.scanRepositoryPicker .repositoryConnectRow:last-child {
+  border-block-end: 0;
+}
+
+.scanRepositoryPicker .repositoryConnectRow__copy strong {
+  color: var(--ds-text-secondary);
+}
+
+.scanRepositoryPicker .repositoryConnectRow__copy small,
+.scanRepositoryPicker .repositoryConnectList > p {
+  color: var(--ds-text-muted);
+}
+
 .appShell--scans .contextConnectionSummary {
   border: 0;
 }

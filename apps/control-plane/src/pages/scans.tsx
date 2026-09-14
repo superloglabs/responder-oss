@@ -18,7 +18,12 @@ import {
   AgentContextRow,
 } from "../components/agent-context-controls";
 import { AppShell } from "../components/app-shell";
-import { ArrowIcon, SearchIcon, SignalIcon } from "../components/icons";
+import {
+  ArrowIcon,
+  RepositoryIcon,
+  SearchIcon,
+  SignalIcon,
+} from "../components/icons";
 import type { ProviderGlyphId } from "../components/provider-glyphs";
 import {
   contextCategoryDescriptions,
@@ -409,6 +414,7 @@ export function ScansPage() {
   const [sources, setSources] = useState(isStoryboard ? initialSources : []);
   const [runs, setRuns] = useState(isStoryboard ? scanRuns : []);
   const [integrationQuery, setIntegrationQuery] = useState("");
+  const [resourceQuery, setResourceQuery] = useState("");
   const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false);
   const [configurationTarget, setConfigurationTarget] = useState<string | null>(null);
   const [loading, setLoading] = useState(!isStoryboard);
@@ -500,6 +506,12 @@ export function ScansPage() {
   const sourceToConfigure = sources.find(
     (source) => source.id === configurationTarget,
   );
+  const normalizedResourceQuery = resourceQuery.trim().toLocaleLowerCase();
+  const visibleResources = sourceToConfigure?.resources.filter((resource) =>
+    `${resource.label} ${resource.description}`
+      .toLocaleLowerCase()
+      .includes(normalizedResourceQuery),
+  ) ?? [];
   const slackChannelOptions = useMemo(() => {
     if (isStoryboard) {
       return [
@@ -532,6 +544,7 @@ export function ScansPage() {
     setSourcesDialogOpen(false);
     setConfigurationTarget(null);
     setIntegrationQuery("");
+    setResourceQuery("");
   }
 
   function integrationConnectionUrl(source: ScanSource): string {
@@ -607,6 +620,7 @@ export function ScansPage() {
       if (event.key === "Escape") {
         if (configurationTarget) {
           setConfigurationTarget(null);
+          setResourceQuery("");
           return;
         }
         setSourcesDialogOpen(false);
@@ -766,6 +780,8 @@ export function ScansPage() {
                 })
               }
               options={slackChannelOptions}
+              searchable
+              searchPlaceholder="Search channels…"
               value={configuration.slackChannelResourceId ?? ""}
             />
           </section>
@@ -841,23 +857,69 @@ export function ScansPage() {
                   <strong>{sourceToConfigure.connectionName ?? sourceToConfigure.name}</strong>
                   <small>{sourceToConfigure.description}</small>
                 </div>
-                <fieldset className="scanResourceList">
-                  <legend>{sourceToConfigure.resourceLabel}</legend>
-                  {sourceToConfigure.resources.map((resource) => (
-                    <Checkbox
-                      checked={resource.selected}
-                      description={resource.description}
-                      key={resource.id}
-                      label={resource.label}
-                      onChange={() =>
-                        toggleResource(sourceToConfigure.id, resource.id)
-                      }
-                    />
-                  ))}
-                  {sourceToConfigure.resources.length === 0 ? (
-                    <p>This integration is configured at the account level.</p>
-                  ) : null}
-                </fieldset>
+                {sourceToConfigure.kind === "github" ? (
+                  <div className="repositoryPicker scanRepositoryPicker">
+                    <label className="repositorySearch">
+                      <SearchIcon />
+                      <input
+                        aria-label="Search repositories"
+                        onChange={(event) => setResourceQuery(event.target.value)}
+                        placeholder="Search repositories"
+                        type="search"
+                        value={resourceQuery}
+                      />
+                    </label>
+                    <div className="repositoryConnectList">
+                      {visibleResources.map((resource) => (
+                        <div className="repositoryConnectRow" key={resource.id}>
+                          <span className="repositoryConnectRow__icon">
+                            <RepositoryIcon />
+                          </span>
+                          <span className="repositoryConnectRow__copy">
+                            <strong>{resource.label}</strong>
+                            <small>{resource.description}</small>
+                          </span>
+                          <Button
+                            aria-pressed={resource.selected}
+                            className={`repositoryConnectButton ${
+                              resource.selected ? "isConnected" : ""
+                            }`}
+                            onClick={() =>
+                              toggleResource(sourceToConfigure.id, resource.id)
+                            }
+                            size="small"
+                            variant={resource.selected ? "secondary" : "primary"}
+                          >
+                            {resource.selected ? "Selected" : "Select"}
+                          </Button>
+                        </div>
+                      ))}
+                      {sourceToConfigure.resources.length === 0 ? (
+                        <p>No repositories are available for this connection.</p>
+                      ) : visibleResources.length === 0 ? (
+                        <p>No repositories match “{resourceQuery}”.</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <fieldset className="scanResourceList">
+                    <legend>{sourceToConfigure.resourceLabel}</legend>
+                    {sourceToConfigure.resources.map((resource) => (
+                      <Checkbox
+                        checked={resource.selected}
+                        description={resource.description}
+                        key={resource.id}
+                        label={resource.label}
+                        onChange={() =>
+                          toggleResource(sourceToConfigure.id, resource.id)
+                        }
+                      />
+                    ))}
+                    {sourceToConfigure.resources.length === 0 ? (
+                      <p>This integration is configured at the account level.</p>
+                    ) : null}
+                  </fieldset>
+                )}
               </div>
               <footer className="configurationDialog__footer">
                 <span>
@@ -865,7 +927,13 @@ export function ScansPage() {
                     ? sourceToConfigure.enabled ? "Account enabled" : "Account not used"
                     : `${sourceToConfigure.resources.filter((resource) => resource.selected).length} selected`}
                 </span>
-                <Button onClick={() => setConfigurationTarget(null)} size="small">
+                <Button
+                  onClick={() => {
+                    setConfigurationTarget(null);
+                    setResourceQuery("");
+                  }}
+                  size="small"
+                >
                   Done
                 </Button>
               </footer>
@@ -910,9 +978,10 @@ export function ScansPage() {
                             <AgentContextIntegrationControls
                               enabled={source.enabled}
                               label={source.name}
-                              onConfigure={() =>
-                                setConfigurationTarget(source.id)
-                              }
+                              onConfigure={() => {
+                                setResourceQuery("");
+                                setConfigurationTarget(source.id);
+                              }}
                               onToggle={() => toggleSource(source.id)}
                               toggleAriaLabel={`${source.enabled ? "Disable" : "Enable"} ${source.name} for scheduled scans`}
                             />

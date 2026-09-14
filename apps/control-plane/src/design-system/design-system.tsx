@@ -404,6 +404,8 @@ export interface SelectFieldProps<Value extends string> {
   name?: string;
   onChange: (value: Value) => void;
   options: Array<SelectOption<Value>>;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   value: Value;
 }
 
@@ -415,13 +417,24 @@ export function SelectField<Value extends string>({
   name,
   onChange,
   options,
+  searchable = false,
+  searchPlaceholder = "Search…",
   value,
 }: SelectFieldProps<Value>) {
   const inputId = useId();
   const hintId = hint ? `${inputId}-hint` : undefined;
   const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedOption = options.find((option) => option.value === value);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredOptions = normalizedQuery
+    ? options.filter((option) =>
+        `${option.label} ${option.description ?? ""}`
+          .toLocaleLowerCase()
+          .includes(normalizedQuery),
+      )
+    : options;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -429,11 +442,15 @@ export function SelectField<Value extends string>({
     function closeOnOutsideClick(event: MouseEvent) {
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
         setIsOpen(false);
+        setQuery("");
       }
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        setQuery("");
+      }
     }
 
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -457,7 +474,10 @@ export function SelectField<Value extends string>({
           className="dsSelect__trigger"
           disabled={disabled}
           id={inputId}
-          onClick={() => setIsOpen((current) => !current)}
+          onClick={() => {
+            if (isOpen) setQuery("");
+            setIsOpen(!isOpen);
+          }}
           type="button"
         >
           <span id={`${inputId}-value`}>{selectedOption?.label ?? "Select…"}</span>
@@ -466,26 +486,47 @@ export function SelectField<Value extends string>({
           </svg>
         </button>
         {isOpen ? (
-          <div aria-labelledby={`${inputId}-label`} className="dsSelect__popover shadow-xl" role="listbox">
-            {options.map((option) => (
-              <button
-                aria-selected={option.value === value}
-                className="dsSelect__option"
-                key={option.value}
-                onClick={() => {
-                  onChange(option.value);
-                  setIsOpen(false);
-                }}
-                role="option"
-                type="button"
-              >
-                <span>
-                  <strong>{option.label}</strong>
-                  {option.description ? <small>{option.description}</small> : null}
-                </span>
-                {option.value === value ? <span aria-hidden="true" className="dsSelect__check">✓</span> : null}
-              </button>
-            ))}
+          <div className="dsSelect__popover shadow-xl">
+            {searchable ? (
+              <input
+                aria-label={`Search ${label.toLocaleLowerCase()}`}
+                autoFocus
+                className="dsSelect__search"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={searchPlaceholder}
+                type="search"
+                value={query}
+              />
+            ) : null}
+            <div
+              aria-labelledby={`${inputId}-label`}
+              className="dsSelect__options"
+              role="listbox"
+            >
+              {filteredOptions.map((option) => (
+                <button
+                  aria-selected={option.value === value}
+                  className="dsSelect__option"
+                  key={option.value}
+                  onClick={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                    setQuery("");
+                  }}
+                  role="option"
+                  type="button"
+                >
+                  <span>
+                    <strong>{option.label}</strong>
+                    {option.description ? <small>{option.description}</small> : null}
+                  </span>
+                  {option.value === value ? <span aria-hidden="true" className="dsSelect__check">✓</span> : null}
+                </button>
+              ))}
+              {filteredOptions.length === 0 ? (
+                <p className="dsSelect__empty">No options match “{query}”.</p>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>
