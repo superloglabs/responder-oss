@@ -313,6 +313,7 @@ async function validateConfigurationResources(
         "clickstack",
         "upstash",
         "langfuse",
+        "supabase",
         "vercel",
         "custom_mcp",
         "linear",

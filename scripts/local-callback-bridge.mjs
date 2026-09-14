@@ -19,6 +19,7 @@ const browserOAuthCallbackPaths = new Set([
   "/api/integrations/linear/callback",
   "/api/integrations/sentry/callback",
   "/api/integrations/slack/callback",
+  "/api/integrations/supabase/callback",
   "/api/integrations/vercel/callback",
 ]);
 const bridgeMarker = "responder-local-callback-bridge-v1";

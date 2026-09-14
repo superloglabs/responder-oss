@@ -13,6 +13,7 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   "clickstack",
   "upstash",
   "langfuse",
+  "supabase",
   "custom_mcp",
   "linear",
 ]);

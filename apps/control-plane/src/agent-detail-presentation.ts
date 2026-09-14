@@ -4,6 +4,7 @@ import {
   type AgentOptions,
   slackChannelLabel,
 } from "./agents-api";
+import { providerDisplayName } from "./components/provider-glyphs";
 
 export interface AgentPipelineCard {
   detail?: string;
@@ -17,24 +18,6 @@ export interface AgentPipelinePresentation {
   input: AgentPipelineCard;
   output: AgentPipelineCard;
 }
-
-const providerLabels: Record<AgentOptions["accounts"][number]["provider"], string> = {
-  aws: "AWS",
-  gcp: "Google Cloud",
-  axiom: "Axiom",
-  custom_mcp: "MCP",
-  clickstack: "ClickStack / HyperDX",
-  datadog: "Datadog",
-  dash0: "Dash0",
-  posthog: "PostHog",
-  github: "GitHub",
-  linear: "Linear",
-  langfuse: "Langfuse",
-  sentry: "Sentry",
-  slack: "Slack",
-  upstash: "Upstash",
-  vercel: "Vercel",
-};
 
 function unique(values: string[]) {
   return [...new Set(values)];
@@ -150,7 +133,7 @@ function summarizeContext(
   const providers = unique(
     configuration.contextAccountIds.flatMap((accountId) => {
       const account = options.accounts.find((candidate) => candidate.id === accountId);
-      return account ? [providerLabels[account.provider]] : [];
+      return account ? [providerDisplayName(account.provider)] : [];
     }),
   );
   const repositoryNames = repositories.map((repository) => repository.fullName);

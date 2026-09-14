@@ -22,8 +22,15 @@ import {
 } from "../components/agent-context-controls";
 import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import { RepositoryIcon, SearchIcon } from "../components/icons";
-import { providerDisplayName } from "../components/provider-glyphs";
+import {
+  contextCategoryDescriptions,
+  contextCategoryOrder,
+  contextProviderMetadata,
+  providerDisplayName,
+} from "../components/provider-glyphs";
 import { SettingsTabs } from "../components/settings-tabs";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { Button, Checkbox, IconButton, TextAreaField } from "../design-system";
@@ -42,50 +49,13 @@ const defaultConfiguration: SlackThreadModeConfiguration = {
 
 type ContextAccount = AgentOptions["accounts"][number];
 type ConfigurationTarget = ContextAccount | "github" | "vercel" | "secrets";
-type ContextCategory =
-  | "Observability"
-  | "Code & deployment"
-  | "Communication & workflow"
-  | "Data & infrastructure";
-
 const tagModeDraftKey = "responder:tag-mode-settings-draft";
-const contextCategoryOrder: ContextCategory[] = [
-  "Observability",
-  "Code & deployment",
-  "Communication & workflow",
-  "Data & infrastructure",
-];
-const contextCategoryDescriptions: Record<ContextCategory, string> = {
-  Observability: "Errors, logs, traces, and service health",
-  "Code & deployment": "Source code, releases, and runtime changes",
-  "Communication & workflow": "Team conversations and incident follow-up",
-  "Data & infrastructure": "Cloud resources, databases, and custom tools",
-};
-const contextProviderMetadata: Record<
-  IntegrationSummary["id"],
-  { category: ContextCategory; searchTerms: string }
-> = {
-  sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
-  datadog: { category: "Observability", searchTerms: "apm logs monitors" },
-  dash0: { category: "Observability", searchTerms: "logs metrics traces checks alerts" },
-  posthog: { category: "Observability", searchTerms: "analytics errors logs traces replays alerts" },
-  axiom: { category: "Observability", searchTerms: "logs traces metrics monitors" },
-  clickstack: { category: "Observability", searchTerms: "hyperdx logs traces" },
-  langfuse: { category: "Observability", searchTerms: "llm traces prompts projects" },
-  github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
-  vercel: { category: "Code & deployment", searchTerms: "deployments projects hosting" },
-  slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
-  linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
-  aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
-  gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },
-  upstash: { category: "Data & infrastructure", searchTerms: "redis vector qstash workflow" },
-  custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
-};
 const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "aws",
   "gcp",
   "custom_mcp",
   "langfuse",
+  "supabase",
   "dash0",
   "posthog",
 ]);
@@ -96,6 +66,7 @@ const contextProviderOrder: ContextAccount["provider"][] = [
   "gcp",
   "upstash",
   "langfuse",
+  "supabase",
   "datadog",
   "dash0",
   "posthog",
@@ -124,6 +95,8 @@ function accountDetail(account: ContextAccount): string {
       return `${prefix}Redis, Vector, Search, QStash, and Workflow`;
     case "langfuse":
       return "Traces, observations, scores, metrics, prompts, and alerts";
+    case "supabase":
+      return "Project logs and scoped PostgreSQL access";
     case "datadog":
       return `${prefix}Logs, traces, monitors, and service health`;
     case "dash0":
@@ -166,6 +139,10 @@ export function TagModeSettingsPage() {
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const [connectingSupabase, setConnectingSupabase] = useState(
+    Boolean(supabaseSelectionState),
+  );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [configuration, setConfiguration] =
     useState<SlackThreadModeConfiguration>(defaultConfiguration);
@@ -255,6 +232,8 @@ export function TagModeSettingsPage() {
       .toLocaleLowerCase()
       .includes(normalizedIntegrationQuery);
   });
+  const supabaseConnectUrl =
+    integrations.find((item) => item.id === "supabase")?.connectUrl ?? "";
 
   function update(patch: Partial<SlackThreadModeConfiguration>) {
     setConfiguration((current) => ({ ...current, ...patch }));
@@ -358,6 +337,10 @@ export function TagModeSettingsPage() {
       setConnectingLangfuse(true);
       return;
     }
+    if (integration.id === "supabase") {
+      setConnectingSupabase(true);
+      return;
+    }
     if (integration.id === "clickstack") {
       setConnectingClickStack(true);
       return;
@@ -430,6 +413,13 @@ export function TagModeSettingsPage() {
         onCancel={() => setConnectingLangfuse(false)}
         open={connectingLangfuse}
         returnTo="/settings/tag-mode"
+      />
+      <SupabaseConnectionDialog
+        connectUrl={supabaseConnectUrl}
+        onCancel={() => setConnectingSupabase(false)}
+        open={connectingSupabase && Boolean(supabaseConnectUrl)}
+        returnTo="/settings/tag-mode"
+        selectionState={supabaseSelectionState}
       />
       <ClickStackConnectionDialog
         connectUrl={integrations.find((item) => item.id === "clickstack")?.connectUrl ?? ""}

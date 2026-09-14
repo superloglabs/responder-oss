@@ -106,6 +106,40 @@ export async function consumeIntegrationConnectionState(
   return rows[0] ?? null;
 }
 
+export async function getIntegrationConnectionState(
+  provider: IntegrationProvider,
+  state: string,
+  tenant: { organizationId: string; userId: string },
+): Promise<{
+  organizationId: string;
+  userId: string;
+  codeVerifier: string | null;
+  metadata: Record<string, unknown>;
+  returnTo: string;
+} | null> {
+  const rows = await getDatabase()
+    .select({
+      organizationId: integrationConnectionStates.organizationId,
+      userId: integrationConnectionStates.userId,
+      codeVerifier: integrationConnectionStates.codeVerifier,
+      metadata: integrationConnectionStates.metadata,
+      returnTo: integrationConnectionStates.returnTo,
+    })
+    .from(integrationConnectionStates)
+    .where(
+      and(
+        eq(integrationConnectionStates.stateHash, hashConnectionState(state)),
+        eq(integrationConnectionStates.provider, provider),
+        eq(integrationConnectionStates.organizationId, tenant.organizationId),
+        eq(integrationConnectionStates.userId, tenant.userId),
+        gt(integrationConnectionStates.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function updateIntegrationConnectionStateMetadata(input: {
   metadata: Record<string, unknown>;
   organizationId: string;

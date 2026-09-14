@@ -2,8 +2,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ProviderGlyph } from "./icons";
+import { contextProviderMetadata } from "./provider-glyphs";
 
 describe("ProviderGlyph", () => {
+  it("keeps Supabase discovery metadata with its canonical provider metadata", () => {
+    expect(contextProviderMetadata.supabase).toEqual({
+      category: "Data & infrastructure",
+      searchTerms: "postgres database sql logs",
+    });
+  });
+
   it.each([
     ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],
@@ -71,6 +79,18 @@ describe("ProviderGlyph", () => {
     expect(markup).toContain("#FF5D5F");
     expect(markup).toContain("#4E9CFF");
     expect(markup).not.toContain(">LF</span>");
+  });
+
+  it("renders the official Supabase mark instead of a text abbreviation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "supabase" }),
+    );
+
+    expect(markup).toContain('aria-label="Supabase"');
+    expect(markup).toContain('class="providerGlyph__logo"');
+    expect(markup).toContain("#249361");
+    expect(markup).toContain("#3ECF8E");
+    expect(markup).not.toContain(">SB</span>");
   });
 
   it("renders the official AWS mark instead of a text abbreviation", () => {

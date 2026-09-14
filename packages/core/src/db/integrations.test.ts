@@ -6,6 +6,7 @@ import { getDatabase } from "./client.js";
 import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
+  getIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
@@ -130,9 +131,12 @@ describe("integration account tenancy", () => {
       .fn()
       .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
       .mockResolvedValueOnce([]);
-    const set = vi.fn(() => ({
-      where: vi.fn(() => ({ returning })),
-    }));
+    const set = vi.fn((_values: Record<string, unknown>) => {
+      void _values;
+      return {
+        where: vi.fn(() => ({ returning })),
+      };
+    });
     vi.mocked(getDatabase).mockReturnValue({
       update: vi.fn(() => ({ set })),
     } as never);
@@ -153,6 +157,37 @@ describe("integration account tenancy", () => {
     expect(set).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "error" }),
     );
+  });
+
+  it("releases a failed credential lease without changing connection status by default", async () => {
+    const returning = vi
+      .fn()
+      .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
+      .mockResolvedValueOnce([{ id: "account-1" }]);
+    const set = vi.fn((_values: Record<string, unknown>) => {
+      void _values;
+      return {
+        where: vi.fn(() => ({ returning })),
+      };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: "account-1",
+        operation: async () => {
+          throw new Error("temporary network failure");
+        },
+        organizationId: account.organizationId,
+        provider: "supabase",
+      }),
+    ).rejects.toThrow("temporary network failure");
+
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(set.mock.calls.at(-1)?.[0]).not.toHaveProperty("status");
   });
 
   it("returns a newly connected GitHub account", async () => {
@@ -219,6 +254,39 @@ describe("integration account tenancy", () => {
       "axiom",
       account.organizationId,
       "20000000-0000-4000-8000-000000000000",
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
+  });
+
+  it("reads a live tenant-owned OAuth state without consuming it", async () => {
+    const stateRow = {
+      organizationId: account.organizationId,
+      userId: "20000000-0000-4000-8000-000000000000",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "encrypted-credentials" },
+      returnTo: "/settings",
+    };
+    const limit = vi.fn().mockResolvedValue([stateRow]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { limit };
+    });
+    const from = vi.fn(() => ({ where }));
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({ from })),
+    } as never);
+
+    await expect(getIntegrationConnectionState("supabase", "selection-state", {
+      organizationId: account.organizationId,
+      userId: stateRow.userId,
+    })).resolves.toEqual(stateRow);
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.params).toEqual([
+      createHash("sha256").update("selection-state").digest("hex"),
+      "supabase",
+      account.organizationId,
+      stateRow.userId,
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     ]);
   });

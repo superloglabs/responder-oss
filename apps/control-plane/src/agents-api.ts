@@ -85,6 +85,7 @@ export interface AgentOptions {
       | "clickstack"
       | "upstash"
       | "langfuse"
+      | "supabase"
       | "vercel"
       | "custom_mcp"
       | "linear";
@@ -148,6 +149,7 @@ export interface IntegrationSummary {
     | "axiom"
     | "upstash"
     | "langfuse"
+    | "supabase"
     | "vercel"
     | "custom_mcp"
     | "clickstack"
@@ -222,6 +224,7 @@ export interface IssueEvidence {
     | "clickstack"
     | "upstash"
     | "langfuse"
+    | "supabase"
     | "github"
     | "slack"
     | "vercel"

@@ -338,7 +338,7 @@ describe("local callback routing", () => {
     }
   });
 
-  it.each(["axiom", "slack"])(
+  it.each(["axiom", "slack", "supabase"])(
     "redirects %s OAuth callbacks to the configured browser origin",
     async (provider) => {
       const portReservation = createServer();

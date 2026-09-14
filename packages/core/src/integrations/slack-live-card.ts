@@ -175,6 +175,7 @@ function humanizeToolName(value: string): string {
     rum: "RUM",
     sentry: "Sentry",
     slack: "Slack",
+    supabase: "Supabase",
     upstash: "Upstash",
     langfuse: "Langfuse",
     slo: "SLO",

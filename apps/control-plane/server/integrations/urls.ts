@@ -14,6 +14,7 @@ export function integrationCallbackUrl(
     | "posthog"
     | "sentry"
     | "slack"
+    | "supabase"
     | "vercel",
 ): string {
   const callbackBaseUrl =
@@ -33,7 +34,7 @@ export function dash0WebhookUrl(integrationAccountId: string): string {
 export function settingsRedirect(
   returnTo: string,
   provider: string,
-  status: "connected" | "error" | "finishing",
+  status: "connected" | "error" | "finishing" | "select_project",
   reason?: string,
 ): string {
   const baseUrl = new URL(controlPlaneBaseUrl());
