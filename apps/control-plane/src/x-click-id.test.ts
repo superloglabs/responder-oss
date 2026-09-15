@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { xClickIdCookie } from "./x-click-id";
+import { forgetXClickId, xClickIdCookie } from "./x-click-id";
 
 describe("xClickIdCookie", () => {
   it("stores the click id in a long-lived first-party cookie", () => {
@@ -22,5 +22,20 @@ describe("xClickIdCookie", () => {
 
   it("rejects click ids that could smuggle cookie attributes", () => {
     expect(xClickIdCookie("?twclid=abc;%20Domain=evil.test", true)).toBeNull();
+  });
+});
+
+describe("forgetXClickId", () => {
+  it("expires a previously stored advertising click id", () => {
+    const document = {
+      cookie: "",
+      location: { protocol: "https:" },
+    } as unknown as Document;
+
+    forgetXClickId(document);
+
+    expect(document.cookie).toBe(
+      "responder_twclid=; Max-Age=0; Path=/; SameSite=Lax; Secure",
+    );
   });
 });
