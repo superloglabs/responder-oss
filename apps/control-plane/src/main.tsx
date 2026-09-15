@@ -10,6 +10,7 @@ import { BrowserAnalyticsIdentity } from "./components/browser-analytics-identit
 import { BrowserAnalyticsPageviews } from "./components/browser-analytics-pageviews";
 import { ApplicationError } from "./components/application-error";
 import { BrowserMonitoringIdentity } from "./components/browser-monitoring-identity";
+import { initializeRedditPixel } from "./reddit-pixel";
 import { rememberXClickId } from "./x-click-id";
 import { initializeXPixel } from "./x-pixel";
 import "./styles.css";
@@ -23,6 +24,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Root element is missing");
 
 rememberXClickId();
+initializeRedditPixel();
 initializeXPixel();
 
 const application = (

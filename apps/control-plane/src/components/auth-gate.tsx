@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
+import { trackRedditSignupPixel } from "../reddit-pixel";
 import {
   socialAuthErrorMessage,
   socialAuthUrls,
@@ -157,6 +158,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       }),
     );
     if (isCreatingAccount) {
+      trackRedditSignupPixel(result.data.user.id);
       trackXSignupPixel(result.data.user.id);
     }
   }
@@ -581,6 +583,7 @@ export function AuthGate({ children }: AuthGateProps) {
       window.history.replaceState(window.history.state, "", url);
     }
     if (intent.trackSocialSignup) {
+      trackRedditSignupPixel(signedInUserId);
       trackXSignupPixel(signedInUserId);
     }
     let cancelled = false;
