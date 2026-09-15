@@ -1,9 +1,13 @@
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDatabase } from "./client.js";
-import { searchIssuesByText, submitInvestigationReport } from "./issues.js";
+import {
+  listIssues,
+  searchIssuesByText,
+  submitInvestigationReport,
+} from "./issues.js";
 import { queueAutomaticIssuePullRequests } from "./pull-requests.js";
-import { investigations } from "./schema.js";
+import { agents, investigations, issues } from "./schema.js";
 
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
@@ -243,5 +247,77 @@ describe("issue text search", () => {
     expect(query.sql).toContain("timeline_entry->>'title' ilike");
     expect(query.sql).toContain("timeline_entry->>'description' ilike");
     expect(query.sql).not.toContain('"issues"."timeline"::text ilike');
+  });
+});
+
+describe("issue list sources", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns scan, agent, and unknown sources from the filing investigation", async () => {
+    const issueRows = [
+      {
+        id: firstIssueId,
+        sourceInput: { provider: "scan" },
+        sourceAgentId: "30303030-3030-4030-8030-303030303030",
+        sourceAgentName: "Scanner",
+      },
+      {
+        id: secondIssueId,
+        sourceInput: { provider: "sentry" },
+        sourceAgentId: "40404040-4040-4040-8040-404040404040",
+        sourceAgentName: "Production agent",
+      },
+      {
+        id: "50505050-5050-4050-8050-505050505050",
+        sourceInput: null,
+        sourceAgentId: null,
+        sourceAgentName: null,
+      },
+    ];
+    const orderBy = vi.fn().mockResolvedValue(issueRows);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { orderBy };
+    });
+    const query = { leftJoin: vi.fn(), where };
+    query.leftJoin.mockReturnValue(query);
+    const select = vi.fn(() => ({ from: vi.fn(() => query) }));
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+
+    const result = await listIssues(organizationId);
+
+    expect(result.map(({ id, source }) => ({ id, source }))).toEqual([
+      {
+        id: firstIssueId,
+        source: { kind: "scan", agentId: null, name: "Scan" },
+      },
+      {
+        id: secondIssueId,
+        source: {
+          kind: "agent",
+          agentId: "40404040-4040-4040-8040-404040404040",
+          name: "Production agent",
+        },
+      },
+      {
+        id: "50505050-5050-4050-8050-505050505050",
+        source: null,
+      },
+    ]);
+    expect(query.leftJoin).toHaveBeenCalledTimes(2);
+    expect(query.leftJoin.mock.calls[0]![0]).toBe(investigations);
+    expect(
+      new PgDialect().sqlToQuery(query.leftJoin.mock.calls[0]![1] as never).sql,
+    ).toBe('"investigations"."id" = "issues"."source_investigation_id"');
+    expect(query.leftJoin.mock.calls[1]![0]).toBe(agents);
+    expect(
+      new PgDialect().sqlToQuery(query.leftJoin.mock.calls[1]![1] as never).sql,
+    ).toBe('"agents"."id" = "investigations"."agent_id"');
+    expect(
+      new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never).sql,
+    ).toContain('"issues"."organization_id" = $1');
+    expect(issues.sourceInvestigationId.name).toBe("source_investigation_id");
   });
 });

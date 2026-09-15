@@ -44,6 +44,10 @@ export interface IssueEmbedding {
   vector: number[];
 }
 
+export type IssueSource =
+  | { kind: "agent"; agentId: string; name: string }
+  | { kind: "scan"; agentId: null; name: "Scan" };
+
 export interface PreparedInvestigationReportSubmission {
   report: InvestigationReportSubmission;
   newIssueEmbeddings: Array<IssueEmbedding | null>;
@@ -285,6 +289,7 @@ export async function submitInvestigationReport(input: {
           evidence: submittedIssue.evidence,
           embedding: embedding?.vector ?? null,
           embeddingModel: embedding?.model ?? null,
+          sourceInvestigationId: input.investigationId,
         })
         .returning();
       canonicalById.set(issueId, inserted[0]!);
@@ -434,7 +439,7 @@ export async function listIssues(
   organizationId: string,
   includeArchived = false,
 ) {
-  return getDatabase()
+  const rows = await getDatabase()
     .select({
       id: issues.id,
       title: issues.title,
@@ -446,8 +451,16 @@ export async function listIssues(
       remediations: issues.remediations,
       archivedAt: issues.archivedAt,
       createdAt: issues.createdAt,
+      sourceInput: investigations.input,
+      sourceAgentId: agents.id,
+      sourceAgentName: agents.name,
     })
     .from(issues)
+    .leftJoin(
+      investigations,
+      eq(investigations.id, issues.sourceInvestigationId),
+    )
+    .leftJoin(agents, eq(agents.id, investigations.agentId))
     .where(
       includeArchived
         ? eq(issues.organizationId, organizationId)
@@ -457,6 +470,33 @@ export async function listIssues(
           ),
     )
     .orderBy(desc(issues.createdAt));
+
+  return rows.map(({
+    sourceInput,
+    sourceAgentId,
+    sourceAgentName,
+    ...issue
+  }) => ({
+    ...issue,
+    source: issueSourceFromInvestigation({
+      input: sourceInput,
+      agentId: sourceAgentId,
+      agentName: sourceAgentName,
+    }),
+  }));
+}
+
+function issueSourceFromInvestigation(input: {
+  input: { provider: string } | null;
+  agentId: string | null;
+  agentName: string | null;
+}): IssueSource | null {
+  if (!input.input) return null;
+  if (input.input.provider === "scan") {
+    return { kind: "scan", agentId: null, name: "Scan" };
+  }
+  if (input.agentId === null || input.agentName === null) return null;
+  return { kind: "agent", agentId: input.agentId, name: input.agentName };
 }
 
 export async function getIssueDetail(

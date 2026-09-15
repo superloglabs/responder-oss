@@ -27,7 +27,7 @@ function TableSkeleton({
   const cellCounts = {
     agents: 6,
     investigations: 4,
-    issues: 4,
+    issues: 5,
   } as const;
 
   return (

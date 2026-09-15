@@ -285,10 +285,14 @@ export interface IssueListItem {
   remediations: IssueRemediation[];
   archivedAt: string | null;
   createdAt: string;
+  source:
+    | { kind: "agent"; agentId: string; name: string }
+    | { kind: "scan"; agentId: null; name: "Scan" }
+    | null;
 }
 
 export interface IssueDetailResponse {
-  issue: IssueListItem & {
+  issue: Omit<IssueListItem, "source"> & {
     evidence: IssueEvidence[];
   };
   investigations: Array<{
