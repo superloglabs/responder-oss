@@ -22,10 +22,6 @@ import {
   adminAc as organizationAdminAc,
   memberAc as organizationMemberAc,
 } from "better-auth/plugins/organization/access";
-import {
-  advertisingConsentCookieName,
-  allowsAdvertisingTracking,
-} from "../src/advertising-consent-cookie.js";
 import { sendEmail, workspaceInvitationEmailBody } from "./email.js";
 
 export const superuserRoles = {
@@ -196,17 +192,11 @@ export function createResponderAuth() {
                 signup_method: signupMethod,
               },
             });
-            if (
-              allowsAdvertisingTracking(
-                context?.getCookie(advertisingConsentCookieName),
-              )
-            ) {
-              await captureXSignupConversion({
-                conversionId: user.id,
-                email: user.email,
-                twclid: context?.getCookie("responder_twclid") ?? undefined,
-              });
-            }
+            await captureXSignupConversion({
+              conversionId: user.id,
+              email: user.email,
+              twclid: context?.getCookie("responder_twclid") ?? undefined,
+            });
           },
         },
       },

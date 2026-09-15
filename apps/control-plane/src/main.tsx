@@ -4,14 +4,15 @@ import { StrictMode } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app";
-import { initializeConsentedAdvertisingTracking } from "./advertising-consent";
 import { initializeBrowserAnalytics } from "./browser-analytics";
 import { initializeBrowserMonitoring } from "./browser-monitoring";
 import { BrowserAnalyticsIdentity } from "./components/browser-analytics-identity";
 import { BrowserAnalyticsPageviews } from "./components/browser-analytics-pageviews";
-import { AdvertisingConsent } from "./components/advertising-consent";
 import { ApplicationError } from "./components/application-error";
 import { BrowserMonitoringIdentity } from "./components/browser-monitoring-identity";
+import { initializeRedditPixel } from "./reddit-pixel";
+import { rememberXClickId } from "./x-click-id";
+import { initializeXPixel } from "./x-pixel";
 import "./styles.css";
 import "./design-system/design-system.css";
 import "./design-system/design-library.css";
@@ -22,7 +23,9 @@ void initializeBrowserAnalytics();
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element is missing");
 
-initializeConsentedAdvertisingTracking();
+rememberXClickId();
+initializeRedditPixel();
+initializeXPixel();
 
 const application = (
   <StrictMode>
@@ -33,7 +36,6 @@ const application = (
         <BrowserAnalyticsIdentity />
         <BrowserAnalyticsPageviews />
         <BrowserMonitoringIdentity />
-        <AdvertisingConsent />
         <App />
       </BrowserRouter>
     </Sentry.ErrorBoundary>
