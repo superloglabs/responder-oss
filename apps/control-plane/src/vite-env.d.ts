@@ -14,4 +14,5 @@ interface ImportMetaEnv {
   readonly VITE_SENTRY_RELEASE?: string;
   readonly VITE_SENTRY_TRACES_SAMPLE_RATE?: string;
   readonly VITE_X_ADS_SIGNUP_EVENT_ID?: string;
+  readonly VITE_X_ADS_SIGNUP_EVENT_IDS?: string;
 }

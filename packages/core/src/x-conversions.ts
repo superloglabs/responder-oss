@@ -8,19 +8,50 @@ export interface XSignupConversion {
   twclid?: string;
 }
 
-interface XConversionConfig {
-  accessToken: string;
-  accessTokenSecret: string;
-  consumerKey: string;
-  consumerSecret: string;
+interface XConversionConfigBase {
   eventId: string;
   pixelId: string;
 }
 
-let config: XConversionConfig | null | undefined;
+interface XOAuthConversionConfig extends XConversionConfigBase {
+  authentication: "oauth";
+  accessToken: string;
+  accessTokenSecret: string;
+  consumerKey: string;
+  consumerSecret: string;
+}
 
-function getConfig(): XConversionConfig | null {
-  if (config !== undefined) return config;
+interface XPixelTokenConversionConfig extends XConversionConfigBase {
+  authentication: "pixel-token";
+  pixelToken: string;
+}
+
+type XConversionConfig =
+  | XOAuthConversionConfig
+  | XPixelTokenConversionConfig;
+
+let configs: XConversionConfig[] | undefined;
+
+function eventConfig(
+  eventId: string,
+  environmentName: string,
+): XConversionConfigBase | null {
+  // Event ids look like tw-pixel1-event1; the middle segment is the pixel id
+  // that addresses the Conversion API endpoint.
+  const pixelId = /^tw-([a-z0-9]+)-[a-z0-9]+$/i.exec(eventId)?.[1];
+  if (!pixelId) {
+    console.error(
+      `${environmentName} must look like tw-xxxxx-yyyyy, got "${eventId}"`,
+    );
+    return null;
+  }
+  return { eventId, pixelId };
+}
+
+function getConfigs(): XConversionConfig[] {
+  if (configs !== undefined) return configs;
+
+  configs = [];
 
   const consumerKey = process.env.X_ADS_CONSUMER_KEY;
   const consumerSecret = process.env.X_ADS_CONSUMER_SECRET;
@@ -28,36 +59,42 @@ function getConfig(): XConversionConfig | null {
   const accessTokenSecret = process.env.X_ADS_ACCESS_TOKEN_SECRET;
   const eventId = process.env.X_ADS_SIGNUP_EVENT_ID;
   if (
-    !consumerKey ||
-    !consumerSecret ||
-    !accessToken ||
-    !accessTokenSecret ||
-    !eventId
+    consumerKey &&
+    consumerSecret &&
+    accessToken &&
+    accessTokenSecret &&
+    eventId
   ) {
-    config = null;
-    return config;
+    const event = eventConfig(eventId, "X_ADS_SIGNUP_EVENT_ID");
+    if (event) {
+      configs.push({
+        ...event,
+        accessToken,
+        accessTokenSecret,
+        authentication: "oauth",
+        consumerKey,
+        consumerSecret,
+      });
+    }
   }
 
-  // Event ids look like tw-pixel1-event1; the middle segment is the pixel id
-  // that addresses the Conversion API endpoint.
-  const pixelId = /^tw-([a-z0-9]+)-[a-z0-9]+$/i.exec(eventId)?.[1];
-  if (!pixelId) {
-    console.error(
-      `X_ADS_SIGNUP_EVENT_ID must look like tw-xxxxx-yyyyy, got "${eventId}"`,
+  const pixelToken = process.env.X_ADS_PIXEL_TOKEN;
+  const pixelTokenEventId = process.env.X_ADS_PIXEL_TOKEN_SIGNUP_EVENT_ID;
+  if (pixelToken && pixelTokenEventId) {
+    const event = eventConfig(
+      pixelTokenEventId,
+      "X_ADS_PIXEL_TOKEN_SIGNUP_EVENT_ID",
     );
-    config = null;
-    return config;
+    if (event) {
+      configs.push({
+        ...event,
+        authentication: "pixel-token",
+        pixelToken,
+      });
+    }
   }
 
-  config = {
-    accessToken,
-    accessTokenSecret,
-    consumerKey,
-    consumerSecret,
-    eventId,
-    pixelId,
-  };
-  return config;
+  return configs;
 }
 
 function percentEncode(value: string): string {
@@ -71,7 +108,7 @@ function percentEncode(value: string): string {
 // are excluded from the signature, so the base string only covers the
 // oauth_* parameters.
 function buildOAuthHeader(
-  credentials: XConversionConfig,
+  credentials: XOAuthConversionConfig,
   method: string,
   url: string,
 ): string {
@@ -112,8 +149,8 @@ function buildOAuthHeader(
 export async function captureXSignupConversion(
   input: XSignupConversion,
 ): Promise<void> {
-  const credentials = getConfig();
-  if (!credentials) return;
+  const configuredTrackers = getConfigs();
+  if (configuredTrackers.length === 0) return;
 
   const identifiers: Record<string, string>[] = [];
   const email = input.email?.trim().toLowerCase();
@@ -127,31 +164,40 @@ export async function captureXSignupConversion(
   }
   if (identifiers.length === 0) return;
 
-  const url = `https://ads-api.x.com/12/measurement/conversions/${credentials.pixelId}`;
-  try {
-    const response = await fetch(url, {
-      body: JSON.stringify({
-        conversions: [
-          {
-            conversion_id: input.conversionId,
-            conversion_time: new Date().toISOString(),
-            event_id: credentials.eventId,
-            identifiers,
+  const conversionTime = new Date().toISOString();
+  await Promise.all(
+    configuredTrackers.map(async (tracker) => {
+      const url = `https://ads-api.x.com/12/measurement/conversions/${tracker.pixelId}`;
+      try {
+        const response = await fetch(url, {
+          body: JSON.stringify({
+            conversions: [
+              {
+                conversion_id: input.conversionId,
+                conversion_time: conversionTime,
+                event_id: tracker.eventId,
+                identifiers,
+              },
+            ],
+          }),
+          headers: {
+            ...(tracker.authentication === "oauth"
+              ? { Authorization: buildOAuthHeader(tracker, "POST", url) }
+              // Events Manager's generated Pixel Token installation example
+              // specifies this header for tokens created with that event.
+              : { "X-Pixel-Token": tracker.pixelToken }),
+            "Content-Type": "application/json",
           },
-        ],
-      }),
-      headers: {
-        Authorization: buildOAuthHeader(credentials, "POST", url),
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(3_000),
-    });
-    if (!response.ok) {
-      throw new Error(`X Ads API responded with status ${response.status}`);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error(`Unable to capture X signup conversion: ${message}`);
-  }
+          method: "POST",
+          signal: AbortSignal.timeout(3_000),
+        });
+        if (!response.ok) {
+          throw new Error(`X Ads API responded with status ${response.status}`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        console.error(`Unable to capture X signup conversion: ${message}`);
+      }
+    }),
+  );
 }
