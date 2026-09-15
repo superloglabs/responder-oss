@@ -737,6 +737,10 @@ export const issues = pgTable(
     evidence: jsonb("evidence").$type<IssueEvidence[]>().notNull().default([]),
     embedding: jsonb("embedding").$type<number[]>(),
     embeddingModel: text("embedding_model"),
+    sourceInvestigationId: uuid("source_investigation_id").references(
+      () => investigations.id,
+      { onDelete: "set null" },
+    ),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -746,6 +750,7 @@ export const issues = pgTable(
       table.organizationId,
       table.createdAt,
     ),
+    index("issues_source_investigation_idx").on(table.sourceInvestigationId),
   ],
 );
 

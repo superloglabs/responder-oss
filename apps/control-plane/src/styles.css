@@ -2571,6 +2571,32 @@ button:disabled {
   outline-offset: 2px;
 }
 
+.issueListTable .dsDataTable table {
+  table-layout: fixed;
+}
+
+.issueTableSource {
+  width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ds-text-secondary);
+  line-height: 18px;
+}
+
+.issueTableSource > svg {
+  flex: 0 0 auto;
+  color: var(--ds-text-muted);
+}
+
+.issueTableSource > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .issueTableSeverity {
   min-width: 58px;
   min-height: 24px;
@@ -4613,7 +4639,7 @@ button:disabled {
 }
 
 .screenSkeletonTable--issues .screenSkeletonTable__row {
-  grid-template-columns: minmax(0, 1fr) 110px 110px 36px;
+  grid-template-columns: minmax(0, 1fr) 150px 90px 100px 36px;
 }
 
 .screenSkeletonTable--investigations .screenSkeletonTable__row {

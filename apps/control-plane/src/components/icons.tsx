@@ -349,6 +349,46 @@ export function ArrowIcon(props: IconProps) {
   );
 }
 
+export function AgentIcon(props: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="16"
+      viewBox="0 0 16 16"
+      width="16"
+      {...props}
+    >
+      <rect height="8.5" rx="2" stroke="currentColor" width="11" x="2.5" y="5" />
+      <path d="M8 2.5V5" stroke="currentColor" strokeLinecap="round" />
+      <circle cx="8" cy="2.5" fill="currentColor" r="1" />
+      <circle cx="5.75" cy="9.25" fill="currentColor" r=".8" />
+      <circle cx="10.25" cy="9.25" fill="currentColor" r=".8" />
+    </svg>
+  );
+}
+
+export function ScanIcon(props: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="16"
+      viewBox="0 0 16 16"
+      width="16"
+      {...props}
+    >
+      <path
+        d="M5 2.5H3.5a1 1 0 0 0-1 1V5m8.5-2.5h1.5a1 1 0 0 1 1 1V5M5 13.5H3.5a1 1 0 0 1-1-1V11m8.5 2.5h1.5a1 1 0 0 0 1-1V11"
+        stroke="currentColor"
+        strokeLinecap="round"
+      />
+      <circle cx="8" cy="8" r="2.5" stroke="currentColor" />
+      <circle cx="8" cy="8" fill="currentColor" r=".8" />
+    </svg>
+  );
+}
+
 export function PlusIcon(props: IconProps) {
   return (
     <svg
