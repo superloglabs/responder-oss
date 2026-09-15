@@ -15,6 +15,18 @@ export function advertisingConsentCookie(
   );
 }
 
+export function advertisingConsentFromCookie(
+  cookieHeader: string,
+): AdvertisingConsentChoice | null {
+  const prefix = `${advertisingConsentCookieName}=`;
+  const cookie = cookieHeader
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(prefix));
+  const consent = cookie?.slice(prefix.length);
+  return consent === "all" || consent === "essential" ? consent : null;
+}
+
 export function allowsAdvertisingTracking(consent: string | null | undefined) {
   return consent === "all";
 }

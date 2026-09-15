@@ -1,6 +1,7 @@
 import { redditPixelId, initializeRedditPixel } from "./reddit-pixel";
 import {
   advertisingConsentCookie,
+  advertisingConsentFromCookie,
   type AdvertisingConsentChoice,
 } from "./advertising-consent-cookie";
 import { forgetXClickId, rememberXClickId } from "./x-click-id";
@@ -25,15 +26,21 @@ export function resolveAdvertisingConsent(
 
 export function getAdvertisingConsent(): AdvertisingConsent | null {
   if (typeof window === "undefined") return inMemoryAdvertisingConsent;
+  if (inMemoryAdvertisingConsent !== null) return inMemoryAdvertisingConsent;
   try {
-    return (
-      resolveAdvertisingConsent(
-        window.localStorage.getItem(advertisingConsentStorageKey),
-      ) ?? inMemoryAdvertisingConsent
+    const cookieConsent = advertisingConsentFromCookie(window.document.cookie);
+    if (cookieConsent !== null) return cookieConsent;
+  } catch {
+    // Cookie access can be blocked in hardened browser contexts.
+  }
+  try {
+    return resolveAdvertisingConsent(
+      window.localStorage.getItem(advertisingConsentStorageKey),
     );
   } catch {
-    return inMemoryAdvertisingConsent;
+    // Browser storage can be blocked independently from cookie access.
   }
+  return null;
 }
 
 export function setAdvertisingConsent(consent: AdvertisingConsent) {

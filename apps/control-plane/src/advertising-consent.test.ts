@@ -80,6 +80,56 @@ describe("advertising consent", () => {
     expect(window.rdt).toBeUndefined();
   });
 
+  it("uses the consent cookie when browser storage is unavailable", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      document: {
+        cookie: "responder_advertising_consent=all",
+      },
+      localStorage: {
+        getItem: vi.fn(() => {
+          throw new Error("storage unavailable");
+        }),
+      },
+    });
+    const { getAdvertisingConsent } = await import("./advertising-consent");
+
+    expect(getAdvertisingConsent()).toBe("all");
+  });
+
+  it("prefers the server-visible cookie over stale browser storage", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      document: {
+        cookie: "responder_advertising_consent=essential",
+      },
+      localStorage: { getItem: vi.fn(() => "all") },
+    });
+    const { getAdvertisingConsent } = await import("./advertising-consent");
+
+    expect(getAdvertisingConsent()).toBe("essential");
+  });
+
+  it("prefers the latest in-memory choice when storage writes fail", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", {
+      document: { cookie: "", location: { protocol: "https:" } },
+      localStorage: {
+        getItem: vi.fn(() => "all"),
+        setItem: vi.fn(() => {
+          throw new Error("storage unavailable");
+        }),
+      },
+    });
+    const { getAdvertisingConsent, setAdvertisingConsent } = await import(
+      "./advertising-consent"
+    );
+
+    setAdvertisingConsent("essential");
+
+    expect(getAdvertisingConsent()).toBe("essential");
+  });
+
   it("requires an explicit opt-in before starting advertising tracking", () => {
     expect(shouldStartAdvertisingTracking(null, true)).toBe(false);
     expect(shouldStartAdvertisingTracking("essential", true)).toBe(false);

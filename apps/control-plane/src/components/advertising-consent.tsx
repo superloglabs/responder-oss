@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 import {
   setAdvertisingConsent,
@@ -6,6 +6,7 @@ import {
   startAdvertisingTracking,
   subscribeAdvertisingConsent,
 } from "../advertising-consent";
+import { focusMainContent } from "../advertising-consent-focus";
 import { Button, IconButton } from "../design-system";
 
 interface AdvertisingConsentPromptProps {
@@ -63,27 +64,39 @@ export function AdvertisingConsentPrompt({
 }
 
 export function AdvertisingConsent() {
+  const [announcement, setAnnouncement] = useState("");
   const isVisible = useSyncExternalStore(
     subscribeAdvertisingConsent,
     shouldOfferAdvertisingConsent,
     () => false,
   );
 
-  if (!isVisible) return null;
-
   function useEssentialOnly() {
+    focusMainContent();
+    setAnnouncement("Advertising tracking disabled.");
     setAdvertisingConsent("essential");
   }
 
   function allowAdvertising() {
+    focusMainContent();
+    setAnnouncement("Advertising tracking allowed.");
     setAdvertisingConsent("all");
     startAdvertisingTracking();
   }
 
   return (
-    <AdvertisingConsentPrompt
-      onAccept={allowAdvertising}
-      onEssentialOnly={useEssentialOnly}
-    />
+    <>
+      {announcement ? (
+        <span className="dsVisuallyHidden" role="status">
+          {announcement}
+        </span>
+      ) : null}
+      {isVisible ? (
+        <AdvertisingConsentPrompt
+          onAccept={allowAdvertising}
+          onEssentialOnly={useEssentialOnly}
+        />
+      ) : null}
+    </>
   );
 }
