@@ -255,25 +255,54 @@ describe("issue list sources", () => {
     vi.clearAllMocks();
   });
 
-  it("derives the source from the investigation that filed the issue", async () => {
-    const orderBy = vi.fn().mockResolvedValue([]);
+  it("returns scan, agent, and unknown sources from the filing investigation", async () => {
+    const issueRows = [
+      {
+        id: firstIssueId,
+        sourceInput: { provider: "scan" },
+        sourceAgentId: "30303030-3030-4030-8030-303030303030",
+        sourceAgentName: "Scanner",
+      },
+      {
+        id: secondIssueId,
+        sourceInput: { provider: "sentry" },
+        sourceAgentId: "40404040-4040-4040-8040-404040404040",
+        sourceAgentName: "Production agent",
+      },
+      {
+        id: "50505050-5050-4050-8050-505050505050",
+        sourceInput: null,
+        sourceAgentId: null,
+        sourceAgentName: null,
+      },
+    ];
+    const orderBy = vi.fn().mockResolvedValue(issueRows);
     const where = vi.fn(() => ({ orderBy }));
-    const select = vi.fn((selection: Record<string, unknown>) => {
-      void selection;
-      return { from: vi.fn(() => ({ where })) };
-    });
+    const query = { leftJoin: vi.fn(), where };
+    query.leftJoin.mockReturnValue(query);
+    const select = vi.fn(() => ({ from: vi.fn(() => query) }));
     vi.mocked(getDatabase).mockReturnValue({ select } as never);
 
-    await listIssues(organizationId);
+    const result = await listIssues(organizationId);
 
-    const selection = select.mock.calls[0]![0];
-    const query = new PgDialect().sqlToQuery(selection.source as never);
-    expect(query.sql).toContain('"source_link"."relationship" = \'new\'');
-    expect(query.sql).toContain(
-      '"source_investigation"."input"->>\'provider\' = \'scan\'',
-    );
-    expect(query.sql).toContain('"source_agent"."name"');
-    expect(query.sql).toContain('"source_link"."issue_id" = "issues"."id"');
-    expect(query.sql).toContain('ORDER BY "source_link"."created_at" ASC');
+    expect(result.map(({ id, source }) => ({ id, source }))).toEqual([
+      {
+        id: firstIssueId,
+        source: { kind: "scan", agentId: null, name: "Scan" },
+      },
+      {
+        id: secondIssueId,
+        source: {
+          kind: "agent",
+          agentId: "40404040-4040-4040-8040-404040404040",
+          name: "Production agent",
+        },
+      },
+      {
+        id: "50505050-5050-4050-8050-505050505050",
+        source: null,
+      },
+    ]);
+    expect(query.leftJoin).toHaveBeenCalledTimes(2);
   });
 });

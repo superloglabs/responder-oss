@@ -289,6 +289,7 @@ export async function submitInvestigationReport(input: {
           evidence: submittedIssue.evidence,
           embedding: embedding?.vector ?? null,
           embeddingModel: embedding?.model ?? null,
+          sourceInvestigationId: input.investigationId,
         })
         .returning();
       canonicalById.set(issueId, inserted[0]!);
@@ -438,7 +439,7 @@ export async function listIssues(
   organizationId: string,
   includeArchived = false,
 ) {
-  return getDatabase()
+  const rows = await getDatabase()
     .select({
       id: issues.id,
       title: issues.title,
@@ -450,33 +451,16 @@ export async function listIssues(
       remediations: issues.remediations,
       archivedAt: issues.archivedAt,
       createdAt: issues.createdAt,
-      source: sql<IssueSource | null>`(
-        SELECT jsonb_build_object(
-          'kind', CASE
-            WHEN "source_investigation"."input"->>'provider' = 'scan' THEN 'scan'
-            ELSE 'agent'
-          END,
-          'agentId', CASE
-            WHEN "source_investigation"."input"->>'provider' = 'scan' THEN NULL
-            ELSE "source_agent"."id"
-          END,
-          'name', CASE
-            WHEN "source_investigation"."input"->>'provider' = 'scan' THEN 'Scan'
-            ELSE "source_agent"."name"
-          END
-        )
-        FROM "investigation_issues" AS "source_link"
-        INNER JOIN "investigations" AS "source_investigation"
-          ON "source_investigation"."id" = "source_link"."investigation_id"
-        INNER JOIN "agents" AS "source_agent"
-          ON "source_agent"."id" = "source_investigation"."agent_id"
-        WHERE "source_link"."issue_id" = "issues"."id"
-          AND "source_link"."relationship" = 'new'
-        ORDER BY "source_link"."created_at" ASC
-        LIMIT 1
-      )`,
+      sourceInput: investigations.input,
+      sourceAgentId: agents.id,
+      sourceAgentName: agents.name,
     })
     .from(issues)
+    .leftJoin(
+      investigations,
+      eq(investigations.id, issues.sourceInvestigationId),
+    )
+    .leftJoin(agents, eq(agents.id, investigations.agentId))
     .where(
       includeArchived
         ? eq(issues.organizationId, organizationId)
@@ -486,6 +470,33 @@ export async function listIssues(
           ),
     )
     .orderBy(desc(issues.createdAt));
+
+  return rows.map(({
+    sourceInput,
+    sourceAgentId,
+    sourceAgentName,
+    ...issue
+  }) => ({
+    ...issue,
+    source: issueSourceFromInvestigation({
+      input: sourceInput,
+      agentId: sourceAgentId,
+      agentName: sourceAgentName,
+    }),
+  }));
+}
+
+function issueSourceFromInvestigation(input: {
+  input: { provider: string } | null;
+  agentId: string | null;
+  agentName: string | null;
+}): IssueSource | null {
+  if (!input.input) return null;
+  if (input.input.provider === "scan") {
+    return { kind: "scan", agentId: null, name: "Scan" };
+  }
+  if (input.agentId === null || input.agentName === null) return null;
+  return { kind: "agent", agentId: input.agentId, name: input.agentName };
 }
 
 export async function getIssueDetail(
