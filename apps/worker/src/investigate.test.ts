@@ -656,3 +656,49 @@ describe("sandbox agent configuration", () => {
     consoleError.mockRestore();
   });
 });
+
+describe("profile-specific investigation guidance", () => {
+  const base = {
+    agentPrompt: "Inspect the failure.",
+    runtimeSystemPrompt: "Instance guidance.",
+    clickStackConnected: false,
+    datadogConnected: false,
+    sentryConnected: true,
+    repositories: [],
+  };
+
+  it("uses the selected profile's sections and still gates disconnected sources", () => {
+    const instructions = investigationInstructions({
+      ...base,
+      awsAccountNames: ["production"],
+      runtimePromptParts: {
+        sentry: "Inspect Sentry with this profile.",
+        aws: "AWS accounts: {{value1}}",
+        datadog: "Disconnected source instruction",
+        remediationChoice: "This profile's remediation policy.",
+        reportResponse: "Use the saved report.",
+        credentialSafety: "",
+      },
+    });
+    expect(instructions).toContain("Instance guidance.");
+    expect(instructions).toContain("AWS accounts: production");
+    expect(instructions).toContain("Inspect Sentry with this profile.");
+    expect(instructions).toContain("This profile's remediation policy.");
+    expect(instructions).toContain("Use the saved report.");
+    expect(instructions).not.toContain("Disconnected source instruction");
+    expect(instructions).not.toContain("Do not expose credentials or secret values.");
+    expect(instructions).not.toContain("Always try to create a code change remediation.");
+  });
+
+  it.each([undefined, 1])("requires attempting code remediation for normal runs and issue followups (%s)", (issueFollowupIssueCount) => {
+    const instructions = investigationInstructions({ ...base, issueFollowupIssueCount });
+    expect(instructions).toContain("Always try to create a code change remediation.");
+    expect(instructions).toContain("absolutely impossible in code and human intervention is required");
+    expect(instructions).toContain("Read-only source tools do not make the repository checkout read-only.");
+    expect(instructions).toContain("it never prevents preparing a code change remediation");
+  });
+
+  it.each([{ scanMode: true }, { threadMode: true }])("keeps observation-only modes free of code-remediation instructions (%j)", (mode) => {
+    expect(investigationInstructions({ ...base, ...mode })).not.toContain("Always try to create a code change remediation.");
+  });
+});

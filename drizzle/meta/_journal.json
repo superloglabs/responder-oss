@@ -309,6 +309,13 @@
       "when": 1789464888996,
       "tag": "0043_dapper_komodo",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789475505467,
+      "tag": "0044_runtime_prompt_parts",
+      "breakpoints": true
     }
   ]
 }

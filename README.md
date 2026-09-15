@@ -128,3 +128,21 @@ Responder is licensed under the [Apache License 2.0](LICENSE). The Inter font
 is distributed under the SIL Open Font License; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Product and provider names
 and logos are governed separately; see [TRADEMARKS.md](TRADEMARKS.md).
+
+### Runtime investigation guidance
+
+Each runtime profile stores `system_prompt` and a `prompt_parts` JSON object.
+The worker selects the applicable prompt sections for the connected sources and
+execution mode, renders context placeholders once, and records the assembled
+instructions in the investigation trace. Defaults live in
+`packages/core/src/investigations/prompt-parts.ts`; the database schema snapshots
+these defaults for profiles. An omitted key falls back to the worker default;
+an explicit empty string suppresses that section. Changing default sections
+also requires updating the database default through a migration.
+
+For ordinary investigations and issue follow-ups, the default guidance requires
+attempting a code remediation. External action is reserved for remediation that
+is impossible in code and requires human intervention. PR policy
+controls later publication of the saved diff, not whether the investigation can
+prepare it. Observation-only scans and ad-hoc Slack threads retain their separate
+execution restrictions; configurable wording does not change tool permissions.

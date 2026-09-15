@@ -1,3 +1,4 @@
+import { renderInvestigationPromptPart, type InvestigationPromptParts } from "@responder/core/investigations/prompt-parts";
 import { tool } from "@openai/agents";
 import { submitInvestigationReport } from "@responder/core/db/issues";
 import { saveInvestigationReplayReport } from "@responder/core/db/investigations";
@@ -10,11 +11,9 @@ import { embedNewIssues } from "./issue-embeddings.js";
 import { attachRepositoryBasesToReport } from "./remediation-bases.js";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
-const submitInvestigationReportDescription =
-  "Submit the final structured investigation report. You must call this exactly once before giving your final response. Responder delivers its Slack messages after the investigation finishes.";
-
 function reportToolResult(input: {
   automaticPullRequestIssueIds: string[];
+  promptParts?: InvestigationPromptParts;
   deliveryWarnings?: string[];
   issueIds: string[];
   linearTicketRequestIds?: string[];
@@ -26,12 +25,12 @@ function reportToolResult(input: {
     deliveryWarnings: input.deliveryWarnings ?? [],
     issueIds: input.issueIds,
     instruction: [
-      "The report was saved.",
+      renderInvestigationPromptPart("reportSaved", input.promptParts),
       input.automaticPullRequestIssueIds.length > 0
-        ? `Separate remediation jobs will handle pull request fixes for these issue IDs: ${input.automaticPullRequestIssueIds.join(", ")}. Do not modify code in this investigation.`
+        ? renderInvestigationPromptPart("reportPullRequests", input.promptParts, { issueIds: input.automaticPullRequestIssueIds.join(", ") })
         : null,
       input.linearTicketRequestIds?.length
-        ? `Separate Linear ticket jobs will handle these request IDs: ${input.linearTicketRequestIds.join(", ")}.`
+        ? renderInvestigationPromptPart("reportLinearTickets", input.promptParts, { requestIds: input.linearTicketRequestIds.join(", ") })
         : null,
     ].filter(Boolean).join("\n\n"),
     ...(input.slackMarkdown !== undefined
@@ -64,6 +63,7 @@ export async function deliverCompletedInvestigationWithWarnings(
 export async function submitInvestigationReportForRun(input: {
   investigationId: string;
   organizationId: string;
+  promptParts?: InvestigationPromptParts;
   report: InvestigationReportSubmission;
   repositories?: Array<{ branch: string; repository: string; sha: string }>;
   environment?: NodeJS.ProcessEnv;
@@ -115,6 +115,7 @@ export async function submitInvestigationReportForRun(input: {
     }));
   }
   return reportToolResult({
+    promptParts: input.promptParts,
     issueIds: result.issues.map((issue) => issue.id),
     automaticPullRequestIssueIds: result.automaticPullRequestIssueIds,
     slackMarkdown: result.markdown,
@@ -127,6 +128,7 @@ export async function submitInvestigationReportForRun(input: {
 export function createSubmitInvestigationReportTool(input: {
   investigationId: string;
   organizationId: string;
+  promptParts?: InvestigationPromptParts;
   repositories?: Array<{ branch: string; repository: string; sha: string }>;
   environment?: NodeJS.ProcessEnv;
   allowCodeChanges?: boolean;
@@ -135,13 +137,14 @@ export function createSubmitInvestigationReportTool(input: {
 }) {
   return tool({
     name: "submit_investigation_report",
-    description: submitInvestigationReportDescription,
+    description: renderInvestigationPromptPart("reportToolDescription", input.promptParts),
     parameters: investigationReportSubmissionSchema,
     async execute(report) {
       return submitInvestigationReportForRun({
         investigationId: input.investigationId,
         organizationId: input.organizationId,
         report,
+        promptParts: input.promptParts,
         repositories: input.repositories,
         environment: input.environment,
         allowCodeChanges: input.allowCodeChanges,
@@ -156,10 +159,11 @@ export function createSubmitInvestigationReportTool(input: {
 export function createCaptureInvestigationReplayReportTool(input: {
   investigationId: string;
   organizationId: string;
+  promptParts?: InvestigationPromptParts;
 }) {
   return tool({
     name: "submit_investigation_report",
-    description: submitInvestigationReportDescription,
+    description: renderInvestigationPromptPart("reportToolDescription", input.promptParts),
     parameters: investigationReportSubmissionSchema,
     async execute(report) {
       return captureInvestigationReplayReport({ ...input, report });
@@ -170,6 +174,7 @@ export function createCaptureInvestigationReplayReportTool(input: {
 export async function captureInvestigationReplayReport(input: {
   investigationId: string;
   organizationId: string;
+  promptParts?: InvestigationPromptParts;
   report: InvestigationReportSubmission;
 }) {
   assertNoDaytonaSecretPlaceholders(input.report, "Investigation replay report");
@@ -198,6 +203,7 @@ export async function captureInvestigationReplayReport(input: {
     }),
   );
   return reportToolResult({
+    promptParts: input.promptParts,
     automaticPullRequestIssueIds: [],
     issueIds: input.report.issues
       .filter((issue) => issue.resolution === "existing")

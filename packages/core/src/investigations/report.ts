@@ -235,7 +235,7 @@ const newIssueSubmissionSchema = z.object({
     .describe("Ordered events that explain how the issue unfolded."),
   severity: issueSeveritySchema,
   remediations: authoredIssueRemediationsSchema.describe(
-    "Concrete remediation options. Use code_change only after inspecting and editing the relevant files and running the checks you choose; use external_action for configuration, deployment, data, or other work outside the attached repositories.",
+    "Concrete remediation options with prepared code changes or instructions for required human intervention. Follow the active runtime profile guidance when selecting a remediation type.",
   ),
   evidence: z.array(issueEvidenceSchema).min(1).max(30),
 });

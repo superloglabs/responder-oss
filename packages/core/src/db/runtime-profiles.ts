@@ -1,3 +1,4 @@
+import type { InvestigationPromptParts } from "../investigations/prompt-parts.js";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { runtimeProfiles } from "./schema.js";
@@ -6,6 +7,7 @@ export interface RuntimeProfile {
   id: string;
   version: number;
   systemPrompt: string;
+  promptParts: InvestigationPromptParts;
   model: string;
   modelOptions: Record<string, unknown>;
   createdBy: string;
@@ -21,6 +23,7 @@ export async function getRuntimeProfile(
       id: runtimeProfiles.id,
       version: runtimeProfiles.version,
       systemPrompt: runtimeProfiles.systemPrompt,
+      promptParts: runtimeProfiles.promptParts,
       model: runtimeProfiles.model,
       modelOptions: runtimeProfiles.modelOptions,
       createdBy: runtimeProfiles.createdBy,

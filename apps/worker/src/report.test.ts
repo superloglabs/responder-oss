@@ -108,13 +108,14 @@ describe("investigation report submission", () => {
         investigationId: "investigation-id",
         organizationId: "organization-id",
         report,
+        promptParts: { reportSaved: "Saved with profile guidance." },
       }),
     ).resolves.toEqual({
       accepted: true,
       automaticPullRequestIssueIds: [],
       deliveryWarnings: [],
       issueIds: ["12121212-1212-4212-8212-121212121212"],
-      instruction: "The report was saved.",
+      instruction: "Saved with profile guidance.",
       slackMarkdown: "saved markdown",
     });
     expect(submitInvestigationReport).toHaveBeenCalledWith({
@@ -231,7 +232,7 @@ describe("investigation report submission", () => {
       ),
     ).resolves.toEqual(
       expect.objectContaining({
-        instruction: expect.stringContaining("Separate remediation jobs"),
+        instruction: expect.stringContaining("publish the exact saved patches"),
       }),
     );
     expect(onAutomaticPullRequestRequests).toHaveBeenCalledWith([
