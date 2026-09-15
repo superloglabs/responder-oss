@@ -108,6 +108,7 @@ export async function captureRedditSignupConversion(
             {
               action_source: "WEBSITE",
               ...(clickId ? { click_id: clickId } : {}),
+              // Reddit CAPI v3 requires Unix epoch milliseconds.
               event_at: Date.now(),
               ...(configured.eventSourceUrl
                 ? { event_source_url: configured.eventSourceUrl }
