@@ -405,6 +405,7 @@ describe("investigation report submission", () => {
       deliveryWarnings: [],
       issueIds: [],
       instruction: "The report was saved.",
+      slackMarkdown: "Current-data replay\n\nSentry telemetry confirms the regression.",
     });
     expect(saveInvestigationReplayReport).toHaveBeenCalledWith({
       investigationId: "replay-id",
