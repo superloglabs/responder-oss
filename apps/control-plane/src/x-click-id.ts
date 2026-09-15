@@ -24,9 +24,3 @@ export function rememberXClickId(document: Document = window.document) {
   );
   if (cookie) document.cookie = cookie;
 }
-
-export function forgetXClickId(document: Document = window.document) {
-  document.cookie =
-    "responder_twclid=; Max-Age=0; Path=/; SameSite=Lax" +
-    (document.location.protocol === "https:" ? "; Secure" : "");
-}
