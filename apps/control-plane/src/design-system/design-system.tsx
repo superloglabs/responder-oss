@@ -404,6 +404,8 @@ export interface SelectFieldProps<Value extends string> {
   name?: string;
   onChange: (value: Value) => void;
   options: Array<SelectOption<Value>>;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   value: Value;
 }
 
@@ -415,13 +417,28 @@ export function SelectField<Value extends string>({
   name,
   onChange,
   options,
+  searchable = false,
+  searchPlaceholder = "Search…",
   value,
 }: SelectFieldProps<Value>) {
   const inputId = useId();
   const hintId = hint ? `${inputId}-hint` : undefined;
+  const optionsId = `${inputId}-options`;
   const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
+  const optionsRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selectedOption = options.find((option) => option.value === value);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredOptions = normalizedQuery
+    ? options.filter((option) =>
+        `${option.label} ${option.description ?? ""}`
+          .toLocaleLowerCase()
+          .includes(normalizedQuery),
+      )
+    : options;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -429,11 +446,18 @@ export function SelectField<Value extends string>({
     function closeOnOutsideClick(event: MouseEvent) {
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
         setIsOpen(false);
+        setQuery("");
+        setActiveOptionIndex(-1);
       }
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        setQuery("");
+        setActiveOptionIndex(-1);
+        requestAnimationFrame(() => triggerRef.current?.focus());
+      }
     }
 
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -443,6 +467,23 @@ export function SelectField<Value extends string>({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || activeOptionIndex < 0) return;
+    optionsRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-option-index="${activeOptionIndex}"]`,
+      )
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeOptionIndex, isOpen, query]);
+
+  function selectOption(option: SelectOption<Value>) {
+    onChange(option.value);
+    setIsOpen(false);
+    setQuery("");
+    setActiveOptionIndex(-1);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }
 
   return (
     <div className={classNames("dsField", className)} ref={rootRef}>
@@ -457,7 +498,19 @@ export function SelectField<Value extends string>({
           className="dsSelect__trigger"
           disabled={disabled}
           id={inputId}
-          onClick={() => setIsOpen((current) => !current)}
+          onClick={() => {
+            if (isOpen) {
+              setQuery("");
+              setActiveOptionIndex(-1);
+            } else {
+              const selectedIndex = options.findIndex(
+                (option) => option.value === value,
+              );
+              setActiveOptionIndex(selectedIndex >= 0 ? selectedIndex : 0);
+            }
+            setIsOpen(!isOpen);
+          }}
+          ref={triggerRef}
           type="button"
         >
           <span id={`${inputId}-value`}>{selectedOption?.label ?? "Select…"}</span>
@@ -466,26 +519,86 @@ export function SelectField<Value extends string>({
           </svg>
         </button>
         {isOpen ? (
-          <div aria-labelledby={`${inputId}-label`} className="dsSelect__popover shadow-xl" role="listbox">
-            {options.map((option) => (
-              <button
-                aria-selected={option.value === value}
-                className="dsSelect__option"
-                key={option.value}
-                onClick={() => {
-                  onChange(option.value);
-                  setIsOpen(false);
+          <div className="dsSelect__popover shadow-xl">
+            {searchable ? (
+              <input
+                aria-activedescendant={
+                  filteredOptions[activeOptionIndex]
+                    ? `${inputId}-option-${activeOptionIndex}`
+                    : undefined
+                }
+                aria-autocomplete="list"
+                aria-controls={optionsId}
+                aria-expanded="true"
+                aria-label={`Search ${label.toLocaleLowerCase()}`}
+                autoFocus
+                className="dsSelect__search"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveOptionIndex(0);
                 }}
-                role="option"
-                type="button"
-              >
-                <span>
-                  <strong>{option.label}</strong>
-                  {option.description ? <small>{option.description}</small> : null}
-                </span>
-                {option.value === value ? <span aria-hidden="true" className="dsSelect__check">✓</span> : null}
-              </button>
-            ))}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setActiveOptionIndex((current) =>
+                      filteredOptions.length === 0
+                        ? -1
+                        : Math.min(current + 1, filteredOptions.length - 1),
+                    );
+                  } else if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setActiveOptionIndex((current) =>
+                      filteredOptions.length === 0
+                        ? -1
+                        : Math.max(current - 1, 0),
+                    );
+                  } else if (event.key === "Enter") {
+                    const activeOption = filteredOptions[activeOptionIndex];
+                    if (activeOption) {
+                      event.preventDefault();
+                      selectOption(activeOption);
+                    }
+                  }
+                }}
+                placeholder={searchPlaceholder}
+                role="combobox"
+                type="search"
+                value={query}
+              />
+            ) : null}
+            <div
+              aria-labelledby={`${inputId}-label`}
+              className="dsSelect__options"
+              id={optionsId}
+              ref={optionsRef}
+              role="listbox"
+            >
+              {filteredOptions.map((option, index) => (
+                <button
+                  aria-selected={option.value === value}
+                  className={classNames(
+                    "dsSelect__option",
+                    index === activeOptionIndex && "isActive",
+                  )}
+                  data-option-index={index}
+                  id={`${inputId}-option-${index}`}
+                  key={option.value}
+                  onClick={() => selectOption(option)}
+                  onMouseEnter={() => setActiveOptionIndex(index)}
+                  role="option"
+                  type="button"
+                >
+                  <span>
+                    <strong>{option.label}</strong>
+                    {option.description ? <small>{option.description}</small> : null}
+                  </span>
+                  {option.value === value ? <span aria-hidden="true" className="dsSelect__check">✓</span> : null}
+                </button>
+              ))}
+              {filteredOptions.length === 0 ? (
+                <p className="dsSelect__empty">No options match “{query}”.</p>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>
