@@ -35,6 +35,11 @@ describe("advertising consent cookie", () => {
         "responder_advertising_consent=unexpected",
       ),
     ).toBeNull();
+    expect(
+      advertisingConsentFromCookie(
+        "responder_advertising_consent=all; responder_advertising_consent=essential",
+      ),
+    ).toBeNull();
     expect(advertisingConsentFromCookie("session=one")).toBeNull();
   });
 

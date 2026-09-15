@@ -19,11 +19,12 @@ export function advertisingConsentFromCookie(
   cookieHeader: string,
 ): AdvertisingConsentChoice | null {
   const prefix = `${advertisingConsentCookieName}=`;
-  const cookie = cookieHeader
+  const cookies = cookieHeader
     .split(";")
     .map((value) => value.trim())
-    .find((value) => value.startsWith(prefix));
-  const consent = cookie?.slice(prefix.length);
+    .filter((value) => value.startsWith(prefix));
+  if (cookies.length !== 1) return null;
+  const consent = cookies[0].slice(prefix.length);
   return consent === "all" || consent === "essential" ? consent : null;
 }
 
