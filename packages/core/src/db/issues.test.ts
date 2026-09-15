@@ -7,7 +7,7 @@ import {
   submitInvestigationReport,
 } from "./issues.js";
 import { queueAutomaticIssuePullRequests } from "./pull-requests.js";
-import { investigations } from "./schema.js";
+import { agents, investigations, issues } from "./schema.js";
 
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
@@ -277,7 +277,10 @@ describe("issue list sources", () => {
       },
     ];
     const orderBy = vi.fn().mockResolvedValue(issueRows);
-    const where = vi.fn(() => ({ orderBy }));
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { orderBy };
+    });
     const query = { leftJoin: vi.fn(), where };
     query.leftJoin.mockReturnValue(query);
     const select = vi.fn(() => ({ from: vi.fn(() => query) }));
@@ -304,5 +307,17 @@ describe("issue list sources", () => {
       },
     ]);
     expect(query.leftJoin).toHaveBeenCalledTimes(2);
+    expect(query.leftJoin.mock.calls[0]![0]).toBe(investigations);
+    expect(
+      new PgDialect().sqlToQuery(query.leftJoin.mock.calls[0]![1] as never).sql,
+    ).toBe('"investigations"."id" = "issues"."source_investigation_id"');
+    expect(query.leftJoin.mock.calls[1]![0]).toBe(agents);
+    expect(
+      new PgDialect().sqlToQuery(query.leftJoin.mock.calls[1]![1] as never).sql,
+    ).toBe('"agents"."id" = "investigations"."agent_id"');
+    expect(
+      new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never).sql,
+    ).toContain('"issues"."organization_id" = $1');
+    expect(issues.sourceInvestigationId.name).toBe("source_investigation_id");
   });
 });
