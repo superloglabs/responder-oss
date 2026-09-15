@@ -205,6 +205,10 @@ export async function captureInvestigationReplayReport(input: {
   return reportToolResult({
     promptParts: input.promptParts,
     automaticPullRequestIssueIds: [],
+    // Replays must satisfy the same final-response contract without delivery.
+    slackMarkdown: [input.report.headline, input.report.summary]
+      .map((text) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"))
+      .join("\n\n"),
     issueIds: input.report.issues
       .filter((issue) => issue.resolution === "existing")
       .map((issue) => issue.issueId),
