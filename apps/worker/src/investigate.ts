@@ -977,10 +977,10 @@ export async function runInvestigationAgent(
       if (event) await writeTrace(event);
     }
     await result.completed;
-    if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
-      throw new Error("OpenAI agent returned an empty report");
-    }
-    const report = redactDaytonaSecretPlaceholders(result.finalOutput.trim());
+    const report =
+      typeof result.finalOutput === "string"
+        ? redactDaytonaSecretPlaceholders(result.finalOutput.trim())
+        : "";
     await writeTrace(traceEvent("session.completed"));
     if (threadMode) {
       const sandboxSessionState = await client.serializeSessionState(

@@ -68,3 +68,12 @@ export async function deliverPersistedInvestigationAfterFailure(
   if (input.replay || input.investigationFailed) return [];
   return deliver(input.investigationId, input.deliveryRunId);
 }
+
+export async function recoverSubmittedInvestigationReport(
+  report: string | null,
+): Promise<string> {
+  if (!report?.trim()) {
+    throw new Error("OpenAI agent returned an empty report");
+  }
+  return report.trim();
+}
