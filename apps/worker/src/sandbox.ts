@@ -133,7 +133,10 @@ export async function createDaytonaSandboxSession(
     dependencies,
   );
   try {
-    return await creator.create();
+    return await retryTransientDaytonaOperation(
+      () => creator.create(),
+      dependencies,
+    );
   } catch (createError) {
     try {
       await deleteDaytonaSandboxByReference(
