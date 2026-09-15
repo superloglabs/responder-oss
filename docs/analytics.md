@@ -85,3 +85,11 @@ VITE_X_ADS_SIGNUP_EVENT_IDS=tw-pixel2-event2
 The browser pixel is disabled unless at least one public event id is set during
 the web build. `VITE_X_ADS_SIGNUP_EVENT_IDS` accepts a comma-separated list and
 is combined with the backward-compatible singular value.
+
+## Reddit Pixel
+
+Set `VITE_REDDIT_PIXEL_ID` during the web build to enable Reddit measurement.
+The pixel loads when the app starts, reports a page visit, and sends
+deduplicated `SignUp` events after successful email and first-time social
+signups. The pixel is disabled when the variable is empty, and content blockers
+can suppress browser events.
