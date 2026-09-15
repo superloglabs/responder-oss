@@ -67,7 +67,8 @@ each other with the Better Auth user ID as the `conversion_id` key:
 Configure these variables in the control-plane project for the server-side
 path. The OAuth 1.0a credentials come from a developer app attached to the X
 Ads account, and the event id is the full identifier from X Events Manager.
-The Conversion API path is disabled when any of them are unset.
+An optional second tracker can authenticate with its Pixel Token. Each
+Conversion API path is disabled when its required values are unset.
 
 ```dotenv
 X_ADS_CONSUMER_KEY=
@@ -75,8 +76,12 @@ X_ADS_CONSUMER_SECRET=
 X_ADS_ACCESS_TOKEN=
 X_ADS_ACCESS_TOKEN_SECRET=
 X_ADS_SIGNUP_EVENT_ID=tw-pixel1-event1
+X_ADS_PIXEL_TOKEN=
+X_ADS_PIXEL_TOKEN_SIGNUP_EVENT_ID=tw-pixel2-event2
 VITE_X_ADS_SIGNUP_EVENT_ID=tw-pixel1-event1
+VITE_X_ADS_SIGNUP_EVENT_IDS=tw-pixel2-event2
 ```
 
-The browser pixel is disabled unless `VITE_X_ADS_SIGNUP_EVENT_ID` is set during
-the web build.
+The browser pixel is disabled unless at least one public event id is set during
+the web build. `VITE_X_ADS_SIGNUP_EVENT_IDS` accepts a comma-separated list and
+is combined with the backward-compatible singular value.

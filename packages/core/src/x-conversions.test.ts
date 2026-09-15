@@ -11,6 +11,11 @@ function stubCredentials() {
   vi.stubEnv("X_ADS_SIGNUP_EVENT_ID", "tw-pixel1-event1");
 }
 
+function stubPixelTokenCredentials() {
+  vi.stubEnv("X_ADS_PIXEL_TOKEN", "pixel-token");
+  vi.stubEnv("X_ADS_PIXEL_TOKEN_SIGNUP_EVENT_ID", "tw-pixel2-event2");
+}
+
 describe("X signup conversions", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -100,6 +105,73 @@ describe("X signup conversions", () => {
       },
       { twclid: "26l6412g5p4iyj65a2oic2ayg2" },
     ]);
+  });
+
+  it("sends a conversion authenticated with a Pixel Token", async () => {
+    stubPixelTokenCredentials();
+    const { captureXSignupConversion } = await import("./x-conversions.js");
+
+    await captureXSignupConversion({
+      conversionId: "user-1",
+      email: "user@example.com",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://ads-api.x.com/12/measurement/conversions/pixel2");
+    expect(request.method).toBe("POST");
+    expect(request.headers).toEqual({
+      "Content-Type": "application/json",
+      "X-Pixel-Token": "pixel-token",
+    });
+
+    const body = JSON.parse(request.body as string);
+    expect(body.conversions[0]).toMatchObject({
+      conversion_id: "user-1",
+      event_id: "tw-pixel2-event2",
+      identifiers: [
+        {
+          hashed_email: createHash("sha256")
+            .update("user@example.com")
+            .digest("hex"),
+        },
+      ],
+    });
+  });
+
+  it("reports the signup to OAuth and Pixel Token trackers", async () => {
+    stubCredentials();
+    stubPixelTokenCredentials();
+    const { captureXSignupConversion } = await import("./x-conversions.js");
+
+    await captureXSignupConversion({
+      conversionId: "user-1",
+      email: "user@example.com",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://ads-api.x.com/12/measurement/conversions/pixel1",
+      "https://ads-api.x.com/12/measurement/conversions/pixel2",
+    ]);
+  });
+
+  it("ignores a malformed Pixel Token event id", async () => {
+    stubPixelTokenCredentials();
+    vi.stubEnv("X_ADS_PIXEL_TOKEN_SIGNUP_EVENT_ID", "invalid-event-id");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { captureXSignupConversion } = await import("./x-conversions.js");
+
+    await captureXSignupConversion({
+      conversionId: "user-1",
+      email: "user@example.com",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      'X_ADS_PIXEL_TOKEN_SIGNUP_EVENT_ID must look like tw-xxxxx-yyyyy, got "invalid-event-id"',
+    );
+    consoleError.mockRestore();
   });
 
   it("does not fail the signup when delivery fails", async () => {
