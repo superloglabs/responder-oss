@@ -44,6 +44,10 @@ export interface IssueEmbedding {
   vector: number[];
 }
 
+export type IssueSource =
+  | { kind: "agent"; agentId: string; name: string }
+  | { kind: "scan"; agentId: null; name: "Scan" };
+
 export interface PreparedInvestigationReportSubmission {
   report: InvestigationReportSubmission;
   newIssueEmbeddings: Array<IssueEmbedding | null>;
@@ -446,6 +450,31 @@ export async function listIssues(
       remediations: issues.remediations,
       archivedAt: issues.archivedAt,
       createdAt: issues.createdAt,
+      source: sql<IssueSource | null>`(
+        SELECT jsonb_build_object(
+          'kind', CASE
+            WHEN "source_investigation"."input"->>'provider' = 'scan' THEN 'scan'
+            ELSE 'agent'
+          END,
+          'agentId', CASE
+            WHEN "source_investigation"."input"->>'provider' = 'scan' THEN NULL
+            ELSE "source_agent"."id"
+          END,
+          'name', CASE
+            WHEN "source_investigation"."input"->>'provider' = 'scan' THEN 'Scan'
+            ELSE "source_agent"."name"
+          END
+        )
+        FROM "investigation_issues" AS "source_link"
+        INNER JOIN "investigations" AS "source_investigation"
+          ON "source_investigation"."id" = "source_link"."investigation_id"
+        INNER JOIN "agents" AS "source_agent"
+          ON "source_agent"."id" = "source_investigation"."agent_id"
+        WHERE "source_link"."issue_id" = "issues"."id"
+          AND "source_link"."relationship" = 'new'
+        ORDER BY "source_link"."created_at" ASC
+        LIMIT 1
+      )`,
     })
     .from(issues)
     .where(

@@ -1,7 +1,11 @@
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDatabase } from "./client.js";
-import { searchIssuesByText, submitInvestigationReport } from "./issues.js";
+import {
+  listIssues,
+  searchIssuesByText,
+  submitInvestigationReport,
+} from "./issues.js";
 import { queueAutomaticIssuePullRequests } from "./pull-requests.js";
 import { investigations } from "./schema.js";
 
@@ -243,5 +247,33 @@ describe("issue text search", () => {
     expect(query.sql).toContain("timeline_entry->>'title' ilike");
     expect(query.sql).toContain("timeline_entry->>'description' ilike");
     expect(query.sql).not.toContain('"issues"."timeline"::text ilike');
+  });
+});
+
+describe("issue list sources", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("derives the source from the investigation that filed the issue", async () => {
+    const orderBy = vi.fn().mockResolvedValue([]);
+    const where = vi.fn(() => ({ orderBy }));
+    const select = vi.fn((selection: Record<string, unknown>) => {
+      void selection;
+      return { from: vi.fn(() => ({ where })) };
+    });
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+
+    await listIssues(organizationId);
+
+    const selection = select.mock.calls[0]![0];
+    const query = new PgDialect().sqlToQuery(selection.source as never);
+    expect(query.sql).toContain('"source_link"."relationship" = \'new\'');
+    expect(query.sql).toContain(
+      '"source_investigation"."input"->>\'provider\' = \'scan\'',
+    );
+    expect(query.sql).toContain('"source_agent"."name"');
+    expect(query.sql).toContain('"source_link"."issue_id" = "issues"."id"');
+    expect(query.sql).toContain('ORDER BY "source_link"."created_at" ASC');
   });
 });
