@@ -51,18 +51,20 @@ Signups are reported to X Ads through two channels that deduplicate against
 each other with the Better Auth user ID as the `conversion_id` key:
 
 - **Browser pixel** (`uwt.js`), which works without any Ads API approval. The
-  web app loads the tag at startup and fires the signup event after email
-  signup succeeds, or on the first-time social login landing marked by the
-  `signed_up=1` callback parameter. Content blockers can suppress it.
+  web app loads the tag after advertising consent and fires the signup event
+  after email signup succeeds, or on the first-time social login landing
+  marked by the `signed_up=1` callback parameter. Content blockers can
+  suppress it.
 - **Server-side [Conversion API](https://docs.x.com/x-ads-api/measurement/web-conversions)**,
-  called from the `user.create` hook alongside the `user signed up` PostHog
-  event. It is out of reach of content blockers but requires Ads API
-  ("Conversion Only" tier) approval for the developer app that issued the
-  OAuth credentials. X matches the conversion through the SHA-256 hash of the
-  account email plus the `twclid` click id when the visitor arrived through an
-  ad; the web app stores `twclid` from the landing URL in the first-party
-  `responder_twclid` cookie for 30 days, and the signup request carries it to
-  the server. Delivery failures are logged and never fail the signup.
+  called from the `user.create` hook only when the request carries explicit
+  advertising consent. It is out of reach of content blockers but requires
+  Ads API ("Conversion Only" tier) approval for the developer app that issued
+  the OAuth credentials. X matches the conversion through the SHA-256 hash of
+  the account email plus the `twclid` click id when the visitor arrived
+  through an ad; after consent, the web app stores `twclid` from the landing
+  URL in the first-party `responder_twclid` cookie for 30 days, and the signup
+  request carries it to the server. Delivery failures are logged and never
+  fail the signup.
 
 Configure these variables in the control-plane project for the server-side
 path. The OAuth 1.0a credentials come from a developer app attached to the X
@@ -85,3 +87,18 @@ VITE_X_ADS_SIGNUP_EVENT_IDS=tw-pixel2-event2
 The browser pixel is disabled unless at least one public event id is set during
 the web build. `VITE_X_ADS_SIGNUP_EVENT_IDS` accepts a comma-separated list and
 is combined with the backward-compatible singular value.
+
+## Advertising consent and Reddit Pixel
+
+When a Reddit or X browser pixel is configured, Responder offers an explicit
+advertising choice. Until the visitor selects `Allow advertising`, the app does
+not load either advertising script, store the X click id, or send X's
+server-side signup conversion. Selecting `Use essential only` or closing the
+prompt keeps advertising tracking disabled and clears any saved X click id.
+The choice is stored in browser storage and in a first-party consent cookie so
+the server can enforce it during signup.
+
+Set `VITE_REDDIT_PIXEL_ID` during the web build to enable Reddit measurement.
+After consent, the pixel reports a page visit and deduplicated `SignUp` events
+for successful email and first-time social signups. The pixel and the consent
+prompt are disabled when no Reddit or X browser identifier is configured.
