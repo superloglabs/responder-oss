@@ -551,8 +551,8 @@ export function SuggestionsPage() {
         <div>
           <h1>Suggestions</h1>
           <p>
-            Improvements discovered when investigations run out of useful
-            signals.
+            Our agent will find gaps in observability and propose improvements
+            in your logging setup.
           </p>
         </div>
         <Switch
