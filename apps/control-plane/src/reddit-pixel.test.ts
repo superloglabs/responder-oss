@@ -33,6 +33,25 @@ describe("redditPixelId", () => {
 });
 
 describe("Reddit Pixel", () => {
+  it("loads the pixel-specific Reddit script", () => {
+    const script: { async?: boolean; src?: string } = {};
+    const appendChild = vi.fn();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => script),
+      head: { appendChild },
+    });
+    vi.stubEnv("VITE_REDDIT_PIXEL_ID", "a2_pixel123");
+
+    redditPixel.initializeRedditPixel();
+
+    expect(script).toEqual({
+      async: true,
+      src: "https://www.redditstatic.com/ads/pixel.js?pixel_id=a2_pixel123",
+    });
+    expect(appendChild).toHaveBeenCalledWith(script);
+  });
+
   it("initializes once and reports a page visit", () => {
     const rdt = vi.fn();
     vi.stubGlobal("window", { rdt });

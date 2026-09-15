@@ -40,7 +40,7 @@ export function initializeRedditPixel() {
     window.rdt = rdt;
     const script = document.createElement("script");
     script.async = true;
-    script.src = "https://www.redditstatic.com/ads/pixel.js";
+    script.src = `https://www.redditstatic.com/ads/pixel.js?pixel_id=${encodeURIComponent(pixelId)}`;
     document.head.appendChild(script);
   }
 
