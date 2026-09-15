@@ -1,5 +1,6 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
+import { captureRedditSignupConversion } from "@responder/core/reddit-conversions";
 import { captureXSignupConversion } from "@responder/core/x-conversions";
 import { getDatabase } from "../../../packages/core/src/db/client.js";
 import {
@@ -192,11 +193,21 @@ export function createResponderAuth() {
                 signup_method: signupMethod,
               },
             });
-            await captureXSignupConversion({
-              conversionId: user.id,
-              email: user.email,
-              twclid: context?.getCookie("responder_twclid") ?? undefined,
-            });
+            await Promise.all([
+              captureRedditSignupConversion({
+                clickId: context?.getCookie("_rdt_cid") ?? undefined,
+                conversionId: user.id,
+                email: user.email,
+                ipAddress:
+                  context?.getHeader("x-responder-client-ip") ?? undefined,
+                userAgent: context?.getHeader("user-agent") ?? undefined,
+              }),
+              captureXSignupConversion({
+                conversionId: user.id,
+                email: user.email,
+                twclid: context?.getCookie("responder_twclid") ?? undefined,
+              }),
+            ]);
           },
         },
       },

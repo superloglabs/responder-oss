@@ -11,6 +11,7 @@ import { BrowserAnalyticsPageviews } from "./components/browser-analytics-pagevi
 import { ApplicationError } from "./components/application-error";
 import { BrowserMonitoringIdentity } from "./components/browser-monitoring-identity";
 import { initializeRedditPixel } from "./reddit-pixel";
+import { rememberRedditClickId } from "./reddit-click-id";
 import { rememberXClickId } from "./x-click-id";
 import { initializeXPixel } from "./x-pixel";
 import "./styles.css";
@@ -24,6 +25,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Root element is missing");
 
 rememberXClickId();
+rememberRedditClickId();
 initializeRedditPixel();
 initializeXPixel();
 
