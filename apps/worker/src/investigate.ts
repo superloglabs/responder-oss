@@ -1,3 +1,4 @@
+import { renderInvestigationPromptPart, type InvestigationPromptParts } from "@responder/core/investigations/prompt-parts";
 import { run, setDefaultOpenAIKey, setTracingDisabled } from "@openai/agents";
 import { Capabilities, SandboxAgent, skills } from "@openai/agents/sandbox";
 import {
@@ -324,6 +325,7 @@ export function investigationInstructions(input: {
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
   runtimeSystemPrompt?: string | null;
+  runtimePromptParts?: InvestigationPromptParts;
   sentryConnected: boolean;
   sentryUnavailable?: boolean;
   linearConnected?: boolean;
@@ -344,6 +346,8 @@ export function investigationInstructions(input: {
   scanMode?: boolean;
   replay?: boolean;
 }): string {
+  const prompt = (key: string, values: Record<string, string> = {}) =>
+    renderInvestigationPromptPart(key, input.runtimePromptParts, values);
   const awsAccountNames = input.awsAccountNames ?? [];
   const customMcpNames = input.customMcpNames ?? [];
   const dash0AccountNames = input.dash0AccountNames ?? [];
@@ -375,137 +379,138 @@ export function investigationInstructions(input: {
     input.runtimeSystemPrompt,
     input.agentPrompt,
     input.scanMode
-      ? "Proactively survey the connected sources within the requested scan window. Report only concrete problems that are currently active."
-      : "Investigate only the alert and context provided by Responder.",
+      ? prompt("scanScope")
+      : prompt("investigationScope"),
     awsAccountNames.length > 0
-      ? `Use the connected read-only AWS tools to inspect relevant infrastructure, configuration, telemetry, and service health before concluding. Connected AWS accounts: ${awsAccountNames.join(", ")}. Never request secret values.`
+      ? prompt("aws", { value1: awsAccountNames.join(", ") })
       : null,
     input.awsAlarmTriggered && awsAccountNames.length > 0
-      ? "This investigation was triggered by an AWS alarm forwarded through Slack. Locate the exact CloudWatch alarm by its normalized name and region first. Inspect its current configuration, state history, metric data, affected resource, and relevant logs around the transition. Treat the Slack notification as a pointer, not as proof of root cause."
+      ? prompt("awsAlarm")
       : null,
     input.awsSkillContext
-      ? `Use the following AWS investigation guides when planning service-specific inspection:\n\n${input.awsSkillContext}`
+      ? prompt("awsGuides", { value1: input.awsSkillContext })
       : null,
     awsAccountNames.length > 0
-      ? "Prefer the typed aws_inspect_cloudwatch_alarm, aws_inspect_cloudwatch_metric, aws_query_cloudwatch_logs, aws_inspect_sqs_queue, and aws_inspect_lambda_function tools for AWS evidence. If aws___run_script is necessary, use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and inspect every nested api_calls result. An outer success status does not mean the nested AWS calls succeeded; retry failed nested calls with corrected operation names."
+      ? prompt("awsTools")
       : null,
     gcpProjectNames.length > 0
-      ? `Use the connected read-only Google Cloud Asset Inventory, Logging, and Monitoring tools to inspect relevant resources and telemetry before concluding. Connected GCP projects: ${gcpProjectNames.join(", ")}. Never request secret values or attempt to change cloud resources.`
+      ? prompt("gcp", { value1: gcpProjectNames.join(", ") })
       : null,
     input.datadogConnected
-      ? "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding."
+      ? prompt("datadog")
       : null,
     dash0AccountNames.length > 0
-      ? `Use the connected read-only Dash0 tools to inspect relevant services, failed checks, logs, metrics, and traces before concluding. Never create or modify Dash0 resources and do not delegate the investigation to Agent0. Connected Dash0 organizations: ${dash0AccountNames.join(", ")}.`
+      ? prompt("dash0", { value1: dash0AccountNames.join(", ") })
       : null,
     postHogAccountNames.length > 0
-      ? `Use the connected read-only PostHog tools to inspect the matching alert, errors, logs, traces, replays, and product impact before concluding. Never create, update, or delete PostHog resources. Connected PostHog projects: ${postHogAccountNames.join(", ")}.`
+      ? prompt("posthog", { value1: postHogAccountNames.join(", ") })
       : null,
     input.axiomConnected
-      ? "Use the connected read-only Axiom tools to inspect telemetry relevant to the Slack alert, including logs, traces, metrics, and surrounding service activity, before concluding. Never create, update, or delete Axiom resources."
+      ? prompt("axiom")
       : null,
     input.clickStackConnected
-      ? "Use the connected ClickStack tools to inspect relevant logs, traces, metrics, and surrounding service activity before concluding. Do not create, update, or delete ClickStack resources during an investigation."
+      ? prompt("clickstack")
       : null,
     input.sentryConnected
-      ? "Use the connected read-only Sentry tools to inspect the issue, related events, traces, and relevant historical telemetry before concluding."
+      ? prompt("sentry")
       : null,
     input.sentryUnavailable
-      ? "Sentry context is temporarily unavailable. Continue with the alert payload, repositories, and other connected evidence sources. Clearly state that live Sentry evidence could not be inspected."
+      ? prompt("sentryUnavailable")
       : null,
     input.upstashConnected
-      ? "Use list_upstash_resources first to locate relevant Redis, Vector, Search, QStash, or team resources, then use the read-only Upstash inspection and runtime tools for evidence. Workflow and QStash runtime history are available through the connected Upstash tools. Never create, update, delete, retry, publish, or otherwise mutate Upstash resources or data."
+      ? prompt("upstash")
       : null,
     langfuseProjectNames.length > 0
-      ? `Use the connected read-only Langfuse tools to inspect relevant traces, observations, scores, metrics, prompts, and alerts before concluding. Start with bounded observation or metric searches, then inspect specific observations for evidence. Never create or modify Langfuse prompts, scores, datasets, annotations, alerts, or other resources. Connected Langfuse projects: ${langfuseProjectNames.join(", ")}.`
+      ? prompt("langfuse", { value1: langfuseProjectNames.join(", ") })
       : null,
     supabaseConnections.length > 0
       ? [
-          "Use the connected Supabase tools only when the project is relevant to the investigation.",
+          prompt("supabase"),
           ...supabaseConnections.map((connection) => {
             if (connection.accessMode === "logs") {
-              return `- ${connection.displayName}: inspect project logs only; database tools are not available.`;
+              return prompt("supabaseLogs", { value1: connection.displayName });
             }
             if (connection.accessMode === "read_only") {
-              return `- ${connection.displayName}: inspect project logs, schema metadata, and data with read-only SQL. Never attempt to modify data or schema.`;
+              return prompt("supabaseReadOnly", { value1: connection.displayName });
             }
-            return `- ${connection.displayName}: project logs and database SQL are available. Only modify data or schema when the investigation explicitly requires it and the change is necessary; never modify platform configuration.`;
+            return prompt("supabaseReadWrite", { value1: connection.displayName });
           }),
         ].join("\n")
       : null,
     input.linearConnected
-      ? "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links."
+      ? prompt("linear")
       : null,
     vercelAccountIds.length > 0
-      ? `Use the connected read-only Vercel tools to inspect selected projects, deployments, build and runtime logs, and project domains. Search the Vercel API catalog before calling an operation. Never attempt to retrieve environment-variable values or other secrets. Connected Vercel account IDs: ${vercelAccountIds.join(", ")}.`
+      ? prompt("vercel", { value1: vercelAccountIds.join(", ") })
       : null,
     customMcpNames.length > 0
-      ? `Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: ${customMcpNames.join(", ")}.`
+      ? prompt("customMcp", { value1: customMcpNames.join(", ") })
       : null,
     slackChannels.length > 0
-      ? `Use the read-only Slack tools to inspect relevant conversation history in these selected channels only: ${slackChannels.map((channel) => `#${channel.name} (${channel.id})`).join(", ")}.`
+      ? prompt("slack", { value1: slackChannels.map((channel) => `#${channel.name} (${channel.id})`).join(", ") })
       : null,
     !observabilityConnected
-      ? "No observability data source is connected. Clearly say when the alert alone is insufficient."
+      ? prompt("noObservability")
       : null,
     input.repositories.length > 0
       ? [
-          "The selected repositories are already checked out:",
+          prompt("repositories"),
           ...input.repositories.map(
             (repository) =>
-              `- ${repository.repository}: ${repository.path} (${repository.branch} at ${repository.sha})`,
+              prompt("repositoryEntry", { value1: repository.repository, value2: repository.path, value3: repository.branch, value4: repository.sha }),
           ),
-          "Inspect the relevant files before claiming a code-level root cause.",
+          prompt("repositoryEvidence"),
         ].join("\n")
-      : "No repositories are attached to this Agent version. Clearly distinguish code-level hypotheses from verified root causes.",
+      : prompt("noRepositories"),
     repositoryInstructions.length > 0
       ? [
-          "Read the repository instruction file(s) that apply to the files you inspect:",
+          prompt("repositoryInstructions"),
           ...repositoryInstructions.map((path) => `- ${path}`),
         ].join("\n")
       : null,
     input.threadMode
-      ? "Use the sandbox tools and attached code to investigate the request."
+      ? prompt("threadSandbox")
       : input.scanMode
-        ? "Use the sandbox filesystem and shell tools to inspect attached repository checkouts without changing them."
-        : "Use the sandbox filesystem and shell tools to inspect and work in attached repository checkouts.",
+        ? prompt("scanSandbox")
+        : prompt("sandbox"),
     input.threadMode
       ? null
       : input.scanMode
-        ? "This is an observation-only scan. Do not modify files or source systems, and do not create branches, commits, tickets, or pull requests."
-        : "This run may prepare code remediation locally. You may modify repository files and run the checks you judge useful, but do not push branches, create pull requests, or make any other external code change. A later job publishes the exact saved diff.",
-    "Do not expose credentials or secret values.",
-    workspaceSecretUsageInstructions(workspaceSecrets),
+        ? prompt("scanPermissions")
+        : prompt("codePermissions"),
+    prompt("credentialSafety"),
+    workspaceSecretUsageInstructions(workspaceSecrets, input.runtimePromptParts),
     input.threadMode
-      ? "This is an ad-hoc Slack thread investigation. Never create or update issues, tickets, branches, commits, or pull requests. You may use the sandbox for notes, experiments, and local code changes, but nothing in it is published."
+      ? prompt("threadMode")
       : issueUpdateFollowup
         ? null
-        : "For every distinct problem you find, call search_existing_issues before deciding whether it is a new issue or a recurrence. Use an existing issue ID when the evidence matches; this attaches the investigation to that issue instead of creating a duplicate.",
+        : prompt("existingIssues"),
+    !input.threadMode && !input.scanMode ? prompt("remediationChoice") : null,
     input.threadMode || input.replay || issueUpdateFollowup
       ? null
-      : "If missing telemetry materially blocks or slows the investigation, search_observability_suggestions before proposing anything. If no semantically equivalent suggestion exists, call create_observability_suggestion with a one-sentence title, a distinct one-sentence subtitle, and detailed Markdown. Include codeChange only after preparing and validating a complete patch in an attached repository. Do not create suggestions for merely nice-to-have telemetry or use them as a substitute for finishing the investigation.",
+      : prompt("observabilitySuggestions"),
     issueUpdateFollowup
-      ? "This is a follow-up to an existing Slack issue investigation. Use the supplied prior investigation context and the latest Slack feedback to decide which bound issue remediations need to change. For an updated code remediation, make the change locally, run the checks you judge useful, and save the exact final diff plus your ready-for-review pull request title and body. Do not create new issues, tickets, or pull requests. Call update_issue_remediation for each affected issue, and do not update unrelated issues. If the feedback is ambiguous, ask for clarification instead of guessing."
+      ? prompt("issueFollowup")
       : noIssueFollowup
-        ? "This is a follow-up to a Slack investigation that previously identified no issues. Reconsider that conclusion using the original report and latest feedback. Submit a normal structured report: create or attach issues only when the new evidence supports them, and otherwise keep the report issue-free."
+        ? prompt("noIssueFollowup")
         : null,
     input.threadMode || issueUpdateFollowup
       ? null
       : input.scanMode
-        ? "For every new issue, submit one or more concise external_action remediation options. Describe the next action for a human and include a self-contained prompt they can pass to an agent with access to the relevant system. Do not prepare code changes during a scan."
-        : "For every new issue, submit one or more concrete remediation options with the report. Keep each remediation description to at most one sentence. For a code_change, first make the smallest safe change in the attached checkout, choose and run the checks appropriate for that change, and inspect the final git diff. Its changes array must contain one complete unified diff per attached repository; use one element for a single-repository fix, and combine changes for the same repository. Author the ready-for-review pull request title and complete Markdown body in each change's pullRequest field, including only the context and check results you decide belong there. The saved diff and pull request content are published later without another model pass or project checks. Use external_action for work outside the attached repositories, describe the action for a human, and include a self-contained prompt they can pass to an agent with access to that system.",
+        ? prompt("scanRemediations")
+        : prompt("codeRemediations"),
     input.threadMode
       ? null
-      : "Do not include actions performed by Responder during the investigation in an issue timeline; include only events in the incident's causal sequence.",
+      : prompt("timeline"),
     input.threadMode
-      ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session."
+      ? prompt("threadResponse")
       : issueUpdateFollowup
-        ? "Return a concise Markdown response directly to the Slack thread. Answer the latest request using evidence gathered in this session. Treat every follow-up reply as new information: reconsider prior conclusions and the proposed remediation, explain what changed, and provide the updated remediation (including concrete code changes or steps when appropriate)."
-        : "Before your final response, you must call submit_investigation_report exactly once with the structured result. That action saves or attaches the issues and posts the report to Slack.",
+        ? prompt("followupResponse")
+        : prompt("submitReport"),
     input.threadMode || issueUpdateFollowup
       ? null
-      : "After submitting, return a concise Markdown report with: Summary, Evidence, Impact, and Recommended next step.",
-    "Clearly say when the available evidence is insufficient.",
+      : prompt("reportResponse"),
+    prompt("insufficientEvidence"),
   ]
     .filter((instruction): instruction is string => Boolean(instruction))
     .join("\n\n");
@@ -819,12 +824,14 @@ export async function runInvestigationAgent(
     }
     const reportTool = replay
       ? createCaptureInvestigationReplayReportTool({
+          promptParts: runtimeProfile?.promptParts,
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
         })
       : threadMode
         ? null
         : createSubmitInvestigationReportTool({
+          promptParts: runtimeProfile?.promptParts,
           investigationId: job.investigationId,
           organizationId: job.config.organizationId,
           environment,
@@ -897,6 +904,7 @@ export async function runInvestigationAgent(
       ),
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
+      runtimePromptParts: runtimeProfile?.promptParts,
       sentryConnected: sentryServer !== null,
       sentryUnavailable: sentryConnectionDegraded,
       linearConnected: linearServer !== null,

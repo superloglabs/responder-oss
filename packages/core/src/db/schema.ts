@@ -1,3 +1,4 @@
+import { defaultInvestigationPromptParts, type InvestigationPromptParts } from "../investigations/prompt-parts.js";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -112,6 +113,7 @@ export const runtimeProfiles = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     version: serial("version").notNull(),
     systemPrompt: text("system_prompt").notNull(),
+    promptParts: jsonb("prompt_parts").$type<InvestigationPromptParts>().notNull().default(sql.raw(`'${JSON.stringify(defaultInvestigationPromptParts).replaceAll("'", "''")}'::jsonb`)),
     model: text("model").notNull(),
     modelOptions: jsonb("model_options")
       .$type<RuntimeProfileModelOptions>()
