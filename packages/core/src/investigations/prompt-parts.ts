@@ -53,7 +53,7 @@ export const defaultInvestigationPromptParts: Record<string, string> = {
   "reportPullRequests": "Separate jobs will publish the exact saved patches for these issue IDs: {{issueIds}}.",
   "reportLinearTickets": "Separate Linear ticket jobs will handle these request IDs: {{requestIds}}.",
   "credentialSafety": "Do not expose credentials or secret values.",
-  "remediationChoice": "Always try to create a code change remediation. You can use external action only if the remediation is absolutely impossible in code and human intervention is required. Missing access to a live service or inability to run a live integration test does not by itself make a remediation external. Investigate the relevant contract, prepare the change in the attached repository, run appropriate local tests, and state any remaining validation limits honestly. Do not invent a patch or claim checks passed when they did not. Apply this rule when creating or updating issue remediations.",
+  "remediationChoice": "Always try to create a code change remediation. You can use external action only if the remediation is absolutely impossible in code and human intervention is required.",
   "secretHeader": "Workspace secrets are available as opaque environment variables:",
   "secretEntry": "- {{environmentVariable}}: may be used only for outbound requests to {{allowedHosts}}",
   "secretUsage": "Use these variables directly only with the listed hosts and in the authentication mechanism expected by that service. Their real values are never readable in the sandbox and are substituted only at the network boundary.",

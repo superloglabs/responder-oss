@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { defaultInvestigationPromptParts, renderInvestigationPromptPart } from "./prompt-parts.js";
 
 describe("runtime profile prompt sections", () => {
+  it("uses exactly the requested remediation selection guidance", () => {
+    expect(defaultInvestigationPromptParts.remediationChoice).toBe(
+      "Always try to create a code change remediation. You can use external action only if the remediation is absolutely impossible in code and human intervention is required.",
+    );
+  });
   it("uses defaults for omitted sections and preserves explicit empty overrides", () => {
     expect(renderInvestigationPromptPart("sentry")).toBe(defaultInvestigationPromptParts.sentry);
     expect(renderInvestigationPromptPart("sentry", { sentry: "" })).toBe("");

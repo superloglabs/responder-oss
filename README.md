@@ -142,8 +142,7 @@ also requires updating the database default through a migration.
 
 For ordinary investigations and issue follow-ups, the default guidance requires
 attempting a code remediation. External action is reserved for remediation that
-is impossible in code and requires human intervention. Live integration access
-is not a prerequisite for preparing and locally testing a patch. PR policy
+is impossible in code and requires human intervention. PR policy
 controls later publication of the saved diff, not whether the investigation can
 prepare it. Observation-only scans and ad-hoc Slack threads retain their separate
 execution restrictions; configurable wording does not change tool permissions.
