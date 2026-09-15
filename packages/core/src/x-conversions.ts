@@ -183,6 +183,8 @@ export async function captureXSignupConversion(
           headers: {
             ...(tracker.authentication === "oauth"
               ? { Authorization: buildOAuthHeader(tracker, "POST", url) }
+              // Events Manager's generated Pixel Token installation example
+              // specifies this header for tokens created with that event.
               : { "X-Pixel-Token": tracker.pixelToken }),
             "Content-Type": "application/json",
           },
