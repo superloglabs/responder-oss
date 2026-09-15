@@ -547,6 +547,7 @@
 }
 
 .dsSelect__option:hover,
+.dsSelect__option.isActive,
 .dsSelect__option[aria-selected="true"] {
   background: var(--ds-surface-hover);
   color: var(--ds-text-primary);

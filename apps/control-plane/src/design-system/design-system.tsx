@@ -427,6 +427,7 @@ export function SelectField<Value extends string>({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
+  const optionsRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const selectedOption = options.find((option) => option.value === value);
@@ -466,6 +467,15 @@ export function SelectField<Value extends string>({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || activeOptionIndex < 0) return;
+    optionsRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-option-index="${activeOptionIndex}"]`,
+      )
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeOptionIndex, isOpen, query]);
 
   function selectOption(option: SelectOption<Value>) {
     onChange(option.value);
@@ -560,12 +570,17 @@ export function SelectField<Value extends string>({
               aria-labelledby={`${inputId}-label`}
               className="dsSelect__options"
               id={optionsId}
+              ref={optionsRef}
               role="listbox"
             >
               {filteredOptions.map((option, index) => (
                 <button
                   aria-selected={option.value === value}
-                  className="dsSelect__option"
+                  className={classNames(
+                    "dsSelect__option",
+                    index === activeOptionIndex && "isActive",
+                  )}
+                  data-option-index={index}
                   id={`${inputId}-option-${index}`}
                   key={option.value}
                   onClick={() => selectOption(option)}
