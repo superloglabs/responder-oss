@@ -10475,7 +10475,7 @@ body:has(.appShell--scans) {
   background: var(--ds-surface-raised);
 }
 
-.scanRepositoryPicker {
+.configurationDialog__body .scanRepositoryPicker {
   margin: 0;
 }
 

@@ -423,9 +423,12 @@ export function SelectField<Value extends string>({
 }: SelectFieldProps<Value>) {
   const inputId = useId();
   const hintId = hint ? `${inputId}-hint` : undefined;
+  const optionsId = `${inputId}-options`;
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selectedOption = options.find((option) => option.value === value);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredOptions = normalizedQuery
@@ -443,6 +446,7 @@ export function SelectField<Value extends string>({
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
         setIsOpen(false);
         setQuery("");
+        setActiveOptionIndex(-1);
       }
     }
 
@@ -450,6 +454,8 @@ export function SelectField<Value extends string>({
       if (event.key === "Escape") {
         setIsOpen(false);
         setQuery("");
+        setActiveOptionIndex(-1);
+        requestAnimationFrame(() => triggerRef.current?.focus());
       }
     }
 
@@ -460,6 +466,14 @@ export function SelectField<Value extends string>({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isOpen]);
+
+  function selectOption(option: SelectOption<Value>) {
+    onChange(option.value);
+    setIsOpen(false);
+    setQuery("");
+    setActiveOptionIndex(-1);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }
 
   return (
     <div className={classNames("dsField", className)} ref={rootRef}>
@@ -475,9 +489,18 @@ export function SelectField<Value extends string>({
           disabled={disabled}
           id={inputId}
           onClick={() => {
-            if (isOpen) setQuery("");
+            if (isOpen) {
+              setQuery("");
+              setActiveOptionIndex(-1);
+            } else {
+              const selectedIndex = options.findIndex(
+                (option) => option.value === value,
+              );
+              setActiveOptionIndex(selectedIndex >= 0 ? selectedIndex : 0);
+            }
             setIsOpen(!isOpen);
           }}
+          ref={triggerRef}
           type="button"
         >
           <span id={`${inputId}-value`}>{selectedOption?.label ?? "Select…"}</span>
@@ -489,11 +512,46 @@ export function SelectField<Value extends string>({
           <div className="dsSelect__popover shadow-xl">
             {searchable ? (
               <input
+                aria-activedescendant={
+                  filteredOptions[activeOptionIndex]
+                    ? `${inputId}-option-${activeOptionIndex}`
+                    : undefined
+                }
+                aria-autocomplete="list"
+                aria-controls={optionsId}
+                aria-expanded="true"
                 aria-label={`Search ${label.toLocaleLowerCase()}`}
                 autoFocus
                 className="dsSelect__search"
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveOptionIndex(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setActiveOptionIndex((current) =>
+                      filteredOptions.length === 0
+                        ? -1
+                        : Math.min(current + 1, filteredOptions.length - 1),
+                    );
+                  } else if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setActiveOptionIndex((current) =>
+                      filteredOptions.length === 0
+                        ? -1
+                        : Math.max(current - 1, 0),
+                    );
+                  } else if (event.key === "Enter") {
+                    const activeOption = filteredOptions[activeOptionIndex];
+                    if (activeOption) {
+                      event.preventDefault();
+                      selectOption(activeOption);
+                    }
+                  }
+                }}
                 placeholder={searchPlaceholder}
+                role="combobox"
                 type="search"
                 value={query}
               />
@@ -501,18 +559,17 @@ export function SelectField<Value extends string>({
             <div
               aria-labelledby={`${inputId}-label`}
               className="dsSelect__options"
+              id={optionsId}
               role="listbox"
             >
-              {filteredOptions.map((option) => (
+              {filteredOptions.map((option, index) => (
                 <button
                   aria-selected={option.value === value}
                   className="dsSelect__option"
+                  id={`${inputId}-option-${index}`}
                   key={option.value}
-                  onClick={() => {
-                    onChange(option.value);
-                    setIsOpen(false);
-                    setQuery("");
-                  }}
+                  onClick={() => selectOption(option)}
+                  onMouseEnter={() => setActiveOptionIndex(index)}
                   role="option"
                   type="button"
                 >

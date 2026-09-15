@@ -127,6 +127,7 @@
 .dsIconButton:focus-visible,
 .dsSegmentedControl__option:focus-visible,
 .dsSelect__trigger:focus-visible,
+.dsSelect__search:focus-visible,
 .dsSelect__option:focus-visible,
 .dsSearch__clear:focus-visible,
 .dsSearch__result:focus-visible,
@@ -500,14 +501,13 @@
   padding-inline: 10px;
   border: 1px solid var(--ds-border-default);
   border-radius: 7px;
-  outline: 0;
   background: var(--ds-surface-raised);
   color: var(--ds-text-primary);
   font-family: var(--ds-font-sans);
   font-size: 12px;
 }
 
-.dsSelect__search:focus {
+.dsSelect__search:focus-visible {
   border-color: var(--ds-border-strong);
 }
 
