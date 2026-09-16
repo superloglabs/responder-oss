@@ -2455,6 +2455,30 @@ describe("integration callback routing", () => {
     expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
   });
 
+  it("does not describe an Axiom provider failure as a cancellation", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: false,
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+
+    const response = await app.request(
+      "/api/integrations/axiom/callback?state=oauth-state&error=invalid_target",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=axiom&status=error&reason=connection_failed",
+    );
+  });
+
   it("starts Dash0 OAuth for the organization MCP endpoint", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(normalizeDash0McpUrl).mockResolvedValue(
