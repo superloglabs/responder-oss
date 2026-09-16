@@ -85,7 +85,11 @@ Configure a public GitHub App with:
 
 - Installation target: any account
 - Request user authorization during installation: enabled
-- Callback and setup URL: `<public>/api/integrations/github/callback`
+- OAuth redirect URI: `<public>/api/integrations/github/callback`
+- Setup URL: leave unset
+- Repository-access updates can return to the OAuth redirect URI with
+  `setup_action=update` and no OAuth code. Responder preserves the installation
+  and completes an explicit OAuth authorization before synchronizing it.
 - Repository permissions: Contents read/write, Pull requests read/write, and
   Metadata read
 - Account permission: Email addresses read-only

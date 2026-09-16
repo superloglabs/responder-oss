@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
   consumeIntegrationConnectionState,
+  createIntegrationConnectionState,
   listOrganizationIntegrationAccounts,
   replaceRepositories,
   upsertIntegrationAccount,
@@ -121,6 +122,99 @@ describe("GitHub integration routing", () => {
         connectUrl: "/api/integrations/github/start",
         configurationUrl: "/api/integrations/github/start?mode=install",
       }),
+    );
+  });
+
+  it.each(["install", "update"] as const)(
+    "continues a code-less GitHub %s callback through explicit authorization",
+    async (setupAction) => {
+      configureGitHub();
+      vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+        codeVerifier: null,
+        metadata: {},
+        organizationId: tenant.organizationId,
+        returnTo: "/settings",
+        userId: tenant.user.id,
+      });
+      vi.mocked(createIntegrationConnectionState).mockResolvedValue(
+        "authorization-state",
+      );
+
+      const response = await app.request(
+        "/api/integrations/github/callback" +
+          "?installation_id=12345" +
+          `&setup_action=${setupAction}` +
+          "&state=installation-state",
+      );
+
+      expect(response.status).toBe(302);
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin + location.pathname).toBe(
+        "https://github.com/login/oauth/authorize",
+      );
+      expect(location.searchParams.get("client_id")).toBe("github-client");
+      expect(location.searchParams.get("state")).toBe("authorization-state");
+      expect(location.searchParams.get("redirect_uri")).toBe(
+        "https://responder.example/api/integrations/github/callback",
+      );
+      expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+        metadata: { installationId: 12345 },
+        organizationId: tenant.organizationId,
+        provider: "github",
+        returnTo: "/settings",
+        routingUrl: "https://responder.example/api/integrations/github/callback",
+        userId: tenant.user.id,
+      });
+      expect(exchangeGitHubCode).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uses the preserved installation after explicit authorization", async () => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      codeVerifier: null,
+      metadata: { installationId: 12345 },
+      organizationId: tenant.organizationId,
+      returnTo: "/settings",
+      userId: tenant.user.id,
+    });
+    vi.mocked(exchangeGitHubCode).mockResolvedValue({
+      access_token: "user-token",
+      token_type: "bearer",
+    });
+    vi.mocked(verifyGitHubUserInstallation).mockResolvedValue({
+      account: { id: 98, login: "example", type: "Organization" },
+      id: 12345,
+      repository_selection: "selected",
+    });
+    vi.mocked(listGitHubRepositories).mockResolvedValue([]);
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(disableAgentsWithUnavailableRepositories).mockResolvedValue([]);
+
+    const response = await app.request(
+      "/api/integrations/github/callback" +
+        "?code=one-time-code" +
+        "&installation_id=67890" +
+        "&state=authorization-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=github" +
+        "&status=connected",
+    );
+    expect(exchangeGitHubCode).toHaveBeenCalledWith(
+      "one-time-code",
+      "https://responder.example/api/integrations/github/callback",
+    );
+    expect(verifyGitHubUserInstallation).toHaveBeenCalledWith(
+      "user-token",
+      12345,
     );
   });
 
