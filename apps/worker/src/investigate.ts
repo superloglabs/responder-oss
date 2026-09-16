@@ -718,50 +718,6 @@ export async function runInvestigationAgent(
   let session: DaytonaSandboxSession | null = null;
 
   try {
-    await Promise.all(
-      contextServers.map(async (server) => {
-        try {
-          await server.connect();
-        } catch (error) {
-          console.error(
-            JSON.stringify(
-              contextServerConnectFailureEvent({
-                awsConnections,
-                gcpConnections,
-                customMcpConnections,
-                dash0Connections,
-                postHogConnections,
-                error,
-                investigationId: job.investigationId,
-                langfuseConnections,
-                serverName: server.name,
-                supabaseConnections,
-                upstashConnection,
-              }),
-            ),
-          );
-          if (server.name.startsWith("upstash-")) {
-            throw new Error("Unable to connect to Upstash context");
-          }
-          if (server.name.startsWith("aws-")) {
-            throw new Error("Unable to connect to AWS context");
-          }
-          if (server.name.startsWith("gcp-")) {
-            throw new Error("Unable to connect to GCP context");
-          }
-          if (server.name.startsWith("dash0-")) {
-            throw new Error("Unable to connect to Dash0 context");
-          }
-          if (server.name.startsWith("langfuse-")) {
-            throw new Error("Unable to connect to Langfuse context");
-          }
-          if (server.name.startsWith("supabase-")) {
-            throw new Error("Unable to connect to Supabase context");
-          }
-          throw error;
-        }
-      }),
-    );
     let awsSkillContext = "";
     if (awsAlarmTriggered && awsServers[0]) {
       const loadedSkills = await loadAwsAlarmSkillContext(awsServers[0]);
