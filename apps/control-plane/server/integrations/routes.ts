@@ -3248,12 +3248,14 @@ export const integrationRoutes = new Hono()
 
     const parsedCallback = z
       .object({
-        code: z.string().min(1),
+        code: z.string().min(1).optional(),
         installationId: z.coerce.number().int().positive().optional(),
+        setupAction: z.enum(["install", "update"]).optional(),
       })
       .safeParse({
         code: context.req.query("code"),
         installationId: context.req.query("installation_id"),
+        setupAction: context.req.query("setup_action"),
       });
     if (!parsedCallback.success) {
       return context.redirect(
@@ -3267,17 +3269,58 @@ export const integrationRoutes = new Hono()
     }
 
     try {
+      if (!parsedCallback.data.code) {
+        if (
+          !parsedCallback.data.installationId ||
+          !parsedCallback.data.setupAction
+        ) {
+          return context.redirect(
+            settingsRedirect(
+              connectionState.returnTo,
+              "github",
+              "error",
+              "invalid_callback",
+            ),
+          );
+        }
+
+        // Connection state intentionally allows one live flow per user and
+        // provider. Starting another GitHub connection replaces this state,
+        // so an older tab fails closed instead of completing with stale state.
+        const authorizationState = await createIntegrationConnectionState({
+          metadata: {
+            ...connectionState.metadata,
+            installationId: parsedCallback.data.installationId,
+          },
+          organizationId: connectionState.organizationId,
+          provider: "github",
+          returnTo: connectionState.returnTo,
+          routingUrl: integrationCallbackUrl("github"),
+          userId: connectionState.userId,
+        });
+        return context.redirect(githubAuthorizeUrl(authorizationState));
+      }
+
+      const storedInstallationId = z.coerce
+        .number()
+        .int()
+        .positive()
+        .safeParse(connectionState.metadata.installationId);
+      const installationId =
+        storedInstallationId.success
+          ? storedInstallationId.data
+          : parsedCallback.data.installationId;
       const userToken = await exchangeGitHubCode(
         parsedCallback.data.code,
-        context.req.query("setup_action")
+        parsedCallback.data.setupAction
           ? ""
           : integrationCallbackUrl("github"),
       );
-      const installations = parsedCallback.data.installationId
+      const installations = installationId
         ? [
             await verifyGitHubUserInstallation(
               userToken.access_token,
-              parsedCallback.data.installationId,
+              installationId,
             ),
           ]
         : await listGitHubUserInstallations(userToken.access_token);
