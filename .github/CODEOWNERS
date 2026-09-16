@@ -1,0 +1,3 @@
+# Owners for deployment automation and ownership rules.
+/.github/workflows/ @arseniycodes @nicolomagnante-cmd
+/.github/CODEOWNERS @arseniycodes @nicolomagnante-cmd
