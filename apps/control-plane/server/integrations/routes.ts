@@ -352,6 +352,10 @@ function callbackErrorReason(error: unknown): string {
   return "connection_failed";
 }
 
+function browserOAuthErrorReason(error: string | undefined): string {
+  return error === "access_denied" ? "cancelled" : "connection_failed";
+}
+
 function logCallbackError(
   provider: string,
   error: unknown,
@@ -1648,7 +1652,7 @@ export const integrationRoutes = new Hono()
           connectionState?.returnTo ?? "/settings",
           "dash0",
           "error",
-          context.req.query("error") ? "cancelled" : "connection_failed",
+          browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }
@@ -1780,7 +1784,7 @@ export const integrationRoutes = new Hono()
           connectionState?.returnTo ?? "/settings",
           "posthog",
           "error",
-          context.req.query("error") ? "cancelled" : "connection_failed",
+          browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }
@@ -1886,7 +1890,7 @@ export const integrationRoutes = new Hono()
           connectionState?.returnTo ?? "/settings",
           "axiom",
           "error",
-          context.req.query("error") ? "cancelled" : "connection_failed",
+          browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }
@@ -2186,7 +2190,7 @@ export const integrationRoutes = new Hono()
           connectionState?.returnTo ?? "/settings",
           "supabase",
           "error",
-          context.req.query("error") ? "cancelled" : "connection_failed",
+          browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }
@@ -2531,7 +2535,7 @@ export const integrationRoutes = new Hono()
           connectionState?.returnTo ?? "/settings",
           "custom_mcp",
           "error",
-          context.req.query("error") ? "cancelled" : "connection_failed",
+          browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }
@@ -2614,7 +2618,7 @@ export const integrationRoutes = new Hono()
           connectionState.returnTo,
           "linear",
           "error",
-          context.req.query("error") ? "cancelled" : "connection_failed",
+          browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }

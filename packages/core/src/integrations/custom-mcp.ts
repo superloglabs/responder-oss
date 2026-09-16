@@ -3,6 +3,7 @@ import { lookup } from "node:dns/promises";
 import { Readable } from "node:stream";
 import {
   auth,
+  extractWWWAuthenticateParams,
   type OAuthClientProvider,
   type OAuthDiscoveryState,
 } from "@modelcontextprotocol/sdk/client/auth.js";
@@ -432,12 +433,14 @@ export async function beginCustomMcpOAuth(input: {
   const mcpUrl = await validateCustomMcpUrl(input.mcpUrl, {
     allowLocal: process.env.NODE_ENV !== "production",
   });
+  const oauthChallenge = await discoverCustomMcpOAuthChallenge(mcpUrl);
   const provider = new CustomMcpOAuthProvider({
     connectionState: input.connectionState,
     redirectUrl: input.redirectUrl,
   });
   const result = await auth(provider, {
     fetchFn: safeCustomMcpFetch,
+    ...oauthChallenge,
     serverUrl: mcpUrl,
   });
   if (result !== "REDIRECT" || !provider.authorizationUrl) {
@@ -450,6 +453,31 @@ export async function beginCustomMcpOAuth(input: {
     authorizationUrl: authorizationUrl.toString(),
     oauth: provider.snapshot(),
   };
+}
+
+async function discoverCustomMcpOAuthChallenge(
+  mcpUrl: URL,
+): Promise<{ resourceMetadataUrl?: URL; scope?: string }> {
+  try {
+    const response = await safeCustomMcpFetch(mcpUrl, {
+      headers: { accept: "application/json, text/event-stream" },
+      method: "GET",
+    });
+    try {
+      const { resourceMetadataUrl, scope } =
+        extractWWWAuthenticateParams(response);
+      return {
+        ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+        ...(scope ? { scope } : {}),
+      };
+    } finally {
+      await response.body?.cancel();
+    }
+  } catch {
+    // Some MCP endpoints do not support an unauthenticated GET. In that case,
+    // let the SDK use its well-known metadata discovery fallback.
+    return {};
+  }
 }
 
 export async function finishCustomMcpOAuth(input: {
