@@ -173,7 +173,8 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
           <span className="invitationLabel">Workspace invitation</span>
         ) : null}
         <h1>{heading}</h1>
-        {isInvitation ? <p>{description}</p> : null}
+        <p className={isInvitation ? undefined : "authDescription"}>{description}</p>
+        {/* Keep account navigation beneath the heading and description. */}
         <button
           className="authSwitch"
           disabled={isSubmitting || socialProvider !== null}
@@ -240,10 +241,11 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
             type="email"
           />
         </label>
-        <label className="authField">
-          <span>Enter your password</span>
+        <div className="authField">
+          <label htmlFor="auth-password">Enter your password</label>
           <span className="authPassword">
             <input
+              id="auth-password"
               autoComplete={
                 isCreatingAccount ? "new-password" : "current-password"
               }
@@ -271,7 +273,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
               </svg>
             </button>
           </span>
-        </label>
+        </div>
         {error ? <p className="authError">{error}</p> : null}
         <button
           className="button button--primary authSubmit"

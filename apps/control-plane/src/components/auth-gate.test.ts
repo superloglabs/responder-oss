@@ -25,6 +25,12 @@ describe("signed-out authentication", () => {
     expect(html).toContain('autoComplete="current-password"');
     expect(html).toMatch(/<button[^>]*type="button"[^>]*aria-label="Show password"[^>]*aria-pressed="false"/);
     expect(html).toContain('type="submit"');
+    expect(html).toContain("Sign in to manage your agents and investigations.");
+    expect(html).toContain('<label for="auth-password">Enter your password</label>');
+    expect(html).toContain('id="auth-password"');
+    for (const label of html.matchAll(/<label\b[^>]*>[\s\S]*?<\/label>/g)) {
+      expect(label[0]).not.toContain("<button");
+    }
   });
 
   it("preserves invitation guidance while exposing sign-up and policy links", () => {

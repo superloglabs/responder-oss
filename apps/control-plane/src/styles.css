@@ -11130,5 +11130,6 @@ body:has(.appShell--scans) {
 }
 .authTerms a {
   color: var(--foreground);
+  text-decoration: underline;
   text-underline-offset: 3px;
 }
