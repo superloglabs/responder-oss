@@ -11095,3 +11095,50 @@ body:has(.appShell--scans) {
     line-height: 32px;
   }
 }
+
+.authPassword {
+  position: relative;
+  display: block;
+}
+.authPassword input {
+  padding-right: 44px;
+}
+.authPassword button {
+  position: absolute;
+  inset: 0 4px 0 auto;
+  width: 36px;
+  padding: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.authPassword svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+.authPassword button:focus-visible {
+  outline: 2px solid var(--border-logo);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.authTerms {
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+.authTerms a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.authHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.authHeading h1 { flex: 1; min-width: 0; }
+.authHeading .authSwitch { margin: 0; max-width: 150px; text-align: right; }

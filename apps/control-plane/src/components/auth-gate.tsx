@@ -3,10 +3,7 @@ import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
 import { trackRedditSignupPixel } from "../reddit-pixel";
-import {
-  socialAuthErrorMessage,
-  socialAuthUrls,
-} from "../social-auth-url";
+import { socialAuthErrorMessage, socialAuthUrls } from "../social-auth-url";
 import { trackXSignupPixel } from "../x-pixel";
 import {
   explicitSignupIntent,
@@ -39,10 +36,11 @@ function AuthFrame({ children }: AuthGateProps) {
 
 function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [socialProvider, setSocialProvider] = useState<"github" | "google" | null>(
-    null,
-  );
+  const [socialProvider, setSocialProvider] = useState<
+    "github" | "google" | null
+  >(null);
   const [error, setError] = useState<string | null>(() =>
     socialAuthErrorMessage(window.location.search),
   );
@@ -78,7 +76,10 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
     const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
     const returnUrls = socialAuthUrls(window.location.href, signupIntent);
     if (isCreatingAccount) {
-      sessionStorage.setItem(explicitSignupStorageKey, `social:${signupIntent}`);
+      sessionStorage.setItem(
+        explicitSignupStorageKey,
+        `social:${signupIntent}`,
+      );
     }
     const result = await authClient.signIn.social({
       provider,
@@ -132,7 +133,9 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
       } else {
         const targetUrl = await tryLegacyEmailSignIn(email, password);
         if (targetUrl) {
-          console.info(JSON.stringify({ event: "legacy_email_handoff_success" }));
+          console.info(
+            JSON.stringify({ event: "legacy_email_handoff_success" }),
+          );
           window.location.replace(targetUrl);
           return;
         }
@@ -169,8 +172,24 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
         {isInvitation ? (
           <span className="invitationLabel">Workspace invitation</span>
         ) : null}
+        <div className="authHeading">
         <h1>{heading}</h1>
-        <p>{description}</p>
+        <button
+          className="authSwitch"
+          disabled={isSubmitting || socialProvider !== null}
+          onClick={() => {
+            setError(null);
+            setShowPassword(false);
+            setIsCreatingAccount((value) => !value);
+          }}
+          type="button"
+        >
+          {isCreatingAccount
+            ? "Already have an account? Sign in"
+            : "Don’t have an account? Get started"}
+        </button>
+        </div>
+        <p className={isInvitation ? undefined : "authDescription"}>{description}</p>
       </div>
       <div className="socialAuth">
         <button
@@ -180,7 +199,9 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
           type="button"
         >
           <ProviderGlyph decorative provider="google" />
-          {socialProvider === "google" ? "Opening Google…" : "Continue with Google"}
+          {socialProvider === "google"
+            ? "Opening Google…"
+            : "Continue with Google"}
         </button>
         <button
           className="socialAuth__button"
@@ -189,7 +210,9 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
           type="button"
         >
           <ProviderGlyph decorative provider="github" />
-          {socialProvider === "github" ? "Opening GitHub…" : "Continue with GitHub"}
+          {socialProvider === "github"
+            ? "Opening GitHub…"
+            : "Continue with GitHub"}
         </button>
       </div>
       <div className="authDivider">
@@ -219,17 +242,39 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
             type="email"
           />
         </label>
-        <label className="authField">
-          <span>Password</span>
-          <input
-            autoComplete={isCreatingAccount ? "new-password" : "current-password"}
-            minLength={8}
-            name="password"
-            placeholder="At least 8 characters"
-            required
-            type="password"
-          />
-        </label>
+        <div className="authField">
+          <label htmlFor="auth-password">Enter your password</label>
+          <span className="authPassword">
+            <input
+              id="auth-password"
+              autoComplete={
+                isCreatingAccount ? "new-password" : "current-password"
+              }
+              minLength={8}
+              name="password"
+              placeholder="At least 8 characters"
+              required
+              type={showPassword ? "text" : "password"}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword((value) => !value)}
+            >
+              <svg aria-hidden="true" fill="none" viewBox="0 0 18 18">
+                <path
+                  d="M1.5 9s2.5-5 7.5-5 7.5 5 7.5 5-2.5 5-7.5 5S1.5 9 1.5 9Z"
+                  stroke="currentColor"
+                />
+                <circle cx="9" cy="9" r="2" stroke="currentColor" />
+                {showPassword ? (
+                  <path d="m2 2 14 14" stroke="currentColor" />
+                ) : null}
+              </svg>
+            </button>
+          </span>
+        </div>
         {error ? <p className="authError">{error}</p> : null}
         <button
           className="button button--primary authSubmit"
@@ -243,18 +288,10 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
               : "Sign in"}
         </button>
       </form>
-      <button
-        className="authSwitch"
-        onClick={() => {
-          setError(null);
-          setIsCreatingAccount((value) => !value);
-        }}
-        type="button"
-      >
-        {isCreatingAccount
-          ? "Already have an account? Sign in"
-          : "New to Superlog? Create an account"}
-      </button>
+      <p className="authTerms">
+        By {isCreatingAccount ? "creating an account" : "signing in"}, you agree to the <a href="/tos">Terms of Service</a> and{" "}
+        <a href="/privacy">Privacy Policy</a>.
+      </p>
     </>
   );
 }
@@ -558,9 +595,9 @@ export function AuthGate({ children }: AuthGateProps) {
   const invitationMatch = window.location.pathname.match(
     /^\/invite\/([0-9a-f-]+)$/i,
   );
-  const requestedOrganizationId = new URL(window.location.href).searchParams.get(
-    "organization_id",
-  );
+  const requestedOrganizationId = new URL(
+    window.location.href,
+  ).searchParams.get("organization_id");
 
   const signedInUserId = session.data?.user.id;
   const activeOrganizationId = session.data?.session.activeOrganizationId;
