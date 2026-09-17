@@ -11,6 +11,7 @@ import {
   loadSentryConnectionForInvestigation,
   safeInvestigationError,
   sandboxAgentConfig,
+  writeInvestigationTraceEvent,
 } from "./investigate.js";
 
 describe("sandbox agent configuration", () => {
@@ -518,6 +519,32 @@ describe("sandbox agent configuration", () => {
       jobId: "job-123",
       traceEventType: "message.received",
     });
+  });
+
+  it("keeps the investigation running when a trace write fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      writeInvestigationTraceEvent(
+        { type: "action.result" },
+        vi.fn().mockRejectedValue(new Error("database failed")),
+        {
+          investigationId: "investigation-123",
+          jobId: "job-123",
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(consoleError).toHaveBeenCalledWith(
+      JSON.stringify({
+        error: "database failed",
+        event: "investigation_trace_write_failed",
+        investigationId: "investigation-123",
+        jobId: "job-123",
+        traceEventType: "action.result",
+      }),
+    );
+
+    consoleError.mockRestore();
   });
 
   it("stores the exact instructions configured on the agent", () => {
