@@ -172,9 +172,8 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
         {isInvitation ? (
           <span className="invitationLabel">Workspace invitation</span>
         ) : null}
+        <div className="authHeading">
         <h1>{heading}</h1>
-        <p className={isInvitation ? undefined : "authDescription"}>{description}</p>
-        {/* Keep account navigation beneath the heading and description. */}
         <button
           className="authSwitch"
           disabled={isSubmitting || socialProvider !== null}
@@ -189,6 +188,8 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
             ? "Already have an account? Sign in"
             : "Don’t have an account? Get started"}
         </button>
+        </div>
+        <p className={isInvitation ? undefined : "authDescription"}>{description}</p>
       </div>
       <div className="socialAuth">
         <button

@@ -11133,3 +11133,12 @@ body:has(.appShell--scans) {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+.authHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.authHeading h1 { flex: 1; min-width: 0; }
+.authHeading .authSwitch { margin: 0; max-width: 150px; text-align: right; }
