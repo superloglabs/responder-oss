@@ -140,6 +140,30 @@ export function investigationTraceWriteFailure(
   };
 }
 
+export async function writeInvestigationTraceEvent(
+  event: InvestigationTraceEvent,
+  onTraceEvent: (event: InvestigationTraceEvent) => Promise<void>,
+  context: {
+    investigationId: string;
+    jobId: string;
+  },
+): Promise<void> {
+  try {
+    await onTraceEvent(event);
+  } catch (error) {
+    console.error(
+      JSON.stringify(
+        investigationTraceWriteFailure({
+          error,
+          investigationId: context.investigationId,
+          jobId: context.jobId,
+          traceEventType: event.type,
+        }),
+      ),
+    );
+  }
+}
+
 export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
   gcpConnections?: ReadonlyArray<{ accountId: string }>;
@@ -564,23 +588,11 @@ export async function runInvestigationAgent(
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
     investigationInput.attributes?.slackAlertProvider === "aws";
-  const writeTrace = async (event: InvestigationTraceEvent): Promise<void> => {
-    try {
-      await onTraceEvent(event);
-    } catch (error) {
-      console.error(
-        JSON.stringify(
-          investigationTraceWriteFailure({
-            error,
-            investigationId: job.investigationId,
-            jobId: traceContext.jobId,
-            traceEventType: event.type,
-          }),
-        ),
-      );
-      throw error;
-    }
-  };
+  const writeTrace = async (event: InvestigationTraceEvent): Promise<void> =>
+    writeInvestigationTraceEvent(event, onTraceEvent, {
+      investigationId: job.investigationId,
+      jobId: traceContext.jobId,
+    });
   const initialMessage = initialInvestigationMessage(investigationInput);
   await writeTrace(traceEvent("session.started"));
   await writeTrace(initialMessage.traceEvent);
