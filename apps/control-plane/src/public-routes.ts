@@ -3,6 +3,7 @@ export const blogArticlePath =
 
 export const publicDocumentRoutes = [
   { output: "index.html", pathname: "/" },
+  { output: "enterprise/index.html", pathname: "/enterprise" },
   { output: "blog/index.html", pathname: "/blog" },
   { output: "team/index.html", pathname: "/team" },
   { output: "privacy/index.html", pathname: "/privacy" },

@@ -16,6 +16,7 @@ import {
   BlogArticlePage,
   BlogIndexPage,
   DpaPage,
+  EnterprisePage,
   HomePage,
   PrivacyPage,
   PricingPage,
@@ -54,6 +55,7 @@ export function App() {
     <Routes>
       <Route element={<HomePage />} path="/" />
       <Route element={<PricingPage />} path="/pricing" />
+      <Route element={<EnterprisePage />} path="/enterprise" />
       <Route element={<BlogIndexPage />} path="/blog" />
       <Route element={<TeamPage />} path="/team" />
       <Route element={<PrivacyPage />} path="/privacy" />

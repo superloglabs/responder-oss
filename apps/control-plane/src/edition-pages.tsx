@@ -44,3 +44,7 @@ export function SecurityPage() {
 export function SubprocessorsPage() {
   return <Navigate replace to="/agents" />;
 }
+
+export function EnterprisePage() {
+  return <Navigate replace to="/agents" />;
+}
