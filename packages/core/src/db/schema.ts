@@ -135,6 +135,41 @@ export const instanceConfiguration = pgTable("instance_configuration", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Operator-controlled ingest pauses.
+ *
+ * A row with a null `resumedAt` means the organization is paused: incoming
+ * events are dropped before an investigation is created, so no incident,
+ * notification, or model spend is produced for them. Pausing never deletes
+ * anything and never blocks sign-in, and resuming restores normal ingest.
+ * Rows are retained after `resumedAt` is set so the pause history stays
+ * auditable.
+ */
+export const organizationIngestPauses = pgTable(
+  "organization_ingest_pauses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    pausedBy: text("paused_by").notNull(),
+    pausedAt: timestamp("paused_at", { withTimezone: true }).notNull().defaultNow(),
+    resumedBy: text("resumed_by"),
+    resumedAt: timestamp("resumed_at", { withTimezone: true }),
+  },
+  (table) => [
+    // At most one open pause per organization.
+    uniqueIndex("organization_ingest_pauses_active_idx")
+      .on(table.organizationId)
+      .where(sql`${table.resumedAt} is null`),
+    index("organization_ingest_pauses_organization_idx").on(
+      table.organizationId,
+      table.pausedAt,
+    ),
+  ],
+);
+
 export const agents = pgTable(
   "agents",
   {

@@ -425,6 +425,9 @@ export const app = instrumentedApp
 
     try {
       const result = await queueInvestigation(parsed.data);
+      if (result.kind === "paused") {
+        return context.json({ accepted: false, paused: true }, 202);
+      }
       if (result.kind === "blocked") {
         return context.json({
           error: "Monthly investigation allowance exhausted",

@@ -487,6 +487,8 @@ async function forwardSlackEvent(input: {
         threadTimestamp: input.threadTimestamp,
       })
     : await queueInvestigation(request);
+  // Ingest is paused for this organization; drop the event quietly.
+  if (result.kind === "paused") return null;
   if (result.kind === "blocked") {
     throw new Error("Monthly investigation allowance exhausted");
   }
@@ -855,6 +857,9 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           },
         },
       );
+      if (result.kind === "paused") {
+        return context.json({ ok: true, matchedAgents: 0, paused: true });
+      }
       if (result.kind === "blocked") {
         throw new Error("Monthly investigation allowance exhausted");
       }
@@ -998,6 +1003,9 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         userId: event.user,
         userName: event.username?.trim() || undefined,
       });
+      // Ingest is paused for this organization, so there is nothing to record
+      // or acknowledge in the thread.
+      if (!result) return;
       await recordInvestigationSlackSource(result.investigationId, {
         attachments: event.attachments ?? [],
         authorName: slackMessageAuthor(event),

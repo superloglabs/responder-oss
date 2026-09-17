@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   finalizeInvestigationReservation: vi.fn(),
   getIssuePullRequestForRemediation: vi.fn(),
   getInvestigationForRetry: vi.fn(),
+  getIngestPauseForAgent: vi.fn(),
   getRuntimeAgentConfig: vi.fn(),
   notifyBillingLimitReached: vi.fn(),
   prepareInvestigationRetry: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   getRuntimeAgentConfig: mocks.getRuntimeAgentConfig,
   getInvestigationForRetry: mocks.getInvestigationForRetry,
   prepareInvestigationRetry: mocks.prepareInvestigationRetry,
+}));
+
+vi.mock("../../../../packages/core/src/db/organization-ingest.js", () => ({
+  getIngestPauseForAgent: mocks.getIngestPauseForAgent,
 }));
 
 vi.mock("../../../../packages/core/src/db/pull-requests.js", () => ({
@@ -121,6 +126,7 @@ describe("investigation queue", () => {
   beforeEach(async () => {
     await closeInvestigationQueue();
     vi.clearAllMocks();
+    mocks.getIngestPauseForAgent.mockResolvedValue(null);
     mocks.beginInvestigation.mockResolvedValue(created);
     mocks.beginSlackThreadInvestigation.mockResolvedValue({
       ...created,
@@ -430,5 +436,69 @@ describe("investigation queue", () => {
       remediationRequest.requestId,
       "database unavailable",
     );
+  });
+  it("drops an event without any work when ingest is paused", async () => {
+    mocks.getIngestPauseForAgent.mockResolvedValue({
+      organizationId: created.config.organizationId,
+      pausedAt: new Date("2026-09-17T08:00:00.000Z"),
+      pausedBy: "nicolo@superlog.sh",
+      reason: "Runaway alert loop",
+    });
+
+    await expect(queueInvestigation(request)).resolves.toEqual({
+      kind: "paused",
+    });
+    // Nothing downstream may run: no investigation row, no metered usage, and
+    // no queued job, so a paused organization costs nothing.
+    expect(mocks.beginInvestigation).not.toHaveBeenCalled();
+    expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
+    expect(mocks.bossSend).not.toHaveBeenCalled();
+  });
+
+  it("drops a Slack thread turn when ingest is paused", async () => {
+    mocks.getIngestPauseForAgent.mockResolvedValue({
+      organizationId: created.config.organizationId,
+      pausedAt: new Date("2026-09-17T08:00:00.000Z"),
+      pausedBy: "nicolo@superlog.sh",
+      reason: "Runaway alert loop",
+    });
+
+    await expect(
+      queueSlackThreadInvestigation(request, {
+        teamId: "T123",
+        channelId: "C123",
+        threadTimestamp: "1789631309.785069",
+      }),
+    ).resolves.toEqual({ kind: "paused" });
+    expect(mocks.beginSlackThreadInvestigation).not.toHaveBeenCalled();
+    expect(mocks.bossSend).not.toHaveBeenCalled();
+  });
+
+  it("records dropped events so paused traffic stays visible", async () => {
+    mocks.getIngestPauseForAgent.mockResolvedValue({
+      organizationId: created.config.organizationId,
+      pausedAt: new Date("2026-09-17T08:00:00.000Z"),
+      pausedBy: "nicolo@superlog.sh",
+      reason: "Runaway alert loop",
+    });
+
+    await queueInvestigation(request);
+
+    expect(mocks.captureAnalyticsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "investigation dropped while paused",
+        organizationId: created.config.organizationId,
+      }),
+    );
+  });
+
+  it("queues normally once ingest is resumed", async () => {
+    mocks.getIngestPauseForAgent.mockResolvedValue(null);
+
+    await expect(queueInvestigation(request)).resolves.toEqual({
+      investigationId: created.investigationId,
+      jobId: "21212121-2121-4121-8121-212121212121",
+      kind: "queued",
+    });
   });
 });
