@@ -90,8 +90,8 @@ Configure a public GitHub App with:
 - Repository-access updates can return to the OAuth redirect URI with
   `setup_action=update` and no OAuth code. Responder preserves the installation
   and completes an explicit OAuth authorization before synchronizing it.
-- Repository permissions: Contents read/write, Pull requests read/write, and
-  Metadata read
+- Repository permissions: Contents read/write, Pull requests read/write,
+  Actions read, Checks read, and Metadata read
 - Account permission: Email addresses read-only
 - Webhook URL: `<public>/api/webhooks/github`
 - Subscribe to: Pull request and Pull request review comment
@@ -101,6 +101,10 @@ Configure a public GitHub App with:
 
 The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.
+Investigations can inspect pull request history, workflow runs, jobs, steps,
+check runs, and check annotations for those repositories. Those tools use a
+separate installation token restricted to the selected repository and read-only
+permissions; raw workflow logs and artifacts are not exposed.
 When a reviewer bot leaves a new inline comment on a pull request created by
 Responder, the agent checks every unresolved bot thread, pushes any needed
 follow-up commit, replies to the addressed threads, and resolves them. Human

@@ -16,6 +16,7 @@ import {
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
+  getRuntimeRepositories,
   getRuntimeSlackConnection,
   getRuntimeSentryConnection,
   getRuntimeSupabaseConnections,
@@ -94,6 +95,7 @@ import {
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
+import { createGitHubInspectionTools } from "./github-inspection-tools.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
   createSearchSuggestionsTool,
@@ -591,6 +593,7 @@ export async function runInvestigationAgent(
 
   const [
     runtimeProfile,
+    runtimeRepositories,
     awsConnections,
     gcpConnections,
     axiomConnection,
@@ -609,6 +612,7 @@ export async function runInvestigationAgent(
     workspaceSecrets,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
+    getRuntimeRepositories(job.config.id),
     getRuntimeAwsConnections(job.config.id),
     getRuntimeGcpConnections(job.config.id),
     getRuntimeAxiomConnection(job.config.id),
@@ -875,6 +879,9 @@ export async function runInvestigationAgent(
       repositories,
       session,
     });
+    const githubInspectionTools = createGitHubInspectionTools(
+      runtimeRepositories,
+    );
     const vercelTools = createVercelTools(vercelConnections);
     const awsInspectionTools = createAwsInspectionTools(awsConnections, {
       environment,
@@ -951,6 +958,7 @@ export async function runInvestigationAgent(
             : [issueSearchTool, reportTool!]),
         ...suggestionTools,
         ...awsInspectionTools,
+        ...githubInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,
         ...vercelTools,
