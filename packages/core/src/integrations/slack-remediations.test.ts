@@ -114,6 +114,8 @@ describe("Slack remediation cards", () => {
     const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackIssuePullRequestMessage({
       failureReason: null,
+      issueDescription:
+        "Requests fail for <!channel> & plants without a configured color.",
       issueId,
       issueSeverity: "SEV-2",
       issueTitle: "Plant API returns HTTP 500",
@@ -126,8 +128,20 @@ describe("Slack remediation cards", () => {
     }, investigationId);
 
     expect(message.text).toContain("Pull request: Open");
+    expect(message.text).toContain(
+      "Requests fail for &lt;!channel&gt; &amp; plants without a configured color.",
+    );
+    expect(message.text).not.toContain("<!channel>");
     expect(message.blocks).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          type: "section",
+          text: expect.objectContaining({
+            text: expect.stringContaining(
+              "Requests fail for &lt;!channel&gt; &amp; plants without a configured color.",
+            ),
+          }),
+        }),
         expect.objectContaining({
           type: "carousel",
           elements: [

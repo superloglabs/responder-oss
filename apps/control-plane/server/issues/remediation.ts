@@ -82,6 +82,7 @@ export async function startSlackIssueRemediation(input: {
         integrationAccountId: issue.integrationAccountId,
         card: {
           failureReason: null,
+          issueDescription: issue.description,
           issueId: issue.id,
           issueSeverity: issue.severity,
           issueTitle: issue.title,
