@@ -6,7 +6,10 @@ import {
 } from "../db/pull-requests.js";
 import { refreshInvestigationSlackReply } from "../db/investigations.js";
 import type { IssueRemediation } from "../investigations/report.js";
-import { responderIssueUrl } from "../responder-urls.js";
+import {
+  responderInvestigationUrl,
+  responderIssueUrl,
+} from "../responder-urls.js";
 import { updateSlackMessage } from "./slack.js";
 import { slackInvestigationFeedbackBlock } from "./slack-live-card.js";
 
@@ -177,11 +180,14 @@ export function slackRemediationCarousel(input: {
 }
 
 export interface SlackIssuePullRequestCard {
+  agentId?: string;
   failureReason: string | null;
   issueDescription: string;
   issueId: string;
   issueSeverity: "SEV-1" | "SEV-2" | "SEV-3";
   issueTitle: string;
+  investigationId?: string;
+  organizationId?: string;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
   repositoryFullName: string | null;
@@ -236,13 +242,20 @@ function pullRequestStatus(card: SlackIssuePullRequestCard): {
 
 export function slackIssuePullRequestMessage(
   card: SlackIssuePullRequestCard,
-  investigationId?: string,
 ): {
   blocks: unknown[];
   text: string;
 } {
   const status = pullRequestStatus(card);
   const issueUrl = responderIssueUrl(card.issueId, responderAppUrl());
+  const investigationUrl = card.agentId && card.investigationId
+    ? responderInvestigationUrl({
+        agentId: card.agentId,
+        investigationId: card.investigationId,
+        organizationId: card.organizationId,
+        origin: responderAppUrl(),
+      })
+    : null;
   const pullRequestActions = [
     ...(card.pullRequestUrl
       ? [{
@@ -260,6 +273,19 @@ export function slackIssuePullRequestMessage(
       url: issueUrl,
       value: card.issueId,
     },
+    ...(investigationUrl && card.investigationId
+      ? [{
+          type: "button",
+          action_id: "view_investigation",
+          text: {
+            type: "plain_text",
+            text: "View investigation",
+            emoji: false,
+          },
+          url: investigationUrl,
+          value: card.investigationId,
+        }]
+      : []),
   ];
   return {
     text: [
@@ -329,8 +355,8 @@ export function slackIssuePullRequestMessage(
           },
         ],
       },
-      ...(investigationId
-        ? [slackInvestigationFeedbackBlock(investigationId)]
+      ...(card.investigationId
+        ? [slackInvestigationFeedbackBlock(card.investigationId)]
         : []),
     ],
   };
@@ -355,10 +381,7 @@ export async function refreshIssuePullRequestSlackMessages(
             delivery.encryptedCredentials,
           ),
         );
-        const message = slackIssuePullRequestMessage(
-          card,
-          delivery.investigationId,
-        );
+        const message = slackIssuePullRequestMessage(card);
         await updateSlackMessage({
           accessToken: credentials.accessToken,
           blocks: message.blocks,

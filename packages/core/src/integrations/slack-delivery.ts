@@ -215,18 +215,21 @@ function issueSlackMessage(
     : undefined;
   return context.prMode === "always" && request && selectedRemediation
     ? slackIssuePullRequestMessage({
+        agentId: context.agentId,
         failureReason: request.failureReason,
         issueDescription: issue.description,
         issueId: issue.id,
         issueSeverity: issue.severity,
         issueTitle: issue.title,
+        investigationId: context.investigationId,
+        organizationId: context.organizationId ?? "",
         pullRequestNumber: request.pullRequestNumber,
         pullRequestUrl: request.pullRequestUrl,
         repositoryFullName: request.repositoryFullName,
         requestId: request.id,
         selectedRemediation,
         status: request.status,
-      }, context.investigationId)
+      })
     : slackIssueMessage(
         issue,
         context.investigationId,

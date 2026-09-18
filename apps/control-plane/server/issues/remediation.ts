@@ -1,5 +1,6 @@
 import { getIssueForSlackAction } from "../../../../packages/core/src/db/issues.js";
 import {
+  getIssuePullRequestSlackCard,
   IssuePullRequestError,
   queueManualIssuePullRequest,
 } from "../../../../packages/core/src/db/pull-requests.js";
@@ -76,23 +77,39 @@ export async function startSlackIssueRemediation(input: {
     organizationId: issue.organizationId,
     remediationId: remediation.id,
   });
-  return result.ok
+  if (!result.ok) return result;
+  let storedCard: SlackIssuePullRequestCard | null = null;
+  try {
+    storedCard = await getIssuePullRequestSlackCard(result.requestId);
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      event: "issue_pull_request_slack_card_read_failed",
+      requestId: result.requestId,
+    }));
+  }
+  const card: SlackIssuePullRequestCard = storedCard
     ? {
-        ...result,
-        integrationAccountId: issue.integrationAccountId,
-        card: {
-          failureReason: null,
-          issueDescription: issue.description,
-          issueId: issue.id,
-          issueSeverity: issue.severity,
-          issueTitle: issue.title,
-          pullRequestNumber: null,
-          pullRequestUrl: null,
-          repositoryFullName: null,
-          requestId: result.requestId,
-          selectedRemediation: remediation,
-          status: "creating",
-        },
+        ...storedCard,
+        repositoryFullName: null,
+        status: "creating",
       }
-    : result;
+    : {
+        failureReason: null,
+        issueDescription: issue.description,
+        issueId: issue.id,
+        issueSeverity: issue.severity,
+        issueTitle: issue.title,
+        pullRequestNumber: null,
+        pullRequestUrl: null,
+        repositoryFullName: null,
+        requestId: result.requestId,
+        selectedRemediation: remediation,
+        status: "creating",
+      };
+  return {
+    ...result,
+    integrationAccountId: issue.integrationAccountId,
+    card,
+  };
 }

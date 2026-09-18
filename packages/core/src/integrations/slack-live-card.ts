@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
-import { responderIssueUrl } from "../responder-urls.js";
+import {
+  responderInvestigationUrl,
+  responderIssueUrl,
+} from "../responder-urls.js";
 import {
   recordInvestigationSlackReply,
   recordInvestigationSlackTrace,
@@ -86,20 +89,6 @@ function responderAppUrl(): string {
     process.env.BETTER_AUTH_URL ??
     "http://localhost:3000"
   ).replace(/\/$/, "");
-}
-
-function investigationUrl(
-  agentId: string,
-  investigationId: string,
-  organizationId?: string,
-): string {
-  const origin = responderAppUrl();
-  const url = new URL(origin);
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/agents/${encodeURIComponent(agentId)}/investigations/${encodeURIComponent(investigationId)}`;
-  url.search = "";
-  url.hash = "";
-  if (organizationId) url.searchParams.set("organization_id", organizationId);
-  return url.toString();
 }
 
 function richText(value: string, preformatted = false) {
@@ -812,11 +801,12 @@ export function slackInvestigationCard(input: {
             {
               type: "url",
               text: "View investigation",
-              url: investigationUrl(
-                input.agentId,
-                input.investigationId,
-                input.organizationId,
-              ),
+              url: responderInvestigationUrl({
+                agentId: input.agentId,
+                investigationId: input.investigationId,
+                organizationId: input.organizationId,
+                origin: responderAppUrl(),
+              }),
             },
           ],
         }),

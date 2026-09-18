@@ -1306,11 +1306,14 @@ describe("control-plane API", () => {
 
   it("replaces the remediation picker with the selected remediation and PR cards", () => {
     const response = slackPullRequestQueuedResponse({
+      agentId: "17171717-1717-4717-8717-171717171717",
       failureReason: null,
       issueDescription: "Requests fail when a plant has no configured color.",
       issueId: "07070707-0707-4707-8707-070707070707",
       issueSeverity: "SEV-2",
       issueTitle: "Plant API returns HTTP 500",
+      investigationId: "16161616-1616-4616-8616-161616161616",
+      organizationId: "15151515-1515-4515-8515-151515151515",
       pullRequestNumber: null,
       pullRequestUrl: null,
       repositoryFullName: null,
@@ -1353,11 +1356,14 @@ describe("control-plane API", () => {
       sessionId: "session-1",
       integrationAccountId: "25252525-2525-4525-8525-252525252525",
       card: {
+        agentId: "17171717-1717-4717-8717-171717171717",
         failureReason: null,
         issueDescription: "Requests fail when a plant has no configured color.",
         issueId: "07070707-0707-4707-8707-070707070707",
         issueSeverity: "SEV-2",
         issueTitle: "Plant API returns HTTP 500",
+        investigationId: "16161616-1616-4616-8616-161616161616",
+        organizationId: "15151515-1515-4515-8515-151515151515",
         pullRequestNumber: null,
         pullRequestUrl: null,
         repositoryFullName: null,
