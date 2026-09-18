@@ -23,6 +23,7 @@ import {
   getRuntimeVercelConnections,
   getSlackInvestigationSessionRuntime,
   SentryConnectionUnavailableError,
+  type RuntimeAxiomConnection,
   type RuntimeSentryConnection,
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
@@ -284,6 +285,33 @@ export async function loadSentryConnectionForInvestigation(input: {
         );
       }
     }
+    return null;
+  }
+}
+
+export async function loadAxiomConnectionForInvestigation(input: {
+  getConnection?: (versionId: string) => Promise<RuntimeAxiomConnection | null>;
+  investigationId: string;
+  versionId: string;
+}): Promise<RuntimeAxiomConnection | null> {
+  const getConnection = input.getConnection ?? getRuntimeAxiomConnection;
+  try {
+    return await getConnection(input.versionId);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.startsWith("Reconnect custom MCP ")
+    ) {
+      throw error;
+    }
+    console.error(
+      JSON.stringify({
+        accountId: (error as Error & { accountId?: string }).accountId,
+        event: "axiom_connection_degraded",
+        investigationContinues: true,
+        investigationId: input.investigationId,
+      }),
+    );
     return null;
   }
 }
@@ -611,7 +639,10 @@ export async function runInvestigationAgent(
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
     getRuntimeGcpConnections(job.config.id),
-    getRuntimeAxiomConnection(job.config.id),
+    loadAxiomConnectionForInvestigation({
+      investigationId: job.investigationId,
+      versionId: job.config.id,
+    }),
     getRuntimeDatadogConnection(job.config.id),
     getRuntimeDash0Connections(job.config.id),
     getRuntimePostHogConnections(job.config.id),

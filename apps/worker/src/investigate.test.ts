@@ -8,6 +8,7 @@ import {
   investigationInstructions,
   investigationInstructionsTraceEvent,
   investigationTraceWriteFailure,
+  loadAxiomConnectionForInvestigation,
   loadSentryConnectionForInvestigation,
   safeInvestigationError,
   sandboxAgentConfig,
@@ -585,6 +586,43 @@ describe("sandbox agent configuration", () => {
       }),
     );
     consoleError.mockRestore();
+  });
+
+  it("continues without Axiom context when reconnect is required", async () => {
+    const failure = Object.assign(new Error("Reconnect custom MCP Axiom"), {
+      accountId: "account-123",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      loadAxiomConnectionForInvestigation({
+        getConnection: vi.fn().mockRejectedValue(failure),
+        investigationId: "investigation-123",
+        versionId: "version-123",
+      }),
+    ).resolves.toBeNull();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      JSON.stringify({
+        accountId: "account-123",
+        event: "axiom_connection_degraded",
+        investigationContinues: true,
+        investigationId: "investigation-123",
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("still fails investigations for unexpected Axiom lookup errors", async () => {
+    const failure = new Error("database unavailable");
+
+    await expect(
+      loadAxiomConnectionForInvestigation({
+        getConnection: vi.fn().mockRejectedValue(failure),
+        investigationId: "investigation-123",
+        versionId: "version-123",
+      }),
+    ).rejects.toBe(failure);
   });
 
   it("does not let monitoring failure stop a degraded investigation", async () => {
