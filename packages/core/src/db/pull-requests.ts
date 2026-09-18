@@ -281,11 +281,14 @@ export async function registerIssuePullRequestSlackMessage(input: {
 export async function getIssuePullRequestSlackCard(requestId: string) {
   const rows = await getDatabase()
     .select({
+      agentId: agentConfigVersions.agentId,
       requestId: issuePullRequests.id,
       issueId: issues.id,
       issueTitle: issues.title,
       issueDescription: issues.description,
       issueSeverity: issues.severity,
+      investigationId: issuePullRequests.investigationId,
+      organizationId: issues.organizationId,
       issueRemediations: issues.remediations,
       remediationId: issuePullRequests.remediationId,
       repositoryFullName: issuePullRequests.repositoryFullName,
@@ -296,6 +299,10 @@ export async function getIssuePullRequestSlackCard(requestId: string) {
     })
     .from(issuePullRequests)
     .innerJoin(issues, eq(issues.id, issuePullRequests.issueId))
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, issuePullRequests.agentConfigVersionId),
+    )
     .where(eq(issuePullRequests.id, requestId))
     .limit(1);
   const request = rows[0];

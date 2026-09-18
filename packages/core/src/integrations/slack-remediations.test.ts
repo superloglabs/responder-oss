@@ -8,6 +8,9 @@ import {
 } from "./slack-remediations.js";
 
 const issueId = "07070707-0707-4707-8707-070707070707";
+const agentId = "17171717-1717-4717-8717-171717171717";
+const investigationId = "16161616-1616-4616-8616-161616161616";
+const organizationId = "15151515-1515-4515-8515-151515151515";
 const codeRemediation = {
   id: "24242424-2424-4424-8424-242424242424",
   type: "code_change" as const,
@@ -111,21 +114,23 @@ describe("Slack remediation cards", () => {
   });
 
   it("shows the selected remediation and live pull request state", () => {
-    const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackIssuePullRequestMessage({
+      agentId,
       failureReason: null,
       issueDescription:
         "Requests fail for <!channel> & plants without a configured color.",
       issueId,
       issueSeverity: "SEV-2",
       issueTitle: "Plant API returns HTTP 500",
+      investigationId,
+      organizationId,
       pullRequestNumber: 42,
       pullRequestUrl: "https://github.com/example/plants/pull/42",
       repositoryFullName: "example/plants",
       requestId: "23232323-2323-4323-8323-232323232323",
       selectedRemediation: codeRemediation,
       status: "created",
-    }, investigationId);
+    });
 
     expect(message.text).toContain("Pull request: Open");
     expect(message.text).toContain(
@@ -152,6 +157,11 @@ describe("Slack remediation cards", () => {
                 expect.objectContaining({
                   action_id: "open_pull_request",
                   url: "https://github.com/example/plants/pull/42",
+                }),
+                expect.objectContaining({
+                  action_id: "view_investigation",
+                  url:
+                    `http://localhost:3000/agents/${agentId}/investigations/${investigationId}?organization_id=${organizationId}`,
                 }),
               ]),
             }),
