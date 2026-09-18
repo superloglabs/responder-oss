@@ -1307,6 +1307,7 @@ describe("control-plane API", () => {
   it("replaces the remediation picker with the selected remediation and PR cards", () => {
     const response = slackPullRequestQueuedResponse({
       failureReason: null,
+      issueDescription: "Requests fail when a plant has no configured color.",
       issueId: "07070707-0707-4707-8707-070707070707",
       issueSeverity: "SEV-2",
       issueTitle: "Plant API returns HTTP 500",
@@ -1326,6 +1327,9 @@ describe("control-plane API", () => {
 
     expect(response.replace_original).toBe(true);
     expect(response.text).toContain("Pull request: Creating");
+    expect(response.text).toContain(
+      "Requests fail when a plant has no configured color.",
+    );
     expect(response.blocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1350,6 +1354,7 @@ describe("control-plane API", () => {
       integrationAccountId: "25252525-2525-4525-8525-252525252525",
       card: {
         failureReason: null,
+        issueDescription: "Requests fail when a plant has no configured color.",
         issueId: "07070707-0707-4707-8707-070707070707",
         issueSeverity: "SEV-2",
         issueTitle: "Plant API returns HTTP 500",
@@ -1425,6 +1430,12 @@ describe("control-plane API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       responseUrl,
       expect.objectContaining({ method: "POST" }),
+    );
+    const actionResponse = JSON.parse(
+      fetchMock.mock.calls[0]?.[1]?.body as string,
+    ) as { text: string };
+    expect(actionResponse.text).toContain(
+      "Requests fail when a plant has no configured color.",
     );
   });
 

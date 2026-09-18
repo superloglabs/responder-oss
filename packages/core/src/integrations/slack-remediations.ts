@@ -178,6 +178,7 @@ export function slackRemediationCarousel(input: {
 
 export interface SlackIssuePullRequestCard {
   failureReason: string | null;
+  issueDescription: string;
   issueId: string;
   issueSeverity: "SEV-1" | "SEV-2" | "SEV-3";
   issueTitle: string;
@@ -261,13 +262,24 @@ export function slackIssuePullRequestMessage(
     },
   ];
   return {
-    text: `${card.issueSeverity} — ${card.issueTitle}\n${card.selectedRemediation.title}\nPull request: ${status.label}`,
+    text: [
+      `${card.issueSeverity} — ${card.issueTitle}`,
+      escapeSlack(card.issueDescription),
+      card.selectedRemediation.title,
+      `Pull request: ${status.label}`,
+    ].filter(Boolean).join("\n\n"),
     blocks: [
       {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*${card.issueSeverity} — ${escapeSlack(card.issueTitle)}*`,
+          text: truncate(
+            [
+              `*${card.issueSeverity} — ${escapeSlack(card.issueTitle)}*`,
+              escapeSlack(card.issueDescription),
+            ].filter(Boolean).join("\n\n"),
+            2_900,
+          ),
         },
       },
       {

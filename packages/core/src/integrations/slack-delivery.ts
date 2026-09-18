@@ -216,6 +216,7 @@ function issueSlackMessage(
   return context.prMode === "always" && request && selectedRemediation
     ? slackIssuePullRequestMessage({
         failureReason: request.failureReason,
+        issueDescription: issue.description,
         issueId: issue.id,
         issueSeverity: issue.severity,
         issueTitle: issue.title,

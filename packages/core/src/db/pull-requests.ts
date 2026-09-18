@@ -284,6 +284,7 @@ export async function getIssuePullRequestSlackCard(requestId: string) {
       requestId: issuePullRequests.id,
       issueId: issues.id,
       issueTitle: issues.title,
+      issueDescription: issues.description,
       issueSeverity: issues.severity,
       issueRemediations: issues.remediations,
       remediationId: issuePullRequests.remediationId,
