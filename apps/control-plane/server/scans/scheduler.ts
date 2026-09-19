@@ -30,7 +30,9 @@ export async function runDueScans(): Promise<void> {
           JSON.stringify({
             event: "scheduled_scan_queued",
             investigationId:
-              result.kind === "blocked" ? null : result.investigationId,
+              result.kind === "blocked" || result.kind === "paused"
+                ? null
+                : result.investigationId,
             organizationId: scan.organizationId,
             outcome: result.kind,
             scheduledFor: executionTime.toISOString(),

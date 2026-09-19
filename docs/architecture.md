@@ -105,6 +105,21 @@ Review follow-ups are serialized per pull request. Each pass reloads unresolved
 bot threads and the current PR head, so redundant queued comment events exit
 without repeating replies.
 
+## Ingest pauses
+
+An operator can pause ingest for a single organization. The pause is checked at
+the investigation queue, before an investigation is created, so a paused
+organization produces no investigation rows, no notifications, and no model
+spend for the events that arrive while it is paused. Dropped events are counted
+in analytics rather than retried, and webhook senders receive an accepted
+response instead of an error.
+
+A pause deletes no data and does not affect sign-in, dashboards, or existing
+investigations. Pauses are rows in `organization_ingest_pauses`: at most one may
+be open per organization, resumed pauses are retained, and each row records the
+actor and reason on both sides of the change. Use `pnpm ingest:status`,
+`pnpm ingest:pause`, and `pnpm ingest:resume`.
+
 ## Deployment contract
 
 Serve the Vite build and API from one public origin so browser authentication,

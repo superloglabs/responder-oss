@@ -115,6 +115,9 @@ export const scanRoutes = new Hono()
         externalEventId: `manual:${tenant.organizationId}:${crypto.randomUUID()}`,
       });
       const result = await queueInvestigation(request);
+      if (result.kind === "paused") {
+        return context.json({ accepted: false, paused: true }, 202);
+      }
       if (result.kind === "blocked") {
         return context.json(
           { error: "Monthly investigation allowance exhausted" },

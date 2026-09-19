@@ -13,6 +13,7 @@ import {
   getInvestigationForRetry,
   prepareInvestigationRetry,
 } from "../../../../packages/core/src/db/investigations.js";
+import { getIngestPauseForAgent } from "../../../../packages/core/src/db/organization-ingest.js";
 import {
   queueIssueRemediationJob,
   queueSuggestionRemediationJob,
@@ -31,6 +32,7 @@ import {
 
 type QueueResult =
   | { kind: "blocked" }
+  | { kind: "paused" }
   | { investigationId: string; kind: "duplicate" }
   | { investigationId: string; jobId: string; kind: "queued" };
 
@@ -64,6 +66,34 @@ async function getBoss() {
   return bossStart;
 }
 
+/**
+ * Reports whether ingest is paused for the agent's organization, and records
+ * the drop so paused traffic stays visible in analytics.
+ *
+ * This runs before the investigation is created, so a paused organization
+ * produces no investigation row, no notification, and no model spend.
+ */
+async function ingestIsPaused(agentId: string): Promise<boolean> {
+  const pause = await getIngestPauseForAgent(agentId);
+  if (!pause) return false;
+
+  await captureAnalyticsEvent({
+    distinctId: `organization:${pause.organizationId}`,
+    event: "investigation dropped while paused",
+    organizationId: pause.organizationId,
+    properties: {
+      $process_person_profile: false,
+      agent_id: agentId,
+      paused_at: pause.pausedAt.toISOString(),
+      paused_by: pause.pausedBy,
+      reason: pause.reason,
+    },
+  }).catch((error: unknown) => {
+    console.error("Unable to record a paused ingest drop", error);
+  });
+  return true;
+}
+
 export async function queueInvestigation(
   request: InvestigationRequest,
   options?: {
@@ -76,6 +106,8 @@ export async function queueInvestigation(
     };
   },
 ): Promise<QueueResult> {
+  if (await ingestIsPaused(request.agentId)) return { kind: "paused" };
+
   const input = toInvestigationInput(request);
   const result = await beginInvestigation(request.agentId, input);
   if (!result.created) {
@@ -168,6 +200,8 @@ export async function queueSlackThreadInvestigation(
   request: InvestigationRequest,
   thread: { teamId: string; channelId: string; threadTimestamp: string },
 ): Promise<QueueResult> {
+  if (await ingestIsPaused(request.agentId)) return { kind: "paused" };
+
   const input = toInvestigationInput(request);
   const result = await beginSlackThreadInvestigation({
     agentId: request.agentId,

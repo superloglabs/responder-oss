@@ -135,6 +135,8 @@ async function forwardSentryIssue(input: {
       timestamp: input.issue.lastSeen ?? input.issue.firstSeen ?? null,
     },
   });
+  // Ingest is paused for this organization; drop the event quietly.
+  if (result.kind === "paused") return null;
   if (result.kind === "blocked") {
     throw new Error("Monthly investigation allowance exhausted");
   }

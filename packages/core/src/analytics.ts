@@ -11,6 +11,7 @@ export interface AnalyticsEvent {
     | "agent created"
     | "integration connected"
     | "investigation created"
+    | "investigation dropped while paused"
     | "investigation feedback submitted"
     | "investigation rerun"
     | "organization created"

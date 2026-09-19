@@ -142,6 +142,7 @@ export const dash0WebhookRoutes = new Hono().post("/:accountId", async (context)
             timestamp: issue.start ?? null,
           },
         });
+        if (result.kind === "paused") return;
         if (result.kind === "blocked") {
           throw new Error("Monthly investigation allowance exhausted");
         }
