@@ -62,6 +62,9 @@ export function assertAutomationHarnessModelCompatibility(
 }
 
 export function resolveAutomationWorkspacePath(workspacePath: string): string {
+  if (!path.posix.isAbsolute(workspacePath)) {
+    throw new Error("Automation workspace path must be absolute");
+  }
   const resolved = path.posix.resolve(workspacePath);
   if (
     resolved !== automationWorkspaceRoot &&

@@ -35,7 +35,10 @@ export interface FreshAutomationSandboxInput<T> {
   brokerToken: string;
   config: DaytonaClientConfig;
   organizationId: string;
-  run(session: DaytonaSandboxSession): Promise<T>;
+  run(
+    session: DaytonaSandboxSession,
+    withModelBroker: <Result>(operation: () => Promise<Result>) => Promise<Result>,
+  ): Promise<T>;
   runId: string;
 }
 
@@ -43,7 +46,35 @@ function sandboxNameForRun(runId: string): string {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/u.test(runId)) {
     throw new Error("Automation run ID cannot be used as a sandbox name");
   }
-  return `responder-automation-${runId}`;
+  const sandboxName = `responder-automation-${runId}`;
+  if (sandboxName.length > 64) {
+    throw new Error("Automation run ID cannot be used as a sandbox name");
+  }
+  return sandboxName;
+}
+
+async function withRunScopedModelBroker<Result>(
+  session: DaytonaSandboxSession,
+  brokerToken: string,
+  operation: () => Promise<Result>,
+): Promise<Result> {
+  // This token is an intentionally untrusted, least-privilege capability for
+  // the harness process, not a customer provider credential. The broker must
+  // bind it to one run, model, budget, and short expiry. Limit its lifetime in
+  // the sandbox environment to the model operation so setup commands never
+  // receive it.
+  const environment = session.state.environment;
+  const previousValue = environment[modelBrokerTokenEnvironmentVariable];
+  environment[modelBrokerTokenEnvironmentVariable] = brokerToken;
+  try {
+    return await operation();
+  } finally {
+    if (previousValue === undefined) {
+      delete environment[modelBrokerTokenEnvironmentVariable];
+    } else {
+      environment[modelBrokerTokenEnvironmentVariable] = previousValue;
+    }
+  }
 }
 
 export async function runInFreshAutomationSandbox<T>(
@@ -56,9 +87,6 @@ export async function runInFreshAutomationSandbox<T>(
   const sandboxName = sandboxNameForRun(input.runId);
   const client = dependencies.createClient({
     ...daytonaClientOptions(input.config),
-    env: {
-      [modelBrokerTokenEnvironmentVariable]: input.brokerToken,
-    },
     name: sandboxName,
     pauseOnExit: false,
   });
@@ -74,7 +102,10 @@ export async function runInFreshAutomationSandbox<T>(
     if (!input.config.sandboxSnapshotName) {
       await dependencies.prepare(session);
     }
-    return await input.run(session);
+    const activeSession = session;
+    return await input.run(activeSession, (operation) =>
+      withRunScopedModelBroker(activeSession, input.brokerToken, operation)
+    );
   } finally {
     if (session) {
       await dependencies.close(session, input.config, {

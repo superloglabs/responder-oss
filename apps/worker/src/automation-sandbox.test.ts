@@ -7,7 +7,7 @@ import { runInFreshAutomationSandbox } from "./automation-sandbox.js";
 
 function harness() {
   const session = {
-    state: { sandboxId: "sandbox-1" },
+    state: { environment: {}, sandboxId: "sandbox-1" },
   } as unknown as DaytonaSandboxSession;
   const client = { create: vi.fn() } as unknown as DaytonaSandboxClient;
   const dependencies = {
@@ -24,7 +24,19 @@ const input = {
   brokerToken: "short-lived-run-token",
   config: { daytonaApiKey: "daytona-test" },
   organizationId: "organization-1",
-  run: vi.fn().mockResolvedValue("completed"),
+  run: vi.fn(
+    async (
+      session: DaytonaSandboxSession,
+      withModelBroker: <Result>(
+        operation: () => Promise<Result>,
+      ) => Promise<Result>,
+    ) =>
+      withModelBroker(async () =>
+        session.state.environment.RESPONDER_MODEL_BROKER_TOKEN
+          ? "completed"
+          : "missing token",
+      ),
+  ),
   runId: "run-1",
 };
 
@@ -39,9 +51,6 @@ describe("fresh automation sandbox", () => {
     expect(dependencies.createClient).toHaveBeenCalledWith({
       apiKey: "daytona-test",
       apiUrl: undefined,
-      env: {
-        RESPONDER_MODEL_BROKER_TOKEN: "short-lived-run-token",
-      },
       name: "responder-automation-run-1",
       pauseOnExit: false,
       sandboxSnapshotName: undefined,
@@ -52,7 +61,10 @@ describe("fresh automation sandbox", () => {
       input.config,
       "responder-automation-run-1",
     );
-    expect(input.run).toHaveBeenCalledWith(session);
+    expect(input.run).toHaveBeenCalledWith(session, expect.any(Function));
+    expect(
+      session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
+    ).toBeUndefined();
     expect(dependencies.close).toHaveBeenCalledWith(
       session,
       input.config,
@@ -66,7 +78,14 @@ describe("fresh automation sandbox", () => {
 
     await expect(
       runInFreshAutomationSandbox(
-        { ...input, run: vi.fn().mockRejectedValue(runError) },
+        {
+          ...input,
+          run: vi.fn((_session, withModelBroker) =>
+            withModelBroker(async () => {
+              throw runError;
+            }),
+          ),
+        },
         dependencies,
       ),
     ).rejects.toBe(runError);
@@ -76,6 +95,9 @@ describe("fresh automation sandbox", () => {
       input.config,
       { jobId: "run-1", organizationId: "organization-1" },
     );
+    expect(
+      session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
+    ).toBeUndefined();
   });
 
   it("uses a prepared snapshot without mutating its toolchain", async () => {
@@ -113,6 +135,18 @@ describe("fresh automation sandbox", () => {
     await expect(
       runInFreshAutomationSandbox(
         { ...input, runId: "../another-tenant" },
+        dependencies,
+      ),
+    ).rejects.toThrow("cannot be used as a sandbox name");
+    expect(dependencies.createClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects generated sandbox names over the provider limit", async () => {
+    const { dependencies } = harness();
+
+    await expect(
+      runInFreshAutomationSandbox(
+        { ...input, runId: "a".repeat(44) },
         dependencies,
       ),
     ).rejects.toThrow("cannot be used as a sandbox name");

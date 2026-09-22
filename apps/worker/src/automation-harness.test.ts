@@ -61,5 +61,11 @@ describe("automation harness compatibility", () => {
     expect(() =>
       resolveAutomationWorkspacePath("/home/daytona/workspace/../../etc"),
     ).toThrow("must be inside the sandbox workspace");
+    expect(() => resolveAutomationWorkspacePath("repositories/responder")).toThrow(
+      "must be absolute",
+    );
+    expect(() => resolveAutomationWorkspacePath("")).toThrow(
+      "must be absolute",
+    );
   });
 });

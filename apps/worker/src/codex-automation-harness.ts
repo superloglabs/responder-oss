@@ -2,7 +2,6 @@ import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/da
 import {
   assertAutomationHarnessModelCompatibility,
   automationWorkspaceRoot,
-  type AutomationHarness,
   type AutomationHarnessInput,
   type AutomationHarnessResult,
   modelBrokerTokenEnvironmentVariable,
@@ -87,9 +86,10 @@ export async function prepareCodexAutomationHarness(
   const output = await session.execCommand({
     cmd: [
       "set -eu",
+      `unset ${modelBrokerTokenEnvironmentVariable}`,
       `mkdir -p ${shellQuote(codexInstallRoot)}`,
       `if [ -x ${shellQuote(codexExecutable)} ] && [ "$(${shellQuote(codexExecutable)} --version)" = ${shellQuote(expectedVersion)} ]; then exit 0; fi`,
-      `npm install --prefix ${shellQuote(codexInstallRoot)} --no-audit --no-fund --no-package-lock --no-save ${shellQuote(`@openai/codex@${codexCliVersion}`)}`,
+      `npm install --prefix ${shellQuote(codexInstallRoot)} --ignore-scripts --no-audit --no-fund --no-package-lock --no-save ${shellQuote(`@openai/codex@${codexCliVersion}`)}`,
       `[ "$(${shellQuote(codexExecutable)} --version)" = ${shellQuote(expectedVersion)} ]`,
     ].join("\n"),
     maxOutputTokens: 2_000,
@@ -100,11 +100,35 @@ export async function prepareCodexAutomationHarness(
   }
 }
 
+async function assertAutomationWorkspaceHasNoSymlinkRedirects(
+  session: DaytonaSandboxSession,
+  workspacePath: string,
+): Promise<void> {
+  const resolvedWorkspacePath = resolveAutomationWorkspacePath(workspacePath);
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `unset ${modelBrokerTokenEnvironmentVariable}`,
+      `resolved=$(realpath -e -- ${shellQuote(resolvedWorkspacePath)})`,
+      `[ "$resolved" = ${shellQuote(resolvedWorkspacePath)} ]`,
+    ].join("\n"),
+    maxOutputTokens: 100,
+    workdir: automationWorkspaceRoot,
+  });
+  if (!commandSucceeded(output)) {
+    throw new Error("Automation workspace cannot use symlink redirects");
+  }
+}
+
 export async function runCodexAutomation(
   session: DaytonaSandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
   await prepareCodexAutomationHarness(session);
+  await assertAutomationWorkspaceHasNoSymlinkRedirects(
+    session,
+    input.workspacePath,
+  );
   await session.materializeEntry({
     entry: { type: "file", content: input.prompt },
     path: promptPath,
@@ -119,8 +143,3 @@ export async function runCodexAutomation(
   }
   return { eventStream: output };
 }
-
-export const codexAutomationHarness: AutomationHarness = {
-  kind: "codex",
-  run: runCodexAutomation,
-};

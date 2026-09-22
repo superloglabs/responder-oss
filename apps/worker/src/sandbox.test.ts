@@ -79,14 +79,14 @@ describe("Daytona sandbox preparation", () => {
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         cmd: expect.stringContaining(
-          "command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v bun >/dev/null 2>&1",
+          "command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v bun >/dev/null 2>&1",
         ),
       }),
     );
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         cmd: expect.stringContaining(
-          "install -y -qq curl git nodejs python3 ripgrep unzip",
+          "install -y -qq curl git nodejs npm python3 ripgrep unzip",
         ),
       }),
     );
@@ -107,7 +107,7 @@ describe("Daytona sandbox preparation", () => {
     } as unknown as DaytonaSandboxSession;
 
     await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
-      "Unable to install curl, git, Node.js, Python 3, ripgrep, unzip, and Bun in Daytona: python3 unavailable",
+      "Unable to install curl, git, Node.js, npm, Python 3, ripgrep, unzip, and Bun in Daytona: python3 unavailable",
     );
   });
 
@@ -117,7 +117,7 @@ describe("Daytona sandbox preparation", () => {
     } as unknown as DaytonaSandboxSession;
 
     await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
-      "Unable to install curl, git, Node.js, Python 3, ripgrep, unzip, and Bun in Daytona",
+      "Unable to install curl, git, Node.js, npm, Python 3, ripgrep, unzip, and Bun in Daytona",
     );
   });
 });

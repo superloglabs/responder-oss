@@ -33,6 +33,11 @@ describe("Codex automation harness", () => {
         workdir: "/home/daytona/workspace",
       }),
     );
+    const command = vi.mocked(session.execCommand).mock.calls[0]?.[0].cmd;
+    expect(command).toContain("unset RESPONDER_MODEL_BROKER_TOKEN");
+    expect(command?.indexOf("unset RESPONDER_MODEL_BROKER_TOKEN")).toBeLessThan(
+      command?.indexOf("npm install") ?? -1,
+    );
   });
 
   it("fails safely when the pinned CLI cannot be prepared", async () => {
@@ -80,6 +85,9 @@ describe("Codex automation harness", () => {
           "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
         )
         .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
           "Chunk ID: run\nProcess exited with code 0\nOutput:\n{\"type\":\"turn.completed\"}\n",
         ),
       materializeEntry: vi.fn().mockResolvedValue(undefined),
@@ -93,18 +101,28 @@ describe("Codex automation harness", () => {
       entry: { type: "file", content: input.prompt },
       path: "/home/daytona/workspace/.responder/automation-prompt.txt",
     });
-    const command = vi.mocked(session.execCommand).mock.calls[1]?.[0].cmd;
+    const command = vi.mocked(session.execCommand).mock.calls[2]?.[0].cmd;
     expect(command).not.toContain(input.prompt);
     expect(command).toContain("trap");
   });
 
-  it("does not include a customer provider key in command configuration", () => {
-    const customerProviderKey = "customer-provider-key-for-test";
-    const command = buildCodexAutomationCommand(input);
-    const serializedInput = JSON.stringify(input);
+  it("rejects a workspace redirected through a symlink before writing the prompt", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(
+          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 1\nOutput:\n",
+        ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
 
-    expect(command).not.toContain(customerProviderKey);
-    expect(serializedInput).not.toContain(customerProviderKey);
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      "Automation workspace cannot use symlink redirects",
+    );
+    expect(session.materializeEntry).not.toHaveBeenCalled();
   });
 
   it("returns a generic error instead of command output", async () => {
@@ -114,6 +132,9 @@ describe("Codex automation harness", () => {
         .fn()
         .mockResolvedValueOnce(
           "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 0\nOutput:\n",
         )
         .mockResolvedValue(
           `Chunk ID: run\nProcess exited with code 1\nOutput:\n${secretShapedOutput}\n`,
