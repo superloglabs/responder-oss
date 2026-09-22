@@ -137,6 +137,13 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+export const INITIAL_TRIAGE_SLACK_REACTIONS = [
+  "red_circle",
+  "large_orange_circle",
+  "large_yellow_circle",
+  "large_green_circle",
+] as const;
+
 export async function addSlackReaction(input: {
   accessToken: string;
   channelId: string;

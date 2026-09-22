@@ -42,6 +42,7 @@ const configuration: AgentConfiguration = {
   contextAccountIds: ["sentry", "datadog", "upstash"],
   contextResourceIds: [],
   secretIds: ["service-key"],
+  initialTriageEnabled: false,
   createLinearTickets: false,
   linearIssueTemplate: "{{description}}",
   description: "Investigates production alerts.",

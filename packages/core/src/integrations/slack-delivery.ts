@@ -17,6 +17,7 @@ import {
 import { registerIssuePullRequestSlackMessage } from "../db/pull-requests.js";
 import {
   addSlackReaction,
+  INITIAL_TRIAGE_SLACK_REACTIONS,
   postSlackMessage,
   removeSlackReaction,
   setSlackThreadStatus,
@@ -105,6 +106,45 @@ export function slackCompletionReaction(
     return "large_yellow_square";
   }
   return "white_check_mark";
+}
+
+interface InitialTriageReactionCleanupDependencies {
+  recordReaction: typeof setInvestigationSlackReaction;
+  removeReaction: typeof removeSlackReaction;
+}
+
+export async function removeInitialTriageSlackReactions(
+  input: {
+    accessToken: string;
+    channelId: string;
+    investigationId: string;
+    timestamp: string;
+  },
+  dependencies: InitialTriageReactionCleanupDependencies = {
+    recordReaction: setInvestigationSlackReaction,
+    removeReaction: removeSlackReaction,
+  },
+): Promise<void> {
+  const results = await Promise.allSettled(
+    INITIAL_TRIAGE_SLACK_REACTIONS.map(async (name) => {
+      await dependencies.removeReaction({
+        accessToken: input.accessToken,
+        channelId: input.channelId,
+        name,
+        timestamp: input.timestamp,
+      });
+      await dependencies.recordReaction(input.investigationId, name, false);
+    }),
+  );
+  const failures = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      "Slack initial triage reaction cleanup failed",
+    );
+  }
 }
 
 export function slackThreadCompletionText(
@@ -567,6 +607,14 @@ export async function reconcileCompletedInvestigationSlackCard(
           timestamp: context.source.reactionTimestamp,
         })
       : Promise.resolve(),
+    context.source.reactionTimestamp
+      ? removeInitialTriageSlackReactions({
+          accessToken: token,
+          channelId: context.source.channelId,
+          investigationId,
+          timestamp: context.source.reactionTimestamp,
+        })
+      : Promise.resolve(),
     setSlackThreadStatus({
       accessToken: token,
       channelId: context.source.channelId,
@@ -752,6 +800,12 @@ async function deliverSourceThread(
       accessToken: token,
       channelId: context.source.channelId,
       name: "eyes",
+      timestamp: context.source.reactionTimestamp,
+    }),
+    removeInitialTriageSlackReactions({
+      accessToken: token,
+      channelId: context.source.channelId,
+      investigationId: context.investigationId,
       timestamp: context.source.reactionTimestamp,
     }),
     setSlackThreadStatus({

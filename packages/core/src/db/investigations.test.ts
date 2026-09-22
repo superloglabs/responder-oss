@@ -13,7 +13,9 @@ import {
   customMcpTokenRefreshFailureEvent,
   customMcpTokenRefreshSuccessEvent,
   customMcpReconnectError,
+  getInitialTriageContext,
   getInvestigationForSlackAction,
+  INITIAL_TRIAGE_HISTORY_LIMIT,
   investigationCanBeRetried,
   markInvestigationStarted,
   prepareInvestigationReplay,
@@ -24,6 +26,100 @@ import {
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
 }));
+
+describe("initial triage context", () => {
+  it("bounds the current alert and recent terminal incident history", async () => {
+    const currentQuery = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{
+        agentId: "agent-1",
+        agentConfigVersionId: "config-1",
+        createdAt: new Date("2026-09-22T10:00:00.000Z"),
+        initialTriageEnabled: true,
+        input: {
+          attributes: { channelId: "C123" },
+          body: "a".repeat(20_000),
+          externalEventId: "event-2",
+          provider: "slack",
+          title: "Current alert",
+        },
+        isReplay: false,
+        slackThreadSnapshot: { reactions: ["eyes"], replies: [], source: null, version: 1 },
+      }]),
+    };
+    currentQuery.from.mockReturnValue(currentQuery);
+    currentQuery.innerJoin.mockReturnValue(currentQuery);
+    currentQuery.where.mockReturnValue(currentQuery);
+    const historyQuery = {
+      from: vi.fn(),
+      where: vi.fn(),
+      orderBy: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{
+        createdAt: new Date("2026-09-21T10:00:00.000Z"),
+        failureReason: null,
+        finding: { summary: "b".repeat(2_000) },
+        input: {
+          body: "c".repeat(2_000),
+          externalEventId: "event-1",
+          provider: "slack",
+          title: "Previous alert",
+        },
+        status: "resolved",
+        structuredReport: null,
+        title: "Previous alert",
+      }]),
+    };
+    historyQuery.from.mockReturnValue(historyQuery);
+    historyQuery.where.mockReturnValue(historyQuery);
+    historyQuery.orderBy.mockReturnValue(historyQuery);
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn()
+        .mockReturnValueOnce(currentQuery)
+        .mockReturnValueOnce(historyQuery),
+    } as never);
+
+    const result = await getInitialTriageContext("investigation-2");
+
+    expect(result?.agentConfigVersionId).toBe("config-1");
+    expect(result?.alert.body).toHaveLength(12_000);
+    expect(result?.existingReactions).toEqual(["eyes"]);
+    expect(result?.recentIncidents).toEqual([
+      expect.objectContaining({
+        body: "c".repeat(1_200),
+        outcome: "b".repeat(800),
+        status: "resolved",
+      }),
+    ]);
+    expect(historyQuery.limit).toHaveBeenCalledWith(
+      INITIAL_TRIAGE_HISTORY_LIMIT,
+    );
+  });
+
+  it("does not load history when initial triage is disabled", async () => {
+    const query = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{
+        initialTriageEnabled: false,
+        input: { provider: "slack" },
+        isReplay: false,
+      }]),
+    };
+    query.from.mockReturnValue(query);
+    query.innerJoin.mockReturnValue(query);
+    query.where.mockReturnValue(query);
+    const select = vi.fn().mockReturnValue(query);
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+
+    await expect(
+      getInitialTriageContext("investigation-2"),
+    ).resolves.toBeNull();
+    expect(select).toHaveBeenCalledOnce();
+  });
+});
 
 describe("Slack investigation actions", () => {
   it("resolves an investigation through a connected Slack workspace", async () => {

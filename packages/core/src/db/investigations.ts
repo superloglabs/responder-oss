@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, gte, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   decryptCredentials,
@@ -91,6 +91,47 @@ export interface RuntimeSlackConnection {
   accountId: string;
   channels: Array<{ id: string; name: string }>;
   userAccessToken: string;
+}
+
+export const INITIAL_TRIAGE_HISTORY_LIMIT = 8;
+const initialTriageAlertBodyLimit = 12_000;
+const initialTriageHistoryBodyLimit = 1_200;
+const initialTriageHistorySummaryLimit = 800;
+const initialTriageAttributeNames = [
+  "slackAlertProvider",
+  "awsAlarmName",
+  "awsAlarmState",
+  "awsAlarmRegion",
+] as const;
+
+function initialTriageAttributes(
+  attributes: InvestigationInput["attributes"],
+): InvestigationInput["attributes"] {
+  if (!attributes) return undefined;
+  const selected = initialTriageAttributeNames.flatMap((name) =>
+    attributes[name] === undefined ? [] : [[name, attributes[name]] as const],
+  );
+  return selected.length > 0 ? Object.fromEntries(selected) : undefined;
+}
+
+export interface InitialTriageContext {
+  agentConfigVersionId: string;
+  alert: {
+    attributes: InvestigationInput["attributes"];
+    body: string;
+    provider: InvestigationInput["provider"];
+    sourceUrl?: string;
+    title: string;
+  };
+  existingReactions: string[];
+  recentIncidents: Array<{
+    body: string;
+    createdAt: string;
+    outcome: string;
+    provider: InvestigationInput["provider"];
+    status: "resolved" | "failed";
+    title: string;
+  }>;
 }
 
 export interface BeginInvestigationResult {
@@ -572,6 +613,90 @@ export async function listInvestigationTraceEvents(
       .reverse()
       .map((row) => row.event),
     truncated,
+  };
+}
+
+export async function getInitialTriageContext(
+  investigationId: string,
+): Promise<InitialTriageContext | null> {
+  const db = getDatabase();
+  const currentRows = await db
+    .select({
+      agentId: investigations.agentId,
+      agentConfigVersionId: investigations.agentConfigVersionId,
+      createdAt: investigations.createdAt,
+      input: investigations.input,
+      initialTriageEnabled: agentConfigVersions.initialTriageEnabled,
+      isReplay: investigations.isReplay,
+      slackThreadSnapshot: investigations.slackThreadSnapshot,
+    })
+    .from(investigations)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, investigations.agentConfigVersionId),
+    )
+    .where(eq(investigations.id, investigationId))
+    .limit(1);
+  const current = currentRows[0];
+  if (
+    !current?.initialTriageEnabled ||
+    current.isReplay ||
+    current.input.provider !== "slack"
+  ) {
+    return null;
+  }
+
+  const history = await db
+    .select({
+      createdAt: investigations.createdAt,
+      failureReason: investigations.failureReason,
+      finding: investigations.finding,
+      input: investigations.input,
+      status: investigations.status,
+      structuredReport: investigations.structuredReport,
+      title: investigations.title,
+    })
+    .from(investigations)
+    .where(
+      and(
+        eq(investigations.agentId, current.agentId),
+        ne(investigations.id, investigationId),
+        eq(investigations.isReplay, false),
+        inArray(investigations.status, ["resolved", "failed"]),
+        lt(investigations.createdAt, current.createdAt),
+      ),
+    )
+    .orderBy(desc(investigations.createdAt))
+    .limit(INITIAL_TRIAGE_HISTORY_LIMIT);
+
+  return {
+    agentConfigVersionId: current.agentConfigVersionId,
+    alert: {
+      attributes: initialTriageAttributes(current.input.attributes),
+      body: current.input.body.slice(0, initialTriageAlertBodyLimit),
+      provider: current.input.provider,
+      ...(current.input.sourceUrl ? { sourceUrl: current.input.sourceUrl } : {}),
+      title: current.input.title,
+    },
+    existingReactions: current.slackThreadSnapshot?.reactions ?? [],
+    recentIncidents: history.flatMap((incident) => {
+      if (incident.status !== "resolved" && incident.status !== "failed") {
+        return [];
+      }
+      const outcome =
+        incident.finding?.summary ??
+        incident.structuredReport?.summary ??
+        incident.failureReason ??
+        "No outcome was recorded.";
+      return [{
+        body: incident.input.body.slice(0, initialTriageHistoryBodyLimit),
+        createdAt: incident.createdAt.toISOString(),
+        outcome: outcome.slice(0, initialTriageHistorySummaryLimit),
+        provider: incident.input.provider,
+        status: incident.status,
+        title: incident.title,
+      }];
+    }),
   };
 }
 

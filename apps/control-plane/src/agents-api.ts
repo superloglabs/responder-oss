@@ -53,6 +53,7 @@ export interface AgentConfiguration {
   contextAccountIds: string[];
   contextResourceIds: string[];
   secretIds: string[];
+  initialTriageEnabled: boolean;
   createLinearTickets: boolean;
   linearIssueTemplate: string;
   trigger: AgentTrigger;

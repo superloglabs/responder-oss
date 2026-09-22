@@ -153,6 +153,11 @@ describe("sandbox agent configuration", () => {
       }),
     ).toBe("request failed for [redacted]");
     expect(
+      safeInvestigationError(new Error("gateway rejected gateway-secret"), {
+        AI_GATEWAY_API_KEY: "gateway-secret",
+      }),
+    ).toBe("gateway rejected [redacted]");
+    expect(
       safeInvestigationError(new Error("request used dtn_secret_1234-abcd"), {}),
     ).toBe("request used [secret placeholder redacted]");
   });

@@ -21,7 +21,11 @@ function redactText(
   environment: NodeJS.ProcessEnv,
 ): string {
   let safe = redactDaytonaSecretPlaceholders(value);
-  for (const name of ["OPENAI_API_KEY", "DAYTONA_API_KEY"] as const) {
+  for (const name of [
+    "OPENAI_API_KEY",
+    "DAYTONA_API_KEY",
+    "AI_GATEWAY_API_KEY",
+  ] as const) {
     const secret = environment[name];
     if (secret) safe = safe.replaceAll(secret, "[redacted]");
   }

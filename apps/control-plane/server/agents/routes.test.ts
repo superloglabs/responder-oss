@@ -135,6 +135,7 @@ const agentConfiguration = {
   contextAccountIds: [],
   contextResourceIds: [],
   secretIds: [],
+  initialTriageEnabled: false,
   createLinearTickets: false,
   linearIssueTemplate: "",
   trigger: {

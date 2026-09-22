@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SlackApiError } from "./slack.js";
 import {
   redeliverInvestigationSlackIssue,
+  removeInitialTriageSlackReactions,
   slackCompletedInvestigationCard,
   slackDeliveryClientMessageId,
   slackDeliveryErrorMessage,
@@ -12,6 +13,35 @@ import {
 } from "./slack-delivery.js";
 
 describe("Slack issue delivery", () => {
+  it("removes every temporary triage circle after final assessment", async () => {
+    const recordReaction = vi.fn().mockResolvedValue(undefined);
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    await removeInitialTriageSlackReactions(
+      {
+        accessToken: "xoxb-test",
+        channelId: "C123",
+        investigationId: "16161616-1616-4616-8616-161616161616",
+        timestamp: "1785500000.000100",
+      },
+      { recordReaction, removeReaction },
+    );
+
+    expect(removeReaction.mock.calls.map(([input]) => input.name)).toEqual([
+      "red_circle",
+      "large_orange_circle",
+      "large_yellow_circle",
+      "large_green_circle",
+    ]);
+    expect(recordReaction.mock.calls.map(([, name, active]) => [name, active]))
+      .toEqual([
+        ["red_circle", false],
+        ["large_orange_circle", false],
+        ["large_yellow_circle", false],
+        ["large_green_circle", false],
+      ]);
+  });
+
   it("keeps the completed investigation card focused on the trace", () => {
     const investigationId = "16161616-1616-4616-8616-161616161616";
     const message = slackCompletedInvestigationCard({
