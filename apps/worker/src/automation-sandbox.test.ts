@@ -152,4 +152,46 @@ describe("fresh automation sandbox", () => {
     ).rejects.toThrow("cannot be used as a sandbox name");
     expect(dependencies.createClient).not.toHaveBeenCalled();
   });
+
+  it("serializes overlapping model broker operations and clears the token", async () => {
+    const { dependencies, session } = harness();
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+
+    await runInFreshAutomationSandbox(
+      {
+        ...input,
+        run: async (activeSession, withModelBroker) => {
+          const first = withModelBroker(async () => {
+            events.push("first:start");
+            expect(
+              activeSession.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
+            ).toBe("short-lived-run-token");
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve;
+            });
+            events.push("first:end");
+          });
+          const second = withModelBroker(async () => {
+            events.push("second:start");
+            expect(
+              activeSession.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
+            ).toBe("short-lived-run-token");
+          });
+
+          await vi.waitFor(() => {
+            expect(events).toEqual(["first:start"]);
+          });
+          releaseFirst?.();
+          await Promise.all([first, second]);
+        },
+      },
+      dependencies,
+    );
+
+    expect(events).toEqual(["first:start", "first:end", "second:start"]);
+    expect(
+      session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
+    ).toBeUndefined();
+  });
 });

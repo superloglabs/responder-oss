@@ -77,6 +77,23 @@ async function withRunScopedModelBroker<Result>(
   }
 }
 
+function serializedModelBrokerAccess(
+  session: DaytonaSandboxSession,
+  brokerToken: string,
+): <Result>(operation: () => Promise<Result>) => Promise<Result> {
+  let previous = Promise.resolve();
+  return <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const current = previous.then(() =>
+      withRunScopedModelBroker(session, brokerToken, operation)
+    );
+    previous = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
+  };
+}
+
 export async function runInFreshAutomationSandbox<T>(
   input: FreshAutomationSandboxInput<T>,
   dependencies: AutomationSandboxDependencies = defaultDependencies,
@@ -103,8 +120,9 @@ export async function runInFreshAutomationSandbox<T>(
       await dependencies.prepare(session);
     }
     const activeSession = session;
-    return await input.run(activeSession, (operation) =>
-      withRunScopedModelBroker(activeSession, input.brokerToken, operation)
+    return await input.run(
+      activeSession,
+      serializedModelBrokerAccess(activeSession, input.brokerToken),
     );
   } finally {
     if (session) {

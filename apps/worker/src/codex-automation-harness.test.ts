@@ -38,6 +38,7 @@ describe("Codex automation harness", () => {
     expect(command?.indexOf("unset RESPONDER_MODEL_BROKER_TOKEN")).toBeLessThan(
       command?.indexOf("npm install") ?? -1,
     );
+    expect(command).toContain("process.versions.node");
   });
 
   it("fails safely when the pinned CLI cannot be prepared", async () => {
@@ -121,6 +122,25 @@ describe("Codex automation harness", () => {
 
     await expect(runCodexAutomation(session, input)).rejects.toThrow(
       "Automation workspace cannot use symlink redirects",
+    );
+    expect(session.materializeEntry).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing workspace separately from a symlink redirect", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(
+          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 42\nOutput:\n",
+        ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      "Automation workspace does not exist",
     );
     expect(session.materializeEntry).not.toHaveBeenCalled();
   });

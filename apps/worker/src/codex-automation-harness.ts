@@ -11,6 +11,7 @@ import {
 
 export const codexCliVersion = "0.155.1";
 
+const codexMinimumNodeMajorVersion = 16;
 const codexInstallRoot = `${automationWorkspaceRoot}/.responder/codex/${codexCliVersion}`;
 const codexExecutable = `${codexInstallRoot}/node_modules/.bin/codex`;
 const codexHome = `${automationWorkspaceRoot}/.responder/codex-home`;
@@ -89,6 +90,7 @@ export async function prepareCodexAutomationHarness(
       `unset ${modelBrokerTokenEnvironmentVariable}`,
       `mkdir -p ${shellQuote(codexInstallRoot)}`,
       `if [ -x ${shellQuote(codexExecutable)} ] && [ "$(${shellQuote(codexExecutable)} --version)" = ${shellQuote(expectedVersion)} ]; then exit 0; fi`,
+      `node -e ${shellQuote(`if (Number(process.versions.node.split(".")[0]) < ${codexMinimumNodeMajorVersion}) process.exit(1)`)}`,
       `npm install --prefix ${shellQuote(codexInstallRoot)} --ignore-scripts --no-audit --no-fund --no-package-lock --no-save ${shellQuote(`@openai/codex@${codexCliVersion}`)}`,
       `[ "$(${shellQuote(codexExecutable)} --version)" = ${shellQuote(expectedVersion)} ]`,
     ].join("\n"),
@@ -109,6 +111,7 @@ async function assertAutomationWorkspaceHasNoSymlinkRedirects(
     cmd: [
       "set -eu",
       `unset ${modelBrokerTokenEnvironmentVariable}`,
+      `if [ ! -d ${shellQuote(resolvedWorkspacePath)} ]; then exit 42; fi`,
       `resolved=$(realpath -e -- ${shellQuote(resolvedWorkspacePath)})`,
       `[ "$resolved" = ${shellQuote(resolvedWorkspacePath)} ]`,
     ].join("\n"),
@@ -116,6 +119,9 @@ async function assertAutomationWorkspaceHasNoSymlinkRedirects(
     workdir: automationWorkspaceRoot,
   });
   if (!commandSucceeded(output)) {
+    if (/(?:^|\n)Process exited with code 42(?:\n|$)/u.test(output)) {
+      throw new Error("Automation workspace does not exist");
+    }
     throw new Error("Automation workspace cannot use symlink redirects");
   }
 }
