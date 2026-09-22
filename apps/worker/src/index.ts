@@ -542,7 +542,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
           await reportWorkerException(error, {
             investigationId: payload.investigationId,
             jobId: job.id,
-            operation: "slack_delivery",
+            operation: "investigation",
             organizationId: payload.config.organizationId,
           }).catch(() => undefined);
         },

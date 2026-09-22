@@ -102,6 +102,7 @@ const initialTriageAttributeNames = [
   "awsAlarmName",
   "awsAlarmState",
   "awsAlarmRegion",
+  "awsAlarmUrl",
 ] as const;
 
 function initialTriageAttributes(
@@ -109,7 +110,14 @@ function initialTriageAttributes(
 ): InvestigationInput["attributes"] {
   if (!attributes) return undefined;
   const selected = initialTriageAttributeNames.flatMap((name) =>
-    attributes[name] === undefined ? [] : [[name, attributes[name]] as const],
+    attributes[name] === undefined
+      ? []
+      : [[
+          name,
+          typeof attributes[name] === "string"
+            ? attributes[name].slice(0, 2_000)
+            : attributes[name],
+        ] as const],
   );
   return selected.length > 0 ? Object.fromEntries(selected) : undefined;
 }
@@ -675,8 +683,10 @@ export async function getInitialTriageContext(
       attributes: initialTriageAttributes(current.input.attributes),
       body: current.input.body.slice(0, initialTriageAlertBodyLimit),
       provider: current.input.provider,
-      ...(current.input.sourceUrl ? { sourceUrl: current.input.sourceUrl } : {}),
-      title: current.input.title,
+      ...(current.input.sourceUrl
+        ? { sourceUrl: current.input.sourceUrl.slice(0, 2_000) }
+        : {}),
+      title: current.input.title.slice(0, 500),
     },
     existingReactions: current.slackThreadSnapshot?.reactions ?? [],
     recentIncidents: history.flatMap((incident) => {
@@ -694,7 +704,7 @@ export async function getInitialTriageContext(
         outcome: outcome.slice(0, initialTriageHistorySummaryLimit),
         provider: incident.input.provider,
         status: incident.status,
-        title: incident.title,
+        title: incident.title.slice(0, 500),
       }];
     }),
   };

@@ -144,6 +144,43 @@ describe("initial Jev triage", () => {
     );
   });
 
+  it("bounds alert metadata before sending it to Jev", async () => {
+    mocks.getInitialTriageContext.mockResolvedValue({
+      ...context,
+      alert: {
+        ...context.alert,
+        attributes: {
+          slackAlertProvider: "sentry",
+          awsAlarmUrl: `https://example.com/${"a".repeat(3_000)}`,
+        },
+        sourceUrl: `https://example.com/${"b".repeat(3_000)}`,
+        title: "t".repeat(1_000),
+      },
+    });
+
+    await runInitialTriage(investigationId, {
+      AI_GATEWAY_API_KEY: "gateway-key",
+    });
+
+    const state = mocks.evaluate.mock.calls[0]![0].state;
+    expect(state.alert.title).toHaveLength(500);
+    expect(state.alert.sourceUrl).toHaveLength(2_000);
+    expect(state.alert.attributes.awsAlarmUrl).toHaveLength(2_000);
+  });
+
+  it("continues without Sentry enrichment when the lookup fails", async () => {
+    mocks.fetchSentryIssueTriageContext.mockRejectedValue(
+      new Error("Sentry unavailable"),
+    );
+
+    await expect(
+      runInitialTriage(investigationId, { AI_GATEWAY_API_KEY: "gateway-key" }),
+    ).resolves.toBe("red_circle");
+    expect(mocks.evaluate.mock.calls[0]![0].state).not.toHaveProperty(
+      "sentryIssue",
+    );
+  });
+
   it("does nothing when the pinned agent version has triage disabled", async () => {
     mocks.getInitialTriageContext.mockResolvedValue(null);
 

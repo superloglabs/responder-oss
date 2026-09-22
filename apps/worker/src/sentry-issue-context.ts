@@ -90,7 +90,7 @@ export function sentryIssueLocator(body: string): SentryIssueLocator | null {
   for (const candidate of urls) {
     let url: URL;
     try {
-      url = new URL(candidate);
+      url = new URL(candidate.replace(/[.,;:!?]+$/u, ""));
     } catch {
       continue;
     }
@@ -117,11 +117,9 @@ export async function fetchSentryIssueTriageContext(
     connection: RuntimeSentryConnection;
   },
   request: typeof fetch = globalThis.fetch,
-): Promise<SentryIssueTriageContext> {
+): Promise<SentryIssueTriageContext | null> {
   const locator = sentryIssueLocator(input.alertBody);
-  if (!locator) {
-    throw new Error("Sentry alert does not contain a supported issue URL");
-  }
+  if (!locator) return null;
   const url = new URL(
     `/api/0/organizations/${encodeURIComponent(input.connection.organizationSlug)}/issues/${encodeURIComponent(locator.issueId)}/`,
     locator.apiBaseUrl,
@@ -136,7 +134,9 @@ export async function fetchSentryIssueTriageContext(
   if (!response.ok) {
     throw new Error(`Sentry issue request failed (status=${response.status})`);
   }
-  const issue = sentryIssueSchema.parse(await response.json());
+  const parsedIssue = sentryIssueSchema.safeParse(await response.json());
+  if (!parsedIssue.success) return null;
+  const issue = parsedIssue.data;
   const latestEvent = issue.latestEvent
     ? definedEntries({
         culprit: boundedText(issue.latestEvent.culprit, 1_000),

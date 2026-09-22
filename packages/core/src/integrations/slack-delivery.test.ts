@@ -3,6 +3,7 @@ import { SlackApiError } from "./slack.js";
 import {
   redeliverInvestigationSlackIssue,
   removeInitialTriageSlackReactions,
+  shouldRemoveInitialTriageSlackReactions,
   slackCompletedInvestigationCard,
   slackDeliveryClientMessageId,
   slackDeliveryErrorMessage,
@@ -40,6 +41,31 @@ describe("Slack issue delivery", () => {
         ["large_yellow_circle", false],
         ["large_green_circle", false],
       ]);
+  });
+
+  it("does not fail Slack cleanup when reaction bookkeeping fails", async () => {
+    const recordReaction = vi.fn()
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValue(undefined);
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      removeInitialTriageSlackReactions(
+        {
+          accessToken: "xoxb-test",
+          channelId: "C123",
+          investigationId: "16161616-1616-4616-8616-161616161616",
+          timestamp: "1785500000.000100",
+        },
+        { recordReaction, removeReaction },
+      ),
+    ).resolves.toBeUndefined();
+    expect(recordReaction).toHaveBeenCalledTimes(4);
+  });
+
+  it("only removes temporary circles for triage-enabled investigations", () => {
+    expect(shouldRemoveInitialTriageSlackReactions(true)).toBe(true);
+    expect(shouldRemoveInitialTriageSlackReactions(false)).toBe(false);
   });
 
   it("keeps the completed investigation card focused on the trace", () => {

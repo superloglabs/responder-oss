@@ -39,7 +39,10 @@ describe("initial triage context", () => {
         createdAt: new Date("2026-09-22T10:00:00.000Z"),
         initialTriageEnabled: true,
         input: {
-          attributes: { channelId: "C123" },
+          attributes: {
+            awsAlarmUrl: `https://example.com/${"d".repeat(3_000)}`,
+            channelId: "C123",
+          },
           body: "a".repeat(20_000),
           externalEventId: "event-2",
           provider: "slack",
@@ -84,6 +87,9 @@ describe("initial triage context", () => {
 
     expect(result?.agentConfigVersionId).toBe("config-1");
     expect(result?.alert.body).toHaveLength(12_000);
+    expect(result?.alert.attributes).toEqual({
+      awsAlarmUrl: `https://example.com/${"d".repeat(1_980)}`,
+    });
     expect(result?.existingReactions).toEqual(["eyes"]);
     expect(result?.recentIncidents).toEqual([
       expect.objectContaining({

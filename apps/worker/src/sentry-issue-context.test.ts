@@ -23,6 +23,14 @@ describe("Sentry issue triage context", () => {
       issueId: "140145604",
     });
     expect(sentryIssueLocator("No issue URL here")).toBeNull();
+    expect(
+      sentryIssueLocator(
+        "See https://example.sentry.io/issues/140145605/.,",
+      ),
+    ).toEqual({
+      apiBaseUrl: "https://sentry.io",
+      issueId: "140145605",
+    });
   });
 
   it("fetches the connected organization's issue and returns bounded fields", async () => {
@@ -81,10 +89,10 @@ describe("Sentry issue triage context", () => {
       status: "unresolved",
       userCount: 42,
     }));
-    expect(result.latestEvent?.message).toHaveLength(2_000);
+    expect(result?.latestEvent?.message).toHaveLength(2_000);
   });
 
-  it("does not make an API request without a supported issue URL", async () => {
+  it("returns no enrichment without a supported issue URL", async () => {
     const request = vi.fn();
 
     await expect(
@@ -99,7 +107,29 @@ describe("Sentry issue triage context", () => {
         },
         request,
       ),
-    ).rejects.toThrow("supported issue URL");
+    ).resolves.toBeNull();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("returns no enrichment for an unexpected Sentry response", async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({
+      id: "140145603",
+      latestEvent: { message: { unexpected: true } },
+      permalink: null,
+    }));
+
+    await expect(
+      fetchSentryIssueTriageContext(
+        {
+          alertBody: "https://example.sentry.io/issues/140145603/",
+          connection: {
+            accessToken: "sentry-token",
+            mcpUrl: "https://mcp.sentry.dev/example",
+            organizationSlug: "example",
+          },
+        },
+        request,
+      ),
+    ).resolves.toBeNull();
   });
 });

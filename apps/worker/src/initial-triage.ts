@@ -22,6 +22,10 @@ const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
 });
 
+const initialTriageTitleLimit = 500;
+const initialTriageUrlLimit = 2_000;
+const initialTriageAttributeLimit = 2_000;
+
 export const INITIAL_TRIAGE_REACTIONS = INITIAL_TRIAGE_SLACK_REACTIONS;
 
 const initialTriageQuestions = {
@@ -81,14 +85,42 @@ export async function runInitialTriage(
         "A connected Sentry account is required to triage a Sentry alert",
       );
     }
-    sentryIssue = await fetchSentryIssueTriageContext({
-      alertBody: context.alert.body,
-      connection,
-    });
+    try {
+      sentryIssue = await fetchSentryIssueTriageContext({
+        alertBody: context.alert.body,
+        connection,
+      });
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          error: error instanceof Error ? error.message : "Sentry lookup failed",
+          event: "initial_triage_sentry_context_failed",
+          investigationId,
+        }),
+      );
+    }
   }
   const gateway = createGateway({ apiKey });
   const state = JSON.parse(JSON.stringify({
-    alert: context.alert,
+    alert: {
+      ...context.alert,
+      title: context.alert.title.slice(0, initialTriageTitleLimit),
+      ...(context.alert.sourceUrl
+        ? { sourceUrl: context.alert.sourceUrl.slice(0, initialTriageUrlLimit) }
+        : {}),
+      ...(context.alert.attributes
+        ? {
+            attributes: Object.fromEntries(
+              Object.entries(context.alert.attributes).map(([name, value]) => [
+                name,
+                typeof value === "string"
+                  ? value.slice(0, initialTriageAttributeLimit)
+                  : value,
+              ]),
+            ),
+          }
+        : {}),
+    },
     recentIncidents: context.recentIncidents,
     ...(sentryIssue ? { sentryIssue } : {}),
   })) as Record<string, JSONValue>;

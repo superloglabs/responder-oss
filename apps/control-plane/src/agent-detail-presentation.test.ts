@@ -107,6 +107,18 @@ describe("buildAgentPipelinePresentation", () => {
     });
   });
 
+  it("shows when initial Slack triage is enabled", () => {
+    const enabled = buildAgentPipelinePresentation(
+      { ...configuration, initialTriageEnabled: true },
+      [],
+      options,
+    );
+    const disabled = buildAgentPipelinePresentation(configuration, [], options);
+
+    expect(enabled.input.detail).toBe("Jev initial triage enabled");
+    expect(disabled.input.detail).toBeUndefined();
+  });
+
   it("describes mention triggers and source-thread reporting without resources", () => {
     const presentation = buildAgentPipelinePresentation(
       {
