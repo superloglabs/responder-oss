@@ -3,6 +3,7 @@ import type { IssuePullRequestActivityEvent } from "./schema.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
+  agentVersionRepositories,
   agents,
   instanceConfiguration,
   integrationAccounts,
@@ -12,6 +13,7 @@ import {
   issuePullRequestSlackMessages,
   issuePullRequests,
   issues,
+  repositories,
   runtimeProfiles,
 } from "./schema.js";
 
@@ -437,12 +439,44 @@ export async function queueManualIssuePullRequest(input: {
       );
     }
 
-    const changes = remediation.changes;
+    let changes = remediation.changes;
     if (changes.length === 0) {
       throw new IssuePullRequestError(
         "Code remediation not found",
         "remediation_not_found",
       );
+    }
+    if (changes.some((change) => !change.repository)) {
+      if (changes.length !== 1) {
+        throw new IssuePullRequestError(
+          "The code remediation must name a repository",
+          "remediation_not_found",
+        );
+      }
+      const attachedRepositories = await tx
+        .select({ fullName: repositories.fullName })
+        .from(agentVersionRepositories)
+        .innerJoin(
+          repositories,
+          eq(repositories.id, agentVersionRepositories.repositoryId),
+        )
+        .where(
+          eq(
+            agentVersionRepositories.agentConfigVersionId,
+            target.agentConfigVersionId,
+          ),
+        )
+        .limit(2);
+      if (attachedRepositories.length !== 1) {
+        throw new IssuePullRequestError(
+          "The code remediation must name a repository",
+          "remediation_not_found",
+        );
+      }
+      changes = [{
+        ...changes[0]!,
+        repository: attachedRepositories[0]!.fullName,
+      }];
     }
     const insert = tx.insert(issuePullRequests).values(
       changes.map((change) => ({

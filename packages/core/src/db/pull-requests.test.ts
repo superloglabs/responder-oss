@@ -69,6 +69,7 @@ function databaseDouble(
   inserted: Array<{ id: string }>,
   options: {
     activeIndexAvailable?: boolean;
+    attachedRepositories?: Array<{ fullName: string }>;
     existing?: Array<{ id: string }>;
     remediations?: unknown[];
   } = {},
@@ -97,7 +98,10 @@ function databaseDouble(
         }]),
       )
       .mockReturnValueOnce(simpleSelect(options.existing ?? [], existingLimit))
-      .mockReturnValueOnce(eligible);
+      .mockReturnValueOnce(eligible)
+      .mockReturnValueOnce(
+        joinedSelect(options.attachedRepositories ?? [{ fullName: "acme/api" }]),
+      );
     return callback({
       execute,
       insert: vi.fn(() => ({ values })),
@@ -220,6 +224,22 @@ describe("manual pull request uniqueness", () => {
       expect.objectContaining({ repositoryFullName: "acme/app" }),
       expect.objectContaining({ repositoryFullName: "acme/sdk" }),
     ]);
+  });
+
+  it("rejects a repository-less remediation when several repositories are attached", async () => {
+    databaseDouble([], {
+      attachedRepositories: [
+        { fullName: "acme/api" },
+        { fullName: "acme/web" },
+      ],
+    });
+
+    await expect(
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
+    ).rejects.toMatchObject({
+      code: "remediation_not_found",
+      message: "The code remediation must name a repository",
+    });
   });
 
   it("allows a failed automatic pull request to be retried", async () => {
