@@ -19,6 +19,7 @@ export interface CreateDraft {
   contextAccountIds: string[];
   contextResourceIds: string[];
   workspaceSecretRecordIds: string[];
+  initialTriageEnabled: boolean;
   createLinearTickets: boolean;
   linearIssueTemplate: string;
   instructions: string;
@@ -50,6 +51,7 @@ export function draftForSessionStorage(
     prMode: draft.prMode,
     contextAccountIds: draft.contextAccountIds,
     contextResourceIds: draft.contextResourceIds,
+    initialTriageEnabled: draft.initialTriageEnabled,
     workspaceSecretNames: options.secrets
       .filter((secret) => draft.workspaceSecretRecordIds.includes(secret.id))
       .map((secret) => secret.name),

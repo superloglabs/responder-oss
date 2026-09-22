@@ -1,0 +1,1 @@
+ALTER TABLE "agent_config_versions" ADD COLUMN "initial_triage_enabled" boolean DEFAULT false NOT NULL;

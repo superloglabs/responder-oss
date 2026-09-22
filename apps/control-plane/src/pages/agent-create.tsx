@@ -261,6 +261,7 @@ function draftFromConfiguration(
     contextAccountIds: configuration.contextAccountIds,
     contextResourceIds: configuration.contextResourceIds,
     workspaceSecretRecordIds: configuration.secretIds,
+    initialTriageEnabled: configuration.initialTriageEnabled,
     createLinearTickets: configuration.createLinearTickets,
     linearIssueTemplate: configuration.linearIssueTemplate,
     instructions: configuration.instructions,
@@ -397,6 +398,8 @@ function createInitialDraft(
       ) ??
       (isEditing ? defaultContext.contextResourceIds : []),
     workspaceSecretRecordIds,
+    initialTriageEnabled:
+      saved.initialTriageEnabled ?? configured.initialTriageEnabled ?? false,
     createLinearTickets:
       saved.createLinearTickets ?? configured.createLinearTickets ?? false,
     linearIssueTemplate:
@@ -1578,6 +1581,7 @@ export function AgentCreatePage() {
       contextAccountIds: currentDraft.contextAccountIds,
       contextResourceIds: currentDraft.contextResourceIds,
       secretIds: currentDraft.workspaceSecretRecordIds,
+      initialTriageEnabled: currentDraft.initialTriageEnabled,
       createLinearTickets: currentDraft.createLinearTickets,
       linearIssueTemplate: currentDraft.linearIssueTemplate.trim(),
       trigger,
@@ -1887,6 +1891,7 @@ export function AgentCreatePage() {
                 onChange={() =>
                   updateDraft({
                     inputKind: "sentry_issue",
+                    initialTriageEnabled: false,
                     outputMode: "output_channel",
                   })
                 }
@@ -1900,6 +1905,7 @@ export function AgentCreatePage() {
                 onChange={() =>
                   updateDraft({
                     inputKind: "dash0_alert",
+                    initialTriageEnabled: false,
                     outputMode: "output_channel",
                   })
                 }
@@ -2053,6 +2059,16 @@ export function AgentCreatePage() {
                   refreshing={refreshingSlackChannels}
                   value={draft.slackInputResourceId}
                 />
+                <Checkbox
+                  checked={draft.initialTriageEnabled}
+                  description="Use Jev with this alert and up to eight recent incidents, then add a red SEV-1, orange SEV-2, yellow SEV-3, or green no-issue reaction. Unclear alerts get no reaction."
+                  label="Add an initial triage reaction"
+                  onChange={(event) =>
+                    updateDraft({
+                      initialTriageEnabled: event.target.checked,
+                    })
+                  }
+                />
               </Panel>
           ) : (
             <ConnectionPrompt
@@ -2087,6 +2103,16 @@ export function AgentCreatePage() {
                   refreshError={slackRefreshError}
                   refreshing={refreshingSlackChannels}
                   value={draft.slackInputResourceId}
+                />
+                <Checkbox
+                  checked={draft.initialTriageEnabled}
+                  description="Use Jev with this alert and up to eight recent incidents, then add a red SEV-1, orange SEV-2, yellow SEV-3, or green no-issue reaction. Unclear alerts get no reaction."
+                  label="Add an initial triage reaction"
+                  onChange={(event) =>
+                    updateDraft({
+                      initialTriageEnabled: event.target.checked,
+                    })
+                  }
                 />
               </NewAgentSetupStep>
             ) : (

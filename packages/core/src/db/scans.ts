@@ -100,6 +100,7 @@ export async function scanAgentConfiguration(input: {
     contextAccountIds: input.configuration.contextAccountIds,
     contextResourceIds: input.configuration.contextResourceIds,
     secretIds: [],
+    initialTriageEnabled: false,
     createLinearTickets: false,
     linearIssueTemplate: defaultLinearIssueTemplate,
     trigger: {

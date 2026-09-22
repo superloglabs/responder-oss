@@ -62,7 +62,9 @@ dashboard, create an account, and create the first workspace.
 The UI and authentication flow work without provider credentials. Set
 `DAYTONA_API_KEY` to store workspace secrets or run investigations, and set
 `OPENAI_API_KEY` to run investigations. Restart the stack after changing
-`.env.local`. See [.env.example](.env.example) for all configuration.
+`.env.local`. Agents using initial triage reactions also require an
+`AI_GATEWAY_API_KEY` for Jev through Vercel AI Gateway. See
+[.env.example](.env.example) for all configuration.
 
 Provider OAuth and webhooks require a public HTTPS origin. The local tunnel
 workflow is documented in [docs/integrations.md](docs/integrations.md).

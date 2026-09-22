@@ -42,6 +42,7 @@ const configuration: AgentConfiguration = {
   contextAccountIds: ["sentry", "datadog", "upstash"],
   contextResourceIds: [],
   secretIds: ["service-key"],
+  initialTriageEnabled: false,
   createLinearTickets: false,
   linearIssueTemplate: "{{description}}",
   description: "Investigates production alerts.",
@@ -104,6 +105,18 @@ describe("buildAgentPipelinePresentation", () => {
       meta: "Pull requests on demand",
       title: "#incident-response",
     });
+  });
+
+  it("shows when initial Slack triage is enabled", () => {
+    const enabled = buildAgentPipelinePresentation(
+      { ...configuration, initialTriageEnabled: true },
+      [],
+      options,
+    );
+    const disabled = buildAgentPipelinePresentation(configuration, [], options);
+
+    expect(enabled.input.detail).toBe("Jev initial triage enabled");
+    expect(disabled.input.detail).toBeUndefined();
   });
 
   it("describes mention triggers and source-thread reporting without resources", () => {

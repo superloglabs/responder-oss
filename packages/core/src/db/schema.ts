@@ -224,6 +224,9 @@ export const agentConfigVersions = pgTable(
       .$type<AgentPrMode>()
       .notNull()
       .default("disabled"),
+    initialTriageEnabled: boolean("initial_triage_enabled")
+      .notNull()
+      .default(false),
     createLinearTickets: boolean("create_linear_tickets").notNull().default(false),
     linearIssueTemplate: text("linear_issue_template")
       .notNull()

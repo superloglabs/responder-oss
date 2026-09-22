@@ -79,6 +79,7 @@ import {
 import { processRemediationJob } from "./remediation-job.js";
 import { processPullRequestReviewJob } from "./pull-request-review-job.js";
 import { loadResponderSecrets } from "@responder/core/secrets";
+import { runInitialTriage } from "./initial-triage.js";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -523,6 +524,30 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
 
   try {
+    if (
+      payload.request.provider === "slack" &&
+      !payload.replay &&
+      !payload.slackIssueFollowup
+    ) {
+      await runInitialTriage(payload.investigationId, process.env).catch(
+        async (error: unknown) => {
+          console.error(
+            JSON.stringify({
+              error: safeInvestigationError(error),
+              event: "initial_triage_failed",
+              investigationId: payload.investigationId,
+              jobId: job.id,
+            }),
+          );
+          await reportWorkerException(error, {
+            investigationId: payload.investigationId,
+            jobId: job.id,
+            operation: "investigation",
+            organizationId: payload.config.organizationId,
+          }).catch(() => undefined);
+        },
+      );
+    }
     const result = await runInvestigationAgent(
       payload,
       process.env,

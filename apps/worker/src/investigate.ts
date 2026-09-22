@@ -116,7 +116,11 @@ export function safeInvestigationError(
       : typeof error === "string"
         ? error
         : "Investigation agent failed";
-  for (const name of ["OPENAI_API_KEY", "DAYTONA_API_KEY"] as const) {
+  for (const name of [
+    "OPENAI_API_KEY",
+    "DAYTONA_API_KEY",
+    "AI_GATEWAY_API_KEY",
+  ] as const) {
     const value = environment[name];
     if (value) message = message.replaceAll(value, "[redacted]");
   }
