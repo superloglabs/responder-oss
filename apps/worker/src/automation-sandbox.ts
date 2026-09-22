@@ -82,6 +82,8 @@ interface SerializedModelBrokerAccess {
   run<Result>(operation: () => Promise<Result>): Promise<Result>;
 }
 
+const modelBrokerDrainTimeoutMs = 30_000;
+
 function serializedModelBrokerAccess(
   session: DaytonaSandboxSession,
   brokerToken: string,
@@ -94,7 +96,22 @@ function serializedModelBrokerAccess(
   return {
     async drain(): Promise<void> {
       acceptingOperations = false;
-      await previous;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          previous,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              delete session.state.environment[
+                modelBrokerTokenEnvironmentVariable
+              ];
+              reject(new Error("Model broker drain timed out"));
+            }, modelBrokerDrainTimeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
       if (queuedOperationFailed) throw queuedFailure;
     },
     run<Result>(operation: () => Promise<Result>): Promise<Result> {

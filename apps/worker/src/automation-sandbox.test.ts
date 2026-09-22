@@ -255,4 +255,38 @@ describe("fresh automation sandbox", () => {
       { jobId: "run-1", organizationId: "organization-1" },
     );
   });
+
+  it("closes the sandbox when a detached model operation never settles", async () => {
+    vi.useFakeTimers();
+    const { dependencies, session } = harness();
+
+    try {
+      const run = runInFreshAutomationSandbox(
+        {
+          ...input,
+          run: async (_session, withModelBroker) => {
+            void withModelBroker(() => new Promise(() => undefined));
+            return "completed too early";
+          },
+        },
+        dependencies,
+      );
+
+      const rejection = expect(run).rejects.toThrow(
+        "Model broker drain timed out",
+      );
+      await vi.runAllTimersAsync();
+      await rejection;
+      expect(dependencies.close).toHaveBeenCalledWith(
+        session,
+        input.config,
+        { jobId: "run-1", organizationId: "organization-1" },
+      );
+      expect(
+        session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
