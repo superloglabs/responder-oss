@@ -194,4 +194,65 @@ describe("fresh automation sandbox", () => {
       session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
     ).toBeUndefined();
   });
+
+  it("drains queued model operations before closing the sandbox", async () => {
+    const { dependencies } = harness();
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    dependencies.close.mockImplementation(async () => {
+      events.push("close");
+    });
+
+    const run = runInFreshAutomationSandbox(
+      {
+        ...input,
+        run: async (_session, withModelBroker) => {
+          void withModelBroker(async () => {
+            events.push("first:start");
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve;
+            });
+            events.push("first:end");
+          });
+          void withModelBroker(async () => {
+            events.push("second");
+          });
+          return "completed";
+        },
+      },
+      dependencies,
+    );
+
+    await vi.waitFor(() => {
+      expect(events).toEqual(["first:start"]);
+    });
+    releaseFirst?.();
+    await expect(run).resolves.toBe("completed");
+    expect(events).toEqual(["first:start", "first:end", "second", "close"]);
+  });
+
+  it("fails the run when a detached queued model operation fails", async () => {
+    const { dependencies, session } = harness();
+    const queueError = new Error("queued model call failed");
+
+    await expect(
+      runInFreshAutomationSandbox(
+        {
+          ...input,
+          run: async (_session, withModelBroker) => {
+            void withModelBroker(async () => {
+              throw queueError;
+            });
+            return "completed too early";
+          },
+        },
+        dependencies,
+      ),
+    ).rejects.toBe(queueError);
+    expect(dependencies.close).toHaveBeenCalledWith(
+      session,
+      input.config,
+      { jobId: "run-1", organizationId: "organization-1" },
+    );
+  });
 });

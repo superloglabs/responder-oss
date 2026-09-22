@@ -77,20 +77,44 @@ async function withRunScopedModelBroker<Result>(
   }
 }
 
+interface SerializedModelBrokerAccess {
+  drain(): Promise<void>;
+  run<Result>(operation: () => Promise<Result>): Promise<Result>;
+}
+
 function serializedModelBrokerAccess(
   session: DaytonaSandboxSession,
   brokerToken: string,
-): <Result>(operation: () => Promise<Result>) => Promise<Result> {
+): SerializedModelBrokerAccess {
   let previous = Promise.resolve();
-  return <Result>(operation: () => Promise<Result>): Promise<Result> => {
-    const current = previous.then(() =>
-      withRunScopedModelBroker(session, brokerToken, operation)
-    );
-    previous = current.then(
-      () => undefined,
-      () => undefined,
-    );
-    return current;
+  let acceptingOperations = true;
+  let queuedFailure: unknown;
+  let queuedOperationFailed = false;
+
+  return {
+    async drain(): Promise<void> {
+      acceptingOperations = false;
+      await previous;
+      if (queuedOperationFailed) throw queuedFailure;
+    },
+    run<Result>(operation: () => Promise<Result>): Promise<Result> {
+      if (!acceptingOperations) {
+        return Promise.reject(new Error("Model broker operation queue is closed"));
+      }
+      const current = previous.then(() =>
+        withRunScopedModelBroker(session, brokerToken, operation)
+      );
+      previous = current.then(
+        () => undefined,
+        (error: unknown) => {
+          if (!queuedOperationFailed) {
+            queuedOperationFailed = true;
+            queuedFailure = error;
+          }
+        },
+      );
+      return current;
+    },
   };
 }
 
@@ -120,10 +144,33 @@ export async function runInFreshAutomationSandbox<T>(
       await dependencies.prepare(session);
     }
     const activeSession = session;
-    return await input.run(
+    const modelBroker = serializedModelBrokerAccess(
       activeSession,
-      serializedModelBrokerAccess(activeSession, input.brokerToken),
+      input.brokerToken,
     );
+    let outcome:
+      | { error: unknown; succeeded: false }
+      | { succeeded: true; value: T };
+    try {
+      outcome = {
+        succeeded: true,
+        value: await input.run(activeSession, modelBroker.run),
+      };
+    } catch (error) {
+      outcome = { error, succeeded: false };
+    }
+    try {
+      await modelBroker.drain();
+    } catch (queueError) {
+      if (outcome.succeeded) throw queueError;
+      if (queueError === outcome.error) throw outcome.error;
+      throw new AggregateError(
+        [outcome.error, queueError],
+        "Automation callback and queued model operation failed",
+      );
+    }
+    if (!outcome.succeeded) throw outcome.error;
+    return outcome.value;
   } finally {
     if (session) {
       await dependencies.close(session, input.config, {
