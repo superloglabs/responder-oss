@@ -2,7 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ProviderGlyph } from "./icons";
-import { contextProviderMetadata } from "./provider-glyphs";
+import {
+  contextProviderMetadata,
+  contextProviderSearchText,
+} from "./provider-glyphs";
 
 describe("ProviderGlyph", () => {
   it("keeps Supabase discovery metadata with its canonical provider metadata", () => {
@@ -10,6 +13,13 @@ describe("ProviderGlyph", () => {
       category: "Data & infrastructure",
       searchTerms: "postgres database sql logs",
     });
+  });
+
+  it("builds search text only for supported context providers", () => {
+    expect(contextProviderSearchText("aws", "AWS", "Cloud accounts")).toContain(
+      "Data & infrastructure",
+    );
+    expect(contextProviderSearchText("unknown", "Unknown", "New provider")).toBeNull();
   });
 
   it.each([

@@ -29,6 +29,7 @@ import {
   contextCategoryDescriptions,
   contextCategoryOrder,
   contextProviderMetadata,
+  contextProviderSearchText,
   providerDisplayName,
 } from "../components/provider-glyphs";
 import { SettingsHeading } from "../components/settings-heading";
@@ -227,8 +228,12 @@ export function TagModeSettingsPage() {
     ) {
       return false;
     }
-    const metadata = contextProviderMetadata[integration.id];
-    return `${integration.name} ${integration.description} ${metadata.category} ${metadata.searchTerms}`
+    const searchText = contextProviderSearchText(
+      integration.id,
+      integration.name,
+      integration.description,
+    );
+    return searchText !== null && searchText
       .toLocaleLowerCase()
       .includes(normalizedIntegrationQuery);
   });

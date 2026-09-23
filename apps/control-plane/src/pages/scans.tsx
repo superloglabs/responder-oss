@@ -24,6 +24,7 @@ import {
   contextCategoryDescriptions,
   contextCategoryOrder,
   contextProviderMetadata,
+  contextProviderSearchText,
 } from "../components/provider-glyphs";
 import {
   Button,
@@ -497,11 +498,15 @@ export function ScansPage() {
 
   const normalizedQuery = integrationQuery.trim().toLocaleLowerCase();
   const availableSources = sources.filter(
-    (source) =>
-      !source.connected &&
-      `${source.name} ${source.description} ${contextProviderMetadata[source.provider].category} ${contextProviderMetadata[source.provider].searchTerms}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery),
+    (source) => {
+      if (source.connected) return false;
+      const searchText = contextProviderSearchText(
+        source.provider,
+        source.name,
+        source.description,
+      );
+      return searchText !== null && searchText.toLocaleLowerCase().includes(normalizedQuery);
+    },
   );
   const sourceToConfigure = sources.find(
     (source) => source.id === configurationTarget,
