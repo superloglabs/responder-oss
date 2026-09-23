@@ -150,6 +150,26 @@ describe("fresh automation sandbox", () => {
     expect(dependencies.configure).not.toHaveBeenCalled();
   });
 
+  it("preserves the setup failure when pending sandbox cleanup also fails", async () => {
+    const { dependencies } = harness();
+    const setupError = new Error("sandbox creation failed");
+    dependencies.createSession.mockRejectedValue(setupError);
+    dependencies.closePending.mockRejectedValue(
+      new Error("pending sandbox cleanup failed"),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      runInFreshAutomationSandbox(input, dependencies),
+    ).rejects.toBe(setupError);
+
+    expect(dependencies.closePending).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("automation_pending_sandbox_cleanup_failed"),
+    );
+    consoleError.mockRestore();
+  });
+
   it("uses a prepared snapshot without mutating its toolchain", async () => {
     const { dependencies } = harness();
 

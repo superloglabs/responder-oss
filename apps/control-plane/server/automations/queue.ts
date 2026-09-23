@@ -1,7 +1,6 @@
 import {
   abandonPendingAutomationRun,
   beginAutomationRun,
-  setAutomationRunStatus,
   type AutomationTriggerInput,
 } from "../../../../packages/core/src/db/automations.js";
 import {
@@ -71,14 +70,7 @@ export async function queueAutomationRun(input: {
     if (!jobId) throw new Error("Automation run job was not created");
     return { duplicate: false, jobId, runId: run.runId };
   } catch (error) {
-    if (!(await abandonPendingAutomationRun(run.runId))) {
-      await setAutomationRunStatus({
-        failureCategory: "queue_unavailable",
-        failureMessage: "Automation worker is unavailable",
-        runId: run.runId,
-        status: "failed",
-      });
-    }
+    await abandonPendingAutomationRun(run.runId);
     throw new Error("Automation worker is unavailable", { cause: error });
   }
 }
@@ -91,9 +83,15 @@ export async function closeAutomationQueue(): Promise<void> {
   bossStart = undefined;
   const startedBoss = await startingBoss?.catch(() => undefined);
   const bosses = new Set([activeBoss, startedBoss].filter(Boolean));
-  await Promise.all(
+  const shutdowns = await Promise.allSettled(
     [...bosses].map((nextBoss) =>
-      nextBoss!.stop({ graceful: true, timeout: 5_000 }).catch(() => undefined)
+      nextBoss!.stop({ graceful: true, timeout: 5_000 })
     ),
   );
+  const failures = shutdowns.flatMap((shutdown) =>
+    shutdown.status === "rejected" ? [shutdown.reason] : []
+  );
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Unable to close the automation queue");
+  }
 }

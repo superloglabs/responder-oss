@@ -44,6 +44,15 @@ const defaultCleanupDependencies: DaytonaCleanupDependencies = {
 };
 
 const daytonaRetryDelaysMs = [0, 500, 1_500] as const;
+const daytonaAppearanceRetryDelaysMs = [
+  0,
+  500,
+  1_500,
+  3_000,
+  5_000,
+  10_000,
+  10_000,
+] as const;
 
 function isTransientDaytonaError(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "statusCode" in error) {
@@ -93,8 +102,11 @@ async function deleteDaytonaSandboxByReference(
   dependencies: DaytonaCleanupDependencies,
 ): Promise<void> {
   const client = dependencies.createClient(config);
+  const retryDelays = waitForAppearance
+    ? daytonaAppearanceRetryDelaysMs
+    : daytonaRetryDelaysMs;
   try {
-    for (const [index, delayMs] of daytonaRetryDelaysMs.entries()) {
+    for (const [index, delayMs] of retryDelays.entries()) {
       if (delayMs > 0) await dependencies.sleep(delayMs);
       try {
         const sandbox = await client.get(reference);
@@ -102,8 +114,22 @@ async function deleteDaytonaSandboxByReference(
         return;
       } catch (error) {
         if (isDaytonaNotFound(error)) {
-          if (waitForAppearance && index < daytonaRetryDelaysMs.length - 1) {
+          if (waitForAppearance && index < retryDelays.length - 1) {
             continue;
+          }
+          if (waitForAppearance) {
+            const cleanupError = new Error(
+              `Sandbox ${reference} did not appear before cleanup timed out`,
+            );
+            await dependencies.reportException(cleanupError, {
+              operation: "sandbox_cleanup",
+              sandboxId: reference,
+            });
+            console.error(JSON.stringify({
+              event: "daytona_pending_sandbox_not_found",
+              sandboxId: reference,
+            }));
+            throw cleanupError;
           }
           return;
         }
@@ -123,12 +149,13 @@ async function deleteDaytonaSandboxByReference(
 export async function deleteDaytonaSandboxByName(
   sandboxName: string,
   config: DaytonaCleanupConfig,
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
 ): Promise<void> {
   await deleteDaytonaSandboxByReference(
     sandboxName,
     config,
     true,
-    defaultCleanupDependencies,
+    dependencies,
   );
 }
 

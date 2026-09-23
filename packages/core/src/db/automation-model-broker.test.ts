@@ -139,8 +139,9 @@ describe("automation model broker grant storage", () => {
 
   it("revokes only the grant owned by the expected run and organization", async () => {
     const where = vi.fn().mockResolvedValue(undefined);
+    const deleteGrant = vi.fn(() => ({ where }));
     vi.mocked(getDatabase).mockReturnValue({
-      delete: vi.fn(() => ({ where })),
+      delete: deleteGrant,
     } as never);
 
     await revokeAutomationModelBrokerGrant({
@@ -149,6 +150,7 @@ describe("automation model broker grant storage", () => {
       runId: "run-1",
     });
 
+    expect(deleteGrant).toHaveBeenCalledWith(automationModelBrokerGrants);
     expect(where).toHaveBeenCalledOnce();
   });
 

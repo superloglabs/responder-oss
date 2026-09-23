@@ -38,7 +38,8 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
 
 export const automationConfigurationSchema = z
   .object({
-    contextAccountIds: z.array(z.uuid()).max(50).default([]),
+    contextAccountIds: z.array(z.uuid()).max(50).default([])
+      .refine(uniqueIds, "Context account IDs must be unique"),
     harness: automationHarnessSchema,
     maxModelRequests: z.number().int().min(1).max(128),
     maxOutputTokensPerRequest: z.number().int().min(256).max(100_000),

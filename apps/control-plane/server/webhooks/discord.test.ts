@@ -4,7 +4,7 @@ import {
   type KeyObject,
 } from "node:crypto";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findAutomationsForDiscordCommand: vi.fn(),
@@ -65,6 +65,12 @@ describe("Discord webhook", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
     mocks.findAutomationsForDiscordCommand.mockResolvedValue([]);
     mocks.queueAutomationRun.mockResolvedValue({ created: true, runId: "run-1" });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("verifies Ed25519 signatures and answers endpoint pings", async () => {

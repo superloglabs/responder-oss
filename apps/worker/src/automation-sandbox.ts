@@ -182,6 +182,9 @@ export async function runInFreshAutomationSandbox<T>(
   });
   let session: DaytonaSandboxSession | null = null;
   let creationStarted = false;
+  let executionOutcome:
+    | { error: unknown; succeeded: false }
+    | { succeeded: true; value: T };
 
   try {
     creationStarted = true;
@@ -222,8 +225,13 @@ export async function runInFreshAutomationSandbox<T>(
       );
     }
     if (!outcome.succeeded) throw outcome.error;
-    return outcome.value;
-  } finally {
+    executionOutcome = { succeeded: true, value: outcome.value };
+  } catch (error) {
+    executionOutcome = { error, succeeded: false };
+  }
+
+  let cleanupFailure: unknown;
+  try {
     if (session) {
       await dependencies.close(session, input.config, {
         jobId: input.runId,
@@ -232,5 +240,27 @@ export async function runInFreshAutomationSandbox<T>(
     } else if (creationStarted) {
       await dependencies.closePending(sandboxName, input.config);
     }
+  } catch (error) {
+    cleanupFailure = error;
   }
+
+  if (!executionOutcome.succeeded) {
+    if (cleanupFailure !== undefined) {
+      console.error(JSON.stringify({
+        cleanupError:
+          cleanupFailure instanceof Error
+            ? cleanupFailure.constructor.name
+            : "unknown",
+        event: "automation_pending_sandbox_cleanup_failed",
+        primaryError:
+          executionOutcome.error instanceof Error
+            ? executionOutcome.error.constructor.name
+            : "unknown",
+        runId: input.runId,
+      }));
+    }
+    throw executionOutcome.error;
+  }
+  if (cleanupFailure !== undefined) throw cleanupFailure;
+  return executionOutcome.value;
 }

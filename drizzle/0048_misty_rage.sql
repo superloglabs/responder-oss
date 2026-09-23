@@ -12,6 +12,8 @@ ALTER TABLE "automation_version_integration_accounts" ADD CONSTRAINT "automation
 ALTER TABLE "automation_version_integration_accounts" ADD CONSTRAINT "automation_version_integration_accounts_automation_version_id_integration_account_id_role_pk" PRIMARY KEY("automation_version_id","integration_account_id","role");--> statement-breakpoint
 
 ALTER TABLE "automation_model_broker_grants" ADD COLUMN "lease_id" uuid;--> statement-breakpoint
+DELETE FROM "automation_model_broker_grants"
+WHERE NOT pg_input_is_valid("run_id", 'uuid');--> statement-breakpoint
 UPDATE "automation_model_broker_grants" AS broker_grant
 SET "lease_id" = run."lease_id"
 FROM "automation_runs" AS run
@@ -102,6 +104,35 @@ FOR EACH ROW EXECUTE FUNCTION "validate_automation_version_link_scope"();--> sta
 CREATE TRIGGER "automation_version_secrets_scope_trigger"
 BEFORE INSERT OR UPDATE ON "automation_version_secrets"
 FOR EACH ROW EXECUTE FUNCTION "validate_automation_version_link_scope"();--> statement-breakpoint
+
+CREATE FUNCTION "prevent_automation_resource_ownership_change"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_TABLE_NAME = 'repositories' THEN
+    IF NEW."integration_account_id" IS DISTINCT FROM OLD."integration_account_id" THEN
+      RAISE EXCEPTION 'repository integration ownership is immutable' USING ERRCODE = '23514';
+    END IF;
+  ELSIF NEW."organization_id" IS DISTINCT FROM OLD."organization_id" THEN
+    RAISE EXCEPTION 'automation resource organization ownership is immutable' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER "automations_organization_immutable_trigger"
+BEFORE UPDATE OF "organization_id" ON "automations"
+FOR EACH ROW EXECUTE FUNCTION "prevent_automation_resource_ownership_change"();--> statement-breakpoint
+CREATE TRIGGER "organization_model_credentials_organization_immutable_trigger"
+BEFORE UPDATE OF "organization_id" ON "organization_model_credentials"
+FOR EACH ROW EXECUTE FUNCTION "prevent_automation_resource_ownership_change"();--> statement-breakpoint
+CREATE TRIGGER "integration_accounts_organization_immutable_trigger"
+BEFORE UPDATE OF "organization_id" ON "integration_accounts"
+FOR EACH ROW EXECUTE FUNCTION "prevent_automation_resource_ownership_change"();--> statement-breakpoint
+CREATE TRIGGER "workspace_secrets_organization_immutable_trigger"
+BEFORE UPDATE OF "organization_id" ON "workspace_secrets"
+FOR EACH ROW EXECUTE FUNCTION "prevent_automation_resource_ownership_change"();--> statement-breakpoint
+CREATE TRIGGER "repositories_integration_account_immutable_trigger"
+BEFORE UPDATE OF "integration_account_id" ON "repositories"
+FOR EACH ROW EXECUTE FUNCTION "prevent_automation_resource_ownership_change"();--> statement-breakpoint
 
 CREATE FUNCTION "validate_automation_run_scope"() RETURNS trigger
 LANGUAGE plpgsql AS $$

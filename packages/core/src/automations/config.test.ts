@@ -85,5 +85,10 @@ describe("automation configuration", () => {
         "51515151-5151-4151-8151-515151515151",
       ],
     })).toThrow("Workspace secret IDs must be unique");
+    const contextAccountId = "41414141-4141-4141-8141-414141414141";
+    expect(() => automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      contextAccountIds: [contextAccountId, contextAccountId],
+    })).toThrow("Context account IDs must be unique");
   });
 });
