@@ -340,6 +340,6 @@
 
 .appShell--workspace .issueRail .issueSeverity { padding-left: 0; }
 
-html:has(.appShell--workspace), body:has(.appShell--workspace) { color-scheme: light; background: #f9f9f9; }
+html:has(.appShell.appShell--workspace), body:has(.appShell.appShell--workspace) { color-scheme: light; background: #f9f9f9; }
 .issuesFilters summary { list-style: none; }
 .issuesFilters summary::-webkit-details-marker { display: none; }
