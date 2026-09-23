@@ -7,15 +7,7 @@ import { DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import "./scan-suggestions.css";
 import { findingsForScan, scanRuns, type ScanFinding, type ScanRun } from "./scan-data";
-
-function scanDateLabel(startedAt: string): string {
-  const parts = new Intl.DateTimeFormat(undefined, {
-    month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).formatToParts(new Date(startedAt));
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("month")} ${part("day")}, ${part("hour")}:${part("minute")}`;
-}
+import { failureReasonWithFindings, scanDateLabel } from "./scan-detail-presentation";
 
 function FindingSection({ findings, isStoryboard, label }: {
   findings: ScanFinding[];
@@ -116,6 +108,9 @@ export function ScanDetailPage() {
 
   const newFindings = findings.filter((finding) => finding.outcome === "filed");
   const existingFindings = findings.filter((finding) => finding.outcome === "existing");
+  const partialFailureReason = scan
+    ? failureReasonWithFindings(scan.status, scan.failureReason, findings.length)
+    : null;
 
   return (
     <AppShell active="scans" density="scans" redesigned>
@@ -136,6 +131,9 @@ export function ScanDetailPage() {
                 {scan.status === "completed" ? "Completed" : scan.status === "running" ? "Running" : "Failed"}
               </span>
             </header>
+            {partialFailureReason ? (
+              <p className="scanDetailFailure" role="alert">Scan failed: {partialFailureReason}</p>
+            ) : null}
             {findings.length === 0 ? (
               <section className="emptyState emptyState--list">
                 <h2>

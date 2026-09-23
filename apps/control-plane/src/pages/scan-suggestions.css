@@ -72,6 +72,7 @@
 .appShell--workspace .scanDetailHeading .scanRunStatus > span { width: 6px; height: 6px; background: currentColor; }
 .appShell--workspace .scanDetailHeading .scanRunStatus--running { color: #806600; }
 .appShell--workspace .scanDetailHeading .scanRunStatus--failed { color: #b52e35; }
+.appShell--workspace .scanDetailFailure { margin: 0; color: #b52e35; font-size: 13px; line-height: 20px; }
 .scanDetailFindings { display: flex; flex-direction: column; gap: 24px; margin-top: 12px; }
 .scanFindingSection { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .appShell--workspace .scanFindingSection__heading { display: flex; align-items: center; gap: 8px; height: 16px; margin: 0; padding-left: 12px; color: #444; font-size: 13px; font-weight: 400; line-height: 16px; }
