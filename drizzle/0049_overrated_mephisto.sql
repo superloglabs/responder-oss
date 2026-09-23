@@ -1,0 +1,1 @@
+ALTER TABLE "suggestions" ADD COLUMN "dismissed_at" timestamp with time zone;

@@ -1,15 +1,10 @@
+import { IssueSeverity } from "../components/issue-severity";
+import { ListDashesIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  fetchIssues,
-  type IssueListItem,
-  relativeTime,
-} from "../agents-api";
+import { fetchIssues, type IssueListItem, relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
-import { AgentIcon, ArrowIcon, ScanIcon } from "../components/icons";
-import { IssueListSkeleton } from "../components/screen-skeletons";
 import { dateGroupLabel } from "../date-presentation";
-import { DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 
 type IssueFilter = "all" | IssueListItem["severity"];
@@ -25,164 +20,60 @@ export function IssuesPage() {
   useEffect(() => {
     let cancelled = false;
     void fetchIssues(showArchived)
-      .then((loaded) => {
-        if (!cancelled) setIssues(loaded);
-      })
+      .then((loaded) => { if (!cancelled) setIssues(loaded); })
       .catch((caught: unknown) => {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Unable to load issues");
-        }
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load issues");
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [showArchived]);
 
-  const filteredIssues = issues.filter(
-    (issue) => issueFilter === "all" || issue.severity === issueFilter,
-  );
+  const groups = new Map<string, IssueListItem[]>();
+  const now = new Date();
+  for (const issue of issues.filter((issue) => issueFilter === "all" || issue.severity === issueFilter)) {
+    const label = dateGroupLabel(issue.createdAt, now);
+    groups.set(label, [...(groups.get(label) ?? []), issue]);
+  }
 
   return (
-    <AppShell active="issues">
-      <section className="pageHeading">
-        <div>
-          <h1>Issues</h1>
-          <p>Distinct failure mechanisms identified across investigations.</p>
-        </div>
-        <label className="issueArchiveFilter">
-          <span>Show archived</span>
-          <input
-            checked={showArchived}
-            onChange={(event) => {
-              setLoading(true);
-              setError(null);
-              setShowArchived(event.target.checked);
-            }}
-            type="checkbox"
-          />
-          <span aria-hidden="true" className="toggle" />
-        </label>
-      </section>
-
-      {error ? <p className="formError">{error}</p> : null}
-      {loading ? (
-        <IssueListSkeleton />
-      ) : issues.length === 0 ? (
-        <section className="emptyState emptyState--list">
-          <h2>No issues identified</h2>
-          <p>Issues will appear after an investigation submits a finding.</p>
-        </section>
-      ) : (
-        <div className="issueListTable">
-          <DataTable<IssueListItem, IssueFilter>
-            aria-label="Identified issues"
-            activeFilter={issueFilter}
-            columns={[
-              {
-                header: "Issue",
-                key: "issue",
-                render: (issue) => (
-                  <Link className="issueTableTitle" to={`/issues/${issue.id}`}>
-                    <span>{issue.title}</span>
-                    {issue.archivedAt ? (
-                      <span className="archivedBadge">Archived</span>
-                    ) : null}
-                  </Link>
-                ),
-                width: "52%",
-              },
-              {
-                header: "Source",
-                key: "source",
-                render: (issue) => (
-                  <span className="issueTableSource">
-                    {issue.source?.kind === "scan" ? (
-                      <ScanIcon />
-                    ) : issue.source?.kind === "agent" ? (
-                      <AgentIcon />
-                    ) : null}
-                    <span title={issue.source?.name}>
-                      {issue.source?.name ?? "—"}
-                    </span>
-                  </span>
-                ),
-                width: "20%",
-              },
-              {
-                header: "Severity",
-                key: "severity",
-                render: (issue) => (
-                  <span
-                    className={`issueTableSeverity issueTableSeverity--${issue.severity.toLowerCase()}`}
-                  >
-                    {issue.severity}
-                  </span>
-                ),
-                width: "11%",
-              },
-              {
-                header: "Created",
-                key: "created",
-                render: (issue) => (
-                  <time
-                    className="issueTableCreated"
-                    dateTime={issue.createdAt}
-                  >
-                    {relativeTime(issue.createdAt)}
-                  </time>
-                ),
-                width: "12%",
-              },
-              {
-                align: "right",
-                header: "",
-                key: "open",
-                render: (issue) => (
-                  <Link
-                    aria-label={`Open ${issue.title}`}
-                    className="issueTableArrow"
-                    to={`/issues/${issue.id}`}
-                  >
-                    <ArrowIcon />
-                  </Link>
-                ),
-                width: "5%",
-              },
-            ]}
-            filters={[
-              { count: issues.length, label: "All", value: "all" },
-              {
-                count: issues.filter((issue) => issue.severity === "SEV-1")
-                  .length,
-                dot: "var(--ds-danger)",
-                label: "SEV 1",
-                value: "SEV-1",
-              },
-              {
-                count: issues.filter((issue) => issue.severity === "SEV-2")
-                  .length,
-                dot: "var(--ds-warning)",
-                label: "SEV 2",
-                value: "SEV-2",
-              },
-              {
-                count: issues.filter((issue) => issue.severity === "SEV-3")
-                  .length,
-                dot: "var(--ds-text-muted)",
-                label: "SEV 3",
-                value: "SEV-3",
-              },
-            ]}
-            getRowGroup={(issue) => dateGroupLabel(issue.createdAt)}
-            getRowKey={(issue) => issue.id}
-            onFilterChange={setIssueFilter}
-            rows={filteredIssues}
-          />
-        </div>
-      )}
+    <AppShell active="issues" density="issues">
+      <div className="issuesPage">
+        <header className="issuesHeading">
+          <h1><ListDashesIcon aria-hidden="true" size={16} weight="fill" />Issues</h1>
+          <details className="issuesFilters">
+            <summary>Filters{issueFilter !== "all" || showArchived ? " · Active" : ""}</summary>
+            <div className="issuesFilters__popover">
+              <label>Severity<select value={issueFilter} onChange={(event) => setIssueFilter(event.target.value as IssueFilter)}>
+                <option value="all">All severities</option>
+                <option value="SEV-1">SEV-1</option><option value="SEV-2">SEV-2</option><option value="SEV-3">SEV-3</option>
+              </select></label>
+              <label className="issuesFilters__archive"><input type="checkbox" checked={showArchived} onChange={(event) => {
+                setLoading(true); setError(null); setShowArchived(event.target.checked);
+              }} />Show archived</label>
+            </div>
+          </details>
+        </header>
+        {error ? <p className="formError" role="alert">{error}</p> : loading ? (
+          <div className="issuesLoading" role="status" aria-busy="true"><span className="srOnly">Loading issues…</span>{Array.from({ length: 6 }, (_, index) => <div key={index} />)}</div>
+        ) : groups.size === 0 ? (
+          <section className="issuesEmpty"><h2>{issues.length ? "No matching issues" : "No issues identified"}</h2><p>{issues.length ? "Choose another severity to see more issues." : "Issues will appear after an investigation submits a finding."}</p></section>
+        ) : Array.from(groups, ([label, rows]) => (
+          <section className="issuesGroup" key={label} aria-label={label}>
+            <h2>{label}</h2>
+            <div className="issuesTableSurface">
+              <table className="issuesTable" aria-label={label + " issues"}>
+                <colgroup><col className="issuesTable__titleColumn" /><col /><col /></colgroup>
+                <thead><tr><th scope="col">Issue</th><th scope="col">Severity</th><th scope="col">Created</th></tr></thead>
+                <tbody>{rows.map((issue) => <tr key={issue.id}>
+                  <td><Link to={"/issues/" + issue.id} title={issue.title}><span>{issue.title}</span>{issue.archivedAt ? <small>Archived</small> : null}</Link></td>
+                  <td><IssueSeverity severity={issue.severity} /></td>
+                  <td><time dateTime={issue.createdAt} title={new Date(issue.createdAt).toLocaleString()}>{relativeTime(issue.createdAt)}</time></td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </section>
+        ))}
+      </div>
     </AppShell>
   );
 }

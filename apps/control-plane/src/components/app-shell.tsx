@@ -4,11 +4,24 @@ import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
 import { BillingBanner } from "./billing-banner";
+import {
+  CaretDownIcon,
+  CheckIcon,
+  FlagIcon,
+  GearIcon,
+  LightningIcon,
+  ListBulletsIcon,
+  ScanIcon,
+  SignOutIcon,
+  UserCircleIcon,
+} from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import "./workspace.css";
 
 interface AppShellProps {
   active: "agents" | "automations" | "issues" | "scans" | "settings" | "suggestions";
   children: ReactNode;
+  redesigned?: boolean;
   density?:
     | "default"
     | "compact"
@@ -16,10 +29,12 @@ interface AppShellProps {
     | "edit"
     | "investigation"
     | "scans"
-    | "settings";
+    | "settings"
+    | "issues";
 }
 
-export function AppShell({ active, children, density = "default" }: AppShellProps) {
+export function AppShell({ active, children, density = "default", redesigned = false }: AppShellProps) {
+  const workspace = redesigned || density === "issues";
   const session = authClient.useSession();
   const activeOrganization = authClient.useActiveOrganization();
   const organizations = authClient.useListOrganizations();
@@ -127,11 +142,21 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
   }
 
   return (
-    <main className={`appShell appShell--${density}`}>
+    <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}`}>
       <header className="globalHeader">
         <div className="globalHeader__left">
           <Link aria-label="Superlog home" className="brand" to="/agents">
-            <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
+            {workspace ? (
+              <svg aria-hidden="true" className="brandPictogram" width="16" height="16" viewBox="175 175 350 350" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <rect x="347.464" y="347.464" width="96.3768" height="96.3768" />
+                <rect x="175" y="256.159" width="81.1594" height="187.681" />
+                <rect x="443.841" y="256.159" width="81.1594" height="187.681" />
+                <rect x="443.841" y="175" width="81.1594" height="187.681" transform="rotate(90 443.841 175)" />
+                <rect x="443.841" y="443.841" width="81.1594" height="187.681" transform="rotate(90 443.841 443.841)" />
+              </svg>
+            ) : (
+              <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
+            )}
           </Link>
           <nav aria-label="Primary navigation" className="primaryNav">
             <Link
@@ -139,6 +164,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               className={active === "agents" ? "isActive" : undefined}
               to="/agents"
             >
+              {workspace ? <LightningIcon size={16} aria-hidden="true" /> : null}
               Agents
             </Link>
             {automationsEnabled ? (
@@ -155,6 +181,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               className={active === "issues" ? "isActive" : undefined}
               to="/issues"
             >
+              {workspace ? <ListBulletsIcon size={16} aria-hidden="true" /> : null}
               Issues
             </Link>
             <Link
@@ -162,6 +189,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               className={active === "scans" ? "isActive" : undefined}
               to="/scans"
             >
+              {workspace ? <ScanIcon size={16} aria-hidden="true" /> : null}
               Scans
             </Link>
             <Link
@@ -169,6 +197,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               className={active === "suggestions" ? "isActive" : undefined}
               to="/suggestions"
             >
+              {workspace ? <FlagIcon size={16} aria-hidden="true" /> : null}
               Suggestions
             </Link>
             <Link
@@ -176,12 +205,13 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               className={active === "settings" ? "isActive" : undefined}
               to="/settings"
             >
+              {workspace ? <GearIcon size={16} aria-hidden="true" /> : null}
               Settings
             </Link>
           </nav>
         </div>
         <div className="globalHeader__right" ref={menuRef}>
-          <ColorThemeToggle className="globalThemeToggle" />
+          {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
           <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}
@@ -192,7 +222,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
               type="button"
             >
               <span className="accountMenuTrigger__workspace">
-                {activeOrganization.data?.name ?? "Workspace"}
+                {workspace ? displayName : activeOrganization.data?.name ?? "Workspace"}
               </span>
               <span className="avatar accountMenuTrigger__avatar">
                 {session.data?.user.image ? (
@@ -201,20 +231,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
                   initials
                 )}
               </span>
-              <svg
-                aria-hidden="true"
-                fill="none"
-                height="12"
-                viewBox="0 0 12 12"
-                width="12"
-              >
-                <path
-                  d="m3.25 4.75 2.75 2.5 2.75-2.5"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              {!workspace ? <CaretDownIcon aria-hidden="true" size={12} /> : null}
             </button>
             {isMenuOpen ? (
               <div className="accountPopover" role="menu">
@@ -243,7 +260,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
                         <span>{organization.name}</span>
                         {isActive ? (
                           <span aria-label="Active workspace" className="menuCheck">
-                            ✓
+                            <CheckIcon aria-hidden="true" size={12} />
                           </span>
                         ) : switchingTo === organization.id ? (
                           <span className="menuCheck">…</span>
@@ -260,6 +277,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
                       role="menuitem"
                       to="/superuser/users"
                     >
+                      {workspace ? <UserCircleIcon aria-hidden="true" size={16} /> : null}
                       User support
                     </Link>
                   ) : null}
@@ -269,14 +287,18 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
                     role="menuitem"
                     to="/settings/workspace"
                   >
+                    {workspace ? <GearIcon aria-hidden="true" size={16} /> : null}
                     Workspace settings
                   </Link>
+                </div>
+                <div className="accountPopover__section">
                   <button
                     className="accountPopover__item accountPopover__item--danger"
                     onClick={() => void signOut()}
                     role="menuitem"
                     type="button"
                   >
+                    {workspace ? <SignOutIcon aria-hidden="true" size={16} /> : null}
                     Log out
                   </button>
                   {menuError ? (
@@ -290,8 +312,9 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
           </div>
         </div>
       </header>
-      <BillingBanner />
-      {children}
+      {workspace ? (
+        <div className="workspaceSurface"><BillingBanner /><div className="workspaceContent">{children}</div></div>
+      ) : <><BillingBanner />{children}</>}
     </main>
   );
 }

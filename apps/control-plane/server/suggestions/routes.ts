@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   getSuggestionDetail,
+  getSuggestionFilters,
+  setSuggestionDismissed,
   getSuggestionSettings,
   listSuggestions,
   setSuggestionSettings,
@@ -16,6 +18,8 @@ import { getActiveTenant } from "../tenant.js";
 const settingsSchema = z.object({ autoOpenPullRequests: z.boolean() });
 const listQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
+  status: z.enum(["open", "applied", "dismissed"]).optional(),
+  source: z.string().min(1).max(100).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 const cursorSchema = z.object({
@@ -58,17 +62,21 @@ export const suggestionRoutes = new Hono()
     if (cursor === null) {
       return context.json({ error: "Invalid suggestion cursor" }, 400);
     }
-    const [page, settings] = await Promise.all([
+    const [page, settings, filters] = await Promise.all([
       listSuggestions(tenant.organizationId, {
         limit: query.data.limit,
+        status: query.data.status,
+        source: query.data.source,
         ...(cursor ? { cursor } : {}),
       }),
       getSuggestionSettings(tenant.organizationId),
+      getSuggestionFilters(tenant.organizationId),
     ]);
     return context.json({
       suggestions: page.suggestions,
       nextCursor: encodeCursor(page.nextCursor),
       settings,
+      filters,
     });
   })
   .patch("/settings", async (context) => {
@@ -100,6 +108,16 @@ export const suggestionRoutes = new Hono()
     );
     if (!detail) return context.json({ error: "Suggestion not found" }, 404);
     return context.json(detail);
+  })
+  .patch("/:suggestionId", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) return context.json({ error: tenant.error }, tenant.status);
+    const id = z.uuid().safeParse(context.req.param("suggestionId"));
+    const parsed = z.object({ dismissed: z.boolean() }).safeParse(await context.req.json().catch(() => null));
+    if (!id.success || !parsed.success) return context.json({ error: "Invalid suggestion update" }, 400);
+    const result = await setSuggestionDismissed(tenant.organizationId, id.data, parsed.data.dismissed);
+    if (!result) return context.json({ error: "Suggestion not found" }, 404);
+    return context.json(result);
   })
   .post("/:suggestionId/pull-requests", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

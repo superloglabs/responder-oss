@@ -1,8 +1,9 @@
+import { EnvelopeIcon } from "@phosphor-icons/react";
 import { type FormEvent, useState } from "react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { AppShell } from "../components/app-shell";
-import { SettingsTabs } from "../components/settings-tabs";
+import { SettingsHeading } from "../components/settings-heading";
 import { MemberListSkeleton } from "../components/screen-skeletons";
 import { SelectField, type SelectOption } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -243,13 +244,8 @@ export function WorkspaceSettingsPage() {
   }
 
   return (
-    <AppShell active="settings" density="settings">
-      <section className="settingsHeading">
-        <h1>Settings</h1>
-        <p>Manage your workspace, members, and connected services.</p>
-      </section>
-
-      <SettingsTabs active="workspace" />
+    <AppShell active="settings" density="settings" redesigned>
+      <SettingsHeading active="workspace" />
 
       <section className="workspaceSettings">
         <div className="workspaceSettings__intro">
@@ -393,7 +389,7 @@ export function WorkspaceSettingsPage() {
             <div className="memberList">
               {invitations.map((invitation) => (
                 <div className="memberRow invitationRow" key={invitation.id}>
-                  <span className="memberAvatar memberAvatar--pending">✉</span>
+                  <span className="memberAvatar memberAvatar--pending"><EnvelopeIcon size={16} aria-hidden="true" /></span>
                   <span className="memberIdentity">
                     <strong>{invitation.email}</strong>
                     <span>

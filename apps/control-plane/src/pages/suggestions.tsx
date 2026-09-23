@@ -7,17 +7,15 @@ import {
   fetchSuggestions,
   relativeTime,
   saveSuggestionSettings,
+  setSuggestionDismissed,
   type SuggestionListItem,
   type SuggestionPullRequest,
   type SuggestionSummary,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
-import {
-  ArrowIcon,
-  PullRequestIcon,
-} from "../components/icons";
-import { Button, DataTable, Switch, Tabs } from "../design-system";
-import { dateGroupLabel } from "../date-presentation";
+import { CaretRightIcon, FlagIcon, GitPullRequestIcon as PullRequestIcon, CheckIcon, ListBulletsIcon } from "@phosphor-icons/react";
+import { Button, DataTable, Switch, SelectField } from "../design-system";
+import "./scan-suggestions.css";
 import { useDocumentTitle } from "../use-document-title";
 
 const RemediationDiff = lazy(() =>
@@ -30,7 +28,9 @@ function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1_000).toISOString();
 }
 
-type SuggestionDetailTab = "code" | "description";
+type SuggestionStatus = "open" | "applied" | "dismissed";
+const sourceLabel = (source: string) => ({ slack: "Slack", sentry: "Sentry", datadog: "Datadog", posthog: "PostHog", github: "GitHub", scan: "Scan", manual: "Manual", unknown: "Unknown" }[source] ?? source);
+
 
 const storyboardSuggestions: SuggestionListItem[] = [
   {
@@ -251,10 +251,11 @@ export function SuggestionsPage() {
   const [autoOpen, setAutoOpen] = useState(false);
   const [loading, setLoading] = useState(!isStoryboard);
   const [error, setError] = useState<string | null>(null);
-  const [detailView, setDetailView] = useState<{
-    suggestionId: string;
-    tab: SuggestionDetailTab;
-  }>({ suggestionId: "", tab: "description" });
+  const [status, setStatus] = useState<SuggestionStatus>("open");
+  const [source, setSource] = useState("");
+  const [filterCounts, setFilterCounts] = useState<Array<{ status: SuggestionStatus; source: string; count: number }>>([]);
+  const [changingStatus, setChangingStatus] = useState(false);
+  const [storyboardDismissed, setStoryboardDismissed] = useState<string[]>([]);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openedIds, setOpenedIds] = useState<string[]>([]);
   const [failedDetailId, setFailedDetailId] = useState<string | null>(null);
@@ -285,10 +286,6 @@ export function SuggestionsPage() {
     selected &&
       (openedIds.includes(selected.id) || openedPullRequests.length > 0),
   );
-  const activeDetailTab =
-    selected?.codeChange && detailView.suggestionId === selected.id
-      ? detailView.tab
-      : "description";
   useDocumentTitle("Suggestions");
 
   useEffect(() => {
@@ -307,10 +304,11 @@ export function SuggestionsPage() {
           setFailedDetailId(null);
           setPullRequests(response.pullRequestState.requests);
         })
-      : fetchSuggestions().then((response) => {
+      : fetchSuggestions(undefined, { status, source }).then((response) => {
           if (cancelled) return;
           setSuggestions(response.suggestions);
           setNextCursor(response.nextCursor);
+          setFilterCounts(response.filters);
           setAutoOpen(response.settings.autoOpenPullRequests);
           setPullRequests([]);
         });
@@ -329,7 +327,7 @@ export function SuggestionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [isStoryboard, suggestionId]);
+  }, [isStoryboard, suggestionId, status, source]);
 
   useEffect(() => {
     if (isStoryboard || !suggestionId || pendingPullRequests.length === 0) return;
@@ -396,7 +394,7 @@ export function SuggestionsPage() {
     setLoadingMore(true);
     setError(null);
     try {
-      const response = await fetchSuggestions(nextCursor);
+      const response = await fetchSuggestions(nextCursor, { status, source });
       setSuggestions((current) => [...current, ...response.suggestions]);
       setNextCursor(response.nextCursor);
     } catch (caught) {
@@ -425,20 +423,44 @@ export function SuggestionsPage() {
     }
   }
 
+  const selectedDismissed = isStoryboard ? storyboardDismissed.includes(suggestionId ?? "") : selected?.status === "dismissed";
+  async function toggleDismissed() {
+    if (!selected) return;
+    setChangingStatus(true);
+    setError(null);
+    try {
+      if (isStoryboard) {
+        setStoryboardDismissed((current) => selectedDismissed ? current.filter((id) => id !== selected.id) : [...current, selected.id]);
+      } else {
+        await setSuggestionDismissed(selected.id, !selectedDismissed);
+        const response = await fetchSuggestion(selected.id);
+        setDetail(response.suggestion);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to update suggestion");
+    } finally { setChangingStatus(false); }
+  }
+  const visibleSuggestions = isStoryboard
+    ? suggestions.filter((item) => (storyboardDismissed.includes(item.id) ? "dismissed" : item.status ?? "open") === status && (!source || (item.source ?? "manual") === source))
+    : suggestions;
+  const counts = isStoryboard
+    ? suggestions.map((item) => ({ status: (storyboardDismissed.includes(item.id) ? "dismissed" : item.status ?? "open") as SuggestionStatus, source: item.source ?? "manual", count: 1 }))
+    : filterCounts;
+
   if (suggestionId) {
     if (
       loading ||
       (!isStoryboard && !selected && failedDetailId !== suggestionId)
     ) {
       return (
-        <AppShell active="suggestions" density="compact">
+        <AppShell active="suggestions" density="compact" redesigned>
           <p className="suggestionDetail__loading">Loading suggestion…</p>
         </AppShell>
       );
     }
     if (!selected) {
       return (
-        <AppShell active="suggestions" density="compact">
+        <AppShell active="suggestions" density="compact" redesigned>
           <section className="emptyState">
             <h1>Suggestion not found</h1>
             <p>{error ?? "This suggestion is unavailable."}</p>
@@ -448,22 +470,26 @@ export function SuggestionsPage() {
       );
     }
     return (
-      <AppShell active="suggestions" density="compact">
+      <AppShell active="suggestions" density="compact" redesigned>
         <article className="suggestionDetail suggestionDetail--page">
-          <Link className="suggestionDetail__back" to={basePath}>
-            ← Suggestions
-          </Link>
-          <header
-            className={`suggestionDetail__header${
-              selected.codeChange
-                ? ""
-                : " suggestionDetail__header--withoutAction"
-            }`}
-          >
-            <div className="suggestionDetail__headingCopy">
-              <h1>{selected.title}</h1>
-              <p>{selected.subtitle}</p>
-            </div>
+          <nav className="workspaceBreadcrumb" aria-label="Breadcrumb">
+            <Link to={basePath}>Suggestions</Link><CaretRightIcon size={12} aria-hidden="true" /><span>{selected.title}</span>
+          </nav>
+          <header className="suggestionDetail__header">
+            <h1>{selected.title}</h1>
+            <Button variant="secondary" loading={changingStatus} onClick={() => void toggleDismissed()}>{selectedDismissed ? "Restore" : "Dismiss"}</Button>
+          </header>
+          {error ? <p className="formError" role="alert">{error}</p> : null}
+          <div className="suggestionOverview">
+            <p>{selected.subtitle}</p>
+            <div className="suggestionMarkdown"><Markdown>{selected.detail}</Markdown></div>
+          </div>
+          {selected.codeChange ? (
+            <section className="suggestionProposedChange">
+              <h2>Proposed change</h2>
+              <div className="remediationCard">
+                <div className="remediationCard__header">
+                  <h3>{selected.codeChange.title}</h3>
             {selected.codeChange ? (
               <div aria-live="polite" className="suggestionDetail__action">
                 <Button
@@ -472,12 +498,12 @@ export function SuggestionsPage() {
                     openingId === selected.id || pendingPullRequests.length > 0
                   }
                   onClick={() => void openPullRequest()}
-                  variant="primary"
+                  variant="secondary"
                 >
                   {hasOpenedPullRequest ? (
-                    <span aria-hidden="true">✓</span>
+                    <CheckIcon size={14} aria-hidden="true" />
                   ) : (
-                    <PullRequestIcon />
+                    <PullRequestIcon size={14} aria-hidden="true" />
                   )}
                   {pendingPullRequests.length > 0
                     ? `Opening ${
@@ -499,77 +525,50 @@ export function SuggestionsPage() {
                 </Button>
               </div>
             ) : null}
-          </header>
-
-          <div className="suggestionDetail__body">
-            {error ? <p className="formError">{error}</p> : null}
-            {selected.codeChange ? (
-              <div className="suggestionDetail__tabs">
-                <Tabs<SuggestionDetailTab>
-                  aria-label="Suggestion detail"
-                  onChange={(tab) =>
-                    setDetailView({ suggestionId: selected.id, tab })
-                  }
-                  options={[
-                    { label: "Description", value: "description" },
-                    { label: "Code", value: "code" },
-                  ]}
-                  value={activeDetailTab}
-                />
-              </div>
-            ) : null}
-            <div
-              aria-label={activeDetailTab === "code" ? "Code" : "Description"}
-              className="suggestionDetail__panel"
-              role={selected.codeChange ? "tabpanel" : undefined}
-            >
-              {activeDetailTab === "code" && selected.codeChange ? (
-                <Suspense
-                  fallback={
-                    <div className="remediationDiff__loading">
-                      Loading proposed diff…
-                    </div>
-                  }
-                >
+                </div>
+                <p className="remediationCard__description">{selected.codeChange.description}</p>
+                <Suspense fallback={<div className="remediationDiff__loading">Loading proposed diff…</div>}>
                   <RemediationDiff remediation={selected.codeChange} />
                 </Suspense>
-              ) : (
-                <div className="suggestionMarkdown">
-                  <Markdown>{selected.detail}</Markdown>
-                </div>
-              )}
-            </div>
-          </div>
+              </div>
+            </section>
+          ) : null}
+          {selected.relatedIssues?.length ? (
+            <section className="suggestionRelatedIssues">
+              <h2>Related {selected.relatedIssues.length === 1 ? "issue" : "issues"}</h2>
+              {selected.relatedIssues.map((issue) => (
+                <Link className="suggestionRelatedIssue" key={issue.id} to={`/issues/${issue.id}`}>
+                  <ListBulletsIcon size={16} aria-hidden="true" /><strong>{issue.title}</strong>
+                  <time dateTime={issue.createdAt}>{relativeTime(issue.createdAt)}</time><CaretRightIcon size={14} aria-hidden="true" />
+                </Link>
+              ))}
+            </section>
+          ) : null}
         </article>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="suggestions" density="compact">
-      <section className="suggestionsHeading">
-        <div>
-          <h1>Suggestions</h1>
-          <p>
-            Our agent will find gaps in observability and propose improvements
-            in your logging setup.
-          </p>
+    <AppShell active="suggestions" density="compact" redesigned>
+      <header className="workspaceHeading"><h1><FlagIcon size={16} aria-hidden="true" />Suggestions</h1></header>
+      <div className="suggestionsToolbar">
+        <div className="suggestionStatusFilters" aria-label="Suggestion status">
+          {(["open", "applied", "dismissed"] as const).map((value) => (
+            <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}>
+              {value[0].toUpperCase() + value.slice(1)} <span>{counts.filter((item) => item.status === value && (!source || item.source === source)).reduce((sum, item) => sum + item.count, 0)}</span>
+            </button>
+          ))}
         </div>
-        <Switch
-          checked={autoOpen}
-          className="suggestionsAutoOpen"
-          description="Create a pull request whenever a code change is available."
-          label="Open pull requests automatically"
-          onCheckedChange={(checked) => void updateAutoOpen(checked)}
-        />
-      </section>
+        <SelectField label="Source" className="suggestionSourceFilter" value={source} onChange={setSource} options={[{ label: "All sources", value: "" }, ...[...new Set(counts.map((item) => item.source))].sort().map((value) => ({ label: sourceLabel(value), value }))]} />
+      </div>
 
       {error ? <p className="formError">{error}</p> : null}
       {loading ? (
         <p className="suggestionsLoading">Loading suggestions…</p>
-      ) : suggestions.length === 0 ? (
+      ) : visibleSuggestions.length === 0 ? (
         <section className="emptyState emptyState--list">
-          <h2>No suggestions yet</h2>
+          <h2>No {status} suggestions</h2>
           <p>
             Suggestions will appear when an investigation finds an observability
             gap.
@@ -589,56 +588,29 @@ export function SuggestionsPage() {
                     to={`${basePath}/${suggestion.id}`}
                   >
                     <strong>{suggestion.title}</strong>
-                    <span>{suggestion.subtitle}</span>
                   </Link>
                 ),
                 width: "67%",
               },
               {
-                header: "Code change",
-                key: "codeChange",
-                render: (suggestion) => (
-                  <span className="suggestionCodeAvailability">
-                    {suggestion.codeChangeAvailable ? (
-                      <>
-                        <PullRequestIcon /> Available
-                      </>
-                    ) : (
-                      "—"
-                    )}
-                  </span>
-                ),
+                header: "Source",
+                key: "source",
+                render: (suggestion) => sourceLabel(suggestion.source ?? "manual"),
                 width: "16%",
               },
               {
-                header: "Created",
+                header: "Identified",
                 key: "created",
                 render: (suggestion) => (
                   <time dateTime={suggestion.createdAt}>
                     {relativeTime(suggestion.createdAt)}
                   </time>
                 ),
-                width: "12%",
-              },
-              {
-                align: "right",
-                header: "",
-                key: "open",
-                render: (suggestion) => (
-                  <Link
-                    aria-label={`Open ${suggestion.title}`}
-                    className="suggestionsTable__arrow"
-                    to={`${basePath}/${suggestion.id}`}
-                  >
-                    <ArrowIcon />
-                  </Link>
-                ),
-                width: "5%",
+                width: "17%",
               },
             ]}
-            getRowGroup={(suggestion) => dateGroupLabel(suggestion.createdAt)}
             getRowKey={(suggestion) => suggestion.id}
-            rows={suggestions}
+            rows={visibleSuggestions}
           />
           {nextCursor ? (
             <div className="suggestionsPagination">
@@ -652,6 +624,7 @@ export function SuggestionsPage() {
           ) : null}
         </div>
       )}
+      <Switch checked={autoOpen} className="suggestionsAutoOpen" label="Open pull requests automatically" description="Create a pull request whenever a code change is available." onCheckedChange={(checked) => void updateAutoOpen(checked)} />
     </AppShell>
   );
 }

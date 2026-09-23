@@ -1,4 +1,16 @@
 import {
+  CaretDownIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon,
+  FloppyDiskIcon,
+  MagnifyingGlassIcon as SearchIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  GitBranchIcon as RepositoryIcon,
+  TrashIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -13,6 +25,7 @@ import {
 } from "@responder/core/agents/config";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  type AgentDetail,
   type AgentConfiguration,
   type AgentOptions,
   type IntegrationSummary,
@@ -22,7 +35,9 @@ import {
   createWorkspaceSecret,
   refreshGitHubAgentOptions,
   refreshSlackAgentOptions,
+  refreshSentryAgentOptions,
   saveAgent,
+  setAgentEnabled,
   slackChannelLabel,
 } from "../agents-api";
 import {
@@ -52,12 +67,7 @@ import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
 } from "../components/dash0-connection-dialog";
-import {
-  ChevronDownIcon,
-  ProviderGlyph,
-  RepositoryIcon,
-  SearchIcon,
-} from "../components/icons";
+import { ProviderGlyph } from "../components/icons";
 import {
   contextCategoryDescriptions as CONTEXT_CATEGORY_DESCRIPTIONS,
   contextCategoryOrder as CONTEXT_CATEGORY_ORDER,
@@ -70,14 +80,17 @@ import {
   Checkbox,
   IconButton,
   Panel,
-  Radio,
   SegmentedControl,
   SelectField,
+  Switch,
   TextAreaField,
 } from "../design-system";
+import { AgentRunHistory } from "../components/agent-run-history";
+import "./agent-editor.css";
 import { useDocumentTitle } from "../use-document-title";
 import {
   draftForSessionStorage,
+  restoreTriggerSelection,
   workspaceSecretRecordIdsForDraft,
   type CreateDraft,
   type OutputMode,
@@ -85,7 +98,6 @@ import {
   type Severity,
 } from "./agent-create-draft";
 
-type CreateStep = 1 | 2 | 3 | 4;
 const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "aws",
   "gcp",
@@ -125,25 +137,6 @@ const SEVERITY_OPTIONS: Array<{
   },
 ];
 const SEVERITIES = SEVERITY_OPTIONS.map(({ severity }) => severity);
-const NEW_AGENT_STEPS: Array<{
-  id: CreateStep;
-  title: string;
-  description: string;
-}> = [
-  { id: 1, title: "Connect Slack", description: "Workspace access" },
-  { id: 2, title: "Choose channel", description: "Alert source" },
-  { id: 3, title: "Agent context", description: "Tools and repositories" },
-];
-const EDIT_AGENT_STEPS: Array<{
-  id: CreateStep;
-  title: string;
-  description: string;
-}> = [
-  { id: 1, title: "Input", description: "Trigger and source" },
-  { id: 2, title: "Output", description: "Channel and routing" },
-  { id: 3, title: "Agent context", description: "Tools and repositories" },
-  { id: 4, title: "Prompt", description: "Investigation instructions" },
-];
 
 function resourcesOfKind(
   options: AgentOptions,
@@ -179,13 +172,6 @@ function readSavedDraft(key: string): SavedCreateDraft {
   } catch {
     return {};
   }
-}
-
-function readSavedStep(key: string): CreateStep {
-  const value = window.sessionStorage.getItem(key);
-  return value === "2" || value === "3" || value === "4"
-    ? Number(value) as CreateStep
-    : 1;
 }
 
 function draftFromConfiguration(
@@ -308,9 +294,8 @@ function createInitialDraft(
   );
 
   return {
-    inputKind: isEditing
-      ? saved.inputKind ?? configured.inputKind ?? "slack_channel"
-      : "slack_channel",
+    name: saved.name ?? configuration?.name ?? "",
+    ...restoreTriggerSelection(saved, configured),
     sentryAccountId:
       sentryAccounts.some((account) => account.id === saved.sentryAccountId)
         ? saved.sentryAccountId!
@@ -343,9 +328,6 @@ function createInitialDraft(
             )
           ? configured.slackInputResourceId!
         : slackChannels[0]?.id ?? "",
-    outputMode: isEditing
-      ? saved.outputMode ?? configured.outputMode ?? "thread"
-      : "thread",
     outputChannelResourceId:
       slackChannels.some(
         (channel) => channel.id === saved.outputChannelResourceId,
@@ -406,10 +388,7 @@ function createInitialDraft(
       saved.linearIssueTemplate ??
       configured.linearIssueTemplate ??
       defaultLinearIssueTemplate,
-    instructions:
-      isEditing
-        ? saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS
-        : DEFAULT_INSTRUCTIONS,
+    instructions: saved.instructions ?? configured.instructions ?? DEFAULT_INSTRUCTIONS,
   };
 }
 
@@ -451,7 +430,7 @@ export function AgentCreatePage() {
   const isEditing = Boolean(agentId);
   const draftStorageKey = storageKey(DRAFT_STORAGE_KEY, agentId);
   const stepStorageKey = storageKey(DRAFT_STEP_STORAGE_KEY, agentId);
-  const returnTo = agentId ? `/agents/${agentId}/edit` : "/agents/new";
+  const returnTo = agentId ? `/agents/${agentId}` : "/agents/new";
   const sentryJustConnected = successfulConnectionReturn("sentry");
   const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
@@ -471,43 +450,17 @@ export function AgentCreatePage() {
   const returnedIntegrationAccountId = new URLSearchParams(
     window.location.search,
   ).get("integration_account_id");
-  const contextIntegrationJustConnected =
-    sentryJustConnected ||
-    slackJustConnected ||
-    githubJustConnected ||
-    datadogJustConnected ||
-    dash0JustConnected ||
-    postHogJustConnected ||
-    axiomJustConnected ||
-    upstashJustConnected ||
-    langfuseJustConnected ||
-    supabaseJustConnected ||
-    vercelJustConnected ||
-    customMcpJustConnected ||
-    clickStackJustConnected ||
-    linearJustConnected ||
-    awsJustConnected ||
-    gcpJustConnected;
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [existingConfiguration, setExistingConfiguration] =
     useState<AgentConfiguration | null>(null);
   const [draft, setDraft] = useState<CreateDraft | null>(null);
-  const initialStep = !isEditing && slackJustConnected
-    ? 2
-    : contextIntegrationJustConnected
-      ? 3
-      : readSavedStep(stepStorageKey);
-  const normalizedInitialStep = !isEditing && initialStep === 4
-    ? 3
-    : initialStep;
-  const [activeStep, setActiveStep] =
-    useState<CreateStep>(normalizedInitialStep);
-  // Editing an existing agent unlocks every section immediately; only the
-  // create flow walks steps sequentially.
-  const [furthestStep, setFurthestStep] = useState<CreateStep>(
-    isEditing ? 4 : normalizedInitialStep,
-  );
+  const triggerPickerRef = useRef<HTMLDetailsElement>(null);
+  const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(null);
+  const [activeTab, setActiveTab] = useState<"settings" | "history">("settings");
+  const [updatingEnabled, setUpdatingEnabled] = useState(false);
+  const [refreshingInput, setRefreshingInput] = useState(false);
+  const [inputRefreshError, setInputRefreshError] = useState<string | null>(null);
   const [githubDialogOpen, setGithubDialogOpen] = useState(githubJustConnected);
   const [slackContextDialogOpen, setSlackContextDialogOpen] = useState(false);
   const [vercelDialogOpen, setVercelDialogOpen] = useState(vercelJustConnected);
@@ -560,8 +513,8 @@ export function AgentCreatePage() {
   const githubRefreshInFlight = useRef<Promise<void> | null>(null);
   const slackRefreshInFlight = useRef<Promise<void> | null>(null);
   const connectingProviderRef = useRef<IntegrationSummary["id"] | null>(null);
-  const [notice] = useState(connectionNotice);
-  useDocumentTitle(isEditing ? "Edit agent" : "Create agent");
+  const [notice, setNotice] = useState(connectionNotice);
+  useDocumentTitle(isEditing ? agentDetail?.name ?? "Agent" : "Create agent");
 
   const refreshGithubRepositories = useCallback((): Promise<void> => {
     if (githubRefreshInFlight.current) return githubRefreshInFlight.current;
@@ -655,17 +608,18 @@ export function AgentCreatePage() {
         setOptions(loadedOptions);
         setIntegrations(loadedIntegrations);
         setExistingConfiguration(loadedConfiguration);
-        if (!isEditing && !slackJustConnected && resourcesOfKind(loadedOptions, "slack_channel").length > 0) {
-          setActiveStep((current) => (current === 1 ? 2 : current));
-          setFurthestStep((current) => Math.max(current, 2) as CreateStep);
-        }
+        setAgentDetail(agent);
         const loadedDraft = createInitialDraft(
           loadedOptions,
           readSavedDraft(draftStorageKey),
           loadedConfiguration,
           isEditing,
         );
-        const connectedSentry = accountsFor(loadedOptions, "sentry")[0];
+        const connectedSentry = accountsFor(loadedOptions, "sentry").find((account) => account.id === returnedIntegrationAccountId) ?? accountsFor(loadedOptions, "sentry")[0];
+        if (sentryJustConnected && connectedSentry && loadedDraft.inputKind === "sentry_issue") {
+          loadedDraft.sentryAccountId = connectedSentry.id;
+          loadedDraft.sentryProjectResourceIds = resourcesOfKind(loadedOptions, "sentry_project").filter((project) => project.integrationAccountId === connectedSentry.id).slice(0, 1).map((project) => project.id);
+        }
         if (
           sentryJustConnected &&
           connectedSentry &&
@@ -920,6 +874,17 @@ export function AgentCreatePage() {
   ]);
 
   useEffect(() => {
+    function closeTriggerPicker(event: PointerEvent | KeyboardEvent) {
+      const picker = triggerPickerRef.current;
+      if (!picker?.open) return;
+      if ((event instanceof KeyboardEvent && event.key === "Escape") || (event instanceof PointerEvent && event.target instanceof Node && !picker.contains(event.target))) picker.open = false;
+    }
+    document.addEventListener("pointerdown", closeTriggerPicker);
+    document.addEventListener("keydown", closeTriggerPicker);
+    return () => { document.removeEventListener("pointerdown", closeTriggerPicker); document.removeEventListener("keydown", closeTriggerPicker); };
+  }, []);
+
+  useEffect(() => {
     if (!draft) return;
     saveDraftToSessionStorage(draftStorageKey, draft, options);
   }, [draft, draftStorageKey, options]);
@@ -928,13 +893,6 @@ export function AgentCreatePage() {
     if (!githubJustConnected || loading) return;
     void refreshGithubRepositories();
   }, [githubJustConnected, loading, refreshGithubRepositories]);
-
-  useEffect(() => {
-    window.sessionStorage.setItem(
-      stepStorageKey,
-      activeStep.toString(),
-    );
-  }, [activeStep, stepStorageKey]);
 
   const sentryAccounts = useMemo(
     () => accountsFor(options, "sentry"),
@@ -1021,9 +979,12 @@ export function AgentCreatePage() {
     [options],
   );
 
+  if (!loading && !draft) {
+    return <AppShell redesigned active="agents" density="create"><section className="emptyState"><h1>Unable to load agent</h1><p>{error ?? "Try again in a moment."}</p><Button onClick={() => window.location.reload()} variant="secondary">Retry</Button><Link to="/agents">Back to agents</Link></section></AppShell>;
+  }
   if (loading || !draft) {
     return (
-      <AppShell active="agents" density="create">
+      <AppShell redesigned active="agents" density="create">
         <AgentSetupSkeleton />
       </AppShell>
     );
@@ -1041,12 +1002,8 @@ export function AgentCreatePage() {
   const selectedOutputChannel = slackChannels.find(
     (channel) => channel.id === draft.outputChannelResourceId,
   );
-  const slackConnected = slackChannels.length > 0;
-  const steps = isEditing ? EDIT_AGENT_STEPS : NEW_AGENT_STEPS;
-  const finalStep: CreateStep = isEditing ? 4 : 3;
-  const effectiveOutputMode: OutputMode = !isEditing
-    ? "thread"
-    : draft.inputKind === "slack_channel"
+  const slackConnected = slackAccounts.length > 0;
+  const effectiveOutputMode: OutputMode = draft.inputKind === "slack_channel"
       ? draft.outputMode
       : "output_channel";
   const activeSentryAccount =
@@ -1085,18 +1042,6 @@ export function AgentCreatePage() {
       .toLocaleLowerCase()
       .includes(repositoryQuery.trim().toLocaleLowerCase()),
   );
-  const selectedGithubAccountIds = [
-    ...new Set(
-      options.repositories
-        .filter((repository) =>
-          draft.repositoryIds.includes(repository.id),
-        )
-        .map((repository) => repository.integrationAccountId),
-    ),
-  ];
-  const selectedGithubAccount = githubAccounts.find((account) =>
-    selectedGithubAccountIds.includes(account.id),
-  );
   const inputRequirement =
     draft.inputKind === "sentry_issue" && selectedSentryProjects.length === 0
       ? "Connect Sentry and choose at least one project."
@@ -1128,30 +1073,12 @@ export function AgentCreatePage() {
       : draft.createLinearTickets && !draft.linearIssueTemplate.trim()
         ? "Add a Linear issue description template."
       : null;
-  const slackConnectionRequirement = !isEditing && !slackConnected
-    ? "Connect Slack to continue."
-    : null;
-  const stepRequirements: Record<CreateStep, string | null> = isEditing
-    ? {
-        1: inputRequirement,
-        2: outputRequirement,
-        3: contextRequirement,
-        4: promptRequirement,
-      }
-    : {
-        1: slackConnectionRequirement,
-        2: inputRequirement,
-        3: contextRequirement,
-        4: null,
-      };
-  const currentRequirement = stepRequirements[activeStep];
-  const missingRequirement = isEditing
-    ? inputRequirement ?? outputRequirement ?? contextRequirement ?? promptRequirement
-    : slackConnectionRequirement ?? inputRequirement ?? contextRequirement;
+  const missingRequirement = inputRequirement ?? outputRequirement ?? contextRequirement ?? promptRequirement;
 
   function updateDraft(update: Partial<CreateDraft>) {
     setDraft((current) => (current ? { ...current, ...update } : current));
     setError(null);
+    setNotice(null);
   }
 
   function refreshSlackChannels(): Promise<void> {
@@ -1203,6 +1130,14 @@ export function AgentCreatePage() {
       });
     slackRefreshInFlight.current = refresh;
     return refresh;
+  }
+
+  async function refreshInputResources() {
+    setRefreshingInput(true);
+    setInputRefreshError(null);
+    try { setOptions(await refreshSentryAgentOptions(currentDraft.sentryAccountId)); }
+    catch (caught) { setInputRefreshError(caught instanceof Error ? caught.message : "Couldn’t load projects"); }
+    finally { setRefreshingInput(false); }
   }
 
   function openGithubDialog() {
@@ -1357,19 +1292,6 @@ export function AgentCreatePage() {
     });
   }
 
-  function toggleGithubContextIntegration() {
-    if (currentDraft.repositoryIds.length > 0) {
-      updateDraft({ repositoryIds: [], prMode: "disabled" });
-      return;
-    }
-    const firstRepository = options.repositories[0];
-    if (!firstRepository) {
-      openGithubDialog();
-      return;
-    }
-    updateDraft({ repositoryIds: [firstRepository.id], prMode: "manual" });
-  }
-
   function toggleVercelContextIntegration() {
     const selectedVercelIds = new Set(
       vercelProjects
@@ -1477,55 +1399,10 @@ export function AgentCreatePage() {
     }
   }
 
-  function showStep(step: CreateStep) {
-    if (step > furthestStep) return;
-    setActiveStep(step);
-    setError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function continueToNextStep() {
-    if (currentRequirement) {
-      setError(currentRequirement);
-      return;
-    }
-    if (activeStep === finalStep) return;
-    const nextStep = (activeStep + 1) as CreateStep;
-    setActiveStep(nextStep);
-    setFurthestStep((current) =>
-      Math.max(current, nextStep) as CreateStep
-    );
-    setError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function returnToPreviousStep() {
-    if (activeStep === 1) return;
-    setActiveStep((activeStep - 1) as CreateStep);
-    setError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
   async function saveConfiguration() {
-    // Editing saves the whole configuration from any section.
-    if (!isEditing && activeStep !== finalStep) return;
+    if (saving) return;
     if (missingRequirement) {
       setError(missingRequirement);
-      const blockedStep: CreateStep = slackConnectionRequirement
-        ? 1
-        : inputRequirement
-          ? isEditing
-            ? 1
-            : 2
-          : outputRequirement
-            ? 2
-            : contextRequirement
-              ? 3
-              : finalStep;
-      setActiveStep(blockedStep);
-      setFurthestStep((current) =>
-        Math.max(current, blockedStep) as CreateStep
-      );
       return;
     }
 
@@ -1565,7 +1442,7 @@ export function AgentCreatePage() {
           ? "Dash0 alert"
           : slackChannelLabel(selectedSlackInput!.displayName);
     const configuration: AgentConfiguration = {
-      name: existingConfiguration?.name ?? `${inputLabel} responder`,
+      name: currentDraft.name?.trim() || existingConfiguration?.name || `${inputLabel} responder`,
       description:
         existingConfiguration?.description ??
         (trigger.kind === "sentry_issue"
@@ -1594,7 +1471,11 @@ export function AgentCreatePage() {
       const savedAgentId = await saveAgent(agentId, configuration);
       window.sessionStorage.removeItem(draftStorageKey);
       window.sessionStorage.removeItem(stepStorageKey);
-      navigate(`/agents/${savedAgentId}`);
+      if (isEditing) {
+        setExistingConfiguration(configuration);
+        setAgentDetail((current) => current ? { ...current, name: configuration.name, description: configuration.description, enabled: configuration.enabled, configuration } : current);
+        setNotice({ tone: "success", message: "Agent settings saved." });
+      } else navigate(`/agents/${savedAgentId}`);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -1609,21 +1490,11 @@ export function AgentCreatePage() {
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
+    // Saving is explicit; Enter in a picker or text input never creates an agent.
     event.preventDefault();
-    // New-agent creation is click-only. This form guard prevents implicit
-    // submits from context inputs from ever creating an agent.
-    if (!isEditing) return;
-    const submitter = (event.nativeEvent as SubmitEvent).submitter;
-    if (
-      !(submitter instanceof HTMLButtonElement) ||
-      submitter.dataset.submitAgent !== "true"
-    ) {
-      return;
-    }
-    void saveConfiguration();
   }
 
-  const sentryConnected = sentryProjects.length > 0;
+  const sentryConnected = sentryAccounts.length > 0;
   const outputChannelSelected = effectiveOutputMode === "output_channel";
   const vercelContextConnected = selectedVercelProjects.length > 0;
   const selectedSlackContextChannels = slackChannels.filter((channel) =>
@@ -1693,7 +1564,7 @@ export function AgentCreatePage() {
   const supabaseConnectUrl = integrationFor("supabase")?.connectUrl ?? "";
 
   return (
-    <AppShell active="agents" density="create">
+    <AppShell redesigned active="agents" density="create">
       <DatadogConnectionDialog
         connectUrl={integrationFor("datadog")?.connectUrl ?? ""}
         onCancel={() => setChoosingDatadogSite(false)}
@@ -1754,16 +1625,36 @@ export function AgentCreatePage() {
         open={connectingGcp}
         returnTo={returnTo}
       />
-      <section className="createAgentHeading">
-        <div>
-          <h1>{isEditing ? `Edit ${existingConfiguration?.name ?? "agent"}` : "Create agent"}</h1>
-          <p>
-            {isEditing
-              ? "Update what starts the agent, where its results go, and what context it can use."
-              : "Connect Slack, choose an alert channel, and add the context the agent can use."}
-          </p>
+      <header className="agentEditorHeading">
+        <h1 className="srOnly">{isEditing ? agentDetail?.name ?? "Agent" : "Create agent"}</h1>
+        <nav className="workspaceBreadcrumb" aria-label="Breadcrumb">
+          <Link to="/agents">Agents</Link><CaretRightIcon size={12} aria-hidden="true" />
+          <span>{isEditing ? agentDetail?.name ?? "Agent" : "Create agent"}</span>
+        </nav>
+        <div className="agentEditorHeading__row">
+          <label className="agentEditorName">
+            <span className="srOnly">Agent name</span>
+            <input readOnly={activeTab === "history"} style={{ width: `${Math.max(10, (draft.name || existingConfiguration?.name || "New agent").length + 1)}ch` }} value={draft.name ?? ""} maxLength={80} placeholder={isEditing ? existingConfiguration?.name : "New agent"} onChange={(event) => updateDraft({ name: event.target.value })} />
+            <PencilSimpleIcon size={14} aria-hidden="true" />
+          </label>
+          {isEditing && agentDetail ? <Switch checked={agentDetail.enabled} disabled={updatingEnabled || saving} label={agentDetail.enabled ? "Active" : "Inactive"} onCheckedChange={async (enabled) => {
+            setUpdatingEnabled(true);
+            try {
+              await setAgentEnabled(agentDetail.id, enabled);
+              setAgentDetail({ ...agentDetail, enabled });
+              setExistingConfiguration((current) => current ? { ...current, enabled } : current);
+            } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update agent status"); }
+            finally { setUpdatingEnabled(false); }
+          }} /> : null}
+          {activeTab === "settings" ? <Button disabled={saving || updatingEnabled || Boolean(missingRequirement)} loading={saving} onClick={() => void saveConfiguration()} size="small" variant="primary">
+            <FloppyDiskIcon size={14} aria-hidden="true" />{saving ? "Saving…" : "Save"}
+          </Button> : null}
         </div>
-      </section>
+        {isEditing ? <div className="agentDetailTabs" role="tablist" aria-label="Agent sections">
+          <button type="button" role="tab" aria-selected={activeTab === "settings"} onClick={() => setActiveTab("settings")}>Settings</button>
+          <button type="button" role="tab" aria-selected={activeTab === "history"} onClick={() => setActiveTab("history")}>Run history</button>
+        </div> : null}
+      </header>
 
       {notice ? (
         <Alert
@@ -1777,160 +1668,38 @@ export function AgentCreatePage() {
         <Alert className="createNotice" role="alert" title={error} tone="danger" />
       ) : null}
 
-      <form
-        className="createAgentForm createStepper"
-        onKeyDown={(event) => {
-          // Inputs inside the context step must not implicitly activate the
-          // final submit button when Enter is pressed.
-          if (
-            event.key === "Enter" &&
-            !(event.target instanceof HTMLButtonElement) &&
-            !(event.target instanceof HTMLTextAreaElement)
-          ) {
-            event.preventDefault();
-          }
-        }}
-        onSubmit={submit}
-      >
-        <nav
-          aria-label="Agent setup progress"
-          className={`createStepperRail ${
-            isEditing ? "" : "createStepperRail--three"
-          }`}
-        >
-          {steps.map((step) => {
-            const current = activeStep === step.id;
-            // Editing has no step order: each marker reflects whether its
-            // section is complete right now.
-            const complete = isEditing
-              ? !stepRequirements[step.id]
-              : step.id < furthestStep && !stepRequirements[step.id];
-            return (
-              <button
-                aria-current={current ? "step" : undefined}
-                className={[
-                  "createStepperStep",
-                  current ? "isCurrent" : "",
-                  complete ? "isComplete" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                disabled={step.id > furthestStep}
-                key={step.id}
-                onClick={() => showStep(step.id)}
-                type="button"
-              >
-                <span className="createStepperStep__marker">
-                  {complete ? "✓" : isEditing ? "" : step.id}
-                </span>
-                <span className="createStepperStep__copy">
-                  <strong>{step.title}</strong>
-                  <small>{step.description}</small>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="createStepperPanel">
-          {activeStep === 1 ? (
-            !isEditing ? (
-              <NewAgentSetupStep
-                className="newAgentSetupStep--connect"
-                description={
-                  <>
-                    Link the workspace where your monitoring tools post alerts.
-                    <br />
-                    You can choose the exact channel next.
-                  </>
-                }
-                title="Connect Slack"
-              >
-                {slackConnected ? (
-                  <SlackConnectionSummary
-                    displayName={
-                      options.accounts.find(
-                        (account) =>
-                          account.id ===
-                          selectedSlackInput?.integrationAccountId,
-                      )?.displayName ?? "Slack"
-                    }
-                    onReconnect={() => connect("slack")}
-                  />
-                ) : (
-                  <div className="newAgentSetupStep__connectAction">
-                    <Button
-                      className="newAgentSetupStep__connectButton"
-                      disabled={
-                        integrationFor("slack")?.state === "coming_soon" ||
-                        connectingProvider === "slack"
-                      }
-                      loading={connectingProvider === "slack"}
-                      onClick={() => connect("slack")}
-                      variant="primary"
-                    >
-                      {connectingProvider === "slack"
-                        ? "Connecting…"
-                        : integrationFor("slack")?.state === "coming_soon"
-                          ? "Coming soon"
-                          : "Connect Slack"}
-                    </Button>
-                  </div>
-                )}
-              </NewAgentSetupStep>
-            ) : (
-            <CreateSection
-              description="What should start this agent?"
-              title="Input"
-            >
-            <div className="createChoiceGrid">
-              <ChoiceCard
-                checked={draft.inputKind === "sentry_issue"}
-                description="Run whenever Sentry reports a new or regressed error."
-                name="inputKind"
-                onChange={() =>
-                  updateDraft({
-                    inputKind: "sentry_issue",
-                    initialTriageEnabled: false,
-                    outputMode: "output_channel",
-                  })
-                }
-                title="Every Sentry error"
-                value="sentry_issue"
-              />
-              <ChoiceCard
-                checked={draft.inputKind === "dash0_alert"}
-                description="Run whenever Dash0 reports an ongoing failed check."
-                name="inputKind"
-                onChange={() =>
-                  updateDraft({
-                    inputKind: "dash0_alert",
-                    initialTriageEnabled: false,
-                    outputMode: "output_channel",
-                  })
-                }
-                title="Every Dash0 failed check"
-                value="dash0_alert"
-              />
-              <ChoiceCard
-                checked={draft.inputKind === "slack_channel"}
-                description="Run when an alert is posted in a channel."
-                name="inputKind"
-                onChange={() => {
-                  updateDraft({
-                    inputKind: "slack_channel",
-                    outputMode:
-                      draft.outputMode === "output_channel"
-                        ? "output_channel"
-                        : "thread",
-                  });
-                  void refreshSlackChannels();
-                }}
-                title="Alert in a Slack channel"
-                value="slack_channel"
-              />
+      {activeTab === "history" && agentDetail ? <AgentRunHistory agent={agentDetail} /> : null}
+      <form hidden={activeTab !== "settings"} className="createAgentForm agentEditor" onSubmit={submit}>
+        <CreateSection title="Input" description="Choose what starts an investigation.">
+          <div className="agentInputPanel">
+            <div className="agentInputHeader">
+              <ProviderMark provider={draft.inputKind === "sentry_issue" ? "sentry" : draft.inputKind === "dash0_alert" ? "dash0" : "slack"} />
+              <details className="agentTriggerPicker" ref={triggerPickerRef}>
+                <summary aria-label="Choose a trigger">
+                  {draft.inputKind === "sentry_issue" ? "Sentry" : draft.inputKind === "dash0_alert" ? "Dash0" : "Slack"}
+                  <CaretDownIcon size={12} aria-hidden="true" />
+                </summary>
+                <div className="agentTriggerPicker__menu">
+                  <strong>Choose a trigger</strong>
+                  {([
+                    { kind: "slack_channel", provider: "slack", title: "Slack", description: "Alerts in a channel", connected: slackConnected },
+                    { kind: "sentry_issue", provider: "sentry", title: "Sentry", description: "New or regressed errors", connected: sentryConnected },
+                    { kind: "dash0_alert", provider: "dash0", title: "Dash0", description: "Ongoing failed checks", connected: Boolean(activeDash0Account) },
+                  ] as const).map((source) => (
+                    <button type="button" key={source.kind} onClick={(event) => {
+                      updateDraft({ inputKind: source.kind, initialTriageEnabled: source.kind === "slack_channel" && draft.initialTriageEnabled, outputMode: source.kind === "slack_channel" ? "thread" : "output_channel" });
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}>
+                      <ProviderMark provider={source.provider} />
+                      <span><b>{source.title}</b><small>{source.description}</small></span>
+                      <small className={source.connected ? "isConnected" : ""}>{source.connected ? "Connected" : "Connect"}</small>
+                      <CaretRightIcon size={12} aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </details>
+              <span>{draft.inputKind === "sentry_issue" ? "New or regressed errors" : draft.inputKind === "dash0_alert" ? "Ongoing failed checks" : "Alerts in a channel"}</span>
             </div>
-
           {draft.inputKind === "sentry_issue" ? (
             sentryConnected ? (
               <div className="connectedSetup">
@@ -1957,6 +1726,11 @@ export function AgentCreatePage() {
                 />
                 <div className="projectPicker">
                   <span>Projects</span>
+                  {inputRefreshError || !sentryProjects.some((project) => project.integrationAccountId === draft.sentryAccountId) ? <div className="agentResourceNotice" role="status">
+                    <p>{inputRefreshError ?? "No projects available. Check the account’s project access, then refresh."}</p>
+                    <Button size="small" variant="secondary" disabled={refreshingInput} onClick={() => void refreshInputResources()}>{refreshingInput ? "Refreshing…" : "Refresh"}</Button>
+                    <Button size="small" variant="ghost" onClick={() => connect("sentry")}>Manage connection</Button>
+                  </div> : null}
                   <div>
                     {sentryProjects
                       .filter(
@@ -1990,7 +1764,7 @@ export function AgentCreatePage() {
               </div>
             ) : (
               <ConnectionPrompt
-                actionLabel="Set up"
+                actionLabel="Connect"
                 integration={integrationFor("sentry")}
                 isConnecting={connectingProvider === "sentry"}
                 onConnect={() => connect("sentry")}
@@ -2025,7 +1799,7 @@ export function AgentCreatePage() {
               </div>
             ) : (
               <ConnectionPrompt
-                actionLabel="Set up"
+                actionLabel="Connect"
                 integration={integrationFor("dash0")}
                 isConnecting={connectingDash0}
                 onConnect={() => connect("dash0")}
@@ -2048,6 +1822,7 @@ export function AgentCreatePage() {
                   }
                   onReconnect={() => connect("slack")}
                 />
+                {slackChannels.length === 0 ? <div className="agentResourceNotice" role="status"><p>{slackRefreshError ?? "No channels available. Check Slack channel access, then refresh."}</p><Button disabled={refreshingSlackChannels} onClick={() => void refreshSlackChannels()} size="small" variant="secondary">{refreshingSlackChannels ? "Refreshing…" : "Refresh channels"}</Button></div> : null}
                 <ChannelPicker
                   channels={slackChannels}
                   label="Alert channel"
@@ -2061,7 +1836,7 @@ export function AgentCreatePage() {
                 />
                 <Checkbox
                   checked={draft.initialTriageEnabled}
-                  description="Use Jev with this alert and up to eight recent incidents, then add a red SEV-1, orange SEV-2, yellow SEV-3, or green no-issue reaction. Unclear alerts get no reaction."
+                  description="Assess the alert with up to eight recent incidents and add a severity reaction. Unclear alerts receive no reaction."
                   label="Add an initial triage reaction"
                   onChange={(event) =>
                     updateDraft({
@@ -2072,7 +1847,7 @@ export function AgentCreatePage() {
               </Panel>
           ) : (
             <ConnectionPrompt
-              actionLabel="Set up"
+              actionLabel="Connect"
               flat
               integration={integrationFor("slack")}
               isConnecting={connectingProvider === "slack"}
@@ -2081,51 +1856,19 @@ export function AgentCreatePage() {
               title="Connect Slack to continue"
             />
           )}
-            </CreateSection>
-            )
-          ) : null}
-
-          {activeStep === 2 ? (
-            !isEditing ? (
-              <NewAgentSetupStep
-                className="newAgentSetupStep--channel"
-                description="Responder starts an investigation whenever an alert appears here."
-                title="Pick the alert channel"
-              >
-                <ChannelPicker
-                  channels={slackChannels}
-                  label="Alert channel"
-                  onChange={(value) =>
-                    updateDraft({ slackInputResourceId: value })
-                  }
-                  onOpen={refreshSlackChannels}
-                  placeholder="Select a channel…"
-                  refreshError={slackRefreshError}
-                  refreshing={refreshingSlackChannels}
-                  value={draft.slackInputResourceId}
-                />
-                <Checkbox
-                  checked={draft.initialTriageEnabled}
-                  description="Use Jev with this alert and up to eight recent incidents, then add a red SEV-1, orange SEV-2, yellow SEV-3, or green no-issue reaction. Unclear alerts get no reaction."
-                  label="Add an initial triage reaction"
-                  onChange={(event) =>
-                    updateDraft({
-                      initialTriageEnabled: event.target.checked,
-                    })
-                  }
-                />
-              </NewAgentSetupStep>
-            ) : (
-            <CreateSection
+          </div>
+        </CreateSection>
+        <CreateSection
               description="Where should results be posted?"
               title="Output"
             >
+          <div className="agentOutputPanel">
           {draft.inputKind !== "slack_channel" ? (
             <div className="requiredOutput">
               <div className="requiredOutput__label">
                 <span className="radioMark radioMark--selected" />
-                <strong>Post to an output channel</strong>
-                <small>Required for provider alerts</small>
+                <strong>Post to a Slack channel</strong>
+                <small>Required for Sentry and Dash0</small>
               </div>
               {slackConnected ? (
                 <ChannelPicker
@@ -2141,7 +1884,7 @@ export function AgentCreatePage() {
                 />
               ) : (
                 <ConnectionPrompt
-                  actionLabel="Set up"
+                  actionLabel="Connect"
                   compact
                   integration={integrationFor("slack")}
                   isConnecting={connectingProvider === "slack"}
@@ -2153,28 +1896,9 @@ export function AgentCreatePage() {
             </div>
           ) : (
             <>
-              <div className="createChoiceGrid">
-                <ChoiceCard
-                  checked={draft.outputMode === "thread"}
-                  description="Keep the investigation beside the original alert."
-                  name="outputMode"
-                  onChange={() => updateDraft({ outputMode: "thread" })}
-                  title="Reply to the alert thread"
-                  value="thread"
-                />
-                {isEditing ? (
-                  <ChoiceCard
-                    checked={draft.outputMode === "output_channel"}
-                    description="Route results to another Slack channel."
-                    name="outputMode"
-                    onChange={() => {
-                      updateDraft({ outputMode: "output_channel" });
-                      void refreshSlackChannels();
-                    }}
-                    title="Post to an output channel"
-                    value="output_channel"
-                  />
-                ) : null}
+              <div className="agentOutputChoice">
+                <SelectField label="Output destination" value={draft.outputMode} onChange={(value) => updateDraft({ outputMode: value as OutputMode })} options={[{ label: "Reply to the alert thread", value: "thread" }, { label: "Post to a Slack channel", value: "output_channel" }]} />
+                <p>{draft.outputMode === "thread" ? "Keep the investigation beside the original alert." : "Route findings to another Slack channel."}</p>
               </div>
               {draft.outputMode === "output_channel" ? (
                 slackConnected ? (
@@ -2191,7 +1915,7 @@ export function AgentCreatePage() {
                   />
                 ) : (
                   <ConnectionPrompt
-                    actionLabel="Set up"
+                    actionLabel="Connect"
                     compact
                     integration={integrationFor("slack")}
                     isConnecting={connectingProvider === "slack"}
@@ -2204,17 +1928,56 @@ export function AgentCreatePage() {
             </>
           )}
 
-          {isEditing && outputChannelSelected && slackConnected ? (
+          {outputChannelSelected && slackConnected ? (
             <SeverityFilter draft={draft} updateDraft={updateDraft} />
           ) : null}
+          </div>
             </CreateSection>
-            )
-          ) : null}
-
-          {activeStep === 3 ? (
+            <CreateSection
+              description="Tell the agent how to investigate and respond."
+              title="Agent instructions"
+            >
+              <div className="agentInstructionsField">
+              <TextAreaField
+                className="promptField"
+                error={
+                  error === promptRequirement
+                    ? promptRequirement ?? undefined
+                    : undefined
+                }
+                label="Agent instructions"
+                maxLength={AGENT_PROMPT_MAX_LENGTH}
+                onChange={(event) =>
+                  updateDraft({ instructions: event.target.value })
+                }
+                rows={5}
+                placeholder="Describe what the agent should do."
+                value={draft.instructions}
+              />
+              <div className="agentRuntimeInfo"><span>Model: {existingConfiguration?.model && existingConfiguration.model !== "instance/default" ? existingConfiguration.model : "Auto"}</span><span>Harness: Default</span></div>
+              </div>
+            </CreateSection>
+        <section className="agentEditorRepositories">
+          <h2>Repositories</h2>
+          <div className="agentEditorRepositories__list">
+            {options.repositories.filter((repository) => draft.repositoryIds.includes(repository.id)).map((repository) => (
+              <div className="agentEditorRepository" key={repository.id}>
+                <RepositoryIcon size={16} aria-hidden="true" />
+                <span>{repository.fullName}</span>
+                <IconButton aria-label={`Remove ${repository.fullName}`} onClick={() => {
+                  const repositoryIds = draft.repositoryIds.filter((id) => id !== repository.id);
+                  updateDraft({ repositoryIds, ...(repositoryIds.length === 0 ? { prMode: "disabled" } : {}) });
+                }} size="small" variant="ghost"><TrashIcon size={14} aria-hidden="true" /></IconButton>
+              </div>
+            ))}
+            <button className="agentEditorAdd" type="button" onClick={() => githubAccounts.length ? openGithubDialog() : connect("github")}>
+              <PlusIcon size={16} aria-hidden="true" />{draft.repositoryIds.length ? "Manage repositories" : "Add repository"}
+            </button>
+          </div>
+        </section>
             <CreateSection
               description="Choose the integrations and resources this agent can use."
-              title="Agent context"
+              title="Connectors"
             >
               <div className="contextPanel">
                 <div className="contextToolbar">
@@ -2240,6 +2003,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={enabled}
                             label={label}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2258,6 +2022,7 @@ export function AgentCreatePage() {
                     <ContextRow
                       action={
                         <ContextIntegrationControls
+                            showConfigureLabel
                           enabled={selectedSlackContextChannels.length > 0}
                           label="Slack"
                           onConfigure={() => {
@@ -2316,7 +2081,7 @@ export function AgentCreatePage() {
                             size="small"
                             variant="ghost"
                           >
-                            ×
+                            <XIcon size={16} aria-hidden="true" />
                           </IconButton>
                         </header>
                         <div className="configurationDialog__body">
@@ -2350,7 +2115,7 @@ export function AgentCreatePage() {
                                       onClick={() => setSlackContextQuery("")}
                                       type="button"
                                     >
-                                      ×
+                                      <XIcon size={16} aria-hidden="true" />
                                     </button>
                                   ) : null}
                                 </div>
@@ -2498,36 +2263,6 @@ export function AgentCreatePage() {
                     </div>
                   ) : null}
 
-                  {githubAccounts.length > 0 ? (
-                    <ContextRow
-                    action={
-                      <ContextIntegrationControls
-                        enabled={draft.repositoryIds.length > 0}
-                        label="GitHub"
-                        onConfigure={openGithubDialog}
-                        onToggle={toggleGithubContextIntegration}
-                      />
-                    }
-                    detail={
-                      githubAccounts.length > 0
-                        ? `${
-                            selectedGithubAccountIds.length > 1
-                              ? `${selectedGithubAccountIds.length} organizations`
-                              : selectedGithubAccount?.displayName ??
-                                activeGithubAccount?.displayName ??
-                                "GitHub"
-                          } · ${draft.repositoryIds.length} ${
-                            draft.repositoryIds.length === 1
-                              ? "repository"
-                              : "repositories"
-                          } selected`
-                        : "Repositories and pull request fixes"
-                    }
-                    label="GitHub"
-                    provider="github"
-                  />
-                  ) : null}
-
                       {githubDialogOpen && activeGithubAccount ? (
                         <div
                           className="configurationDialogBackdrop"
@@ -2560,7 +2295,7 @@ export function AgentCreatePage() {
                                 size="small"
                                 variant="ghost"
                               >
-                                ×
+                                <XIcon size={16} aria-hidden="true" />
                               </IconButton>
                             </header>
                             <div className="configurationDialog__body">
@@ -2715,6 +2450,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={account.displayName}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2734,6 +2470,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={account.displayName}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2754,6 +2491,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2774,6 +2512,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={account.displayName}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2794,6 +2533,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={account.displayName}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2812,6 +2552,7 @@ export function AgentCreatePage() {
                     <ContextRow
                     action={
                       <ContextIntegrationControls
+                            showConfigureLabel
                         enabled={vercelContextConnected}
                         label="Vercel"
                         onConfigure={() => {
@@ -2871,7 +2612,7 @@ export function AgentCreatePage() {
                             size="small"
                             variant="ghost"
                           >
-                            ×
+                            <XIcon size={16} aria-hidden="true" />
                           </IconButton>
                         </header>
                         <div className="configurationDialog__body">
@@ -2932,6 +2673,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -2952,6 +2694,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onConfigure={() => setDash0WebhookAccountId(account.id)}
@@ -2972,6 +2715,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onToggle={() => toggleContextAccount(account.id)}
@@ -2991,6 +2735,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -3011,6 +2756,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onConfigure={() => {
@@ -3063,7 +2809,7 @@ export function AgentCreatePage() {
                             size="small"
                             variant="ghost"
                           >
-                            ×
+                            <XIcon size={16} aria-hidden="true" />
                           </IconButton>
                         </header>
                         <div className="configurationDialog__body">
@@ -3110,6 +2856,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={account.displayName}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -3132,6 +2879,7 @@ export function AgentCreatePage() {
                       <ContextRow
                         action={
                           <ContextIntegrationControls
+                            showConfigureLabel
                             enabled={connected}
                             label={label}
                             onConfigure={() => setConnectionSettingsOpen(account)}
@@ -3147,10 +2895,8 @@ export function AgentCreatePage() {
                   })}
                 </div>
 
-                <section
-                  aria-labelledby="add-context-integration-title"
-                  className="contextIntegrationCatalog"
-                >
+                <details className="contextIntegrationCatalog">
+                  <summary><PlusIcon size={16} aria-hidden="true" />Add connector</summary>
                   <header className="contextIntegrationCatalog__header">
                     <span className="configurationDialog__copy">
                       <strong id="add-context-integration-title">Add integration</strong>
@@ -3233,7 +2979,7 @@ export function AgentCreatePage() {
                       No integrations match “{integrationQuery}”.
                     </div>
                   )}
-                </section>
+                </details>
               </div>
 
               {connectionSettingsOpen ? (
@@ -3494,93 +3240,6 @@ export function AgentCreatePage() {
                 ) : null}
               </div>
             </CreateSection>
-          ) : null}
-
-          {isEditing && activeStep === 4 ? (
-            <CreateSection
-              description="Tell the agent how to investigate and respond."
-              title="Prompt"
-            >
-              <TextAreaField
-                className="promptField"
-                error={
-                  error === promptRequirement
-                    ? promptRequirement ?? undefined
-                    : undefined
-                }
-                hint={`The agent can use only the context connected above · ${draft.instructions.length.toLocaleString()} / ${AGENT_PROMPT_MAX_LENGTH.toLocaleString()}`}
-                label="Agent prompt"
-                maxLength={AGENT_PROMPT_MAX_LENGTH}
-                onChange={(event) =>
-                  updateDraft({ instructions: event.target.value })
-                }
-                rows={5}
-                value={draft.instructions}
-              />
-            </CreateSection>
-          ) : null}
-
-          {!isEditing && activeStep === 1 && !slackConnected ? null : (
-          <footer
-            className={`createAgentActions ${
-              !isEditing && activeStep === 2
-                ? "createAgentActions--guided"
-                : ""
-            }`}
-          >
-            {(isEditing || activeStep >= 3) &&
-            (currentRequirement || activeStep >= 3) ? (
-              <span
-                aria-live="polite"
-                className={
-                  currentRequirement
-                    ? "createRequirement"
-                    : "createRequirement isReady"
-                }
-              >
-                {currentRequirement ??
-                  (activeStep === 3
-                    ? "Context is optional. Add only what the agent needs."
-                    : "All required setup is complete.")}
-              </span>
-            ) : null}
-            {activeStep === 1 ? (
-              <Link
-                className="dsButton dsButton--secondary dsButton--medium"
-                to={agentId ? `/agents/${agentId}` : "/agents"}
-              >
-                Cancel
-              </Link>
-            ) : (
-              <Button onClick={returnToPreviousStep} variant="secondary">
-                Back
-              </Button>
-            )}
-            {!isEditing && activeStep < finalStep ? (
-              <Button
-                disabled={Boolean(currentRequirement)}
-                onClick={continueToNextStep}
-                type="button"
-                variant="primary"
-              >
-                {activeStep === 2 ? "Continue to context" : "Continue"}
-              </Button>
-            ) : null}
-            {isEditing || activeStep === finalStep ? (
-              <Button
-                data-submit-agent="true"
-                disabled={Boolean(missingRequirement) || saving}
-                loading={saving}
-                onClick={!isEditing ? () => void saveConfiguration() : undefined}
-                type={isEditing ? "submit" : "button"}
-                variant="primary"
-              >
-                {isEditing ? "Save changes" : "Create agent"}
-              </Button>
-            ) : null}
-          </footer>
-          )}
-        </div>
       </form>
     </AppShell>
   );
@@ -3608,56 +3267,6 @@ function CreateSection({
   );
 }
 
-function NewAgentSetupStep({
-  children,
-  className,
-  description,
-  title,
-}: {
-  children: ReactNode;
-  className: string;
-  description: ReactNode;
-  title: string;
-}) {
-  return (
-    <section className={`newAgentSetupStep ${className}`}>
-      <header>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function ChoiceCard({
-  checked,
-  description,
-  name,
-  onChange,
-  title,
-  value,
-}: {
-  checked: boolean;
-  description: string;
-  name: string;
-  onChange: () => void;
-  title: string;
-  value: string;
-}) {
-  return (
-    <Radio
-      checked={checked}
-      className="createChoice"
-      description={description}
-      label={title}
-      name={name}
-      onChange={onChange}
-      value={value}
-    />
-  );
-}
-
 function SlackConnectionSummary({
   displayName,
   onReconnect,
@@ -3668,11 +3277,7 @@ function SlackConnectionSummary({
   return (
     <div className="slackConnectionHeader">
       <div className="slackConnectionIdentity">
-        <ProviderMark provider="slack" />
-        <div className="connectedAccount">
-          <span>Slack workspace</span>
-          <strong>{displayName}</strong>
-        </div>
+        <div className="connectedAccount"><strong>{displayName}</strong><span className="agentConnectedLabel">Connected</span></div>
       </div>
       <Button
         className="slackReconnectButton"
@@ -3712,6 +3317,7 @@ function ConnectionPrompt({
       <ProviderMark provider={provider} />
       <span className="connectionPrompt__copy">
         <strong>{title}</strong>
+        <small>Authorize access to {providerDisplayName(provider)}. You’ll return here to finish setup. Your draft will be kept.</small>
       </span>
       <Button
         disabled={comingSoon || isConnecting}
@@ -3720,7 +3326,7 @@ function ConnectionPrompt({
         size="small"
         variant="primary"
       >
-        {isConnecting ? "Connecting…" : comingSoon ? "Coming soon" : actionLabel}
+        {isConnecting ? "Connecting…" : comingSoon ? "Coming soon" : `${actionLabel} ${providerDisplayName(provider)}`}
       </Button>
     </div>
   );
@@ -3815,7 +3421,7 @@ function ChannelPicker({
           <div className="channelPicker__options" role="listbox">
             {refreshing ? <p>Refreshing channels…</p> : null}
             {!refreshing && refreshError ? (
-              <p>{refreshError}. Showing the last available list.</p>
+              <div className="agentResourceNotice"><p>{refreshError}. Showing the last available list.</p><button type="button" onClick={() => void onOpen?.()}>Retry</button></div>
             ) : null}
             {filteredChannels.map((channel) => (
               <button
@@ -3835,7 +3441,7 @@ function ChannelPicker({
               </button>
             ))}
             {filteredChannels.length === 0 ? (
-              <p>No channels match “{query}”.</p>
+              <p>{query ? `No channels match “${query}”.` : "No channels available. Check channel access or refresh."}</p>
             ) : null}
           </div>
         </div>
@@ -3930,7 +3536,7 @@ function SeverityFilter({
 }) {
   return (
     <fieldset className="severityFilter">
-      <legend>What should be posted?</legend>
+      <legend>Report findings</legend>
       <div className="severityChecks">
         {SEVERITY_OPTIONS.map(({ description, severity }) => (
           <Checkbox

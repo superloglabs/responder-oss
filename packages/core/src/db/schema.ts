@@ -1182,6 +1182,7 @@ export const suggestions = pgTable(
     detail: text("detail").notNull(),
     codeChange: jsonb("code_change").$type<SuggestionCodeChange>(),
     fingerprint: text("fingerprint").notNull(),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
     embedding: jsonb("embedding").$type<number[]>(),
     embeddingModel: text("embedding_model"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

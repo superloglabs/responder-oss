@@ -1,0 +1,113 @@
+/* Agent setup and detail share a normal document flow. */
+.appShell--workspace.appShell--create .agentEditor { gap: 32px; }
+.appShell--workspace.appShell--create .agentEditor[hidden] { display: none; }
+.appShell--workspace.appShell--create .workspaceContent { gap: 22px; }
+.appShell--workspace.appShell--create .createSection > header h2 { font-size: 13px; line-height: 18px; }
+.agentDetailTabs { display: flex; gap: 28px; border-bottom: 1px solid #e6e8ec; margin-top: 8px; }
+.agentDetailTabs button { position: relative; padding: 0 0 13px; border: 0; background: transparent; color: #666; font: inherit; font-size: 13px; cursor: pointer; }
+.agentDetailTabs button[aria-selected="true"] { color: #121212; }
+.agentDetailTabs button[aria-selected="true"]::after { content: ""; position: absolute; height: 2px; bottom: -1px; left: 0; right: 0; background: #4e58f9; }
+.agentInputPanel { display: flex; flex-direction: column; gap: 16px; padding: 16px; background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; }
+.agentInputHeader { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #eee; font-size: 13px; line-height: 18px; }
+.agentInputHeader > span { color: #666; font-size: 12px; }
+.agentTriggerPicker { position: relative; }
+.agentTriggerPicker summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; color: #121212; }
+.agentTriggerPicker summary::-webkit-details-marker { display: none; }
+.agentTriggerPicker__menu { position: absolute; z-index: 20; top: calc(100% + 12px); left: -30px; width: 350px; max-width: calc(100vw - 70px); display: flex; flex-direction: column; padding: 6px; border: 1px solid #e3e3e3; border-radius: 10px; background: #fff; box-shadow: 0 8px 24px #00000014; }
+.agentTriggerPicker__menu > strong { padding: 8px; font-size: 12px; font-weight: 500; color: #666; }
+.agentTriggerPicker__menu button { display: flex; align-items: center; gap: 10px; padding: 12px 8px; width: 100%; border: 0; border-radius: 6px; background: transparent; text-align: left; color: #202020; cursor: pointer; }
+.agentTriggerPicker__menu button:hover { background: #f6f6f6; }
+.agentTriggerPicker__menu button > span:not(.providerMark) { display: flex; flex: 1; flex-direction: column; gap: 3px; }
+.agentTriggerPicker__menu b { font-size: 13px; font-weight: 400; }
+.agentTriggerPicker__menu small { font-size: 12px; color: #666; }
+.agentTriggerPicker__menu .isConnected { color: #2c805e; }
+.appShell--workspace.appShell--create .agentInputPanel .connectedSetup { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.appShell--workspace.appShell--create .agentInputPanel .connectedSetup > .providerMark { display: none; }
+.appShell--workspace.appShell--create .connectedSetup--channel > .dsCheckbox { border-top: 1px solid #f0f0f0; padding-top: 12px; }
+.appShell--workspace.appShell--create .createField { max-width: none; }
+.appShell--workspace.appShell--create .createField :is(.dsSelect__trigger, .channelPicker__trigger) { height: 32px; min-height: 32px; padding: 6px 10px; font-size: 13px; line-height: 18px; background: #fff; border: 1px solid #ddd; border-radius: 6px; color: #202020; }
+.appShell--workspace.appShell--create .projectPicker { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.appShell--workspace.appShell--create .projectPicker > div { display: flex; flex-wrap: wrap; gap: 24px; }
+.appShell--workspace.appShell--create .createChoiceGrid { display: flex; flex-direction: column; gap: 8px; }
+.appShell--workspace.appShell--create .createChoice { min-height: 0; padding: 12px 16px; }
+.appShell--workspace.appShell--create .createChoice.isSelected { border-color: #ddd; background: #fff; }
+.appShell--workspace.appShell--create .requiredOutput { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid #e3e3e3; background: #fff; border-radius: 8px; }
+.appShell--workspace.appShell--create .requiredOutput__label { gap: 8px; }
+.appShell--workspace.appShell--create .requiredOutput__label > .radioMark { display: none; }
+.appShell--workspace.appShell--create .requiredOutput__label strong { font-size: 13px; font-weight: 400; }
+.appShell--workspace.appShell--create .requiredOutput__label small { font-size: 12px; color: #666; }
+.appShell--workspace.appShell--create .severityFilter { display: flex; flex-wrap: wrap; gap: 16px; border: 0; padding: 0 16px; background: transparent; }
+.appShell--workspace.appShell--create .severityChecks { display: flex; flex-wrap: wrap; gap: 16px; }
+.appShell--workspace.appShell--create .severityChoice { border: 0; padding: 0; background: transparent; }
+.appShell--workspace.appShell--create .severityChoice .dsCheckbox__description { display: none; }
+.agentRuntimeInfo { display: flex; gap: 16px; padding: 0 16px; color: #444; font-size: 13px; }
+.agentRuntimeInfo > span + span { padding-left: 16px; border-left: 1px solid #e8e8e8; }
+.appShell--workspace.appShell--create .contextRow { display: flex; align-items: center; }
+.appShell--workspace.appShell--create .contextRow__copy { flex: 1; min-width: 0; }
+.appShell--workspace.appShell--create .contextRow__action { flex-shrink: 0; }
+.appShell--workspace.appShell--create .contextIntegrationGrid { display: flex; flex-wrap: wrap; }
+.appShell--workspace.appShell--create .contextIntegrationCard { flex: 1 1 300px; }
+.appShell--workspace.appShell--create .connectionPrompt { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; border: 0; background: transparent; }
+.appShell--workspace.appShell--create .connectionPrompt__copy { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 180px; }
+.appShell--workspace.appShell--create .connectionPrompt__copy strong { font-size: 13px; font-weight: 500; }
+.appShell--workspace.appShell--create .connectionPrompt__copy small { font-size: 13px; color: #666; line-height: 20px; }
+.agentResourceNotice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: #666; font-size: 13px; }
+.agentResourceNotice p { flex-basis: 100%; margin: 0; }
+.agentRunHistory { display: flex; flex-direction: column; gap: 12px; }
+.agentRunHistory > header { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #666; }
+.agentRunHistory h2 { margin: 0; font-size: 13px; font-weight: 500; color: #202020; }
+.agentRunHistory > header small { margin-left: auto; font-size: 12px; }
+.agentHistoryTable { border: 1px solid #e6e8ec; border-radius: 10px; overflow-x: auto; background: #fff; }
+.agentHistoryRow { display: flex; align-items: center; min-width: 620px; border-top: 1px solid #e6e8ec; font-size: 13px; line-height: 20px; }
+.agentHistoryRow > :first-child { flex: 1; min-width: 0; }
+.agentHistoryRow > :nth-child(2) { width: 120px; flex-shrink: 0; }
+.agentHistoryRow > :nth-child(3) { width: 100px; flex-shrink: 0; }
+.agentHistoryRow > :last-child { width: 36px; flex-shrink: 0; }
+.agentHistoryRow > * { padding: 12px; }
+.agentHistoryRow strong { display: block; color: #202020; font-weight: 400; }
+.agentHistoryRow small { display: block; color: #666; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.agentHistoryRow--heading { background: #fafafa; border-top: 0; }
+.agentHistoryRow--heading > * { padding-block: 8px; }
+.agentHistoryDate { padding: 8px 12px; background: #fafafa; border-top: 1px solid #e6e8ec; color: #666; font-size: 12px; }
+.agentHistoryEmpty { padding: 20px; color: #666; font-size: 13px; }
+.agentRunStatus { display: inline-flex; align-items: center; gap: 6px; color: #38643b; }
+.agentRunStatus i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.agentRunStatus--investigating, .agentRunStatus--pending { color: #806600; }
+.agentRunStatus--failed { color: #b52e35; }
+@media (max-width: 700px) {
+  .agentEditorHeading__row { flex-wrap: wrap; }
+  .agentEditorName { flex-basis: 100%; }
+  .agentInputHeader { flex-wrap: wrap; }
+  .appShell--workspace.appShell--create .requiredOutput__label { flex-wrap: wrap; }
+}
+.appShell--workspace.appShell--create .agentEditor .connectedSetup { min-height: 0; box-shadow: none; }
+.appShell--workspace.appShell--create .agentEditor .channelPicker__trigger { width: 100%; }
+.appShell--workspace.appShell--create .agentEditor .createChoice.dsChoice { min-height: 0; padding: 12px 16px; background: #fff; border-color: #e3e3e3; box-shadow: none; }
+.appShell--workspace.appShell--create .agentEditor .createChoice .dsChoice__copy strong { font-size: 13px; font-weight: 400; }
+.appShell--workspace.appShell--create .agentEditor .createChoice .dsChoice__copy span { font-size: 13px; }
+.appShell--workspace.appShell--create .agentEditor .connectedAccount { display: flex; flex-direction: row; align-items: center; gap: 10px; }
+.appShell--workspace.appShell--create .agentEditor .connectedAccount .agentConnectedLabel { color: #2c805e; font-size: 13px; text-transform: none; letter-spacing: normal; }
+.appShell--workspace.appShell--create .agentEditor .slackReconnectButton { border: 0; background: transparent; box-shadow: none; color: #666; }
+.agentEditorName input { max-width: 100%; }
+
+.appShell--workspace.appShell--create .agentTriggerPicker__menu .providerMark { flex: 0 0 20px; }
+.appShell--workspace.appShell--create .agentOutputChoice { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
+.appShell--workspace.appShell--create .agentOutputChoice .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.appShell--workspace.appShell--create .agentOutputChoice .dsSelect__trigger { width: 100%; height: auto; min-height: 20px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; font-size: 13px; font-weight: 400; color: #202020; }
+.agentOutputChoice p { margin: 0; color: #666; font-size: 13px; line-height: 20px; }
+.appShell--workspace.appShell--create .agentEditor .agentOutputPanel { display: flex; flex-direction: column; gap: 14px; padding: 16px; background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; }
+.appShell--workspace.appShell--create .agentEditor .agentOutputPanel :is(.agentOutputChoice, .requiredOutput) { padding: 0; border: 0; }
+.appShell--workspace.appShell--create .agentEditor .requiredOutput__label small { text-transform: none; letter-spacing: normal; }
+.appShell--workspace.appShell--create .agentEditor .severityFilter { padding: 0; gap: 10px; }
+.appShell--workspace.appShell--create .agentEditor .severityChecks { display: flex; flex-direction: row; flex-wrap: wrap; gap: 16px; }
+.appShell--workspace.appShell--create .agentEditor .severityChoice.dsChoice { width: auto; min-height: 0; padding: 0; border: 0; background: transparent; flex: 0 0 auto; box-shadow: none; }
+.appShell--workspace.appShell--create .agentEditor .severityChoice .dsChoice__copy > span { display: none; }
+.appShell--workspace.appShell--create .agentEditor .severityChoice .dsChoice__copy strong { color: #666; font-size: 12px; font-weight: 400; }
+.appShell--workspace.appShell--create .agentEditor .dsChoice:has(input:checked) .dsChoice__mark { background: #4e58f9; border-color: #4e58f9; }
+.agentInstructionsField { display: flex; flex-direction: column; gap: 10px; padding-bottom: 14px; border: 1px solid #e8e8e8; border-radius: 8px; background: #fff; overflow: hidden; }
+.appShell--workspace.appShell--create .agentEditor .agentInstructionsField textarea { border: 0; border-radius: 0; min-height: 118px; box-shadow: none; }
+.appShell--workspace.appShell--create .agentEditorHeading__row > .dsSwitch { width: auto; flex: 0 0 auto; gap: 8px; }
+.appShell--workspace.appShell--create .agentEditorHeading__row > .dsSwitch .dsSwitch__copy strong { font-size: 13px; font-weight: 400; }
+.appShell--workspace.appShell--create .agentEditor .slackConnectionIdentity { flex: 1; min-width: 0; }
+.appShell--workspace.appShell--create .agentEditor .connectedAccount { width: auto; max-width: none; flex-wrap: wrap; }
+.appShell--workspace.appShell--create .agentEditor .connectedAccount strong { width: auto; max-width: none; }

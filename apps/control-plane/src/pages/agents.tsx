@@ -13,7 +13,7 @@ import {
   integrationsForAgent,
 } from "../agent-list-presentation";
 import { AppShell } from "../components/app-shell";
-import { EllipsisIcon, PlusIcon } from "../components/icons";
+import { DotsThreeIcon as EllipsisIcon, PlusIcon, LightningIcon } from "@phosphor-icons/react";
 import { AgentListSkeleton } from "../components/screen-skeletons";
 import { Badge, DataTable, IconButton } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -21,24 +21,6 @@ import { useDocumentTitle } from "../use-document-title";
 function AgentRowMenu({ agent }: { agent: AgentListItem }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<number | null>(null);
-
-  function cancelScheduledClose() {
-    if (closeTimer.current !== null) {
-      window.clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  }
-
-  // The short delay lets the pointer cross the gap between the trigger and
-  // the popover without the menu closing underneath it.
-  function scheduleClose() {
-    cancelScheduledClose();
-    closeTimer.current = window.setTimeout(() => setOpen(false), 140);
-  }
-
-  useEffect(() => cancelScheduledClose, []);
-
   useEffect(() => {
     if (!open) return;
 
@@ -66,8 +48,6 @@ function AgentRowMenu({ agent }: { agent: AgentListItem }) {
   return (
     <div
       className="agentRowMenu"
-      onMouseEnter={cancelScheduledClose}
-      onMouseLeave={scheduleClose}
       ref={rootRef}
     >
       <IconButton
@@ -75,10 +55,6 @@ function AgentRowMenu({ agent }: { agent: AgentListItem }) {
         aria-haspopup="menu"
         aria-label={`Actions for ${agent.name}`}
         onClick={() => setOpen((value) => !value)}
-        onMouseEnter={() => {
-          cancelScheduledClose();
-          setOpen(true);
-        }}
         size="small"
         variant="ghost"
       >
@@ -138,20 +114,27 @@ export function AgentsPage() {
   );
 
   return (
-    <AppShell active="agents">
-      <section className="pageHeading pageHeading--agents">
-        <div>
-          <h1>Agents</h1>
-          <p>Configure how Responder investigates and acts on incidents.</p>
+    <AppShell redesigned active="agents">
+      <header className="workspaceHeading">
+        <h1><LightningIcon size={16} weight="fill" aria-hidden="true" />Agents</h1>
+        <div className="workspaceHeading__actions">
+          <details className="issuesFilters">
+            <summary>Filters{agentFilter !== "all" ? " · Active" : ""}</summary>
+            <div className="issuesFilters__popover">
+              <label>Status
+                <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value as AgentFilter)}>
+                  <option value="all">All agents</option>
+                  <option value="active">Active</option>
+                  <option value="paused">Paused</option>
+                </select>
+              </label>
+            </div>
+          </details>
+          <Link className="dsButton dsButton--primary dsButton--small" to="/agents/new">
+            <PlusIcon size={14} aria-hidden="true" />Create agent
+          </Link>
         </div>
-        <Link
-          className="dsButton dsButton--primary dsButton--medium"
-          to="/agents/new"
-        >
-          <PlusIcon />
-          New agent
-        </Link>
-      </section>
+      </header>
 
       {error ? <p className="formError">{error}</p> : null}
       {loading ? (
@@ -169,7 +152,7 @@ export function AgentsPage() {
         </section>
       ) : (
         <section
-          aria-labelledby="agent-list-title"
+          aria-label="Agents"
           className="agentListTable"
         >
           <h2 className="srOnly" id="agent-list-title">
@@ -191,7 +174,7 @@ export function AgentsPage() {
                     <small>{agent.description || "No description provided."}</small>
                   </Link>
                 ),
-                width: "34%",
+                width: "38%",
               },
               {
                 header: "Input",
@@ -201,7 +184,7 @@ export function AgentsPage() {
                     {triggerLabel(agent.trigger)}
                   </span>
                 ),
-                width: "18%",
+                width: "15%",
               },
               {
                 header: "Integrations",
@@ -211,7 +194,7 @@ export function AgentsPage() {
                     {integrationsForAgent(agent).join(" · ") || "—"}
                   </span>
                 ),
-                width: "19%",
+                width: "17%",
               },
               {
                 header: "Last run",
@@ -246,7 +229,7 @@ export function AgentsPage() {
                     {agent.enabled ? "Active" : "Paused"}
                   </Badge>
                 ),
-                width: "10%",
+                width: "11%",
               },
               {
                 align: "right",
@@ -254,21 +237,6 @@ export function AgentsPage() {
                 key: "actions",
                 render: (agent) => <AgentRowMenu agent={agent} />,
                 width: "5%",
-              },
-            ]}
-            filters={[
-              { count: agents.length, label: "All", value: "all" },
-              {
-                count: agents.filter((agent) => agent.enabled).length,
-                dot: "var(--ds-positive)",
-                label: "Active",
-                value: "active",
-              },
-              {
-                count: agents.filter((agent) => !agent.enabled).length,
-                dot: "var(--ds-text-muted)",
-                label: "Paused",
-                value: "paused",
               },
             ]}
             getRowKey={(agent) => agent.id}
