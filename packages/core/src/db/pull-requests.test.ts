@@ -54,8 +54,9 @@ function joinedSelect(
   })),
 ) {
   const limit = vi.fn().mockResolvedValue(rows);
-  where.mockImplementation(() => ({
+  where.mockImplementation(() => Object.assign(Promise.resolve(rows), {
     orderBy: vi.fn(() => ({ limit })),
+    limit,
   }));
   const joined = {
     innerJoin: vi.fn(),
@@ -69,6 +70,7 @@ function databaseDouble(
   inserted: Array<{ id: string }>,
   options: {
     activeIndexAvailable?: boolean;
+    attachedRepositories?: Array<{ fullName: string }>;
     existing?: Array<{ id: string }>;
     remediations?: unknown[];
   } = {},
@@ -97,7 +99,10 @@ function databaseDouble(
         }]),
       )
       .mockReturnValueOnce(simpleSelect(options.existing ?? [], existingLimit))
-      .mockReturnValueOnce(eligible);
+      .mockReturnValueOnce(eligible)
+      .mockReturnValueOnce(
+        joinedSelect(options.attachedRepositories ?? [{ fullName: "acme/api" }]),
+      );
     return callback({
       execute,
       insert: vi.fn(() => ({ values })),
@@ -207,7 +212,7 @@ describe("manual pull request uniqueness", () => {
     };
     const { values } = databaseDouble(
       [{ id: firstRequestId }, { id: secondRequestId }],
-      { remediations: [plan] },
+      { remediations: [plan], attachedRepositories: [{ fullName: "acme/app" }, { fullName: "acme/sdk" }] },
     );
 
     await expect(
@@ -220,6 +225,74 @@ describe("manual pull request uniqueness", () => {
       expect.objectContaining({ repositoryFullName: "acme/app" }),
       expect.objectContaining({ repositoryFullName: "acme/sdk" }),
     ]);
+  });
+
+  it("rejects a repository-less remediation when several repositories are attached", async () => {
+    databaseDouble([], {
+      attachedRepositories: [
+        { fullName: "acme/api" },
+        { fullName: "acme/web" },
+      ],
+    });
+
+    await expect(
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
+    ).rejects.toMatchObject({
+      code: "remediation_not_found",
+      message: "The code remediation must name a repository",
+    });
+  });
+
+  it("stores the sole attached repository for a legacy diff", async () => {
+    const { values } = databaseDouble([{ id: "request-id" }]);
+    await queueManualIssuePullRequest({ issueId, organizationId, remediationId });
+    expect(values).toHaveBeenCalledWith([
+      expect.objectContaining({ repositoryFullName: "acme/api" }),
+    ]);
+  });
+
+  it.each([{ attachedRepositories: [] }, { attachedRepositories: [{ fullName: "acme/storefront" }] }])(
+    "rejects a named diff when its repository is unavailable: %j",
+    async ({ attachedRepositories }) => {
+      const { values } = databaseDouble([], {
+        attachedRepositories,
+        remediations: [{
+          ...codeRemediation,
+          changes: [{ ...codeRemediation.changes[0]!, repository: "acme/api" }],
+        }],
+      });
+      await expect(
+        queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
+      ).rejects.toMatchObject({
+        code: "remediation_not_found",
+        message: "The code remediation targets a repository that is not available to this agent",
+      });
+      expect(values).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects every request when one repository in a multi-repository diff is unavailable", async () => {
+    const { values } = databaseDouble([], {
+      remediations: [{
+        ...codeRemediation,
+        changes: [
+          { ...codeRemediation.changes[0]!, repository: "acme/api" },
+          { ...codeRemediation.changes[0]!, repository: "acme/missing" },
+        ],
+      }],
+    });
+    await expect(
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
+    ).rejects.toMatchObject({ code: "remediation_not_found" });
+    expect(values).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy diff when no repository is available", async () => {
+    const { values } = databaseDouble([], { attachedRepositories: [] });
+    await expect(
+      queueManualIssuePullRequest({ issueId, organizationId, remediationId }),
+    ).rejects.toMatchObject({ code: "remediation_not_found" });
+    expect(values).not.toHaveBeenCalled();
   });
 
   it("allows a failed automatic pull request to be retried", async () => {
