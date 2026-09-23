@@ -81,6 +81,34 @@ export function resolveAutomationWorkspacePath(workspacePath: string): string {
   return resolved;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+export async function assertAutomationWorkspaceHasNoSymlinkRedirects(
+  session: DaytonaSandboxSession,
+  workspacePath: string,
+): Promise<void> {
+  const resolvedWorkspacePath = resolveAutomationWorkspacePath(workspacePath);
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `unset ${modelBrokerTokenEnvironmentVariable}`,
+      `if [ ! -d ${shellQuote(resolvedWorkspacePath)} ]; then exit 42; fi`,
+      `resolved=$(realpath -e -- ${shellQuote(resolvedWorkspacePath)})`,
+      `[ "$resolved" = ${shellQuote(resolvedWorkspacePath)} ]`,
+    ].join("\n"),
+    maxOutputTokens: 100,
+    workdir: automationWorkspaceRoot,
+  });
+  if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
+    if (/(?:^|\n)Process exited with code 42(?:\n|$)/u.test(output)) {
+      throw new Error("Automation workspace does not exist");
+    }
+    throw new Error("Automation workspace cannot use symlink redirects");
+  }
+}
+
 export function validateBrokerBaseUrl(value: string): string {
   let url: URL;
   try {

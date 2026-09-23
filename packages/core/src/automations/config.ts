@@ -10,22 +10,27 @@ export const automationModelProviderSchema = z.enum(["openai", "anthropic"]);
 
 const externalResourceIdSchema = z.string().trim().min(1).max(255);
 const integrationAccountIdSchema = z.uuid();
+const uniqueIds = (ids: string[]) => new Set(ids).size === ids.length;
 
 export const automationTriggerSchema = z.discriminatedUnion("kind", [
   z.object({
-    channelIds: z.array(externalResourceIdSchema).min(1).max(50),
+    channelIds: z.array(externalResourceIdSchema).min(1).max(50)
+      .refine(uniqueIds, "Channel IDs must be unique"),
     eventMode: z.enum(["mentions", "every_message", "both"]),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("slack"),
   }),
   z.object({
-    eventTypes: z.array(z.enum(["new_issue", "regression"])).min(1).max(2),
+    eventTypes: z.array(z.enum(["new_issue", "regression"])).min(1).max(2)
+      .refine(uniqueIds, "Event types must be unique"),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("sentry"),
-    projectIds: z.array(externalResourceIdSchema).min(1).max(100),
+    projectIds: z.array(externalResourceIdSchema).min(1).max(100)
+      .refine(uniqueIds, "Project IDs must be unique"),
   }),
   z.object({
-    channelIds: z.array(externalResourceIdSchema).min(1).max(50),
+    channelIds: z.array(externalResourceIdSchema).min(1).max(50)
+      .refine(uniqueIds, "Channel IDs must be unique"),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("discord"),
   }),
@@ -46,10 +51,12 @@ export const automationConfigurationSchema = z
     modelCredentialId: z.uuid(),
     modelProvider: automationModelProviderSchema,
     prompt: z.string().trim().min(1).max(50_000),
-    repositoryIds: z.array(z.uuid()).min(1).max(10),
+    repositoryIds: z.array(z.uuid()).min(1).max(10)
+      .refine(uniqueIds, "Repository IDs must be unique"),
     toolPolicy: z.literal("full"),
     trigger: automationTriggerSchema,
-    workspaceSecretIds: z.array(z.uuid()).max(20).default([]),
+    workspaceSecretIds: z.array(z.uuid()).max(20).default([])
+      .refine(uniqueIds, "Workspace secret IDs must be unique"),
   })
   .superRefine((configuration, context) => {
     if (

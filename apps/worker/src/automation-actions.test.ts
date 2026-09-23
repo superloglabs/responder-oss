@@ -153,4 +153,53 @@ describe("automation trusted actions", () => {
     }));
     expect(JSON.stringify(activeSession)).not.toContain("xoxb-secret");
   });
+
+  it("rejects duplicate action IDs without starting an external write", async () => {
+    const deps = dependencies();
+    const duplicate = {
+      body: "Fixes the deployment check.",
+      id: "same-action",
+      kind: "open_github_pull_request",
+      repository: "acme/app",
+      title: "Fix deployment check",
+    };
+    await expect(executeAutomationActions({
+      automationVersionId: versionId,
+      checkedOutRepositories: [checkout],
+      runId,
+      session: session({ actions: [duplicate, duplicate] }),
+    }, deps)).rejects.toThrow("Action IDs must be unique");
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
+    expect(deps.createPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("checks cancellation immediately before a trusted write", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const deps = dependencies();
+    deps.getConnections.mockResolvedValue([{
+      encryptedCredentials: encryptCredentials({ accessToken: "xoxb-secret" }),
+      externalAccountId: "T123",
+      id: "61616161-6161-4161-8161-616161616161",
+      metadata: {},
+      provider: "slack",
+    }]);
+    const controller = new AbortController();
+    deps.openDirectMessage.mockImplementation(async () => {
+      controller.abort(new Error("run cancelled"));
+      return "D123";
+    });
+    await expect(executeAutomationActions({
+      automationVersionId: versionId,
+      checkedOutRepositories: [checkout],
+      runId,
+      session: session({ actions: [{
+        id: "slack-1",
+        kind: "send_slack_message",
+        target: { type: "dm", userId: "U123" },
+        text: "The fix is ready.",
+      }] }),
+      signal: controller.signal,
+    }, deps)).rejects.toThrow("run cancelled");
+    expect(deps.postMessage).not.toHaveBeenCalled();
+  });
 });

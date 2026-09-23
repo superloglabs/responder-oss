@@ -149,7 +149,8 @@ export const automationModelBrokerGrants = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    runId: text("run_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    leaseId: uuid("lease_id").notNull(),
     tokenHash: text("token_hash").notNull(),
     provider: text("provider").$type<AutomationModelProvider>().notNull(),
     model: text("model").notNull(),
@@ -663,13 +664,23 @@ export const automationVersionIntegrationAccounts = pgTable(
     integrationAccountId: uuid("integration_account_id")
       .notNull()
       .references(() => integrationAccounts.id, { onDelete: "restrict" }),
+    role: text("role").$type<"context" | "trigger">().notNull(),
   },
   (table) => [
     primaryKey({
-      columns: [table.automationVersionId, table.integrationAccountId],
+      columns: [
+        table.automationVersionId,
+        table.integrationAccountId,
+        table.role,
+      ],
     }),
   ],
 );
+
+// Migration 0048 installs organization-scope triggers on every version link,
+// on version credentials, on active versions, and on run references. These
+// cross-table invariants cannot be expressed by the single-column Drizzle
+// foreign keys below without duplicating organization IDs in every join row.
 
 export const automationVersionRepositories = pgTable(
   "automation_version_repositories",
@@ -764,6 +775,11 @@ export const automationRuns = pgTable(
     index("automation_runs_status_lease_idx").on(
       table.status,
       table.leaseExpiresAt,
+    ),
+    uniqueIndex("automation_runs_id_organization_lease_idx").on(
+      table.id,
+      table.organizationId,
+      table.leaseId,
     ),
   ],
 );

@@ -45,6 +45,8 @@ describe("Claude automation harness", () => {
       "ANTHROPIC_BASE_URL='https://models.responder.test/v1'",
     );
     expect(command).toContain("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1");
+    expect(command).toContain("RESPONDER_AUTOMATION_MODEL='claude-sonnet-4-5'");
+    expect(command).toContain("claude-agent-sdk-runner.mjs");
     expect(command).not.toContain(input.prompt);
   });
 

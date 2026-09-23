@@ -1,6 +1,7 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
   assertAutomationHarnessModelCompatibility,
+  assertAutomationWorkspaceHasNoSymlinkRedirects,
   automationWorkspaceRoot,
   modelBrokerTokenEnvironmentVariable,
   resolveAutomationWorkspacePath,
@@ -95,6 +96,10 @@ export async function runClaudeAutomation(
   session: DaytonaSandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
+  await assertAutomationWorkspaceHasNoSymlinkRedirects(
+    session,
+    input.workspacePath,
+  );
   await prepareClaudeAutomationHarness(session);
   await session.materializeEntry({
     entry: { type: "file", content: input.prompt },

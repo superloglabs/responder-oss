@@ -337,6 +337,13 @@
       "when": 1790095666482,
       "tag": "0047_slow_blue_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790152871860,
+      "tag": "0048_misty_rage",
+      "breakpoints": true
     }
   ]
 }

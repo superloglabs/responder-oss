@@ -29,6 +29,9 @@ export async function setOrganizationCapability(input: {
   organizationId: string;
   updatedBy: string;
 }): Promise<void> {
+  // The hosted private control room owns the initial allowlist UI and writes
+  // this shared table. The public application intentionally has no route that
+  // can grant its own organization a private capability.
   await getDatabase()
     .insert(organizationCapabilities)
     .values({

@@ -120,6 +120,18 @@ async function deleteDaytonaSandboxByReference(
   }
 }
 
+export async function deleteDaytonaSandboxByName(
+  sandboxName: string,
+  config: DaytonaCleanupConfig,
+): Promise<void> {
+  await deleteDaytonaSandboxByReference(
+    sandboxName,
+    config,
+    true,
+    defaultCleanupDependencies,
+  );
+}
+
 export async function createDaytonaSandboxSession(
   creator: DaytonaSandboxCreator,
   config: DaytonaCleanupConfig,

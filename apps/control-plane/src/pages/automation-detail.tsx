@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import {
   cancelAutomationRun,
@@ -27,43 +27,44 @@ export function AutomationDetailPage() {
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
   useDocumentTitle(automation?.name ?? "Automation");
 
   const load = useCallback(async () => {
     if (!automationId) return;
+    const generation = ++requestGeneration.current;
     try {
-      setAutomation(await fetchAutomation(automationId));
+      const loadedAutomation = await fetchAutomation(automationId);
+      if (requestGeneration.current === generation) {
+        setAutomation(loadedAutomation);
+        setMissing(false);
+        setError(null);
+      }
     } catch (cause) {
+      if (requestGeneration.current !== generation) return;
       const message = cause instanceof Error ? cause.message : "Unable to load automation";
       if (message === "Automation not found") setMissing(true);
       else setError(message);
     } finally {
-      setLoading(false);
+      if (requestGeneration.current === generation) setLoading(false);
     }
   }, [automationId]);
 
   useEffect(() => {
     if (!automationId) return;
-    let cancelled = false;
-    void fetchAutomation(automationId)
-      .then((loadedAutomation) => {
-        if (!cancelled) setAutomation(loadedAutomation);
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return;
-        const message = cause instanceof Error
-          ? cause.message
-          : "Unable to load automation";
-        if (message === "Automation not found") setMissing(true);
-        else setError(message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const effectGeneration = ++requestGeneration.current;
+    void Promise.resolve().then(() => {
+      if (requestGeneration.current !== effectGeneration) return;
+      setLoading(true);
+      setAutomation(null);
+      setMissing(false);
+      setError(null);
+      void load();
+    });
     return () => {
-      cancelled = true;
+      requestGeneration.current += 1;
     };
-  }, [automationId]);
+  }, [automationId, load]);
   useEffect(() => {
     if (!automation?.runs.some((run) => run.status === "pending" || run.status === "running")) return;
     const timer = window.setInterval(() => void load(), 2_000);

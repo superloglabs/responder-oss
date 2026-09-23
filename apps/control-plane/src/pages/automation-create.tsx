@@ -78,6 +78,9 @@ export function AutomationCreatePage() {
           const firstRepository = loadedOptions.repositories[0];
           setConfiguration((current) => ({
             ...current,
+            model: firstCredential?.provider === "anthropic"
+              ? "claude-sonnet-4-5"
+              : "gpt-5.4",
             modelCredentialId: firstCredential?.id ?? "",
             modelProvider: firstCredential?.provider ?? "openai",
             repositoryIds: firstRepository ? [firstRepository.id] : [],

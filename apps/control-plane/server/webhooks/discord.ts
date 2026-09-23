@@ -31,6 +31,7 @@ const discordCommandSchema = z.object({
       }),
     })
     .optional(),
+  token: z.string().min(1),
   type: z.literal(2),
 });
 
@@ -81,6 +82,87 @@ function interactionResponse(content: string) {
   };
 }
 
+function deferredInteractionResponse() {
+  return { data: { flags: 64 }, type: 5 };
+}
+
+async function updateInteractionResponse(input: {
+  applicationId: string;
+  content: string;
+  token: string;
+}): Promise<void> {
+  const response = await fetch(
+    `https://discord.com/api/v10/webhooks/${encodeURIComponent(input.applicationId)}/${encodeURIComponent(input.token)}/messages/@original`,
+    {
+      body: JSON.stringify({ content: input.content }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Discord interaction update failed (${response.status})`);
+  }
+}
+
+async function fanOutDiscordCommand(
+  interaction: z.infer<typeof discordCommandSchema>,
+): Promise<void> {
+  let content: string;
+  try {
+    const matches = await findAutomationsForDiscordCommand({
+      channelId: interaction.channel_id,
+      guildId: interaction.guild_id,
+    });
+    const commandContext = interaction.data.options.find(
+      (option) => option.name === "context",
+    )?.value.trim();
+    const user = interaction.member?.user;
+    const results = await Promise.allSettled(
+      matches.map((match) =>
+        queueAutomationRun({
+          automationId: match.automationId,
+          trigger: {
+            attributes: {
+              applicationId: interaction.application_id,
+              channelId: interaction.channel_id,
+              guildId: interaction.guild_id,
+              interactionId: interaction.id,
+              userId: user?.id ?? null,
+              username: user?.global_name ?? user?.username ?? null,
+            },
+            body: commandContext ||
+              "The automation was started with the /automate command.",
+            externalEventId: `${interaction.id}:${match.automationId}`,
+            provider: "discord",
+            sourceUrl:
+              `https://discord.com/channels/${interaction.guild_id}/${interaction.channel_id}`,
+            title: user
+              ? `Discord automation requested by ${user.global_name ?? user.username}`
+              : "Discord automation requested",
+          },
+        })
+      ),
+    );
+    const started = results.filter((result) => result.status === "fulfilled").length;
+    const failed = results.length - started;
+    content = matches.length === 0
+      ? "No automation is configured for this channel."
+      : failed === 0
+        ? started === 1 ? "Automation started." : `${started} automations started.`
+        : started === 0
+          ? "The configured automations could not be started."
+          : `${started} automations started; ${failed} could not be started.`;
+  } catch (error) {
+    console.error("Unable to fan out Discord automation command", error);
+    content = "The configured automations could not be started.";
+  }
+  await updateInteractionResponse({
+    applicationId: interaction.application_id,
+    content,
+    token: interaction.token,
+  });
+}
+
 export const discordWebhookRoutes = new Hono().post("/", async (context) => {
   const rawBody = await context.req.text();
   if (
@@ -115,57 +197,8 @@ export const discordWebhookRoutes = new Hono().post("/", async (context) => {
     );
   }
 
-  const interaction = parsed.data;
-  const matches = await findAutomationsForDiscordCommand({
-    channelId: interaction.channel_id,
-    guildId: interaction.guild_id,
+  void fanOutDiscordCommand(parsed.data).catch((error) => {
+    console.error("Unable to update Discord automation command", error);
   });
-  const commandContext = interaction.data.options.find(
-    (option) => option.name === "context",
-  )?.value.trim();
-  const user = interaction.member?.user;
-
-  try {
-    await Promise.all(
-      matches.map((match) =>
-        queueAutomationRun({
-          automationId: match.automationId,
-          trigger: {
-            attributes: {
-              applicationId: interaction.application_id,
-              channelId: interaction.channel_id,
-              guildId: interaction.guild_id,
-              interactionId: interaction.id,
-              userId: user?.id ?? null,
-              username: user?.global_name ?? user?.username ?? null,
-            },
-            body: commandContext ||
-              "The automation was started with the /automate command.",
-            externalEventId: `${interaction.id}:${match.automationId}`,
-            provider: "discord",
-            sourceUrl:
-              `https://discord.com/channels/${interaction.guild_id}/${interaction.channel_id}`,
-            title: user
-              ? `Discord automation requested by ${user.global_name ?? user.username}`
-              : "Discord automation requested",
-          },
-        })
-      ),
-    );
-  } catch (error) {
-    console.error("Unable to fan out Discord automation command", error);
-    return context.json(
-      interactionResponse("The automation could not be started. Try again shortly."),
-    );
-  }
-
-  return context.json(
-    interactionResponse(
-      matches.length === 0
-        ? "No automation is configured for this channel."
-        : matches.length === 1
-          ? "Automation started."
-          : `${matches.length} automations started.`,
-    ),
-  );
+  return context.json(deferredInteractionResponse());
 });

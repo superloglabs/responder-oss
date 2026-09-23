@@ -118,9 +118,6 @@ describe("Codex automation harness", () => {
       execCommand: vi
         .fn()
         .mockResolvedValueOnce(
-          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
-        )
-        .mockResolvedValueOnce(
           "Chunk ID: workspace\nProcess exited with code 1\nOutput:\n",
         ),
       materializeEntry: vi.fn().mockResolvedValue(undefined),
@@ -136,9 +133,6 @@ describe("Codex automation harness", () => {
     const session = {
       execCommand: vi
         .fn()
-        .mockResolvedValueOnce(
-          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
-        )
         .mockResolvedValueOnce(
           "Chunk ID: workspace\nProcess exited with code 42\nOutput:\n",
         ),

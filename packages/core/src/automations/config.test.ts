@@ -71,4 +71,19 @@ describe("automation configuration", () => {
       })
     ).toThrow();
   });
+
+  it("rejects duplicate linked resources before persistence", () => {
+    const repositoryId = baseConfiguration.repositoryIds[0];
+    expect(() => automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      repositoryIds: [repositoryId, repositoryId],
+    })).toThrow("Repository IDs must be unique");
+    expect(() => automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      workspaceSecretIds: [
+        "51515151-5151-4151-8151-515151515151",
+        "51515151-5151-4151-8151-515151515151",
+      ],
+    })).toThrow("Workspace secret IDs must be unique");
+  });
 });

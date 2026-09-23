@@ -12,12 +12,14 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
+  deleteDaytonaSandboxByName,
   prepareDaytonaSandbox,
   type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
 
 interface AutomationSandboxDependencies {
   close: typeof closeDaytonaSandbox;
+  closePending: typeof deleteDaytonaSandboxByName;
   configure: typeof configureDaytonaSandboxLifecycle;
   createClient(options: DaytonaSandboxClientOptions): DaytonaSandboxClient;
   createSession: typeof createDaytonaSandboxSession;
@@ -26,6 +28,7 @@ interface AutomationSandboxDependencies {
 
 const defaultDependencies: AutomationSandboxDependencies = {
   close: closeDaytonaSandbox,
+  closePending: deleteDaytonaSandboxByName,
   configure: configureDaytonaSandboxLifecycle,
   createClient: (options) => new DaytonaSandboxClient(options),
   createSession: createDaytonaSandboxSession,
@@ -41,6 +44,7 @@ export interface FreshAutomationSandboxInput<T> {
   run(
     session: DaytonaSandboxSession,
     withModelBroker: <Result>(operation: () => Promise<Result>) => Promise<Result>,
+    signal: AbortSignal | undefined,
   ): Promise<T>;
   runId: string;
 }
@@ -86,6 +90,31 @@ interface SerializedModelBrokerAccess {
 }
 
 const modelBrokerDrainTimeoutMs = 30_000;
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Automation sandbox operation was aborted");
+}
+
+async function abortable<Result>(
+  operation: Promise<Result>,
+  signal: AbortSignal | undefined,
+): Promise<Result> {
+  if (!signal) return operation;
+  if (signal.aborted) throw abortReason(signal);
+  let rejectFromAbort: ((error: Error) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectFromAbort = reject;
+  });
+  const onAbort = () => rejectFromAbort?.(abortReason(signal));
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
 
 function serializedModelBrokerAccess(
   session: DaytonaSandboxSession,
@@ -152,16 +181,20 @@ export async function runInFreshAutomationSandbox<T>(
     pauseOnExit: false,
   });
   let session: DaytonaSandboxSession | null = null;
+  let creationStarted = false;
 
   try {
-    session = await dependencies.createSession(
-      client,
-      input.config,
-      sandboxName,
+    creationStarted = true;
+    session = await abortable(
+      dependencies.createSession(client, input.config, sandboxName),
+      input.signal,
     );
-    await dependencies.configure(session, input.config, input.secrets ?? []);
+    await abortable(
+      dependencies.configure(session, input.config, input.secrets ?? []),
+      input.signal,
+    );
     if (!input.config.sandboxSnapshotName) {
-      await dependencies.prepare(session);
+      await abortable(dependencies.prepare(session), input.signal);
     }
     const activeSession = session;
     const modelBroker = serializedModelBrokerAccess(
@@ -172,23 +205,8 @@ export async function runInFreshAutomationSandbox<T>(
       | { error: unknown; succeeded: false }
       | { succeeded: true; value: T };
     try {
-      const run = input.run(activeSession, modelBroker.run);
-      const value = input.signal
-        ? await Promise.race([
-            run,
-            new Promise<never>((_resolve, reject) => {
-              const rejectFromSignal = () => reject(
-                input.signal?.reason instanceof Error
-                  ? input.signal.reason
-                  : new Error("Automation sandbox operation was aborted"),
-              );
-              if (input.signal?.aborted) rejectFromSignal();
-              else input.signal?.addEventListener("abort", rejectFromSignal, {
-                once: true,
-              });
-            }),
-          ])
-        : await run;
+      const run = input.run(activeSession, modelBroker.run, input.signal);
+      const value = await abortable(run, input.signal);
       outcome = { succeeded: true, value };
     } catch (error) {
       outcome = { error, succeeded: false };
@@ -211,6 +229,8 @@ export async function runInFreshAutomationSandbox<T>(
         jobId: input.runId,
         organizationId: input.organizationId,
       });
+    } else if (creationStarted) {
+      await dependencies.closePending(sandboxName, input.config);
     }
   }
 }

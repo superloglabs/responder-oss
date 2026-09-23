@@ -26,6 +26,7 @@ import {
   automationVersions,
   automations,
   integrationAccounts,
+  integrationResources,
   organizationCapabilities,
   organizationModelCredentials,
   repositories,
@@ -89,6 +90,15 @@ export async function findAutomationsForSlackEvent(input: {
         eq(integrationAccounts.status, "connected"),
       ),
     )
+    .innerJoin(
+      integrationResources,
+      and(
+        eq(integrationResources.integrationAccountId, integrationAccounts.id),
+        eq(integrationResources.kind, "slack_channel"),
+        eq(integrationResources.externalId, input.channelId),
+        eq(integrationResources.available, true),
+      ),
+    )
     .where(eq(automations.enabled, true));
 
   return rows.flatMap((row) => {
@@ -141,6 +151,15 @@ export async function findAutomationsForSentryIssue(input: {
         eq(integrationAccounts.status, "connected"),
       ),
     )
+    .innerJoin(
+      integrationResources,
+      and(
+        eq(integrationResources.integrationAccountId, integrationAccounts.id),
+        eq(integrationResources.kind, "sentry_project"),
+        eq(integrationResources.externalId, input.projectId),
+        eq(integrationResources.available, true),
+      ),
+    )
     .where(eq(automations.enabled, true));
   const eventType = input.action === "created" ? "new_issue" : "regression";
   return rows.flatMap((row) =>
@@ -183,6 +202,15 @@ export async function findAutomationsForDiscordCommand(input: {
         eq(integrationAccounts.provider, "discord"),
         eq(integrationAccounts.externalAccountId, input.guildId),
         eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .innerJoin(
+      integrationResources,
+      and(
+        eq(integrationResources.integrationAccountId, integrationAccounts.id),
+        eq(integrationResources.kind, "discord_channel"),
+        eq(integrationResources.externalId, input.channelId),
+        eq(integrationResources.available, true),
       ),
     )
     .where(eq(automations.enabled, true));
@@ -233,6 +261,37 @@ async function validateConfigurationResources(
   if (triggerAccount?.provider !== triggerProvider(configuration.trigger)) {
     throw new AutomationConfigurationError(
       "The selected trigger integration has the wrong provider",
+      "integration_not_found",
+    );
+  }
+  const triggerResource = configuration.trigger.kind === "sentry"
+    ? {
+        externalIds: configuration.trigger.projectIds,
+        kind: "sentry_project" as const,
+      }
+    : {
+        externalIds: configuration.trigger.channelIds,
+        kind: configuration.trigger.kind === "slack"
+          ? "slack_channel" as const
+          : "discord_channel" as const,
+      };
+  const triggerResources = await tx
+    .select({ externalId: integrationResources.externalId })
+    .from(integrationResources)
+    .where(
+      and(
+        eq(
+          integrationResources.integrationAccountId,
+          configuration.trigger.integrationAccountId,
+        ),
+        eq(integrationResources.kind, triggerResource.kind),
+        eq(integrationResources.available, true),
+        inArray(integrationResources.externalId, triggerResource.externalIds),
+      ),
+    );
+  if (triggerResources.length !== triggerResource.externalIds.length) {
+    throw new AutomationConfigurationError(
+      "One or more selected trigger resources are unavailable",
       "integration_not_found",
     );
   }
@@ -291,7 +350,7 @@ async function validateConfigurationResources(
         eq(repositories.available, true),
       ),
     );
-  if (repositoryRows.length !== new Set(configuration.repositoryIds).size) {
+  if (repositoryRows.length !== configuration.repositoryIds.length) {
     throw new AutomationConfigurationError(
       "One or more selected repositories are unavailable",
       "repository_not_found",
@@ -308,7 +367,7 @@ async function validateConfigurationResources(
           inArray(workspaceSecrets.id, configuration.workspaceSecretIds),
         ),
       );
-    if (secretRows.length !== new Set(configuration.workspaceSecretIds).size) {
+    if (secretRows.length !== configuration.workspaceSecretIds.length) {
       throw new AutomationConfigurationError(
         "One or more selected workspace secrets are unavailable",
         "secret_not_found",
@@ -349,17 +408,22 @@ async function insertAutomationVersion(
   const versionId = rows[0]?.id;
   if (!versionId) throw new Error("Unable to create automation version");
 
-  const accountIds = [
-    ...new Set([
-      input.configuration.trigger.integrationAccountId,
-      ...input.configuration.contextAccountIds,
-    ]),
+  const accountLinks = [
+    {
+      integrationAccountId: input.configuration.trigger.integrationAccountId,
+      role: "trigger" as const,
+    },
+    ...input.configuration.contextAccountIds.map((integrationAccountId) => ({
+      integrationAccountId,
+      role: "context" as const,
+    })),
   ];
   await Promise.all([
     tx.insert(automationVersionIntegrationAccounts).values(
-      accountIds.map((integrationAccountId) => ({
+      accountLinks.map(({ integrationAccountId, role }) => ({
         automationVersionId: versionId,
         integrationAccountId,
+        role,
       })),
     ),
     tx.insert(automationVersionRepositories).values(
@@ -550,7 +614,10 @@ export async function getAutomation(
   if (!automation) return null;
   const [accountRows, repositoryRows, secretRows, runRows] = await Promise.all([
     db
-      .select({ id: automationVersionIntegrationAccounts.integrationAccountId })
+      .select({
+        id: automationVersionIntegrationAccounts.integrationAccountId,
+        role: automationVersionIntegrationAccounts.role,
+      })
       .from(automationVersionIntegrationAccounts)
       .where(
         eq(
@@ -595,14 +662,13 @@ export async function getAutomation(
       .orderBy(desc(automationRuns.createdAt))
       .limit(50),
   ]);
-  const triggerAccountId = automation.configuration.trigger.integrationAccountId;
   return {
     ...automation,
     configuration: {
       ...automation.configuration,
       contextAccountIds: accountRows
-        .map((row) => row.id)
-        .filter((id) => id !== triggerAccountId),
+        .filter((row) => row.role === "context")
+        .map((row) => row.id),
       repositoryIds: repositoryRows.map((row) => row.id),
       workspaceSecretIds: secretRows.map((row) => row.id),
     },
@@ -616,7 +682,25 @@ export async function getAutomationRun(
 ) {
   const db = getDatabase();
   const rows = await db
-    .select()
+    .select({
+      automationId: automationRuns.automationId,
+      automationVersionId: automationRuns.automationVersionId,
+      cancelRequestedAt: automationRuns.cancelRequestedAt,
+      completedAt: automationRuns.completedAt,
+      createdAt: automationRuns.createdAt,
+      failureCategory: automationRuns.failureCategory,
+      failureMessage: automationRuns.failureMessage,
+      heartbeatAt: automationRuns.heartbeatAt,
+      id: automationRuns.id,
+      organizationId: automationRuns.organizationId,
+      redactedTrigger: automationRuns.redactedTrigger,
+      resultSummary: automationRuns.resultSummary,
+      sandboxId: automationRuns.sandboxId,
+      startedAt: automationRuns.startedAt,
+      status: automationRuns.status,
+      updatedAt: automationRuns.updatedAt,
+      usage: automationRuns.usage,
+    })
     .from(automationRuns)
     .where(
       and(
@@ -741,6 +825,19 @@ export async function beginAutomationRun(input: {
   });
 }
 
+export async function abandonPendingAutomationRun(runId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .delete(automationRuns)
+    .where(
+      and(
+        eq(automationRuns.id, runId),
+        eq(automationRuns.status, "pending"),
+      ),
+    )
+    .returning({ id: automationRuns.id });
+  return rows.length > 0;
+}
+
 export async function appendAutomationRunEvent(input: {
   data?: Record<string, unknown>;
   runId: string;
@@ -815,13 +912,14 @@ export async function failAutomationActionAttempt(input: {
 export async function setAutomationRunStatus(input: {
   failureCategory?: string;
   failureMessage?: string;
+  leaseId?: string;
   resultSummary?: string;
   runId: string;
   status: AutomationRunStatus;
   usage?: Record<string, unknown>;
-}): Promise<void> {
+}): Promise<boolean> {
   const terminal = ["succeeded", "failed", "cancelled"].includes(input.status);
-  await getDatabase()
+  const rows = await getDatabase()
     .update(automationRuns)
     .set({
       ...(terminal ? { completedAt: new Date() } : {}),
@@ -833,17 +931,26 @@ export async function setAutomationRunStatus(input: {
       updatedAt: new Date(),
       usage: input.usage,
     })
-    .where(eq(automationRuns.id, input.runId));
+    .where(
+      and(
+        eq(automationRuns.id, input.runId),
+        ...(input.leaseId ? [eq(automationRuns.leaseId, input.leaseId)] : []),
+      ),
+    )
+    .returning({ id: automationRuns.id });
+  return rows.length > 0;
 }
 
 export async function claimAutomationRun(runId: string) {
   const db = getDatabase();
   const now = new Date();
+  const leaseId = randomUUID();
   const leaseExpiresAt = new Date(now.getTime() + 60_000);
   const claimed = await db
     .update(automationRuns)
     .set({
       heartbeatAt: now,
+      leaseId,
       leaseExpiresAt,
       startedAt: now,
       status: "running",
@@ -868,10 +975,11 @@ export async function claimAutomationRun(runId: string) {
       automationId: automationRuns.automationId,
       automationVersionId: automationRuns.automationVersionId,
       organizationId: automationRuns.organizationId,
+      leaseId: automationRuns.leaseId,
       triggerInput: automationRuns.triggerInput,
     });
   const run = claimed[0];
-  if (!run) return null;
+  if (!run?.leaseId) return null;
 
   const rows = await db
     .select({
@@ -918,12 +1026,13 @@ export async function claimAutomationRun(runId: string) {
     await setAutomationRunStatus({
       failureCategory: "configuration_unavailable",
       failureMessage: "Automation configuration is unavailable",
+      leaseId,
       runId,
       status: "failed",
     });
     return null;
   }
-  return { ...run, ...configuration, runId };
+  return { ...run, ...configuration, leaseId, runId };
 }
 
 export async function automationRunCancellationRequested(
@@ -938,7 +1047,7 @@ export async function automationRunCancellationRequested(
 }
 
 export async function heartbeatAutomationRun(
-  runId: string,
+  input: { leaseId: string; runId: string },
   leaseSeconds = 60,
 ): Promise<boolean> {
   if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 30 || leaseSeconds > 600) {
@@ -954,7 +1063,8 @@ export async function heartbeatAutomationRun(
     })
     .where(
       and(
-        eq(automationRuns.id, runId),
+        eq(automationRuns.id, input.runId),
+        eq(automationRuns.leaseId, input.leaseId),
         eq(automationRuns.status, "running"),
       ),
     )
@@ -1010,6 +1120,7 @@ export async function getAutomationRuntimeConnections(versionId: string) {
       id: integrationAccounts.id,
       metadata: integrationAccounts.metadata,
       provider: integrationAccounts.provider,
+      role: automationVersionIntegrationAccounts.role,
     })
     .from(automationVersionIntegrationAccounts)
     .innerJoin(

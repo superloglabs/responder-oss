@@ -96,7 +96,7 @@ function automationBrokerBaseUrl(environment: NodeJS.ProcessEnv): string {
 
 function automationContextServers(
   environment: NodeJS.ProcessEnv,
-  connections: Array<{ id: string; provider: string }>,
+  connections: Array<{ id: string; provider: string; role: "context" | "trigger" }>,
 ) {
   const broker = new URL(automationBrokerBaseUrl(environment));
   broker.pathname = broker.pathname.replace(
@@ -105,6 +105,7 @@ function automationContextServers(
   );
   return connections
     .filter((connection) =>
+      connection.role === "context" &&
       ["custom_mcp", "datadog", "sentry", "slack"].includes(
         connection.provider,
       )
@@ -199,18 +200,31 @@ export async function processAutomationRun(
       });
   }, 5_000);
   const heartbeat = setInterval(() => {
-    void dependencies.heartbeatRun(run.runId).catch((error) => {
-      console.error(JSON.stringify({
-        errorCode: error instanceof Error ? error.name : typeof error,
-        event: "automation_run_heartbeat_failed",
-        runId: run.runId,
-      }));
-    });
+    void dependencies.heartbeatRun({ leaseId: run.leaseId, runId: run.runId })
+      .then((active) => {
+        if (!active) runAbort.abort(new AutomationRunLeaseLostError());
+      })
+      .catch((error) => {
+        console.error(JSON.stringify({
+          errorCode: error instanceof Error ? error.name : typeof error,
+          event: "automation_run_heartbeat_failed",
+          runId: run.runId,
+        }));
+      });
   }, 30_000);
   try {
-    await dependencies.heartbeatRun(run.runId);
+    if (!(await dependencies.heartbeatRun({
+      leaseId: run.leaseId,
+      runId: run.runId,
+    }))) {
+      throw new AutomationRunLeaseLostError();
+    }
     if (run.cancelRequestedAt || await dependencies.cancellationRequested(run.runId)) {
-      await dependencies.setStatus({ runId: run.runId, status: "cancelled" });
+      await dependencies.setStatus({
+        leaseId: run.leaseId,
+        runId: run.runId,
+        status: "cancelled",
+      });
       await recordEvent(dependencies, run.runId, "run_cancelled");
       return { runId: run.runId };
     }
@@ -230,6 +244,7 @@ export async function processAutomationRun(
       maxOutputTokensPerRequest: run.maxOutputTokensPerRequest,
       maxRequests: run.maxModelRequests,
       model: run.model,
+      leaseId: run.leaseId,
       organizationId: run.organizationId,
       provider: run.modelProvider,
       runId: run.runId,
@@ -246,7 +261,8 @@ export async function processAutomationRun(
       brokerToken: grant.token,
       config: daytonaConfig,
       organizationId: run.organizationId,
-      run: async (session, withModelBroker) => {
+      run: async (session, withModelBroker, sandboxSignal) => {
+        sandboxSignal?.throwIfAborted();
         await recordEvent(dependencies, run.runId, "sandbox_ready");
         const repositories = await dependencies.checkoutRepositories(
           session,
@@ -259,6 +275,7 @@ export async function processAutomationRun(
             sha,
           })),
         });
+        sandboxSignal?.throwIfAborted();
         if (await dependencies.cancellationRequested(run.runId)) {
           throw new AutomationRunCancelledError();
         }
@@ -279,14 +296,24 @@ export async function processAutomationRun(
             dependencies,
           )
         );
+        sandboxSignal?.throwIfAborted();
         if (await dependencies.cancellationRequested(run.runId)) {
           throw new AutomationRunCancelledError();
         }
         const actions = await dependencies.executeActions({
+          assertActive: async () => {
+            if (!(await dependencies.heartbeatRun({
+              leaseId: run.leaseId,
+              runId: run.runId,
+            }))) {
+              throw new AutomationRunLeaseLostError();
+            }
+          },
           automationVersionId: run.automationVersionId,
           checkedOutRepositories: repositories,
           runId: run.runId,
           session,
+          signal: runAbort.signal,
         });
         for (const action of actions) {
           await recordEvent(dependencies, run.runId, "action_succeeded", action);
@@ -299,11 +326,16 @@ export async function processAutomationRun(
     });
 
     if (await dependencies.cancellationRequested(run.runId)) {
-      await dependencies.setStatus({ runId: run.runId, status: "cancelled" });
+      await dependencies.setStatus({
+        leaseId: run.leaseId,
+        runId: run.runId,
+        status: "cancelled",
+      });
       await recordEvent(dependencies, run.runId, "run_cancelled");
       return { runId: run.runId };
     }
-    await dependencies.setStatus({
+    if (!(await dependencies.setStatus({
+      leaseId: run.leaseId,
       resultSummary: "Automation completed successfully.",
       runId: run.runId,
       status: "succeeded",
@@ -311,9 +343,12 @@ export async function processAutomationRun(
         actionCount: result.actions.length,
         harnessOutputBytes: Buffer.byteLength(result.harnessResult.eventStream),
       },
-    });
+    }))) {
+      throw new AutomationRunLeaseLostError();
+    }
     await recordEvent(dependencies, run.runId, "run_succeeded");
   } catch (error) {
+    const leaseLost = error instanceof AutomationRunLeaseLostError;
     const cancelled = error instanceof AutomationRunCancelledError;
     const timedOut = error instanceof AutomationRunTimeoutError;
     const message = cancelled
@@ -321,23 +356,26 @@ export async function processAutomationRun(
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
       : safeInvestigationError(error, environment);
-    await dependencies.setStatus({
-      ...(cancelled
-        ? {}
-        : {
-            failureCategory: timedOut ? "runtime_limit_exceeded" : "execution_failed",
-            failureMessage: message,
-          }),
-      runId: run.runId,
-      status: cancelled ? "cancelled" : "failed",
-    });
-    await recordEvent(
-      dependencies,
-      run.runId,
-      cancelled ? "run_cancelled" : "run_failed",
-      cancelled ? undefined : { message },
-    );
-    if (!cancelled) {
+    if (!leaseLost) {
+      await dependencies.setStatus({
+        ...(cancelled
+          ? {}
+          : {
+              failureCategory: timedOut ? "runtime_limit_exceeded" : "execution_failed",
+              failureMessage: message,
+            }),
+        leaseId: run.leaseId,
+        runId: run.runId,
+        status: cancelled ? "cancelled" : "failed",
+      });
+      await recordEvent(
+        dependencies,
+        run.runId,
+        cancelled ? "run_cancelled" : "run_failed",
+        cancelled ? undefined : { message },
+      );
+    }
+    if (!cancelled && !leaseLost) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",
@@ -350,18 +388,31 @@ export async function processAutomationRun(
     clearInterval(heartbeat);
     clearTimeout(runtimeTimeout);
     if (grantId) {
-      await dependencies.revokeGrant({
-        grantId,
-        organizationId: run.organizationId,
-        runId: run.runId,
-      }).catch(async (error) => {
-        await dependencies.reportException(error, {
+      let revocationError: unknown;
+      for (const delayMs of [0, 100, 500]) {
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        try {
+          await dependencies.revokeGrant({
+            grantId,
+            organizationId: run.organizationId,
+            runId: run.runId,
+          });
+          revocationError = undefined;
+          break;
+        } catch (error) {
+          revocationError = error;
+        }
+      }
+      if (revocationError) {
+        await dependencies.reportException(revocationError, {
           jobId,
           operation: "automation",
           organizationId: run.organizationId,
           requestId: run.runId,
-        });
-      });
+        }).catch(() => undefined);
+      }
     }
   }
   return { runId: run.runId };
@@ -378,5 +429,12 @@ class AutomationRunTimeoutError extends Error {
   constructor() {
     super("Automation run exceeded its configured runtime limit");
     this.name = "AutomationRunTimeoutError";
+  }
+}
+
+class AutomationRunLeaseLostError extends Error {
+  constructor() {
+    super("Automation run lease was lost");
+    this.name = "AutomationRunLeaseLostError";
   }
 }

@@ -27,12 +27,20 @@ function claim(provider: string, credentials: Record<string, unknown>) {
 function appFor(activeClaim: ReturnType<typeof claim> | null) {
   const dependencies = {
     providerFetch: vi.fn(),
+    refreshCustomMcp: vi.fn().mockResolvedValue({
+      tokens: { access_token: "fresh-oauth-token", refresh_token: "refresh-token" },
+    }),
     resolveGrant: vi.fn().mockResolvedValue(activeClaim),
     slackSearch: vi.fn().mockResolvedValue({
       channel: { id: "C123", name: "incidents" },
       matches: [],
       query: "deploy failed",
       totalMatches: 0,
+    }),
+    withCredentialLease: vi.fn(async (input) => {
+      if (!activeClaim?.account.encryptedCredentials) return null;
+      const result = await input.operation(activeClaim.account.encryptedCredentials);
+      return result.value;
     }),
   };
   const app = new Hono().route(
@@ -99,6 +107,7 @@ describe("automation context broker", () => {
     expect(dependencies.slackSearch).toHaveBeenCalledWith(expect.objectContaining({
       accessToken: "xoxp-worker-only",
       channel: { id: "C123", name: "incidents" },
+      signal: expect.any(AbortSignal),
     }));
     expect(await call.text()).not.toContain("xoxp-worker-only");
   });
@@ -128,5 +137,35 @@ describe("automation context broker", () => {
     expect(headers.get("dd-application-key")).toBe("dd-app-secret");
     expect(headers.get("authorization")).toBeNull();
     expect(await response.text()).not.toContain("dd-api-secret");
+  });
+
+  it("refreshes custom MCP OAuth credentials before proxying", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app, dependencies } = appFor(claim("custom_mcp", {
+      authType: "oauth",
+      mcpUrl: "https://mcp.example.test/api",
+      oauth: {
+        tokens: {
+          access_token: "expired-token",
+          refresh_token: "refresh-token",
+        },
+      },
+    }));
+    dependencies.providerFetch.mockResolvedValue(new Response(
+      JSON.stringify({ id: 1, jsonrpc: "2.0", result: { tools: [] } }),
+      { headers: { "content-type": "application/json" } },
+    ));
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(dependencies.refreshCustomMcp).toHaveBeenCalledOnce();
+    const request = dependencies.providerFetch.mock.calls[0]![1] as RequestInit;
+    expect(new Headers(request.headers).get("authorization")).toBe(
+      "Bearer fresh-oauth-token",
+    );
   });
 });

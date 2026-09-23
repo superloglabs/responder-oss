@@ -62,6 +62,7 @@ describe("Discord webhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("DISCORD_PUBLIC_KEY", rawPublicKey(keys.publicKey));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
     mocks.findAutomationsForDiscordCommand.mockResolvedValue([]);
     mocks.queueAutomationRun.mockResolvedValue({ created: true, runId: "run-1" });
   });
@@ -108,6 +109,7 @@ describe("Discord webhook", () => {
             username: "operator",
           },
         },
+        token: "interaction-token",
         type: 2,
       },
       privateKey: keys.privateKey,
@@ -118,9 +120,10 @@ describe("Discord webhook", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      data: { content: "2 automations started.", flags: 64 },
-      type: 4,
+      data: { flags: 64 },
+      type: 5,
     });
+    await vi.waitFor(() => expect(mocks.queueAutomationRun).toHaveBeenCalledTimes(2));
     expect(mocks.findAutomationsForDiscordCommand).toHaveBeenCalledWith({
       channelId: "channel-1",
       guildId: "guild-1",
@@ -136,6 +139,10 @@ describe("Discord webhook", () => {
         }),
       }),
     );
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "https://discord.com/api/v10/webhooks/application-1/interaction-token/messages/@original",
+      expect.objectContaining({ method: "PATCH" }),
+    ));
   });
 
   it("rejects unsigned requests", async () => {

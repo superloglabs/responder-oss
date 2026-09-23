@@ -19,7 +19,7 @@ import { listAgentOptions } from "../../../../packages/core/src/db/agents.js";
 import {
   createOrganizationModelCredential,
   deleteOrganizationModelCredential,
-  getOrganizationModelCredential,
+  getOrganizationModelCredentialForValidation,
   listOrganizationModelCredentials,
   markOrganizationModelCredentialValidated,
   rotateOrganizationModelCredential,
@@ -77,7 +77,7 @@ async function testProviderCredential(input: {
   apiKey: string;
   model: string;
   provider: "anthropic" | "openai";
-}): Promise<boolean> {
+}): Promise<{ authenticationFailed: boolean; valid: boolean }> {
   let response: Response;
   if (input.provider === "openai") {
     response = await fetch(
@@ -103,7 +103,13 @@ async function testProviderCredential(input: {
       signal: AbortSignal.timeout(30_000),
     });
   }
-  return response.ok;
+  if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
+    throw new Error("Model provider is temporarily unavailable");
+  }
+  return {
+    authenticationFailed: response.status === 401 || response.status === 403,
+    valid: response.ok,
+  };
 }
 
 export const automationRoutes = new Hono()
@@ -189,28 +195,34 @@ export const automationRoutes = new Hono()
       await context.req.json().catch(() => null),
     );
     if (!parsed.success) return context.json({ error: "Invalid model" }, 400);
-    const credential = await getOrganizationModelCredential({
+    const credential = await getOrganizationModelCredentialForValidation({
       credentialId: context.req.param("credentialId"),
       organizationId: access.tenant.organizationId,
     });
     if (!credential) {
       return context.json({ error: "Model credential not found" }, 404);
     }
-    let valid = false;
+    let result: { authenticationFailed: boolean; valid: boolean };
     try {
-      valid = await testProviderCredential({
+      result = await testProviderCredential({
         ...credential,
         model: parsed.data.model,
       });
     } catch {
-      valid = false;
+      return context.json({ error: "Model provider is temporarily unavailable" }, 503);
     }
-    await markOrganizationModelCredentialValidated({
-      credentialId: context.req.param("credentialId"),
-      organizationId: access.tenant.organizationId,
-      valid,
-    });
-    return context.json({ valid }, valid ? 200 : 422);
+    if (result.valid || result.authenticationFailed) {
+      await markOrganizationModelCredentialValidated({
+        credentialId: context.req.param("credentialId"),
+        encryptedCredentials: credential.encryptedCredentials,
+        organizationId: access.tenant.organizationId,
+        valid: result.valid,
+      });
+    }
+    return context.json(
+      { authenticationFailed: result.authenticationFailed, valid: result.valid },
+      result.valid ? 200 : 422,
+    );
   })
   .delete("/credentials/:credentialId", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

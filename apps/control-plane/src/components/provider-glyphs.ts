@@ -43,7 +43,7 @@ export const contextCategoryDescriptions: Record<ContextCategory, string> = {
 };
 
 export const contextProviderMetadata: Record<
-  Exclude<ProviderGlyphId, "google" | "scan">,
+  Exclude<ProviderGlyphId, "discord" | "google" | "scan">,
   { category: ContextCategory; searchTerms: string }
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },
@@ -56,7 +56,6 @@ export const contextProviderMetadata: Record<
   github: { category: "Code & deployment", searchTerms: "repositories code pull requests" },
   vercel: { category: "Code & deployment", searchTerms: "deployments projects hosting" },
   slack: { category: "Communication & workflow", searchTerms: "channels messages chat" },
-  discord: { category: "Communication & workflow", searchTerms: "channels commands chat" },
   linear: { category: "Communication & workflow", searchTerms: "issues projects tickets" },
   aws: { category: "Data & infrastructure", searchTerms: "cloud accounts iam services" },
   gcp: { category: "Data & infrastructure", searchTerms: "google cloud projects logs metrics assets" },

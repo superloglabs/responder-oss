@@ -1,4 +1,5 @@
 import {
+  abandonPendingAutomationRun,
   beginAutomationRun,
   setAutomationRunStatus,
   type AutomationTriggerInput,
@@ -11,28 +12,43 @@ import {
 
 let boss: ReturnType<typeof createJobBoss> | undefined;
 let bossStart: Promise<ReturnType<typeof createJobBoss>> | undefined;
+let queueGeneration = 0;
 
 async function getBoss() {
   if (boss) return boss;
-  bossStart ??= (async () => {
-    const nextBoss = createJobBoss();
-    nextBoss.on("error", (error) => {
-      console.error(
-        JSON.stringify({
-          errorCode: error instanceof Error ? error.constructor.name : "unknown",
-          event: "automation_queue_error",
-        }),
-      );
-    });
-    await nextBoss.start();
-    await prepareWorkerQueues(nextBoss);
-    boss = nextBoss;
-    return nextBoss;
-  })().catch((error: unknown) => {
-    bossStart = undefined;
-    throw error;
-  });
-  return bossStart;
+  if (!bossStart) {
+    const generation = queueGeneration;
+    bossStart = (async () => {
+      const nextBoss = createJobBoss();
+      nextBoss.on("error", (error) => {
+        console.error(
+          JSON.stringify({
+            errorCode: error instanceof Error ? error.constructor.name : "unknown",
+            event: "automation_queue_error",
+          }),
+        );
+      });
+      try {
+        await nextBoss.start();
+        await prepareWorkerQueues(nextBoss);
+        if (generation !== queueGeneration) {
+          await nextBoss.stop({ graceful: true, timeout: 5_000 });
+          throw new Error("Automation queue closed during startup");
+        }
+        boss = nextBoss;
+        return nextBoss;
+      } catch (error) {
+        await nextBoss.stop({ graceful: true, timeout: 5_000 }).catch(() => undefined);
+        throw error;
+      }
+    })();
+  }
+  const start = bossStart;
+  try {
+    return await start;
+  } finally {
+    if (bossStart === start) bossStart = undefined;
+  }
 }
 
 export async function queueAutomationRun(input: {
@@ -55,18 +71,29 @@ export async function queueAutomationRun(input: {
     if (!jobId) throw new Error("Automation run job was not created");
     return { duplicate: false, jobId, runId: run.runId };
   } catch (error) {
-    await setAutomationRunStatus({
-      failureCategory: "queue_unavailable",
-      failureMessage: "Automation worker is unavailable",
-      runId: run.runId,
-      status: "failed",
-    });
+    if (!(await abandonPendingAutomationRun(run.runId))) {
+      await setAutomationRunStatus({
+        failureCategory: "queue_unavailable",
+        failureMessage: "Automation worker is unavailable",
+        runId: run.runId,
+        status: "failed",
+      });
+    }
     throw new Error("Automation worker is unavailable", { cause: error });
   }
 }
 
 export async function closeAutomationQueue(): Promise<void> {
-  await boss?.stop({ graceful: true, timeout: 5_000 });
+  queueGeneration += 1;
+  const activeBoss = boss;
+  const startingBoss = bossStart;
   boss = undefined;
   bossStart = undefined;
+  const startedBoss = await startingBoss?.catch(() => undefined);
+  const bosses = new Set([activeBoss, startedBoss].filter(Boolean));
+  await Promise.all(
+    [...bosses].map((nextBoss) =>
+      nextBoss!.stop({ graceful: true, timeout: 5_000 }).catch(() => undefined)
+    ),
+  );
 }

@@ -1,5 +1,5 @@
 import type { randomBytes as nodeRandomBytes } from "node:crypto";
-import { and, eq, gt, gte, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
   issueAutomationModelBrokerToken,
 } from "../automations/model-broker.js";
@@ -46,6 +46,7 @@ export interface CreateAutomationModelBrokerGrantInput {
   maxOutputTokensPerRequest: number;
   maxRequests: number;
   model: string;
+  leaseId: string;
   organizationId: string;
   provider: AutomationModelProvider;
   runId: string;
@@ -143,6 +144,7 @@ export async function createAutomationModelBrokerGrant(
       credentialKeyVersion: 1,
       encryptedCredentials,
       expiresAt: input.expiresAt,
+      leaseId: input.leaseId,
       maxOutputTokensPerRequest: input.maxOutputTokensPerRequest,
       model: input.model,
       organizationId: input.organizationId,
@@ -215,7 +217,14 @@ export async function claimAutomationModelBrokerGrant(
       remainingOutputTokens: sql`${automationModelBrokerGrants.remainingOutputTokens} - ${reservedOutputTokens}`,
       remainingRequests: sql`${automationModelBrokerGrants.remainingRequests} - 1`,
     })
-    .where(and(...conditions))
+    .from(automationRuns)
+    .where(and(
+      ...conditions,
+      eq(automationRuns.id, automationModelBrokerGrants.runId),
+      eq(automationRuns.organizationId, automationModelBrokerGrants.organizationId),
+      eq(automationRuns.leaseId, automationModelBrokerGrants.leaseId),
+      eq(automationRuns.status, "running"),
+    ))
     .returning({
       encryptedCredentials: automationModelBrokerGrants.encryptedCredentials,
       id: automationModelBrokerGrants.id,
@@ -256,16 +265,29 @@ export async function revokeAutomationModelBrokerGrant(input: {
   runId: string;
 }): Promise<void> {
   await getDatabase()
-    .update(automationModelBrokerGrants)
-    .set({ revokedAt: new Date() })
+    .delete(automationModelBrokerGrants)
     .where(
       and(
         eq(automationModelBrokerGrants.id, input.grantId),
         eq(automationModelBrokerGrants.organizationId, input.organizationId),
         eq(automationModelBrokerGrants.runId, input.runId),
-        isNull(automationModelBrokerGrants.revokedAt),
       ),
     );
+}
+
+export async function purgeAutomationModelBrokerGrants(
+  now = new Date(),
+): Promise<number> {
+  const deleted = await getDatabase()
+    .delete(automationModelBrokerGrants)
+    .where(
+      or(
+        isNotNull(automationModelBrokerGrants.revokedAt),
+        lt(automationModelBrokerGrants.expiresAt, now),
+      ),
+    )
+    .returning({ id: automationModelBrokerGrants.id });
+  return deleted.length;
 }
 
 export async function resolveAutomationContextBrokerGrant(input: {
@@ -288,8 +310,9 @@ export async function resolveAutomationContextBrokerGrant(input: {
     .innerJoin(
       automationRuns,
       and(
-        sql`${automationRuns.id}::text = ${automationModelBrokerGrants.runId}`,
+        eq(automationRuns.id, automationModelBrokerGrants.runId),
         eq(automationRuns.organizationId, automationModelBrokerGrants.organizationId),
+        eq(automationRuns.leaseId, automationModelBrokerGrants.leaseId),
         eq(automationRuns.status, "running"),
       ),
     )
@@ -304,6 +327,7 @@ export async function resolveAutomationContextBrokerGrant(input: {
           automationVersionIntegrationAccounts.integrationAccountId,
           input.integrationAccountId,
         ),
+        eq(automationVersionIntegrationAccounts.role, "context"),
       ),
     )
     .innerJoin(

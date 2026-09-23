@@ -11,6 +11,7 @@ function claimedRun() {
     automationVersionId: "41414141-4141-4141-8141-414141414141",
     cancelRequestedAt: null,
     harness: "codex" as const,
+    leaseId: "71717171-7171-4171-8171-717171717170",
     maxModelRequests: 8,
     maxOutputTokensPerRequest: 4_096,
     maxRuntimeSeconds: 600,
@@ -75,7 +76,7 @@ function dependencies() {
       async (operation: () => Promise<unknown>) => operation(),
     )),
     runOpenCode: vi.fn(),
-    setStatus: vi.fn().mockResolvedValue(undefined),
+    setStatus: vi.fn().mockResolvedValue(true),
   };
 }
 

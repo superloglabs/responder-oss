@@ -3296,6 +3296,7 @@ export const integrationRoutes = new Hono()
       );
     }
 
+    let discordAccountId: string | undefined;
     try {
       const installation = await exchangeDiscordCode(code);
       await registerDiscordAutomationCommand(installation.guild.id);
@@ -3308,9 +3309,12 @@ export const integrationRoutes = new Hono()
           applicationId: process.env.DISCORD_APPLICATION_ID,
           scopes: installation.scope.split(" ").filter(Boolean),
         },
+        status: "pending",
       });
+      discordAccountId = accountId;
       const channels = await listDiscordChannels(installation.guild.id);
       await replaceIntegrationResources(accountId, "discord_channel", channels);
+      await setIntegrationAccountStatus(accountId, "connected");
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",
@@ -3325,6 +3329,11 @@ export const integrationRoutes = new Hono()
         settingsRedirect(connectionState.returnTo, "discord", "connected"),
       );
     } catch (error) {
+      if (discordAccountId) {
+        await setIntegrationAccountStatus(discordAccountId, "error").catch(
+          () => undefined,
+        );
+      }
       logCallbackError("Discord", error);
       return context.redirect(
         settingsRedirect(

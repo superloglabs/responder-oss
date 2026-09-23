@@ -15,6 +15,7 @@ interface BrokeredAutomationProofInput {
   maxOutputTokensPerRequest: number;
   maxRequests: number;
   maxRuntimeSeconds: number;
+  leaseId: string;
   model: string;
   organizationId: string;
   prompt: string;
@@ -58,6 +59,7 @@ export async function runBrokeredAutomationProof(
     maxOutputTokensPerRequest: input.maxOutputTokensPerRequest,
     maxRequests: input.maxRequests,
     model: input.model,
+    leaseId: input.leaseId,
     organizationId: input.organizationId,
     provider: "openai",
     runId: input.runId,

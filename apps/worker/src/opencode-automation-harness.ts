@@ -1,6 +1,7 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
   assertAutomationHarnessModelCompatibility,
+  assertAutomationWorkspaceHasNoSymlinkRedirects,
   automationWorkspaceRoot,
   modelBrokerTokenEnvironmentVariable,
   resolveAutomationWorkspacePath,
@@ -16,6 +17,7 @@ const installRoot = `${automationWorkspaceRoot}/.responder/opencode/${openCodeVe
 const executable = `${installRoot}/node_modules/.bin/opencode`;
 const configPath = `${automationWorkspaceRoot}/.responder/opencode.json`;
 const promptPath = `${automationWorkspaceRoot}/.responder/automation-prompt.txt`;
+const shellPath = `${automationWorkspaceRoot}/.responder/opencode-shell`;
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -68,6 +70,7 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
       },
     ])),
     permission: { "*": "allow" },
+    shell: shellPath,
     provider: {
       responder: {
         models: {
@@ -104,7 +107,18 @@ export async function runOpenCodeAutomation(
   session: DaytonaSandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
+  await assertAutomationWorkspaceHasNoSymlinkRedirects(
+    session,
+    input.workspacePath,
+  );
   await prepareOpenCodeAutomationHarness(session);
+  await session.materializeEntry({
+    entry: {
+      type: "file",
+      content: `#!/bin/sh\nunset ${modelBrokerTokenEnvironmentVariable}\nexec /bin/sh "$@"\n`,
+    },
+    path: shellPath,
+  });
   await session.materializeEntry({
     entry: { type: "file", content: input.prompt },
     path: promptPath,
@@ -117,7 +131,7 @@ export async function runOpenCodeAutomation(
     path: configPath,
   });
   const output = await session.execCommand({
-    cmd: buildOpenCodeAutomationCommand(input),
+    cmd: `chmod 700 ${shellQuote(shellPath)}\n${buildOpenCodeAutomationCommand(input)}`,
     maxOutputTokens: 20_000,
     workdir: automationWorkspaceRoot,
   });

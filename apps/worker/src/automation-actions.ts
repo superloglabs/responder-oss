@@ -39,7 +39,12 @@ const actionSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const manifestSchema = z.object({ actions: z.array(actionSchema).max(20) });
+const manifestSchema = z.object({
+  actions: z.array(actionSchema).max(20).refine(
+    (actions) => new Set(actions.map((action) => action.id)).size === actions.length,
+    "Action IDs must be unique",
+  ),
+});
 
 interface AutomationActionDependencies {
   beginAttempt: typeof beginAutomationActionAttempt;
@@ -90,13 +95,16 @@ async function loadManifest(session: DaytonaSandboxSession) {
 }
 
 export async function executeAutomationActions(input: {
+  assertActive?: () => Promise<void>;
   automationVersionId: string;
   checkedOutRepositories: CheckedOutRepository[];
   runId: string;
   session: DaytonaSandboxSession;
+  signal?: AbortSignal;
 }, dependencies: AutomationActionDependencies = defaultDependencies): Promise<
   Array<{ externalReference: string | null; kind: string }>
 > {
+  input.signal?.throwIfAborted();
   const manifest = await loadManifest(input.session);
   if (manifest.actions.length === 0) return [];
   const [repositories, connections] = await Promise.all([
@@ -106,6 +114,8 @@ export async function executeAutomationActions(input: {
   const results: Array<{ externalReference: string | null; kind: string }> = [];
 
   for (const action of manifest.actions) {
+    input.signal?.throwIfAborted();
+    await input.assertActive?.();
     const key = idempotencyKey(input.runId, action.kind, action.id);
     const redactedInput = action.kind === "open_github_pull_request"
       ? { repository: action.repository, title: action.title }
@@ -123,6 +133,8 @@ export async function executeAutomationActions(input: {
     }
 
     try {
+      input.signal?.throwIfAborted();
+      await input.assertActive?.();
       let externalReference: string;
       if (action.kind === "open_github_pull_request") {
         const checkout = input.checkedOutRepositories.find(
@@ -147,9 +159,13 @@ export async function executeAutomationActions(input: {
         }, input.session);
         externalReference = pullRequest.url;
       } else {
-        const slackConnections = connections.filter(
-          (candidate) => candidate.provider === "slack",
-        );
+        const slackConnections = [
+          ...new Map(
+            connections
+              .filter((candidate) => candidate.provider === "slack")
+              .map((candidate) => [candidate.id, candidate]),
+          ).values(),
+        ];
         const connection = action.integrationAccountId
           ? slackConnections.find((candidate) => candidate.id === action.integrationAccountId)
           : slackConnections.length === 1 ? slackConnections[0] : undefined;
@@ -168,6 +184,8 @@ export async function executeAutomationActions(input: {
               accessToken: credentials.accessToken,
               userId: action.target.userId,
             });
+        input.signal?.throwIfAborted();
+        await input.assertActive?.();
         const timestamp = await dependencies.postMessage({
           accessToken: credentials.accessToken,
           channelId,

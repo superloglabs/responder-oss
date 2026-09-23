@@ -36,6 +36,7 @@ describe("automation model broker grant storage", () => {
         maxOutputTokensPerRequest: 4_096,
         maxRequests: 8,
         model: "gpt-5.1-codex",
+        leaseId: "31313131-3131-4131-8131-313131313131",
         organizationId,
         provider: "openai",
         runId: "run-1",
@@ -85,7 +86,8 @@ describe("automation model broker grant storage", () => {
       },
     ]);
     const where = vi.fn(() => ({ returning }));
-    const set = vi.fn(() => ({ where }));
+    const from = vi.fn(() => ({ where }));
+    const set = vi.fn(() => ({ from }));
     vi.mocked(getDatabase).mockReturnValue({
       update: vi.fn(() => ({ set })),
     } as never);
@@ -110,6 +112,7 @@ describe("automation model broker grant storage", () => {
       runId: "run-1",
     });
     expect(set).toHaveBeenCalledOnce();
+    expect(from).toHaveBeenCalledOnce();
     expect(where).toHaveBeenCalledOnce();
     expect(decrypt).toHaveBeenCalledWith(encryptedCredentials);
   });
@@ -118,7 +121,9 @@ describe("automation model broker grant storage", () => {
     const returning = vi.fn().mockResolvedValue([]);
     vi.mocked(getDatabase).mockReturnValue({
       update: vi.fn(() => ({
-        set: vi.fn(() => ({ where: vi.fn(() => ({ returning })) })),
+        set: vi.fn(() => ({
+          from: vi.fn(() => ({ where: vi.fn(() => ({ returning })) })),
+        })),
       })),
     } as never);
 
@@ -134,9 +139,8 @@ describe("automation model broker grant storage", () => {
 
   it("revokes only the grant owned by the expected run and organization", async () => {
     const where = vi.fn().mockResolvedValue(undefined);
-    const set = vi.fn(() => ({ where }));
     vi.mocked(getDatabase).mockReturnValue({
-      update: vi.fn(() => ({ set })),
+      delete: vi.fn(() => ({ where })),
     } as never);
 
     await revokeAutomationModelBrokerGrant({
@@ -145,7 +149,6 @@ describe("automation model broker grant storage", () => {
       runId: "run-1",
     });
 
-    expect(set).toHaveBeenCalledWith({ revokedAt: expect.any(Date) });
     expect(where).toHaveBeenCalledOnce();
   });
 

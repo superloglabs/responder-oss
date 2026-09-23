@@ -120,8 +120,44 @@ export async function getOrganizationModelCredential(input: {
   return { apiKey: decrypted.apiKey, provider: credential.provider };
 }
 
+export async function getOrganizationModelCredentialForValidation(input: {
+  credentialId: string;
+  organizationId: string;
+}): Promise<{
+  apiKey: string;
+  encryptedCredentials: string;
+  provider: AutomationModelProvider;
+} | null> {
+  const rows = await getDatabase()
+    .select({
+      credentialKeyVersion: organizationModelCredentials.credentialKeyVersion,
+      encryptedCredentials: organizationModelCredentials.encryptedCredentials,
+      provider: organizationModelCredentials.provider,
+    })
+    .from(organizationModelCredentials)
+    .where(
+      and(
+        eq(organizationModelCredentials.id, input.credentialId),
+        eq(organizationModelCredentials.organizationId, input.organizationId),
+      ),
+    )
+    .limit(1);
+  const credential = rows[0];
+  if (!credential || credential.credentialKeyVersion !== 1) return null;
+  const decrypted = decryptCredentials<StoredModelCredential>(
+    credential.encryptedCredentials,
+  );
+  if (!decrypted.apiKey) return null;
+  return {
+    apiKey: decrypted.apiKey,
+    encryptedCredentials: credential.encryptedCredentials,
+    provider: credential.provider,
+  };
+}
+
 export async function markOrganizationModelCredentialValidated(input: {
   credentialId: string;
+  encryptedCredentials: string;
   organizationId: string;
   valid: boolean;
 }): Promise<void> {
@@ -136,6 +172,10 @@ export async function markOrganizationModelCredentialValidated(input: {
       and(
         eq(organizationModelCredentials.id, input.credentialId),
         eq(organizationModelCredentials.organizationId, input.organizationId),
+        eq(
+          organizationModelCredentials.encryptedCredentials,
+          input.encryptedCredentials,
+        ),
       ),
     );
 }

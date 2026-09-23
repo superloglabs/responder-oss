@@ -53,6 +53,7 @@ describe("OpenCode automation harness", () => {
         },
       },
       share: "disabled",
+      shell: "/home/daytona/workspace/.responder/opencode-shell",
     });
     expect(openCodeAutomationConfig({
       ...input,
@@ -65,6 +66,8 @@ describe("OpenCode automation harness", () => {
   it("keeps the prompt out of the shell command", () => {
     const command = buildOpenCodeAutomationCommand(input);
     expect(command).toContain("OPENCODE_CONFIG=");
+    expect(command).toContain("prompt=$(cat '/home/daytona/workspace/.responder/automation-prompt.txt')");
+    expect(command).toContain('-- "$prompt"');
     expect(command).not.toContain(input.prompt);
   });
 });

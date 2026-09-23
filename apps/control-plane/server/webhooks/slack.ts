@@ -814,9 +814,8 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     teamId: callback.data.team_id,
     userId: event.user,
   });
-  try {
-    await Promise.all(
-      automationMatches.map((match) =>
+  const automationResults = await Promise.allSettled(
+    automationMatches.map((match) =>
         queueAutomationRun({
           automationId: match.automationId,
           trigger: {
@@ -834,14 +833,13 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           },
         })
       ),
-    );
-  } catch (error) {
+  );
+  if (automationResults.some((result) => result.status === "rejected")) {
     console.error(JSON.stringify({
-      errorCode: error instanceof Error ? error.name : typeof error,
       event: "slack_automation_fanout_failed",
       eventId: callback.data.event_id,
+      failedCount: automationResults.filter((result) => result.status === "rejected").length,
     }));
-    return context.json({ error: "Unable to start Slack automation" }, 502);
   }
   if (event.type === "app_mention" && event.thread_ts) {
     const linked = await findSlackIssueThread({

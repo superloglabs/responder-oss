@@ -8,13 +8,20 @@ import {
   resolveAutomationContextBrokerGrant,
   type AutomationContextBrokerClaim,
 } from "../../../../packages/core/src/db/automation-model-broker.js";
-import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
+import {
+  decryptCredentials,
+  encryptCredentials,
+} from "../../../../packages/core/src/credentials/encryption.js";
+import { withIntegrationAccountCredentialLease } from "../../../../packages/core/src/db/integrations.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
   parseCustomMcpCredentials,
+  refreshCustomMcpOAuth,
   safeCustomMcpFetch,
+  type CustomMcpCredentials,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { searchSlackChannel } from "../../../../packages/core/src/integrations/slack-search.js";
+import { integrationCallbackUrl } from "../integrations/urls.js";
 
 const accountIdSchema = z.uuid();
 const requestSchema = z.object({
@@ -33,14 +40,18 @@ type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
   providerFetch: typeof safeCustomMcpFetch;
+  refreshCustomMcp: typeof refreshCustomMcpOAuth;
   resolveGrant: ResolveGrant;
   slackSearch: typeof searchSlackChannel;
+  withCredentialLease: typeof withIntegrationAccountCredentialLease;
 }
 
 const defaultDependencies: ContextBrokerDependencies = {
   providerFetch: safeCustomMcpFetch,
+  refreshCustomMcp: refreshCustomMcpOAuth,
   resolveGrant: resolveAutomationContextBrokerGrant,
   slackSearch: searchSlackChannel,
+  withCredentialLease: withIntegrationAccountCredentialLease,
 };
 
 function rpcResult(id: string | number | undefined, result: unknown) {
@@ -55,10 +66,13 @@ function rpcError(
   return { error: { code, message }, id: id ?? null, jsonrpc: "2.0" as const };
 }
 
-function providerTarget(claim: AutomationContextBrokerClaim): {
+async function providerTarget(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<{
   headers: Headers;
   url: string;
-} | null {
+} | null> {
   if (!claim.account.encryptedCredentials) return null;
   const credentials = decryptCredentials<Record<string, unknown>>(
     claim.account.encryptedCredentials,
@@ -102,7 +116,29 @@ function providerTarget(claim: AutomationContextBrokerClaim): {
     };
   }
   if (claim.account.provider === "custom_mcp") {
-    const parsed = parseCustomMcpCredentials(credentials);
+    const parsed = await dependencies.withCredentialLease<CustomMcpCredentials>({
+      allowedStatuses: ["connected"],
+      integrationAccountId: claim.account.id,
+      operation: async (encryptedCredentials) => {
+        const current = parseCustomMcpCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        if (current.authType === "api_token") return { value: current };
+        const oauth = await dependencies.refreshCustomMcp({
+          mcpUrl: current.mcpUrl,
+          oauth: current.oauth,
+          redirectUrl: integrationCallbackUrl("custom_mcp"),
+        });
+        const updated = { ...current, oauth };
+        return {
+          encryptedCredentials: encryptCredentials(updated),
+          value: updated,
+        };
+      },
+      organizationId: claim.organizationId,
+      provider: "custom_mcp",
+    });
+    if (!parsed) return null;
     const accessToken = parsed.authType === "api_token"
       ? parsed.apiToken
       : parsed.oauth.tokens?.access_token;
@@ -118,6 +154,7 @@ function providerTarget(claim: AutomationContextBrokerClaim): {
 async function slackResponse(
   claim: AutomationContextBrokerClaim,
   request: z.infer<typeof requestSchema>,
+  signal: AbortSignal,
   dependencies: ContextBrokerDependencies,
 ): Promise<Response> {
   if (request.method === "notifications/initialized") {
@@ -188,6 +225,7 @@ async function slackResponse(
     channel: { id: channel.externalId, name: channel.displayName },
     limit: toolInput.data.limit,
     query: toolInput.data.query,
+    signal,
   });
   return Response.json(rpcResult(request.id, {
     content: [{ text: JSON.stringify(result), type: "text" }],
@@ -195,8 +233,12 @@ async function slackResponse(
 }
 
 export function createAutomationContextBrokerRoutes(
-  dependencies: ContextBrokerDependencies = defaultDependencies,
+  overrides: Partial<ContextBrokerDependencies> = {},
 ) {
+  const dependencies: ContextBrokerDependencies = {
+    ...defaultDependencies,
+    ...overrides,
+  };
   return new Hono().post("/v1/:integrationAccountId", async (context) => {
     const token = readAutomationModelBrokerBearerToken(
       context.req.header("authorization") ?? null,
@@ -227,9 +269,14 @@ export function createAutomationContextBrokerRoutes(
     }
     try {
       if (claim.account.provider === "slack") {
-        return await slackResponse(claim, parsed.data, dependencies);
+        return await slackResponse(
+          claim,
+          parsed.data,
+          context.req.raw.signal,
+          dependencies,
+        );
       }
-      const target = providerTarget(claim);
+      const target = await providerTarget(claim, dependencies);
       if (!target) {
         return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
       }
