@@ -10,11 +10,13 @@ import {
   FlagIcon,
   GearIcon,
   LightningIcon,
+  ListIcon,
   ListBulletsIcon,
   ScanIcon,
   RobotIcon,
   SignOutIcon,
   UserCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import "./workspace.css";
@@ -40,10 +42,14 @@ export function AppShell({ active, children, density = "default", redesigned = f
   const activeOrganization = authClient.useActiveOrganization();
   const organizations = authClient.useListOrganizations();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [automationsEnabled, setAutomationsEnabled] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
+  const restoreSidebarFocusRef = useRef(false);
   const displayName = session.data?.user.name || session.data?.user.email || "Account";
   const initials = displayName
     .split(/\s+/)
@@ -90,6 +96,54 @@ export function AppShell({ active, children, density = "default", redesigned = f
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isMenuOpen]);
+
+  useEffect(() => {
+    if (!isSidebarOpen && restoreSidebarFocusRef.current) {
+      restoreSidebarFocusRef.current = false;
+      sidebarTriggerRef.current?.focus();
+    }
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    if (!isSidebarOpen || !workspace) return;
+
+    const media = window.matchMedia("(max-width: 600px)");
+    if (!media.matches) return;
+
+    sidebarRef.current?.querySelector<HTMLAnchorElement>(".primaryNav a")?.focus();
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        restoreSidebarFocusRef.current = true;
+        setIsSidebarOpen(false);
+      } else if (event.key === "Tab") {
+        const focusable = sidebarRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled])',
+        );
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    function closeOnResize() {
+      if (!media.matches) setIsSidebarOpen(false);
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    media.addEventListener("change", closeOnResize);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      media.removeEventListener("change", closeOnResize);
+    };
+  }, [isSidebarOpen, workspace]);
 
   async function switchWorkspace(organizationId: string) {
     if (organizationId === session.data?.session.activeOrganizationId) {
@@ -143,10 +197,42 @@ export function AppShell({ active, children, density = "default", redesigned = f
   }
 
   return (
-    <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}`}>
-      <header className="globalHeader">
+    <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}${workspace && isSidebarOpen ? " appShell--sidebarOpen" : ""}`}>
+      {workspace && isSidebarOpen ? (
+        <button
+          aria-hidden="true"
+          className="mobileSidebarBackdrop"
+          onClick={() => {
+            restoreSidebarFocusRef.current = true;
+            setIsSidebarOpen(false);
+          }}
+          tabIndex={-1}
+          type="button"
+        />
+      ) : null}
+      <header
+        aria-label={workspace && isSidebarOpen ? "Navigation" : undefined}
+        aria-modal={workspace && isSidebarOpen ? true : undefined}
+        className={`globalHeader${workspace && isSidebarOpen ? " globalHeader--open" : ""}`}
+        id={workspace ? "workspace-sidebar" : undefined}
+        ref={sidebarRef}
+        role={workspace && isSidebarOpen ? "dialog" : undefined}
+      >
+        {workspace ? (
+          <button
+            aria-label="Close navigation"
+            className="mobileSidebarClose"
+            onClick={() => {
+              restoreSidebarFocusRef.current = true;
+              setIsSidebarOpen(false);
+            }}
+            type="button"
+          >
+            <XIcon aria-hidden="true" size={20} />
+          </button>
+        ) : null}
         <div className="globalHeader__left">
-          <Link aria-label="Superlog home" className="brand" to="/agents">
+          <Link aria-label="Superlog home" className="brand" onClick={() => setIsSidebarOpen(false)} to="/agents">
             {workspace ? (
               <svg aria-hidden="true" className="brandPictogram" width="16" height="16" viewBox="175 175 350 350" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                 <rect x="347.464" y="347.464" width="96.3768" height="96.3768" />
@@ -159,7 +245,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
               <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
             )}
           </Link>
-          <nav aria-label="Primary navigation" className="primaryNav">
+          <nav aria-label="Primary navigation" className="primaryNav" onClick={() => setIsSidebarOpen(false)}>
             <Link
               aria-current={active === "agents" ? "page" : undefined}
               className={active === "agents" ? "isActive" : undefined}
@@ -315,7 +401,22 @@ export function AppShell({ active, children, density = "default", redesigned = f
         </div>
       </header>
       {workspace ? (
-        <div className="workspaceSurface"><BillingBanner /><div className="workspaceContent">{children}</div></div>
+        <div className="workspaceSurface" inert={isSidebarOpen}>
+          <div className="mobileSidebarBar">
+            <button
+              aria-controls="workspace-sidebar"
+              aria-expanded={isSidebarOpen}
+              aria-label="Open navigation"
+              className="mobileSidebarTrigger"
+              onClick={() => setIsSidebarOpen(true)}
+              ref={sidebarTriggerRef}
+              type="button"
+            >
+              <ListIcon aria-hidden="true" size={20} />
+            </button>
+          </div>
+          <BillingBanner /><div className="workspaceContent">{children}</div>
+        </div>
       ) : <><BillingBanner />{children}</>}
     </main>
   );
