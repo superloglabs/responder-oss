@@ -27,6 +27,7 @@
 .automationSave:hover { background: #4653cc; }
 .automationSave:disabled { opacity: .55; cursor: wait; }
 .automationEditor { width: 100%; margin: 0; gap: 0; }
+.appShell--workspace .automationEditor { width: 100%; margin: 0; gap: 0; }
 .automationSection { padding: 19px 0 21px; border-top: 1px solid var(--border); }
 .automationSection h2 { margin: 0 0 13px; color: var(--foreground); font-size: 13px; font-weight: 600; }
 .automationSection .automationFormHint { margin: 10px 0 0; }
@@ -91,6 +92,7 @@
 .automationPrompt { min-height: 0; margin: 0; }
 .automationVersion { color: var(--muted); font-size: 11px; }
 .automationRuns { margin-top: 20px; }
+.appShell--workspace .automationRuns { margin-top: 20px; }
 .automationRunMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: -8px 0 22px; color: var(--muted); font-size: 12px; }
 .automationRunMeta a { margin-left: auto; color: var(--secondary); text-decoration: none; }
 .automationTranscript { display: flex; flex-direction: column; gap: 14px; }
