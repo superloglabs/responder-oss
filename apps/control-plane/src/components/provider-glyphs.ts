@@ -64,6 +64,18 @@ export const contextProviderMetadata: Record<
   custom_mcp: { category: "Data & infrastructure", searchTerms: "custom tools server mcp" },
 };
 
+export function contextProviderSearchText(
+  provider: string,
+  name: string,
+  description: string,
+): string | null {
+  const metadata = contextProviderMetadata[
+    provider as keyof typeof contextProviderMetadata
+  ];
+  if (!metadata) return null;
+  return `${name} ${description} ${metadata.category} ${metadata.searchTerms}`;
+}
+
 export function providerDisplayName(provider: string): string {
   if (provider === "clickstack") return "ClickStack / HyperDX";
   if (provider in providerGlyphs) {
