@@ -17,9 +17,15 @@ export interface AutomationModelRoute {
 }
 
 export interface AutomationHarnessInput {
+  contextServers: AutomationContextServer[];
   model: AutomationModelRoute;
   prompt: string;
   workspacePath: string;
+}
+
+export interface AutomationContextServer {
+  name: string;
+  url: string;
 }
 
 export interface AutomationHarnessResult {
@@ -91,4 +97,17 @@ export function validateBrokerBaseUrl(value: string): string {
     );
   }
   return url.toString().replace(/\/$/u, "");
+}
+
+export function validateAutomationContextServers(
+  servers: AutomationContextServer[],
+): AutomationContextServer[] {
+  const names = new Set<string>();
+  return servers.map((server) => {
+    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(server.name) || names.has(server.name)) {
+      throw new Error("Automation context server names must be unique identifiers");
+    }
+    names.add(server.name);
+    return { name: server.name, url: validateBrokerBaseUrl(server.url) };
+  });
 }

@@ -11,6 +11,193 @@
   --live: #b8e6a3;
 }
 
+/* Capability-gated automation workspace */
+.automationLoading {
+  margin: 80px 0;
+  color: var(--muted);
+}
+
+.automationEditorHeading,
+.automationDetailHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.automationEditorHeading h1,
+.automationDetailHeading h1 {
+  margin-top: 16px;
+}
+
+.automationEditor {
+  width: min(900px, 100%);
+  margin-top: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.automationFormCard {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.automationFormCard h2,
+.automationRuns h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 17px;
+  font-weight: 550;
+}
+
+.automationFormHint,
+.automationSectionHeading p {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.automationToggle {
+  min-height: 38px;
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.automationChecks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 18px;
+}
+
+.automationChecks > span {
+  width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.automationChecks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.automationChecks small {
+  color: var(--muted);
+}
+
+.automationCredentialForm {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.automationEditorActions,
+.automationDetailActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.automationTitleLine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.automationOverviewGrid {
+  margin-top: 34px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.automationOverviewGrid article {
+  min-width: 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+}
+
+.automationOverviewGrid article:last-child {
+  border-right: 0;
+}
+
+.automationOverviewGrid span,
+.automationOverviewGrid small,
+.automationRunDate {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.automationOverviewGrid strong {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.automationRuns {
+  margin-top: 40px;
+}
+
+.automationSectionHeading {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 760px) {
+  .automationEditorHeading,
+  .automationDetailHeading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .automationDetailActions {
+    justify-content: flex-start;
+  }
+
+  .automationOverviewGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .automationOverviewGrid article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .automationOverviewGrid article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .automationCredentialForm,
+  .inlineFields {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+}
+
 :root[data-color-theme="light"] {
   --background: var(--ds-canvas);
   --surface: var(--ds-surface-base);

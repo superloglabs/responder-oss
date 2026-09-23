@@ -45,7 +45,8 @@ interface IntegrationSummary {
     | "vercel"
     | "custom_mcp"
     | "clickstack"
-    | "linear";
+    | "linear"
+    | "discord";
   name: string;
   description: string;
   state: IntegrationState;
@@ -232,7 +233,7 @@ export function SettingsPage() {
   }, [isFinishingSentryConnection]);
 
   const featured = integrations.filter((integration) =>
-    ["github", "slack"].includes(integration.id),
+    ["github", "slack", "discord"].includes(integration.id),
   );
   const secondary = integrations.filter((integration) =>
     [

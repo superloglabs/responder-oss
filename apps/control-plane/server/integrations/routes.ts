@@ -47,6 +47,7 @@ import {
   POSTHOG_MCP_URL,
 } from "../../../../packages/core/src/integrations/posthog.js";
 import { getActiveTenant } from "../tenant.js";
+import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   getIntegrationDefinition,
   integrationCatalog,
@@ -67,6 +68,12 @@ import {
   listSlackChannels,
   slackAuthorizeUrl,
 } from "./slack.js";
+import {
+  discordAuthorizeUrl,
+  exchangeDiscordCode,
+  listDiscordChannels,
+  registerDiscordAutomationCommand,
+} from "./discord.js";
 import {
   datadogAccount,
   DatadogCredentialsError,
@@ -299,6 +306,7 @@ type BrowserOAuthProvider =
   | "clickstack"
   | "custom_mcp"
   | "dash0"
+  | "discord"
   | "gcp"
   | "github"
   | "linear"
@@ -695,12 +703,15 @@ export const integrationRoutes = new Hono()
       return context.json({ error: tenant.error }, tenant.status);
     }
 
-    const accounts = await listOrganizationIntegrationAccounts(
-      tenant.organizationId,
-    );
+    const [accounts, automationsEnabled] = await Promise.all([
+      listOrganizationIntegrationAccounts(tenant.organizationId),
+      organizationHasCapability(tenant.organizationId, "automations"),
+    ]);
 
     return context.json({
-      integrations: integrationCatalog.map((definition) => {
+      integrations: integrationCatalog
+        .filter((definition) => definition.id !== "discord" || automationsEnabled)
+        .map((definition) => {
         const providerAccounts = accounts.filter(
           (account) => account.provider === definition.id,
         );
@@ -787,7 +798,6 @@ export const integrationRoutes = new Hono()
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
     }
-
     const accounts = await listConnectedSentryIntegrationAccounts(
       tenant.organizationId,
     );
@@ -886,13 +896,19 @@ export const integrationRoutes = new Hono()
     if (!definition?.implemented) {
       return context.json({ error: "Integration is not available yet" }, 501);
     }
-    if (!integrationIsConfigured(definition)) {
-      return context.json({ error: "Integration application is not configured" }, 503);
-    }
 
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (
+      parsedProvider.data === "discord" &&
+      !(await organizationHasCapability(tenant.organizationId, "automations"))
+    ) {
+      return context.json({ error: "Unknown integration provider" }, 404);
+    }
+    if (!integrationIsConfigured(definition)) {
+      return context.json({ error: "Integration application is not configured" }, 503);
     }
     if (
       parsedProvider.data === "aws" ||
@@ -1110,6 +1126,7 @@ export const integrationRoutes = new Hono()
       returnTo: context.req.query("returnTo"),
       routingUrl:
         parsedProvider.data === "github" ||
+        parsedProvider.data === "discord" ||
         parsedProvider.data === "sentry" ||
         parsedProvider.data === "vercel"
           ? integrationCallbackUrl(parsedProvider.data)
@@ -1118,6 +1135,9 @@ export const integrationRoutes = new Hono()
 
     if (parsedProvider.data === "slack") {
       return context.redirect(slackAuthorizeUrl(state));
+    }
+    if (parsedProvider.data === "discord") {
+      return context.redirect(discordAuthorizeUrl(state));
     }
     if (parsedProvider.data === "sentry") {
       return context.redirect(sentryInstallUrl(state));
@@ -2558,7 +2578,6 @@ export const integrationRoutes = new Hono()
         settingsRedirect("/settings", "linear", "error", "invalid_state"),
       );
     }
-
     let accountId: string | undefined;
     try {
       const codeVerifier = z.string().min(1).parse(connectionState.codeVerifier);
@@ -3220,6 +3239,97 @@ export const integrationRoutes = new Hono()
         settingsRedirect(
           connectionState.returnTo,
           "slack",
+          "error",
+          callbackErrorReason(error),
+        ),
+      );
+    }
+  })
+  .get("/discord/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "discord", "error", "invalid_state"),
+      );
+    }
+
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "discord",
+      state,
+    });
+    if (!connectionState) {
+      return context.redirect(
+        settingsRedirect("/settings", "discord", "error", "invalid_state"),
+      );
+    }
+    if (
+      !(await organizationHasCapability(
+        connectionState.organizationId,
+        "automations",
+      ))
+    ) {
+      return context.redirect(
+        settingsRedirect("/settings", "discord", "error", "invalid_state"),
+      );
+    }
+    if (context.req.query("error")) {
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "discord",
+          "error",
+          "cancelled",
+        ),
+      );
+    }
+
+    const code = context.req.query("code");
+    if (!code) {
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "discord",
+          "error",
+          "missing_code",
+        ),
+      );
+    }
+
+    try {
+      const installation = await exchangeDiscordCode(code);
+      await registerDiscordAutomationCommand(installation.guild.id);
+      const accountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "discord",
+        externalAccountId: installation.guild.id,
+        displayName: installation.guild.name,
+        metadata: {
+          applicationId: process.env.DISCORD_APPLICATION_ID,
+          scopes: installation.scope.split(" ").filter(Boolean),
+        },
+      });
+      const channels = await listDiscordChannels(installation.guild.id);
+      await replaceIntegrationResources(accountId, "discord_channel", channels);
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "discord",
+          resource_count: channels.length,
+        },
+      });
+      return context.redirect(
+        settingsRedirect(connectionState.returnTo, "discord", "connected"),
+      );
+    } catch (error) {
+      logCallbackError("Discord", error);
+      return context.redirect(
+        settingsRedirect(
+          connectionState.returnTo,
+          "discord",
           "error",
           callbackErrorReason(error),
         ),

@@ -100,6 +100,29 @@ describe("fresh automation sandbox", () => {
     ).toBeUndefined();
   });
 
+  it("closes the sandbox when the run is aborted", async () => {
+    const { dependencies, session } = harness();
+    const controller = new AbortController();
+    const timeout = new Error("runtime limit reached");
+    const run = runInFreshAutomationSandbox(
+      {
+        ...input,
+        run: vi.fn(() => new Promise(() => undefined)),
+        signal: controller.signal,
+      },
+      dependencies,
+    );
+
+    controller.abort(timeout);
+
+    await expect(run).rejects.toBe(timeout);
+    expect(dependencies.close).toHaveBeenCalledWith(
+      session,
+      input.config,
+      { jobId: "run-1", organizationId: "organization-1" },
+    );
+  });
+
   it("uses a prepared snapshot without mutating its toolchain", async () => {
     const { dependencies } = harness();
 

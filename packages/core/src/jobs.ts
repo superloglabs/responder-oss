@@ -20,6 +20,7 @@ export const slackThreadInvestigationQueue =
 export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
 export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
+export const automationRunQueue = "responder-automation-runs-v1";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -135,6 +136,12 @@ export const linearTicketJobSchema = z.object({
   requestId: z.uuid(),
 });
 export type LinearTicketJob = z.infer<typeof linearTicketJobSchema>;
+export const automationRunJobSchema = z.object({
+  kind: z.literal("automation_run"),
+  queuedAt: z.iso.datetime(),
+  runId: z.uuid(),
+});
+export type AutomationRunJob = z.infer<typeof automationRunJobSchema>;
 export const responderJobSchema = z.union([
   investigationJobSchema,
   remediationJobSchema,
@@ -263,6 +270,16 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryBackoff: true,
       retryDelay: 60,
       retryLimit: 5,
+    }),
+    boss.createQueue(automationRunQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 3_600,
+      heartbeatSeconds: investigationHeartbeatSeconds,
+      notify: true,
+      policy: "key_strict_fifo",
+      retryBackoff: true,
+      retryDelay: 30,
+      retryLimit: 2,
     }),
   ]);
   // createQueue leaves an existing queue unchanged. Reconcile the heartbeat

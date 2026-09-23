@@ -1,4 +1,6 @@
 import {
+  automationRunJobSchema,
+  automationRunQueue,
   createJobBoss,
   investigationLocalConcurrency,
   investigationQueue,
@@ -80,6 +82,7 @@ import { processRemediationJob } from "./remediation-job.js";
 import { processPullRequestReviewJob } from "./pull-request-review-job.js";
 import { loadResponderSecrets } from "@responder/core/secrets";
 import { runInitialTriage } from "./initial-triage.js";
+import { processAutomationRun } from "./automation-run.js";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -344,6 +347,10 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
   );
 
   return { marker: payload.marker, processedAt };
+});
+await boss.work(automationRunQueue, { localConcurrency: 2 }, async ([job]) => {
+  const payload = automationRunJobSchema.parse(job.data);
+  return processAutomationRun(job.id, payload, process.env);
 });
 await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
   const payload = linearTicketJobSchema.parse(job.data);

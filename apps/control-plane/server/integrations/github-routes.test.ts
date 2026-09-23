@@ -9,6 +9,7 @@ import {
   upsertIntegrationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
 import { getActiveTenant } from "../tenant.js";
+import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   exchangeGitHubCode,
   listGitHubRepositories,
@@ -38,6 +39,10 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
 
 vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
+  organizationHasCapability: vi.fn(),
 }));
 
 vi.mock("./github.js", async (importOriginal) => ({
@@ -71,6 +76,7 @@ function configureGitHub() {
 describe("GitHub integration routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
   });
 
   afterEach(() => {

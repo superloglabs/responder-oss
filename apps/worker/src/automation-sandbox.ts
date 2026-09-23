@@ -13,6 +13,7 @@ import {
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
   prepareDaytonaSandbox,
+  type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
 
 interface AutomationSandboxDependencies {
@@ -35,6 +36,8 @@ export interface FreshAutomationSandboxInput<T> {
   brokerToken: string;
   config: DaytonaClientConfig;
   organizationId: string;
+  signal?: AbortSignal;
+  secrets?: DaytonaSandboxSecretMount[];
   run(
     session: DaytonaSandboxSession,
     withModelBroker: <Result>(operation: () => Promise<Result>) => Promise<Result>,
@@ -156,7 +159,7 @@ export async function runInFreshAutomationSandbox<T>(
       input.config,
       sandboxName,
     );
-    await dependencies.configure(session, input.config);
+    await dependencies.configure(session, input.config, input.secrets ?? []);
     if (!input.config.sandboxSnapshotName) {
       await dependencies.prepare(session);
     }
@@ -169,10 +172,24 @@ export async function runInFreshAutomationSandbox<T>(
       | { error: unknown; succeeded: false }
       | { succeeded: true; value: T };
     try {
-      outcome = {
-        succeeded: true,
-        value: await input.run(activeSession, modelBroker.run),
-      };
+      const run = input.run(activeSession, modelBroker.run);
+      const value = input.signal
+        ? await Promise.race([
+            run,
+            new Promise<never>((_resolve, reject) => {
+              const rejectFromSignal = () => reject(
+                input.signal?.reason instanceof Error
+                  ? input.signal.reason
+                  : new Error("Automation sandbox operation was aborted"),
+              );
+              if (input.signal?.aborted) rejectFromSignal();
+              else input.signal?.addEventListener("abort", rejectFromSignal, {
+                once: true,
+              });
+            }),
+          ])
+        : await run;
+      outcome = { succeeded: true, value };
     } catch (error) {
       outcome = { error, succeeded: false };
     }

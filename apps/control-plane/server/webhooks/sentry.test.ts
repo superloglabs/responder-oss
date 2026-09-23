@@ -9,6 +9,14 @@ vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   findAgentsForSentryIssue: vi.fn(),
 }));
 
+vi.mock("../../../../packages/core/src/db/automations.js", () => ({
+  findAutomationsForSentryIssue: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../automations/queue.js", () => ({
+  queueAutomationRun: vi.fn(),
+}));
+
 vi.mock("../investigations/queue.js", () => ({
   queueInvestigation: vi.fn(),
 }));

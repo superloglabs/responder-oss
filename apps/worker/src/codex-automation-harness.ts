@@ -6,6 +6,7 @@ import {
   type AutomationHarnessResult,
   modelBrokerTokenEnvironmentVariable,
   resolveAutomationWorkspacePath,
+  validateAutomationContextServers,
   validateBrokerBaseUrl,
 } from "./automation-harness.js";
 
@@ -35,6 +36,7 @@ export function buildCodexAutomationCommand(
   assertAutomationHarnessModelCompatibility("codex", input.model);
   const workspacePath = resolveAutomationWorkspacePath(input.workspacePath);
   const brokerBaseUrl = validateBrokerBaseUrl(input.model.brokerBaseUrl);
+  const contextServers = validateAutomationContextServers(input.contextServers);
   const args = [
     "exec",
     "--json",
@@ -68,6 +70,12 @@ export function buildCodexAutomationCommand(
     `shell_environment_policy.filters={ ${modelBrokerTokenEnvironmentVariable} = ${tomlString("exclude")} }`,
     "--config",
     "allow_login_shell=false",
+    ...contextServers.flatMap((server) => [
+      "--config",
+      `mcp_servers.${server.name}.url=${tomlString(server.url)}`,
+      "--config",
+      `mcp_servers.${server.name}.bearer_token_env_var=${tomlString(modelBrokerTokenEnvironmentVariable)}`,
+    ]),
     "-",
   ];
 

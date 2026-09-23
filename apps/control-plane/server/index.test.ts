@@ -35,9 +35,20 @@ import {
 } from "./investigations/queue.js";
 
 const slackWebhookMocks = vi.hoisted(() => ({
+  findAutomationsForSlackEvent: vi.fn().mockResolvedValue([]),
   findAgentsForSlackEvent: vi.fn(),
   getSlackChannelConnection: vi.fn(),
   recordInvestigationSlackSource: vi.fn(),
+}));
+
+vi.mock("../../../packages/core/src/db/automations.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  findAutomationsForSlackEvent: slackWebhookMocks.findAutomationsForSlackEvent,
+}));
+
+vi.mock("./automations/queue.js", () => ({
+  closeAutomationQueue: vi.fn(),
+  queueAutomationRun: vi.fn(),
 }));
 
 vi.mock("../../../packages/core/src/db/agents.js", async (importOriginal) => ({
