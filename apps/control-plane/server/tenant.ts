@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/hono/node";
 import { getAuth } from "./auth.js";
 
 export type ActiveTenantResult =
@@ -23,6 +24,8 @@ export async function getActiveTenant(headers: Headers): Promise<ActiveTenantRes
     return { ok: false, error: "Unauthorized", status: 401 };
   }
 
+  Sentry.setUser({ id: authSession.user.id, username: authSession.user.name });
+
   const organizationId = authSession.session.activeOrganizationId;
   if (!organizationId) {
     return { ok: false, error: "No active organization", status: 409 };
@@ -38,6 +41,8 @@ export async function getActiveTenant(headers: Headers): Promise<ActiveTenantRes
   ) {
     return { ok: false, error: "Organization access denied", status: 403 };
   }
+
+  Sentry.setTag("organization_id", organizationId);
 
   return {
     ok: true,

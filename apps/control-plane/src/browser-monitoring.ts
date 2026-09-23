@@ -38,7 +38,10 @@ export function initializeBrowserMonitoring(
 export function setBrowserMonitoringIdentity(
   userId?: string,
   organizationId?: string | null,
+  userName?: string,
+  organizationName?: string | null,
 ) {
-  Sentry.setUser(userId ? { id: userId } : null);
+  Sentry.setUser(userId ? { id: userId, username: userName } : null);
   Sentry.setTag("organization_id", organizationId ?? "");
+  Sentry.setTag("organization_name", organizationId ? organizationName ?? "" : "");
 }

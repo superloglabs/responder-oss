@@ -4,6 +4,7 @@ import {
   sentryRelease,
   sentrySampleRate,
 } from "@responder/core/observability/sentry";
+import { organizationErrorTags } from "@responder/core/observability/sentry-identity";
 import { scrubSentryEvent } from "./sentry-scrubbing.js";
 
 export function initializeServerMonitoring(
@@ -15,7 +16,17 @@ export function initializeServerMonitoring(
 
   try {
     Sentry.init({
-      beforeSend: scrubSentryEvent,
+      beforeSend: async (event) => {
+        const organizationId = event.tags?.organization_id;
+        // The shared lookup returns within 250 ms, even if the database stalls.
+        event.tags = {
+          ...event.tags,
+          ...await organizationErrorTags(
+            typeof organizationId === "string" ? organizationId : undefined,
+          ),
+        };
+        return scrubSentryEvent(event);
+      },
       dsn,
       environment: sentryEnvironment(environment),
       release: sentryRelease(environment),

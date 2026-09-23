@@ -48,11 +48,20 @@ describe("browser error monitoring", () => {
     });
   });
 
+  it("sets names and clears the old name while a new organization loads", () => {
+    setBrowserMonitoringIdentity("user-1", "organization-1", "Ada", "Acme");
+    expect(sentryMocks.setUser).toHaveBeenLastCalledWith({ id: "user-1", username: "Ada" });
+    expect(sentryMocks.setTag).toHaveBeenLastCalledWith("organization_name", "Acme");
+    setBrowserMonitoringIdentity("user-1", "organization-2", "Ada");
+    expect(sentryMocks.setTag).toHaveBeenLastCalledWith("organization_name", "");
+  });
+
   it("clears identity fields after sign out", () => {
-    setBrowserMonitoringIdentity("user-1", "organization-1");
+    setBrowserMonitoringIdentity("user-1", "organization-1", "Ada", "Acme");
     setBrowserMonitoringIdentity();
 
     expect(sentryMocks.setUser).toHaveBeenLastCalledWith(null);
-    expect(sentryMocks.setTag).toHaveBeenLastCalledWith("organization_id", "");
+    expect(sentryMocks.setTag).toHaveBeenCalledWith("organization_id", "");
+    expect(sentryMocks.setTag).toHaveBeenLastCalledWith("organization_name", "");
   });
 });
