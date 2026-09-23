@@ -35,7 +35,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ active, children, density = "default", redesigned = false }: AppShellProps) {
-  const workspace = redesigned || density === "issues";
+  const workspace = redesigned || density === "issues" || active === "automations";
   const session = authClient.useSession();
   const activeOrganization = authClient.useActiveOrganization();
   const organizations = authClient.useListOrganizations();

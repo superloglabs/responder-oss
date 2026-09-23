@@ -553,6 +553,8 @@ export async function listAutomations(organizationId: string) {
       enabled: automations.enabled,
       harness: automationVersions.harness,
       id: automations.id,
+      lastRunAt: sql<Date | null>`(select max(r.created_at) from automation_runs r where r.automation_id = ${automations.id})`,
+      lastRunStatus: sql<AutomationRunStatus | null>`(select r.status from automation_runs r where r.automation_id = ${automations.id} order by r.created_at desc limit 1)`,
       model: automationVersions.model,
       modelProvider: automationVersions.modelProvider,
       name: automations.name,

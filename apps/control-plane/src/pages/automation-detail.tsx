@@ -3,14 +3,16 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import {
   cancelAutomationRun,
   fetchAutomation,
+  fetchAutomationOptions,
   runAutomation,
   setAutomationEnabled,
   type AutomationDetail,
   type AutomationRunSummary,
+  type AutomationOptions,
 } from "../automations-api";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
-import { Badge, DataTable } from "../design-system";
+import { Badge } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 
 function runTone(run: AutomationRunSummary): "neutral" | "live" | "danger" | "warning" {
@@ -27,6 +29,8 @@ export function AutomationDetailPage() {
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
+  const [tab, setTab] = useState<"settings" | "runs">("settings");
+  const [options, setOptions] = useState<AutomationOptions | null>(null);
   const requestGeneration = useRef(0);
   useDocumentTitle(automation?.name ?? "Automation");
 
@@ -50,6 +54,9 @@ export function AutomationDetailPage() {
     }
   }, [automationId]);
 
+  useEffect(() => {
+    void fetchAutomationOptions().then(setOptions).catch(() => undefined);
+  }, []);
   useEffect(() => {
     if (!automationId) return;
     const effectGeneration = ++requestGeneration.current;
@@ -116,41 +123,18 @@ export function AutomationDetailPage() {
 
   return (
     <AppShell active="automations">
-      <section className="detailHeading automationDetailHeading">
-        <div>
-          <Link className="investigationBackLink" to="/automations">← Automations</Link>
-          <div className="automationTitleLine"><h1>{automation.name}</h1><Badge tone={automation.enabled ? "live" : "neutral"}>{automation.enabled ? "Enabled" : "Paused"}</Badge></div>
-          <p>{automation.description || "No description provided."}</p>
-        </div>
-        <div className="automationDetailActions">
-          <button className="button button--secondary" disabled={action !== null} onClick={() => void toggleEnabled()} type="button">{automation.enabled ? "Pause" : "Enable"}</button>
-          <Link className="button button--secondary" to={`/automations/${automation.id}/edit`}>Edit</Link>
-          <button className="button button--primary" disabled={action !== null || !automation.enabled} onClick={() => void startRun()} type="button">{action === "run" ? "Starting…" : "Run now"}</button>
-        </div>
-      </section>
+      <div className="automationCanvas">
+      <nav className="automationBreadcrumb"><Link to="/automations">Automations</Link><span>›</span>{automation.name}</nav>
+      <section className="automationPageHeader"><h1>{automation.name}</h1><div className="automationHeaderActions"><button className="automationStatusButton" disabled={action !== null} onClick={() => void toggleEnabled()} type="button"><span className={automation.enabled ? "automationStatusDot" : "automationStatusDot isPaused"} />{automation.enabled ? "Active" : "Paused"}</button><button className="automationSave" disabled={action !== null || !automation.enabled} onClick={() => void startRun()} type="button">{action === "run" ? "Starting…" : "Run now"}</button></div></section>
+      <nav aria-label="Automation sections" className="automationTabs"><button aria-current={tab === "settings" ? "page" : undefined} onClick={() => setTab("settings")} type="button">Settings</button><button aria-current={tab === "runs" ? "page" : undefined} onClick={() => setTab("runs")} type="button">Run history</button></nav>
       {error ? <p className="formError">{error}</p> : null}
-      <section className="automationOverviewGrid">
-        <article><span>Trigger</span><strong>{automation.configuration.trigger.kind}</strong></article>
-        <article><span>Harness</span><strong>{automation.configuration.harness.replaceAll("_", " ")}</strong></article>
-        <article><span>Model</span><strong>{automation.configuration.model}</strong><small>{automation.configuration.modelProvider}</small></article>
-        <article><span>Version</span><strong>v{automation.version}</strong></article>
-      </section>
-      <section className="automationRuns">
-        <div className="automationSectionHeading"><div><h2>Runs</h2><p>Manual and triggered executions appear here.</p></div></div>
+      {tab === "settings" ? <div className="automationSettings"><section className="automationSection"><h2>Triggers</h2><div className="automationTriggerCard"><div className="automationTriggerHead"><span className="automationProviderIcon">{automation.configuration.trigger.kind[0].toUpperCase()}</span><strong>{automation.configuration.trigger.kind[0].toUpperCase() + automation.configuration.trigger.kind.slice(1)}</strong><span>{options?.accounts.find((account) => account.id === automation.configuration.trigger.integrationAccountId)?.displayName}</span></div><div className="automationSettingMeta"><span>Event</span><strong>{automation.configuration.trigger.kind === "slack" ? automation.configuration.trigger.eventMode.replaceAll("_", " ") : automation.configuration.trigger.kind === "sentry" ? automation.configuration.trigger.eventTypes.join(", ").replaceAll("_", " ") : "Slash command"}</strong></div><div className="automationSettingMeta"><span>{automation.configuration.trigger.kind === "sentry" ? "Projects" : "Channels"}</span><strong>{automation.configuration.trigger.kind === "sentry" ? automation.configuration.trigger.projectIds.join(", ") : automation.configuration.trigger.channelIds.join(", ")}</strong></div></div><p className="automationFormHint">Every matching event starts a run.</p></section><section className="automationSection"><h2>Agent instructions</h2><p className="automationPrompt">{automation.configuration.prompt}</p><div className="automationSettingMeta"><span>Model</span><strong>{automation.configuration.model}</strong><span>Harness</span><strong>{automation.configuration.harness.replaceAll("_", " ")}</strong></div></section><section className="automationSection"><h2>Repositories</h2>{automation.configuration.repositoryIds.map((id) => <div className="automationSelectedRow" key={id}><span className="automationProviderIcon">G</span><strong>{options?.repositories.find((repository) => repository.id === id)?.fullName ?? id}</strong></div>)}</section><section className="automationSection"><h2>Connectors</h2><div className="automationSelectedRow"><span className="automationProviderIcon">G</span><strong>GitHub</strong></div>{automation.configuration.contextAccountIds.map((id) => <div className="automationSelectedRow" key={id}><span className="automationProviderIcon">＋</span><strong>{options?.accounts.find((account) => account.id === id)?.displayName ?? id}</strong></div>)}</section><Link className="automationSave" to={`/automations/${automation.id}/edit`}>Edit settings</Link><p className="automationVersion">Version {automation.version} · Changes create a new version.</p></div> : null}
+      {tab === "runs" ? <section className="automationRuns">
         {automation.runs.length === 0 ? <div className="emptyState"><h2>No runs yet</h2><p>Use Run now to test this automation with a manual event.</p></div> : (
-          <DataTable<AutomationRunSummary>
-            aria-label="Automation runs"
-            columns={[
-              { header: "Started", key: "started", render: (run) => <span><strong>{relativeTime(run.createdAt)}</strong><small className="automationRunDate">{new Date(run.createdAt).toLocaleString()}</small></span>, width: "24%" },
-              { header: "Status", key: "status", render: (run) => <Badge tone={runTone(run)}>{run.status}</Badge>, width: "16%" },
-              { header: "Result", key: "result", render: (run) => run.failureMessage ?? run.resultSummary ?? (run.status === "running" ? "Running in sandbox…" : "Waiting for a worker…"), width: "45%" },
-              { align: "right", header: "", key: "actions", render: (run) => run.status === "pending" || run.status === "running" ? <button className="button button--secondary" disabled={action !== null} onClick={() => void cancelRun(run.id)} type="button">{action === run.id ? "Cancelling…" : "Cancel"}</button> : null, width: "15%" },
-            ]}
-            getRowKey={(run) => run.id}
-            rows={automation.runs}
-          />
+          <div className="automationTableWrap"><table className="automationTable"><thead><tr><th>Run</th><th>Started</th><th>Duration</th><th>Result</th><th /></tr></thead><tbody>{automation.runs.map((run, index) => <tr key={run.id}><td><Link className="automationTableName" to={`/automations/${automation.id}/runs/${run.id}`}><strong>{run.failureMessage ?? run.resultSummary ?? (run.status === "running" ? "Run in progress" : "Automation run")}</strong><small>Run #{automation.runs.length - index} · {automation.configuration.trigger.kind}</small></Link></td><td>{relativeTime(run.createdAt)}</td><td>{run.startedAt && run.completedAt ? `${Math.max(1, Math.round((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))}s` : "—"}</td><td><Badge tone={runTone(run)}>{run.status === "succeeded" ? "Completed" : run.status}</Badge><small className="automationRunDate">{run.failureCategory ?? ""}</small></td><td>{run.status === "pending" || run.status === "running" ? <button className="automationTextButton" disabled={action !== null} onClick={() => void cancelRun(run.id)} type="button">{action === run.id ? "Cancelling…" : "Cancel"}</button> : <Link to={`/automations/${automation.id}/runs/${run.id}`}>›</Link>}</td></tr>)}</tbody></table></div>
         )}
-      </section>
+      </section> : null}
+      </div>
     </AppShell>
   );
 }

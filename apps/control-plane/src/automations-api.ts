@@ -52,12 +52,20 @@ export interface AutomationListItem {
   enabled: boolean;
   harness: AutomationHarness;
   id: string;
+  lastRunAt: string | null;
+  lastRunStatus: AutomationRunStatus | null;
   model: string;
   modelProvider: AutomationModelProvider;
   name: string;
   trigger: AutomationTrigger;
   updatedAt: string;
   version: number;
+}
+
+export interface AutomationRunDetail extends AutomationRunSummary {
+  automationId: string;
+  redactedTrigger: Record<string, unknown>;
+  events: Array<{ id: number; type: string; data: Record<string, unknown> | null; createdAt: string }>;
 }
 
 export interface AutomationRunSummary {
@@ -125,6 +133,13 @@ export async function fetchAutomation(id: string): Promise<AutomationDetail> {
     `/api/automations/${encodeURIComponent(id)}`,
   );
   return response.automation;
+}
+
+export async function fetchAutomationRun(id: string): Promise<AutomationRunDetail> {
+  const response = await automationJson<{ run: AutomationRunDetail }>(
+    `/api/automations/runs/${encodeURIComponent(id)}`,
+  );
+  return response.run;
 }
 
 export function fetchAutomationOptions(): Promise<AutomationOptions> {

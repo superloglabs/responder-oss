@@ -5,15 +5,23 @@ import {
   type AutomationListItem,
 } from "../automations-api";
 import { AppShell } from "../components/app-shell";
-import { PlusIcon } from "../components/icons";
-import { Badge, DataTable } from "../design-system";
+import { Badge } from "../design-system";
 import { relativeTime } from "../agents-api";
 import { useDocumentTitle } from "../use-document-title";
 
 function triggerLabel(automation: AutomationListItem): string {
-  if (automation.trigger.kind === "slack") return "Slack";
-  if (automation.trigger.kind === "sentry") return "Sentry";
-  return "Discord";
+  if (automation.trigger.kind === "slack") return automation.trigger.eventMode === "mentions" ? "App mentioned" : automation.trigger.eventMode === "every_message" ? "Message posted" : "Message or mention";
+  if (automation.trigger.kind === "sentry") return automation.trigger.eventTypes.includes("new_issue") ? "New issue" : "Regression";
+  return "Slash command";
+}
+
+function statusLabel(status: AutomationListItem["lastRunStatus"]) {
+  if (status === "succeeded") return "Completed";
+  if (status === "pending") return "Queued";
+  if (status === "running") return "Running";
+  if (status === "failed") return "Failed";
+  if (status === "cancelled") return "Cancelled";
+  return "—";
 }
 
 export function AutomationsPage() {
@@ -41,16 +49,8 @@ export function AutomationsPage() {
 
   return (
     <AppShell active="automations">
-      <section className="pageHeading pageHeading--agents">
-        <div>
-          <h1>Automations</h1>
-          <p>Run unattended coding tasks from operational events.</p>
-        </div>
-        <Link className="dsButton dsButton--primary dsButton--medium" to="/automations/new">
-          <PlusIcon />
-          New automation
-        </Link>
-      </section>
+      <div className="automationCanvas">
+      <section className="automationPageHeader"><h1>Automations</h1><Link className="automationSave" to="/automations/new">＋ Create automation</Link></section>
       {error ? <p className="formError">{error}</p> : null}
       {loading ? <p className="automationLoading">Loading automations…</p> : null}
       {!loading && automations.length === 0 ? (
@@ -63,58 +63,9 @@ export function AutomationsPage() {
         </section>
       ) : null}
       {!loading && automations.length > 0 ? (
-        <section className="agentListTable" aria-labelledby="automation-list-title">
-          <h2 className="srOnly" id="automation-list-title">Configured automations</h2>
-          <DataTable<AutomationListItem, "all">
-            aria-label="Configured automations"
-            activeFilter="all"
-            columns={[
-              {
-                header: "Automation",
-                key: "automation",
-                render: (automation) => (
-                  <Link className="agentTableTitle" to={`/automations/${automation.id}`}>
-                    <strong>{automation.name}</strong>
-                    <small>{automation.description || "No description provided."}</small>
-                  </Link>
-                ),
-                width: "36%",
-              },
-              { header: "Trigger", key: "trigger", render: triggerLabel, width: "14%" },
-              {
-                header: "Runtime",
-                key: "runtime",
-                render: (automation) => (
-                  <span className="agentTableCell">
-                    {automation.harness.replaceAll("_", " ")} · {automation.model}
-                  </span>
-                ),
-                width: "28%",
-              },
-              {
-                header: "Status",
-                key: "status",
-                render: (automation) => (
-                  <Badge tone={automation.enabled ? "live" : "neutral"}>
-                    {automation.enabled ? "Enabled" : "Paused"}
-                  </Badge>
-                ),
-                width: "12%",
-              },
-              {
-                header: "Updated",
-                key: "updated",
-                render: (automation) => relativeTime(automation.updatedAt),
-                width: "10%",
-              },
-            ]}
-            filters={[{ count: automations.length, label: "All", value: "all" }]}
-            getRowKey={(automation) => automation.id}
-            onFilterChange={() => undefined}
-            rows={automations}
-          />
-        </section>
+        <div className="automationTableWrap"><table className="automationTable"><thead><tr><th>Automation</th><th>Triggers</th><th>Connectors</th><th>Last run</th><th>Status</th></tr></thead><tbody>{automations.map((automation) => <tr key={automation.id}><td><Link className="automationTableName" to={`/automations/${automation.id}`}><strong>{automation.name}</strong><small>{automation.description || "No description provided."}</small></Link></td><td><span className="automationProviderIcon">{automation.trigger.kind[0].toUpperCase()}</span><span className="automationTableStack"><strong>{automation.trigger.kind[0].toUpperCase() + automation.trigger.kind.slice(1)}</strong><small>{triggerLabel(automation)}</small></span></td><td><span className="automationProviderIcon">G</span><span className="automationTableStack"><strong>GitHub</strong><small>{automation.harness === "claude_agent_sdk" ? "Claude Agent SDK" : automation.harness === "opencode" ? "OpenCode" : "Default"}</small></span></td><td>{automation.lastRunAt ? <span className="automationTableStack"><strong>{relativeTime(automation.lastRunAt)}</strong><small>{statusLabel(automation.lastRunStatus)}</small></span> : "—"}</td><td><Badge tone={automation.enabled ? "live" : "neutral"}>{automation.enabled ? "Active" : "Paused"}</Badge></td></tr>)}</tbody></table></div>
       ) : null}
+      </div>
     </AppShell>
   );
 }

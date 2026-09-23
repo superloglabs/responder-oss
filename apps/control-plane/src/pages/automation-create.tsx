@@ -22,7 +22,7 @@ const defaultConfiguration: AutomationConfiguration = {
   model: "gpt-5.4",
   modelCredentialId: "",
   modelProvider: "openai",
-  prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
+  prompt: "",
   repositoryIds: [],
   toolPolicy: "full",
   trigger: {
@@ -55,6 +55,14 @@ export function AutomationCreatePage() {
   const [credentialLabel, setCredentialLabel] = useState("");
   const [credentialKey, setCredentialKey] = useState("");
   const [credentialSaving, setCredentialSaving] = useState(false);
+  const [picker, setPicker] = useState<"trigger" | "connector" | "repository" | null>(null);
+  const [triggerChosen, setTriggerChosen] = useState(Boolean(automationId));
+  useEffect(() => {
+    if (!picker) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setPicker(null); };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [picker]);
   useDocumentTitle(automationId ? "Edit automation" : "New automation");
 
   useEffect(() => {
@@ -71,11 +79,11 @@ export function AutomationCreatePage() {
           setDescription(automation.description);
           setEnabled(automation.enabled);
           setConfiguration(automation.configuration);
+          setTriggerChosen(true);
         } else {
           const firstCredential = loadedOptions.credentials.find(
             (credential) => credential.status === "active",
           );
-          const firstRepository = loadedOptions.repositories[0];
           setConfiguration((current) => ({
             ...current,
             model: firstCredential?.provider === "anthropic"
@@ -83,7 +91,7 @@ export function AutomationCreatePage() {
               : "gpt-5.4",
             modelCredentialId: firstCredential?.id ?? "",
             modelProvider: firstCredential?.provider ?? "openai",
-            repositoryIds: firstRepository ? [firstRepository.id] : [],
+            repositoryIds: [],
           }));
         }
       })
@@ -139,6 +147,7 @@ export function AutomationCreatePage() {
   }
 
   function setTriggerKind(kind: "slack" | "sentry" | "discord") {
+    setTriggerChosen(true);
     const account = options?.accounts.find((item) => item.provider === kind);
     setConfiguration((current) => ({
       ...current,
@@ -196,76 +205,19 @@ export function AutomationCreatePage() {
 
   return (
     <AppShell active="automations" density="create">
-      <section className="detailHeading automationEditorHeading">
-        <div>
-          <Link className="investigationBackLink" to={automationId ? `/automations/${automationId}` : "/automations"}>← Automations</Link>
-          <h1>{automationId ? "Edit automation" : "New automation"}</h1>
-          <p>Each run gets a clean sandbox and the selected repositories and connections.</p>
-        </div>
-      </section>
+      <div className="automationCanvas automationCanvas--editor">
+      <nav className="automationBreadcrumb"><Link to="/automations">Automations</Link><span>›</span>{automationId ? "Edit automation" : "Create automation"}</nav>
       {error ? <p className="formError">{error}</p> : null}
       <form className="automationEditor" onSubmit={(event) => void submit(event)}>
-        <section className="automationFormCard">
-          <h2>Basics</h2>
-          <div className="inlineFields">
-            <label className="field field--grow"><span>Name</span><input maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} /></label>
-            <label className="automationToggle"><input checked={enabled} onChange={(event) => setEnabled(event.target.checked)} type="checkbox" /><span>Enabled</span></label>
-          </div>
-          <label className="field"><span>Description</span><textarea maxLength={2_000} onChange={(event) => setDescription(event.target.value)} value={description} /></label>
-        </section>
-
-        <section className="automationFormCard">
-          <h2>Trigger</h2>
-          <div className="inlineFields">
-            <label className="field field--grow"><span>Provider</span><select onChange={(event) => setTriggerKind(event.target.value as "slack" | "sentry" | "discord")} value={configuration.trigger.kind}><option value="slack">Slack</option><option value="sentry">Sentry</option><option value="discord">Discord</option></select></label>
-            <label className="field field--grow"><span>Connection</span><select onChange={(event) => setConfiguration((current) => ({ ...current, trigger: { ...current.trigger, integrationAccountId: event.target.value } }))} required value={configuration.trigger.integrationAccountId}><option value="">Choose a connection</option>{triggerAccounts.map((account) => <option key={account.id} value={account.id}>{account.displayName}</option>)}</select></label>
-          </div>
-          {configuration.trigger.kind === "slack" ? (
-            <label className="field"><span>Event mode</span><select onChange={(event) => setConfiguration((current) => ({ ...current, trigger: current.trigger.kind === "slack" ? { ...current.trigger, eventMode: event.target.value as "mentions" | "every_message" | "both" } : current.trigger }))} value={configuration.trigger.eventMode}><option value="mentions">Mentions</option><option value="every_message">Every message</option><option value="both">Both</option></select></label>
-          ) : null}
-          {configuration.trigger.kind === "sentry" ? (
-            <div className="automationChecks"><span>Events</span>{(["new_issue", "regression"] as const).map((eventType) => <label key={eventType}><input checked={configuration.trigger.kind === "sentry" && configuration.trigger.eventTypes.includes(eventType)} onChange={() => setConfiguration((current) => ({ ...current, trigger: current.trigger.kind === "sentry" ? { ...current.trigger, eventTypes: toggle(current.trigger.eventTypes, eventType) as Array<"new_issue" | "regression"> } : current.trigger }))} type="checkbox" />{eventType.replaceAll("_", " ")}</label>)}</div>
-          ) : null}
-          <div className="automationChecks"><span>{configuration.trigger.kind === "sentry" ? "Projects" : "Channels"}</span>{triggerResources.length === 0 ? <small>No synced resources found for this connection.</small> : triggerResources.map((resource) => {
-            const selected = configuration.trigger.kind === "sentry" ? configuration.trigger.projectIds : configuration.trigger.channelIds;
-            return <label key={resource.id}><input checked={selected.includes(resource.externalId)} onChange={() => setConfiguration((current) => ({ ...current, trigger: current.trigger.kind === "sentry" ? { ...current.trigger, projectIds: toggle(current.trigger.projectIds, resource.externalId) } : { ...current.trigger, channelIds: toggle(current.trigger.channelIds, resource.externalId) } }))} type="checkbox" />{resource.displayName}</label>;
-          })}</div>
-        </section>
-
-        <section className="automationFormCard">
-          <h2>Model and harness</h2>
-          <div className="inlineFields">
-            <label className="field field--grow"><span>Provider</span><select onChange={(event) => setProvider(event.target.value as AutomationModelProvider)} value={configuration.modelProvider}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
-            <label className="field field--grow"><span>Harness</span><select onChange={(event) => setConfiguration((current) => ({ ...current, harness: event.target.value as AutomationHarness }))} value={configuration.harness}><option value="codex">Default coding harness</option><option disabled={configuration.modelProvider !== "anthropic"} value="claude_agent_sdk">Anthropic agent harness</option><option value="opencode">OpenCode</option></select></label>
-          </div>
-          <div className="inlineFields">
-            <label className="field field--grow"><span>Model</span><input onChange={(event) => setConfiguration((current) => ({ ...current, model: event.target.value }))} required value={configuration.model} /></label>
-            <label className="field field--grow"><span>Model key</span><select onChange={(event) => setConfiguration((current) => ({ ...current, modelCredentialId: event.target.value }))} required value={configuration.modelCredentialId}><option value="">Choose a key</option>{providerCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.label} ·••••{credential.lastFour}</option>)}</select></label>
-          </div>
-          <button className="button button--secondary" onClick={() => setShowCredential((value) => !value)} type="button">{showCredential ? "Cancel adding key" : "Add model key"}</button>
-          {showCredential ? <div className="automationCredentialForm"><label className="field"><span>Key label</span><input onChange={(event) => setCredentialLabel(event.target.value)} required={showCredential} value={credentialLabel} /></label><label className="field"><span>API key</span><input autoComplete="off" onChange={(event) => setCredentialKey(event.target.value)} required={showCredential} type="password" value={credentialKey} /></label><button className="button button--secondary" disabled={credentialSaving || !credentialKey || !credentialLabel} onClick={() => void addCredential()} type="button">{credentialSaving ? "Saving…" : "Save key"}</button></div> : null}
-        </section>
-
-        <section className="automationFormCard">
-          <h2>Task</h2>
-          <label className="field field--instructions"><span>Instructions</span><textarea maxLength={50_000} onChange={(event) => setConfiguration((current) => ({ ...current, prompt: event.target.value }))} required value={configuration.prompt} /></label>
-          <div className="inlineFields"><label className="field field--grow"><span>Maximum runtime (seconds)</span><input max={3600} min={60} onChange={(event) => setConfiguration((current) => ({ ...current, maxRuntimeSeconds: Number(event.target.value) }))} type="number" value={configuration.maxRuntimeSeconds} /></label><label className="field field--grow"><span>Maximum model calls</span><input max={128} min={1} onChange={(event) => setConfiguration((current) => ({ ...current, maxModelRequests: Number(event.target.value) }))} type="number" value={configuration.maxModelRequests} /></label><label className="field field--grow"><span>Output tokens per call</span><input max={100000} min={256} onChange={(event) => setConfiguration((current) => ({ ...current, maxOutputTokensPerRequest: Number(event.target.value) }))} type="number" value={configuration.maxOutputTokensPerRequest} /></label></div>
-        </section>
-
-        <section className="automationFormCard">
-          <h2>Repositories</h2>
-          <div className="automationChecks">{options?.repositories.length ? options.repositories.map((repository) => <label key={repository.id}><input checked={configuration.repositoryIds.includes(repository.id)} onChange={() => setConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repository.id) }))} type="checkbox" />{repository.fullName}</label>) : <small>Connect GitHub and sync at least one repository first.</small>}</div>
-        </section>
-
-        <section className="automationFormCard">
-          <h2>Context and secrets</h2>
-          <p className="automationFormHint">The trigger connection and selected Slack, Sentry, Datadog, or custom MCP connections are available through the run-scoped context broker. Selected GitHub repositories are checked out in the sandbox. Write actions execute without human approval.</p>
-          <div className="automationChecks"><span>Connections</span>{contextAccounts.length ? contextAccounts.map((account) => <label key={account.id}><input checked={configuration.contextAccountIds.includes(account.id)} onChange={() => setConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, account.id) }))} type="checkbox" />{account.displayName} · {account.provider}</label>) : <small>No additional compatible context connections found.</small>}</div>
-          <div className="automationChecks"><span>Workspace secrets</span>{options?.secrets.length ? options.secrets.map((secret) => <label key={secret.id}><input checked={configuration.workspaceSecretIds.includes(secret.id)} onChange={() => setConfiguration((current) => ({ ...current, workspaceSecretIds: toggle(current.workspaceSecretIds, secret.id) }))} type="checkbox" />{secret.name}</label>) : <small>No workspace secrets selected.</small>}</div>
-        </section>
-
-        <div className="automationEditorActions"><Link className="button button--secondary" to={automationId ? `/automations/${automationId}` : "/automations"}>Cancel</Link><button className="button button--primary" disabled={saving} type="submit">{saving ? "Saving…" : "Save automation"}</button></div>
+        <header className="automationTopline"><label className="srOnly" htmlFor="automation-name">Automation name</label><input id="automation-name" className="automationNameInput" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="New automation" required value={name} /><button className="automationSave" disabled={saving || !triggerChosen} type="submit">{saving ? "Saving…" : "Save"}</button></header>
+        <section className="automationSection"><h2>Triggers</h2>{triggerChosen ? <div className="automationTriggerCard"><div className="automationTriggerHead"><span className="automationProviderIcon">{configuration.trigger.kind[0].toUpperCase()}</span><strong>{configuration.trigger.kind[0].toUpperCase() + configuration.trigger.kind.slice(1)}</strong><span>{triggerAccounts.find((account) => account.id === configuration.trigger.integrationAccountId)?.displayName}</span><button onClick={() => setPicker("trigger")} type="button">Change</button></div>{triggerAccounts.length === 0 ? <p className="automationFormHint">No {configuration.trigger.kind} connection is available. <Link to="/settings">Connect it in Settings ↗</Link></p> : null}<div className="automationFieldGrid"><label>Connection<select onChange={(event) => setConfiguration((current) => ({ ...current, trigger: { ...current.trigger, integrationAccountId: event.target.value } }))} required value={configuration.trigger.integrationAccountId}><option value="">Choose a connection</option>{triggerAccounts.map((account) => <option key={account.id} value={account.id}>{account.displayName}</option>)}</select></label>{configuration.trigger.kind === "slack" ? <label>Event<select onChange={(event) => setConfiguration((current) => ({ ...current, trigger: current.trigger.kind === "slack" ? { ...current.trigger, eventMode: event.target.value as "mentions" | "every_message" | "both" } : current.trigger }))} value={configuration.trigger.eventMode}><option value="mentions">App mentioned</option><option value="every_message">Message posted</option><option value="both">Either event</option></select></label> : null}</div>{configuration.trigger.kind === "sentry" ? <div className="automationChecks"><span>Event</span>{(["new_issue", "regression"] as const).map((eventType) => <label key={eventType}><input checked={configuration.trigger.kind === "sentry" && configuration.trigger.eventTypes.includes(eventType)} onChange={() => setConfiguration((current) => ({ ...current, trigger: current.trigger.kind === "sentry" ? { ...current.trigger, eventTypes: toggle(current.trigger.eventTypes, eventType) as Array<"new_issue" | "regression"> } : current.trigger }))} type="checkbox" />{eventType === "new_issue" ? "New issue" : "Regression"}</label>)}</div> : null}<div className="automationChecks"><span>{configuration.trigger.kind === "sentry" ? "Projects" : "Channels"}</span>{triggerResources.length ? triggerResources.map((resource) => { const selected = configuration.trigger.kind === "sentry" ? configuration.trigger.projectIds : configuration.trigger.channelIds; return <label key={resource.id}><input checked={selected.includes(resource.externalId)} onChange={() => setConfiguration((current) => ({ ...current, trigger: current.trigger.kind === "sentry" ? { ...current.trigger, projectIds: toggle(current.trigger.projectIds, resource.externalId) } : { ...current.trigger, channelIds: toggle(current.trigger.channelIds, resource.externalId) } }))} type="checkbox" />{resource.displayName}</label>; }) : <small>No synced resources found for this connection.</small>}</div></div> : null}<button className="automationAddRow" onClick={() => setPicker("trigger")} type="button">＋ Add trigger</button><p className="automationFormHint">Every matching event starts a run.</p></section>
+        <section className="automationSection"><h2>Agent instructions</h2><label className="srOnly" htmlFor="automation-instructions">Agent instructions</label><textarea id="automation-instructions" className="automationInstructions" maxLength={50_000} onChange={(event) => setConfiguration((current) => ({ ...current, prompt: event.target.value }))} placeholder="Describe what the agent should do." required value={configuration.prompt} /><div className="automationModelBar"><label>Provider<select onChange={(event) => setProvider(event.target.value as AutomationModelProvider)} value={configuration.modelProvider}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label><label>Model<input onChange={(event) => setConfiguration((current) => ({ ...current, model: event.target.value }))} required value={configuration.model} /></label><label>Harness<select onChange={(event) => setConfiguration((current) => ({ ...current, harness: event.target.value as AutomationHarness }))} value={configuration.harness}><option value="codex">Default</option><option disabled={configuration.modelProvider !== "anthropic"} value="claude_agent_sdk">Claude Agent SDK</option><option value="opencode">OpenCode</option></select></label></div><div className="automationModelBar"><label>Model key<select onChange={(event) => setConfiguration((current) => ({ ...current, modelCredentialId: event.target.value }))} required value={configuration.modelCredentialId}><option value="">Choose a key</option>{providerCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.label} ·••••{credential.lastFour}</option>)}</select></label><button className="automationTextButton" onClick={() => setShowCredential((value) => !value)} type="button">{showCredential ? "Cancel" : "＋ Add model key"}</button></div>{showCredential ? <div className="automationCredentialForm"><label className="field"><span>Key label</span><input onChange={(event) => setCredentialLabel(event.target.value)} value={credentialLabel} /></label><label className="field"><span>API key</span><input autoComplete="off" onChange={(event) => setCredentialKey(event.target.value)} type="password" value={credentialKey} /></label><button className="button button--secondary" disabled={credentialSaving || !credentialKey || !credentialLabel} onClick={() => void addCredential()} type="button">{credentialSaving ? "Saving…" : "Save key"}</button></div> : null}</section>
+        <section className="automationSection"><h2>Repositories</h2>{options?.repositories.filter((repository) => configuration.repositoryIds.includes(repository.id)).map((repository) => <div className="automationSelectedRow" key={repository.id}><span className="automationProviderIcon">G</span><strong>{repository.fullName}</strong><button aria-label={`Remove ${repository.fullName}`} onClick={() => setConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repository.id) }))} type="button">×</button></div>)}<button className="automationAddRow" onClick={() => setPicker("repository")} type="button">＋ Add repository</button></section>
+        <section className="automationSection"><h2>Connectors</h2><div className="automationSelectedRow"><span className="automationProviderIcon">G</span><strong>GitHub</strong><Link to="/settings">Manage</Link></div>{contextAccounts.filter((account) => configuration.contextAccountIds.includes(account.id)).map((account) => <div className="automationSelectedRow" key={account.id}><span className="automationProviderIcon">{account.provider[0].toUpperCase()}</span><strong>{account.displayName}</strong><button aria-label={`Remove ${account.displayName}`} onClick={() => setConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, account.id) }))} type="button">×</button></div>)}<button className="automationAddRow" onClick={() => setPicker("connector")} type="button">＋ Add connector</button></section>
+        <details className="automationAdvanced"><summary>Advanced settings</summary><label>Description<textarea maxLength={2_000} onChange={(event) => setDescription(event.target.value)} value={description} /></label><label className="automationToggle"><input checked={enabled} onChange={(event) => setEnabled(event.target.checked)} type="checkbox" />Active after saving</label><div className="automationModelBar"><label>Maximum runtime (seconds)<input max={3600} min={60} onChange={(event) => setConfiguration((current) => ({ ...current, maxRuntimeSeconds: Number(event.target.value) }))} type="number" value={configuration.maxRuntimeSeconds} /></label><label>Maximum model calls<input max={128} min={1} onChange={(event) => setConfiguration((current) => ({ ...current, maxModelRequests: Number(event.target.value) }))} type="number" value={configuration.maxModelRequests} /></label><label>Output tokens per call<input max={100000} min={256} onChange={(event) => setConfiguration((current) => ({ ...current, maxOutputTokensPerRequest: Number(event.target.value) }))} type="number" value={configuration.maxOutputTokensPerRequest} /></label></div><div className="automationChecks"><span>Workspace secrets</span>{options?.secrets.map((secret) => <label key={secret.id}><input checked={configuration.workspaceSecretIds.includes(secret.id)} onChange={() => setConfiguration((current) => ({ ...current, workspaceSecretIds: toggle(current.workspaceSecretIds, secret.id) }))} type="checkbox" />{secret.name}</label>)}</div><p className="automationFormHint">Runs use a fresh sandbox. Selected connections can perform supported write actions without approval.</p></details>
       </form>
+      {picker ? <div className="automationModalBackdrop" onClick={() => setPicker(null)}><section aria-label={picker === "trigger" ? "Choose a trigger" : picker === "connector" ? "Add connector" : "Add repository"} aria-modal="true" className="automationPicker" onClick={(event) => event.stopPropagation()} role="dialog"><header><h2>{picker === "trigger" ? "Choose a trigger" : picker === "connector" ? "Give the agent access to your tools" : "Add repository"}</h2><button aria-label="Close" onClick={() => setPicker(null)} type="button">×</button></header>{picker === "trigger" ? <>{(["slack", "sentry", "discord"] as const).map((kind) => <button className="automationPickerRow" key={kind} onClick={() => { setTriggerKind(kind); setPicker(null); }} type="button"><span className="automationProviderIcon">{kind[0].toUpperCase()}</span><span><strong>{kind[0].toUpperCase() + kind.slice(1)}</strong><small>{kind === "slack" ? "Message posted or app mentioned" : kind === "sentry" ? "New issue or regression" : "Slash command in a channel"}</small></span><span>›</span></button>)}<p className="automationPickerNote">GitHub and Datadog triggers are not available yet.</p></> : picker === "repository" ? options?.repositories.map((repository) => <button className="automationPickerRow" key={repository.id} onClick={() => { setConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repository.id) })); }} type="button"><span className="automationProviderIcon">G</span><strong>{repository.fullName}</strong><span>{configuration.repositoryIds.includes(repository.id) ? "Added ✓" : "Add"}</span></button>) : contextAccounts.map((account) => <button className="automationPickerRow" key={account.id} onClick={() => setConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, account.id) }))} type="button"><span className="automationProviderIcon">{account.provider[0].toUpperCase()}</span><span><strong>{account.displayName}</strong><small>{account.provider}</small></span><span>{configuration.contextAccountIds.includes(account.id) ? "Added ✓" : "Add"}</span></button>)}{picker !== "trigger" ? <Link className="automationPickerManage" to="/settings">Manage connections ↗</Link> : null}</section></div> : null}
+      </div>
     </AppShell>
   );
 }
