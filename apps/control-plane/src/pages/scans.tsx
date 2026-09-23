@@ -18,12 +18,7 @@ import {
   AgentContextRow,
 } from "../components/agent-context-controls";
 import { AppShell } from "../components/app-shell";
-import {
-  ArrowIcon,
-  RepositoryIcon,
-  SearchIcon,
-  SignalIcon,
-} from "../components/icons";
+import { BookBookmarkIcon as RepositoryIcon, MagnifyingGlassIcon as SearchIcon, ScanIcon as SignalIcon, PlusIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import type { ProviderGlyphId } from "../components/provider-glyphs";
 import {
   contextCategoryDescriptions,
@@ -31,13 +26,13 @@ import {
   contextProviderMetadata,
 } from "../components/provider-glyphs";
 import {
-  Badge,
   Button,
   Checkbox,
   DataTable,
   IconButton,
   SelectField,
 } from "../design-system";
+import "./scan-suggestions.css";
 import { useDocumentTitle } from "../use-document-title";
 import { scanRuns, type ScanRun } from "./scan-data";
 
@@ -50,7 +45,7 @@ type ScanSource = {
   id: string;
   kind: "account" | "github" | "vercel";
   name: string;
-  provider: Exclude<ProviderGlyphId, "google" | "scan">;
+  provider: Exclude<ProviderGlyphId, "discord" | "google" | "scan">;
   resourceLabel: string;
   resources: Array<{
     description: string;
@@ -340,7 +335,7 @@ function configuredSources(
         source.provider !== "custom_mcp" &&
         !connectedProviders.has(source.provider),
     )
-    .map((source) => ({ ...source, connected: false, enabled: false }));
+    .map((source) => ({ ...source, connected: false, enabled: false, resources: [] }));
   return [...accountSources, ...githubSource, ...vercelSource, ...unavailableSources];
 }
 
@@ -480,6 +475,11 @@ export function ScansPage() {
     const save = saveQueueRef.current
       .catch(() => undefined)
       .then(() => saveScanConfiguration(next))
+      .then((saved) => {
+        if (saveVersionRef.current !== version) return;
+        configurationRef.current = saved;
+        setConfiguration(saved);
+      })
       .finally(() => {
         if (saveVersionRef.current === version) setSaving(false);
       });
@@ -494,7 +494,7 @@ export function ScansPage() {
     (source) => source.connected && source.enabled,
   ).length;
   const connectedSources = sources.filter((source) => source.connected);
-  const connectedSourceNames = connectedSources.map((source) => source.name);
+
   const normalizedQuery = integrationQuery.trim().toLocaleLowerCase();
   const availableSources = sources.filter(
     (source) =>
@@ -742,14 +742,11 @@ export function ScansPage() {
       : `/scans/${scanId}`;
 
   return (
-    <AppShell active="scans" density="scans">
+    <AppShell active="scans" density="scans" redesigned>
       <div className="scansSetup">
-        <section className="pageHeading scansHeading">
-          <div>
-            <h1>Scans</h1>
-            <p>Find active issues across your stack before they are reported.</p>
-          </div>
-          <Button loading={isRunning} onClick={startScan} variant="secondary">
+        <section className="workspaceHeading">
+          <h1><SignalIcon size={16} aria-hidden="true" />Scans</h1>
+          <Button disabled={loading || saving} loading={isRunning} onClick={startScan} variant="primary">
             {isRunning ? "Running scan…" : "Run scan now"}
           </Button>
         </section>
@@ -757,7 +754,9 @@ export function ScansPage() {
         <div className="scansSettings">
           <section aria-label="Scan settings" className="scanControls">
             <SelectField
+              disabled={loading}
               label="Frequency"
+              hint={configuration.nextRunAt ? `Next scan ${new Date(configuration.nextRunAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : undefined}
               onChange={(value) =>
                 persist({
                   ...configurationRef.current,
@@ -772,7 +771,8 @@ export function ScansPage() {
               value={configuration.frequencyHours?.toString() ?? "off"}
             />
             <SelectField
-              label="Slack channel where we post findings"
+              disabled={loading}
+              label="Slack channel for findings"
               onChange={(value) =>
                 persist({
                   ...configurationRef.current,
@@ -789,31 +789,37 @@ export function ScansPage() {
           {error ? <p className="formError">{error}</p> : null}
           {saving ? <span className="srOnly" aria-live="polite">Saving scan settings</span> : null}
 
-          <section aria-labelledby="scan-sources-title" className="scanSources">
-            <div className="scanSourceSummary">
-              <div aria-hidden="true" className="scanSourceSummary__providers">
-                {connectedSources.map((source) => (
-                  <AgentContextProviderMark
-                    connected={source.enabled}
-                    key={source.id}
-                    provider={source.provider}
-                  />
-                ))}
-              </div>
-              <span className="scanSourceSummary__copy">
-                <strong id="scan-sources-title">Connected integrations</strong>
-                <small>
-                  {connectedSources.length} connected · {selectedSourceCount} used by scans
-                </small>
-                <small>{connectedSourceNames.join(", ")}</small>
-              </span>
-              <Button
-                onClick={() => setSourcesDialogOpen(true)}
-                size="small"
-                variant="secondary"
-              >
-                Configure
-              </Button>
+          <section className="scanSources" aria-labelledby="scan-repositories-title">
+            <h2 id="scan-repositories-title">Repositories</h2>
+            <div className="scanContextList">
+              {sources.filter((source) => source.kind === "github" && source.connected).flatMap((source) =>
+                source.resources.filter((resource) => resource.selected).map((resource) => (
+                  <div className="scanContextRow" key={resource.id}>
+                    <RepositoryIcon size={16} aria-hidden="true" />
+                    <span>{resource.label}</span>
+                    <IconButton aria-label={`Remove ${resource.label} from scans`} variant="ghost" size="small" onClick={() => toggleResource(source.id, resource.id)}>
+                      <TrashIcon size={14} />
+                    </IconButton>
+                  </div>
+                ))
+              )}
+              <button className="scanContextAdd" onClick={() => { setConfigurationTarget(sources.find((source) => source.kind === "github" && source.connected)?.id ?? null); setSourcesDialogOpen(true); }} type="button">
+                <PlusIcon size={16} aria-hidden="true" /> Add repository
+              </button>
+            </div>
+          </section>
+          <section className="scanSources" aria-labelledby="scan-sources-title">
+            <h2 id="scan-sources-title">Connectors</h2>
+            <div className="scanContextList">
+              {connectedSources.filter((source) => source.enabled).map((source) => (
+                <div className="scanContextRow" key={source.id}>
+                  <AgentContextProviderMark provider={source.provider} />
+                  <span>{source.name}</span>
+                  <Button variant="secondary" size="small" onClick={() => { setConfigurationTarget(source.id); setSourcesDialogOpen(true); }}>Manage</Button>
+                  <IconButton aria-label={`Remove ${source.name} from scans`} variant="ghost" size="small" onClick={() => toggleSource(source.id)}><TrashIcon size={14} /></IconButton>
+                </div>
+              ))}
+              <button className="scanContextAdd" onClick={() => setSourcesDialogOpen(true)} type="button"><PlusIcon size={16} aria-hidden="true" /> Add connector</button>
             </div>
           </section>
         </div>
@@ -848,7 +854,7 @@ export function ScansPage() {
                   size="small"
                   variant="ghost"
                 >
-                  ×
+                  <XIcon size={16} />
                 </IconButton>
               </header>
               <div className="configurationDialog__body">
@@ -962,7 +968,7 @@ export function ScansPage() {
                   size="small"
                   variant="ghost"
                 >
-                  ×
+                  <XIcon size={16} />
                 </IconButton>
               </header>
               <div className="configurationDialog__body">
@@ -1025,7 +1031,7 @@ export function ScansPage() {
                             onClick={() => setIntegrationQuery("")}
                             type="button"
                           >
-                            ×
+                            <XIcon size={16} />
                           </button>
                         ) : null}
                       </label>
@@ -1104,11 +1110,12 @@ export function ScansPage() {
         <div className="scanSectionHeading">
           <div>
             <h2 id="recent-scans-title">Recent scans</h2>
-            <p>New issues are filed once. Existing issues stay linked to their first report.</p>
+
           </div>
         </div>
         <div className="scanHistoryTable">
           <DataTable<ScanRun>
+            variant="workspace"
             aria-label="Recent scans"
             columns={[
               {
@@ -1120,14 +1127,13 @@ export function ScansPage() {
                     to={scanDetailPath(scan.id)}
                   >
                     <time dateTime={scan.startedAt}>{scan.startedLabel}</time>
-                    {scan.status === "running" ? (
-                      <Badge tone="info">Running</Badge>
-                    ) : scan.status === "failed" ? (
-                      <Badge tone="danger">Failed</Badge>
-                    ) : null}
                   </Link>
                 ),
-                width: "38%",
+                width: "27%",
+              },
+              {
+                header: "Status", key: "status", width: "17%",
+                render: (scan) => <span className={`scanRunStatus scanRunStatus--${scan.status}`}><span aria-hidden="true" />{scan.status === "completed" ? "Completed" : scan.status === "running" ? "Running" : "Failed"}</span>,
               },
               {
                 header: "Findings",
@@ -1138,7 +1144,7 @@ export function ScansPage() {
                       ? "Checking…"
                       : scan.status === "failed"
                         ? "Scan failed"
-                      : `${scan.activeIssues} active · ${scan.filedIssues} new`}
+                      : `${scan.filedIssues} new · ${Math.max(0, scan.activeIssues - scan.filedIssues)} existing`}
                   </span>
                 ),
                 width: "25%",
@@ -1146,7 +1152,7 @@ export function ScansPage() {
               {
                 header: "Sources",
                 key: "sources",
-                render: (scan) => `${scan.sources} integrations`,
+                render: (scan) => `${scan.sources} ${scan.sources === 1 ? "source" : "sources"}`,
                 width: "17%",
               },
               {
@@ -1156,27 +1162,13 @@ export function ScansPage() {
                 render: (scan) => scan.duration,
                 width: "15%",
               },
-              {
-                align: "right",
-                header: "",
-                key: "open",
-                render: (scan) => (
-                  <Link
-                    aria-label={`Open scan from ${scan.startedLabel}`}
-                    className="issueTableArrow"
-                    to={scanDetailPath(scan.id)}
-                  >
-                    <ArrowIcon />
-                  </Link>
-                ),
-                width: "5%",
-              },
+
             ]}
             getRowKey={(scan) => scan.id}
             onRowClick={(scan) => navigate(scanDetailPath(scan.id))}
             rows={loading ? [] : runs}
           />
-          {loading ? <p className="contextIntegrationsEmpty">Loading scans…</p> : null}
+          {loading ? <p className="contextIntegrationsEmpty">Loading scans…</p> : runs.length === 0 ? <p className="contextIntegrationsEmpty">No scans yet. Configure your sources and run your first scan.</p> : null}
         </div>
       </section>
     </AppShell>

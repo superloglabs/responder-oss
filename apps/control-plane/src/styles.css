@@ -11,6 +11,193 @@
   --live: #b8e6a3;
 }
 
+/* Capability-gated automation workspace */
+.automationLoading {
+  margin: 80px 0;
+  color: var(--muted);
+}
+
+.automationEditorHeading,
+.automationDetailHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.automationEditorHeading h1,
+.automationDetailHeading h1 {
+  margin-top: 16px;
+}
+
+.automationEditor {
+  width: min(900px, 100%);
+  margin-top: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.automationFormCard {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.automationFormCard h2,
+.automationRuns h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 17px;
+  font-weight: 550;
+}
+
+.automationFormHint,
+.automationSectionHeading p {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.automationToggle {
+  min-height: 38px;
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.automationChecks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 18px;
+}
+
+.automationChecks > span {
+  width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.automationChecks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.automationChecks small {
+  color: var(--muted);
+}
+
+.automationCredentialForm {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.automationEditorActions,
+.automationDetailActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.automationTitleLine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.automationOverviewGrid {
+  margin-top: 34px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.automationOverviewGrid article {
+  min-width: 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+}
+
+.automationOverviewGrid article:last-child {
+  border-right: 0;
+}
+
+.automationOverviewGrid span,
+.automationOverviewGrid small,
+.automationRunDate {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.automationOverviewGrid strong {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.automationRuns {
+  margin-top: 40px;
+}
+
+.automationSectionHeading {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 760px) {
+  .automationEditorHeading,
+  .automationDetailHeading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .automationDetailActions {
+    justify-content: flex-start;
+  }
+
+  .automationOverviewGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .automationOverviewGrid article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .automationOverviewGrid article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .automationCredentialForm,
+  .inlineFields {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+}
+
 :root[data-color-theme="light"] {
   --background: var(--ds-canvas);
   --surface: var(--ds-surface-base);
@@ -2656,6 +2843,10 @@ button:disabled {
 .agentListTable {
   min-height: 0;
   flex: 1 1 auto;
+}
+
+.agentListTable .dsDataTable th {
+  border-bottom: 0;
 }
 
 .agentListTable .dsDataTable td {
@@ -11142,3 +11333,143 @@ body:has(.appShell--scans) {
 }
 .authHeading h1 { flex: 1; min-width: 0; }
 .authHeading .authSwitch { margin: 0; max-width: 150px; text-align: right; }
+
+/* Shared authentication styling for hosted and local application editions. */
+.authPage {
+  background: #fcfcfc;
+  color: #202020;
+  color-scheme: light;
+  --surface: #fff;
+  --foreground: #202020;
+  --secondary: #202020;
+  --muted: #646464;
+  --dim: #737373;
+  --border: #e8e8e8;
+  --border-strong: #d6d6d6;
+  --border-logo: #4e58f9;
+}
+.authPage .authThemeToggle {
+  display: none;
+}
+.authPage .authBrand {
+  margin: 0 auto 32px;
+}
+.authPage .authBrand img {
+  filter: invert(1);
+  height: 20px;
+}
+.authPage .authIntro {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.authPage .authIntro h1 {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 24px;
+  letter-spacing: -0.001em;
+}
+.authPage .authIntro p {
+  font-size: 14px;
+  line-height: 20px;
+}
+.authPage .socialAuth {
+  gap: 8px;
+}
+.authPage .socialAuth__button {
+  height: 32px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #202020;
+  background: #fff;
+  box-shadow: inset 0 0 0 .5px #ffffffcc,0 1px 2px -.5px #0000001f,0 0 0 .5px #00000029;
+}
+.authPage .authDivider {
+  height: 60px;
+  font-size: 13px;
+  text-transform: none;
+  color: #646464;
+}
+.authPage .authField {
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.authPage .authField input {
+  height: 32px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fcfcfc;
+  color: #202020;
+  font-size: 14px;
+}
+.authPage .authField input:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 2px;
+}
+.authPage .authSubmit {
+  min-height: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid #4e58f9;
+  border-bottom-width: 2px;
+  border-radius: 8px;
+  background: #3f4af8cc;
+  color: #fff;
+  font-size: 14px;
+}
+.authPage .authSwitch {
+  color: #202020;
+  font-size: 14px;
+}
+.authPage .authTerms {
+  margin: 24px 0 0;
+  text-align: center;
+  color: #737373;
+  font-size: 13px;
+  line-height: 20px;
+}
+.authPage .authTerms a {
+  color: #202020;
+  text-decoration: underline;
+  text-decoration-color: #cecece;
+  text-underline-offset: 3px;
+}
+.authPage button:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 3px;
+}
+.authPage .authPassword {
+  position: relative;
+  display: block;
+}
+.authPage .authPassword input {
+  padding-right: 42px;
+}
+.authPage .authPassword button {
+  position: absolute;
+  right: 4px;
+  top: 0;
+  height: 32px;
+  width: 32px;
+  padding: 7px;
+  background: transparent;
+  color: #646464;
+  cursor: pointer;
+}
+.authPage .authPassword svg {
+  width: 18px;
+  height: 18px;
+}
+
+.authPage .authIntro .authSwitch {
+  margin-top: 8px;
+}
+
+/* Use the account switch as the subtitle; invitations retain their guidance. */
+.authPage .authDescription { display: none; }
+.authPage .authHeading { flex-direction: column; gap: 8px; }
+.authPage .authHeading .authSwitch { max-width: none; margin: 0; text-align: center; }

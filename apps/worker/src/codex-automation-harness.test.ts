@@ -1,0 +1,171 @@
+import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { describe, expect, it, vi } from "vitest";
+import {
+  buildCodexAutomationCommand,
+  codexCliVersion,
+  prepareCodexAutomationHarness,
+  runCodexAutomation,
+} from "./codex-automation-harness.js";
+
+const input = {
+  contextServers: [{
+    name: "slack_61616161616141618161616161616161",
+    url: "https://responder.test/api/automation-context-broker/v1/61616161-6161-4161-8161-616161616161",
+  }],
+  model: {
+    brokerBaseUrl: "https://models.responder.test/v1",
+    model: "gpt-5.4",
+    provider: "openai",
+  },
+  prompt: "Fix the flaky test; don't print CUSTOMER_PROVIDER_KEY.",
+  workspacePath: "/home/daytona/workspace/repositories/responder",
+};
+
+describe("Codex automation harness", () => {
+  it("uses a pinned CLI package inside the sandbox", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+      ),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareCodexAutomationHarness(session)).resolves.toBeUndefined();
+
+    expect(session.execCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: expect.stringContaining(`@openai/codex@${codexCliVersion}`),
+        workdir: "/home/daytona/workspace",
+      }),
+    );
+    const command = vi.mocked(session.execCommand).mock.calls[0]?.[0].cmd;
+    expect(command).toContain("unset RESPONDER_MODEL_BROKER_TOKEN");
+    expect(command?.indexOf("unset RESPONDER_MODEL_BROKER_TOKEN")).toBeLessThan(
+      command?.indexOf("npm install") ?? -1,
+    );
+    expect(command).toContain("process.versions.node");
+  });
+
+  it("fails safely when the pinned CLI cannot be prepared", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: install\nProcess exited with code 1\nOutput:\nnpm failed with a private registry message\n",
+      ),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareCodexAutomationHarness(session)).rejects.toThrow(
+      "Unable to prepare the pinned Codex automation harness",
+    );
+  });
+
+  it("runs unattended and ephemeral against only the model broker", () => {
+    const command = buildCodexAutomationCommand(input);
+
+    expect(command).toContain("--ephemeral");
+    expect(command).toContain("--ignore-user-config");
+    expect(command).toContain("--ignore-rules");
+    expect(command).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(command).toContain('model_provider="responder"');
+    expect(command).toContain(
+      'model_providers.responder.base_url="https://models.responder.test/v1"',
+    );
+    expect(command).toContain(
+      'model_providers.responder.env_key="RESPONDER_MODEL_BROKER_TOKEN"',
+    );
+    expect(command).toContain("shell_environment_policy.inherit=\"core\"");
+    expect(command).toContain(
+      "shell_environment_policy.ignore_default_excludes=false",
+    );
+    expect(command).toContain(
+      'shell_environment_policy.filters={ RESPONDER_MODEL_BROKER_TOKEN = "exclude" }',
+    );
+    expect(command).toContain("mcp_servers.slack_61616161616141618161616161616161.url");
+    expect(command).toContain("bearer_token_env_var");
+    expect(command).not.toContain(input.prompt);
+    expect(command).not.toContain("CUSTOMER_PROVIDER_KEY");
+  });
+
+  it("materializes the prompt without putting it in the shell command", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(
+          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
+          "Chunk ID: run\nProcess exited with code 0\nOutput:\n{\"type\":\"turn.completed\"}\n",
+        ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).resolves.toEqual({
+      eventStream:
+        "Chunk ID: run\nProcess exited with code 0\nOutput:\n{\"type\":\"turn.completed\"}\n",
+    });
+    expect(session.materializeEntry).toHaveBeenCalledWith({
+      entry: { type: "file", content: input.prompt },
+      path: "/home/daytona/workspace/.responder/automation-prompt.txt",
+    });
+    const command = vi.mocked(session.execCommand).mock.calls[2]?.[0].cmd;
+    expect(command).not.toContain(input.prompt);
+    expect(command).toContain("trap");
+  });
+
+  it("rejects a workspace redirected through a symlink before writing the prompt", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 1\nOutput:\n",
+        ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      "Automation workspace cannot use symlink redirects",
+    );
+    expect(session.materializeEntry).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing workspace separately from a symlink redirect", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 42\nOutput:\n",
+        ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      "Automation workspace does not exist",
+    );
+    expect(session.materializeEntry).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic error instead of command output", async () => {
+    const secretShapedOutput = "sk-customer-must-not-escape";
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(
+          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValueOnce(
+          "Chunk ID: workspace\nProcess exited with code 0\nOutput:\n",
+        )
+        .mockResolvedValue(
+          `Chunk ID: run\nProcess exited with code 1\nOutput:\n${secretShapedOutput}\n`,
+        ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    const run = runCodexAutomation(session, input);
+    await expect(run).rejects.toThrow(
+      "Codex automation harness failed",
+    );
+    await expect(run).rejects.not.toThrow(secretShapedOutput);
+  });
+});

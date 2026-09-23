@@ -1,0 +1,76 @@
+/* Shared table and section rhythm for scans and suggestions. */
+.appShell--workspace .scansSettings { gap: 32px; }
+.appShell--workspace .scanControls { display: flex; align-items: flex-start; gap: 24px; width: 100%; }
+.appShell--workspace .scanControls > .dsField { width: 300px; max-width: 100%; gap: 10px; }
+.appShell--workspace .scanControls .dsField__label { font-size: 13px; line-height: 16px; }
+.appShell--workspace .scanControls .dsSelect__trigger,
+.appShell--workspace .suggestionSourceFilter .dsSelect__trigger { height: 26px; min-height: 26px; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 1px 3px #00000008; background: #fff; color: #202020; font-size: 13px; line-height: 18px; }
+.appShell--workspace .scanSources,
+.appShell--workspace .recentScans { gap: 12px; }
+.appShell--workspace .scanSources h2,
+.appShell--workspace .scanSectionHeading h2 { margin: 0; color: #434343; font-size: 13px; font-weight: 500; line-height: 16px; }
+.appShell--workspace .scanSectionHeading { padding: 0; min-height: 0; }
+.scanContextList { display: flex; flex-direction: column; padding: 0 12px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
+.scanContextRow, .scanContextAdd { display: flex; align-items: center; gap: 10px; min-height: 48px; color: #202020; font-size: 13px; line-height: 18px; }
+.scanContextRow > span:not(.providerMark) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.scanContextRow > svg, .scanContextAdd > svg { flex-shrink: 0; color: #666; }
+.appShell--workspace .scanContextRow .providerMark { width: 16px; height: 16px; border: 0; background: transparent; }
+.scanContextRow + .scanContextRow, .scanContextRow + .scanContextAdd { border-top: 1px solid #f0f0f0; }
+.scanContextAdd { width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; color: #444; }
+.scanContextAdd:hover { color: #121212; background: #fafafa; }
+.scanRunStatus { display: inline-flex; align-items: center; gap: 6px; color: #38643b; white-space: nowrap; }
+.scanRunStatus > span { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: #588451; }
+.scanRunStatus--running { color: #806600; }
+.scanRunStatus--running > span { background: #e3bb2b; }
+.scanRunStatus--failed { color: #b52e35; }
+.scanRunStatus--failed > span { background: #dc4545; }
+.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) .dsDataTable--workspace td { color: #666; }
+.appShell--workspace .scanTableTitle, .appShell--workspace .scanTableFindings { font-size: 13px; line-height: 20px; color: #434343; }
+.suggestionsToolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.suggestionStatusFilters { display: flex; align-items: center; gap: 12px; }
+.suggestionStatusFilters button { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #777; font-size: 13px; line-height: 18px; cursor: pointer; }
+.suggestionStatusFilters button[aria-pressed="true"] { border-color: #ddd; background: #f5f5f5; color: #202020; }
+.suggestionStatusFilters button span { color: #777; }
+.suggestionSourceFilter { min-width: 140px; }
+.suggestionSourceFilter > .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.appShell--workspace .suggestionTableTitle strong { color: #1a1a1a; font-weight: 400; font-size: 13px; line-height: 20px; }
+.appShell--workspace .suggestionsAutoOpen.dsSwitch { width: fit-content; max-width: 100%; min-height: 0; padding: 0; border: 0; background: transparent; }
+.appShell--workspace .suggestionDetail { display: flex; flex-direction: column; gap: 32px; width: 100%; padding: 0; }
+.appShell--workspace .suggestionDetail .workspaceBreadcrumb { margin-bottom: -20px; min-width: 0; }
+.appShell--workspace .suggestionDetail .workspaceBreadcrumb > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appShell--workspace .suggestionDetail__header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.appShell--workspace .suggestionDetail__header h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 23px; letter-spacing: normal; color: #121212; text-wrap: initial; }
+.appShell--workspace .suggestionDetail__header > .dsButton { flex-shrink: 0; }
+.suggestionOverview { display: flex; flex-direction: column; gap: 16px; }
+.suggestionOverview > p { margin: 0; color: #444; font-size: 13px; line-height: 23px; }
+.appShell--workspace .suggestionMarkdown { color: #444; font-size: 13px; line-height: 23px; }
+.appShell--workspace .suggestionMarkdown h2 { color: #444; font-size: 15px; line-height: 23px; font-weight: 500; }
+.suggestionProposedChange, .suggestionRelatedIssues { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.suggestionProposedChange > h2, .suggestionRelatedIssues > h2 { margin: 0; color: #444; font-size: 15px; line-height: 23px; font-weight: 500; }
+.appShell--workspace .suggestionDetail__action { width: auto; flex-shrink: 0; }
+.appShell--workspace .suggestionDetail__action .dsButton { width: auto; }
+.suggestionRelatedIssue { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 10px; border-radius: 6px; color: #666; }
+.suggestionRelatedIssue:hover { background: #f5f5f5; }
+.suggestionRelatedIssue > strong { flex: 1; min-width: 0; color: #121212; font-size: 13px; font-weight: 500; line-height: 20px; }
+.suggestionRelatedIssue > svg, .suggestionRelatedIssue > time { flex-shrink: 0; }
+.appShell--workspace .scanSourcesDialog { background: #fff; color: #444; border: 1px solid #e3e3e3; border-radius: 12px; box-shadow: 0 12px 48px #00000024; }
+.appShell--workspace .scanSourcesDialog :is(.configurationDialog__header, .configurationDialog__footer, .contextPanel, .contextList, .contextIntegrationCatalog, .contextIntegrationCard) { background: #fff; border-color: #e8e8e8; }
+.appShell--workspace .scanSourcesDialog .configurationDialog__copy strong { color: #202020; }
+.appShell--workspace .scanSourcesDialog .configurationDialog__copy small { color: #666; }
+@media (max-width: 700px) {
+  .appShell--workspace .scanControls { flex-direction: column; }
+  .appShell--workspace .scanControls > .dsField { width: 100%; }
+  .suggestionsToolbar { flex-wrap: wrap; }
+  .suggestionStatusFilters { gap: 4px; flex-wrap: wrap; }
+  .appShell--workspace .suggestionDetail__header { gap: 12px; }
+  .suggestionRelatedIssue { flex-wrap: wrap; }
+}
+.appShell--workspace .scanDetail { display: flex; flex-direction: column; gap: 24px; }
+.appShell--workspace .scanDetailHeading { margin: 0; padding: 0; }
+.appShell--workspace .scanDetailHeading h1 { font-size: 15px; font-weight: 600; line-height: 23px; }
+.appShell--workspace .scanDetailHeading p { font-size: 13px; line-height: 23px; }
+.appShell--workspace .scanDetailStats { display: flex; flex-wrap: wrap; gap: 32px; padding: 0; border: 0; }
+.appShell--workspace .scanDetailStats > div { flex: 1; }
+
+.suggestionStatusFilters button:hover { background: #eee; color: #202020; }
+.suggestionStatusFilters button:focus-visible { outline: 2px solid #777; outline-offset: 2px; }

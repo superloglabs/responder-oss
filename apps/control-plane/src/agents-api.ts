@@ -53,6 +53,7 @@ export interface AgentConfiguration {
   contextAccountIds: string[];
   contextResourceIds: string[];
   secretIds: string[];
+  initialTriageEnabled: boolean;
   createLinearTickets: boolean;
   linearIssueTemplate: string;
   trigger: AgentTrigger;
@@ -347,6 +348,9 @@ export type SuggestionCodeChange = Extract<
 >;
 
 export interface SuggestionListItem {
+  relatedIssues?: Array<{ id: string; title: string; createdAt: string }>;
+  status?: "open" | "applied" | "dismissed";
+  source?: string;
   codeChange: SuggestionCodeChange | null;
   createdAt: string;
   detail: string;
@@ -356,6 +360,8 @@ export interface SuggestionListItem {
 }
 
 export interface SuggestionSummary {
+  status?: "open" | "applied" | "dismissed";
+  source?: string;
   codeChangeAvailable: boolean;
   createdAt: string;
   id: string;
@@ -543,13 +549,25 @@ export async function fetchIssue(issueId: string): Promise<IssueDetailResponse> 
   );
 }
 
-export async function fetchSuggestions(cursor?: string): Promise<{
+export async function fetchSuggestions(cursor?: string, filters?: { status?: string; source?: string }): Promise<{
+  filters: Array<{ status: "open" | "applied" | "dismissed"; source: string; count: number }>;
   suggestions: SuggestionSummary[];
   nextCursor: string | null;
   settings: SuggestionSettings;
 }> {
-  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-  return apiJson(`/api/suggestions${query}`);
+  const query = new URLSearchParams();
+  if (cursor) query.set("cursor", cursor);
+  if (filters?.status) query.set("status", filters.status);
+  if (filters?.source) query.set("source", filters.source);
+  return apiJson(`/api/suggestions?${query}`);
+}
+
+export async function setSuggestionDismissed(suggestionId: string, dismissed: boolean): Promise<void> {
+  await apiJson(`/api/suggestions/${encodeURIComponent(suggestionId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dismissed }),
+  });
 }
 
 export async function fetchSuggestion(
@@ -744,4 +762,12 @@ export function relativeTime(value: string): string {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
+}
+
+export async function refreshSentryAgentOptions(accountId: string): Promise<AgentOptions> {
+  const result = await apiJson<{ accounts: Array<{ id: string; status: string }> }>("/api/integrations/sentry/check", { method: "POST" });
+  const account = result.accounts.find((candidate) => candidate.id === accountId);
+  if (account?.status === "needs_reconnect") throw new Error("Reconnect Sentry to restore project access.");
+  if (account?.status !== "working") throw new Error("Couldn’t load projects. Try again or check access.");
+  return fetchAgentOptions();
 }

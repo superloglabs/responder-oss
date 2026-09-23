@@ -9,6 +9,7 @@ export function integrationCallbackUrl(
     | "custom_mcp"
     | "dash0"
     | "datadog"
+    | "discord"
     | "github"
     | "linear"
     | "posthog"

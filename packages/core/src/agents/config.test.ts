@@ -51,8 +51,29 @@ describe("agent configuration", () => {
     expect(parsed.data?.contextAccountIds).toEqual([]);
     expect(parsed.data?.contextResourceIds).toEqual([]);
     expect(parsed.data?.secretIds).toEqual([]);
+    expect(parsed.data?.initialTriageEnabled).toBe(false);
     expect(parsed.data?.createLinearTickets).toBe(false);
     expect(parsed.data?.linearIssueTemplate).toContain("{{issue_id}}");
+  });
+
+  it("allows initial Jev triage only for Slack channel alerts", () => {
+    const slackChannel = agentConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      initialTriageEnabled: true,
+      trigger: {
+        kind: "slack_channel",
+        integrationAccountId: "02020202-0202-4202-8202-020202020202",
+        channelId: "alerts",
+      },
+    });
+    const mention = agentConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      initialTriageEnabled: true,
+    });
+
+    expect(slackChannel.success).toBe(true);
+    expect(mention.success).toBe(false);
+    expect(mention.error?.issues[0]?.path).toEqual(["initialTriageEnabled"]);
   });
 
   it("allows custom prompts up to 400,000 characters", () => {

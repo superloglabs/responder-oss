@@ -1,0 +1,141 @@
+import path from "node:path";
+import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+
+export const automationWorkspaceRoot = "/home/daytona/workspace";
+export const modelBrokerTokenEnvironmentVariable =
+  "RESPONDER_MODEL_BROKER_TOKEN";
+
+export type AutomationHarnessKind =
+  | "claude_agent_sdk"
+  | "codex"
+  | "opencode";
+
+export interface AutomationModelRoute {
+  brokerBaseUrl: string;
+  model: string;
+  provider: string;
+}
+
+export interface AutomationHarnessInput {
+  contextServers: AutomationContextServer[];
+  model: AutomationModelRoute;
+  prompt: string;
+  workspacePath: string;
+}
+
+export interface AutomationContextServer {
+  name: string;
+  url: string;
+}
+
+export interface AutomationHarnessResult {
+  eventStream: string;
+}
+
+export interface AutomationHarness {
+  readonly kind: AutomationHarnessKind;
+  run(
+    session: DaytonaSandboxSession,
+    input: AutomationHarnessInput,
+  ): Promise<AutomationHarnessResult>;
+}
+
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint < 32 || codePoint === 127);
+  });
+}
+
+export function assertAutomationHarnessModelCompatibility(
+  harness: AutomationHarnessKind,
+  route: AutomationModelRoute,
+): void {
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(route.provider)) {
+    throw new Error("Model provider must be a normalized provider identifier");
+  }
+  if (
+    route.model.length === 0 ||
+    route.model.length > 255 ||
+    containsControlCharacter(route.model)
+  ) {
+    throw new Error("Model must be a non-empty identifier without control characters");
+  }
+  if (harness === "claude_agent_sdk" && route.provider !== "anthropic") {
+    throw new Error("Claude Agent SDK automations require an Anthropic model");
+  }
+  validateBrokerBaseUrl(route.brokerBaseUrl);
+}
+
+export function resolveAutomationWorkspacePath(workspacePath: string): string {
+  if (!path.posix.isAbsolute(workspacePath)) {
+    throw new Error("Automation workspace path must be absolute");
+  }
+  const resolved = path.posix.resolve(workspacePath);
+  if (
+    resolved !== automationWorkspaceRoot &&
+    !resolved.startsWith(`${automationWorkspaceRoot}/`)
+  ) {
+    throw new Error("Automation workspace must be inside the sandbox workspace");
+  }
+  return resolved;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+export async function assertAutomationWorkspaceHasNoSymlinkRedirects(
+  session: DaytonaSandboxSession,
+  workspacePath: string,
+): Promise<void> {
+  const resolvedWorkspacePath = resolveAutomationWorkspacePath(workspacePath);
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `unset ${modelBrokerTokenEnvironmentVariable}`,
+      `if [ ! -d ${shellQuote(resolvedWorkspacePath)} ]; then exit 42; fi`,
+      `resolved=$(realpath -e -- ${shellQuote(resolvedWorkspacePath)})`,
+      `[ "$resolved" = ${shellQuote(resolvedWorkspacePath)} ]`,
+    ].join("\n"),
+    maxOutputTokens: 100,
+    workdir: automationWorkspaceRoot,
+  });
+  if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
+    if (/(?:^|\n)Process exited with code 42(?:\n|$)/u.test(output)) {
+      throw new Error("Automation workspace does not exist");
+    }
+    throw new Error("Automation workspace cannot use symlink redirects");
+  }
+}
+
+export function validateBrokerBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Model broker base URL must be a valid URL");
+  }
+  if (url.protocol !== "https:") {
+    throw new Error("Model broker base URL must use HTTPS");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error(
+      "Model broker base URL cannot contain credentials, query parameters, or a fragment",
+    );
+  }
+  return url.toString().replace(/\/$/u, "");
+}
+
+export function validateAutomationContextServers(
+  servers: AutomationContextServer[],
+): AutomationContextServer[] {
+  const names = new Set<string>();
+  return servers.map((server) => {
+    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(server.name) || names.has(server.name)) {
+      throw new Error("Automation context server names must be unique identifiers");
+    }
+    names.add(server.name);
+    return { name: server.name, url: validateBrokerBaseUrl(server.url) };
+  });
+}

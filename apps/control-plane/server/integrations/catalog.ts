@@ -15,6 +15,7 @@ export const productIntegrationIds = [
   "custom_mcp",
   "clickstack",
   "linear",
+  "discord",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -64,6 +65,18 @@ export const integrationCatalog: IntegrationDefinition[] = [
       "SLACK_CLIENT_ID",
       "SLACK_CLIENT_SECRET",
       "SLACK_SIGNING_SECRET",
+    ],
+  },
+  {
+    id: "discord",
+    name: "Discord",
+    description: "Channel slash-command triggers for unattended automations.",
+    implemented: true,
+    requiredEnvironment: [
+      "DISCORD_APPLICATION_ID",
+      "DISCORD_BOT_TOKEN",
+      "DISCORD_CLIENT_SECRET",
+      "DISCORD_PUBLIC_KEY",
     ],
   },
   {

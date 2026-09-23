@@ -62,6 +62,25 @@ CloudWatch link when present, and ignores `OK` and `INSUFFICIENT_DATA`
 notifications. Add the matching AWS account as Agent context so the worker can
 inspect the exact alarm, metric history, affected resource, and related logs.
 
+## Discord
+
+Create a Discord application with a bot and enable **Requires OAuth2 Code Grant**.
+Configure:
+
+- OAuth redirect: `<public>/api/integrations/discord/callback`
+- Interactions endpoint: `<public>/api/webhooks/discord`
+- Installation scopes: `identify`, `applications.commands`, and `bot`
+- Bot permission: View Channels
+- Environment: `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN`,
+  `DISCORD_CLIENT_SECRET`, and `DISCORD_PUBLIC_KEY`
+
+Connecting Discord installs the application into one server, synchronizes its
+text and announcement channels, and registers a guild-scoped `/automate`
+command. Automations can watch selected channels. Invoking `/automate` starts
+every matching enabled automation, with the optional `context` argument added
+to the trigger payload. Interaction signatures are verified before the guild
+and channel are matched, and retries are deduplicated by interaction ID.
+
 ## Sentry
 
 Create a public Sentry integration with:

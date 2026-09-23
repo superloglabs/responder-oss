@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { fetchScan } from "../scans-api";
 import { AppShell } from "../components/app-shell";
-import { ArrowIcon } from "../components/icons";
+import { ArrowRightIcon as ArrowIcon } from "@phosphor-icons/react";
+import "./scan-suggestions.css";
 import { DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import {
@@ -69,7 +70,7 @@ export function ScanDetailPage() {
   const existingIssues = scan ? scan.activeIssues - scan.filedIssues : 0;
 
   return (
-    <AppShell active="scans" density="scans">
+    <AppShell active="scans" density="scans" redesigned>
       <div className="scanDetail">
         <Link className="scanDetailBack" to={scansPath}>
           <ArrowIcon />

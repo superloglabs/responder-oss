@@ -84,6 +84,7 @@ export const agentConfigurationSchema = z
     contextAccountIds: z.array(z.uuid()).max(20).default([]),
     contextResourceIds: z.array(z.uuid()).max(100).default([]),
     secretIds: z.array(z.uuid()).max(20).default([]),
+    initialTriageEnabled: z.boolean().default(false),
     createLinearTickets: z.boolean().default(false),
     linearIssueTemplate: z
       .string()
@@ -93,6 +94,16 @@ export const agentConfigurationSchema = z
     reporting: agentReportingSchema,
   })
   .superRefine((configuration, context) => {
+    if (
+      configuration.initialTriageEnabled &&
+      configuration.trigger.kind !== "slack_channel"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Initial triage requires a Slack channel trigger",
+        path: ["initialTriageEnabled"],
+      });
+    }
     if (
       configuration.createLinearTickets &&
       !configuration.linearIssueTemplate.trim()

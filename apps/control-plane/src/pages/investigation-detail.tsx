@@ -345,14 +345,14 @@ export function InvestigationDetailPage() {
   }
   if (loading) {
     return (
-      <AppShell active="agents" density="investigation">
+      <AppShell redesigned active="agents" density="investigation">
         <InvestigationDetailSkeleton />
       </AppShell>
     );
   }
   if (!detail) {
     return (
-      <AppShell active="agents" density="investigation">
+      <AppShell redesigned active="agents" density="investigation">
         <section className="emptyState investigationPageState">
           <h1>Unable to load investigation</h1>
           <p>{error ?? "Try again in a moment."}</p>
@@ -386,7 +386,7 @@ export function InvestigationDetailPage() {
   }
 
   return (
-    <AppShell active="agents" density="investigation">
+    <AppShell redesigned active="agents" density="investigation">
       <div
         className={`investigationPage ${
           isLive ? "investigationPage--live" : "investigationPage--complete"

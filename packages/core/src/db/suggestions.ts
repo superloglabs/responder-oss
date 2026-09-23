@@ -3,6 +3,9 @@ import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import type { SuggestionSubmission } from "../suggestions/model.js";
 import { getDatabase } from "./client.js";
 import {
+  investigations,
+  investigationIssues,
+  issues,
   suggestionPullRequests,
   suggestionSettings,
   suggestions,
@@ -211,17 +214,51 @@ export async function createSuggestionIfMissing(input: {
   });
 }
 
+export type SuggestionStatus = "open" | "applied" | "dismissed";
+
+const suggestionStatus = sql<SuggestionStatus>`case
+  when ${suggestions.dismissedAt} is not null then 'dismissed'
+  when exists (select 1 from ${suggestionPullRequests} pr where pr.suggestion_id = ${suggestions.id} and pr.status = 'merged')
+    and not exists (select 1 from ${suggestionPullRequests} pr where pr.suggestion_id = ${suggestions.id} and pr.status <> 'merged')
+    then 'applied'
+  else 'open' end`;
+const suggestionSource = sql<string>`coalesce(${investigations.input}->>'provider', 'unknown')`;
+
+export async function setSuggestionDismissed(organizationId: string, suggestionId: string, dismissed: boolean): Promise<{ id: string } | null> {
+  const rows = await getDatabase().update(suggestions)
+    .set({ dismissedAt: dismissed ? new Date() : null, updatedAt: new Date() })
+    .where(and(eq(suggestions.organizationId, organizationId), eq(suggestions.id, suggestionId)))
+    .returning({ id: suggestions.id });
+  return rows[0] ?? null;
+}
+
+export async function getSuggestionFilters(organizationId: string) {
+  const rows = await getDatabase().select({
+    status: suggestionStatus,
+    source: suggestionSource,
+    count: sql<number>`count(*)::int`,
+  }).from(suggestions)
+    .innerJoin(investigations, and(eq(investigations.id, suggestions.investigationId), eq(investigations.organizationId, organizationId)))
+    .where(eq(suggestions.organizationId, organizationId))
+    .groupBy(suggestionStatus, suggestionSource);
+  return rows;
+}
+
 export async function listSuggestions(
   organizationId: string,
   options: {
     cursor?: { createdAt: string; id: string };
     limit?: number;
+    status?: SuggestionStatus;
+    source?: string;
   } = {},
 ) {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
   const rows = await getDatabase()
     .select({
       id: suggestions.id,
+      status: suggestionStatus,
+      source: suggestionSource,
       title: suggestions.title,
       subtitle: suggestions.subtitle,
       codeChangeAvailable: sql<boolean>`${suggestions.codeChange} is not null`,
@@ -229,9 +266,12 @@ export async function listSuggestions(
       cursorCreatedAt: sql<string>`to_char(${suggestions.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     })
     .from(suggestions)
+    .innerJoin(investigations, and(eq(investigations.id, suggestions.investigationId), eq(investigations.organizationId, organizationId)))
     .where(
       and(
         eq(suggestions.organizationId, organizationId),
+        ...(options.status ? [sql`${suggestionStatus} = ${options.status}`] : []),
+        ...(options.source ? [sql`${suggestionSource} = ${options.source}`] : []),
         ...(options.cursor
           ? [sql`(${suggestions.createdAt}, ${suggestions.id}) < (${options.cursor.createdAt}::timestamptz, ${options.cursor.id})`]
           : []),
@@ -242,6 +282,8 @@ export async function listSuggestions(
   const pageRows = rows.slice(0, limit);
   const page = pageRows.map((row) => ({
     id: row.id,
+    status: row.status,
+    source: row.source,
     title: row.title,
     subtitle: row.subtitle,
     codeChangeAvailable: row.codeChangeAvailable,
@@ -263,13 +305,17 @@ export async function getSuggestionDetail(
   const rows = await getDatabase()
     .select({
       id: suggestions.id,
+      status: suggestionStatus,
+      source: suggestionSource,
       title: suggestions.title,
       subtitle: suggestions.subtitle,
       detail: suggestions.detail,
+      investigationId: suggestions.investigationId,
       codeChange: suggestions.codeChange,
       createdAt: suggestions.createdAt,
     })
     .from(suggestions)
+    .innerJoin(investigations, and(eq(investigations.id, suggestions.investigationId), eq(investigations.organizationId, organizationId)))
     .where(
       and(
         eq(suggestions.organizationId, organizationId),
@@ -294,7 +340,11 @@ export async function getSuggestionDetail(
     .from(suggestionPullRequests)
     .where(eq(suggestionPullRequests.suggestionId, suggestionId))
     .orderBy(desc(suggestionPullRequests.createdAt));
-  return { suggestion: rows[0], pullRequestState: { requests: pullRequests } };
+  const relatedIssues = await getDatabase().select({ id: issues.id, title: issues.title, createdAt: issues.createdAt })
+    .from(investigationIssues)
+    .innerJoin(issues, eq(issues.id, investigationIssues.issueId))
+    .where(and(eq(investigationIssues.investigationId, rows[0].investigationId), eq(issues.organizationId, organizationId)));
+  return { suggestion: { ...rows[0], relatedIssues }, pullRequestState: { requests: pullRequests } };
 }
 
 export async function getSuggestionSettings(organizationId: string) {

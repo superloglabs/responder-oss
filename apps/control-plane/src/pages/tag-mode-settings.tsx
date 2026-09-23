@@ -24,14 +24,14 @@ import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
-import { RepositoryIcon, SearchIcon } from "../components/icons";
+import { BookBookmarkIcon as RepositoryIcon, MagnifyingGlassIcon as SearchIcon, XIcon } from "@phosphor-icons/react";
 import {
   contextCategoryDescriptions,
   contextCategoryOrder,
   contextProviderMetadata,
   providerDisplayName,
 } from "../components/provider-glyphs";
-import { SettingsTabs } from "../components/settings-tabs";
+import { SettingsHeading } from "../components/settings-heading";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { Button, Checkbox, IconButton, TextAreaField } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -389,7 +389,7 @@ export function TagModeSettingsPage() {
   }
 
   return (
-    <AppShell active="settings" density="settings">
+    <AppShell active="settings" density="settings" redesigned>
       <DatadogConnectionDialog
         connectUrl={integrations.find((item) => item.id === "datadog")?.connectUrl ?? ""}
         onCancel={() => setChoosingDatadogSite(false)}
@@ -439,11 +439,7 @@ export function TagModeSettingsPage() {
         open={connectingGcp}
         returnTo="/settings/tag-mode"
       />
-      <section className="settingsHeading">
-        <h1>Settings</h1>
-        <p>Manage your workspace, members, and connected services.</p>
-      </section>
-      <SettingsTabs active="tag-mode" />
+      <SettingsHeading active="tag-mode" />
 
       <form className="tagModeSettings" onSubmit={submit}>
         {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
@@ -550,6 +546,8 @@ export function TagModeSettingsPage() {
             ) : null}
           </div>
 
+        </section>
+
           <section
             aria-labelledby="tag-mode-add-integration-title"
             className="contextIntegrationCatalog"
@@ -574,7 +572,7 @@ export function TagModeSettingsPage() {
                     onClick={() => setIntegrationQuery("")}
                     type="button"
                   >
-                    ×
+                    <XIcon size={16} />
                   </button>
                 ) : null}
               </label>
@@ -636,7 +634,6 @@ export function TagModeSettingsPage() {
               </div>
             )}
           </section>
-        </section>
 
         <section className="workspaceSecretsPanel">
           <div className="contextToolbar">
@@ -681,6 +678,8 @@ export function TagModeSettingsPage() {
             <div className="workspaceSecretsEmpty">No secrets added to Tag mode.</div>
           )}
 
+        </section>
+
           <section className="tagModeSettings__prompt">
             <div className="tagModeSettings__sectionHeading">
               <h2>Prompt</h2>
@@ -695,10 +694,9 @@ export function TagModeSettingsPage() {
               value={configuration.instructions}
             />
           </section>
-        </section>
 
         <div className="tagModeSettings__actions">
-          <Button disabled={saving || !options} type="submit" variant="secondary">
+          <Button disabled={saving || !options} type="submit" variant="primary">
             {saving ? "Saving…" : "Save tag mode"}
           </Button>
         </div>
@@ -729,7 +727,7 @@ export function TagModeSettingsPage() {
                   type="button"
                   variant="ghost"
                 >
-                  ×
+                  <XIcon size={16} />
                 </IconButton>
               </header>
               <div className="configurationDialog__body">
@@ -803,7 +801,7 @@ export function TagModeSettingsPage() {
                   type="button"
                   variant="ghost"
                 >
-                  ×
+                  <XIcon size={16} />
                 </IconButton>
               </header>
               <div className="configurationDialog__body">
@@ -866,7 +864,7 @@ export function TagModeSettingsPage() {
                   type="button"
                   variant="ghost"
                 >
-                  ×
+                  <XIcon size={16} />
                 </IconButton>
               </header>
               <div className="configurationDialog__body">
@@ -930,7 +928,7 @@ export function TagModeSettingsPage() {
                   type="button"
                   variant="ghost"
                 >
-                  ×
+                  <XIcon size={16} />
                 </IconButton>
               </header>
               <div className="configurationDialog__body">

@@ -87,6 +87,9 @@ importers:
       '@hono/node-server':
         specifier: 2.0.12
         version: 2.0.12(hono@4.12.34)
+      '@phosphor-icons/react':
+        specifier: ^2.1.10
+        version: 2.1.10(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@pierre/diffs':
         specifier: 1.2.5
         version: 1.2.5(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -180,7 +183,7 @@ importers:
         version: 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@openai/agents-extensions':
         specifier: 0.14.2
-        version: 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@daytona/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
+        version: 0.14.2(@ai-sdk/provider@4.0.17)(@aws-sdk/credential-provider-node@3.972.80)(@daytona/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.7.2)(ai@7.0.107(zod@4.4.3))(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
@@ -202,6 +205,9 @@ importers:
       '@upstash/mcp-server':
         specifier: 0.2.7
         version: 0.2.7(supports-color@8.1.1)
+      ai:
+        specifier: 7.0.107
+        version: 7.0.107(zod@4.4.3)
       openai:
         specifier: 6.49.0
         version: 6.49.0(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(ws@8.21.3)(zod@4.4.3)
@@ -255,6 +261,22 @@ importers:
         version: 4.4.3
 
 packages:
+
+  '@ai-sdk/gateway@4.0.87':
+    resolution: {integrity: sha512-6wJmX/D5OO7tvDJbtFdXdBuRt8AkCnW+FLK+W35UHe/tHgolAa4hclXtJcMSYnlTDy/t5DNRgdesVaoMXtwzow==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.45':
+    resolution: {integrity: sha512-gLuaCups8OCIRz3eO6WWz5op7VLYNNtFzyH0sWUr0FE9v7cTxR0qxDpQdrKnGcql+9WWttobjnZsJVsuEbsPQQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@4.0.17':
+    resolution: {integrity: sha512-VYMBxIQdcHqbIf1j+YZlI9Ati6LZ4wJe0GGd4z4a5H/KxTggjeOiyaVYTnfF7LHZK5jMQ+rofmzz4QPqf++NUw==}
+    engines: {node: '>=22'}
 
   '@apm-js-collab/code-transformer-bundler-plugins@0.7.4':
     resolution: {integrity: sha512-nAfOeZPSUAQvJa1iFT/5oCrTm5YQhMMrfCNthNnaXHZiOQhu1KGuLoIx7HtbAi3wfwaBYLaICPIeenIaEwcXIg==}
@@ -1108,6 +1130,13 @@ packages:
   '@oxc-project/types@0.144.0':
     resolution: {integrity: sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==}
 
+  '@phosphor-icons/react@2.1.10':
+    resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      react: '>= 16.8'
+      react-dom: '>= 16.8'
+
   '@pierre/diffs@1.2.5':
     resolution: {integrity: sha512-uYOz3Kfs5ED0qY0VraUXzylsEKvZPTVdexboM3QKPx/qBZmTT9F3lKAFuPpY5aIrV04sdHtoFCKStyzEu99U2A==}
     peerDependencies:
@@ -1736,6 +1765,10 @@ packages:
     resolution: {integrity: sha512-z0R5JgmRsX38eSBtbbmgXoaGhfg4U4gYl6MCk+h2OqkJKTt24LoFPDsbOP1H0WUWDn53l9UXRgTAHt5M51P9Tw==}
     hasBin: true
 
+  '@vercel/oidc@3.2.0':
+    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
+    engines: {node: '>= 20'}
+
   '@vitejs/plugin-react@6.0.4':
     resolution: {integrity: sha512-XcCQz0TBpBgljhj0gMuuDj49i6Ytqh5q1osT/Gp5uAVJUCTWxyskk/l1jwYYiu2xcNHHipdMz40EGfM1VdamVg==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1778,6 +1811,9 @@ packages:
   '@vitest/utils@4.1.9':
     resolution: {integrity: sha512-A51o8ymO5PpqlWNnBP9ZHPXDIpuMtTLlGSjN7la4US+LJzoUMyhwjA5QXlm39JexgwHKW4Xjs8Z2d3dLCXOeuA==}
 
+  '@workflow/serde@4.1.0':
+    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
+
   '@xyflow/react@12.11.3':
     resolution: {integrity: sha512-G3jogHz2GWUtIOkhavUGno2YzY9u6fILIJBttfsBendb0/HWB90JG+sOTAvlIMEwyvq9zgy9V9ZQSwyQjR5QzQ==}
     peerDependencies:
@@ -1815,6 +1851,12 @@ packages:
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
+
+  ai@7.0.107:
+    resolution: {integrity: sha512-PVYQ3W9kR8oYiGQxbg4aFIlhQzKskZm8UV+4E0zB2uKOzFr8ju3bXQncOOZtLsOgJY8vdpgyu3cXtomsfcdQYg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   ajv-formats@3.0.1:
     resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
@@ -2846,6 +2888,9 @@ packages:
   json-schema-typed@8.0.2:
     resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
 
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
+
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
 
@@ -3854,6 +3899,10 @@ packages:
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
+  undici@7.29.0:
+    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
+    engines: {node: '>=20.18.1'}
+
   undici@8.10.0:
     resolution: {integrity: sha512-HvltHd7avK13QIw/oLe4qoOLyoVSoafqJ2jYOrtMRBkbYT31eiBQ8O0ehRKZiEZCMEyLFQNIADpgCWC5fALvYQ==}
     engines: {node: '>=22.19.0'}
@@ -4116,6 +4165,26 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@ai-sdk/gateway@4.0.87(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.17
+      '@ai-sdk/provider-utils': 5.0.45(zod@4.4.3)
+      '@vercel/oidc': 3.2.0
+      zod: 4.4.3
+
+  '@ai-sdk/provider-utils@5.0.45(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.17
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.1
+      undici: 7.29.0
+      zod: 4.4.3
+
+  '@ai-sdk/provider@4.0.17':
+    dependencies:
+      json-schema: 0.4.0
 
   '@apm-js-collab/code-transformer-bundler-plugins@0.7.4':
     dependencies:
@@ -4889,7 +4958,7 @@ snapshots:
       - supports-color
       - ws
 
-  '@openai/agents-extensions@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@daytona/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
+  '@openai/agents-extensions@0.14.2(@ai-sdk/provider@4.0.17)(@aws-sdk/credential-provider-node@3.972.80)(@daytona/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))(@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3))(@smithy/signature-v4@5.7.2)(ai@7.0.107(zod@4.4.3))(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@openai/agents': 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
@@ -4898,7 +4967,9 @@ snapshots:
       ws: 8.21.3
       zod: 4.4.3
     optionalDependencies:
+      '@ai-sdk/provider': 4.0.17
       '@daytonaio/sdk': '@daytona/sdk@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)'
+      ai: 7.0.107(zod@4.4.3)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@cfworker/json-schema'
@@ -5232,6 +5303,11 @@ snapshots:
   '@opentelemetry/semantic-conventions@1.43.0': {}
 
   '@oxc-project/types@0.144.0': {}
+
+  '@phosphor-icons/react@2.1.10(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
+    dependencies:
+      react: 19.2.6
+      react-dom: 19.2.6(react@19.2.6)
 
   '@pierre/diffs@1.2.5(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:
@@ -5856,6 +5932,8 @@ snapshots:
       - '@cfworker/json-schema'
       - supports-color
 
+  '@vercel/oidc@3.2.0': {}
+
   '@vitejs/plugin-react@6.0.4(vite@8.2.1(@types/node@26.0.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
@@ -5902,6 +5980,8 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
 
+  '@workflow/serde@4.1.0': {}
+
   '@xyflow/react@12.11.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:
       '@xyflow/system': 0.0.80
@@ -5945,6 +6025,13 @@ snapshots:
       - supports-color
 
   agent-base@7.1.4: {}
+
+  ai@7.0.107(zod@4.4.3):
+    dependencies:
+      '@ai-sdk/gateway': 4.0.87(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.17
+      '@ai-sdk/provider-utils': 5.0.45(zod@4.4.3)
+      zod: 4.4.3
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -6885,6 +6972,8 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   json-schema-typed@8.0.2: {}
+
+  json-schema@0.4.0: {}
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
@@ -7965,6 +8054,8 @@ snapshots:
   typescript@6.0.3: {}
 
   undici-types@8.3.0: {}
+
+  undici@7.29.0: {}
 
   undici@8.10.0: {}
 

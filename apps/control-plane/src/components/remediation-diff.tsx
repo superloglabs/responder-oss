@@ -6,8 +6,10 @@ import { remediationFileGroups } from "./remediation-diff-files";
 
 export function RemediationDiff({
   remediation,
+  theme: themeOverride,
 }: {
   remediation: IssueRemediation & { type: "code_change" };
+  theme?: "light" | "dark";
 }) {
   const { theme } = useColorTheme();
   const fileGroups = useMemo(
@@ -43,7 +45,7 @@ export function RemediationDiff({
                   diffIndicators: "bars",
                   diffStyle: "unified",
                   overflow: "scroll",
-                  themeType: theme,
+                  themeType: themeOverride ?? theme,
                 }}
               />
             ))}

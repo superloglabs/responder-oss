@@ -4,6 +4,7 @@ import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents.js";
+import { findAutomationsForSlackEvent } from "../../../../packages/core/src/db/automations.js";
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
 import {
   getInvestigationForSlackAction,
@@ -43,6 +44,7 @@ import {
   queueInvestigation,
   queueSlackThreadInvestigation,
 } from "../investigations/queue.js";
+import { queueAutomationRun } from "../automations/queue.js";
 
 const slackUrlVerificationSchema = z.object({
   type: z.literal("url_verification"),
@@ -805,6 +807,40 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   const body = event.type === "app_mention"
     ? rawMessageBody.replace(/^\s*<@[A-Z0-9]+>\s*/iu, "").trim() || rawMessageBody
     : rawMessageBody;
+  const automationMatches = await findAutomationsForSlackEvent({
+    channelId: event.channel,
+    eventType: event.type,
+    senderAppId: event.app_id ?? event.bot_profile?.app_id,
+    teamId: callback.data.team_id,
+    userId: event.user,
+  });
+  const automationResults = await Promise.allSettled(
+    automationMatches.map((match) =>
+        queueAutomationRun({
+          automationId: match.automationId,
+          trigger: {
+            attributes: {
+              channelId: event.channel,
+              teamId: callback.data.team_id,
+              threadTimestamp: event.thread_ts ?? event.ts,
+              timestamp: event.ts,
+            },
+            body,
+            externalEventId: `${callback.data.event_id}:${match.automationId}`,
+            provider: "slack",
+            sourceUrl: `https://slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`,
+            title: slackMessageTitle(body),
+          },
+        })
+      ),
+  );
+  if (automationResults.some((result) => result.status === "rejected")) {
+    console.error(JSON.stringify({
+      event: "slack_automation_fanout_failed",
+      eventId: callback.data.event_id,
+      failedCount: automationResults.filter((result) => result.status === "rejected").length,
+    }));
+  }
   if (event.type === "app_mention" && event.thread_ts) {
     const linked = await findSlackIssueThread({
       channelId: event.channel,
@@ -1030,7 +1066,13 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     }),
   );
 
-  return context.json({ ok: true, matchedAgents: matches.length });
+  return context.json({
+    ok: true,
+    matchedAgents: matches.length,
+    ...(automationMatches.length > 0
+      ? { matchedAutomations: automationMatches.length }
+      : {}),
+  });
 }).post("/actions", async (context) => {
   const rawBody = await context.req.text();
   if (

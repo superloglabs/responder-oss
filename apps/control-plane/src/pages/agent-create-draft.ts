@@ -5,6 +5,7 @@ export type OutputMode = "thread" | "output_channel";
 export type Severity = "SEV-1" | "SEV-2" | "SEV-3";
 
 export interface CreateDraft {
+  name?: string;
   inputKind: InputKind;
   sentryAccountId: string;
   sentryProjectResourceIds: string[];
@@ -19,6 +20,7 @@ export interface CreateDraft {
   contextAccountIds: string[];
   contextResourceIds: string[];
   workspaceSecretRecordIds: string[];
+  initialTriageEnabled: boolean;
   createLinearTickets: boolean;
   linearIssueTemplate: string;
   instructions: string;
@@ -37,6 +39,7 @@ export function draftForSessionStorage(
   options: Pick<AgentOptions, "secrets">,
 ): SavedCreateDraft {
   return {
+    name: draft.name,
     inputKind: draft.inputKind,
     sentryAccountId: draft.sentryAccountId,
     sentryProjectResourceIds: draft.sentryProjectResourceIds,
@@ -50,6 +53,7 @@ export function draftForSessionStorage(
     prMode: draft.prMode,
     contextAccountIds: draft.contextAccountIds,
     contextResourceIds: draft.contextResourceIds,
+    initialTriageEnabled: draft.initialTriageEnabled,
     workspaceSecretNames: options.secrets
       .filter((secret) => draft.workspaceSecretRecordIds.includes(secret.id))
       .map((secret) => secret.name),
@@ -80,4 +84,15 @@ export function workspaceSecretRecordIdsForDraft(
   return configured.workspaceSecretRecordIds?.filter((id) =>
     options.secrets.some((secret) => secret.id === id),
   ) ?? [];
+}
+
+/** Restore the input before resource selection, including an interrupted OAuth setup. */
+export function restoreTriggerSelection(saved: SavedCreateDraft, configured: Partial<CreateDraft>): Pick<CreateDraft, "inputKind" | "outputMode"> {
+  const inputKind = saved.inputKind ?? configured.inputKind ?? "slack_channel";
+  return { inputKind, outputMode: inputKind === "slack_channel" ? saved.outputMode ?? configured.outputMode ?? "thread" : "output_channel" };
+}
+
+export function restoredSentryProjects(selected: string[], available: string[]): string[] {
+  const preserved = selected.filter((id) => available.includes(id));
+  return preserved.length > 0 ? preserved : available.slice(0, 1);
 }

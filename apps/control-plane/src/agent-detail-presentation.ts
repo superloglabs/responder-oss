@@ -68,6 +68,9 @@ function summarizeInput(
         trigger.channelId,
       );
       return {
+        detail: configuration.initialTriageEnabled
+          ? "Jev initial triage enabled"
+          : undefined,
         eyebrow: "Input · Slack",
         title: channel,
       };

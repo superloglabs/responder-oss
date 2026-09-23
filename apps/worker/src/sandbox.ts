@@ -44,6 +44,15 @@ const defaultCleanupDependencies: DaytonaCleanupDependencies = {
 };
 
 const daytonaRetryDelaysMs = [0, 500, 1_500] as const;
+const daytonaAppearanceRetryDelaysMs = [
+  0,
+  500,
+  1_500,
+  3_000,
+  5_000,
+  10_000,
+  10_000,
+] as const;
 
 function isTransientDaytonaError(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "statusCode" in error) {
@@ -93,8 +102,11 @@ async function deleteDaytonaSandboxByReference(
   dependencies: DaytonaCleanupDependencies,
 ): Promise<void> {
   const client = dependencies.createClient(config);
+  const retryDelays = waitForAppearance
+    ? daytonaAppearanceRetryDelaysMs
+    : daytonaRetryDelaysMs;
   try {
-    for (const [index, delayMs] of daytonaRetryDelaysMs.entries()) {
+    for (const [index, delayMs] of retryDelays.entries()) {
       if (delayMs > 0) await dependencies.sleep(delayMs);
       try {
         const sandbox = await client.get(reference);
@@ -102,8 +114,22 @@ async function deleteDaytonaSandboxByReference(
         return;
       } catch (error) {
         if (isDaytonaNotFound(error)) {
-          if (waitForAppearance && index < daytonaRetryDelaysMs.length - 1) {
+          if (waitForAppearance && index < retryDelays.length - 1) {
             continue;
+          }
+          if (waitForAppearance) {
+            const cleanupError = new Error(
+              `Sandbox ${reference} did not appear before cleanup timed out`,
+            );
+            await dependencies.reportException(cleanupError, {
+              operation: "sandbox_cleanup",
+              sandboxId: reference,
+            });
+            console.error(JSON.stringify({
+              event: "daytona_pending_sandbox_not_found",
+              sandboxId: reference,
+            }));
+            throw cleanupError;
           }
           return;
         }
@@ -118,6 +144,19 @@ async function deleteDaytonaSandboxByReference(
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }
+}
+
+export async function deleteDaytonaSandboxByName(
+  sandboxName: string,
+  config: DaytonaCleanupConfig,
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<void> {
+  await deleteDaytonaSandboxByReference(
+    sandboxName,
+    config,
+    true,
+    dependencies,
+  );
 }
 
 export async function createDaytonaSandboxSession(
@@ -278,23 +317,24 @@ export async function prepareDaytonaSandbox(
   const output = await session.execCommand({
     cmd: [
       "set -eu",
-      "if command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then exit 0; fi",
-      "if ! command -v apt-get >/dev/null 2>&1; then echo 'curl, git, Node.js, Python 3, ripgrep, unzip, or Bun is unavailable and apt-get is missing' >&2; exit 1; fi",
+      "if command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then exit 0; fi",
+      "if ! command -v apt-get >/dev/null 2>&1; then echo 'curl, git, Node.js, npm, Python 3, ripgrep, unzip, or Bun is unavailable and apt-get is missing' >&2; exit 1; fi",
       "if [ \"$(id -u)\" -eq 0 ]; then",
       "  apt-get update -qq",
-      "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs python3 ripgrep unzip",
+      "  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs npm python3 ripgrep unzip",
       "  if ! command -v bun >/dev/null 2>&1; then curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash; fi",
       "elif command -v sudo >/dev/null 2>&1; then",
       "  sudo apt-get update -qq",
-      "  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs python3 ripgrep unzip",
+      "  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git nodejs npm python3 ripgrep unzip",
       "  if ! command -v bun >/dev/null 2>&1; then curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash; fi",
       "else",
-      "  echo 'curl, git, Node.js, Python 3, ripgrep, unzip, and Bun installation require root access' >&2",
+      "  echo 'curl, git, Node.js, npm, Python 3, ripgrep, unzip, and Bun installation require root access' >&2",
       "  exit 1",
       "fi",
       "command -v curl >/dev/null",
       "command -v git >/dev/null",
       "command -v node >/dev/null",
+      "command -v npm >/dev/null",
       "command -v python3 >/dev/null",
       "command -v rg >/dev/null",
       "command -v unzip >/dev/null",
@@ -306,7 +346,7 @@ export async function prepareDaytonaSandbox(
   if (!execSucceeded(output)) {
     const detail = output.split("\nOutput:\n", 2)[1]?.trim();
     throw new Error(
-      `Unable to install curl, git, Node.js, Python 3, ripgrep, unzip, and Bun in Daytona${detail ? `: ${detail}` : ""}`,
+      `Unable to install curl, git, Node.js, npm, Python 3, ripgrep, unzip, and Bun in Daytona${detail ? `: ${detail}` : ""}`,
     );
   }
 }

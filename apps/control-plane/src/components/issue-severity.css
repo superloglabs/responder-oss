@@ -1,0 +1,21 @@
+.issueSeverity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.issueSeverity__dot {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--severity-dot);
+}
+.issueSeverity--sev-1 { --severity-dot: #dc4545; color: #b52e35; }
+.issueSeverity--sev-2 { --severity-dot: #ed872b; color: #a45118; }
+.issueSeverity--sev-3 { --severity-dot: #e3bb2b; color: #806600; }

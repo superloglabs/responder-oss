@@ -200,11 +200,10 @@ test("shows specific workspace secret validation issues", async ({
   });
 
   await page.goto("/agents/new");
-  await page.getByRole("button", { name: "Continue to context" }).click();
   await expect(
-    page.getByRole("heading", { name: "Agent context" }),
+    page.getByRole("heading", { name: "Connectors" }),
   ).toBeVisible();
-  await expect(page.getByText("Slack", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Manage Slack" })).toBeVisible();
   await page.getByRole("button", { name: "Add secret" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Add a workspace secret",

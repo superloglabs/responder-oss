@@ -4,6 +4,7 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
+  deleteDaytonaSandboxByName,
   type DaytonaCleanupDependencies,
   prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
@@ -79,14 +80,14 @@ describe("Daytona sandbox preparation", () => {
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         cmd: expect.stringContaining(
-          "command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v bun >/dev/null 2>&1",
+          "command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v rg >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v bun >/dev/null 2>&1",
         ),
       }),
     );
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         cmd: expect.stringContaining(
-          "install -y -qq curl git nodejs python3 ripgrep unzip",
+          "install -y -qq curl git nodejs npm python3 ripgrep unzip",
         ),
       }),
     );
@@ -107,7 +108,7 @@ describe("Daytona sandbox preparation", () => {
     } as unknown as DaytonaSandboxSession;
 
     await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
-      "Unable to install curl, git, Node.js, Python 3, ripgrep, unzip, and Bun in Daytona: python3 unavailable",
+      "Unable to install curl, git, Node.js, npm, Python 3, ripgrep, unzip, and Bun in Daytona: python3 unavailable",
     );
   });
 
@@ -117,7 +118,7 @@ describe("Daytona sandbox preparation", () => {
     } as unknown as DaytonaSandboxSession;
 
     await expect(prepareDaytonaSandbox(session)).rejects.toThrow(
-      "Unable to install curl, git, Node.js, Python 3, ripgrep, unzip, and Bun in Daytona",
+      "Unable to install curl, git, Node.js, npm, Python 3, ripgrep, unzip, and Bun in Daytona",
     );
   });
 });
@@ -177,6 +178,33 @@ describe("Daytona sandbox cleanup", () => {
       true,
     );
     expect(harness.sleep).toHaveBeenCalledWith(500);
+  });
+
+  it("reports when a pending sandbox never appears for deletion", async () => {
+    const harness = cleanupHarness({ missing: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      deleteDaytonaSandboxByName(
+        "responder-automation-run-1",
+        { daytonaApiKey: "daytona-test" },
+        harness.dependencies,
+      ),
+    ).rejects.toThrow("did not appear before cleanup timed out");
+
+    expect(harness.get).toHaveBeenCalledTimes(7);
+    expect(harness.sleep).toHaveBeenCalledWith(10_000);
+    expect(harness.reportException).toHaveBeenCalledWith(
+      expect.any(Error),
+      {
+        operation: "sandbox_cleanup",
+        sandboxId: "responder-automation-run-1",
+      },
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("daytona_pending_sandbox_not_found"),
+    );
+    consoleError.mockRestore();
   });
 
   it("enables provider-side deletion when a sandbox stops", async () => {

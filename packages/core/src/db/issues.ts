@@ -742,6 +742,7 @@ export async function getIssueForSlackBackfill(input: {
 export interface SlackInvestigationDeliveryContext {
   agentId: string;
   executionMode: "standard" | "slack_thread";
+  initialTriageEnabled?: boolean;
   investigationId: string;
   organizationId?: string;
   prMode: AgentPrMode;
@@ -790,6 +791,7 @@ export interface SlackInvestigationDeliveryContext {
 export interface SlackInvestigationLiveContext {
   agentId: string;
   executionMode: "standard" | "slack_thread";
+  initialTriageEnabled?: boolean;
   investigationId: string;
   organizationId?: string;
   title: string;
@@ -822,6 +824,7 @@ export async function getSlackInvestigationLiveContext(
       agentId: investigations.agentId,
       executionMode: investigations.executionMode,
       id: investigations.id,
+      initialTriageEnabled: agentConfigVersions.initialTriageEnabled,
       input: investigations.input,
       messageTimestamp: investigations.slackMessageTimestamp,
       organizationId: investigations.organizationId,
@@ -882,6 +885,7 @@ export async function getSlackInvestigationLiveContext(
   return {
     agentId: investigation.agentId,
     executionMode: investigation.executionMode,
+    initialTriageEnabled: investigation.initialTriageEnabled,
     investigationId: investigation.id,
     organizationId: investigation.organizationId,
     title: investigation.title,
@@ -906,6 +910,7 @@ export async function getSlackInvestigationDeliveryContext(
       agentId: investigations.agentId,
       executionMode: investigations.executionMode,
       id: investigations.id,
+      initialTriageEnabled: agentConfigVersions.initialTriageEnabled,
       input: investigations.input,
       messageTimestamp: investigations.slackMessageTimestamp,
       organizationId: investigations.organizationId,
@@ -1004,6 +1009,7 @@ export async function getSlackInvestigationDeliveryContext(
   return {
     agentId: investigation.agentId,
     executionMode: investigation.executionMode,
+    initialTriageEnabled: investigation.initialTriageEnabled,
     investigationId: investigation.id,
     organizationId: investigation.organizationId,
     prMode: investigation.prMode,

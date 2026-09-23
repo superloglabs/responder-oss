@@ -8,6 +8,7 @@ import { slackErrorLogFields } from "@responder/core/integrations/slack-live-car
 
 export interface WorkerErrorContext {
   operation:
+    | "automation"
     | "investigation"
     | "linear_ticket"
     | "pull_request_review"
@@ -30,6 +31,7 @@ let eventScrubbingEnvironment: NodeJS.ProcessEnv = process.env;
 
 const secretEnvironmentNames = [
   "OPENAI_API_KEY",
+  "AI_GATEWAY_API_KEY",
   "DAYTONA_API_KEY",
   "DATABASE_PASSWORD",
   "CREDENTIAL_ENCRYPTION_KEY",

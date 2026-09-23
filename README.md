@@ -62,7 +62,9 @@ dashboard, create an account, and create the first workspace.
 The UI and authentication flow work without provider credentials. Set
 `DAYTONA_API_KEY` to store workspace secrets or run investigations, and set
 `OPENAI_API_KEY` to run investigations. Restart the stack after changing
-`.env.local`. See [.env.example](.env.example) for all configuration.
+`.env.local`. Agents using initial triage reactions also require an
+`AI_GATEWAY_API_KEY` for Jev through Vercel AI Gateway. See
+[.env.example](.env.example) for all configuration.
 
 Provider OAuth and webhooks require a public HTTPS origin. The local tunnel
 workflow is documented in [docs/integrations.md](docs/integrations.md).
@@ -100,6 +102,21 @@ the operator. See [docs/architecture.md](docs/architecture.md) for service and
 security boundaries.
 
 ## Development
+
+To populate a running local installation, first create a local account, then run:
+
+```bash
+pnpm --filter @responder/core exec node scripts/local-seed-demo.mjs your-local-email@example.com
+```
+
+Select **Demo workspace** in the app. The seed adds three paused investigation agents, one internal scan agent, six
+issues (one archived), six completed investigations with evidence and
+remediations, three suggestions, and two completed scans. Re-running it preserves edits and avoids duplicate records.
+It requires a loopback database and reads `.env.local` when `DATABASE_URL` is
+unset. The demo Slack account and channels are fixtures without credentials;
+real investigation runs and external actions require real integrations.
+No jobs or outbound messages are created by the seed.
+
 
 Run the complete validation suite before opening a pull request:
 

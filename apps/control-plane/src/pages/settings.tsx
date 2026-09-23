@@ -15,9 +15,10 @@ import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
 } from "../components/dash0-connection-dialog";
-import { ArrowIcon, ProviderGlyph } from "../components/icons";
+import { ProviderGlyph } from "../components/icons";
+import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { providerDisplayName } from "../components/provider-glyphs";
-import { SettingsTabs } from "../components/settings-tabs";
+import { SettingsHeading } from "../components/settings-heading";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
 import { integrationActionUrl } from "./settings-presentation";
@@ -45,7 +46,8 @@ interface IntegrationSummary {
     | "vercel"
     | "custom_mcp"
     | "clickstack"
-    | "linear";
+    | "linear"
+    | "discord";
   name: string;
   description: string;
   state: IntegrationState;
@@ -127,6 +129,7 @@ function connectionNotice(): {
 
 export function SettingsPage() {
   useDocumentTitle("Settings");
+  const [query, setQuery] = useState("");
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -231,38 +234,15 @@ export function SettingsPage() {
     };
   }, [isFinishingSentryConnection]);
 
-  const featured = integrations.filter((integration) =>
-    ["github", "slack"].includes(integration.id),
-  );
-  const secondary = integrations.filter((integration) =>
-    [
-      "aws",
-      "gcp",
-      "sentry",
-      "datadog",
-      "dash0",
-      "posthog",
-      "axiom",
-      "upstash",
-      "langfuse",
-      "supabase",
-      "linear",
-      "vercel",
-      "custom_mcp",
-      "clickstack",
-    ].includes(
-      integration.id,
-    ),
+  const connected = integrations.filter((integration) => integration.accountCount > 0);
+  const marketplace = integrations.filter((integration) =>
+    integration.accountCount === 0 &&
+    `${integration.name} ${integration.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
 
   return (
-    <AppShell active="settings" density="settings">
-      <section className="settingsHeading">
-        <h1>Settings</h1>
-        <p>Manage your workspace, members, and connected services.</p>
-      </section>
-
-      <SettingsTabs active="integrations" />
+    <AppShell active="settings" density="settings" redesigned>
+      <SettingsHeading active="integrations" />
 
       {notice ? (
         <p
@@ -282,24 +262,26 @@ export function SettingsPage() {
 
         {!isLoading && !error ? (
           <div className="integrationRows">
-            <div className="integrationRow integrationRow--featured">
-              {featured.map((integration) => (
-                <IntegrationCard
-                  integration={integration}
-                  key={integration.id}
-                  sentryHealth={sentryHealth}
-                />
-              ))}
-            </div>
-            <div className="integrationRow">
-              {secondary.map((integration) => (
-                <IntegrationCard
-                  integration={integration}
-                  key={integration.id}
-                  sentryHealth={sentryHealth}
-                />
-              ))}
-            </div>
+            <section className="settingsIntegrationSection" aria-labelledby="connected-integrations-title">
+              <header className="settingsSectionHeading"><h2 id="connected-integrations-title">Connected integrations</h2><span>{connected.length} connected</span></header>
+              <div className="settingsConnectedIntegrations">
+                {connected.map((integration) => <IntegrationCard integration={integration} key={integration.id} sentryHealth={sentryHealth} />)}
+                {connected.length === 0 ? <p className="settingsEmpty">No integrations connected yet. Add a service from the marketplace below.</p> : null}
+              </div>
+            </section>
+            <section className="settingsIntegrationSection" aria-labelledby="marketplace-title">
+              <header className="settingsSectionHeading"><div><h2 id="marketplace-title">Marketplace</h2><p>Add connected services as context for your investigations.</p></div></header>
+              <div className="settingsMarketplaceSearch">
+                <MagnifyingGlassIcon size={16} aria-hidden="true" />
+                <label className="srOnly" htmlFor="integration-search">Search integrations</label>
+                <input id="integration-search" type="search" placeholder="Search integrations…" value={query} onChange={(event) => setQuery(event.target.value)} />
+                {query ? <button type="button" aria-label="Clear integration search" onClick={() => setQuery("")}><XIcon size={14} /></button> : null}
+              </div>
+              <div className="settingsMarketplace">
+                {marketplace.map((integration) => <IntegrationCard integration={integration} key={integration.id} sentryHealth={sentryHealth} />)}
+                {marketplace.length === 0 ? <p className="settingsEmpty">{query ? `No integrations match “${query}”.` : "All available integrations are connected."}</p> : null}
+              </div>
+            </section>
           </div>
         ) : null}
       </section>
@@ -442,18 +424,21 @@ function DefaultIntegrationCard({
       <button
         aria-busy={isConnecting}
         aria-disabled={!canConnect}
-        className={`integrationCard ${integration.id === "github" ? "isFeatured" : ""}`}
+        className="integrationCard"
         id={`integration-${integration.id}`}
         disabled={!canConnect || isConnecting}
         onClick={() => startConnection()}
         type="button"
       >
-        <span className="integrationCard__top">
           <ProviderGlyph
             className={`integrationLogo integrationLogo--${integration.id === "custom_mcp" ? "mcp" : integration.id}`}
             decorative
             provider={integration.id}
           />
+        <span className="integrationCard__body">
+          <strong>{integration.name}</strong>
+          <small>{integrationDetail(integration, sentryHealth)}</small>
+        </span>
           {health === "needs_reconnect" ? (
             <span className="connectedBadge connectedBadge--warning">Reconnect</span>
           ) : health === "unavailable" ? (
@@ -467,17 +452,8 @@ function DefaultIntegrationCard({
           ) : integration.state === "coming_soon" ? (
             <span className="connectedBadge connectedBadge--muted">Coming next</span>
           ) : null}
-        </span>
-        <span className="integrationCard__body">
-          <strong>{integration.name}</strong>
-          <small>{integrationDetail(integration, sentryHealth)}</small>
-        </span>
-        <span className="integrationCard__arrow">
-          {isConnecting ? (
-            <span aria-hidden="true" className="buttonSpinner" />
-          ) : (
-            <ArrowIcon />
-          )}
+        <span className="integrationCard__action">
+          {isConnecting ? <span aria-hidden="true" className="buttonSpinner" /> : integration.accountCount > 0 ? "Manage" : integration.state === "coming_soon" ? "Soon" : !canConnect ? "Unavailable" : "Add"}
         </span>
       </button>
       <DatadogConnectionDialog
@@ -546,6 +522,7 @@ function GcpIntegrationCard({
   integration: IntegrationSummary;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [showAccounts, setShowAccounts] = useState(false);
   const [reconnectProject, setReconnectProject] = useState<{
     displayName: string;
     projectId: string;
@@ -560,18 +537,11 @@ function GcpIntegrationCard({
       className="integrationCard integrationCard--managed"
       id={`integration-${integration.id}`}
     >
-      <div className="integrationCard__top">
         <ProviderGlyph
           className="integrationLogo integrationLogo--gcp"
           decorative
           provider="gcp"
         />
-        {integration.accounts.some((account) => account.status === "error") ? (
-          <span className="connectedBadge connectedBadge--warning">Action needed</span>
-        ) : integration.accountCount > 0 ? (
-          <span className="connectedBadge">Connected</span>
-        ) : null}
-      </div>
       <div className="integrationCard__body">
         <strong>Google Cloud</strong>
         <small>
@@ -579,7 +549,18 @@ function GcpIntegrationCard({
             ? `${integration.accountCount} connected project${integration.accountCount === 1 ? "" : "s"}`
             : "Read-only infrastructure, logs, metrics, and alert context."}
         </small>
-        {integration.accounts.length > 0 ? (
+      </div>
+        {integration.accounts.some((account) => account.status === "error") ? (
+          <span className="connectedBadge connectedBadge--warning">Action needed</span>
+        ) : integration.accountCount > 0 ? (
+          <span className="connectedBadge">Connected</span>
+        ) : null}
+      <div className="integrationCard__actions">
+        {integration.accountCount > 0 ? <button className="button button--secondary button--small" type="button" aria-expanded={showAccounts} onClick={() => setShowAccounts((value) => !value)}>Manage</button> : null}
+        {integration.accountCount === 0 && canConnect ? <button className="button button--secondary button--small" type="button" onClick={() => setDialogOpen(true)}>Add</button> : null}
+        {!canConnect && integration.accountCount === 0 ? <small>Unavailable</small> : null}
+      </div>
+      {showAccounts && integration.accounts.length > 0 ? (
           <ul className="integrationCard__accounts" aria-label="Connected Google Cloud projects">
             {integration.accounts.map((account) => (
               <li key={account.id}>
@@ -650,9 +631,8 @@ function GcpIntegrationCard({
             ))}
           </ul>
         ) : null}
-      </div>
       {removeError ? <p className="siteDialog__error">{removeError}</p> : null}
-      <div className="integrationCard__actions">
+      {showAccounts ? <div className="integrationCard__actions integrationCard__manageActions">
         {canConnect ? (
           <button
             className="button button--primary button--small"
@@ -664,7 +644,7 @@ function GcpIntegrationCard({
         ) : (
           <small>Provider configuration required</small>
         )}
-      </div>
+      </div> : null}
       <GcpConnectionDialog
         connectUrl={integration.connectUrl ?? "/api/integrations/gcp/connect"}
         initialProject={reconnectProject}
