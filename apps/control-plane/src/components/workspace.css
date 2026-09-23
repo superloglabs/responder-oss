@@ -71,6 +71,7 @@
 .appShell--workspace .accountPopover__item--danger:hover { color: #b33d43; background: #fdf1f2; }
 .appShell--workspace .workspaceMonogram { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
 .appShell--workspace .accountPopover__error { color: #b33d43; }
+.mobileSidebarBar, .mobileSidebarClose, .mobileSidebarBackdrop { display: none; }
 .workspaceSurface { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--issues-panel); border-radius: 14px; box-shadow: 0 1px 3px #0000001a, 0 1px 2px -1px #0000001a; }
 .workspaceContent { width: 100%; max-width: 1024px; margin: 0 auto; padding: 32px 40px 64px; display: flex; flex-direction: column; gap: 32px; }
 .issuesPage { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
@@ -117,11 +118,39 @@
 }
 @media (max-width: 600px) {
   .appShell.appShell--workspace { padding: 8px; overflow-y: auto; }
-  .appShell--workspace .globalHeader { position: static; width: 100%; height: auto; padding: 8px 8px 16px; gap: 16px; }
-  .appShell--workspace .globalHeader__left { gap: 16px; }
-  .appShell--workspace .primaryNav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
-  .appShell--workspace .globalHeader__right { flex-direction: row; align-items: center; justify-content: space-between; }
-  .appShell--workspace .accountPopover { top: 48px; bottom: auto; left: auto; right: 0; }
+  .appShell--workspace .globalHeader {
+    display: none; position: fixed; inset: 0 auto 0 0; width: min(256px, calc(100vw - 48px));
+    height: 100svh; padding: 16px; gap: 16px; overflow-y: auto; z-index: 21;
+    background: var(--issues-canvas); box-shadow: 0 1px 3px #0000001a, 0 1px 2px -1px #0000001a;
+  }
+  .appShell--workspace .globalHeader--open { display: flex; }
+  .appShell--workspace .globalHeader__left { gap: 24px; }
+  .appShell--workspace .globalHeader .brand { display: flex; }
+  .appShell--workspace .primaryNav { flex-direction: column; flex-wrap: nowrap; gap: 4px; }
+  .appShell--workspace .globalHeader__right { flex-direction: column; align-items: stretch; justify-content: flex-start; }
+  .appShell--workspace .accountMenuTrigger__workspace { display: block; }
+  .appShell--workspace .accountPopover { top: auto; bottom: 54px; left: 0; right: auto; }
+  .appShell--workspace .mobileSidebarBackdrop {
+    display: block; position: fixed; inset: 0; z-index: 20; border: 0;
+    background: #00000040; cursor: default;
+  }
+  .appShell--workspace .mobileSidebarClose {
+    display: grid; position: absolute; top: 12px; right: 12px; width: 32px; height: 32px;
+    place-items: center; border: 0; border-radius: 4px; background: transparent;
+    color: var(--issues-text); cursor: pointer;
+  }
+  .appShell--workspace .mobileSidebarBar {
+    display: flex; align-items: center; min-height: 48px; padding: 8px 12px;
+    border-bottom: 1px solid var(--issues-line);
+  }
+  .appShell--workspace .mobileSidebarTrigger {
+    display: grid; width: 32px; height: 32px; padding: 0; place-items: center;
+    border: 0; border-radius: 4px; background: transparent;
+    color: var(--issues-text); cursor: pointer;
+  }
+  .appShell--workspace :is(.mobileSidebarTrigger, .mobileSidebarClose):focus-visible {
+    outline: 2px solid #4e58f9; outline-offset: 2px;
+  }
   .workspaceSurface { min-height: 240px; }
   .workspaceContent { padding: 24px 12px; gap: 24px; }
   .issuesPage { gap: 24px; }
