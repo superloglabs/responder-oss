@@ -160,6 +160,7 @@ export function AgentsPage() {
           </h2>
           <DataTable<AgentListItem, AgentFilter>
             aria-label="Configured agents"
+            variant="workspace"
             activeFilter={agentFilter}
             columns={[
               {

@@ -1115,6 +1115,7 @@ export function ScansPage() {
         </div>
         <div className="scanHistoryTable">
           <DataTable<ScanRun>
+            variant="workspace"
             aria-label="Recent scans"
             columns={[
               {

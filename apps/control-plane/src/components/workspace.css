@@ -183,16 +183,21 @@
 .appShell--workspace .formError { color: #b33d43; }
 .appShell--workspace .billingBanner { margin: 16px 24px 0; }
 
-/* Agent list uses the same table surface as issues. */
+/* Shared surface for workspace data tables. The first row owns the header divider. */
+.appShell--workspace .dsDataTable.dsDataTable--workspace { border: 0; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; overflow: auto; }
+.appShell--workspace .dsDataTable--workspace table { width: 100%; min-width: 600px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.appShell--workspace .dsDataTable.dsDataTable--workspace th { height: auto; padding: 7px 12px; border-bottom: 0; background: #fafafa; color: #1a1a1a; font-size: 13px; font-weight: 400; line-height: 20px; text-transform: none; letter-spacing: normal; }
+.appShell--workspace .dsDataTable.dsDataTable--workspace td { height: auto; padding: 10px 12px; border-top: .5px solid #e6e8ec; border-bottom: 0; background: #fff; font-size: 13px; line-height: 20px; }
+.appShell--workspace .dsDataTable--workspace :is(th, td):not(:last-child) { border-right: .5px solid #e6e8ec; }
+.appShell--workspace .dsDataTable--workspace tbody tr:first-child td:first-child { border-top-left-radius: 12px; }
+.appShell--workspace .dsDataTable--workspace tbody tr:first-child td:last-child { border-top-right-radius: 12px; }
+.appShell--workspace .dsDataTable--workspace tr:hover td { background: #fafafa; }
+
+/* Agent-specific column sizing and typography. */
 .appShell--workspace .agentListTable { min-width: 0; }
-.appShell--workspace .agentListTable .dsDataTable { border: 0; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; overflow: auto; }
-.appShell--workspace .agentListTable table { min-width: 680px; border-collapse: separate; border-spacing: 0; table-layout: fixed; width: 100%; }
-.appShell--workspace .agentListTable th { padding: 7px 12px; background: #fafafa; color: #1a1a1a; font-size: 13px; font-weight: 500; line-height: 20px; text-transform: none; letter-spacing: normal; }
-.appShell--workspace .agentListTable td { padding: 12px; background: #fff; border-top: .5px solid #e6e8ec; border-bottom: 0; font-size: 13px; line-height: 20px; }
-.appShell--workspace .agentListTable :is(th, td):nth-child(-n+4) { border-right: .5px solid #e6e8ec; }
-.appShell--workspace .agentListTable tbody tr:first-child td:first-child { border-top-left-radius: 12px; }
-.appShell--workspace .agentListTable tbody tr:first-child td:last-child { border-top-right-radius: 12px; }
-.appShell--workspace .agentListTable tr:hover td { background: #fafafa; }
+.appShell--workspace .agentListTable table { min-width: 680px; }
+.appShell--workspace .agentListTable .dsDataTable--workspace th { font-weight: 500; }
+.appShell--workspace .agentListTable .dsDataTable--workspace td { padding: 12px; }
 .appShell--workspace .agentTableTitle { gap: 2px; }
 .appShell--workspace .agentTableTitle strong { font-size: 13px; font-weight: 400; line-height: 20px; color: #1a1a1a; }
 .appShell--workspace .agentTableTitle small, .appShell--workspace .agentTableRun small { color: #666; font-size: 12px; font-weight: 400; line-height: 18px; }

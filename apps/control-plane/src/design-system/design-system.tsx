@@ -869,6 +869,7 @@ export interface DataTableProps<Row, Filter extends string = string> {
   onFilterChange?: (value: Filter) => void;
   onRowClick?: (row: Row) => void;
   rows: Array<Row>;
+  variant?: "workspace";
 }
 
 function groupDataTableRows<Row>(
@@ -903,8 +904,10 @@ export function DataTable<Row, Filter extends string = string>({
   onFilterChange,
   onRowClick,
   rows,
+  variant,
 }: DataTableProps<Row, Filter>) {
   const rowGroups = getRowGroup ? groupDataTableRows(rows, getRowGroup) : [];
+  const tableClass = classNames("dsDataTable", variant && `dsDataTable--${variant}`);
 
   const columnWidths = (
     <colgroup>
@@ -999,7 +1002,7 @@ export function DataTable<Row, Filter extends string = string>({
               <h2 className="dsDataTableGroupBlock__label">{group.label}</h2>
               <div
                 aria-label={`${ariaLabel}: ${group.label}`}
-                className="dsDataTable"
+                className={tableClass}
                 role="region"
                 tabIndex={0}
               >
@@ -1013,7 +1016,7 @@ export function DataTable<Row, Filter extends string = string>({
           ))}
         </div>
       ) : (
-        <div aria-label={ariaLabel} className="dsDataTable" role="region" tabIndex={0}>
+        <div aria-label={ariaLabel} className={tableClass} role="region" tabIndex={0}>
           <table>
             {columnWidths}
             {columnHeaders}
