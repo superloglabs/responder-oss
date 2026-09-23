@@ -49,6 +49,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
   const menuRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
+  const restoreSidebarFocusRef = useRef(false);
   const displayName = session.data?.user.name || session.data?.user.email || "Account";
   const initials = displayName
     .split(/\s+/)
@@ -97,6 +98,13 @@ export function AppShell({ active, children, density = "default", redesigned = f
   }, [isMenuOpen]);
 
   useEffect(() => {
+    if (!isSidebarOpen && restoreSidebarFocusRef.current) {
+      restoreSidebarFocusRef.current = false;
+      sidebarTriggerRef.current?.focus();
+    }
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
     if (!isSidebarOpen || !workspace) return;
 
     const media = window.matchMedia("(max-width: 600px)");
@@ -106,8 +114,8 @@ export function AppShell({ active, children, density = "default", redesigned = f
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        restoreSidebarFocusRef.current = true;
         setIsSidebarOpen(false);
-        sidebarTriggerRef.current?.focus();
       } else if (event.key === "Tab") {
         const focusable = sidebarRef.current?.querySelectorAll<HTMLElement>(
           'a[href], button:not([disabled])',
@@ -195,8 +203,8 @@ export function AppShell({ active, children, density = "default", redesigned = f
           aria-hidden="true"
           className="mobileSidebarBackdrop"
           onClick={() => {
+            restoreSidebarFocusRef.current = true;
             setIsSidebarOpen(false);
-            sidebarTriggerRef.current?.focus();
           }}
           tabIndex={-1}
           type="button"
@@ -215,8 +223,8 @@ export function AppShell({ active, children, density = "default", redesigned = f
             aria-label="Close navigation"
             className="mobileSidebarClose"
             onClick={() => {
+              restoreSidebarFocusRef.current = true;
               setIsSidebarOpen(false);
-              sidebarTriggerRef.current?.focus();
             }}
             type="button"
           >

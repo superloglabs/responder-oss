@@ -43,6 +43,10 @@ test("mobile navigation stays available and isolates the open drawer", async ({ 
       await route.fulfill({ json: null });
     }
   });
+  await page.route("**/api/context", (route) => route.fulfill({ json: { capabilities: [] } }));
+  await page.route("**/api/legacy-account-redirect", (route) =>
+    route.fulfill({ json: { redirect: false } }),
+  );
   await page.route("**/api/agents", (route) => route.fulfill({ json: { agents: [] } }));
   await page.route("**/api/billing", (route) => route.fulfill({ json: { configured: false, enabled: false } }));
   await page.setViewportSize({ width: 390, height: 700 });
@@ -63,4 +67,8 @@ test("mobile navigation stays available and isolates the open drawer", async ({ 
   await expect(surface).toHaveAttribute("inert", "");
   await expect(page.locator(".appShell")).toHaveCSS("overflow-y", "hidden");
   await expect(surface).toHaveCSS("overflow-y", "hidden");
+
+  await page.getByRole("button", { name: "Close navigation" }).click();
+  await expect(surface).not.toHaveAttribute("inert", "");
+  await expect(page.getByRole("button", { name: "Open navigation" })).toBeFocused();
 });
