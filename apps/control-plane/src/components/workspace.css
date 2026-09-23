@@ -116,13 +116,13 @@
   .issuesTable col { width: 20%; }
 }
 @media (max-width: 600px) {
-  .appShell.appShell--workspace { padding: 8px; }
+  .appShell.appShell--workspace { padding: 8px; overflow-y: auto; }
   .appShell--workspace .globalHeader { position: static; width: 100%; height: auto; padding: 8px 8px 16px; gap: 16px; }
   .appShell--workspace .globalHeader__left { gap: 16px; }
   .appShell--workspace .primaryNav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
   .appShell--workspace .globalHeader__right { flex-direction: row; align-items: center; justify-content: space-between; }
   .appShell--workspace .accountPopover { top: 48px; bottom: auto; left: auto; right: 0; }
-  .workspaceSurface { min-height: 0; }
+  .workspaceSurface { min-height: 240px; }
   .workspaceContent { padding: 24px 12px; gap: 24px; }
   .issuesPage { gap: 24px; }
   .issuesTable th, .issuesTable td { padding: 9px 8px; font-size: 12px; }
@@ -198,6 +198,7 @@
 .appShell--workspace .agentListTable table { min-width: 680px; }
 .appShell--workspace .agentListTable .dsDataTable--workspace th { font-weight: 500; }
 .appShell--workspace .agentListTable .dsDataTable--workspace td { padding: 12px; }
+.appShell--workspace .agentListTable .dsDataTable--workspace :is(th, td):nth-child(5) { border-right: 0; }
 .appShell--workspace .agentTableTitle { gap: 2px; }
 .appShell--workspace .agentTableTitle strong { font-size: 13px; font-weight: 400; line-height: 20px; color: #1a1a1a; }
 .appShell--workspace .agentTableTitle small, .appShell--workspace .agentTableRun small { color: #666; font-size: 12px; font-weight: 400; line-height: 18px; }
@@ -246,7 +247,7 @@
 .appShell--workspace .remediationCard__actions .dsButton { background: #fff; border-color: #ddd; color: #444; }
 .appShell--workspace .remediationPullRequest { border-color: var(--issues-line); background: var(--issues-row); color: var(--issues-text); }
 .appShell--workspace .remediationPullRequest:hover { border-color: #d4d7dc; background: var(--issues-header); }
-.appShell--workspace .remediationPullRequest__icon, .appShell--workspace .remediationPullRequest__state { background: #e9f5ed; color: #267a45; }
+.appShell--workspace .remediationPullRequest__icon, .appShell--workspace .remediationPullRequest__state { background: var(--ds-positive-surface); color: var(--ds-positive); }
 .appShell--workspace .remediationPullRequest__icon--merged, .appShell--workspace .remediationPullRequest__state--merged { background: #eeeafb; color: #6652ad; }
 .appShell--workspace .remediationDiff, .appShell--workspace .remediationDiff__file, .appShell--workspace .remediationDiff__loading, .appShell--workspace .remediationPrompt, .appShell--workspace .remediationDiff__fallback { background: #fff; border-color: #e8e8e8; color: #444; border-radius: 6px; }
 .appShell--workspace .remediationDiff__repository h4 { color: #666; font-weight: 400; }
