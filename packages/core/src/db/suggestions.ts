@@ -219,7 +219,7 @@ export type SuggestionStatus = "open" | "applied" | "dismissed";
 const suggestionStatus = sql<SuggestionStatus>`case
   when ${suggestions.dismissedAt} is not null then 'dismissed'
   when exists (select 1 from ${suggestionPullRequests} pr where pr.suggestion_id = ${suggestions.id} and pr.status = 'merged')
-    and not exists (select 1 from ${suggestionPullRequests} pr where pr.suggestion_id = ${suggestions.id} and pr.status in ('queued', 'creating', 'created'))
+    and not exists (select 1 from ${suggestionPullRequests} pr where pr.suggestion_id = ${suggestions.id} and pr.status <> 'merged')
     then 'applied'
   else 'open' end`;
 const suggestionSource = sql<string>`coalesce(${investigations.input}->>'provider', 'unknown')`;

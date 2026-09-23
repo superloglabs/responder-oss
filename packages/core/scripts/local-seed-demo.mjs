@@ -60,7 +60,7 @@ try {
   }
   for (const [i, title] of ["Record storage errors before retrying uploads", "Measure database connection pool wait time", "Track duplicate webhook deliveries"].entries()) {
     const detail = "## Why this matters\n\nStructured context helps distinguish transient failures from repeated application errors.\n\n## Validate\n\nReproduce the failure locally and confirm the event includes the operation and error code.";
-    const change = i === 0 ? { id: "demo-observability-change", type: "code_change", title: "Include operation context in upload errors", description: "Preserve the original error and record the operation before retrying.", changes: [{ repository: "superloglabs/responder-oss", diff: "diff --git a/src/service.ts b/src/service.ts\n--- a/src/service.ts\n+++ b/src/service.ts\n@@ -1,3 +1,4 @@\n function handleError(error) {\n+  logger.error({ operation: 'upload', error }, 'Upload failed');\n   throw error;\n }\n" }] } : null;
+    const change = i === 0 ? { id: "demo-observability-change", type: "code_change", title: "Include operation context in upload errors", description: "Preserve the original error and record the operation before retrying.", changes: [{ repository: "superloglabs/responder-oss", pullRequest: { title: "Include operation context in upload errors", body: "Preserve the original error and record the operation before retrying." }, diff: "diff --git a/src/service.ts b/src/service.ts\n--- a/src/service.ts\n+++ b/src/service.ts\n@@ -1,3 +1,4 @@\n function handleError(error) {\n+  logger.error({ operation: 'upload', error }, 'Upload failed');\n   throw error;\n }\n" }] } : null;
     await client.query(`insert into suggestions(id,organization_id,investigation_id,agent_config_version_id,title,subtitle,detail,code_change,fingerprint,created_at,dismissed_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict(id) do nothing`, [id(`suggestion-${i}`), organizationId, id(`run-${i}`), id(`version-${i%3}`), title, "The current logs omit context needed to explain the failure and verify the fix.", detail, change ? json(change) : null, `LOCAL_DEMO_${id(`suggestion-${i}`)}`, new Date(Date.now() - (i+1)*3600000), i === 2 ? new Date() : null]);
   }
   const scanAgentId = id("scan-agent"), scanVersionId = id("scan-version");
@@ -73,7 +73,7 @@ try {
     await client.query(`insert into investigation_issues(investigation_id,issue_id,relationship,evidence,created_at) values($1,$2,'recurrence','[]',$3) on conflict do nothing`,[scanId,id(`issue-${i}`),startedAt]);
   }
   await client.query("commit");
-  console.log(json({workspaceId:organizationId,agents:3,issues:6,investigations:6,suggestions:3,scans:2,note:"Demo integrations have no credentials. Agents start paused; no jobs or outbound messages are created."}));
+  console.log(json({workspaceId:organizationId,agents:4,investigationAgents:3,issues:6,investigations:6,suggestions:3,scans:2,note:"Demo integrations have no credentials. Agents start paused; no jobs or outbound messages are created."}));
 } catch(error) {
   await client.query("rollback").catch(()=>{});
   throw error;

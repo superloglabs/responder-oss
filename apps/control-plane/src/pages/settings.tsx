@@ -271,12 +271,12 @@ export function SettingsPage() {
             </section>
             <section className="settingsIntegrationSection" aria-labelledby="marketplace-title">
               <header className="settingsSectionHeading"><div><h2 id="marketplace-title">Marketplace</h2><p>Add connected services as context for your investigations.</p></div></header>
-              <label className="settingsMarketplaceSearch">
+              <div className="settingsMarketplaceSearch">
                 <MagnifyingGlassIcon size={16} aria-hidden="true" />
-                <span className="srOnly">Search integrations</span>
-                <input type="search" placeholder="Search integrations…" value={query} onChange={(event) => setQuery(event.target.value)} />
+                <label className="srOnly" htmlFor="integration-search">Search integrations</label>
+                <input id="integration-search" type="search" placeholder="Search integrations…" value={query} onChange={(event) => setQuery(event.target.value)} />
                 {query ? <button type="button" aria-label="Clear integration search" onClick={() => setQuery("")}><XIcon size={14} /></button> : null}
-              </label>
+              </div>
               <div className="settingsMarketplace">
                 {marketplace.map((integration) => <IntegrationCard integration={integration} key={integration.id} sentryHealth={sentryHealth} />)}
                 {marketplace.length === 0 ? <p className="settingsEmpty">{query ? `No integrations match “${query}”.` : "All available integrations are connected."}</p> : null}

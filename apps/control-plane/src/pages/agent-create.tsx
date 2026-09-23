@@ -29,9 +29,6 @@ import {
   type AgentConfiguration,
   type AgentOptions,
   type IntegrationSummary,
-  fetchAgent,
-  fetchAgentOptions,
-  fetchIntegrations,
   createWorkspaceSecret,
   refreshGitHubAgentOptions,
   refreshSlackAgentOptions,
@@ -85,12 +82,14 @@ import {
   Switch,
   TextAreaField,
 } from "../design-system";
+import { loadAgentEditorData, unsupportedAgentConfiguration } from "./agent-editor-data";
 import { AgentRunHistory } from "../components/agent-run-history";
 import "./agent-editor.css";
 import { useDocumentTitle } from "../use-document-title";
 import {
   draftForSessionStorage,
   restoreTriggerSelection,
+  restoredSentryProjects,
   workspaceSecretRecordIdsForDraft,
   type CreateDraft,
   type OutputMode,
@@ -452,6 +451,7 @@ export function AgentCreatePage() {
   ).get("integration_account_id");
   const [options, setOptions] = useState<AgentOptions>(EMPTY_OPTIONS);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [existingConfiguration, setExistingConfiguration] =
     useState<AgentConfiguration | null>(null);
   const [draft, setDraft] = useState<CreateDraft | null>(null);
@@ -597,14 +597,11 @@ export function AgentCreatePage() {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([
-      fetchAgentOptions(),
-      fetchIntegrations(),
-      agentId ? fetchAgent(agentId) : Promise.resolve(null),
-    ])
-      .then(([loadedOptions, loadedIntegrations, agent]) => {
+    void loadAgentEditorData(agentId)
+      .then(({ options: loadedOptions, integrations: loadedIntegrations, agent, settingsError: loadError }) => {
         if (cancelled) return;
         const loadedConfiguration = agent?.configuration ?? null;
+        setSettingsError(loadError);
         setOptions(loadedOptions);
         setIntegrations(loadedIntegrations);
         setExistingConfiguration(loadedConfiguration);
@@ -618,7 +615,7 @@ export function AgentCreatePage() {
         const connectedSentry = accountsFor(loadedOptions, "sentry").find((account) => account.id === returnedIntegrationAccountId) ?? accountsFor(loadedOptions, "sentry")[0];
         if (sentryJustConnected && connectedSentry && loadedDraft.inputKind === "sentry_issue") {
           loadedDraft.sentryAccountId = connectedSentry.id;
-          loadedDraft.sentryProjectResourceIds = resourcesOfKind(loadedOptions, "sentry_project").filter((project) => project.integrationAccountId === connectedSentry.id).slice(0, 1).map((project) => project.id);
+          loadedDraft.sentryProjectResourceIds = restoredSentryProjects(loadedDraft.sentryProjectResourceIds, resourcesOfKind(loadedOptions, "sentry_project").filter((project) => project.integrationAccountId === connectedSentry.id).map((project) => project.id));
         }
         if (
           sentryJustConnected &&
@@ -885,9 +882,9 @@ export function AgentCreatePage() {
   }, []);
 
   useEffect(() => {
-    if (!draft) return;
+    if (!draft || settingsError || unsupportedAgentConfiguration(existingConfiguration)) return;
     saveDraftToSessionStorage(draftStorageKey, draft, options);
-  }, [draft, draftStorageKey, options]);
+  }, [draft, draftStorageKey, options, settingsError, existingConfiguration]);
 
   useEffect(() => {
     if (!githubJustConnected || loading) return;
@@ -1073,7 +1070,8 @@ export function AgentCreatePage() {
       : draft.createLinearTickets && !draft.linearIssueTemplate.trim()
         ? "Add a Linear issue description template."
       : null;
-  const missingRequirement = inputRequirement ?? outputRequirement ?? contextRequirement ?? promptRequirement;
+  const unsupportedReason = unsupportedAgentConfiguration(existingConfiguration);
+  const missingRequirement = settingsError ?? unsupportedReason ?? inputRequirement ?? outputRequirement ?? contextRequirement ?? promptRequirement;
 
   function updateDraft(update: Partial<CreateDraft>) {
     setDraft((current) => (current ? { ...current, ...update } : current));
@@ -1669,7 +1667,8 @@ export function AgentCreatePage() {
       ) : null}
 
       {activeTab === "history" && agentDetail ? <AgentRunHistory agent={agentDetail} /> : null}
-      <form hidden={activeTab !== "settings"} className="createAgentForm agentEditor" onSubmit={submit}>
+      {activeTab === "settings" && (settingsError || unsupportedReason) ? <section className="agentSettingsUnavailable" role="status"><p>{settingsError ?? unsupportedReason}</p>{settingsError ? <Button onClick={() => window.location.reload()} variant="secondary">Retry settings</Button> : <><h2>Agent instructions</h2><p>{existingConfiguration?.instructions}</p></>}</section> : null}
+      <form hidden={activeTab !== "settings" || Boolean(settingsError || unsupportedReason)} className="createAgentForm agentEditor" onSubmit={submit}>
         <CreateSection title="Input" description="Choose what starts an investigation.">
           <div className="agentInputPanel">
             <div className="agentInputHeader">
@@ -1687,7 +1686,7 @@ export function AgentCreatePage() {
                     { kind: "dash0_alert", provider: "dash0", title: "Dash0", description: "Ongoing failed checks", connected: Boolean(activeDash0Account) },
                   ] as const).map((source) => (
                     <button type="button" key={source.kind} onClick={(event) => {
-                      updateDraft({ inputKind: source.kind, initialTriageEnabled: source.kind === "slack_channel" && draft.initialTriageEnabled, outputMode: source.kind === "slack_channel" ? "thread" : "output_channel" });
+                      updateDraft({ inputKind: source.kind, initialTriageEnabled: source.kind === "slack_channel" && draft.initialTriageEnabled, outputMode: source.kind === "slack_channel" ? draft.outputMode : "output_channel" });
                       event.currentTarget.closest("details")?.removeAttribute("open");
                     }}>
                       <ProviderMark provider={source.provider} />

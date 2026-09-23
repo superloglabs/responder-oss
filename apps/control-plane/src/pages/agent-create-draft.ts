@@ -91,3 +91,8 @@ export function restoreTriggerSelection(saved: SavedCreateDraft, configured: Par
   const inputKind = saved.inputKind ?? configured.inputKind ?? "slack_channel";
   return { inputKind, outputMode: inputKind === "slack_channel" ? saved.outputMode ?? configured.outputMode ?? "thread" : "output_channel" };
 }
+
+export function restoredSentryProjects(selected: string[], available: string[]): string[] {
+  const preserved = selected.filter((id) => available.includes(id));
+  return preserved.length > 0 ? preserved : available.slice(0, 1);
+}

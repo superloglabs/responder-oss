@@ -12,6 +12,7 @@ import {
   LightningIcon,
   ListBulletsIcon,
   ScanIcon,
+  RobotIcon,
   SignOutIcon,
   UserCircleIcon,
 } from "@phosphor-icons/react";
@@ -173,6 +174,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
                 className={active === "automations" ? "isActive" : undefined}
                 to="/automations"
               >
+                {workspace ? <RobotIcon size={16} aria-hidden="true" /> : null}
                 Automations
               </Link>
             ) : null}

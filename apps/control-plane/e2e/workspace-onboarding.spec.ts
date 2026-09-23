@@ -203,7 +203,7 @@ test("shows specific workspace secret validation issues", async ({
   await expect(
     page.getByRole("heading", { name: "Connectors" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Configure Slack" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage Slack" })).toBeVisible();
   await page.getByRole("button", { name: "Add secret" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Add a workspace secret",

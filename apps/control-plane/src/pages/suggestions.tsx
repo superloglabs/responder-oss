@@ -1,3 +1,4 @@
+import { providerDisplayName as sourceLabel } from "../components/provider-glyphs";
 import { lazy, Suspense, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -29,7 +30,6 @@ function hoursAgo(hours: number): string {
 }
 
 type SuggestionStatus = "open" | "applied" | "dismissed";
-const sourceLabel = (source: string) => ({ slack: "Slack", sentry: "Sentry", datadog: "Datadog", posthog: "PostHog", github: "GitHub", scan: "Scan", manual: "Manual", unknown: "Unknown" }[source] ?? source);
 
 
 const storyboardSuggestions: SuggestionListItem[] = [
@@ -553,7 +553,7 @@ export function SuggestionsPage() {
     <AppShell active="suggestions" density="compact" redesigned>
       <header className="workspaceHeading"><h1><FlagIcon size={16} aria-hidden="true" />Suggestions</h1></header>
       <div className="suggestionsToolbar">
-        <div className="suggestionStatusFilters" aria-label="Suggestion status">
+        <div className="suggestionStatusFilters" role="group" aria-label="Suggestion status">
           {(["open", "applied", "dismissed"] as const).map((value) => (
             <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)}>
               {value[0].toUpperCase() + value.slice(1)} <span>{counts.filter((item) => item.status === value && (!source || item.source === source)).reduce((sum, item) => sum + item.count, 0)}</span>

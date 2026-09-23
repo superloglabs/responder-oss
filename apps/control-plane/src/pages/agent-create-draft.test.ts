@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   draftForSessionStorage,
   restoreTriggerSelection,
+  restoredSentryProjects,
   workspaceSecretRecordIdsForDraft,
   type CreateDraft,
 } from "./agent-create-draft";
@@ -75,5 +76,14 @@ describe("trigger restoration after connecting", () => {
   });
   it("preserves Slack channel reporting across authorization", () => {
     expect(restoreTriggerSelection({ inputKind: "slack_channel", outputMode: "output_channel" }, {})).toEqual({ inputKind: "slack_channel", outputMode: "output_channel" });
+  });
+});
+
+describe("connection selection preservation", () => {
+  it("retains all valid project selections after reauthorizing the same account", () => {
+    expect(restoredSentryProjects(["b", "c", "gone"], ["a", "b", "c"])).toEqual(["b", "c"]);
+  });
+  it("selects the first project only when no draft project survives", () => {
+    expect(restoredSentryProjects(["gone"], ["a", "b"])).toEqual(["a"]);
   });
 });
