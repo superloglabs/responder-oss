@@ -423,7 +423,7 @@ function successfulConnectionReturn(provider: IntegrationSummary["id"]): boolean
   );
 }
 
-export function AgentCreatePage() {
+export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail } = {}) {
   const { agentId } = useParams();
   const navigate = useNavigate();
   const isEditing = Boolean(agentId);
@@ -453,10 +453,10 @@ export function AgentCreatePage() {
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [existingConfiguration, setExistingConfiguration] =
-    useState<AgentConfiguration | null>(null);
-  const [draft, setDraft] = useState<CreateDraft | null>(null);
+    useState<AgentConfiguration | null>(initialAgent?.configuration ?? null);
+  const [draft, setDraft] = useState<CreateDraft | null>(() => initialAgent ? createInitialDraft(EMPTY_OPTIONS, {}, initialAgent.configuration, true) : null);
   const triggerPickerRef = useRef<HTMLDetailsElement>(null);
-  const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(null);
+  const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(initialAgent ?? null);
   const [activeTab, setActiveTab] = useState<"settings" | "history">("settings");
   const [updatingEnabled, setUpdatingEnabled] = useState(false);
   const [refreshingInput, setRefreshingInput] = useState(false);
@@ -478,7 +478,8 @@ export function AgentCreatePage() {
   const [connectionSettingsOpen, setConnectionSettingsOpen] = useState<
     AgentOptions["accounts"][number] | null
   >(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialAgent);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connectingProvider, setConnectingProvider] =
     useState<IntegrationSummary["id"] | null>(null);
@@ -597,7 +598,7 @@ export function AgentCreatePage() {
 
   useEffect(() => {
     let cancelled = false;
-    void loadAgentEditorData(agentId)
+    void loadAgentEditorData(agentId, initialAgent)
       .then(({ options: loadedOptions, integrations: loadedIntegrations, agent, settingsError: loadError }) => {
         if (cancelled) return;
         const loadedConfiguration = agent?.configuration ?? null;
@@ -842,12 +843,13 @@ export function AgentCreatePage() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); setSettingsLoading(false); }
       });
     return () => {
       cancelled = true;
     };
   }, [
+    initialAgent,
     agentId,
     axiomJustConnected,
     awsJustConnected,
@@ -882,9 +884,9 @@ export function AgentCreatePage() {
   }, []);
 
   useEffect(() => {
-    if (!draft || settingsError || unsupportedAgentConfiguration(existingConfiguration)) return;
+    if (!draft || settingsLoading || settingsError || unsupportedAgentConfiguration(existingConfiguration)) return;
     saveDraftToSessionStorage(draftStorageKey, draft, options);
-  }, [draft, draftStorageKey, options, settingsError, existingConfiguration]);
+  }, [draft, draftStorageKey, options, settingsLoading, settingsError, existingConfiguration]);
 
   useEffect(() => {
     if (!githubJustConnected || loading) return;
@@ -1071,7 +1073,7 @@ export function AgentCreatePage() {
         ? "Add a Linear issue description template."
       : null;
   const unsupportedReason = unsupportedAgentConfiguration(existingConfiguration);
-  const missingRequirement = settingsError ?? unsupportedReason ?? inputRequirement ?? outputRequirement ?? contextRequirement ?? promptRequirement;
+  const missingRequirement = (settingsLoading ? "Loading agent settings…" : null) ?? settingsError ?? unsupportedReason ?? inputRequirement ?? outputRequirement ?? contextRequirement ?? promptRequirement;
 
   function updateDraft(update: Partial<CreateDraft>) {
     setDraft((current) => (current ? { ...current, ...update } : current));
@@ -1632,10 +1634,10 @@ export function AgentCreatePage() {
         <div className="agentEditorHeading__row">
           <label className="agentEditorName">
             <span className="srOnly">Agent name</span>
-            <input readOnly={activeTab === "history"} style={{ width: `${Math.max(10, (draft.name || existingConfiguration?.name || "New agent").length + 1)}ch` }} value={draft.name ?? ""} maxLength={80} placeholder={isEditing ? existingConfiguration?.name : "New agent"} onChange={(event) => updateDraft({ name: event.target.value })} />
+            <input readOnly={activeTab === "history" || settingsLoading || Boolean(settingsError || unsupportedReason)} style={{ width: `${Math.max(10, (draft.name || existingConfiguration?.name || "New agent").length + 1)}ch` }} value={draft.name ?? ""} maxLength={80} placeholder={isEditing ? existingConfiguration?.name : "New agent"} onChange={(event) => updateDraft({ name: event.target.value })} />
             <PencilSimpleIcon size={14} aria-hidden="true" />
           </label>
-          {isEditing && agentDetail ? <Switch checked={agentDetail.enabled} disabled={updatingEnabled || saving} label={agentDetail.enabled ? "Active" : "Inactive"} onCheckedChange={async (enabled) => {
+          {isEditing && agentDetail ? <Switch checked={agentDetail.enabled} disabled={settingsLoading || updatingEnabled || saving} label={agentDetail.enabled ? "Active" : "Inactive"} onCheckedChange={async (enabled) => {
             setUpdatingEnabled(true);
             try {
               await setAgentEnabled(agentDetail.id, enabled);
@@ -1667,8 +1669,9 @@ export function AgentCreatePage() {
       ) : null}
 
       {activeTab === "history" && agentDetail ? <AgentRunHistory agent={agentDetail} /> : null}
-      {activeTab === "settings" && (settingsError || unsupportedReason) ? <section className="agentSettingsUnavailable" role="status"><p>{settingsError ?? unsupportedReason}</p>{settingsError ? <Button onClick={() => window.location.reload()} variant="secondary">Retry settings</Button> : <><h2>Agent instructions</h2><p>{existingConfiguration?.instructions}</p></>}</section> : null}
-      <form hidden={activeTab !== "settings" || Boolean(settingsError || unsupportedReason)} className="createAgentForm agentEditor" onSubmit={submit}>
+      {activeTab === "settings" && settingsLoading ? <p role="status">Loading agent settings…</p> : null}
+      {activeTab === "settings" && !settingsLoading && (settingsError || unsupportedReason) ? <section className="agentSettingsUnavailable" role="status"><p>{settingsError ?? unsupportedReason}</p>{settingsError ? <Button onClick={() => window.location.reload()} variant="secondary">Retry settings</Button> : <><h2>Agent instructions</h2><p>{existingConfiguration?.instructions}</p></>}</section> : null}
+      <form hidden={activeTab !== "settings" || settingsLoading || Boolean(settingsError || unsupportedReason)} className="createAgentForm agentEditor" onSubmit={submit}>
         <CreateSection title="Input" description="Choose what starts an investigation.">
           <div className="agentInputPanel">
             <div className="agentInputHeader">

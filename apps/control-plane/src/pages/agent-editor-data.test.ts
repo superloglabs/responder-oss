@@ -13,6 +13,25 @@ describe("agent detail availability", () => {
     const result = await loadAgentEditorData("agent");
     expect(result.agent).toEqual(agent);
     expect(result.settingsError).toContain("Options unavailable");
+    expect(result.options).toEqual({ accounts: [], resources: [], repositories: [], secrets: [] });
+  });
+  it("keeps agent data and options when integrations fail", async () => {
+    const agent = { id: "agent", investigations: [] } as unknown as AgentDetail;
+    const options = { accounts: [], resources: [], repositories: [], secrets: [] };
+    vi.mocked(fetchAgentOptions).mockResolvedValue(options);
+    vi.mocked(fetchIntegrations).mockRejectedValue(new Error("Integrations unavailable"));
+    const result = await loadAgentEditorData("agent", agent);
+    expect(result).toEqual({ agent, options, integrations: [], settingsError: "Integrations unavailable" });
+    expect(fetchAgent).not.toHaveBeenCalled();
+  });
+  it("passes successful editor data through without a settings error", async () => {
+    const options = { accounts: [], resources: [], repositories: [], secrets: [] };
+    const integrations = [{ id: "slack" }] as Awaited<ReturnType<typeof fetchIntegrations>>;
+    vi.mocked(fetchAgentOptions).mockResolvedValue(options);
+    vi.mocked(fetchIntegrations).mockResolvedValue(integrations);
+    const result = await loadAgentEditorData();
+    expect(result).toEqual({ agent: null, options, integrations, settingsError: null });
+    expect(fetchAgent).not.toHaveBeenCalled();
   });
   it("does not hide agent loading errors behind optional data", async () => {
     vi.mocked(fetchAgent).mockRejectedValue(new Error("Agent not found"));

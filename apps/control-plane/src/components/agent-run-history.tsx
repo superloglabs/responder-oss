@@ -26,7 +26,7 @@ export function AgentRunHistory({ agent }: { agent: AgentDetail }) {
             </Link></div>
             <div role="cell"><span className={`agentRunStatus agentRunStatus--${investigation.status}`}><i />{labels[investigation.status]}</span></div>
             <time role="cell" dateTime={investigation.createdAt} title={new Date(investigation.createdAt).toLocaleString()}>{relativeTime(investigation.createdAt)}</time>
-            <div role="cell"><Link to={`/agents/${agent.id}/investigations/${investigation.id}`} aria-label={`Open ${investigation.title}`}><ArrowUpRightIcon size={14} /></Link></div>
+            <div role="cell" className="agentHistoryAction"><Link to={`/agents/${agent.id}/investigations/${investigation.id}`} aria-label={`Open ${investigation.title}`}><ArrowUpRightIcon size={14} /></Link></div>
           </div>
         </div>;
       })}

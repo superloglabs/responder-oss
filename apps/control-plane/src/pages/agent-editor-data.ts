@@ -1,10 +1,10 @@
-import { fetchAgent, fetchAgentOptions, fetchIntegrations, type AgentConfiguration, type AgentOptions } from "../agents-api";
+import { fetchAgent, fetchAgentOptions, fetchIntegrations, type AgentConfiguration, type AgentOptions, type AgentDetail } from "../agents-api";
 
 const emptyOptions: AgentOptions = { accounts: [], resources: [], repositories: [], secrets: [] };
 
-export async function loadAgentEditorData(agentId?: string) {
+export async function loadAgentEditorData(agentId?: string, initialAgent?: AgentDetail) {
   const [agent, options, integrations] = await Promise.allSettled([
-    agentId ? fetchAgent(agentId) : Promise.resolve(null),
+    initialAgent ? Promise.resolve(initialAgent) : agentId ? fetchAgent(agentId) : Promise.resolve(null),
     fetchAgentOptions(),
     fetchIntegrations(),
   ]);

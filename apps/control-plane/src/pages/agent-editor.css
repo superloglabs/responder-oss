@@ -111,3 +111,6 @@
 .appShell--workspace.appShell--create .agentEditor .slackConnectionIdentity { flex: 1; min-width: 0; }
 .appShell--workspace.appShell--create .agentEditor .connectedAccount { width: auto; max-width: none; flex-wrap: wrap; }
 .appShell--workspace.appShell--create .agentEditor .connectedAccount strong { width: auto; max-width: none; }
+
+.agentHistoryRow > .agentHistoryAction { padding: 0; align-self: stretch; display: flex; }
+.agentHistoryAction > a { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; }
