@@ -4,21 +4,14 @@ import { failureReasonWithFindings, scanDateLabel } from "./scan-detail-presenta
 describe("scanDateLabel", () => {
   it("uses the viewer's date order and punctuation", () => {
     const startedAt = "2026-09-14T09:00:00+02:00";
-    const expected = new Intl.DateTimeFormat("fr-FR", {
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-      timeZone: "Europe/Paris",
-    }).format(new Date(startedAt));
-    expect(scanDateLabel(startedAt, "fr-FR", "Europe/Paris")).toBe(expected);
+    expect(scanDateLabel(startedAt, "fr-FR", "Europe/Paris")).toBe("14 septembre à 09:00");
   });
 });
 
 describe("failureReasonWithFindings", () => {
   it("keeps a failed scan's reason visible beside persisted findings", () => {
     expect(failureReasonWithFindings("failed", "Connector timed out", 2)).toBe("Connector timed out");
+    expect(failureReasonWithFindings("failed", null, 2)).toBe("Scan failed.");
   });
 
   it("leaves empty and successful scans to their existing messages", () => {
