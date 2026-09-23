@@ -36,12 +36,33 @@ describe("control-plane error monitoring", () => {
       user: { id: "user-1", username: "Ada" },
       request: { cookies: { session: "secret" } },
     }).then(completed);
-    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(completed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     expect(completed).toHaveBeenCalledWith({
       tags: { organization_id: "org-1" },
       user: { id: "user-1", username: "Ada" },
       request: {},
     });
+  });
+
+  it("enriches the event when a delayed lookup completes inside the time limit", async () => {
+    const monitoring = await import("./monitoring.js");
+    vi.useFakeTimers();
+    sentryMocks.getOrganizationName.mockImplementation(() =>
+      new Promise((resolve) => setTimeout(() => resolve("Acme"), 100)),
+    );
+    monitoring.initializeServerMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    const beforeSend = sentryMocks.init.mock.calls[0]![0].beforeSend;
+    const completed = vi.fn();
+    void beforeSend({ tags: { organization_id: "org-1" } }).then(completed);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(completed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(completed).toHaveBeenCalledWith({
+      tags: { organization_id: "org-1", organization_name: "Acme" },
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("stays disabled when no DSN is configured", async () => {
