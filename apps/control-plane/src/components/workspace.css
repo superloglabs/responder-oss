@@ -1,5 +1,5 @@
 .appShell.appShell--workspace {
-  --issues-canvas: #f9f9f9;
+  --issues-canvas: #f5f5f5;
   --issues-panel: #fcfcfc;
   --issues-row: #fff;
   --issues-header: #fafafa;
@@ -340,6 +340,6 @@
 
 .appShell--workspace .issueRail .issueSeverity { padding-left: 0; }
 
-html:has(.appShell.appShell--workspace), body:has(.appShell.appShell--workspace) { color-scheme: light; background: #f9f9f9; }
+html:has(.appShell.appShell--workspace), body:has(.appShell.appShell--workspace) { color-scheme: light; background: #f5f5f5; }
 .issuesFilters summary { list-style: none; }
 .issuesFilters summary::-webkit-details-marker { display: none; }
