@@ -59,8 +59,9 @@
 .automationPicker header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .automationPicker h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .automationPicker header button { border: 0; background: transparent; color: var(--muted); font-size: 22px; cursor: pointer; }
-.automationPickerRow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 9px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; font: inherit; cursor: pointer; }
+.automationPickerRow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 9px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; text-decoration: none; font: inherit; cursor: pointer; }
 .automationPickerRow:hover { background: var(--surface); }
+.automationPickerRow:disabled { opacity: .5; cursor: not-allowed; }
 .automationPickerRow > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; gap: 3px; }
 .automationPickerRow strong { font-size: 13px; font-weight: 600; }
 .automationPickerRow small, .automationPickerNote { color: var(--muted); font-size: 11px; }
