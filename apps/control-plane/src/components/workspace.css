@@ -237,7 +237,11 @@
 .appShell--workspace .remediationCard__description { font-size: 13px; line-height: 22px; }
 .appShell--workspace .remediationCard__actions { padding: 0; margin: 0; border: none; flex-wrap: wrap; }
 .appShell--workspace .remediationCard__actions .dsButton { background: #fff; border-color: #ddd; color: #444; }
-.appShell--workspace .remediationDiff, .appShell--workspace .remediationDiff__file, .appShell--workspace .remediationPrompt, .appShell--workspace .remediationDiff__fallback { background: #fff; border-color: #e8e8e8; color: #444; border-radius: 6px; }
+.appShell--workspace .remediationPullRequest { border-color: var(--issues-line); background: var(--issues-row); color: var(--issues-text); }
+.appShell--workspace .remediationPullRequest:hover { border-color: #d4d7dc; background: var(--issues-header); }
+.appShell--workspace .remediationPullRequest__icon, .appShell--workspace .remediationPullRequest__state { background: #e9f5ed; color: #267a45; }
+.appShell--workspace .remediationPullRequest__icon--merged, .appShell--workspace .remediationPullRequest__state--merged { background: #eeeafb; color: #6652ad; }
+.appShell--workspace .remediationDiff, .appShell--workspace .remediationDiff__file, .appShell--workspace .remediationDiff__loading, .appShell--workspace .remediationPrompt, .appShell--workspace .remediationDiff__fallback { background: #fff; border-color: #e8e8e8; color: #444; border-radius: 6px; }
 .appShell--workspace .remediationDiff__repository h4 { color: #666; font-weight: 400; }
 .appShell--workspace .issueLine { min-height: 24px; padding: 0 12px; border-color: #e8e8e8; }
 .appShell--workspace .issueLine__title { color: #121212; font-size: 13px; font-weight: 500; }
