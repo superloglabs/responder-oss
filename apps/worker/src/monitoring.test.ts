@@ -55,6 +55,15 @@ describe("worker error monitoring", () => {
     expect(sentryMocks.captureException).toHaveBeenCalled();
   });
 
+  it("reports errors without inventing an organization", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    await monitoring.reportWorkerException(new Error("failed"), { operation: "worker" });
+    expect(sentryMocks.scope.setTag).not.toHaveBeenCalledWith("organization_id", expect.anything());
+    expect(sentryMocks.scope.setTag).not.toHaveBeenCalledWith("organization_name", expect.anything());
+    expect(sentryMocks.captureException).toHaveBeenCalledOnce();
+  });
+
   it("stays disabled when no DSN is configured", async () => {
     const monitoring = await import("./monitoring.js");
 
