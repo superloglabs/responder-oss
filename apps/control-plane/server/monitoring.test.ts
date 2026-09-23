@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sentryMocks = vi.hoisted(() => ({
+  getOrganizationName: vi.fn(),
   flush: vi.fn().mockResolvedValue(true),
   init: vi.fn(),
   isInitialized: vi.fn().mockReturnValue(false),
@@ -8,18 +9,39 @@ const sentryMocks = vi.hoisted(() => ({
 
 vi.mock("@sentry/hono/node", () => sentryMocks);
 
-vi.mock("@responder/core/observability/sentry-identity", () => ({
-  organizationErrorTags: async (id?: string) => id
-    ? { organization_id: id, organization_name: "Acme" }
-    : {},
+vi.mock("@responder/core/db/organizations", () => ({
+  getOrganizationName: sentryMocks.getOrganizationName,
 }));
 
 describe("control-plane error monitoring", () => {
   beforeEach(() => {
     vi.resetModules();
+    sentryMocks.getOrganizationName.mockReset().mockResolvedValue("Acme");
     sentryMocks.flush.mockClear();
     sentryMocks.init.mockClear();
     sentryMocks.isInitialized.mockReset().mockReturnValue(false);
+  });
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("releases the scrubbed error event when the organization lookup stalls", async () => {
+    const monitoring = await import("./monitoring.js");
+    vi.useFakeTimers();
+    sentryMocks.getOrganizationName.mockReturnValue(new Promise(() => {}));
+    monitoring.initializeServerMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    const beforeSend = sentryMocks.init.mock.calls[0]![0].beforeSend;
+    const completed = vi.fn();
+    void beforeSend({
+      tags: { organization_id: "org-1" },
+      user: { id: "user-1", username: "Ada" },
+      request: { cookies: { session: "secret" } },
+    }).then(completed);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(completed).toHaveBeenCalledWith({
+      tags: { organization_id: "org-1" },
+      user: { id: "user-1", username: "Ada" },
+      request: {},
+    });
   });
 
   it("stays disabled when no DSN is configured", async () => {

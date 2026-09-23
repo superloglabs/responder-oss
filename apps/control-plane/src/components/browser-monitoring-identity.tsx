@@ -14,7 +14,7 @@ export function BrowserMonitoringIdentity() {
   useEffect(() => {
     if (session.isPending || !userId || !organizationId) return;
     // Sign-in may restore an active organization without invalidating its cache.
-    void refetchOrganization();
+    void refetchOrganization().catch(() => undefined);
   }, [organizationId, refetchOrganization, session.isPending, sessionId, userId]);
 
   const organizationName = organization.data && organization.data.id === organizationId

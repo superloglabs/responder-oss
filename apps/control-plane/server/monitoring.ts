@@ -18,6 +18,7 @@ export function initializeServerMonitoring(
     Sentry.init({
       beforeSend: async (event) => {
         const organizationId = event.tags?.organization_id;
+        // The shared lookup returns within 250 ms, even if the database stalls.
         event.tags = {
           ...event.tags,
           ...await organizationErrorTags(
