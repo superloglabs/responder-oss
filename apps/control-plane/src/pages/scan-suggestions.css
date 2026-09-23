@@ -24,14 +24,7 @@
 .scanRunStatus--running > span { background: #e3bb2b; }
 .scanRunStatus--failed { color: #b52e35; }
 .scanRunStatus--failed > span { background: #dc4545; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) .dsDataTable { border: .5px solid #e6e8ec; border-radius: 12px; background: #fafafa; box-shadow: 0 1px 2px #00000008; overflow-x: auto; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) table { width: 100%; min-width: 600px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) .dsDataTable th { height: auto; padding: 7px 12px; background: #fafafa; color: #1a1a1a; font-size: 13px; font-weight: 400; line-height: 20px; text-transform: none; letter-spacing: normal; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) .dsDataTable td { height: auto; padding: 10px 12px; background: #fff; border-top: .5px solid #e6e8ec; border-bottom: 0; color: #666; font-size: 13px; line-height: 20px; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) :is(th, td):not(:last-child) { border-right: .5px solid #e6e8ec; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) tbody tr:first-child td:first-child { border-top-left-radius: 12px; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) tbody tr:first-child td:last-child { border-top-right-radius: 12px; }
-.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) tbody tr:hover td { background: #fafafa; }
+.appShell--workspace :is(.scanHistoryTable, .suggestionsDataTable) .dsDataTable--workspace td { color: #666; }
 .appShell--workspace .scanTableTitle, .appShell--workspace .scanTableFindings { font-size: 13px; line-height: 20px; color: #434343; }
 .suggestionsToolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .suggestionStatusFilters { display: flex; align-items: center; gap: 12px; }

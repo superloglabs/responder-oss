@@ -2845,6 +2845,10 @@ button:disabled {
   flex: 1 1 auto;
 }
 
+.agentListTable .dsDataTable th {
+  border-bottom: 0;
+}
+
 .agentListTable .dsDataTable td {
   height: 64px;
 }
@@ -11329,3 +11333,143 @@ body:has(.appShell--scans) {
 }
 .authHeading h1 { flex: 1; min-width: 0; }
 .authHeading .authSwitch { margin: 0; max-width: 150px; text-align: right; }
+
+/* Shared authentication styling for hosted and local application editions. */
+.authPage {
+  background: #fcfcfc;
+  color: #202020;
+  color-scheme: light;
+  --surface: #fff;
+  --foreground: #202020;
+  --secondary: #202020;
+  --muted: #646464;
+  --dim: #737373;
+  --border: #e8e8e8;
+  --border-strong: #d6d6d6;
+  --border-logo: #4e58f9;
+}
+.authPage .authThemeToggle {
+  display: none;
+}
+.authPage .authBrand {
+  margin: 0 auto 32px;
+}
+.authPage .authBrand img {
+  filter: invert(1);
+  height: 20px;
+}
+.authPage .authIntro {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.authPage .authIntro h1 {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 24px;
+  letter-spacing: -0.001em;
+}
+.authPage .authIntro p {
+  font-size: 14px;
+  line-height: 20px;
+}
+.authPage .socialAuth {
+  gap: 8px;
+}
+.authPage .socialAuth__button {
+  height: 32px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #202020;
+  background: #fff;
+  box-shadow: inset 0 0 0 .5px #ffffffcc,0 1px 2px -.5px #0000001f,0 0 0 .5px #00000029;
+}
+.authPage .authDivider {
+  height: 60px;
+  font-size: 13px;
+  text-transform: none;
+  color: #646464;
+}
+.authPage .authField {
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.authPage .authField input {
+  height: 32px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fcfcfc;
+  color: #202020;
+  font-size: 14px;
+}
+.authPage .authField input:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 2px;
+}
+.authPage .authSubmit {
+  min-height: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid #4e58f9;
+  border-bottom-width: 2px;
+  border-radius: 8px;
+  background: #3f4af8cc;
+  color: #fff;
+  font-size: 14px;
+}
+.authPage .authSwitch {
+  color: #202020;
+  font-size: 14px;
+}
+.authPage .authTerms {
+  margin: 24px 0 0;
+  text-align: center;
+  color: #737373;
+  font-size: 13px;
+  line-height: 20px;
+}
+.authPage .authTerms a {
+  color: #202020;
+  text-decoration: underline;
+  text-decoration-color: #cecece;
+  text-underline-offset: 3px;
+}
+.authPage button:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 3px;
+}
+.authPage .authPassword {
+  position: relative;
+  display: block;
+}
+.authPage .authPassword input {
+  padding-right: 42px;
+}
+.authPage .authPassword button {
+  position: absolute;
+  right: 4px;
+  top: 0;
+  height: 32px;
+  width: 32px;
+  padding: 7px;
+  background: transparent;
+  color: #646464;
+  cursor: pointer;
+}
+.authPage .authPassword svg {
+  width: 18px;
+  height: 18px;
+}
+
+.authPage .authIntro .authSwitch {
+  margin-top: 8px;
+}
+
+/* Use the account switch as the subtitle; invitations retain their guidance. */
+.authPage .authDescription { display: none; }
+.authPage .authHeading { flex-direction: column; gap: 8px; }
+.authPage .authHeading .authSwitch { max-width: none; margin: 0; text-align: center; }

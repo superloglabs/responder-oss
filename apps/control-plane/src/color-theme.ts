@@ -27,7 +27,6 @@ function readStoredColorTheme() {
 function publishColorTheme(nextTheme: ColorTheme) {
   colorTheme = nextTheme;
   document.documentElement.dataset.colorTheme = nextTheme;
-  document.documentElement.style.colorScheme = nextTheme;
   for (const subscriber of subscribers) subscriber();
 }
 

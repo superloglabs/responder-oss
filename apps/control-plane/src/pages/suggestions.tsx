@@ -578,6 +578,7 @@ export function SuggestionsPage() {
         <div className="suggestionsDataTable">
           <DataTable<SuggestionSummary>
             aria-label="Observability suggestions"
+            variant="workspace"
             columns={[
               {
                 header: "Suggestion",
