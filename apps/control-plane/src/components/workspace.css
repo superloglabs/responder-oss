@@ -118,6 +118,8 @@
 }
 @media (max-width: 600px) {
   .appShell.appShell--workspace { padding: 8px; overflow-y: auto; }
+  .appShell.appShell--workspace.appShell--sidebarOpen { overflow: hidden; }
+  .appShell--sidebarOpen .workspaceSurface { overflow: hidden; }
   .appShell--workspace .globalHeader {
     display: none; position: fixed; inset: 0 auto 0 0; width: min(256px, calc(100vw - 48px));
     height: 100svh; padding: 16px; gap: 16px; overflow-y: auto; z-index: 21;
@@ -140,8 +142,9 @@
     color: var(--issues-text); cursor: pointer;
   }
   .appShell--workspace .mobileSidebarBar {
-    display: flex; align-items: center; min-height: 48px; padding: 8px 12px;
-    border-bottom: 1px solid var(--issues-line);
+    display: flex; position: sticky; top: 0; z-index: 2;
+    align-items: center; min-height: 48px; padding: 8px 12px;
+    border-bottom: 1px solid var(--issues-line); background: var(--issues-panel);
   }
   .appShell--workspace .mobileSidebarTrigger {
     display: grid; width: 32px; height: 32px; padding: 0; place-items: center;

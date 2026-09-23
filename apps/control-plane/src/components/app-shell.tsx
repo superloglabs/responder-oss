@@ -102,8 +102,6 @@ export function AppShell({ active, children, density = "default", redesigned = f
     const media = window.matchMedia("(max-width: 600px)");
     if (!media.matches) return;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     sidebarRef.current?.querySelector<HTMLAnchorElement>(".primaryNav a")?.focus();
 
     function closeOnEscape(event: KeyboardEvent) {
@@ -134,7 +132,6 @@ export function AppShell({ active, children, density = "default", redesigned = f
     document.addEventListener("keydown", closeOnEscape);
     media.addEventListener("change", closeOnResize);
     return () => {
-      document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", closeOnEscape);
       media.removeEventListener("change", closeOnResize);
     };
@@ -192,22 +189,26 @@ export function AppShell({ active, children, density = "default", redesigned = f
   }
 
   return (
-    <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}`}>
+    <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}${workspace && isSidebarOpen ? " appShell--sidebarOpen" : ""}`}>
       {workspace && isSidebarOpen ? (
         <button
-          aria-label="Close navigation"
+          aria-hidden="true"
           className="mobileSidebarBackdrop"
           onClick={() => {
             setIsSidebarOpen(false);
             sidebarTriggerRef.current?.focus();
           }}
+          tabIndex={-1}
           type="button"
         />
       ) : null}
       <header
+        aria-label={workspace && isSidebarOpen ? "Navigation" : undefined}
+        aria-modal={workspace && isSidebarOpen ? true : undefined}
         className={`globalHeader${workspace && isSidebarOpen ? " globalHeader--open" : ""}`}
         id={workspace ? "workspace-sidebar" : undefined}
         ref={sidebarRef}
+        role={workspace && isSidebarOpen ? "dialog" : undefined}
       >
         {workspace ? (
           <button
@@ -392,7 +393,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
         </div>
       </header>
       {workspace ? (
-        <div className="workspaceSurface">
+        <div className="workspaceSurface" inert={isSidebarOpen}>
           <div className="mobileSidebarBar">
             <button
               aria-controls="workspace-sidebar"
