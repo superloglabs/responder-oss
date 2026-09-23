@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiErrorMessage, refreshSentryAgentOptions } from "./agents-api";
+import { apiErrorMessage, fetchIntegrations, refreshSentryAgentOptions } from "./agents-api";
 
 describe("API error messages", () => {
   it("surfaces specific validation issues instead of the generic error", () => {
@@ -47,5 +47,24 @@ describe("refreshing agent Sentry projects", () => {
   it("asks to reconnect an account with expired access", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [{ id: "chosen", status: "needs_reconnect" }] }))));
     await expect(refreshSentryAgentOptions("chosen")).rejects.toThrow("Reconnect Sentry");
+  });
+});
+
+
+describe("editor context integrations", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("filters trigger-only and unknown providers from the product catalog", async () => {
+    const { integrationCatalog } = await import("../server/integrations/catalog");
+    const integrations = [...integrationCatalog, { id: "future_provider" }, { id: "toString" }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ integrations })),
+    ));
+
+    const result = await fetchIntegrations();
+
+    expect(result).toEqual(integrationCatalog.filter(({ id }) => id !== "discord"));
+    expect(result.some(({ id }) => id === "sentry")).toBe(true);
+    expect(result.some(({ id }) => id === "custom_mcp")).toBe(true);
   });
 });

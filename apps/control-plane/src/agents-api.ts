@@ -1,3 +1,5 @@
+import { contextProviderMetadata } from "./components/provider-glyphs";
+
 export type TriggerKind =
   | "sentry_issue"
   | "datadog_monitor"
@@ -138,23 +140,7 @@ export interface AgentListItem {
 }
 
 export interface IntegrationSummary {
-  id:
-    | "aws"
-    | "gcp"
-    | "github"
-    | "slack"
-    | "sentry"
-    | "datadog"
-    | "dash0"
-    | "posthog"
-    | "axiom"
-    | "upstash"
-    | "langfuse"
-    | "supabase"
-    | "vercel"
-    | "custom_mcp"
-    | "clickstack"
-    | "linear";
+  id: keyof typeof contextProviderMetadata;
   name: string;
   description: string;
   state: "available" | "coming_soon" | "connected" | "setup_required";
@@ -709,7 +695,11 @@ export async function fetchIntegrations(): Promise<IntegrationSummary[]> {
   const response = await apiJson<{ integrations: IntegrationSummary[] }>(
     "/api/integrations",
   );
-  return response.integrations;
+  // The product catalog also includes trigger-only integrations, such as Discord.
+  // These editors can only offer providers with supported context metadata.
+  return response.integrations.filter((integration) =>
+    Object.hasOwn(contextProviderMetadata, integration.id),
+  );
 }
 
 export async function saveAgent(
