@@ -229,6 +229,21 @@ export async function postSlackMessage(input: {
   }
 }
 
+export async function openSlackDirectMessage(input: {
+  accessToken: string;
+  userId: string;
+}): Promise<string> {
+  const response = await callSlackApi(
+    input.accessToken,
+    "conversations.open",
+    { users: input.userId },
+  );
+  const channel = objectValue(response.channel);
+  const channelId = channel ? stringValue(channel.id) : null;
+  if (!channelId) throw new Error("Slack did not return a direct-message channel");
+  return channelId;
+}
+
 export async function stopSlackResponseStream(input: {
   accessToken: string;
   channelId: string;

@@ -12,6 +12,7 @@ function harness() {
   const client = { create: vi.fn() } as unknown as DaytonaSandboxClient;
   const dependencies = {
     close: vi.fn().mockResolvedValue(undefined),
+    closePending: vi.fn().mockResolvedValue(undefined),
     configure: vi.fn().mockResolvedValue(undefined),
     createClient: vi.fn(() => client),
     createSession: vi.fn().mockResolvedValue(session),
@@ -61,7 +62,11 @@ describe("fresh automation sandbox", () => {
       input.config,
       "responder-automation-run-1",
     );
-    expect(input.run).toHaveBeenCalledWith(session, expect.any(Function));
+    expect(input.run).toHaveBeenCalledWith(
+      session,
+      expect.any(Function),
+      undefined,
+    );
     expect(
       session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
     ).toBeUndefined();
@@ -98,6 +103,71 @@ describe("fresh automation sandbox", () => {
     expect(
       session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
     ).toBeUndefined();
+  });
+
+  it("closes the sandbox when the run is aborted", async () => {
+    const { dependencies, session } = harness();
+    const controller = new AbortController();
+    const timeout = new Error("runtime limit reached");
+    const run = runInFreshAutomationSandbox(
+      {
+        ...input,
+        run: vi.fn(() => new Promise(() => undefined)),
+        signal: controller.signal,
+      },
+      dependencies,
+    );
+
+    controller.abort(timeout);
+
+    await expect(run).rejects.toBe(timeout);
+    expect(dependencies.close).toHaveBeenCalledWith(
+      session,
+      input.config,
+      { jobId: "run-1", organizationId: "organization-1" },
+    );
+  });
+
+  it("cancels setup and deletes a sandbox that has not returned a session", async () => {
+    const { dependencies } = harness();
+    const controller = new AbortController();
+    const timeout = new Error("runtime limit reached during setup");
+    dependencies.createSession.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const run = runInFreshAutomationSandbox(
+      { ...input, signal: controller.signal },
+      dependencies,
+    );
+
+    controller.abort(timeout);
+
+    await expect(run).rejects.toBe(timeout);
+    expect(dependencies.closePending).toHaveBeenCalledWith(
+      "responder-automation-run-1",
+      input.config,
+    );
+    expect(dependencies.configure).not.toHaveBeenCalled();
+  });
+
+  it("preserves the setup failure when pending sandbox cleanup also fails", async () => {
+    const { dependencies } = harness();
+    const setupError = new Error("sandbox creation failed");
+    dependencies.createSession.mockRejectedValue(setupError);
+    dependencies.closePending.mockRejectedValue(
+      new Error("pending sandbox cleanup failed"),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      runInFreshAutomationSandbox(input, dependencies),
+    ).rejects.toBe(setupError);
+
+    expect(dependencies.closePending).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("automation_pending_sandbox_cleanup_failed"),
+    );
+    consoleError.mockRestore();
   });
 
   it("uses a prepared snapshot without mutating its toolchain", async () => {

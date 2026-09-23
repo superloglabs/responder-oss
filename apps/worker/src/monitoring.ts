@@ -8,6 +8,7 @@ import { slackErrorLogFields } from "@responder/core/integrations/slack-live-car
 
 export interface WorkerErrorContext {
   operation:
+    | "automation"
     | "investigation"
     | "linear_ticket"
     | "pull_request_review"

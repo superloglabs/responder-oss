@@ -27,8 +27,13 @@ import { githubWebhookRoutes } from "./webhooks/github.js";
 import { sentryWebhookRoutes } from "./webhooks/sentry.js";
 import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
+import { discordWebhookRoutes } from "./webhooks/discord.js";
 import { scanRoutes } from "./scans/routes.js";
 import { suggestionRoutes } from "./suggestions/routes.js";
+import { automationModelBrokerRoutes } from "./automations/model-broker.js";
+import { automationRoutes } from "./automations/routes.js";
+import { createAutomationContextBrokerRoutes } from "./automations/context-broker.js";
+import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/db/organization-capabilities.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -393,20 +398,30 @@ export const app = instrumentedApp
     }
 
     return context.json({
+      capabilities: await listEnabledOrganizationCapabilities(
+        tenant.organizationId,
+      ),
       organizationId: tenant.organizationId,
       user: tenant.user,
     });
   })
+  .route("/api/automations", automationRoutes)
   .route("/api/agents", agentRoutes)
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)
   .route("/api/suggestions", suggestionRoutes)
+  .route("/api/automation-model-broker", automationModelBrokerRoutes)
+  .route(
+    "/api/automation-context-broker",
+    createAutomationContextBrokerRoutes(),
+  )
   .route("/api/integrations", integrationRoutes)
   .route("/api/webhooks/github", githubWebhookRoutes)
   .route("/api/webhooks/sentry", sentryWebhookRoutes)
   .route("/api/webhooks/dash0", dash0WebhookRoutes)
   .route("/api/webhooks/slack", slackWebhookRoutes)
+  .route("/api/webhooks/discord", discordWebhookRoutes)
   .post("/api/investigations", async (context) => {
     const authorization = context.req.header("authorization") ?? null;
     if (!authorization || !verifyBearerToken(authorization)) {

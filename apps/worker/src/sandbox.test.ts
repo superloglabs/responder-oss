@@ -4,6 +4,7 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
+  deleteDaytonaSandboxByName,
   type DaytonaCleanupDependencies,
   prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
@@ -177,6 +178,33 @@ describe("Daytona sandbox cleanup", () => {
       true,
     );
     expect(harness.sleep).toHaveBeenCalledWith(500);
+  });
+
+  it("reports when a pending sandbox never appears for deletion", async () => {
+    const harness = cleanupHarness({ missing: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      deleteDaytonaSandboxByName(
+        "responder-automation-run-1",
+        { daytonaApiKey: "daytona-test" },
+        harness.dependencies,
+      ),
+    ).rejects.toThrow("did not appear before cleanup timed out");
+
+    expect(harness.get).toHaveBeenCalledTimes(7);
+    expect(harness.sleep).toHaveBeenCalledWith(10_000);
+    expect(harness.reportException).toHaveBeenCalledWith(
+      expect.any(Error),
+      {
+        operation: "sandbox_cleanup",
+        sandboxId: "responder-automation-run-1",
+      },
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("daytona_pending_sandbox_not_found"),
+    );
+    consoleError.mockRestore();
   });
 
   it("enables provider-side deletion when a sandbox stops", async () => {

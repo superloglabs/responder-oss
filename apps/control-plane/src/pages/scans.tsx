@@ -50,7 +50,7 @@ type ScanSource = {
   id: string;
   kind: "account" | "github" | "vercel";
   name: string;
-  provider: Exclude<ProviderGlyphId, "google" | "scan">;
+  provider: Exclude<ProviderGlyphId, "discord" | "google" | "scan">;
   resourceLabel: string;
   resources: Array<{
     description: string;

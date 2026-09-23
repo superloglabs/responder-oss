@@ -24,6 +24,11 @@ import type {
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import type { SuggestionCodeChange } from "../suggestions/model.js";
+import type {
+  AutomationHarnessKind,
+  AutomationModelProvider,
+  AutomationTrigger,
+} from "../automations/config.js";
 import { organization, user } from "./auth-schema.js";
 
 /**
@@ -67,6 +72,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "vercel",
   "custom_mcp",
   "linear",
+  "discord",
 ]);
 
 export const integrationResourceKind = pgEnum("integration_resource_kind", [
@@ -74,6 +80,7 @@ export const integrationResourceKind = pgEnum("integration_resource_kind", [
   "sentry_project",
   "datadog_monitor",
   "vercel_project",
+  "discord_channel",
 ]);
 
 export const triggerKind = pgEnum("trigger_kind", [
@@ -134,6 +141,47 @@ export const instanceConfiguration = pgTable("instance_configuration", {
   updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const automationModelBrokerGrants = pgTable(
+  "automation_model_broker_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
+    leaseId: uuid("lease_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    provider: text("provider").$type<AutomationModelProvider>().notNull(),
+    model: text("model").notNull(),
+    encryptedCredentials: text("encrypted_credentials").notNull(),
+    credentialKeyVersion: integer("credential_key_version").notNull().default(1),
+    remainingRequests: integer("remaining_requests").notNull(),
+    remainingOutputTokens: integer("remaining_output_tokens").notNull(),
+    maxOutputTokensPerRequest: integer("max_output_tokens_per_request").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("automation_model_broker_grants_token_hash_idx").on(
+      table.tokenHash,
+    ),
+    index("automation_model_broker_grants_expires_idx").on(table.expiresAt),
+    index("automation_model_broker_grants_organization_run_idx").on(
+      table.organizationId,
+      table.runId,
+    ),
+    check(
+      "automation_model_broker_grants_request_budget_check",
+      sql`${table.remainingRequests} >= 0`,
+    ),
+    check(
+      "automation_model_broker_grants_output_budget_check",
+      sql`${table.remainingOutputTokens} >= 0 and ${table.maxOutputTokensPerRequest} > 0`,
+    ),
+  ],
+);
 
 export const agents = pgTable(
   "agents",
@@ -451,6 +499,365 @@ export const agentVersionSecrets = pgTable(
     primaryKey({
       columns: [table.agentConfigVersionId, table.workspaceSecretId],
     }),
+  ],
+);
+
+export type OrganizationCapability = "automations";
+
+export const organizationCapabilities = pgTable(
+  "organization_capabilities",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    capability: text("capability").$type<OrganizationCapability>().notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    updatedBy: uuid("updated_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.capability] }),
+  ],
+);
+
+export const organizationModelCredentials = pgTable(
+  "organization_model_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<AutomationModelProvider>().notNull(),
+    label: text("label").notNull(),
+    encryptedCredentials: text("encrypted_credentials").notNull(),
+    credentialKeyVersion: integer("credential_key_version").notNull().default(1),
+    status: text("status")
+      .$type<"active" | "invalid">()
+      .notNull()
+      .default("active"),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastFour: text("last_four").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("organization_model_credentials_organization_idx").on(
+      table.organizationId,
+    ),
+    uniqueIndex("organization_model_credentials_label_idx").on(
+      table.organizationId,
+      table.label,
+    ),
+  ],
+);
+
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    activeVersionId: uuid("active_version_id"),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automations_organization_updated_idx").on(
+      table.organizationId,
+      table.updatedAt,
+    ),
+    uniqueIndex("automations_organization_name_idx").on(
+      table.organizationId,
+      table.name,
+    ),
+  ],
+);
+
+export const automationVersions = pgTable(
+  "automation_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    prompt: text("prompt").notNull(),
+    harness: text("harness").$type<AutomationHarnessKind>().notNull(),
+    modelProvider: text("model_provider")
+      .$type<AutomationModelProvider>()
+      .notNull(),
+    model: text("model").notNull(),
+    modelCredentialId: uuid("model_credential_id")
+      .notNull()
+      .references(() => organizationModelCredentials.id, {
+        onDelete: "restrict",
+      }),
+    trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
+    connectionMode: text("connection_mode")
+      .$type<"all_selected">()
+      .notNull()
+      .default("all_selected"),
+    toolPolicy: text("tool_policy")
+      .$type<"full">()
+      .notNull()
+      .default("full"),
+    maxRuntimeSeconds: integer("max_runtime_seconds").notNull(),
+    maxModelRequests: integer("max_model_requests").notNull(),
+    maxOutputTokensPerRequest: integer("max_output_tokens_per_request")
+      .notNull(),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("automation_versions_automation_version_idx").on(
+      table.automationId,
+      table.version,
+    ),
+    index("automation_versions_automation_idx").on(table.automationId),
+    check(
+      "automation_versions_runtime_check",
+      sql`${table.maxRuntimeSeconds} between 60 and 3600`,
+    ),
+    check(
+      "automation_versions_model_request_check",
+      sql`${table.maxModelRequests} between 1 and 128`,
+    ),
+    check(
+      "automation_versions_output_tokens_check",
+      sql`${table.maxOutputTokensPerRequest} between 256 and 100000`,
+    ),
+  ],
+);
+
+export const automationVersionIntegrationAccounts = pgTable(
+  "automation_version_integration_accounts",
+  {
+    automationVersionId: uuid("automation_version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    integrationAccountId: uuid("integration_account_id")
+      .notNull()
+      .references(() => integrationAccounts.id, { onDelete: "restrict" }),
+    role: text("role").$type<"context" | "trigger">().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.automationVersionId,
+        table.integrationAccountId,
+        table.role,
+      ],
+    }),
+  ],
+);
+
+// Migration 0048 installs organization-scope triggers on every version link,
+// on version credentials, on active versions, and on run references. These
+// cross-table invariants cannot be expressed by the single-column Drizzle
+// foreign keys below without duplicating organization IDs in every join row.
+
+export const automationVersionRepositories = pgTable(
+  "automation_version_repositories",
+  {
+    automationVersionId: uuid("automation_version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    repositoryId: uuid("repository_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.automationVersionId, table.repositoryId] }),
+  ],
+);
+
+export const automationVersionSecrets = pgTable(
+  "automation_version_secrets",
+  {
+    automationVersionId: uuid("automation_version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    workspaceSecretId: uuid("workspace_secret_id")
+      .notNull()
+      .references(() => workspaceSecrets.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.automationVersionId, table.workspaceSecretId],
+    }),
+  ],
+);
+
+export type AutomationRunStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    automationVersionId: uuid("automation_version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "restrict" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<AutomationRunStatus>()
+      .notNull()
+      .default("pending"),
+    triggerInput: jsonb("trigger_input")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    redactedTrigger: jsonb("redacted_trigger")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    sandboxId: text("sandbox_id"),
+    harnessSessionId: text("harness_session_id"),
+    resultSummary: text("result_summary"),
+    usage: jsonb("usage").$type<Record<string, unknown>>(),
+    failureCategory: text("failure_category"),
+    failureMessage: text("failure_message"),
+    leaseId: uuid("lease_id"),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automation_runs_organization_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    index("automation_runs_automation_created_idx").on(
+      table.automationId,
+      table.createdAt,
+    ),
+    index("automation_runs_status_lease_idx").on(
+      table.status,
+      table.leaseExpiresAt,
+    ),
+    uniqueIndex("automation_runs_id_organization_lease_idx").on(
+      table.id,
+      table.organizationId,
+      table.leaseId,
+    ),
+  ],
+);
+
+export const automationTriggerReceipts = pgTable(
+  "automation_trigger_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    externalEventId: text("external_event_id").notNull(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("automation_trigger_receipts_event_idx").on(
+      table.automationId,
+      table.provider,
+      table.externalEventId,
+    ),
+  ],
+);
+
+export const automationRunEvents = pgTable(
+  "automation_run_events",
+  {
+    id: serial("id").primaryKey(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("automation_run_events_run_idx").on(table.runId, table.id)],
+);
+
+export const automationActionAttempts = pgTable(
+  "automation_action_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    toolCallId: text("tool_call_id").notNull(),
+    kind: text("kind")
+      .$type<"open_github_pull_request" | "send_slack_message">()
+      .notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    redactedInput: jsonb("redacted_input")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    status: text("status")
+      .$type<"pending" | "running" | "succeeded" | "failed">()
+      .notNull()
+      .default("pending"),
+    externalReference: text("external_reference"),
+    failureMessage: text("failure_message"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("automation_action_attempts_idempotency_idx").on(
+      table.idempotencyKey,
+    ),
+    index("automation_action_attempts_run_idx").on(table.runId),
   ],
 );
 

@@ -8,6 +8,10 @@ import {
 } from "./codex-automation-harness.js";
 
 const input = {
+  contextServers: [{
+    name: "slack_61616161616141618161616161616161",
+    url: "https://responder.test/api/automation-context-broker/v1/61616161-6161-4161-8161-616161616161",
+  }],
   model: {
     brokerBaseUrl: "https://models.responder.test/v1",
     model: "gpt-5.4",
@@ -74,6 +78,8 @@ describe("Codex automation harness", () => {
     expect(command).toContain(
       'shell_environment_policy.filters={ RESPONDER_MODEL_BROKER_TOKEN = "exclude" }',
     );
+    expect(command).toContain("mcp_servers.slack_61616161616141618161616161616161.url");
+    expect(command).toContain("bearer_token_env_var");
     expect(command).not.toContain(input.prompt);
     expect(command).not.toContain("CUSTOMER_PROVIDER_KEY");
   });
@@ -112,9 +118,6 @@ describe("Codex automation harness", () => {
       execCommand: vi
         .fn()
         .mockResolvedValueOnce(
-          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
-        )
-        .mockResolvedValueOnce(
           "Chunk ID: workspace\nProcess exited with code 1\nOutput:\n",
         ),
       materializeEntry: vi.fn().mockResolvedValue(undefined),
@@ -130,9 +133,6 @@ describe("Codex automation harness", () => {
     const session = {
       execCommand: vi
         .fn()
-        .mockResolvedValueOnce(
-          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
-        )
         .mockResolvedValueOnce(
           "Chunk ID: workspace\nProcess exited with code 42\nOutput:\n",
         ),

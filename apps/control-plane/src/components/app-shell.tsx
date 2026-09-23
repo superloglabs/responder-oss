@@ -7,7 +7,7 @@ import { BillingBanner } from "./billing-banner";
 import { ColorThemeToggle } from "./color-theme-toggle";
 
 interface AppShellProps {
-  active: "agents" | "issues" | "scans" | "settings" | "suggestions";
+  active: "agents" | "automations" | "issues" | "scans" | "settings" | "suggestions";
   children: ReactNode;
   density?:
     | "default"
@@ -26,6 +26,7 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
+  const [automationsEnabled, setAutomationsEnabled] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const displayName = session.data?.user.name || session.data?.user.email || "Account";
   const initials = displayName
@@ -34,6 +35,21 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/context")
+      .then(async (response) => response.ok
+        ? response.json() as Promise<{ capabilities?: string[] }>
+        : null)
+      .then((context) => {
+        if (!cancelled) {
+          setAutomationsEnabled(context?.capabilities?.includes("automations") ?? false);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [session.data?.session.activeOrganizationId]);
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -125,6 +141,15 @@ export function AppShell({ active, children, density = "default" }: AppShellProp
             >
               Agents
             </Link>
+            {automationsEnabled ? (
+              <Link
+                aria-current={active === "automations" ? "page" : undefined}
+                className={active === "automations" ? "isActive" : undefined}
+                to="/automations"
+              >
+                Automations
+              </Link>
+            ) : null}
             <Link
               aria-current={active === "issues" ? "page" : undefined}
               className={active === "issues" ? "isActive" : undefined}

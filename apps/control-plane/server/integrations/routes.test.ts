@@ -51,6 +51,7 @@ import {
 } from "../../../../packages/core/src/integrations/linear.js";
 import { langfuseProject } from "./langfuse.js";
 import { getActiveTenant } from "../tenant.js";
+import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   customMcpConnectionMetricEvent,
   integrationRoutes,
@@ -154,6 +155,10 @@ vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
 }));
 
+vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
+  organizationHasCapability: vi.fn(),
+}));
+
 const app = new Hono().route("/api/integrations", integrationRoutes);
 
 const tenant = {
@@ -178,6 +183,7 @@ function configureGitHub() {
 describe("integration callback routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
     vi.mocked(replaceIntegrationResourcesIfCredentialsMatch).mockResolvedValue(
       true,
     );
@@ -810,6 +816,30 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("hides Discord when automations are not enabled for the organization", async () => {
+    vi.mocked(organizationHasCapability).mockResolvedValue(false);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).not.toContainEqual(
+      expect.objectContaining({ id: "discord" }),
+    );
+  });
+
+  it("does not expose the Discord installation route without the capability", async () => {
+    vi.mocked(organizationHasCapability).mockResolvedValue(false);
+
+    const response = await app.request("/api/integrations/discord/start");
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unknown integration provider",
+    });
+  });
+
   it("starts Linear OAuth without replacing the connected account", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
@@ -985,6 +1015,10 @@ describe("integration callback routing", () => {
     [
       "slack",
       "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
+    ],
+    [
+      "discord",
+      "/api/integrations/discord/callback?state=oauth-state&code=oauth-code",
     ],
     [
       "supabase",

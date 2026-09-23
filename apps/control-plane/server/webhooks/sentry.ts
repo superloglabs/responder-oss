@@ -2,7 +2,9 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import { findAgentsForSentryIssue } from "../../../../packages/core/src/db/agents.js";
+import { findAutomationsForSentryIssue } from "../../../../packages/core/src/db/automations.js";
 import { queueInvestigation } from "../investigations/queue.js";
+import { queueAutomationRun } from "../automations/queue.js";
 
 const sentryIssueSchema = z
   .object({
@@ -199,9 +201,18 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
     installationId,
     projectId: issue.project.id,
   });
+  const automationMatches = await findAutomationsForSentryIssue({
+    action,
+    installationId,
+    projectId: issue.project.id,
+  });
+  const automationOccurrence = issue.lastSeen
+    ? createHash("sha256").update(issue.lastSeen, "utf8").digest("hex")
+    : payloadHash;
   try {
     await Promise.all(
-      matches.map((match) =>
+      [
+        ...matches.map((match) =>
         forwardSentryIssue({
           action,
           agentId: match.agentId,
@@ -209,13 +220,41 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
           issue,
           payloadHash,
           requestId: context.req.header("request-id"),
-        }),
-      ),
+        })),
+        ...automationMatches.map((match) =>
+          queueAutomationRun({
+            automationId: match.automationId,
+            trigger: {
+              attributes: {
+                action,
+                installationId,
+                issueId: issue.id,
+                projectId: issue.project.id,
+                projectName: issue.project.name ?? null,
+                projectSlug: issue.project.slug ?? null,
+              },
+              body: sentryIssueBody(issue),
+              externalEventId: action === "created"
+                ? `${installationId}:${issue.id}:${match.automationId}`
+                : `${installationId}:${issue.id}:${action}:${automationOccurrence}:${match.automationId}`,
+              provider: "sentry",
+              sourceUrl: issue.web_url ?? issue.permalink,
+              title: `${issue.shortId ?? issue.id}: ${issue.title}`.slice(0, 500),
+            },
+          })
+        ),
+      ],
     );
   } catch (error) {
     console.error("Unable to fan out Sentry issue", error);
     return context.json({ error: "Unable to start Sentry investigation" }, 502);
   }
 
-  return context.json({ ok: true, matchedAgents: matches.length });
+  return context.json({
+    ok: true,
+    matchedAgents: matches.length,
+    ...(automationMatches.length > 0
+      ? { matchedAutomations: automationMatches.length }
+      : {}),
+  });
 });

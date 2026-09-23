@@ -1,11 +1,13 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
   assertAutomationHarnessModelCompatibility,
+  assertAutomationWorkspaceHasNoSymlinkRedirects,
   automationWorkspaceRoot,
   type AutomationHarnessInput,
   type AutomationHarnessResult,
   modelBrokerTokenEnvironmentVariable,
   resolveAutomationWorkspacePath,
+  validateAutomationContextServers,
   validateBrokerBaseUrl,
 } from "./automation-harness.js";
 
@@ -35,6 +37,7 @@ export function buildCodexAutomationCommand(
   assertAutomationHarnessModelCompatibility("codex", input.model);
   const workspacePath = resolveAutomationWorkspacePath(input.workspacePath);
   const brokerBaseUrl = validateBrokerBaseUrl(input.model.brokerBaseUrl);
+  const contextServers = validateAutomationContextServers(input.contextServers);
   const args = [
     "exec",
     "--json",
@@ -68,6 +71,12 @@ export function buildCodexAutomationCommand(
     `shell_environment_policy.filters={ ${modelBrokerTokenEnvironmentVariable} = ${tomlString("exclude")} }`,
     "--config",
     "allow_login_shell=false",
+    ...contextServers.flatMap((server) => [
+      "--config",
+      `mcp_servers.${server.name}.url=${tomlString(server.url)}`,
+      "--config",
+      `mcp_servers.${server.name}.bearer_token_env_var=${tomlString(modelBrokerTokenEnvironmentVariable)}`,
+    ]),
     "-",
   ];
 
@@ -102,39 +111,15 @@ export async function prepareCodexAutomationHarness(
   }
 }
 
-async function assertAutomationWorkspaceHasNoSymlinkRedirects(
-  session: DaytonaSandboxSession,
-  workspacePath: string,
-): Promise<void> {
-  const resolvedWorkspacePath = resolveAutomationWorkspacePath(workspacePath);
-  const output = await session.execCommand({
-    cmd: [
-      "set -eu",
-      `unset ${modelBrokerTokenEnvironmentVariable}`,
-      `if [ ! -d ${shellQuote(resolvedWorkspacePath)} ]; then exit 42; fi`,
-      `resolved=$(realpath -e -- ${shellQuote(resolvedWorkspacePath)})`,
-      `[ "$resolved" = ${shellQuote(resolvedWorkspacePath)} ]`,
-    ].join("\n"),
-    maxOutputTokens: 100,
-    workdir: automationWorkspaceRoot,
-  });
-  if (!commandSucceeded(output)) {
-    if (/(?:^|\n)Process exited with code 42(?:\n|$)/u.test(output)) {
-      throw new Error("Automation workspace does not exist");
-    }
-    throw new Error("Automation workspace cannot use symlink redirects");
-  }
-}
-
 export async function runCodexAutomation(
   session: DaytonaSandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
-  await prepareCodexAutomationHarness(session);
   await assertAutomationWorkspaceHasNoSymlinkRedirects(
     session,
     input.workspacePath,
   );
+  await prepareCodexAutomationHarness(session);
   await session.materializeEntry({
     entry: { type: "file", content: input.prompt },
     path: promptPath,

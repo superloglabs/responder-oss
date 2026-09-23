@@ -1,4 +1,6 @@
 import {
+  automationRunJobSchema,
+  automationRunQueue,
   createJobBoss,
   investigationLocalConcurrency,
   investigationQueue,
@@ -80,6 +82,8 @@ import { processRemediationJob } from "./remediation-job.js";
 import { processPullRequestReviewJob } from "./pull-request-review-job.js";
 import { loadResponderSecrets } from "@responder/core/secrets";
 import { runInitialTriage } from "./initial-triage.js";
+import { processAutomationRun } from "./automation-run.js";
+import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -104,10 +108,27 @@ let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
 const pollers: {
+  brokerGrantCleanup?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
   replayRequest?: NodeJS.Timeout;
 } = {};
+
+async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
+  try {
+    const deleted = await purgeAutomationModelBrokerGrants();
+    if (deleted > 0) {
+      console.log(JSON.stringify({
+        deleted,
+        event: "automation_broker_grants_purged",
+      }));
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+}
 
 const replayRequestQueue = {
   send: (
@@ -295,6 +316,7 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   if (pollers.replayRequest) clearInterval(pollers.replayRequest);
+  if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
   await replayRequestDrain;
@@ -344,6 +366,10 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
   );
 
   return { marker: payload.marker, processedAt };
+});
+await boss.work(automationRunQueue, { localConcurrency: 2 }, async ([job]) => {
+  const payload = automationRunJobSchema.parse(job.data);
+  return processAutomationRun(job.id, payload, process.env);
 });
 await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
   const payload = linearTicketJobSchema.parse(job.data);
@@ -763,6 +789,12 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
 void drainInvestigationReplayRequests();
 void drainLinearTicketRequests();
 void drainAbandonedRemediationRequests();
+void purgeExpiredAutomationBrokerGrants();
+pollers.brokerGrantCleanup = setInterval(
+  () => void purgeExpiredAutomationBrokerGrants(),
+  60 * 60 * 1_000,
+);
+pollers.brokerGrantCleanup.unref();
 pollers.replayRequest = setInterval(
   () => void drainInvestigationReplayRequests(),
   2_000,

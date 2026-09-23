@@ -17,9 +17,15 @@ export interface AutomationModelRoute {
 }
 
 export interface AutomationHarnessInput {
+  contextServers: AutomationContextServer[];
   model: AutomationModelRoute;
   prompt: string;
   workspacePath: string;
+}
+
+export interface AutomationContextServer {
+  name: string;
+  url: string;
 }
 
 export interface AutomationHarnessResult {
@@ -75,6 +81,34 @@ export function resolveAutomationWorkspacePath(workspacePath: string): string {
   return resolved;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+export async function assertAutomationWorkspaceHasNoSymlinkRedirects(
+  session: DaytonaSandboxSession,
+  workspacePath: string,
+): Promise<void> {
+  const resolvedWorkspacePath = resolveAutomationWorkspacePath(workspacePath);
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `unset ${modelBrokerTokenEnvironmentVariable}`,
+      `if [ ! -d ${shellQuote(resolvedWorkspacePath)} ]; then exit 42; fi`,
+      `resolved=$(realpath -e -- ${shellQuote(resolvedWorkspacePath)})`,
+      `[ "$resolved" = ${shellQuote(resolvedWorkspacePath)} ]`,
+    ].join("\n"),
+    maxOutputTokens: 100,
+    workdir: automationWorkspaceRoot,
+  });
+  if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
+    if (/(?:^|\n)Process exited with code 42(?:\n|$)/u.test(output)) {
+      throw new Error("Automation workspace does not exist");
+    }
+    throw new Error("Automation workspace cannot use symlink redirects");
+  }
+}
+
 export function validateBrokerBaseUrl(value: string): string {
   let url: URL;
   try {
@@ -91,4 +125,17 @@ export function validateBrokerBaseUrl(value: string): string {
     );
   }
   return url.toString().replace(/\/$/u, "");
+}
+
+export function validateAutomationContextServers(
+  servers: AutomationContextServer[],
+): AutomationContextServer[] {
+  const names = new Set<string>();
+  return servers.map((server) => {
+    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(server.name) || names.has(server.name)) {
+      throw new Error("Automation context server names must be unique identifiers");
+    }
+    names.add(server.name);
+    return { name: server.name, url: validateBrokerBaseUrl(server.url) };
+  });
 }

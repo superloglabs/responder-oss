@@ -5,6 +5,7 @@ export const providerGlyphs = {
   custom_mcp: { label: "Custom MCP", text: "MCP" },
   datadog: { label: "Datadog", logo: "datadog" },
   dash0: { label: "Dash0", text: "D0" },
+  discord: { label: "Discord", text: "DC" },
   posthog: { label: "PostHog", text: "PH" },
   github: { label: "GitHub", logo: "github" },
   gcp: { label: "Google Cloud", logo: "google" },
@@ -42,7 +43,7 @@ export const contextCategoryDescriptions: Record<ContextCategory, string> = {
 };
 
 export const contextProviderMetadata: Record<
-  Exclude<ProviderGlyphId, "google" | "scan">,
+  Exclude<ProviderGlyphId, "discord" | "google" | "scan">,
   { category: ContextCategory; searchTerms: string }
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },

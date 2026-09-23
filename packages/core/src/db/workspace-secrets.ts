@@ -4,6 +4,9 @@ import {
   agentConfigVersions,
   agentVersionSecrets,
   agents,
+  automations,
+  automationVersions,
+  automationVersionSecrets,
   workspaceSecrets,
 } from "./schema.js";
 import { isWorkspaceSecretEnvironmentVariableName } from "../workspace-secret-names.js";
@@ -116,5 +119,31 @@ export async function getRuntimeWorkspaceSecrets(
       ),
     )
     .where(eq(agentVersionSecrets.agentConfigVersionId, agentConfigVersionId))
+    .orderBy(asc(workspaceSecrets.name));
+}
+
+export async function getAutomationRuntimeWorkspaceSecrets(
+  automationVersionId: string,
+): Promise<RuntimeWorkspaceSecret[]> {
+  return getDatabase()
+    .select({
+      environmentVariable: workspaceSecrets.name,
+      daytonaSecretName: workspaceSecrets.daytonaSecretName,
+      allowedHosts: workspaceSecrets.allowedHosts,
+    })
+    .from(automationVersionSecrets)
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automationVersionSecrets.automationVersionId),
+    )
+    .innerJoin(automations, eq(automations.id, automationVersions.automationId))
+    .innerJoin(
+      workspaceSecrets,
+      and(
+        eq(workspaceSecrets.id, automationVersionSecrets.workspaceSecretId),
+        eq(workspaceSecrets.organizationId, automations.organizationId),
+      ),
+    )
+    .where(eq(automationVersionSecrets.automationVersionId, automationVersionId))
     .orderBy(asc(workspaceSecrets.name));
 }

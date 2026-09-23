@@ -10,6 +10,7 @@ initializeServerMonitoring();
 
 const { productionApp } = await import("./production-app.js");
 const { closeInvestigationQueue } = await import("./investigations/queue.js");
+const { closeAutomationQueue } = await import("./automations/queue.js");
 const { startScanScheduler, stopScanScheduler } = await import(
   "./scans/scheduler.js"
 );
@@ -63,7 +64,10 @@ async function shutdown(signal: NodeJS.Signals) {
       );
       process.exitCode = 1;
     }
-    await closeInvestigationQueue().catch((queueError: unknown) => {
+    await Promise.all([
+      closeInvestigationQueue(),
+      closeAutomationQueue(),
+    ]).catch((queueError: unknown) => {
       console.error(
         JSON.stringify({
           event: "control_plane_queue_shutdown_error",

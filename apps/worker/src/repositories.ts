@@ -13,6 +13,7 @@ import {
   getRuntimeRepositories,
   type RuntimeRepository,
 } from "@responder/core/db/investigations";
+import { getAutomationRuntimeRepositories } from "@responder/core/db/automations";
 import {
   createGitHubInstallationToken,
   githubAppHeaders,
@@ -616,6 +617,22 @@ export async function checkoutRuntimeRepositories(
   return checkoutRuntimeRepositoriesWithRefs(
     session,
     versionId,
+    new Map(),
+    dependencies,
+  );
+}
+
+export async function checkoutAutomationRuntimeRepositories(
+  session: DaytonaSandboxSession,
+  automationVersionId: string,
+  dependencies: RepositoryCheckoutDependencies = {
+    ...defaultDependencies,
+    getRepositories: getAutomationRuntimeRepositories,
+  },
+): Promise<CheckedOutRepository[]> {
+  return checkoutRuntimeRepositoriesWithRefs(
+    session,
+    automationVersionId,
     new Map(),
     dependencies,
   );
