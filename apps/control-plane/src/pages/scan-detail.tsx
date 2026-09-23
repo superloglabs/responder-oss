@@ -1,17 +1,67 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
+import { CaretRightIcon } from "@phosphor-icons/react";
 import { fetchScan } from "../scans-api";
 import { AppShell } from "../components/app-shell";
-import { ArrowRightIcon as ArrowIcon } from "@phosphor-icons/react";
-import "./scan-suggestions.css";
 import { DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
-import {
-  findingsForScan,
-  scanRuns,
-  type ScanFinding,
-  type ScanRun,
-} from "./scan-data";
+import "./scan-suggestions.css";
+import { findingsForScan, scanRuns, type ScanFinding, type ScanRun } from "./scan-data";
+
+function scanDateLabel(startedAt: string): string {
+  const parts = new Intl.DateTimeFormat(undefined, {
+    month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(startedAt));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("month")} ${part("day")}, ${part("hour")}:${part("minute")}`;
+}
+
+function FindingSection({ findings, isStoryboard, label }: {
+  findings: ScanFinding[];
+  isStoryboard: boolean;
+  label: string;
+}) {
+  if (findings.length === 0) return null;
+  return (
+    <section aria-label={label} className="scanFindingSection">
+      <h2 className="scanFindingSection__heading">{label} <span>{findings.length}</span></h2>
+      <div className="scanFindingsTable">
+        <DataTable
+          aria-label={`${label} in this scan`}
+          columns={[
+            {
+              header: "Finding", key: "finding", width: "59.3%",
+              render: (finding) => (
+                <span className="scanFindingTitle">
+                  <strong>{finding.title}</strong>
+                  <small>{finding.evidence}</small>
+                </span>
+              ),
+            },
+            { header: "Source", key: "source", width: "13.8%", render: (finding) => finding.source },
+            { header: "Severity", key: "severity", width: "11.6%", render: (finding) => finding.severity },
+            {
+              header: "Issue", key: "issue", width: "15.3%",
+              render: (finding) => (
+                <Link
+                  aria-label={`Open ${finding.issueLabel}`}
+                  className="scanFindingIssue"
+                  to={isStoryboard ? "/issues" : `/issues/${finding.id}`}
+                >
+                  <span>{finding.issueLabel}</span>
+                  <CaretRightIcon aria-hidden="true" size={12} />
+                </Link>
+              ),
+            },
+          ]}
+          getRowKey={(finding) => finding.id}
+          rows={findings}
+        />
+      </div>
+    </section>
+  );
+}
 
 export function ScanDetailPage() {
   const { scanId } = useParams();
@@ -50,9 +100,7 @@ export function ScanDetailPage() {
       } finally {
         if (!cancelled) {
           setLoading(false);
-          if (pollAgain) {
-            timer = window.setTimeout(() => void loadScan(), 5_000);
-          }
+          if (pollAgain) timer = window.setTimeout(() => void loadScan(), 5_000);
         }
       }
     }
@@ -64,146 +112,53 @@ export function ScanDetailPage() {
   }, [isStoryboard, scanId]);
 
   useDocumentTitle(scan ? `Scan · ${scan.startedLabel}` : "Scan");
-
   if (isStoryboard && !scan) return <Navigate replace to={scansPath} />;
 
-  const existingIssues = scan ? scan.activeIssues - scan.filedIssues : 0;
+  const newFindings = findings.filter((finding) => finding.outcome === "filed");
+  const existingFindings = findings.filter((finding) => finding.outcome === "existing");
 
   return (
     <AppShell active="scans" density="scans" redesigned>
       <div className="scanDetail">
-        <Link className="scanDetailBack" to={scansPath}>
-          <ArrowIcon />
-          Scans
-        </Link>
-
+        <nav aria-label="Breadcrumb" className="workspaceBreadcrumb">
+          <Link to={scansPath}>Scans</Link>
+          <span aria-hidden="true">›</span>
+          <span>Scan details</span>
+        </nav>
         {loading ? <p>Loading scan…</p> : null}
         {error ? <p className="formError">{error}</p> : null}
         {scan ? (
           <>
-            <section className="pageHeading scanDetailHeading">
-              <div>
-                <h1>{scan.startedLabel}</h1>
+            <header className="scanDetailHeading">
+              <h1>{scanDateLabel(scan.startedAt)}</h1>
+              <span className={`scanRunStatus scanRunStatus--${scan.status}`}>
+                <span aria-hidden="true" />
+                {scan.status === "completed" ? "Completed" : scan.status === "running" ? "Running" : "Failed"}
+              </span>
+            </header>
+            {findings.length === 0 ? (
+              <section className="emptyState emptyState--list">
+                <h2>
+                  {scan.status === "running"
+                    ? "Scan in progress"
+                    : scan.status === "failed"
+                      ? "Scan did not complete"
+                      : "No active issues found"}
+                </h2>
                 <p>
-                  {scan.status === "failed"
-                    ? `Scan failed${scan.failureReason ? `: ${scan.failureReason}` : "."}`
-                    : scan.status === "running"
-                      ? `Checking ${scan.sources} integrations now.`
-                      : `Completed in ${scan.duration} across ${scan.sources} integrations.`}
+                  {scan.status === "running"
+                    ? "Findings will appear here as soon as the scan completes."
+                    : scan.status === "failed"
+                      ? scan.failureReason ?? "Try running the scan again."
+                      : "This scan did not identify a problem that needed filing."}
                 </p>
+              </section>
+            ) : (
+              <div className="scanDetailFindings">
+                <FindingSection findings={newFindings} isStoryboard={isStoryboard} label="New issues" />
+                <FindingSection findings={existingFindings} isStoryboard={isStoryboard} label="Existing issues" />
               </div>
-            </section>
-
-            <dl className="scanDetailStats">
-              <div>
-                <dt>Active findings</dt>
-                <dd>{scan.activeIssues}</dd>
-              </div>
-              <div>
-                <dt>New issues filed</dt>
-                <dd>{scan.filedIssues}</dd>
-              </div>
-              <div>
-                <dt>Already filed</dt>
-                <dd>{existingIssues}</dd>
-              </div>
-              <div>
-                <dt>Posted to Slack</dt>
-                <dd>{scan.slackChannelName ? `#${scan.slackChannelName.replace(/^#/, "")}` : "—"}</dd>
-              </div>
-            </dl>
-
-            <section aria-labelledby="scan-findings-title" className="scanFindings">
-              <div className="scanSectionHeading">
-                <h2 id="scan-findings-title">Findings</h2>
-                <p>Active issues found across the integrations in this scan.</p>
-              </div>
-              {findings.length === 0 ? (
-                <section className="emptyState emptyState--list">
-                  <h2>
-                    {scan.status === "running"
-                      ? "Scan in progress"
-                      : scan.status === "failed"
-                        ? "Scan did not complete"
-                        : "No active issues found"}
-                  </h2>
-                  <p>
-                    {scan.status === "running"
-                      ? "Findings will appear here as soon as the scan completes."
-                      : scan.status === "failed"
-                        ? scan.failureReason ?? "Try running the scan again."
-                        : "This scan did not identify a problem that needed filing."}
-                  </p>
-                </section>
-              ) : (
-                <div className="scanFindingsTable">
-                  <DataTable
-                    aria-label="Scan findings"
-                    columns={[
-                      {
-                        header: "Finding",
-                        key: "finding",
-                        render: (finding) => (
-                          <span className="scanFindingTitle">
-                            <strong>{finding.title}</strong>
-                            <small>{finding.evidence}</small>
-                          </span>
-                        ),
-                        width: "52%",
-                      },
-                      {
-                        header: "Source",
-                        key: "source",
-                        render: (finding) => finding.source,
-                        width: "13%",
-                      },
-                      {
-                        header: "Severity",
-                        key: "severity",
-                        render: (finding) => (
-                          <span
-                            className={`issueTableSeverity issueTableSeverity--${finding.severity.toLowerCase()}`}
-                          >
-                            {finding.severity}
-                          </span>
-                        ),
-                        width: "12%",
-                      },
-                      {
-                        header: "Result",
-                        key: "result",
-                        render: (finding) => (
-                          <span className="scanFindingResult">
-                            <strong>
-                              {finding.outcome === "filed" ? "Filed" : "Already filed"}
-                            </strong>
-                            <small>{finding.issueLabel}</small>
-                          </span>
-                        ),
-                        width: "18%",
-                      },
-                      {
-                        align: "right",
-                        header: "",
-                        key: "open",
-                        render: (finding) => (
-                          <Link
-                            aria-label={`Open ${finding.issueLabel}`}
-                            className="issueTableArrow"
-                            to={isStoryboard ? "/issues" : `/issues/${finding.id}`}
-                          >
-                            <ArrowIcon />
-                          </Link>
-                        ),
-                        width: "5%",
-                      },
-                    ]}
-                    getRowKey={(finding) => finding.id}
-                    rows={findings}
-                  />
-                </div>
-              )}
-            </section>
+            )}
           </>
         ) : null}
       </div>

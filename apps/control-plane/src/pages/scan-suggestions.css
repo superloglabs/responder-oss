@@ -65,12 +65,31 @@
   .appShell--workspace .suggestionDetail__header { gap: 12px; }
   .suggestionRelatedIssue { flex-wrap: wrap; }
 }
-.appShell--workspace .scanDetail { display: flex; flex-direction: column; gap: 24px; }
-.appShell--workspace .scanDetailHeading { margin: 0; padding: 0; }
-.appShell--workspace .scanDetailHeading h1 { font-size: 15px; font-weight: 600; line-height: 23px; }
-.appShell--workspace .scanDetailHeading p { font-size: 13px; line-height: 23px; }
-.appShell--workspace .scanDetailStats { display: flex; flex-wrap: wrap; gap: 32px; padding: 0; border: 0; }
-.appShell--workspace .scanDetailStats > div { flex: 1; }
+.appShell--workspace .scanDetail { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 0; }
+.appShell--workspace .scanDetailHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 23px; margin: 0; padding: 0; }
+.appShell--workspace .scanDetailHeading h1 { margin: 0; color: #121212; font-size: 15px; font-weight: 600; line-height: 23px; }
+.appShell--workspace .scanDetailHeading .scanRunStatus { min-width: 128px; color: #2c805e; font-size: 12px; }
+.appShell--workspace .scanDetailHeading .scanRunStatus > span { width: 6px; height: 6px; background: currentColor; }
+.appShell--workspace .scanDetailHeading .scanRunStatus--running { color: #806600; }
+.appShell--workspace .scanDetailHeading .scanRunStatus--failed { color: #b52e35; }
+.scanDetailFindings { display: flex; flex-direction: column; gap: 24px; margin-top: 12px; }
+.scanFindingSection { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.appShell--workspace .scanFindingSection__heading { display: flex; align-items: center; gap: 8px; height: 16px; margin: 0; padding-left: 12px; color: #444; font-size: 13px; font-weight: 400; line-height: 16px; }
+.scanFindingSection__heading span { color: #666; font-size: 12px; }
+.appShell--workspace .scanFindingsTable .dsDataTable { border: .5px solid #e6e8ec; border-radius: 12px; background: #fafafa; box-shadow: 0 1px 2px #00000008; overflow-x: auto; }
+.appShell--workspace .scanFindingsTable table { width: 100%; min-width: 640px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.appShell--workspace .scanFindingsTable .dsDataTable th { height: 35px; padding: 7px 12px; border-bottom: 0; background: #fafafa; color: #1a1a1a; font-size: 13px; font-weight: 500; line-height: 20px; text-transform: none; letter-spacing: normal; }
+.appShell--workspace .scanFindingsTable .dsDataTable td { height: 59px; padding: 9px 12px; border-top: .5px solid #e6e8ec; border-bottom: 0; background: #fff; color: #1a1a1a; font-size: 13px; line-height: 20px; }
+.appShell--workspace .scanFindingsTable :is(th, td):not(:last-child) { border-right: .5px solid #e6e8ec; }
+.appShell--workspace .scanFindingsTable tbody tr:first-child td:first-child { border-top-left-radius: 12px; }
+.appShell--workspace .scanFindingsTable tbody tr:first-child td:last-child { border-top-right-radius: 12px; }
+.appShell--workspace .scanFindingsTable tbody tr:hover td { background: #fafafa; }
+.appShell--workspace .scanFindingTitle strong { color: #1a1a1a; font-size: 13px; font-weight: 400; line-height: 20px; }
+.appShell--workspace .scanFindingTitle small { color: #666; font-size: 12px; line-height: 18px; }
+.scanFindingIssue { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; color: #1a1a1a; font-size: 13px; line-height: 20px; text-decoration: none; }
+.scanFindingIssue svg { flex-shrink: 0; color: #666; }
+.scanFindingIssue:hover span { text-decoration: underline; }
+.scanFindingIssue:focus-visible { outline: 2px solid #444; outline-offset: 2px; }
 
 .suggestionStatusFilters button:hover { background: #eee; color: #202020; }
 .suggestionStatusFilters button:focus-visible { outline: 2px solid #777; outline-offset: 2px; }
