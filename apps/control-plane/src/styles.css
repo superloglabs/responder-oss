@@ -2845,6 +2845,10 @@ button:disabled {
   flex: 1 1 auto;
 }
 
+.agentListTable .dsDataTable th {
+  border-bottom: 0;
+}
+
 .agentListTable .dsDataTable td {
   height: 64px;
 }
