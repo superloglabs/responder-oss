@@ -25,6 +25,12 @@ vi.mock("@sentry/node", () => ({
   ),
 }));
 
+vi.mock("@responder/core/observability/sentry-identity", () => ({
+  organizationErrorTags: async (id?: string) => id
+    ? { organization_id: id, organization_name: "Acme" }
+    : {},
+}));
+
 describe("worker error monitoring", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -36,6 +42,17 @@ describe("worker error monitoring", () => {
     sentryMocks.scope.setContext.mockClear();
     sentryMocks.scope.setTag.mockClear();
     sentryMocks.withScope.mockClear();
+  });
+
+  it("adds organization names to captured errors", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    await monitoring.reportWorkerException(new Error("failed"), {
+      operation: "investigation", organizationId: "org-1",
+    });
+    expect(sentryMocks.scope.setTag).toHaveBeenCalledWith("organization_id", "org-1");
+    expect(sentryMocks.scope.setTag).toHaveBeenCalledWith("organization_name", "Acme");
+    expect(sentryMocks.captureException).toHaveBeenCalled();
   });
 
   it("stays disabled when no DSN is configured", async () => {

@@ -8,6 +8,12 @@ const sentryMocks = vi.hoisted(() => ({
 
 vi.mock("@sentry/hono/node", () => sentryMocks);
 
+vi.mock("@responder/core/observability/sentry-identity", () => ({
+  organizationErrorTags: async (id?: string) => id
+    ? { organization_id: id, organization_name: "Acme" }
+    : {},
+}));
+
 describe("control-plane error monitoring", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -46,6 +52,16 @@ describe("control-plane error monitoring", () => {
         tracesSampleRate: 0,
       }),
     );
+
+    const beforeSend = sentryMocks.init.mock.calls[0]![0].beforeSend;
+    const event = await beforeSend({
+      tags: { organization_id: "org-1" },
+      user: { id: "user-1", username: "Ada" },
+      request: { cookies: { session: "secret" }, url: "https://example.com/api?token=secret" },
+    });
+    expect(event.tags).toEqual({ organization_id: "org-1", organization_name: "Acme" });
+    expect(event.user).toEqual({ id: "user-1", username: "Ada" });
+    expect(event.request).toEqual({ url: "https://example.com/api" });
 
     sentryMocks.isInitialized.mockReturnValue(true);
     expect(monitoring.initializeServerMonitoring(environment)).toBe(true);

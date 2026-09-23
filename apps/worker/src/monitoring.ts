@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/node";
+import { organizationErrorTags } from "@responder/core/observability/sentry-identity";
 import type { Event } from "@sentry/node";
 import {
   sentryEnvironment,
@@ -184,7 +185,11 @@ export async function reportWorkerException(
   if (!errorMonitoringEnabled) return;
 
   try {
+    const organizationTags = await organizationErrorTags(context.organizationId);
     Sentry.withScope((scope) => {
+      for (const [key, value] of Object.entries(organizationTags)) {
+        scope.setTag(key, value);
+      }
       const { diagnostics, ...responderContext } = context;
       scope.setTag("responder.operation", context.operation);
       scope.setContext("responder", responderContext);
