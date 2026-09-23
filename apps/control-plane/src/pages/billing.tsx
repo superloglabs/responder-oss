@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/app-shell";
 import { BillingSkeleton } from "../components/screen-skeletons";
-import { SettingsTabs } from "../components/settings-tabs";
+import { SettingsHeading } from "../components/settings-heading";
 import { useDocumentTitle } from "../use-document-title";
 
 interface BillingSummary {
@@ -85,13 +85,8 @@ export function BillingPage() {
     : 0;
 
   return (
-    <AppShell active="settings" density="settings">
-      <section className="settingsHeading">
-        <h1>Settings</h1>
-        <p>Manage your workspace, members, and connected services.</p>
-      </section>
-
-      <SettingsTabs active="billing" />
+    <AppShell active="settings" density="settings" redesigned>
+      <SettingsHeading active="billing" />
 
       {notice ? <p className="settingsNotice settingsNotice--success">{notice}</p> : null}
       {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}

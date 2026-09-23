@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { IconButton } from "../design-system";
-import { CogIcon, ProviderGlyph } from "./icons";
+import { Button, IconButton } from "../design-system";
+import { ProviderGlyph } from "./icons";
+import { GearIcon as CogIcon } from "@phosphor-icons/react";
 import type { ProviderGlyphId } from "./provider-glyphs";
 
 type ProviderId = Exclude<ProviderGlyphId, "google" | "scan">;
@@ -53,6 +54,7 @@ export function AgentContextIntegrationControls({
   onConfigure,
   onToggle,
   toggleAriaLabel,
+  showConfigureLabel = false,
 }: {
   disabled?: boolean;
   enabled: boolean;
@@ -60,10 +62,11 @@ export function AgentContextIntegrationControls({
   onConfigure?: () => void;
   onToggle: () => void;
   toggleAriaLabel?: string;
+  showConfigureLabel?: boolean;
 }) {
   return (
     <div className="contextIntegrationControls">
-      {onConfigure ? (
+      {onConfigure && showConfigureLabel ? <Button aria-label={`Manage ${label}`} disabled={disabled} onClick={onConfigure} size="small" type="button" variant="secondary">Manage</Button> : onConfigure ? (
         <IconButton
           aria-label={`Configure ${label}`}
           disabled={disabled}

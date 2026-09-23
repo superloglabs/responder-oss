@@ -1,21 +1,25 @@
+import { IssueSeverity } from "../components/issue-severity";
+import {
+  ArchiveIcon,
+  CaretRightIcon as ArrowIcon,
+  GitPullRequestIcon as PullRequestIcon,
+  InfoIcon as StatusDotIcon,
+} from "@phosphor-icons/react";
 import { Fragment, lazy, Suspense, useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import {
   createIssuePullRequest,
   fetchIssue,
+  relativeTime,
   setIssueArchived,
   type InvestigationTraceEvent,
   type IssueDetailResponse,
   type IssuePullRequestActivity,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
-import { EvidenceList, EvidenceSourceGlyph } from "../components/evidence-list";
+import { EvidenceList } from "../components/evidence-list";
 import {
-  ArrowIcon,
   ProviderGlyph,
-  PullRequestIcon,
-  SeverityIcon,
-  StatusDotIcon,
 } from "../components/icons";
 import { IssueDetailSkeleton } from "../components/screen-skeletons";
 import { copyToClipboard } from "../copy-to-clipboard";
@@ -24,7 +28,6 @@ import { useDocumentTitle } from "../use-document-title";
 import {
   evidenceSourceLabel,
   groupPullRequestActivities,
-  investigationCountLabel,
   investigationStatusTone,
   issueIdentifiedAt,
   issueParagraphs,
@@ -40,7 +43,6 @@ import {
 } from "./issue-detail-presentation";
 import { toolInputSummary, traceEventText } from "./investigation-presentation";
 
-const severityBars = { "SEV-1": 3, "SEV-2": 2, "SEV-3": 1 } as const;
 const RemediationDiff = lazy(() =>
   import("../components/remediation-diff").then((module) => ({
     default: module.RemediationDiff,
@@ -404,14 +406,14 @@ export function IssueDetailPage() {
   if (notFound || !issueId) return <Navigate replace to="/issues" />;
   if (loading) {
     return (
-      <AppShell active="issues" density="compact">
+      <AppShell redesigned active="issues" density="compact">
         <IssueDetailSkeleton />
       </AppShell>
     );
   }
   if (!detail) {
     return (
-      <AppShell active="issues" density="compact">
+      <AppShell redesigned active="issues" density="compact">
         <section className="emptyState">
           <h1>Unable to load issue</h1>
           <p>{error ?? "Try again in a moment."}</p>
@@ -482,59 +484,74 @@ export function IssueDetailPage() {
   }
 
   return (
-    <AppShell active="issues" density="compact">
+    <AppShell redesigned active="issues" density="compact">
       <div className="issueDetail">
         <div className="issueDetail__main">
           <header className="issueHeader">
-            <Link className="issueHeader__back" to="/issues">
-              ← Issues
-            </Link>
-            <div className="issueHeader__meta">
-              <span className="issueSeverityBadge">{issue.severity}</span>
-              {issue.archivedAt ? (
-                <span className="archivedBadge">Archived</span>
-              ) : null}
-              <span>Identified {issueIdentifiedAt(issue.createdAt)}</span>
-              <span aria-hidden="true" className="issueHeader__separator">
-                ·
-              </span>
-              <span>{investigationCountLabel(investigations.length)}</span>
+            <nav className="workspaceBreadcrumb" aria-label="Breadcrumb">
+              <Link to="/issues">Issues</Link><ArrowIcon size={12} aria-hidden="true" /><span>Issue details</span>
+            </nav>
+            <div className="issueHeader__titleRow">
+              <h1>{issue.title}</h1>
+              <Button
+                aria-live="polite"
+                className="issueArchiveButton"
+                disabled={archivePending}
+                loading={archivePending}
+                onClick={() => void toggleArchived()}
+                size="small"
+                variant="secondary"
+              >
+                {!archivePending ? <ArchiveIcon aria-hidden="true" size={16} weight={issue.archivedAt ? "fill" : "regular"} /> : null}
+                {archivePending ? "Saving…" : issue.archivedAt ? "Unarchive" : "Archive"}
+              </Button>
             </div>
-            <h1>{issue.title}</h1>
           </header>
 
-          {error ? <p className="formError">{error}</p> : null}
+          {error ? <p className="formError" role="alert">{error}</p> : null}
 
-          <div className="issueProse">
-            {issueParagraphs(issue.description).map((paragraph, index) => (
-              <p key={index}>{paragraph}</p>
-            ))}
+          <div className="issueOverview">
+            <div className="issueOverview__copy">
+              <div className="issueProse">
+                {issueParagraphs(issue.description).map((paragraph, index) => (
+                  <p key={index}>{paragraph}</p>
+                ))}
+              </div>
+
+              <section className="issueSection issueRootCause">
+                <h2 className="issueSection__title">Root cause</h2>
+                <p className="issueSection__copy">
+                  {issue.rootCause || "Not recorded."}
+                </p>
+              </section>
+            </div>
+            <aside className="issueRail">
+              <div className="issueRail__group">
+                <h2 className="issueRail__title">Properties</h2>
+                <div className="issueRail__row">
+                  <span className="issueRail__label">Severity</span>
+                  <IssueSeverity severity={issue.severity} />
+                </div>
+                <div className="issueRail__row">
+                  <span className="issueRail__label">Agent</span>
+                  <span className="issueRail__value">{agentName ?? "—"}</span>
+                </div>
+                <div className="issueRail__row">
+                  <span className="issueRail__label">Source</span>
+                  <span className="issueRail__value">
+                    {source ? evidenceSourceLabel(source) : "—"}
+                  </span>
+                </div>
+                <div className="issueRail__row">
+                  <span className="issueRail__label">Identified</span>
+                  <time className="issueRail__value" dateTime={issue.createdAt} title={issueIdentifiedAt(issue.createdAt)}>{relativeTime(issue.createdAt)}</time>
+                </div>
+              </div>
+
+            </aside>
           </div>
 
-          <section className="issueSection">
-            <h2 className="issueSection__title">Root cause</h2>
-            <p className="issueSection__copy">
-              {issue.rootCause || "Not recorded."}
-            </p>
-          </section>
-
-          <section className="issueSection">
-            <h2 className="issueSection__title">Timeline</h2>
-            {issue.timeline.length > 0 ? (
-              <ol className="issueTimeline">
-                {issue.timeline.map((entry, index) => (
-                  <li key={`${entry.title}-${index}`}>
-                    <strong>{entry.title}</strong>
-                    <p>{entry.description}</p>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="issueSection__copy">Not recorded.</p>
-            )}
-          </section>
-
-          <section className="issueSection">
+          <section className="issueSection issueRemediations">
             <h2 className="issueSection__title">Remediations</h2>
             <div className="remediationList">
               {issue.remediations.map((remediation) => {
@@ -567,6 +584,61 @@ export function IssueDetailPage() {
                           : "External action"}
                       </span>
                       <h3>{remediation.title}</h3>
+                    {remediation.type === "code_change" && publishedPullRequest ? null : (
+                      <div className="remediationCard__actions">
+                        {remediation.type === "code_change" ? (
+                          <>
+                            {failedPullRequest?.failureReason ? (
+                              <span className="remediationCard__failure">
+                                {failedPullRequest.failureReason}
+                              </span>
+                            ) : null}
+                            {request &&
+                            ["queued", "creating"].includes(request.status) ? (
+                              <span className="remediationCard__status">
+                                Opening pull request…
+                              </span>
+                            ) : (
+                              <Button
+                                disabled={!detail.pullRequestState.canCreate}
+                                title={!detail.pullRequestState.canCreate
+                                  ? pullRequests.some((candidate) => ["queued", "creating", "created", "merged"].includes(candidate.status))
+                                    ? "A pull request already exists or is in progress for this issue."
+                                    : "Enable a linked agent with pull request fixes configured to open a pull request."
+                                  : undefined}
+                                loading={pullRequestPending === remediation.id}
+                                onClick={() => void createPullRequest(remediation.id)}
+                                size="small"
+                                variant="primary"
+                              >
+                                <PullRequestIcon size={14} aria-hidden="true" />
+                                {pullRequestPending === remediation.id
+                                  ? "Starting…"
+                                  : failedPullRequest
+                                    ? "Retry pull request"
+                                    : "Open pull request"}
+                              </Button>
+                            )}
+                          </>
+                        ) : (
+                          <Button
+                            aria-live="polite"
+                            onClick={() =>
+                              void copyPrompt(
+                                remediation.id,
+                                remediation.agentPrompt,
+                              )
+                            }
+                            size="small"
+                            variant="secondary"
+                          >
+                            {copiedRemediationId === remediation.id
+                              ? "Copied"
+                              : "Copy prompt"}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     </header>
                     <p className="remediationCard__description">
                       {remediation.description}
@@ -610,7 +682,7 @@ export function IssueDetailPage() {
                               </div>
                             }
                           >
-                            <RemediationDiff remediation={remediation} />
+                            <RemediationDiff remediation={remediation} theme="light" />
                           </Suspense>
                         ) : null}
                       </>
@@ -622,7 +694,7 @@ export function IssueDetailPage() {
                           </div>
                         }
                       >
-                        <RemediationDiff remediation={remediation} />
+                        <RemediationDiff remediation={remediation} theme="light" />
                       </Suspense>
                     ) : (
                       <div className="remediationPrompt">
@@ -630,64 +702,13 @@ export function IssueDetailPage() {
                         <pre>{remediation.agentPrompt}</pre>
                       </div>
                     )}
-                    {remediation.type === "code_change" && publishedPullRequest ? null : (
-                      <div className="remediationCard__actions">
-                        {remediation.type === "code_change" ? (
-                          <>
-                            {failedPullRequest?.failureReason ? (
-                              <span className="remediationCard__failure">
-                                {failedPullRequest.failureReason}
-                              </span>
-                            ) : null}
-                            {request &&
-                            ["queued", "creating"].includes(request.status) ? (
-                              <span className="remediationCard__status">
-                                Opening pull request…
-                              </span>
-                            ) : detail.pullRequestState.canCreate ? (
-                              <Button
-                                loading={pullRequestPending === remediation.id}
-                                onClick={() => void createPullRequest(remediation.id)}
-                                size="small"
-                                variant="primary"
-                              >
-                                {pullRequestPending === remediation.id
-                                  ? "Starting…"
-                                  : failedPullRequest
-                                    ? "Retry pull request"
-                                    : "Open pull request"}
-                              </Button>
-                            ) : null}
-                          </>
-                        ) : (
-                          <Button
-                            aria-live="polite"
-                            onClick={() =>
-                              void copyPrompt(
-                                remediation.id,
-                                remediation.agentPrompt,
-                              )
-                            }
-                            size="small"
-                            variant="secondary"
-                          >
-                            {copiedRemediationId === remediation.id
-                              ? "Copied"
-                              : "Copy prompt"}
-                          </Button>
-                        )}
-                      </div>
-                    )}
+
                   </article>
                 );
               })}
             </div>
           </section>
 
-          <section className="issueSection">
-            <h2 className="issueSection__title">Evidence</h2>
-            <EvidenceList evidence={issue.evidence} />
-          </section>
 
           <section className="issueSection">
             <h2 className="issueSection__title">Investigations</h2>
@@ -811,47 +832,27 @@ export function IssueDetailPage() {
               ))}
             </section>
           ) : null}
+          <section className="issueSection">
+            <h2 className="issueSection__title">Timeline</h2>
+            {issue.timeline.length > 0 ? (
+              <ol className="issueTimeline">
+                {issue.timeline.map((entry, index) => (
+                  <li key={`${entry.title}-${index}`}>
+                    <strong>{entry.title}</strong>
+                    <p>{entry.description}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="issueSection__copy">Not recorded.</p>
+            )}
+          </section>
+          <section className="issueSection">
+            <h2 className="issueSection__title">Evidence</h2>
+            <EvidenceList evidence={issue.evidence} />
+          </section>
         </div>
 
-        <aside className="issueRail">
-          <div className="issueRail__group">
-            <h2 className="issueRail__title">Properties</h2>
-            <div className="issueRail__row">
-              <span className="issueRail__label">Severity</span>
-              <span className="issueRail__icon issueRail__icon--severity">
-                <SeverityIcon filled={severityBars[issue.severity]} />
-              </span>
-              <span className="issueRail__value">{issue.severity}</span>
-            </div>
-            <div className="issueRail__row">
-              <span className="issueRail__label">Agent</span>
-              <span className="issueRail__value">{agentName ?? "—"}</span>
-            </div>
-            <div className="issueRail__row">
-              <span className="issueRail__label">Source</span>
-              {source ? <EvidenceSourceGlyph source={source} /> : null}
-              <span className="issueRail__value">
-                {source ? evidenceSourceLabel(source) : "—"}
-              </span>
-            </div>
-          </div>
-
-          <div className="issueRail__actions">
-            <Button
-              disabled={archivePending}
-              loading={archivePending}
-              onClick={() => void toggleArchived()}
-              size="small"
-              variant={issue.archivedAt ? "secondary" : "danger"}
-            >
-              {archivePending
-                ? "Saving…"
-                : issue.archivedAt
-                  ? "Unarchive"
-                  : "Archive"}
-            </Button>
-          </div>
-        </aside>
       </div>
     </AppShell>
   );
