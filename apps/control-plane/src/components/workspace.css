@@ -17,9 +17,11 @@
   --ds-surface-hover: #f2f2f2;
   color-scheme: light;
   max-width: none;
-  min-height: 100svh;
+  height: 100svh;
+  min-height: 0;
   padding: 8px 8px 8px 256px;
   gap: 0;
+  overflow: hidden;
   background: var(--issues-canvas);
   color: var(--issues-text);
   font-family: var(--ds-font-sans);
@@ -69,7 +71,7 @@
 .appShell--workspace .accountPopover__item--danger:hover { color: #b33d43; background: #fdf1f2; }
 .appShell--workspace .workspaceMonogram { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
 .appShell--workspace .accountPopover__error { color: #b33d43; }
-.workspaceSurface { flex: 1; min-width: 0; min-height: calc(100svh - 16px); background: var(--issues-panel); border-radius: 14px; box-shadow: 0 1px 3px #0000001a, 0 1px 2px -1px #0000001a; }
+.workspaceSurface { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--issues-panel); border-radius: 14px; box-shadow: 0 1px 3px #0000001a, 0 1px 2px -1px #0000001a; }
 .workspaceContent { width: 100%; max-width: 1024px; margin: 0 auto; padding: 32px 40px 64px; display: flex; flex-direction: column; gap: 32px; }
 .issuesPage { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
 .issuesHeading { display: flex; align-items: center; justify-content: space-between; min-height: 20px; padding: 0 8px; }
@@ -120,7 +122,7 @@
   .appShell--workspace .primaryNav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
   .appShell--workspace .globalHeader__right { flex-direction: row; align-items: center; justify-content: space-between; }
   .appShell--workspace .accountPopover { top: 48px; bottom: auto; left: auto; right: 0; }
-  .workspaceSurface { min-height: calc(100svh - 200px); }
+  .workspaceSurface { min-height: 0; }
   .workspaceContent { padding: 24px 12px; gap: 24px; }
   .issuesPage { gap: 24px; }
   .issuesTable th, .issuesTable td { padding: 9px 8px; font-size: 12px; }
