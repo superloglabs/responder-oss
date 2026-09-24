@@ -115,7 +115,7 @@
 .appShell--workspace.appShell--settings .tagModeSettings__sectionHeading { padding: 0 12px; gap: 4px; }
 .appShell--workspace.appShell--settings .tagModeSettings__promptField .dsField__control--textarea { height: auto; min-height: 100px; padding: 16px; border: .5px solid #e6e8ec; border-radius: 12px; background: #fff; color: #1a1a1a; font-size: 13px; line-height: 20px; }
 .appShell--workspace.appShell--settings .tagModeSettings .workspaceSecretsPanel .contextToolbar small { font-size: 12px; }
-.appShell--workspace.appShell--settings .tagModeSettings__actions { padding: 0; }
+.appShell--workspace.appShell--settings .tagModeSettings__status { padding: 0 12px; color: #666; }
 .appShell--workspace.appShell--settings :is(.siteDialog, .configurationDialog) { background: #fff; color: #444; border: 1px solid #e6e8ec; border-radius: 12px; box-shadow: 0 12px 48px #00000024; }
 .appShell--workspace.appShell--settings :is(.siteDialog, .configurationDialog) :is(input, textarea, select) { background: #fff; color: #202020; border-color: #ddd; }
 .appShell--workspace.appShell--settings :is(.siteDialog, .configurationDialog) :is(input, textarea, select):focus { border-color: #4e58f9; }

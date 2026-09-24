@@ -415,10 +415,12 @@ body:has(.appShell--investigation) {
   line-height: 20px;
 }
 
-.tagModeSettings__actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-bottom: 36px;
+.tagModeSettings__status {
+  margin: 0;
+  padding: 0 12px 36px;
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .appShell--settings .workspaceSettings__intro {
