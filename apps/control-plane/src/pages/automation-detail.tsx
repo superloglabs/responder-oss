@@ -21,6 +21,7 @@ const inferenceSourceLabels = {
 
 function runCost(run: AutomationRunSummary): string {
   if (!run.inferenceUsage) return "—";
+  if (run.inferenceUsage.costMicros === null) return "Unknown";
   const dollars = run.inferenceUsage.costMicros / 1_000_000;
   return dollars > 0 && dollars < 0.01 ? "<$0.01" : `$${dollars.toFixed(2)}`;
 }

@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   or,
@@ -711,7 +712,8 @@ export async function getAutomation(
 }
 
 export interface AutomationRunInferenceUsage {
-  costMicros: number;
+  // Null when any request's price is unknown.
+  costMicros: number | null;
   inputTokens: number;
   outputTokens: number;
   requests: number;
@@ -723,17 +725,22 @@ async function summarizeRunsInferenceUsage(
   if (runIds.length === 0) return new Map();
   const rows = await getDatabase()
     .select({
-      costMicros: sql<string>`coalesce(sum(${automationModelUsage.costMicros}), 0)`,
+      costMicros: sql<string | null>`case when bool_or(${automationModelUsage.costMicros} is null) then null else sum(${automationModelUsage.costMicros}) end`,
       inputTokens: sql<string>`sum(${automationModelUsage.inputTokens} + ${automationModelUsage.cachedInputTokens} + ${automationModelUsage.cacheWriteTokens})`,
       outputTokens: sql<string>`sum(${automationModelUsage.outputTokens})`,
       requests: sql<string>`count(*)`,
       runId: automationModelUsage.runId,
     })
     .from(automationModelUsage)
-    .where(inArray(automationModelUsage.runId, runIds))
+    .where(
+      and(
+        inArray(automationModelUsage.runId, runIds),
+        isNotNull(automationModelUsage.completedAt),
+      ),
+    )
     .groupBy(automationModelUsage.runId);
   return new Map(rows.map((row) => [row.runId, {
-    costMicros: Number(row.costMicros),
+    costMicros: row.costMicros === null ? null : Number(row.costMicros),
     inputTokens: Number(row.inputTokens),
     outputTokens: Number(row.outputTokens),
     requests: Number(row.requests),

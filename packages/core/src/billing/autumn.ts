@@ -297,6 +297,8 @@ export const AUTOMATION_PAID_PLANS = [
 ] as const;
 export const AUTOMATION_FREE_ALLOWANCE_DOLLARS = 20;
 
+const automationTrackTimeoutMs = 30_000;
+
 // A run may start while at least one cent of the allowance remains.
 const automationMinimumBalanceDollars = 0.01;
 
@@ -430,6 +432,7 @@ function getAutomationClientOrNull(): Autumn | null {
 // deduct anything; usage is reported after each model response.
 export async function checkAutomationInferenceAllowance(
   organizationId: string,
+  requiredDollars = automationMinimumBalanceDollars,
 ): Promise<AutomationInferenceAccess> {
   if (!billingIsEnabled()) return { allowed: true, nextResetAt: null };
   const client = getAutomationClientOrNull();
@@ -439,7 +442,7 @@ export async function checkAutomationInferenceAllowance(
     client.check({
       customerId: organizationId,
       featureId: AUTOMATION_INFERENCE_FEATURE_ID,
-      requiredBalance: automationMinimumBalanceDollars,
+      requiredBalance: Math.max(automationMinimumBalanceDollars, requiredDollars),
     });
   // A new organization may have no Autumn customer yet (404), and an existing
   // customer may have no automation plan yet (no balance). Set up both once.
@@ -487,7 +490,10 @@ export async function trackAutomationInferenceUsage(input: {
         properties: { model: input.model, runId: input.runId },
         value: input.costMicros / 1_000_000,
       },
-      { headers: { "Idempotency-Key": `automation-usage:${input.usageId}` } },
+      {
+        headers: { "Idempotency-Key": `automation-usage:${input.usageId}` },
+        timeoutMs: automationTrackTimeoutMs,
+      },
     );
   } catch (error) {
     if (!hasStatus(error, 409)) throw error;

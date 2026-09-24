@@ -99,6 +99,8 @@ describe("automation run processor", () => {
       runId,
     }, process.env, deps)).resolves.toEqual({ runId });
 
+    // Organization-funded runs do not use the monthly allowance.
+    expect(deps.checkAllowance).not.toHaveBeenCalled();
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
       credential: {
         apiKey: "customer-provider-secret",

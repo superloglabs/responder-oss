@@ -64,7 +64,7 @@ export interface AutomationListItem {
 }
 
 export interface AutomationRunInferenceUsage {
-  costMicros: number;
+  costMicros: number | null;
   inputTokens: number;
   outputTokens: number;
   requests: number;

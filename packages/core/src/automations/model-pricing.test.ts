@@ -18,6 +18,12 @@ describe("AI Gateway model pricing", () => {
     expect(aiGatewayModelId("anthropic", "claude-haiku-4-5-20251001")).toBe(
       "anthropic/claude-haiku-4.5",
     );
+    expect(aiGatewayModelId("anthropic", "claude-3-5-sonnet-20241022")).toBe(
+      "anthropic/claude-3.5-sonnet",
+    );
+    expect(aiGatewayModelId("anthropic", "claude-3-haiku-20240307")).toBe(
+      "anthropic/claude-3-haiku",
+    );
     expect(aiGatewayModelId("anthropic", "claude-opus-5")).toBe(
       "anthropic/claude-opus-5",
     );

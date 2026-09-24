@@ -31,7 +31,17 @@ describe("automation billing", () => {
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    // The Autumn client is cached across tests, so reset its mocks' queued
+    // results as well as their calls.
+    for (const mock of [
+      client.billing.attach,
+      client.billing.update,
+      client.check,
+      client.customers.getOrCreate,
+      client.track,
+    ]) {
+      mock.mockReset();
+    }
     vi.unstubAllEnvs();
   });
 
@@ -128,7 +138,10 @@ describe("automation billing", () => {
         properties: { model: "gpt-5.4", runId: "run-1" },
         value: 0.012345,
       },
-      { headers: { "Idempotency-Key": "automation-usage:usage-1" } },
+      {
+        headers: { "Idempotency-Key": "automation-usage:usage-1" },
+        timeoutMs: 30_000,
+      },
     );
     client.track.mockRejectedValueOnce(Object.assign(new Error("down"), {
       statusCode: 503,

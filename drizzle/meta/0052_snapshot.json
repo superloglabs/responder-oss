@@ -1,5 +1,5 @@
 {
-  "id": "129d537b-f949-4fd7-acbd-0e55e4acddcb",
+  "id": "cb7b212a-0d4a-4154-b388-7ba3eb217f77",
   "prevId": "114ec146-fe07-44ff-9454-f296e3b48256",
   "version": "7",
   "dialect": "postgresql",
@@ -1547,6 +1547,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1596,6 +1602,12 @@
           "name": "automation_model_usage_unbilled_idx",
           "columns": [
             {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
@@ -1603,7 +1615,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"automation_model_usage\".\"inference_source\" = 'responder' and \"automation_model_usage\".\"billed_at\" is null",
+          "where": "\"automation_model_usage\".\"billed_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1628,6 +1640,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "automation_model_usage_source_check": {
+          "name": "automation_model_usage_source_check",
+          "value": "\"automation_model_usage\".\"inference_source\" in ('responder', 'byok', 'byos')"
+        },
         "automation_model_usage_tokens_check": {
           "name": "automation_model_usage_tokens_check",
           "value": "\"automation_model_usage\".\"input_tokens\" >= 0 and \"automation_model_usage\".\"cached_input_tokens\" >= 0 and \"automation_model_usage\".\"cache_write_tokens\" >= 0 and \"automation_model_usage\".\"output_tokens\" >= 0"

@@ -112,8 +112,9 @@ export function aiGatewayModelId(
   if (provider !== "anthropic") {
     return `${aiGatewayCreators[provider] ?? provider}/${model}`;
   }
+  // `claude-sonnet-4-5` and legacy `claude-3-5-sonnet` both use a dotted version.
   const undated = model.replace(/-\d{8}$/u, "");
-  return `anthropic/${undated.replace(/-(\d+)-(\d+)$/u, "-$1.$2")}`;
+  return `anthropic/${undated.replace(/-(\d+)-(\d+)(?=-|$)/u, "-$1.$2")}`;
 }
 
 export interface AIGatewayModel {

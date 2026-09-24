@@ -101,6 +101,11 @@ function AutomationBilling({
               ? ` Changes to ${automationPlanName(summary, summary.scheduledPlanId)} at the end of this billing period.`
               : ""}
           </p>
+          {!summary.configured ? (
+            <p className="billingConfiguration">
+              Billing needs an Autumn secret key before plans can be changed.
+            </p>
+          ) : null}
           <div className="billingPlanActions">
             {summary.plans
               .filter((plan) => plan.id !== summary.planId)

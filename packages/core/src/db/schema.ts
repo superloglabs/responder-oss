@@ -860,6 +860,8 @@ export const automationRunEvents = pgTable(
 
 // One row per brokered model request. Rows outlive their run so that
 // Responder-funded usage is still reported to billing after a run is deleted.
+// A Responder-funded request first holds a pending row with its estimated
+// maximum cost (`completed_at` is null); the actual cost replaces it at the end.
 export const automationModelUsage = pgTable(
   "automation_model_usage",
   {
@@ -880,6 +882,7 @@ export const automationModelUsage = pgTable(
     costMicros: bigint("cost_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -891,8 +894,12 @@ export const automationModelUsage = pgTable(
       table.createdAt,
     ),
     index("automation_model_usage_unbilled_idx")
-      .on(table.createdAt)
-      .where(sql`${table.inferenceSource} = 'responder' and ${table.billedAt} is null`),
+      .on(table.organizationId, table.createdAt)
+      .where(sql`${table.billedAt} is null`),
+    check(
+      "automation_model_usage_source_check",
+      sql`${table.inferenceSource} in ('responder', 'byok', 'byos')`,
+    ),
     check(
       "automation_model_usage_tokens_check",
       sql`${table.inputTokens} >= 0 and ${table.cachedInputTokens} >= 0 and ${table.cacheWriteTokens} >= 0 and ${table.outputTokens} >= 0`,

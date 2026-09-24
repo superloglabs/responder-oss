@@ -8,15 +8,20 @@ import {
 import {
   aiGatewayBaseUrl,
   aiGatewayModelId,
+  automationModelCostMicros,
   getAIGatewayModelPricing,
 } from "../../../../packages/core/src/automations/model-pricing.js";
-import { recordBrokeredModelUsage } from "../../../../packages/core/src/automations/model-usage-billing.js";
+import {
+  completeResponderInference,
+  recordBrokeredModelUsage,
+  releaseResponderInference,
+  reserveResponderInference,
+} from "../../../../packages/core/src/automations/model-usage-billing.js";
 import {
   createAutomationModelUsageObserver,
   type AutomationModelUsage,
   type AutomationModelWireFormat,
 } from "../../../../packages/core/src/automations/model-usage.js";
-import { checkAutomationInferenceAllowance } from "../../../../packages/core/src/billing/autumn.js";
 import {
   claimAutomationModelBrokerGrant,
   type AutomationModelBrokerClaim,
@@ -44,26 +49,32 @@ type ProviderFetch = (
 ) => Promise<Response>;
 
 interface AutomationModelBrokerDependencies {
-  checkAllowance: typeof checkAutomationInferenceAllowance;
   claimGrant: ClaimGrant;
+  completeInference: typeof completeResponderInference;
   gatewayApiKey(): string | undefined;
   getPricing: typeof getAIGatewayModelPricing;
   providerFetch: ProviderFetch;
   recordUsage: typeof recordBrokeredModelUsage;
+  releaseInference: typeof releaseResponderInference;
+  reserveInference: typeof reserveResponderInference;
 }
 
 const defaultDependencies: AutomationModelBrokerDependencies = {
-  checkAllowance: checkAutomationInferenceAllowance,
   claimGrant: claimAutomationModelBrokerGrant,
+  completeInference: completeResponderInference,
   gatewayApiKey: () => process.env.AI_GATEWAY_API_KEY?.trim() || undefined,
   getPricing: getAIGatewayModelPricing,
   providerFetch: fetch,
   recordUsage: recordBrokeredModelUsage,
+  releaseInference: releaseResponderInference,
+  reserveInference: reserveResponderInference,
 };
 
 interface ProviderRequest {
   body: Record<string, unknown>;
   headers: Headers;
+  // The pending usage row that holds a Responder-funded request's estimated cost.
+  reservationId?: string;
   url: string;
 }
 
@@ -237,8 +248,12 @@ function brokerResponse(
   format: AutomationModelWireFormat,
   grant: AutomationModelBrokerClaim,
   dependencies: AutomationModelBrokerDependencies,
+  reservationId: string | undefined,
 ): Response {
   const headers = providerResponseHeaders(providerResponse.headers);
+  if (reservationId && !providerResponse.body) {
+    releaseReservation(reservationId, grant, dependencies);
+  }
   const body = providerResponse.body && providerResponse.ok
     ? meteredBody(
         providerResponse.body,
@@ -247,15 +262,26 @@ function brokerResponse(
           providerResponse.headers.get("content-type"),
         ),
         (usage) => {
-          if (!usage) return;
-          void dependencies.recordUsage({
-            inferenceSource: grant.inferenceSource,
-            model: grant.model,
-            organizationId: grant.organizationId,
-            provider: grant.provider,
-            runId: grant.runId,
-            usage,
-          }).catch((error: unknown) => {
+          const recorded = reservationId
+            ? usage
+              ? dependencies.completeInference({
+                  model: grant.model,
+                  provider: grant.provider,
+                  reservationId,
+                  usage,
+                })
+              : dependencies.releaseInference(reservationId)
+            : usage
+              ? dependencies.recordUsage({
+                  inferenceSource: grant.inferenceSource,
+                  model: grant.model,
+                  organizationId: grant.organizationId,
+                  provider: grant.provider,
+                  runId: grant.runId,
+                  usage,
+                })
+              : Promise.resolve();
+          void recorded.catch((error: unknown) => {
             logBrokerError("automation_model_usage_record_failed", error, grant);
           });
         },
@@ -269,10 +295,15 @@ function brokerResponse(
   });
 }
 
-async function assertResponderAllowance(
+// Input tokens are estimated from the request size. Three bytes per token
+// overestimates typical JSON, which keeps the reservation conservative.
+const reservationBytesPerInputToken = 3;
+
+async function reserveResponderRequest(
   grant: AutomationModelBrokerClaim,
+  body: Record<string, unknown>,
   dependencies: AutomationModelBrokerDependencies,
-): Promise<string> {
+): Promise<{ apiKey: string; reservationId: string }> {
   const apiKey = dependencies.gatewayApiKey();
   if (!apiKey) {
     throw new BrokerRequestError(
@@ -287,20 +318,42 @@ async function assertResponderAllowance(
   ).catch(() => {
     throw new BrokerRequestError("Model pricing is unavailable", 503);
   });
-  if (!pricing) {
+  const estimateMicros = pricing
+    ? automationModelCostMicros(pricing, {
+        cacheWriteTokens: 0,
+        cachedInputTokens: 0,
+        inputTokens: Math.ceil(
+          JSON.stringify(body).length / reservationBytesPerInputToken,
+        ),
+        outputTokens: grant.maxOutputTokens,
+      })
+    : null;
+  if (estimateMicros === null) {
     throw new BrokerRequestError(
       `${grant.model} is not available with included usage`,
       409,
     );
   }
-  const access = await dependencies.checkAllowance(grant.organizationId);
-  if (!access.allowed) {
+  let reservationId: string | null;
+  try {
+    reservationId = await dependencies.reserveInference({
+      estimateMicros,
+      model: grant.model,
+      organizationId: grant.organizationId,
+      provider: grant.provider,
+      runId: grant.runId,
+    });
+  } catch (error) {
+    logBrokerError("automation_model_usage_reservation_failed", error, grant);
+    throw new BrokerRequestError("Model broker is unavailable", 503);
+  }
+  if (!reservationId) {
     throw new BrokerRequestError(
       "The automation usage allowance for this billing period is used up",
       402,
     );
   }
-  return apiKey;
+  return { apiKey, reservationId };
 }
 
 async function openAIProviderRequest(
@@ -314,13 +367,15 @@ async function openAIProviderRequest(
     max_output_tokens: grant.maxOutputTokens,
   };
   if (grant.inferenceSource === "responder") {
-    const apiKey = await assertResponderAllowance(grant, dependencies);
+    const forwarded = { ...limitedBody, model: aiGatewayModelId("openai", grant.model) };
+    const { apiKey, reservationId } = await reserveResponderRequest(grant, forwarded, dependencies);
     return {
-      body: { ...limitedBody, model: aiGatewayModelId("openai", grant.model) },
+      body: forwarded,
       headers: new Headers({
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       }),
+      reservationId,
       url: aiGatewayResponsesEndpoint,
     };
   }
@@ -348,13 +403,13 @@ async function anthropicProviderRequest(
   if (beta) headers.set("anthropic-beta", beta);
   const limitedBody = { ...body, max_tokens: grant.maxOutputTokens };
   if (grant.inferenceSource === "responder") {
-    headers.set(
-      "authorization",
-      `Bearer ${await assertResponderAllowance(grant, dependencies)}`,
-    );
+    const forwarded = { ...limitedBody, model: aiGatewayModelId("anthropic", grant.model) };
+    const { apiKey, reservationId } = await reserveResponderRequest(grant, forwarded, dependencies);
+    headers.set("authorization", `Bearer ${apiKey}`);
     return {
-      body: { ...limitedBody, model: aiGatewayModelId("anthropic", grant.model) },
+      body: forwarded,
       headers,
+      reservationId,
       url: aiGatewayMessagesEndpoint,
     };
   }
@@ -381,7 +436,6 @@ async function chatCompletionsProviderRequest(
     forwarded.max_completion_tokens = grant.maxOutputTokens;
   }
   if (grant.inferenceSource === "responder") {
-    const apiKey = await assertResponderAllowance(grant, dependencies);
     // Streamed chat completions only report usage when asked to.
     if (forwarded.stream === true) {
       const streamOptions = forwarded.stream_options;
@@ -390,12 +444,15 @@ async function chatCompletionsProviderRequest(
         include_usage: true,
       };
     }
+    const gatewayBody = { ...forwarded, model: aiGatewayModelId(grant.provider, grant.model) };
+    const { apiKey, reservationId } = await reserveResponderRequest(grant, gatewayBody, dependencies);
     return {
-      body: { ...forwarded, model: aiGatewayModelId(grant.provider, grant.model) },
+      body: gatewayBody,
       headers: new Headers({
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       }),
+      reservationId,
       url: aiGatewayChatCompletionsEndpoint,
     };
   }
@@ -440,6 +497,16 @@ async function claimGrant(
   );
 }
 
+function releaseReservation(
+  reservationId: string,
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): void {
+  void dependencies.releaseInference(reservationId).catch((error: unknown) => {
+    logBrokerError("automation_model_usage_release_failed", error, grant);
+  });
+}
+
 async function forward(
   context: Context,
   format: AutomationModelWireFormat,
@@ -448,8 +515,10 @@ async function forward(
   buildRequest: () => Promise<ProviderRequest>,
 ): Promise<Response> {
   let providerResponse: Response;
+  let reservationId: string | undefined;
   try {
     const request = await buildRequest();
+    reservationId = request.reservationId;
     providerResponse = await dependencies.providerFetch(request.url, {
       body: JSON.stringify(request.body),
       headers: request.headers,
@@ -466,13 +535,19 @@ async function forward(
           ]),
     });
   } catch (error) {
+    if (reservationId) releaseReservation(reservationId, grant, dependencies);
     if (error instanceof BrokerRequestError) {
       return context.json({ error: error.message }, error.status);
     }
     logBrokerError("automation_model_provider_request_failed", error, grant);
     return context.json({ error: "Model provider request failed" }, 502);
   }
-  return brokerResponse(providerResponse, format, grant, dependencies);
+  // A failed provider response is not metered, so it releases its reservation.
+  if (reservationId && !providerResponse.ok) {
+    releaseReservation(reservationId, grant, dependencies);
+    reservationId = undefined;
+  }
+  return brokerResponse(providerResponse, format, grant, dependencies, reservationId);
 }
 
 export function createAutomationModelBrokerRoutes(

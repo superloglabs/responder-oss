@@ -132,7 +132,17 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
   }
 }
 
-async function settleAutomationUsageBilling(): Promise<void> {
+let automationUsageBillingPass: Promise<void> | undefined;
+
+// Runs at most one settlement pass at a time; a slow pass delays the next.
+function settleAutomationUsageBilling(): Promise<void> {
+  automationUsageBillingPass ??= runAutomationUsageBillingPass().finally(() => {
+    automationUsageBillingPass = undefined;
+  });
+  return automationUsageBillingPass;
+}
+
+async function runAutomationUsageBillingPass(): Promise<void> {
   try {
     const result = await settleUnbilledAutomationModelUsage();
     if (result.failed > 0 || result.settled > 0) {
@@ -344,6 +354,7 @@ async function shutdown(signal: string): Promise<void> {
   if (pollers.automationUsageBilling) {
     clearInterval(pollers.automationUsageBilling);
   }
+  await automationUsageBillingPass;
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
   await replayRequestDrain;

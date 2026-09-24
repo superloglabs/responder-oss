@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   createAutomationCredential,
   deleteAutomationCredential,
@@ -35,12 +35,15 @@ export function ModelAccessSettingsPage() {
   const [replacing, setReplacing] = useState<string | null>(null);
   const [replacementKey, setReplacementKey] = useState("");
   const [connectingSubscription, setConnectingSubscription] = useState(false);
+  // Only the newest credential list may be shown; older responses are dropped.
+  const loadGeneration = useRef(0);
 
   useEffect(() => {
     let active = true;
+    const generation = ++loadGeneration.current;
     void fetchAutomationCredentials()
       .then((loaded) => {
-        if (active) setCredentials(loaded);
+        if (active && generation === loadGeneration.current) setCredentials(loaded);
       })
       .catch((cause: unknown) => {
         if (active) {
@@ -53,7 +56,9 @@ export function ModelAccessSettingsPage() {
   }, []);
 
   async function reload() {
-    setCredentials(await fetchAutomationCredentials());
+    const generation = ++loadGeneration.current;
+    const loaded = await fetchAutomationCredentials();
+    if (generation === loadGeneration.current) setCredentials(loaded);
   }
 
   async function run(id: string, action: () => Promise<string>) {

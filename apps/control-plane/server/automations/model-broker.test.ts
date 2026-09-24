@@ -25,12 +25,14 @@ type BrokerDependencies = Parameters<typeof createAutomationModelBrokerRoutes>[0
 
 function brokerRoutes(overrides: Partial<NonNullable<BrokerDependencies>>) {
   return createAutomationModelBrokerRoutes({
-    checkAllowance: vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
     claimGrant: vi.fn(),
+    completeInference: vi.fn().mockResolvedValue(undefined),
     gatewayApiKey: () => "gateway-secret",
     getPricing: vi.fn().mockResolvedValue({ input: "0.000001", output: "0.000002" }),
     providerFetch: vi.fn(),
     recordUsage: vi.fn().mockResolvedValue(undefined),
+    releaseInference: vi.fn().mockResolvedValue(undefined),
+    reserveInference: vi.fn().mockResolvedValue("reservation-1"),
     ...overrides,
   });
 }
@@ -360,8 +362,8 @@ it("rejects unsupported provider routes and multiple completion budget bypasses"
 
 describe("Responder-funded automation inference", () => {
   it("routes Responder-funded requests through AI Gateway and records usage", async () => {
-    const recordUsage = vi.fn().mockResolvedValue(undefined);
-    const checkAllowance = vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null });
+    const completeInference = vi.fn().mockResolvedValue(undefined);
+    const reserveInference = vi.fn().mockResolvedValue("reservation-1");
     const providerFetch = vi.fn().mockResolvedValue(
       new Response(
         'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":400},"output_tokens":50}}}\n\n',
@@ -369,7 +371,6 @@ describe("Responder-funded automation inference", () => {
       ),
     );
     const routes = brokerRoutes({
-      checkAllowance,
       claimGrant: vi.fn().mockResolvedValue({
         ...claim,
         apiKey: null,
@@ -377,7 +378,8 @@ describe("Responder-funded automation inference", () => {
         model: "gpt-5.4",
       }),
       providerFetch,
-      recordUsage,
+      completeInference,
+      reserveInference,
     });
 
     const response = await routes.request("/v1/responses", {
@@ -389,9 +391,17 @@ describe("Responder-funded automation inference", () => {
       method: "POST",
     });
     await response.text();
-    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(completeInference).toHaveBeenCalledOnce());
 
-    expect(checkAllowance).toHaveBeenCalledWith(claim.organizationId);
+    // The reservation holds an estimated maximum cost for this request.
+    expect(reserveInference).toHaveBeenCalledWith({
+      estimateMicros: expect.any(Number),
+      model: "gpt-5.4",
+      organizationId: claim.organizationId,
+      provider: "openai",
+      runId: "run-1",
+    });
+    expect(reserveInference.mock.calls[0]![0].estimateMicros).toBeGreaterThanOrEqual(8_192);
     const [url, init] = providerFetch.mock.calls[0]!;
     expect(url).toBe(aiGatewayResponsesEndpoint);
     expect(init.headers.get("authorization")).toBe("Bearer gateway-secret");
@@ -399,12 +409,10 @@ describe("Responder-funded automation inference", () => {
       max_output_tokens: 4_096,
       model: "openai/gpt-5.4",
     });
-    expect(recordUsage).toHaveBeenCalledWith({
-      inferenceSource: "responder",
+    expect(completeInference).toHaveBeenCalledWith({
       model: "gpt-5.4",
-      organizationId: claim.organizationId,
       provider: "openai",
-      runId: "run-1",
+      reservationId: "reservation-1",
       usage: {
         cacheWriteTokens: 0,
         cachedInputTokens: 400,
@@ -417,7 +425,7 @@ describe("Responder-funded automation inference", () => {
   it("stops Responder-funded requests when the allowance is used up", async () => {
     const providerFetch = vi.fn();
     const routes = brokerRoutes({
-      checkAllowance: vi.fn().mockResolvedValue({ allowed: false, nextResetAt: null }),
+      reserveInference: vi.fn().mockResolvedValue(null),
       claimGrant: vi.fn().mockResolvedValue({
         ...claim,
         apiKey: null,
@@ -526,7 +534,7 @@ describe("Responder-funded automation inference", () => {
   });
 
   it("keeps reading a Responder-funded stream after the client disconnects", async () => {
-    const recordUsage = vi.fn().mockResolvedValue(undefined);
+    const completeInference = vi.fn().mockResolvedValue(undefined);
     let push: (text: string) => void = () => undefined;
     let close: () => void = () => undefined;
     const upstream = new ReadableStream<Uint8Array>({
@@ -545,7 +553,7 @@ describe("Responder-funded automation inference", () => {
         inferenceSource: "responder",
       }),
       providerFetch,
-      recordUsage,
+      completeInference,
     });
 
     const response = await routes.request("/v1/responses", {
@@ -560,12 +568,12 @@ describe("Responder-funded automation inference", () => {
     const reader = response.body!.getReader();
     await reader.read();
     await reader.cancel();
-    expect(recordUsage).not.toHaveBeenCalled();
+    expect(completeInference).not.toHaveBeenCalled();
 
     push('data: {"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":3}}}\n\n');
     close();
-    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledOnce());
-    expect(recordUsage.mock.calls[0]![0].usage).toMatchObject({
+    await vi.waitFor(() => expect(completeInference).toHaveBeenCalledOnce());
+    expect(completeInference.mock.calls[0]![0].usage).toMatchObject({
       inputTokens: 9,
       outputTokens: 3,
     });
@@ -573,7 +581,7 @@ describe("Responder-funded automation inference", () => {
   });
 
   it("sends Responder-funded chat completions to AI Gateway and asks for usage", async () => {
-    const recordUsage = vi.fn().mockResolvedValue(undefined);
+    const completeInference = vi.fn().mockResolvedValue(undefined);
     const providerFetch = vi.fn().mockResolvedValue(new Response(
       'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3}}\n\ndata: [DONE]\n\n',
       { headers: { "content-type": "text/event-stream" } },
@@ -587,7 +595,7 @@ describe("Responder-funded automation inference", () => {
         provider: "xai",
       }),
       providerFetch,
-      recordUsage,
+      completeInference,
     });
 
     const response = await routes.request("/v1/providers/xai/chat/completions", {
@@ -603,7 +611,7 @@ describe("Responder-funded automation inference", () => {
       method: "POST",
     });
     await response.text();
-    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(completeInference).toHaveBeenCalledOnce());
 
     const [url, init] = providerFetch.mock.calls[0]!;
     expect(url).toBe(aiGatewayChatCompletionsEndpoint);
@@ -613,9 +621,37 @@ describe("Responder-funded automation inference", () => {
       model: "spacexai/grok-5",
       stream_options: { include_usage: true },
     });
-    expect(recordUsage.mock.calls[0]![0]).toMatchObject({
+    expect(completeInference.mock.calls[0]![0]).toMatchObject({
       provider: "xai",
       usage: { inputTokens: 12, outputTokens: 3 },
     });
+  });
+
+  it("releases the reservation when the provider request fails", async () => {
+    const releaseInference = vi.fn().mockResolvedValue(undefined);
+    const completeInference = vi.fn();
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+      }),
+      completeInference,
+      providerFetch: vi.fn().mockResolvedValue(Response.json({ error: "overloaded" }, { status: 529 })),
+      releaseInference,
+    });
+
+    const response = await routes.request("/v1/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex" }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(529);
+    expect(releaseInference).toHaveBeenCalledWith("reservation-1");
+    expect(completeInference).not.toHaveBeenCalled();
   });
 });

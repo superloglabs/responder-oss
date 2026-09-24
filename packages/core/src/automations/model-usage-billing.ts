@@ -1,12 +1,17 @@
 import {
   billingIsEnabled,
+  checkAutomationInferenceAllowance,
   trackAutomationInferenceUsage,
 } from "../billing/autumn.js";
 import {
+  completeResponderModelUsage,
   listUnbilledAutomationModelUsage,
   markAutomationModelUsageBilled,
   markAutomationModelUsageBillingAttempted,
+  purgeAbandonedResponderModelUsage,
   recordAutomationModelUsage,
+  releaseResponderModelUsage,
+  reserveResponderModelUsage,
   setAutomationModelUsageCost,
   type AutomationModelUsageRecord,
 } from "../db/automation-model-usage.js";
@@ -48,7 +53,8 @@ async function usageCostMicros(
 }
 
 // Prices a stored request if needed and reports Responder-funded usage to
-// billing. Failures leave the row unbilled for the worker to retry.
+// billing. Organization-funded rows only need a price. Failures leave the row
+// unsettled for the worker to retry.
 export async function settleAutomationModelUsage(
   row: AutomationModelUsageRecord,
   dependencies: SettlementDependencies = defaultDependencies,
@@ -61,7 +67,10 @@ export async function settleAutomationModelUsage(
     }
     await dependencies.setCost(row.id, costMicros);
   }
-  if (row.inferenceSource !== "responder") return;
+  if (row.inferenceSource !== "responder") {
+    await dependencies.markBilled(row.id);
+    return;
+  }
   await dependencies.track({
     costMicros,
     model: row.model,
@@ -91,8 +100,8 @@ export async function recordBrokeredModelUsage(
     input.usage,
     dependencies,
   ).catch(() => null);
-  const billable = input.inferenceSource === "responder" && billingIsEnabled();
-  const row = await dependencies.record({
+  // An unpriced organization-funded row stays open so the worker can price it.
+  await dependencies.record({
     ...input.usage,
     costMicros,
     inferenceSource: input.inferenceSource,
@@ -100,9 +109,68 @@ export async function recordBrokeredModelUsage(
     organizationId: input.organizationId,
     provider: input.provider,
     runId: input.runId,
-    settled: !billable,
+    settled: costMicros !== null,
   });
-  if (billable) await settleAutomationModelUsage(row, dependencies);
+}
+
+interface ReservationDependencies {
+  checkAllowance: typeof checkAutomationInferenceAllowance;
+  reserve: typeof reserveResponderModelUsage;
+}
+
+const defaultReservationDependencies: ReservationDependencies = {
+  checkAllowance: checkAutomationInferenceAllowance,
+  reserve: reserveResponderModelUsage,
+};
+
+// Holds the estimated maximum cost of a Responder-funded request against the
+// organization's allowance. Returns null when the allowance cannot cover it.
+export async function reserveResponderInference(
+  input: {
+    estimateMicros: number;
+    model: string;
+    organizationId: string;
+    provider: AutomationModelProvider;
+    runId: string;
+  },
+  dependencies: ReservationDependencies = defaultReservationDependencies,
+): Promise<string | null> {
+  return dependencies.reserve(input, async (requiredMicros) =>
+    (await dependencies.checkAllowance(
+      input.organizationId,
+      requiredMicros / 1_000_000,
+    )).allowed);
+}
+
+export function releaseResponderInference(reservationId: string): Promise<void> {
+  return releaseResponderModelUsage(reservationId);
+}
+
+// Replaces a reservation with the request's actual usage and reports it.
+export async function completeResponderInference(
+  input: {
+    model: string;
+    provider: AutomationModelProvider;
+    reservationId: string;
+    usage: AutomationModelUsage;
+  },
+  dependencies: SettlementDependencies & {
+    complete: typeof completeResponderModelUsage;
+  } = { ...defaultDependencies, complete: completeResponderModelUsage },
+): Promise<void> {
+  const costMicros = await usageCostMicros(
+    input.provider,
+    input.model,
+    input.usage,
+    dependencies,
+  ).catch(() => null);
+  const row = await dependencies.complete(input.reservationId, input.usage, costMicros);
+  if (!row) return;
+  if (!billingIsEnabled()) {
+    await dependencies.markBilled(row.id);
+    return;
+  }
+  await settleAutomationModelUsage(row, dependencies);
 }
 
 // Autumn keeps idempotency keys for 24 hours, so only retry rows younger than
@@ -115,15 +183,17 @@ export async function settleUnbilledAutomationModelUsage(
     list: typeof listUnbilledAutomationModelUsage;
     markAttempted: typeof markAutomationModelUsageBillingAttempted;
     now: () => number;
+    purgeAbandoned: typeof purgeAbandonedResponderModelUsage;
   } = {
     ...defaultDependencies,
     list: listUnbilledAutomationModelUsage,
     markAttempted: markAutomationModelUsageBillingAttempted,
     now: Date.now,
+    purgeAbandoned: purgeAbandonedResponderModelUsage,
   },
 ): Promise<{ failed: number; settled: number }> {
-  if (!billingIsEnabled()) return { failed: 0, settled: 0 };
   const now = dependencies.now();
+  await dependencies.purgeAbandoned(new Date(now));
   const rows = await dependencies.list({
     createdAfter: new Date(now - retryWindowMs),
     createdBefore: new Date(now - retryDelayMs),
