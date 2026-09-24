@@ -242,7 +242,8 @@ export function TagModeSettingsPage() {
     integrations.find((item) => item.id === "supabase")?.connectUrl ?? "";
 
   // Every change saves immediately. Saves run in order so a slow request
-  // cannot overwrite a newer one; a failed save restores the last saved state.
+  // cannot overwrite a newer one. A failed save restores the last saved state
+  // only when no newer save is queued behind it.
   function persist(next: SlackThreadModeConfiguration, successNotice?: string) {
     if (!options) return;
     queuedConfiguration.current = next;
@@ -254,10 +255,13 @@ export function TagModeSettingsPage() {
     saveQueue.current = saveQueue.current.then(async () => {
       try {
         savedConfiguration.current = await saveSlackThreadModeConfiguration(next);
+        setError(null);
         if (successNotice) setNotice(successNotice);
       } catch (caught) {
-        queuedConfiguration.current = savedConfiguration.current;
-        setConfiguration(savedConfiguration.current);
+        if (queuedConfiguration.current === next) {
+          queuedConfiguration.current = savedConfiguration.current;
+          setConfiguration(savedConfiguration.current);
+        }
         setError(caught instanceof Error ? caught.message : "Unable to save tag mode");
       } finally {
         pendingSaves.current -= 1;
