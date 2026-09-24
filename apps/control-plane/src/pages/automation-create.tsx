@@ -163,22 +163,23 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const optionsLoaded = useEffectEvent((loadedOptions: AutomationOptions, isCancelled: () => boolean) => {
     setOptions(loadedOptions);
     const restored = restoreAutomationDraft(loadedOptions, window.location, automationId);
+    // Saved settings and drafts can reference connections removed since. The
+    // page cannot show them and the server rejects them, so drop them. The
+    // cleaned saved settings are what a failed save returns to.
+    if (automationId) {
+      saved.current = { ...saved.current, configuration: availableAutomationConfiguration(saved.current.configuration, loadedOptions) };
+      queuedSnapshot.current = JSON.stringify(saved.current);
+    }
     if (!restored) {
-      if (!automationId) updateConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }), false);
-      // Removed connections cannot be saved. The cleaned settings are the
-      // baseline a failed save returns to; they save with the next change.
-      else {
-        updateConfiguration((current) => availableAutomationConfiguration(current, loadedOptions), false);
-        saved.current = { ...saved.current, configuration: configurationRef.current };
-        queuedSnapshot.current = JSON.stringify(saved.current);
-      }
+      if (automationId) updateConfiguration(() => saved.current.configuration, false);
+      else updateConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }), false);
       return;
     }
     nameRef.current = restored.draft.name;
     setName(restored.draft.name);
     selectTrigger(restored.draft.triggerSelected);
     setGithubIncluded(restored.draft.githubIncluded);
-    updateConfiguration(() => restored.draft.configuration);
+    updateConfiguration(() => availableAutomationConfiguration(restored.draft.configuration, loadedOptions));
     if (restored.error) setError(restored.error);
     window.history.replaceState(window.history.state, "", editorPath);
     if (!restored.finishing) return;
