@@ -155,6 +155,7 @@ export function TagModeSettingsPage() {
   const [configurationTarget, setConfigurationTarget] =
     useState<ConfigurationTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savedConfiguration = useRef(defaultConfiguration);
@@ -249,20 +250,21 @@ export function TagModeSettingsPage() {
     queuedConfiguration.current = next;
     setConfiguration(next);
     setError(null);
+    setSaveError(null);
     setNotice(null);
     pendingSaves.current += 1;
     setSaving(true);
     saveQueue.current = saveQueue.current.then(async () => {
       try {
         savedConfiguration.current = await saveSlackThreadModeConfiguration(next);
-        setError(null);
+        setSaveError(null);
         if (successNotice) setNotice(successNotice);
       } catch (caught) {
         if (queuedConfiguration.current === next) {
           queuedConfiguration.current = savedConfiguration.current;
           setConfiguration(savedConfiguration.current);
         }
-        setError(caught instanceof Error ? caught.message : "Unable to save tag mode");
+        setSaveError(caught instanceof Error ? caught.message : "Unable to save tag mode");
       } finally {
         pendingSaves.current -= 1;
         if (pendingSaves.current === 0) setSaving(false);
@@ -467,6 +469,7 @@ export function TagModeSettingsPage() {
 
       <form className="tagModeSettings" onSubmit={(event) => event.preventDefault()}>
         {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+        {saveError ? <p className="settingsNotice settingsNotice--error">{saveError}</p> : null}
         {notice ? <p className="settingsNotice settingsNotice--success">{notice}</p> : null}
 
         <section className="tagModeSettings__toggleSection">
