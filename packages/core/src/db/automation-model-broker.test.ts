@@ -32,7 +32,7 @@ describe("automation model broker grant storage", () => {
 
     const grant = await createAutomationModelBrokerGrant(
       {
-        apiKey: "provider-secret",
+        credential: { apiKey: "provider-secret", inferenceSource: "byok" },
         expiresAt: new Date("2026-09-22T16:10:00.000Z"),
         maxOutputTokensPerRequest: 4_096,
         maxRequests: 8,
@@ -73,6 +73,59 @@ describe("automation model broker grant storage", () => {
     });
   });
 
+  it("stores no customer credential for Responder-funded grants", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", encryptionKey);
+    const returning = vi.fn().mockResolvedValue([{ id: grantId }]);
+    const values = vi.fn().mockReturnValue({ returning });
+    vi.mocked(getDatabase).mockReturnValue({
+      insert: vi.fn(() => ({ values })),
+    } as never);
+
+    await createAutomationModelBrokerGrant(
+      {
+        credential: { inferenceSource: "responder" },
+        expiresAt: new Date("2026-09-22T16:10:00.000Z"),
+        leaseId: "31313131-3131-4131-8131-313131313131",
+        maxOutputTokensPerRequest: 4_096,
+        maxRequests: 8,
+        model: "gpt-5.4",
+        organizationId,
+        provider: "openai",
+        runId: "run-1",
+      },
+      { now: () => new Date("2026-09-22T16:00:00.000Z") },
+    );
+
+    expect(values.mock.calls[0]![0]).toMatchObject({
+      contextOnly: false,
+      encryptedCredentials: null,
+      inferenceSource: "responder",
+    });
+  });
+
+  it("claims a Responder-funded grant without decrypting a credential", async () => {
+    const returning = vi.fn().mockResolvedValue([{
+      encryptedCredentials: null,
+      id: grantId,
+      inferenceSource: "responder",
+      maxOutputTokensPerRequest: 4_096,
+      model: "gpt-5.4",
+      organizationId,
+      provider: "openai",
+      runId: "run-1",
+    }]);
+    vi.mocked(getDatabase).mockReturnValue({
+      update: () => ({ set: () => ({ from: () => ({ where: () => ({ returning }) }) }) }),
+    } as never);
+    const decrypt = vi.fn();
+
+    await expect(claimAutomationModelBrokerGrant(
+      { model: "gpt-5.4", provider: "openai", requestedMaxOutputTokens: null, tokenHash: "a".repeat(64) },
+      { decryptCredentials: decrypt },
+    )).resolves.toMatchObject({ apiKey: null, inferenceSource: "responder" });
+    expect(decrypt).not.toHaveBeenCalled();
+  });
+
   it("atomically claims a matching unexpired allowance", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", encryptionKey);
     const encryptedCredentials = Buffer.from("placeholder").toString("base64");
@@ -80,9 +133,11 @@ describe("automation model broker grant storage", () => {
       {
         encryptedCredentials,
         id: grantId,
+        inferenceSource: "byok",
         maxOutputTokensPerRequest: 4_096,
         model: "gpt-5.1-codex",
         organizationId,
+        provider: "openai",
         runId: "run-1",
       },
     ]);
@@ -107,9 +162,11 @@ describe("automation model broker grant storage", () => {
     ).resolves.toEqual({
       apiKey: "provider-secret",
       grantId,
+      inferenceSource: "byok",
       maxOutputTokens: 4_096,
       model: "gpt-5.1-codex",
       organizationId,
+      provider: "openai",
       runId: "run-1",
     });
     expect(set).toHaveBeenCalledOnce();
@@ -180,7 +237,7 @@ describe("automation model broker grant storage", () => {
 });
 
 it("does not authorize model inference with a subscription context-only grant", async () => {
-  const returning = vi.fn().mockResolvedValue([{ encryptedCredentials: "cipher", id: grantId, maxOutputTokensPerRequest: 4096, model: "gpt-5.4", organizationId, runId: "run-1" }]);
+  const returning = vi.fn().mockResolvedValue([{ encryptedCredentials: "cipher", id: grantId, inferenceSource: "byos", maxOutputTokensPerRequest: 4096, model: "gpt-5.4", organizationId, provider: "openai", runId: "run-1" }]);
   const where = vi.fn().mockReturnValue({ returning });
   vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set: () => ({ from: () => ({ where }) }) }) } as never);
   await expect(claimAutomationModelBrokerGrant({ model: "gpt-5.4", provider: "openai", requestedMaxOutputTokens: null, tokenHash: "a".repeat(64) }, { decryptCredentials: () => ({ apiKey: "subscription-context-only", contextOnly: true }) })).resolves.toBeNull();

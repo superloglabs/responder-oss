@@ -52,7 +52,7 @@ export async function runBrokeredAutomationProof(
     throw new Error("Automation proof runtime must be between 1 and 3600 seconds");
   }
   const grant = await dependencies.createGrant({
-    apiKey: input.providerApiKey,
+    credential: { apiKey: input.providerApiKey, inferenceSource: "byok" },
     expiresAt: new Date(
       dependencies.now().getTime() + input.maxRuntimeSeconds * 1_000,
     ),

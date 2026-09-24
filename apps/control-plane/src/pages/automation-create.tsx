@@ -13,6 +13,7 @@ import {
 } from "../automations-api";
 import { FloppyDiskIcon, PencilSimpleIcon, PlusIcon, TrashIcon, GithubLogoIcon, PlugsIcon } from "@phosphor-icons/react";
 import { AutomationModelPicker } from "../components/automation-model-picker";
+import { supportsIncludedUsage } from "../../../../packages/core/src/automations/model-pricing";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
 import { AutomationEditorDialog } from "../components/automation-editor-dialog";
 import "./automation-create.css";
@@ -26,7 +27,7 @@ const defaultConfiguration: AutomationConfiguration = {
   maxOutputTokensPerRequest: 16_000,
   maxRuntimeSeconds: 1_800,
   model: "gpt-5.4",
-  modelCredentialId: "",
+  modelCredentialId: null,
   modelProvider: "openai",
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
   repositoryIds: [],
@@ -85,7 +86,7 @@ export function AutomationCreatePage() {
           setEnabled(automation.enabled);
           setConfiguration(automation.configuration);
         } else {
-          setConfiguration((current) => ({ ...current, model: "", modelCredentialId: "", repositoryIds: [] }));
+          setConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }));
         }
       })
       .catch((cause: unknown) => {
@@ -125,16 +126,17 @@ export function AutomationCreatePage() {
   ) ?? [];
 
   function setProvider(provider: AutomationModelProvider) {
-    const credential = options?.credentials.find(
-      (item) => item.provider === provider && item.status === "active",
-    );
+    // A provider without included-usage models starts on its first key.
+    const credential = !supportsIncludedUsage(provider)
+      ? options?.credentials.find((item) => item.provider === provider && item.status === "active")
+      : undefined;
     setConfiguration((current) => ({
       ...current,
       harness: !supportsAutomationHarness(provider, current.harness)
         ? provider === "openai" ? "codex" : provider === "anthropic" ? "claude_agent_sdk" : "opencode"
         : current.harness,
       model: "",
-      modelCredentialId: credential?.id ?? "",
+      modelCredentialId: credential?.id ?? null,
       modelProvider: provider,
     }));
   }
@@ -188,8 +190,8 @@ export function AutomationCreatePage() {
         setPanel("repositories");
         return;
       }
-      if (!configuration.modelCredentialId || !configuration.model.trim()) {
-        setError("Choose a model and an active model key.");
+      if (!configuration.model.trim()) {
+        setError("Choose a model.");
         setModelRequestedOpen((value) => value + 1);
         return;
       }
@@ -233,7 +235,7 @@ export function AutomationCreatePage() {
           </div>
           <div className="inlineFields">
             <label className="field field--grow"><span>Model</span><input onChange={(event) => setConfiguration((current) => ({ ...current, model: event.target.value }))} required value={configuration.model} /></label>
-            <label className="field field--grow"><span>Model key</span><select onChange={(event) => setConfiguration((current) => ({ ...current, modelCredentialId: event.target.value }))} required value={configuration.modelCredentialId}><option value="">Choose a key</option>{providerCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.label} ·••••{credential.lastFour}</option>)}</select></label>
+            <label className="field field--grow"><span>Billing</span><select onChange={(event) => setConfiguration((current) => ({ ...current, modelCredentialId: event.target.value || null }))} value={configuration.modelCredentialId ?? ""}><option value="">Included usage</option>{providerCredentials.map((credential) => <option key={credential.id} value={credential.id}>{credential.label} ·••••{credential.lastFour}</option>)}</select></label>
           </div>
           <button className="button button--secondary" onClick={() => setShowCredential((value) => !value)} type="button">{showCredential ? "Cancel adding key" : "Add model key"}</button>
           {showCredential ? <div className="automationCredentialForm"><label className="field"><span>Key label</span><input onChange={(event) => setCredentialLabel(event.target.value)} required={showCredential} value={credentialLabel} /></label><label className="field"><span>API key</span><input autoComplete="off" onChange={(event) => setCredentialKey(event.target.value)} required={showCredential} type="password" value={credentialKey} /></label><button className="button button--secondary" disabled={credentialSaving || !credentialKey || !credentialLabel} onClick={() => void addCredential()} type="button">{credentialSaving ? "Saving…" : "Save key"}</button></div> : null}

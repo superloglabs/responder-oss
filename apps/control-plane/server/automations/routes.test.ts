@@ -7,6 +7,7 @@ const organizationId = "15151515-1515-4515-8515-151515151515";
 const userId = "21212121-2121-4121-8121-212121212121";
 
 const mocks = vi.hoisted(() => ({
+  gatewayModels: vi.fn(),
   startSubscription: vi.fn(),
   pollSubscription: vi.fn(),
   cancelSubscription: vi.fn(),
@@ -26,6 +27,9 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 
+vi.mock("../../../../packages/core/src/automations/model-pricing.js", () => ({
+  listAIGatewayModels: mocks.gatewayModels,
+}));
 vi.mock("../tenant.js", () => ({ getActiveTenant: mocks.tenant }));
 vi.mock(
   "../../../../packages/core/src/db/organization-capabilities.js",
@@ -86,6 +90,7 @@ const app = new Hono().route("/api/automations", automationRoutes);
 
 describe("automation control-plane routes", () => {
   afterEach(() => {
+    mocks.gatewayModels.mockReset();
     vi.clearAllMocks();
     mocks.credential.mockReset();
     mocks.modelCatalog.mockReset();
@@ -250,4 +255,17 @@ describe("automation control-plane routes", () => {
     expect(response.status).toBe(400);
   });
 
+  it("lists included-usage models for a provider without a connection", async () => {
+    mocks.gatewayModels.mockResolvedValue([{ id: "gpt-5.4", name: "GPT-5.4" }]);
+
+    const response = await app.request("/api/automations/included-models/openai");
+    const unknown = await app.request("/api/automations/included-models/unknown");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      models: [{ id: "gpt-5.4", name: "GPT-5.4" }],
+    });
+    expect(mocks.gatewayModels).toHaveBeenCalledWith("openai");
+    expect(unknown.status).toBe(400);
+  });
 });

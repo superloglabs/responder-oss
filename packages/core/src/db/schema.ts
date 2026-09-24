@@ -1,6 +1,7 @@
 import { defaultInvestigationPromptParts, type InvestigationPromptParts } from "../investigations/prompt-parts.js";
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   foreignKey,
@@ -26,6 +27,7 @@ import type {
 import type { SuggestionCodeChange } from "../suggestions/model.js";
 import type {
   AutomationHarnessKind,
+  AutomationInferenceSource,
   AutomationModelProvider,
   AutomationTrigger,
 } from "../automations/config.js";
@@ -153,9 +155,13 @@ export const automationModelBrokerGrants = pgTable(
     runId: uuid("run_id").notNull(),
     leaseId: uuid("lease_id").notNull(),
     tokenHash: text("token_hash").notNull(),
+    inferenceSource: text("inference_source")
+      .$type<AutomationInferenceSource>()
+      .notNull(),
     provider: text("provider").$type<AutomationModelProvider>().notNull(),
     model: text("model").notNull(),
-    encryptedCredentials: text("encrypted_credentials").notNull(),
+    // Responder-funded grants hold no customer credential.
+    encryptedCredentials: text("encrypted_credentials"),
     credentialKeyVersion: integer("credential_key_version").notNull().default(1),
     contextOnly: boolean("context_only").notNull().default(false),
     remainingRequests: integer("remaining_requests").notNull(),
@@ -181,6 +187,11 @@ export const automationModelBrokerGrants = pgTable(
     check(
       "automation_model_broker_grants_output_budget_check",
       sql`${table.remainingOutputTokens} >= 0 and ${table.maxOutputTokensPerRequest} > 0`,
+    ),
+    check(
+      "automation_model_broker_grants_credential_check",
+      sql`${table.inferenceSource} in ('responder', 'byok', 'byos')
+        and (${table.inferenceSource} = 'responder') = (${table.encryptedCredentials} is null)`,
     ),
   ],
 );
@@ -624,11 +635,14 @@ export const automationVersions = pgTable(
       .$type<AutomationModelProvider>()
       .notNull(),
     model: text("model").notNull(),
-    modelCredentialId: uuid("model_credential_id")
+    inferenceSource: text("inference_source")
+      .$type<AutomationInferenceSource>()
       .notNull()
-      .references(() => organizationModelCredentials.id, {
-        onDelete: "restrict",
-      }),
+      .default("responder"),
+    modelCredentialId: uuid("model_credential_id").references(
+      () => organizationModelCredentials.id,
+      { onDelete: "restrict" },
+    ),
     trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
     connectionMode: text("connection_mode")
       .$type<"all_selected">()
@@ -666,6 +680,11 @@ export const automationVersions = pgTable(
     check(
       "automation_versions_output_tokens_check",
       sql`${table.maxOutputTokensPerRequest} between 256 and 100000`,
+    ),
+    check(
+      "automation_versions_inference_source_check",
+      sql`(${table.inferenceSource} = 'responder' and ${table.modelCredentialId} is null)
+        or (${table.inferenceSource} in ('byok', 'byos') and ${table.modelCredentialId} is not null)`,
     ),
   ],
 );
@@ -838,6 +857,59 @@ export const automationRunEvents = pgTable(
       .defaultNow(),
   },
   (table) => [index("automation_run_events_run_idx").on(table.runId, table.id)],
+);
+
+// One row per brokered model request. Rows outlive their run so that
+// Responder-funded usage is still reported to billing after a run is deleted.
+// A Responder-funded request first holds a pending row with its estimated
+// maximum cost (`completed_at` is null); the actual cost replaces it at the end.
+export const automationModelUsage = pgTable(
+  "automation_model_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
+    inferenceSource: text("inference_source")
+      .$type<AutomationInferenceSource>()
+      .notNull(),
+    provider: text("provider").$type<AutomationModelProvider>().notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    costMicros: bigint("cost_micros", { mode: "number" }),
+    billedAt: timestamp("billed_at", { withTimezone: true }),
+    billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automation_model_usage_run_idx").on(table.runId),
+    index("automation_model_usage_organization_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    index("automation_model_usage_unbilled_idx")
+      .on(table.organizationId, table.createdAt)
+      .where(sql`${table.billedAt} is null`),
+    check(
+      "automation_model_usage_source_check",
+      sql`${table.inferenceSource} in ('responder', 'byok', 'byos')`,
+    ),
+    check(
+      "automation_model_usage_tokens_check",
+      sql`${table.inputTokens} >= 0 and ${table.cachedInputTokens} >= 0 and ${table.cacheWriteTokens} >= 0 and ${table.outputTokens} >= 0`,
+    ),
+    check(
+      "automation_model_usage_cost_check",
+      sql`${table.costMicros} is null or ${table.costMicros} >= 0`,
+    ),
+  ],
 );
 
 export const automationActionAttempts = pgTable(

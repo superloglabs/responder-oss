@@ -56,7 +56,7 @@ export function AutomationsPage() {
       {!loading && automations.length === 0 ? (
         <section className="emptyState emptyState--list">
           <h2>No automations yet</h2>
-          <p>Add a model key, choose a trigger, and run a coding task in a fresh sandbox.</p>
+          <p>Choose a trigger and a model, and run a coding task in a fresh sandbox.</p>
           <Link className="dsButton dsButton--primary dsButton--medium" to="/automations/new">
             Create an automation
           </Link>

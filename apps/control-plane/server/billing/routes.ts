@@ -1,8 +1,14 @@
 import {
+  cancelAutomationPlan,
+  changeAutomationPlan,
+  resumeAutomationPlan,
   createBillingPortal,
   createPayAsYouGoCheckout,
+  getAutomationBillingSummary,
   getBillingSummary,
+  isAutomationPaidPlanId,
 } from "../../../../packages/core/src/billing/autumn.js";
+import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
 import { getActiveTenant } from "../tenant.js";
 
@@ -26,12 +32,19 @@ export const billingRoutes = new Hono()
     }
 
     try {
-      return context.json(
-        await getBillingSummary(
-          tenant.organizationId,
-          customerData(tenant.user),
-        ),
-      );
+      const data = customerData(tenant.user);
+      const [summary, automations] = await Promise.all([
+        getBillingSummary(tenant.organizationId, data),
+        // Investigation billing stays available if automation billing fails.
+        organizationHasCapability(tenant.organizationId, "automations")
+          .then((enabled) =>
+            enabled ? getAutomationBillingSummary(tenant.organizationId, data) : null)
+          .catch((error: unknown) => {
+            console.error("Unable to load automation billing summary", error);
+            return null;
+          }),
+      ]);
+      return context.json({ ...summary, automations });
     } catch (error) {
       console.error("Unable to load billing summary", error);
       return context.json({ error: "Unable to load billing" }, 502);
@@ -53,6 +66,42 @@ export const billingRoutes = new Hono()
     } catch (error) {
       console.error("Unable to create billing checkout", error);
       return context.json({ error: "Unable to start billing checkout" }, 502);
+    }
+  })
+  .post("/automations/plan", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (!(await organizationHasCapability(tenant.organizationId, "automations"))) {
+      return context.json({ error: "Not found" }, 404);
+    }
+    const body = (await context.req.json().catch(() => null)) as
+      | { planId?: unknown }
+      | null;
+    const planId = body?.planId;
+    if (planId !== "free" && planId !== "resume" && !isAutomationPaidPlanId(planId)) {
+      return context.json({ error: "Unknown automation plan" }, 400);
+    }
+
+    try {
+      if (planId === "free" || planId === "resume") {
+        await (planId === "free" ? cancelAutomationPlan : resumeAutomationPlan)(
+          tenant.organizationId,
+        );
+        return context.json({ url: null });
+      }
+      return context.json(
+        await changeAutomationPlan(
+          tenant.organizationId,
+          planId,
+          appUrl(context.req.url, "/settings/billing?status=automation-plan"),
+          customerData(tenant.user),
+        ),
+      );
+    } catch (error) {
+      console.error("Unable to change automation plan", error);
+      return context.json({ error: "Unable to change the automation plan" }, 502);
     }
   })
   .post("/portal", async (context) => {

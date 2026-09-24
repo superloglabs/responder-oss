@@ -13,6 +13,19 @@ import { AppShell } from "../components/app-shell";
 import { Badge, DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 
+const inferenceSourceLabels = {
+  byok: "Your API key",
+  byos: "ChatGPT subscription",
+  responder: "Included usage",
+} as const;
+
+function runCost(run: AutomationRunSummary): string {
+  if (!run.inferenceUsage) return "—";
+  if (run.inferenceUsage.costMicros === null) return "Unknown";
+  const dollars = run.inferenceUsage.costMicros / 1_000_000;
+  return dollars > 0 && dollars < 0.01 ? "<$0.01" : `$${dollars.toFixed(2)}`;
+}
+
 function runTone(run: AutomationRunSummary): "neutral" | "live" | "danger" | "warning" {
   if (run.status === "succeeded") return "live";
   if (run.status === "failed") return "danger";
@@ -66,7 +79,15 @@ export function AutomationDetailPage() {
     };
   }, [automationId, load]);
   useEffect(() => {
-    if (!automation?.runs.some((run) => run.status === "pending" || run.status === "running")) return;
+    // Model usage is recorded just after a run finishes, so keep polling
+    // briefly for runs that completed without a cost yet.
+    const awaitingUsage = (run: AutomationRunSummary) =>
+      run.completedAt !== null &&
+      run.inferenceUsage === null &&
+      Date.now() - new Date(run.completedAt).getTime() < 30_000;
+    if (!automation?.runs.some((run) =>
+      run.status === "pending" || run.status === "running" || awaitingUsage(run)
+    )) return;
     const timer = window.setInterval(() => void load(), 2_000);
     return () => window.clearInterval(timer);
   }, [automation?.runs, load]);
@@ -132,7 +153,7 @@ export function AutomationDetailPage() {
       <section className="automationOverviewGrid">
         <article><span>Trigger</span><strong>{automation.configuration.trigger.kind}</strong></article>
         <article><span>Harness</span><strong>{automation.configuration.harness.replaceAll("_", " ")}</strong></article>
-        <article><span>Model</span><strong>{automation.configuration.model}</strong><small>{automation.configuration.modelProvider}</small></article>
+        <article><span>Model</span><strong>{automation.configuration.model}</strong><small>{automation.configuration.modelProvider} · {inferenceSourceLabels[automation.inferenceSource]}</small></article>
         <article><span>Version</span><strong>v{automation.version}</strong></article>
       </section>
       <section className="automationRuns">
@@ -143,7 +164,8 @@ export function AutomationDetailPage() {
             columns={[
               { header: "Started", key: "started", render: (run) => <span><strong>{relativeTime(run.createdAt)}</strong><small className="automationRunDate">{new Date(run.createdAt).toLocaleString()}</small></span>, width: "24%" },
               { header: "Status", key: "status", render: (run) => <Badge tone={runTone(run)}>{run.status}</Badge>, width: "16%" },
-              { header: "Result", key: "result", render: (run) => run.failureMessage ?? run.resultSummary ?? (run.status === "running" ? "Running in sandbox…" : "Waiting for a worker…"), width: "45%" },
+              { header: "Result", key: "result", render: (run) => run.failureMessage ?? run.resultSummary ?? (run.status === "running" ? "Running in sandbox…" : "Waiting for a worker…"), width: "35%" },
+              { align: "right", header: "Model cost", key: "cost", render: runCost, width: "10%" },
               { align: "right", header: "", key: "actions", render: (run) => run.status === "pending" || run.status === "running" ? <button className="button button--secondary" disabled={action !== null} onClick={() => void cancelRun(run.id)} type="button">{action === run.id ? "Cancelling…" : "Cancel"}</button> : null, width: "15%" },
             ]}
             getRowKey={(run) => run.id}

@@ -1,8 +1,8 @@
 import { GearIcon } from "@phosphor-icons/react";
-import { SettingsTabs } from "./settings-tabs";
+import { SettingsTabs, type SettingsSection } from "./settings-tabs";
 import "./settings.css";
 
-export function SettingsHeading({ active }: { active: "integrations" | "tag-mode" | "workspace" | "billing" }) {
+export function SettingsHeading({ active }: { active: SettingsSection }) {
   return (
     <div className="settingsPageHeading">
       <header className="workspaceHeading"><h1><GearIcon size={16} aria-hidden="true" />Settings</h1></header>

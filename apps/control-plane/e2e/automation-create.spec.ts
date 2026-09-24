@@ -24,6 +24,8 @@ test.beforeEach(async ({ context }) => {
       secrets: [],
     } });
     if (/\/credentials\/[^/]+\/models$/.test(path)) return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
+    if (path === "/api/automations/included-models/openai") return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
+    if (path.startsWith("/api/automations/included-models/")) return route.fulfill({ json: { models: [{ id: "included-model", name: "Included Model" }] } });
     return route.fulfill({ json: {} });
   });
 });
@@ -35,6 +37,8 @@ test("creates an automation using the compact editor and selected resources", as
   await expect(page.getByRole("button", { name: "Choose model", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Choose model", exact: true }).click();
   await page.getByRole("button", { name: "OpenAI", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Model connection" })).toHaveValue("");
+  await expect(page.getByText("Included usage is billed to your monthly allowance.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "GPT-5.4" }).click();
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toBeEmpty();
   await expect(page.getByRole("button", { name: "Add repository", exact: true })).toBeVisible();
@@ -63,7 +67,7 @@ test("creates an automation using the compact editor and selected resources", as
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ name: "Fix incoming issues", configuration: {
-    repositoryIds: [repositoryId], modelCredentialId: credentialId, contextAccountIds: [],
+    repositoryIds: [repositoryId], modelCredentialId: null, contextAccountIds: [],
     trigger: { integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" },
   } });
   await expect(page.getByRole("alert")).toBeVisible();
@@ -254,6 +258,7 @@ test("connects a model inline and filters compatible harnesses", async ({ page }
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep my instructions");
   await page.getByRole("button", { name: /^(Model:|Choose model)/ }).click();
   await page.getByRole("button", { name: "Anthropic", exact: true }).click();
+  await page.getByRole("button", { name: "Add connection", exact: true }).click();
   const connection = page.getByRole("dialog", { name: "Connect Anthropic" });
   await expect(connection.getByLabel("Key name")).toHaveCount(0);
   await connection.getByLabel("API key", { exact: true }).fill("test-only-key");
@@ -296,6 +301,7 @@ test("retries a temporary subscription polling failure without losing the draft 
   await expect(page.getByRole("button", { name: /^Harness:/ })).toBeDisabled();
   await page.getByRole("button", { name: "Choose model" }).click();
   await page.getByRole("button", { name: "OpenAI", exact: true }).click();
+  await page.getByRole("button", { name: "Add connection", exact: true }).click();
   await page.getByRole("button", { name: "Subscription · BYOS" }).click();
   await page.getByRole("button", { name: "Connect subscription ↗" }).click();
   await expect(page.getByText("ABCD-EFGH")).toBeVisible();
@@ -319,6 +325,8 @@ test("shows seven providers and loads, refreshes, and selects models from the ch
   await expect(providers.getByText("Together AI")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("automation-providers.png") });
   await providers.getByRole("button", { name: "Google Gemini", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Included Model included-model" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Model connection" }).selectOption(credentialId);
   await expect(page.getByRole("button", { name: "Gemini Current gemini-current" })).toBeVisible();
   await page.getByRole("button", { name: "Refresh models" }).click();
   await expect(page.getByRole("button", { name: "Gemini Newly Available gemini-new" })).toBeVisible();

@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   or,
@@ -11,11 +12,14 @@ import {
 } from "drizzle-orm";
 import type {
   AutomationConfiguration,
+  AutomationInferenceSource,
   AutomationInput,
   AutomationTrigger,
 } from "../automations/config.js";
+import { supportsIncludedUsage } from "../automations/model-pricing.js";
 import { getDatabase } from "./client.js";
 import {
+  automationModelUsage,
   automationRunEvents,
   automationActionAttempts,
   automationRuns,
@@ -228,11 +232,12 @@ function triggerProvider(trigger: AutomationTrigger): "discord" | "sentry" | "sl
   return trigger.kind;
 }
 
+// Returns the inference source implied by the selected model credential.
 async function validateConfigurationResources(
   tx: AutomationTransaction,
   organizationId: string,
   configuration: AutomationConfiguration,
-): Promise<void> {
+): Promise<AutomationInferenceSource> {
   const accountIds = [
     ...new Set([
       configuration.trigger.integrationAccountId,
@@ -313,27 +318,39 @@ async function validateConfigurationResources(
     );
   }
 
-  const credentialRows = await tx
-    .select({ id: organizationModelCredentials.id, authType: organizationModelCredentials.authType })
-    .from(organizationModelCredentials)
-    .where(
-      and(
-        eq(organizationModelCredentials.id, configuration.modelCredentialId),
-        eq(organizationModelCredentials.organizationId, organizationId),
-        eq(organizationModelCredentials.provider, configuration.modelProvider),
-        eq(organizationModelCredentials.status, "active"),
-      ),
-    )
-    .limit(1);
-  if (!credentialRows[0]) {
+  let inferenceSource: AutomationInferenceSource = "responder";
+  if (!configuration.modelCredentialId && !supportsIncludedUsage(configuration.modelProvider)) {
     throw new AutomationConfigurationError(
-      "The selected model credential is unavailable",
+      "This provider needs a model connection",
       "credential_not_found",
     );
   }
+  if (configuration.modelCredentialId) {
+    const credentialRows = await tx
+      .select({ id: organizationModelCredentials.id, authType: organizationModelCredentials.authType })
+      .from(organizationModelCredentials)
+      .where(
+        and(
+          eq(organizationModelCredentials.id, configuration.modelCredentialId),
+          eq(organizationModelCredentials.organizationId, organizationId),
+          eq(organizationModelCredentials.provider, configuration.modelProvider),
+          eq(organizationModelCredentials.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!credentialRows[0]) {
+      throw new AutomationConfigurationError(
+        "The selected model credential is unavailable",
+        "credential_not_found",
+      );
+    }
 
-  if (credentialRows[0].authType === "chatgpt_subscription" && (configuration.harness !== "codex" || configuration.modelProvider !== "openai")) {
-    throw new AutomationConfigurationError("ChatGPT subscriptions require the Codex harness", "credential_not_found");
+    if (credentialRows[0].authType === "chatgpt_subscription" && (configuration.harness !== "codex" || configuration.modelProvider !== "openai")) {
+      throw new AutomationConfigurationError("ChatGPT subscriptions require the Codex harness", "credential_not_found");
+    }
+    inferenceSource = credentialRows[0].authType === "chatgpt_subscription"
+      ? "byos"
+      : "byok";
   }
 
   const repositoryRows = await tx
@@ -378,6 +395,7 @@ async function validateConfigurationResources(
       );
     }
   }
+  return inferenceSource;
 }
 
 async function insertAutomationVersion(
@@ -386,6 +404,7 @@ async function insertAutomationVersion(
     automationId: string;
     configuration: AutomationConfiguration;
     createdBy: string;
+    inferenceSource: AutomationInferenceSource;
     version: number;
   },
 ): Promise<string> {
@@ -396,6 +415,7 @@ async function insertAutomationVersion(
       connectionMode: "all_selected",
       createdBy: input.createdBy,
       harness: input.configuration.harness,
+      inferenceSource: input.inferenceSource,
       maxModelRequests: input.configuration.maxModelRequests,
       maxOutputTokensPerRequest:
         input.configuration.maxOutputTokensPerRequest,
@@ -456,7 +476,11 @@ export async function createAutomation(
   input: AutomationInput,
 ): Promise<{ id: string }> {
   return getDatabase().transaction(async (tx) => {
-    await validateConfigurationResources(tx, organizationId, input.configuration);
+    const inferenceSource = await validateConfigurationResources(
+      tx,
+      organizationId,
+      input.configuration,
+    );
     const rows = await tx
       .insert(automations)
       .values({
@@ -473,6 +497,7 @@ export async function createAutomation(
       automationId,
       configuration: input.configuration,
       createdBy,
+      inferenceSource,
       version: 1,
     });
     await tx
@@ -504,7 +529,11 @@ export async function updateAutomation(
       )
       .limit(1);
     if (!existing[0]) return false;
-    await validateConfigurationResources(tx, organizationId, input.configuration);
+    const inferenceSource = await validateConfigurationResources(
+      tx,
+      organizationId,
+      input.configuration,
+    );
     const previousVersions = await tx
       .select({ version: automationVersions.version })
       .from(automationVersions)
@@ -515,6 +544,7 @@ export async function updateAutomation(
       automationId,
       configuration: input.configuration,
       createdBy,
+      inferenceSource,
       version: (previousVersions[0]?.version ?? 0) + 1,
     });
     await tx
@@ -557,6 +587,7 @@ export async function listAutomations(organizationId: string) {
       enabled: automations.enabled,
       harness: automationVersions.harness,
       id: automations.id,
+      inferenceSource: automationVersions.inferenceSource,
       model: automationVersions.model,
       modelProvider: automationVersions.modelProvider,
       name: automations.name,
@@ -597,6 +628,7 @@ export async function getAutomation(
       description: automations.description,
       enabled: automations.enabled,
       id: automations.id,
+      inferenceSource: automationVersions.inferenceSource,
       name: automations.name,
       updatedAt: automations.updatedAt,
       versionId: automationVersions.id,
@@ -666,6 +698,9 @@ export async function getAutomation(
       .orderBy(desc(automationRuns.createdAt))
       .limit(50),
   ]);
+  const inferenceUsage = await summarizeRunsInferenceUsage(
+    runRows.map((run) => run.id),
+  );
   return {
     ...automation,
     configuration: {
@@ -676,8 +711,47 @@ export async function getAutomation(
       repositoryIds: repositoryRows.map((row) => row.id),
       workspaceSecretIds: secretRows.map((row) => row.id),
     },
-    runs: runRows,
+    runs: runRows.map((run) => ({
+      ...run,
+      inferenceUsage: inferenceUsage.get(run.id) ?? null,
+    })),
   };
+}
+
+export interface AutomationRunInferenceUsage {
+  // Null when any request's price is unknown.
+  costMicros: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+}
+
+async function summarizeRunsInferenceUsage(
+  runIds: string[],
+): Promise<Map<string, AutomationRunInferenceUsage>> {
+  if (runIds.length === 0) return new Map();
+  const rows = await getDatabase()
+    .select({
+      costMicros: sql<string | null>`case when bool_or(${automationModelUsage.costMicros} is null) then null else sum(${automationModelUsage.costMicros}) end`,
+      inputTokens: sql<string>`sum(${automationModelUsage.inputTokens} + ${automationModelUsage.cachedInputTokens} + ${automationModelUsage.cacheWriteTokens})`,
+      outputTokens: sql<string>`sum(${automationModelUsage.outputTokens})`,
+      requests: sql<string>`count(*)`,
+      runId: automationModelUsage.runId,
+    })
+    .from(automationModelUsage)
+    .where(
+      and(
+        inArray(automationModelUsage.runId, runIds),
+        isNotNull(automationModelUsage.completedAt),
+      ),
+    )
+    .groupBy(automationModelUsage.runId);
+  return new Map(rows.map((row) => [row.runId, {
+    costMicros: row.costMicros === null ? null : Number(row.costMicros),
+    inputTokens: Number(row.inputTokens),
+    outputTokens: Number(row.outputTokens),
+    requests: Number(row.requests),
+  }]));
 }
 
 export async function getAutomationRun(
@@ -714,12 +788,19 @@ export async function getAutomationRun(
     )
     .limit(1);
   if (!rows[0]) return null;
-  const events = await db
-    .select()
-    .from(automationRunEvents)
-    .where(eq(automationRunEvents.runId, runId))
-    .orderBy(automationRunEvents.id);
-  return { ...rows[0], events };
+  const [events, inferenceUsage] = await Promise.all([
+    db
+      .select()
+      .from(automationRunEvents)
+      .where(eq(automationRunEvents.runId, runId))
+      .orderBy(automationRunEvents.id),
+    summarizeRunsInferenceUsage([runId]),
+  ]);
+  return {
+    ...rows[0],
+    events,
+    inferenceUsage: inferenceUsage.get(runId) ?? null,
+  };
 }
 
 export async function requestAutomationRunCancellation(input: {
@@ -989,6 +1070,7 @@ export async function claimAutomationRun(runId: string) {
     .select({
       cancelRequestedAt: automationRuns.cancelRequestedAt,
       harness: automationVersions.harness,
+      inferenceSource: automationVersions.inferenceSource,
       maxModelRequests: automationVersions.maxModelRequests,
       maxOutputTokensPerRequest:
         automationVersions.maxOutputTokensPerRequest,
