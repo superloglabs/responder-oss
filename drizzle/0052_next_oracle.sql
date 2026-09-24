@@ -1,0 +1,2 @@
+ALTER TABLE "automation_model_broker_grants" ADD COLUMN "context_only" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "model_subscription_connections" ADD CONSTRAINT "model_subscription_connections_credential_id_organization_model_credentials_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."organization_model_credentials"("id") ON DELETE cascade ON UPDATE no action;

@@ -1,7 +1,7 @@
 import { AutomationSubscriptionConnect } from "./automation-subscription-connect";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { createAutomationCredential, fetchAutomationModels, fetchAutomationOptions, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
+import { createAutomationCredential, fetchAutomationModels, fetchAutomationOptions, type AutomationCredential, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
 import { automationModelProviders, modelProvider, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
 import "./automation-model-picker.css";
 
@@ -35,7 +35,9 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
   const search = useRef<HTMLInputElement>(null);
   const keyInput = useRef<HTMLInputElement>(null);
   const providerName = modelProvider(provider).name;
-  const credentials = options?.credentials.filter(item => item.provider === provider && item.status === "active") ?? [];
+  const [createdCredential, setCreatedCredential] = useState<AutomationCredential | null>(null);
+  const allCredentials = [...(options?.credentials ?? []), ...(createdCredential && !options?.credentials.some(item => item.id === createdCredential.id) ? [createdCredential] : [])];
+  const credentials = allCredentials.filter(item => item.provider === provider && item.status === "active");
   const [lastRequestedOpen, setLastRequestedOpen] = useState(requestedOpen);
   function setPanel(value: Panel) { setRevision(0); setError(null); setQuery(""); setApiKey(""); if (value === "models") { setLoading(true); setModels([]); } setPanelState(value); }
   if (lastRequestedOpen !== requestedOpen) { setLastRequestedOpen(requestedOpen); setPanel("providers"); }
@@ -69,17 +71,20 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [panel, credentialId, revision]);
-  const subscriptionSelected = options?.credentials.some(item => item.id === configuration.modelCredentialId && item.authType === "chatgpt_subscription") ?? false;
+  const subscriptionSelected = allCredentials.some(item => item.id === configuration.modelCredentialId && item.authType === "chatgpt_subscription");
   function chooseProvider(id: AutomationModelProvider) {
     setProvider(id);
-    const credential = options?.credentials.find(item => item.id === configuration.modelCredentialId && item.provider === id && item.status === "active")
-      ?? options?.credentials.find(item => item.provider === id && item.status === "active");
+    const credential = allCredentials.find(item => item.id === configuration.modelCredentialId && item.provider === id && item.status === "active")
+      ?? allCredentials.find(item => item.provider === id && item.status === "active");
     setCredentialId(credential?.id ?? ""); setMethod("api_key"); setModels([]);
     setPanel(credential ? "models" : "connection");
   }
   async function connected(id: string) {
-    onOptions(await fetchAutomationOptions());
+    const now = new Date().toISOString();
+    setCreatedCredential({ id, provider, authType: method, label: method === "chatgpt_subscription" ? "ChatGPT subscription" : `${providerName} key`, lastFour: "", status: "active", createdAt: now, updatedAt: now, lastValidatedAt: now });
     setCredentialId(id); setPanel("models");
+    // Creation already succeeded; a list refresh must not invite duplicate connections.
+    try { onOptions(await fetchAutomationOptions()); } catch { /* The saved connection can load models by ID. */ }
   }
   async function connect() {
     setSaving(true); setError(null);
@@ -104,7 +109,7 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
     if (event.key === "Enter" && event.target === search.current) { event.preventDefault(); root.current?.querySelector<HTMLButtonElement>(".automationModel__row")?.click(); }
     if (panel && ["ArrowDown", "ArrowUp"].includes(event.key) && panel !== "connection") {
       event.preventDefault();
-      const buttons = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('.automationModel__popover button:not(:disabled)') ?? []);
+      const buttons = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('.automationModel__popover .automationModel__row:not(:disabled)') ?? []);
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
       buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1) + buttons.length) % buttons.length]?.focus();
     }
@@ -117,7 +122,7 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
         {panel === "models" ? <div className="automationModel__heading"><button type="button" onClick={() => setPanel("providers")}>← Providers</button><strong>{providerName}</strong></div> : null}
         {panel === "models" ? <label className="automationModel__search"><MagnifyingGlassIcon size={16} /><input aria-label="Search models" placeholder="Search models…" ref={search} value={query} onChange={event => setQuery(event.target.value)} /></label> : null}
         {panel === "providers" ? <>
-          {automationModelProviders.map(item => <button key={item.id} type="button" className="automationModel__row automationModel__provider" onClick={() => chooseProvider(item.id)}><img className="automationModel__providerIcon" src={`/model-providers/${item.id}.svg`} alt="" aria-hidden="true" /><span>{item.name}</span>{options?.credentials.some(credential => credential.provider === item.id && credential.status === "active") ? <CaretRightIcon size={14} aria-hidden="true" /> : null}</button>)}
+          {automationModelProviders.map(item => <button key={item.id} type="button" className="automationModel__row automationModel__provider" onClick={() => chooseProvider(item.id)}><img className="automationModel__providerIcon" src={`/model-providers/${item.id}.svg`} alt="" aria-hidden="true" /><span>{item.name}</span>{allCredentials.some(credential => credential.provider === item.id && credential.status === "active") ? <CaretRightIcon size={14} aria-hidden="true" /> : null}</button>)}
         </> : <>
           {credentials.length > 1 ? <label className="automationModel__key"><span>Connection</span><select aria-label="Model connection" value={credentialId} onChange={event => { setLoading(true); setModels([]); setError(null); setRevision(0); setCredentialId(event.target.value); }}>{credentials.map(item => <option key={item.id} value={item.id}>{item.label}{item.authType === "chatgpt_subscription" ? " · Subscription" : ""}</option>)}</select></label> : null}
           {loading ? <p className="automationModel__hint" role="status">{credentials.some(item => item.id === credentialId && item.authType === "chatgpt_subscription") ? "Loading subscription models… The first load may take up to a minute." : "Loading available models…"}</p> : error ? <div className="automationModel__footer"><p role="alert">{error}</p><button type="button" onClick={() => refreshModels()}>Retry</button></div> : <>

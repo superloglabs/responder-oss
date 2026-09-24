@@ -37,8 +37,15 @@ export function AutomationTriggerConnect({ kind, name, onConnected }: {
       try {
         if (status === "error") {
           setError(`Unable to connect ${name}. Please try again.`);
-        } else if (!(await onConnected(kind))) {
-          setError(status === "connected" ? `${name} connected, but its resources are not available yet. Try again to refresh the connection.` : "Connection cancelled. You can try again when ready.");
+        } else {
+          let connected = await onConnected(kind);
+          for (let attempt = 0; !connected && status === "finishing" && attempt < 10; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            connected = await onConnected(kind);
+          }
+          if (!connected) {
+          setError(status === "connected" || status === "finishing" ? `${name} connected, but its resources are not available yet. Try again to refresh the connection.` : "Connection cancelled. You can try again when ready.");
+        }
         }
       } catch {
         setError("Could not refresh the connection. Please try again.");
@@ -49,7 +56,7 @@ export function AutomationTriggerConnect({ kind, name, onConnected }: {
     function receive(event: MessageEvent) {
       if (event.origin !== window.location.origin || event.source !== popup) return;
       const data = event.data;
-      if (data?.type !== "automation-connection-complete" || data.requestId !== requestId || data.provider !== kind || !["connected", "error"].includes(data.status)) return;
+      if (data?.type !== "automation-connection-complete" || data.requestId !== requestId || data.provider !== kind || !["connected", "finishing", "error"].includes(data.status)) return;
       void complete(data.status);
     }
     window.addEventListener("message", receive);

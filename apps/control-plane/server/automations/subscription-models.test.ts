@@ -10,6 +10,7 @@ it("discovers all visible subscription models through managed authentication and
   try {
     await mkdir(join(root, "node_modules/.bin"), { recursive: true });
     await mkdir(join(root, "auth"));
+    expect(subscriptionModelsRunner).toContain("/home/daytona/.responder-model-catalog");
     await writeFile(join(root, "node_modules/.bin/codex"), `#!/usr/bin/env node
 const rl = require("node:readline").createInterface({ input: process.stdin });
 const send = (id, result) => process.stdout.write(JSON.stringify({ id, result }) + "\\n");

@@ -187,6 +187,7 @@ export async function processAutomationRun(
     provider: run.modelProvider,
   });
 
+  let subscriptionCleanupConfirmed = true;
   let subscriptionLease: { credentialId: string; organizationId: string; leaseId: string } | undefined;
   let grantId: string | undefined;
   const runAbort = new AbortController();
@@ -275,7 +276,9 @@ export async function processAutomationRun(
     ]);
     const contextServers = automationContextServers(environment, connections);
 
+    subscriptionCleanupConfirmed = false;
     const result = await dependencies.runInSandbox({
+      onCleanupConfirmed: () => { subscriptionCleanupConfirmed = true; },
       brokerToken: grant.token,
       config: daytonaConfig,
       organizationId: run.organizationId,
@@ -403,7 +406,7 @@ export async function processAutomationRun(
       }).catch(() => undefined);
     }
   } finally {
-    if (subscriptionLease) await dependencies.releaseSubscription(subscriptionLease).catch((error) => dependencies.reportException(error, { jobId, operation: "automation", organizationId: run.organizationId, requestId: run.runId }).catch(() => undefined));
+    if (subscriptionLease && subscriptionCleanupConfirmed) await dependencies.releaseSubscription(subscriptionLease).catch((error) => dependencies.reportException(error, { jobId, operation: "automation", organizationId: run.organizationId, requestId: run.runId }).catch(() => undefined));
     clearInterval(cancellationPoll);
     clearInterval(heartbeat);
     clearTimeout(runtimeTimeout);

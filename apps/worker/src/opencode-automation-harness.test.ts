@@ -36,7 +36,7 @@ describe("OpenCode automation harness", () => {
     expect(command).toContain("unset RESPONDER_MODEL_BROKER_TOKEN");
   });
 
-  it("uses the Responses adapter for OpenAI and the Messages adapter for Anthropic", () => {
+  it("uses the Chat Completions adapter for OpenAI and the Messages adapter for Anthropic", () => {
     expect(openCodeAutomationConfig(input)).toMatchObject({
       permission: { "*": "allow" },
       mcp: {
@@ -46,9 +46,10 @@ describe("OpenCode automation harness", () => {
       },
       provider: {
         responder: {
-          npm: "@ai-sdk/openai",
+          npm: "@ai-sdk/openai-compatible",
           options: {
             apiKey: "{env:RESPONDER_MODEL_BROKER_TOKEN}",
+            baseURL: "https://models.responder.test/v1/providers/openai",
           },
         },
       },

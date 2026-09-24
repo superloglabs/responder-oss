@@ -144,6 +144,7 @@ export async function createAutomationModelBrokerGrant(
   const rows = await getDatabase()
     .insert(automationModelBrokerGrants)
     .values({
+      contextOnly: input.contextOnly ?? false,
       credentialKeyVersion: 1,
       encryptedCredentials,
       expiresAt: input.expiresAt,
@@ -193,6 +194,7 @@ export async function claimAutomationModelBrokerGrant(
     ? automationModelBrokerGrants.maxOutputTokensPerRequest
     : sql`${input.requestedMaxOutputTokens}`;
   const conditions = [
+    eq(automationModelBrokerGrants.contextOnly, false),
     eq(automationModelBrokerGrants.tokenHash, input.tokenHash),
     eq(automationModelBrokerGrants.provider, input.provider),
     eq(automationModelBrokerGrants.model, input.model),

@@ -18,7 +18,7 @@ export function AutomationEditorDialog({ children, onClose, title }: {
     };
   }, []);
   return (
-    <dialog aria-labelledby={titleId} className="automationEditorDialog" onCancel={onClose} onClick={(event) => {
+    <dialog aria-labelledby={titleId} className="automationEditorDialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
       if (event.target === event.currentTarget) {
         const bounds = event.currentTarget.getBoundingClientRect();
         if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();

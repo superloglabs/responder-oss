@@ -126,7 +126,7 @@ export function createAutomationModelBrokerRoutes(
 ) {
   return new Hono().post("/v1/providers/:provider/chat/completions", async (context) => {
     const provider = automationModelProviderSchema.safeParse(context.req.param("provider"));
-    if (!provider.success || ["openai", "anthropic"].includes(provider.data)) return context.json({ error: "Unsupported provider" }, 400);
+    if (!provider.success || provider.data === "anthropic") return context.json({ error: "Unsupported provider" }, 400);
     const token = brokerToken(context);
     if (!token) return context.json({ error: "Unauthorized" }, 401);
     const body = await context.req.json().catch(() => null) as Record<string, unknown> | null;
@@ -139,13 +139,14 @@ export function createAutomationModelBrokerRoutes(
     if (!grant) return context.json({ error: "Model broker grant is invalid or exhausted" }, 401);
     const forwarded: Record<string, unknown> = { ...body, model: grant.model, max_tokens: grant.maxOutputTokens };
     delete forwarded.max_completion_tokens;
+    if (provider.data === "openai") { delete forwarded.max_tokens; forwarded.max_completion_tokens = grant.maxOutputTokens; }
     try {
       const response = await dependencies.providerFetch(`${modelProvider(provider.data).baseUrl}/chat/completions`, {
         method: "POST", headers: { authorization: `Bearer ${grant.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify(forwarded), redirect: "error",
         signal: AbortSignal.any([context.req.raw.signal, AbortSignal.timeout(providerRequestTimeoutMs)]),
       });
-      return new Response(response.body, { status: response.status, headers: providerResponseHeaders(response.headers) });
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers: providerResponseHeaders(response.headers) });
     } catch { return context.json({ error: "Model provider request failed" }, 502); }
   }).post("/v1/responses", async (context) => {
     const token = brokerToken(context);

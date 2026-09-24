@@ -25,6 +25,7 @@ rl.on("line", line => {
  }
 });
 `;
+    expect(subscriptionLoginRunner).toContain("/home/daytona/.responder-subscription-login");
     await writeFile(join(root, "node_modules/.bin/codex"), fakeServer, { mode: 0o700 });
     await writeFile(join(root, "login.mjs"), subscriptionLoginRunner.replaceAll("/home/daytona/.responder-subscription-login", root));
     const process = spawn("node", [join(root, "login.mjs")], { stdio: "ignore" });

@@ -239,7 +239,7 @@ export function AutomationCreatePage() {
           {showCredential ? <div className="automationCredentialForm"><label className="field"><span>Key label</span><input onChange={(event) => setCredentialLabel(event.target.value)} required={showCredential} value={credentialLabel} /></label><label className="field"><span>API key</span><input autoComplete="off" onChange={(event) => setCredentialKey(event.target.value)} required={showCredential} type="password" value={credentialKey} /></label><button className="button button--secondary" disabled={credentialSaving || !credentialKey || !credentialLabel} onClick={() => void addCredential()} type="button">{credentialSaving ? "Saving…" : "Save key"}</button></div> : null}
   </>);
   const repositoryFields = (<>
-<div className="automationChecks">{options?.repositories.length ? options.repositories.map((repository) => <label key={repository.id}><input checked={configuration.repositoryIds.includes(repository.id)} onChange={() => setConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repository.id) }))} type="checkbox" />{repository.fullName}</label>) : <small>Connect GitHub and sync at least one repository first.</small>}</div>
+<div className="automationChecks">{options?.repositories.length ? options.repositories.map((repository) => <label key={repository.id}><input checked={configuration.repositoryIds.includes(repository.id)} disabled={!configuration.repositoryIds.includes(repository.id) && configuration.repositoryIds.length >= 10} onChange={() => setConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repository.id) }))} type="checkbox" />{repository.fullName}</label>) : <small>Connect GitHub and sync at least one repository first.</small>}</div>
   </>);
   const connectorFields = (<>
 <p className="automationFormHint">The trigger connection and selected Slack, Sentry, Datadog, or custom MCP connections are available through the run-scoped context broker. Selected GitHub repositories are checked out in the sandbox. Write actions execute without human approval.</p>
@@ -283,7 +283,7 @@ export function AutomationCreatePage() {
             }} onChange={(trigger) => {
               setTriggerSelected(trigger !== null);
               setError(null);
-              if (trigger) setConfiguration((current) => ({ ...current, trigger }));
+              setConfiguration((current) => ({ ...current, trigger: trigger ?? (current.trigger.kind === "sentry" ? { ...current.trigger, integrationAccountId: "", projectIds: [] } : { ...current.trigger, integrationAccountId: "", channelIds: [] }) }));
             }} />
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-instructions">

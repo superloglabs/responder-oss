@@ -8,3 +8,5 @@ it("rejects API-key caches and incomplete subscription credentials", () => {
   expect(() => parseSubscriptionAuth(JSON.stringify({ OPENAI_API_KEY: "api-key" }))).toThrow();
   expect(() => parseSubscriptionAuth(JSON.stringify({ tokens: { access_token: "access" } }))).toThrow();
 });
+
+it("rejects oversized native credential caches", () => { expect(() => parseSubscriptionAuth(" ".repeat(131_073))).toThrow(); });

@@ -18,7 +18,8 @@ export function AutomationResourcePicker({ label, resources, selected, onChange,
   const id = useId();
   const names = selected.map((value) => resources.find((resource) => resource.externalId === value)?.displayName ?? value);
   const search = query.trim().toLowerCase();
-  const filtered = resources.filter((resource) => `${resource.displayName} ${resource.externalId}`.toLowerCase().includes(search));
+  const available = [...resources, ...selected.filter(id => !resources.some(resource => resource.externalId === id)).map(externalId => ({ externalId, displayName: `${externalId} (unavailable)` }))];
+  const filtered = available.filter((resource) => `${resource.displayName} ${resource.externalId}`.toLowerCase().includes(search));
   useEffect(() => {
     if (!open) return;
     input.current?.focus();
@@ -50,7 +51,7 @@ export function AutomationResourcePicker({ label, resources, selected, onChange,
     }
   }}>
     <span className="automationTrigger__fieldLabel" id={`${id}-label`}>{label}</span>
-    <button aria-label={label} aria-expanded={open} aria-controls={id} aria-haspopup="dialog" className="automationResourcePicker__trigger" onClick={() => { setQuery(""); setOpen(!open); }} ref={button} type="button"><span>{names.length ? names.join(", ") : `Select ${label.toLowerCase()}`}</span><CaretDownIcon size={12} /></button>
+    <button aria-labelledby={`${id}-label`} aria-describedby={`${id}-value`} aria-expanded={open} aria-controls={id} aria-haspopup="dialog" className="automationResourcePicker__trigger" onClick={() => { setQuery(""); setOpen(!open); }} ref={button} type="button"><span id={`${id}-value`}>{names.length ? names.join(", ") : `Select ${label.toLowerCase()}`}</span><CaretDownIcon size={12} /></button>
     {open ? <div aria-label={`Choose ${label.toLowerCase()}s`} className="automationResourcePicker__popover" id={id} role="dialog">
       <label className="automationResourcePicker__search"><MagnifyingGlassIcon size={14} /><input aria-label={`Search ${label.toLowerCase()}s`} placeholder={`Search ${label.toLowerCase()}s or paste ${label.toLowerCase()} ID…`} onChange={(event) => setQuery(event.target.value)} ref={input} value={query} /></label>
       <div className="automationResourcePicker__list"><span className="automationResourcePicker__group">{label}s</span>

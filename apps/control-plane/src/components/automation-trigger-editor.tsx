@@ -98,7 +98,7 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
       <div className="automationTrigger__heading">
         <TriggerIcon kind={trigger.kind} />
         <span className="automationTrigger__provider">{title}</span>
-        {accounts.length > 1 ? <select aria-label="Trigger connection" className="automationTrigger__account" value={trigger.integrationAccountId} onChange={(event) => onChange(trigger.kind === "sentry" ? { ...trigger, integrationAccountId: event.target.value, projectIds: [] } : { ...trigger, integrationAccountId: event.target.value, channelIds: [] })}>
+        {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? trigger.integrationAccountId : ""} onChange={(event) => onChange(trigger.kind === "sentry" ? { ...trigger, integrationAccountId: event.target.value, projectIds: [] } : { ...trigger, integrationAccountId: event.target.value, channelIds: [] })}>
           <option value="" disabled>Choose a workspace</option>
           {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
         </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}

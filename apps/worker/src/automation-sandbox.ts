@@ -37,6 +37,7 @@ const defaultDependencies: AutomationSandboxDependencies = {
 
 export interface FreshAutomationSandboxInput<T> {
   brokerToken: string;
+  onCleanupConfirmed?: () => void;
   config: DaytonaClientConfig;
   organizationId: string;
   signal?: AbortSignal;
@@ -244,6 +245,7 @@ export async function runInFreshAutomationSandbox<T>(
     cleanupFailure = error;
   }
 
+  if (cleanupFailure === undefined) input.onCleanupConfirmed?.();
   if (!executionOutcome.succeeded) {
     if (cleanupFailure !== undefined) {
       console.error(JSON.stringify({

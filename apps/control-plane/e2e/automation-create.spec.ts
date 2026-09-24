@@ -326,3 +326,72 @@ test("shows seven providers and loads, refreshes, and selects models from the ch
   await page.getByRole("button", { name: "Harness: OpenCode" }).click();
   await expect(page.getByRole("menuitemradio")).toHaveCount(1);
 });
+
+test("keeps removed resources deselectable after a refresh", async ({ page }) => {
+  let refreshed = false;
+  await page.route("**/api/agents/options/refresh/slack", route => { refreshed = true; return route.fulfill({ json: {} }); });
+  await page.route("**/api/automations/options", route => route.fulfill({ json: {
+    accounts: [{ id: accountId, provider: "slack", displayName: "Engineering" }],
+    resources: refreshed ? [] : [{ id: "channel", integrationAccountId: accountId, kind: "slack_channel", externalId: "C123", displayName: "#incidents" }],
+    repositories: [], credentials: [], secrets: [],
+  } }));
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New message in channel", exact: true }).click();
+  await page.getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents" }).check();
+  await page.getByRole("button", { name: "Refresh channels" }).click();
+  await page.getByRole("checkbox", { name: "C123 (unavailable)" }).click();
+  await page.getByRole("textbox", { name: "Search channels" }).press("Escape");
+  await expect(page.getByRole("button", { name: "Channel", exact: true })).toContainText("Select channel");
+});
+
+test("moves from model search to the first model with ArrowDown", async ({ page }) => {
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Choose model", exact: true }).click();
+  await page.getByRole("button", { name: "OpenAI", exact: true }).click();
+  await expect(page.getByRole("button", { name: "GPT-5.4" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Search models" }).press("ArrowDown");
+  await expect(page.getByRole("button", { name: "GPT-5.4" })).toBeFocused();
+});
+
+test("completes an asynchronous Sentry connection without losing the draft", async ({ page, context }) => {
+  let connected = false;
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: connected ? [{ id: accountId, provider: "sentry", displayName: "Engineering" }] : [],
+    resources: connected ? [{ id: "channel", integrationAccountId: accountId, kind: "sentry_project", externalId: "C123", displayName: "#incidents" }] : [],
+    repositories: [], credentials: [], secrets: [],
+  } }));
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: {
+    integrations: [{ id: "sentry", connectUrl: "/api/integrations/sentry/start" }],
+  } }));
+  await context.route("**/api/integrations/sentry/start?**", async (route) => {
+    const url = new URL(route.request().url());
+    const destination = new URL(url.searchParams.get("returnTo")!, url.origin);
+    expect(destination.pathname).toBe("/automations/connection-complete");
+    destination.searchParams.set("integration", "sentry");
+    destination.searchParams.set("status", "finishing");
+    connected = true;
+    await route.fulfill({ status: 302, headers: { location: destination.toString() } });
+  });
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto("/automations/new");
+  await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep this unsaved draft.");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New issue", exact: true }).click();
+  await expect(page.getByText("Connect Sentry to use this trigger")).toBeVisible();
+  await page.screenshot({ path: "/tmp/automation-connect-trigger.png", fullPage: true });
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  const popup = await popupPromise;
+  await expect(page.getByRole("button", { name: "Project", exact: true })).toBeVisible();
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  await expect(page).toHaveURL(/\/automations\/new$/);
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep this unsaved draft.");
+  await expect(page.getByText("Sentry new issue", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Project", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose projects" }).press("Escape");
+});

@@ -157,6 +157,7 @@ export const automationModelBrokerGrants = pgTable(
     model: text("model").notNull(),
     encryptedCredentials: text("encrypted_credentials").notNull(),
     credentialKeyVersion: integer("credential_key_version").notNull().default(1),
+    contextOnly: boolean("context_only").notNull().default(false),
     remainingRequests: integer("remaining_requests").notNull(),
     remainingOutputTokens: integer("remaining_output_tokens").notNull(),
     maxOutputTokensPerRequest: integer("max_output_tokens_per_request").notNull(),
@@ -535,7 +536,7 @@ export const modelSubscriptionConnections = pgTable("model_subscription_connecti
   encryptedState: text("encrypted_state").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   nextPollAt: timestamp("next_poll_at", { withTimezone: true }).notNull(),
-  credentialId: uuid("credential_id"),
+  credentialId: uuid("credential_id").references(() => organizationModelCredentials.id, { onDelete: "cascade" }),
 }, (table) => [uniqueIndex("model_subscription_connections_owner_idx").on(table.organizationId, table.userId)]);
 
 export const organizationModelCredentials = pgTable(

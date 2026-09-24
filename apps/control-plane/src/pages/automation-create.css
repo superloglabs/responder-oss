@@ -58,3 +58,5 @@
   .automationCreate__section--trigger { padding-top: 2px; }
   .automationEditorDialog .inlineFields { flex-direction: column; }
 }
+
+.automationCreate .formError, .automationEditorDialog .formError { color: #8a2f2b; background: #fdf4f4; border-color: #d6a8a8; }

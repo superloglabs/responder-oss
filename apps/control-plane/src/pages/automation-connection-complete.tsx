@@ -7,7 +7,7 @@ export function AutomationConnectionCompletePage() {
   const requestId = params.get("request");
   const provider = params.get("integration");
   useEffect(() => {
-    if (!window.opener || !requestId || !["connected", "error"].includes(status ?? "")) return;
+    if (!window.opener || !requestId || !["connected", "finishing", "error"].includes(status ?? "")) return;
     window.opener.postMessage({ type: "automation-connection-complete", requestId, provider, status }, window.location.origin);
     // The editor closes the window after receiving the result.
   }, [provider, requestId, status]);

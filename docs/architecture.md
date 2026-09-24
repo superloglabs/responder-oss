@@ -154,11 +154,18 @@ The worker acquires an exclusive credential lease for each subscription run to
 prevent concurrent refresh-token rotations. A concurrent run fails with an explicit
 subscription-in-use message. After execution (including failures), the native cache
 is read back and encrypted under the owning lease, and its sandbox copy is removed.
-Credential leases expire after the maximum runtime plus cleanup time. The sandbox
+Lease deadlines record the maximum runtime plus cleanup time, but do not permit
+automatic takeover: only the owning operation releases the credential after cleanup.
+An interrupted owner that cannot finish cleanup requires reconnecting the subscription. The sandbox
 is destroyed using the existing run lifecycle. Known original and refreshed tokens
-are redacted from persisted harness output. Native auth files are available to the
-trusted CLI execution environment; file permissions do not isolate them from other
-processes running as that same sandbox user.
+are redacted from persisted harness output. Subscription execution uses the client's
+native filesystem permission profile: model tools may edit the workspace, but cannot
+read the auth home (including through symlinks). The trusted launcher runs as root
+inside the disposable container so it can create the nested Linux user namespace;
+model commands run with dropped capabilities under that namespace and filesystem
+policy. The pinned executable is installed outside the writable workspace. Workspace
+ownership is restored after credential cleanup. A snapshot must run as root or support noninteractive
+sudo, and support the client's Linux sandbox; failures never fall back to unrestricted execution.
 
 Runtime limits and provider subscription quotas apply to subscription runs.
 Broker request-count and per-call output-token caps apply only to API-key runs;

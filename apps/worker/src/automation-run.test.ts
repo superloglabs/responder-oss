@@ -74,10 +74,10 @@ function dependencies() {
     revokeGrant: vi.fn().mockResolvedValue(undefined),
     runClaude: vi.fn(),
     runCodex: vi.fn().mockResolvedValue({ eventStream: "completed" }),
-    runInSandbox: vi.fn(async (input) => input.run(
-      session,
-      async (operation: () => Promise<unknown>) => operation(),
-    )),
+    runInSandbox: vi.fn(async (input) => {
+      try { return await input.run(session, async (operation: () => Promise<unknown>) => operation()); }
+      finally { input.onCleanupConfirmed?.(); }
+    }),
     runOpenCode: vi.fn(),
     setStatus: vi.fn().mockResolvedValue(true),
   };
@@ -149,11 +149,29 @@ describe("automation run processor", () => {
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "native-refresh", account_id: "account" } });
     deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
     deps.acquireSubscription.mockResolvedValue(authJson);
+    deps.runCodex.mockImplementation(async (_session, input) => {
+      await input.model.subscription!.persist(authJson);
+      return { eventStream: "" };
+    });
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ contextOnly: true, apiKey: "subscription-context-only" }));
     expect(JSON.stringify(deps.createGrant.mock.calls)).not.toContain("native-refresh");
     expect(deps.runCodex).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ model: expect.objectContaining({ subscription: { authJson, persist: expect.any(Function) } }) }));
+    expect(deps.persistSubscription).toHaveBeenCalledWith({ credentialId: claimedRun().modelCredentialId, organizationId, leaseId: claimedRun().leaseId, authJson, previousAccountId: "account" });
     expect(deps.releaseSubscription).toHaveBeenCalledWith(expect.objectContaining({ leaseId: claimedRun().leaseId, organizationId }));
   });
 
+});
+
+it("retains the subscription lease when sandbox cleanup is unconfirmed", async () => {
+  vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+  vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+  const deps = dependencies();
+  const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+  deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+  deps.acquireSubscription.mockResolvedValue(authJson);
+  deps.runInSandbox.mockRejectedValue(new Error("cleanup failed"));
+  await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+  expect(deps.releaseSubscription).not.toHaveBeenCalled();
+  vi.unstubAllEnvs();
 });

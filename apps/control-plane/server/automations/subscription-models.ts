@@ -72,8 +72,11 @@ async function loadSubscriptionModels(owner: { organizationId: string; credentia
         if (updated) await persistSubscriptionCredential({ ...lease, authJson: updated.toString(), previousAccountId: originalAccountId });
       }
     } finally {
-      try { if (sandbox) await sdk.delete(sandbox); }
-      finally { await releaseSubscriptionCredential(lease); await sdk[Symbol.asyncDispose](); }
+      try {
+        if (sandbox) await sdk.delete(sandbox);
+        // Do not hand credentials to another operation unless the old sandbox is gone.
+        await releaseSubscriptionCredential(lease);
+      } finally { await sdk[Symbol.asyncDispose](); }
     }
   }
 }

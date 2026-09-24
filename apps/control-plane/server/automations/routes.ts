@@ -191,7 +191,7 @@ export const automationRoutes = new Hono()
       );
     }
     try { await listProviderModels(parsed.data.provider, parsed.data.apiKey); }
-    catch (error) { return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to verify the provider connection. Please retry." }, 400); }
+    catch (error) { return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to verify the provider connection. Please retry." }, error instanceof ModelCatalogError && error.authenticationFailed ? 400 : 503); }
     const credential = await createOrganizationModelCredential({
       ...parsed.data,
       organizationId: access.tenant.organizationId,

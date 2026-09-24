@@ -365,6 +365,13 @@
       "when": 1790173740963,
       "tag": "0051_absent_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1790239576487,
+      "tag": "0052_next_oracle",
+      "breakpoints": true
     }
   ]
 }

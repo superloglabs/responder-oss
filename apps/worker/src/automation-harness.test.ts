@@ -19,7 +19,6 @@ describe("automation harness compatibility", () => {
     expect(() =>
       assertAutomationHarnessModelCompatibility("opencode", {
         ...anthropicRoute,
-        provider: "openai",
       }),
     ).not.toThrow();
   });
