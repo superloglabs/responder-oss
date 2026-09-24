@@ -1,7 +1,6 @@
 import type { AutomationListItem, AutomationRunStatus } from "../automations-api";
 import { providerDisplayName } from "../components/provider-glyphs";
 
-export const triggerProviders = { discord: "Discord", sentry: "Sentry", slack: "Slack" } as const;
 
 export const runStatusLabels: Record<AutomationRunStatus, string> = {
   cancelled: "Cancelled",
@@ -10,6 +9,10 @@ export const runStatusLabels: Record<AutomationRunStatus, string> = {
   running: "Running",
   succeeded: "Completed",
 };
+
+export function triggerProviderLabel(trigger: AutomationListItem["trigger"]): string {
+  return providerDisplayName(trigger.kind);
+}
 
 export function triggerEventLabel(trigger: AutomationListItem["trigger"]): string {
   if (trigger.kind === "slack") {

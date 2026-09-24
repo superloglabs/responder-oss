@@ -649,7 +649,7 @@ export async function listAutomations(organizationId: string) {
 }
 
 // Connectors list GitHub first when the version has repositories, followed by
-// each distinct context provider in the order it was linked.
+// each distinct context provider in alphabetical order.
 export function summarizeAutomationList<
   Row extends { id: string; versionId: string },
 >(
@@ -664,7 +664,10 @@ export function summarizeAutomationList<
   for (const { versionId } of links.repositoryRows) {
     connectors.set(versionId, new Set(["github"]));
   }
-  for (const { provider, versionId } of links.accountRows) {
+  const accountRows = [...links.accountRows].sort((left, right) =>
+    left.provider.localeCompare(right.provider),
+  );
+  for (const { provider, versionId } of accountRows) {
     const providers = connectors.get(versionId) ?? new Set<string>();
     providers.add(provider);
     connectors.set(versionId, providers);
