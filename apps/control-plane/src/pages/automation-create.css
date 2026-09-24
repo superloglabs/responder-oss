@@ -14,7 +14,25 @@
 .automationCreate__titleRow { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .automationCreate__titleRow h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 23px; }
 .automationCreate__name { min-width: 0; width: min(360px, 65%); padding: 0; border: 0; border-bottom: 1px solid #ddd; background: transparent; color: #121212; font: inherit; font-size: 15px; font-weight: 600; line-height: 23px; }
-.automationCreate__save { display: inline-flex; align-items: center; justify-content: center; gap: 5px; margin-left: auto; padding: 2px 6px; height: 24px; border: 1px solid #3f4af8; border-radius: 6px; background: #4e58f9; color: #fdfdfd; box-shadow: inset 0 -3px 4px #64646408, 0 4px 4px #00000005; font: inherit; cursor: pointer; }
+.automationCreate__form { display: flex; flex-direction: column; gap: 22px; }
+.automationCreate__form[hidden] { display: none; }
+.automationCreate__spacer { flex: 1; }
+.automationCreate__tabs { display: flex; gap: 24px; height: 35px; margin-top: 10px; border-bottom: 1px solid #e8e8e8; }
+.automationCreate__tabs button { position: relative; padding: 0; border: 0; background: transparent; color: #666; font: inherit; line-height: 18px; cursor: pointer; }
+.automationCreate__tabs button:hover { color: #202020; }
+.automationCreate__tabs button[aria-selected="true"] { color: #202020; font-weight: 500; }
+.automationCreate__tabs button[aria-selected="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: #202020; }
+.automationCreate .automationCreate__status.dsSwitch { width: auto; flex: 0 0 auto; gap: 8px; padding-right: 12px; }
+.automationCreate .automationCreate__status .dsSwitch__copy strong { color: #444; font-size: 13px; font-weight: 400; line-height: 18px; }
+.automationCreate .automationCreate__status .dsSwitch__track { width: 28px; height: 16px; padding: 2px; border: 0; border-radius: 10px; background: #d9d9d9; }
+.automationCreate .automationCreate__status .dsSwitch__track > span { width: 12px; height: 12px; background: #fff; }
+.automationCreate .automationCreate__status[aria-checked="true"] .dsSwitch__track { background: #168255; }
+.automationCreate .automationCreate__status[aria-checked="true"] .dsSwitch__track > span { background: #fff; transform: translateX(12px); }
+.automationCreate__saveStatus { color: #666; font-size: 12px; line-height: 16px; }
+.automationCreate__unsaved { margin: 0; color: #8a5a00; }
+.automationCreate__secondary { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 2px 6px; height: 24px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: inherit; cursor: pointer; }
+.automationCreate__secondary:disabled { opacity: .5; cursor: default; }
+.automationCreate__save { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 2px 6px; height: 24px; border: 1px solid #3f4af8; border-radius: 6px; background: #4e58f9; color: #fdfdfd; box-shadow: inset 0 -3px 4px #64646408, 0 4px 4px #00000005; font: inherit; cursor: pointer; }
 .automationCreate__save:disabled { opacity: .5; cursor: default; }
 .automationCreate__section { display: flex; flex-direction: column; gap: 12px; padding-top: 24px; }
 .automationCreate__section--trigger { padding-top: 2px; }

@@ -648,7 +648,7 @@ export async function getAutomation(
     .limit(1);
   const automation = rows[0];
   if (!automation) return null;
-  const [accountRows, repositoryRows, secretRows, runRows] = await Promise.all([
+  const [accountRows, repositoryRows, secretRows, runPage] = await Promise.all([
     db
       .select({
         id: automationVersionIntegrationAccounts.integrationAccountId,
@@ -676,31 +676,8 @@ export async function getAutomation(
       .where(
         eq(automationVersionSecrets.automationVersionId, automation.versionId),
       ),
-    db
-      .select({
-        completedAt: automationRuns.completedAt,
-        createdAt: automationRuns.createdAt,
-        failureCategory: automationRuns.failureCategory,
-        failureMessage: automationRuns.failureMessage,
-        id: automationRuns.id,
-        resultSummary: automationRuns.resultSummary,
-        startedAt: automationRuns.startedAt,
-        status: automationRuns.status,
-        usage: automationRuns.usage,
-      })
-      .from(automationRuns)
-      .where(
-        and(
-          eq(automationRuns.automationId, automationId),
-          eq(automationRuns.organizationId, organizationId),
-        ),
-      )
-      .orderBy(desc(automationRuns.createdAt))
-      .limit(50),
+    listAutomationRuns(organizationId, automationId, { limit: 50, offset: 0 }),
   ]);
-  const inferenceUsage = await summarizeRunsInferenceUsage(
-    runRows.map((run) => run.id),
-  );
   return {
     ...automation,
     configuration: {
@@ -711,10 +688,70 @@ export async function getAutomation(
       repositoryIds: repositoryRows.map((row) => row.id),
       workspaceSecretIds: secretRows.map((row) => row.id),
     },
-    runs: runRows.map((run) => ({
+    runs: runPage.runs,
+  };
+}
+
+// Returns one page of an automation's runs, newest first. Each run carries
+// its position in the automation's history and the trigger's display fields.
+export async function listAutomationRuns(
+  organizationId: string,
+  automationId: string,
+  page: { limit: number; offset: number },
+) {
+  const db = getDatabase();
+  const scope = and(
+    eq(automationRuns.automationId, automationId),
+    eq(automationRuns.organizationId, organizationId),
+  );
+  const [runRows, totals] = await Promise.all([
+    db
+      .select({
+        completedAt: automationRuns.completedAt,
+        createdAt: automationRuns.createdAt,
+        failureCategory: automationRuns.failureCategory,
+        failureMessage: automationRuns.failureMessage,
+        id: automationRuns.id,
+        number: sql<string>`row_number() over (order by ${automationRuns.createdAt}, ${automationRuns.id})`,
+        redactedTrigger: automationRuns.redactedTrigger,
+        resultSummary: automationRuns.resultSummary,
+        startedAt: automationRuns.startedAt,
+        status: automationRuns.status,
+        usage: automationRuns.usage,
+      })
+      .from(automationRuns)
+      .where(scope)
+      .orderBy(desc(automationRuns.createdAt), desc(automationRuns.id))
+      .limit(page.limit)
+      .offset(page.offset),
+    db
+      .select({ total: sql<string>`count(*)` })
+      .from(automationRuns)
+      .where(scope),
+  ]);
+  const inferenceUsage = await summarizeRunsInferenceUsage(
+    runRows.map((run) => run.id),
+  );
+  return {
+    runs: runRows.map(({ number, redactedTrigger, ...run }) => ({
       ...run,
       inferenceUsage: inferenceUsage.get(run.id) ?? null,
+      number: Number(number),
+      trigger: runTriggerSummary(redactedTrigger),
     })),
+    total: Number(totals[0]?.total ?? 0),
+  };
+}
+
+function runTriggerSummary(trigger: Record<string, unknown>): {
+  provider: string;
+  sourceUrl: string | null;
+  title: string;
+} {
+  return {
+    provider: typeof trigger.provider === "string" ? trigger.provider : "manual",
+    sourceUrl: typeof trigger.sourceUrl === "string" ? trigger.sourceUrl : null,
+    title: typeof trigger.title === "string" ? trigger.title : "Automation run",
   };
 }
 

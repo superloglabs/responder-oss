@@ -77,10 +77,20 @@ export interface AutomationRunSummary {
   failureCategory: string | null;
   failureMessage: string | null;
   id: string;
+  // Position in the automation's history, starting at 1.
+  number: number;
   resultSummary: string | null;
   startedAt: string | null;
   status: AutomationRunStatus;
+  trigger: { provider: string; sourceUrl: string | null; title: string };
   usage: Record<string, unknown> | null;
+}
+
+export interface AutomationRunPage {
+  page: number;
+  pageSize: number;
+  runs: AutomationRunSummary[];
+  total: number;
 }
 
 export interface AutomationDetail {
@@ -138,6 +148,12 @@ export async function fetchAutomation(id: string): Promise<AutomationDetail> {
     `/api/automations/${encodeURIComponent(id)}`,
   );
   return response.automation;
+}
+
+export function fetchAutomationRuns(id: string, page: number): Promise<AutomationRunPage> {
+  return automationJson<AutomationRunPage>(
+    `/api/automations/${encodeURIComponent(id)}/runs?page=${page}`,
+  );
 }
 
 export function fetchAutomationOptions(): Promise<AutomationOptions> {
