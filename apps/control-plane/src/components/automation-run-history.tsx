@@ -101,7 +101,7 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
 
   if (!result) {
     return error
-      ? <p className="automationRuns__message" role="alert">{error}</p>
+      ? <div className="automationRuns__message" role="alert"><p>{error}</p><button onClick={() => { setError(null); void load(); }} type="button">Retry</button></div>
       : <p className="automationRuns__message" role="status">Loading runs…</p>;
   }
 

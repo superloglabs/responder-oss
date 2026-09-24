@@ -193,3 +193,17 @@ test("drops removed connections from a saved automation before saving it", async
   await page.getByRole("textbox", { name: "Agent instructions" }).blur();
   await expect.poll(() => saved).toMatchObject({ configuration: { contextAccountIds: [datadogAccountId], workspaceSecretIds: [] } });
 });
+
+test("retries run history after a failed load", async ({ page }) => {
+  let available = false;
+  await page.route((url) => url.pathname === `/api/automations/${automationId}/runs`, async (route) => {
+    if (available) return route.fallback();
+    await route.fulfill({ status: 503, json: { error: "Run history is unavailable" } });
+  });
+  await page.goto(`/automations/${automationId}`);
+  await page.getByRole("tab", { name: "Run history" }).click();
+  await expect(page.getByRole("alert")).toContainText("Run history is unavailable");
+  available = true;
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("Showing 1–10 of 12 runs")).toBeVisible();
+});

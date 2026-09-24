@@ -122,7 +122,9 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   function enqueue(work: () => Promise<void>) {
     pendingSaves.current += 1;
     setSaveStatus("saving");
-    saveQueue.current = saveQueue.current.then(work).finally(() => {
+    // Work handles its own errors; the catch keeps the queue running if it
+    // ever rejects.
+    saveQueue.current = saveQueue.current.then(work).catch(() => undefined).finally(() => {
       pendingSaves.current -= 1;
       if (pendingSaves.current === 0) setSaveStatus((status) => status === "saving" ? "saved" : status);
     });
