@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { automationModelProviders, supportsAutomationHarness } from "./model-providers.js";
 
 export const automationHarnessSchema = z.enum([
   "codex",
@@ -6,7 +7,7 @@ export const automationHarnessSchema = z.enum([
   "opencode",
 ]);
 
-export const automationModelProviderSchema = z.enum(["openai", "anthropic"]);
+export const automationModelProviderSchema = z.enum(automationModelProviders.map(provider => provider.id));
 
 const externalResourceIdSchema = z.string().trim().min(1).max(255);
 const integrationAccountIdSchema = z.uuid();
@@ -61,12 +62,11 @@ export const automationConfigurationSchema = z
   })
   .superRefine((configuration, context) => {
     if (
-      configuration.harness === "claude_agent_sdk" &&
-      configuration.modelProvider !== "anthropic"
+      !supportsAutomationHarness(configuration.modelProvider, configuration.harness)
     ) {
       context.addIssue({
         code: "custom",
-        message: "Claude Agent SDK requires an Anthropic model credential",
+        message: configuration.harness === "claude_agent_sdk" ? "Claude Agent SDK requires an Anthropic model credential" : "The selected harness does not support this model provider",
         path: ["modelProvider"],
       });
     }

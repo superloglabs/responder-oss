@@ -177,3 +177,9 @@ describe("automation model broker grant storage", () => {
     );
   });
 });
+
+it("does not authorize model inference with a subscription context-only grant", async () => {
+  const returning = vi.fn().mockResolvedValue([{ encryptedCredentials: "cipher", id: grantId, maxOutputTokensPerRequest: 4096, model: "gpt-5.4", organizationId, runId: "run-1" }]);
+  vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set: () => ({ from: () => ({ where: () => ({ returning }) }) }) }) } as never);
+  await expect(claimAutomationModelBrokerGrant({ model: "gpt-5.4", provider: "openai", requestedMaxOutputTokens: null, tokenHash: "a".repeat(64) }, { decryptCredentials: () => ({ apiKey: "subscription-context-only", contextOnly: true }) })).resolves.toBeNull();
+});

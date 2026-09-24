@@ -1,0 +1,69 @@
+.automationModel { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; }
+.automationModel button { font: inherit; cursor: pointer; }
+.automationModel button:disabled { opacity: .5; cursor: default; }
+.automationModel__toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: #444; font-size: 12px !important; }
+.automationModel__popover { position: absolute; top: calc(100% + 12px); left: 0; z-index: 30; width: min(322px, calc(100vw - 64px)); display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid #ddd; border-radius: 12px; background: #fff; box-shadow: 0 4px 12px #0000000a; color: #202020; font-size: 13px; line-height: 18px; max-height: min(65vh, var(--automation-menu-height, 65vh)); overflow-y: auto; }
+.automationModel__search { display: flex; align-items: center; gap: 10px; padding: 12px 8px 16px; border-bottom: 1px solid #e3e3e3; color: #777; }
+.automationModel__search input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; box-shadow: none; background: transparent; font: inherit; }
+.automationModel__group { padding: 14px 10px 4px; color: #666; font-size: 12px; }
+.automationModel .automationModel__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px; border: 0; border-radius: 6px; background: transparent; color: #202020; text-align: left; font-size: 13px; }
+.automationModel__row:hover, .automationModel__row:focus-visible, .automationModel__row[aria-checked="true"] { background: #f2f2f2; }
+.automationModel__row > span { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.automationModel__row small { color: #666; font-size: 12px; }
+.automationModel__row > small, .automationModel__row > svg { flex-shrink: 0; }
+.automationModel__heading { display: flex; flex-direction: column; gap: 6px; padding: 10px 8px 14px; }
+.automationModel__heading button { align-self: flex-start; border: 0; padding: 0; background: transparent; color: #666; font-size: 12px; }
+.automationModel__heading strong { font-size: 14px; line-height: 22px; font-weight: 500; }
+.automationModel__method { padding: 8px; border-radius: 7px; background: #f3f3f3; text-align: center; font-size: 12px; line-height: 20px; }
+.automationModel__key { display: flex; flex-direction: column; gap: 7px; padding: 12px 8px 0; color: #666; font-size: 12px; }
+.automationModel__key input { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; font: inherit; font-size: 13px; line-height: 18px; }
+.automationModel__footer { display: flex; flex-direction: column; gap: 12px; padding: 12px 8px 8px; color: #666; font-size: 12px; }
+.automationModel .automationModel__save { height: 32px; padding: 0 12px; border: 1px solid #4e58f9; border-bottom-width: 2px; border-radius: 8px; background: #3f4af8cc; color: #fff; font-size: 14px; font-weight: 500; }
+.automationModel__footer p { margin: 0; color: #b42318; }
+.automationModel__menuHeading { padding: 10px 8px 12px; border-bottom: 1px solid #e3e3e3; color: #666; font-size: 12px; }
+.automationModel__hint { padding: 8px; color: #666; }
+@media (max-width: 600px) { .automationModel { gap: 10px; flex-wrap: wrap; } }
+.automationCreate .automationModel__search input:focus-visible { outline: none; }
+.automationModel__methods { display: flex; padding: 3px; border-radius: 7px; background: #f3f3f3; }
+.automationModel__methods button { flex: 1; padding: 5px; border: 0; border-radius: 5px; background: transparent; font-size: 12px; line-height: 20px; }
+.automationModel__methods button[aria-pressed="true"] { background: #fff; }
+.automationModel__deviceCode { padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 20px; letter-spacing: .12em; text-align: center; color: #202020; }
+.automationModel__footer a.automationModel__save { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+
+.automationModel__key select { padding: 8px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; font: inherit; }
+.automationModel__footer > button:not(.automationModel__save) { padding: 6px; border: 0; border-radius: 6px; background: #f3f3f3; color: #444; }
+
+/* shadcn/ui dropdown-menu defaults: p-1, rounded-md, shadow-md, text-sm. */
+.automationModel__popover--providers {
+  top: calc(100% + 4px);
+  width: 224px;
+  min-width: 128px;
+  gap: 0;
+  padding: 4px;
+  border-color: #e4e4e7;
+  border-radius: 6px;
+  color: #09090b;
+  font-size: 14px;
+  line-height: 20px;
+  box-shadow: 0 4px 6px -1px #0000001a, 0 2px 4px -2px #0000001a;
+}
+.automationModel .automationModel__provider {
+  gap: 8px;
+  padding: 6px 8px;
+  min-height: 32px;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  cursor: default;
+  user-select: none;
+  outline: none;
+  transition: background-color 150ms, color 150ms;
+}
+.automationModel .automationModel__provider:hover,
+.automationModel .automationModel__provider:focus-visible {
+  background: #f4f4f5;
+  color: #18181b;
+}
+.automationModel__providerIcon { flex: 0 0 16px; width: 16px; height: 16px; object-fit: contain; }
+.automationModel__provider > svg { width: 16px; height: 16px; color: currentColor; }

@@ -6,12 +6,17 @@ const organizationId = "15151515-1515-4515-8515-151515151515";
 const userId = "21212121-2121-4121-8121-212121212121";
 
 const mocks = vi.hoisted(() => ({
+  startSubscription: vi.fn(),
+  pollSubscription: vi.fn(),
+  cancelSubscription: vi.fn(),
   capability: vi.fn().mockResolvedValue(true),
   createAutomation: vi.fn(),
   getAutomation: vi.fn(),
   getAutomationRun: vi.fn(),
   listAutomations: vi.fn().mockResolvedValue([]),
   listCredentials: vi.fn().mockResolvedValue([]),
+  credential: vi.fn(),
+  modelCatalog: vi.fn(),
   queueRun: vi.fn(),
   tenant: vi.fn().mockResolvedValue({
     ok: true,
@@ -45,12 +50,15 @@ vi.mock("../../../../packages/core/src/db/agents.js", () => ({
 vi.mock("../../../../packages/core/src/db/automation-model-credentials.js", () => ({
   createOrganizationModelCredential: vi.fn(),
   deleteOrganizationModelCredential: vi.fn(),
-  getOrganizationModelCredential: vi.fn(),
+  getOrganizationModelCredential: mocks.credential,
   listOrganizationModelCredentials: mocks.listCredentials,
   markOrganizationModelCredentialValidated: vi.fn(),
   rotateOrganizationModelCredential: vi.fn(),
 }));
+vi.mock("../../../../packages/core/src/db/model-subscriptions.js", () => ({ startModelSubscription: mocks.startSubscription, pollModelSubscription: mocks.pollSubscription, cancelModelSubscription: mocks.cancelSubscription }));
 vi.mock("./queue.js", () => ({ queueAutomationRun: mocks.queueRun }));
+
+vi.mock("../../../../packages/core/src/automations/model-catalog.js", async (original) => ({ ...await original<typeof import("../../../../packages/core/src/automations/model-catalog.js")>(), listProviderModels: mocks.modelCatalog }));
 
 const app = new Hono().route("/api/automations", automationRoutes);
 
@@ -112,4 +120,38 @@ describe("automation control-plane routes", () => {
     expect(body).not.toContain("apiKey");
     expect(body).not.toContain("encryptedCredentials");
   });
+});
+
+it("scopes subscription sign-in and polling to the authenticated user and organization", async () => {
+  const connectionId = "41414141-4141-4141-8141-414141414141";
+  mocks.startSubscription.mockResolvedValue({ connectionId, userCode: "ABCD", verificationUrl: "https://auth.openai.com/codex/device" });
+  mocks.pollSubscription.mockResolvedValue({ status: "pending" });
+  const start = await app.request("/api/automations/subscriptions/openai", { method: "POST" });
+  expect(start.status).toBe(200);
+  expect(start.headers.get("cache-control")).toBe("no-store");
+  expect(mocks.startSubscription).toHaveBeenCalledWith({ organizationId, userId }, expect.any(Object));
+  await app.request(`/api/automations/subscriptions/openai/${connectionId}/poll`, { method: "POST" });
+  expect(mocks.pollSubscription).toHaveBeenCalledWith({ organizationId, userId, connectionId }, expect.any(Object));
+  await app.request(`/api/automations/subscriptions/openai/${connectionId}`, { method: "DELETE" });
+  expect(mocks.cancelSubscription).toHaveBeenCalledWith({ organizationId, userId, connectionId }, expect.any(Object));
+});
+it("does not start a subscription login for a disabled workspace", async () => {
+  mocks.startSubscription.mockClear(); mocks.capability.mockResolvedValue(false);
+  expect((await app.request("/api/automations/subscriptions/openai", { method: "POST" })).status).toBe(404);
+  expect(mocks.startSubscription).not.toHaveBeenCalled();
+  mocks.capability.mockResolvedValue(true);
+});
+
+ it("loads models only for credentials in the authenticated workspace and never returns keys", async () => {
+  const id = "33333333-3333-4333-8333-333333333333";
+  mocks.credential.mockResolvedValue({ provider: "google", apiKey: "private-key" });
+  mocks.modelCatalog.mockResolvedValue([{ id: "gemini-current", name: "Gemini" }]);
+  const response = await app.request(`/api/automations/credentials/${id}/models`);
+  expect(response.status).toBe(200);
+  expect(mocks.credential).toHaveBeenCalledWith({ credentialId: id, organizationId });
+  expect(mocks.modelCatalog).toHaveBeenCalledWith("google", "private-key");
+  expect(await response.text()).not.toContain("private-key");
+  mocks.modelCatalog.mockClear(); mocks.credential.mockResolvedValue(null);
+  expect((await app.request(`/api/automations/credentials/${id}/models`)).status).toBe(404);
+  expect(mocks.modelCatalog).not.toHaveBeenCalled();
 });

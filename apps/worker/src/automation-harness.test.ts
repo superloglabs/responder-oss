@@ -12,10 +12,10 @@ const anthropicRoute = {
 };
 
 describe("automation harness compatibility", () => {
-  it("allows every provider through the broker for Codex and OpenCode", () => {
+  it("restricts Codex to OpenAI while OpenCode supports other providers", () => {
     expect(() =>
       assertAutomationHarnessModelCompatibility("codex", anthropicRoute),
-    ).not.toThrow();
+    ).toThrow("does not support");
     expect(() =>
       assertAutomationHarnessModelCompatibility("opencode", {
         ...anthropicRoute,

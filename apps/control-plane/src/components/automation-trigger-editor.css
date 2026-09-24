@@ -1,0 +1,85 @@
+.automationTrigger { display: flex; flex-direction: column; gap: 12px; }
+.automationTrigger__chooser { position: relative; display: flex; align-items: center; gap: 18px; }
+.automationTrigger__menu { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; width: min(360px, 100%); padding: 6px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; box-shadow: 0 6px 20px #00000012; }
+.automationTrigger__icon { display: flex; flex-shrink: 0; justify-content: center; width: 20px; }
+.automationTrigger .providerGlyph { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 16px; height: 16px; border: 0; border-radius: 0; background: transparent; padding: 0; }
+.automationTrigger .providerGlyph svg { width: 16px; height: 16px; }
+.automationTrigger__card { padding: 0 12px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
+.automationTrigger__heading { display: flex; align-items: center; gap: 10px; min-height: 46px; }
+.automationTrigger__provider { flex: 1; color: #202020; }
+.automationTrigger__account { max-width: 50%; padding: 0; border: 0; background: transparent; color: #666; font: inherit; font-size: 12px; line-height: 18px; }
+.automationTrigger__fields { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 0 16px; border-top: 1px solid #f0f0f0; }
+.automationTrigger__field { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; color: #666; font-size: 12px; line-height: 16px; }
+.automationTrigger__select { position: relative; display: flex; }
+.automationTrigger__select select { appearance: none; width: 100%; min-width: 0; padding: 3px 25px 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: inherit; font-size: 13px; line-height: 18px; }
+.automationTrigger__select select:disabled { color: #777; }
+.automationTrigger__select svg { position: absolute; right: 7px; top: 7px; pointer-events: none; color: #666; }
+.automationTrigger__change { display: inline-flex; align-items: center; gap: 10px; padding: 2px 0; border: 0; background: transparent; color: #666; font: inherit; cursor: pointer; }
+.automationTrigger__hint { color: #777; font-size: 12px; line-height: 18px; }
+.automationTrigger__empty { flex-basis: 100%; margin: 0; color: #666; font-size: 12px; line-height: 18px; }
+.automationTrigger__empty a { color: #4e58f9; text-decoration: underline; }
+@media (max-width: 600px) {
+  .automationTrigger__fields { flex-direction: column; }
+  .automationTrigger__chooser { flex-wrap: wrap; gap: 8px; }
+  .automationTrigger__account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+.automationTrigger .providerGlyph--sentry { color: #584164; }
+.automationTrigger select:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+/* Searchable provider menu with an event flyout. */
+.automationTrigger__menu { width: min(280px, 100%); padding: 0; border-radius: 12px; }
+.automationTrigger__search { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid #e8e8e8; color: #666; }
+.automationTrigger__search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: #202020; font: inherit; line-height: 18px; }
+.automationTrigger__search input::placeholder { color: #999; }
+.automationCreate .automationTrigger__search input:focus-visible { outline: none; }
+.automationTrigger__providers { padding: 6px; }
+.automationTrigger__providerItem { position: relative; }
+.automationTrigger__providerOption { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: #202020; font: inherit; text-align: left; cursor: pointer; }
+.automationTrigger__providerOption > span:nth-child(2) { flex: 1; }
+.automationTrigger__providerOption > svg { flex-shrink: 0; color: #888; }
+.automationTrigger__providerOption:is(:hover, .isActive) { background: #f5f5f5; }
+.automationTrigger__flyout { position: absolute; top: -6px; left: 100%; z-index: 1; padding-left: 6px; width: 286px; }
+.automationTrigger__events { padding: 5px; border: 1px solid #e3e3e3; border-radius: 12px; background: #fff; box-shadow: 0 4px 12px #00000012; }
+.automationTrigger__events button { display: block; width: 100%; padding: 8px; border: 0; border-radius: 7px; background: transparent; color: #202020; font: inherit; text-align: left; cursor: pointer; }
+.automationTrigger__events button:hover { background: #eee; }
+.automationTrigger__noResults { margin: 0; padding: 12px 8px; color: #666; }
+@media (max-width: 1100px) {
+  .automationTrigger__flyout { position: static; width: 100%; padding: 0 0 4px 24px; }
+  .automationTrigger__events { border-radius: 6px; box-shadow: none; }
+}
+.automationTrigger__disconnected { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 12px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
+.automationTrigger__connectionCopy { display: flex; flex-direction: column; gap: 6px; }
+.automationTrigger__connectionCopy > div { display: flex; align-items: center; gap: 10px; color: #202020; }
+.automationTrigger__connectionCopy p { margin: 0; color: #666; font-size: 12px; line-height: 18px; }
+.automationTrigger__connectionActions { display: flex; align-items: center; gap: 8px; }
+.automationTrigger__connectAction { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.automationTrigger__connectError { max-width: 280px; margin: 0; color: #b42318; font-size: 12px; line-height: 18px; }
+.automationConnectionComplete { max-width: 480px; margin: 64px auto; padding: 24px; color: var(--foreground); font-family: var(--ds-font-sans); }
+.automationConnectionComplete h1 { font-size: 18px; }
+.automationConnectionComplete p { margin: 12px 0; font-size: 14px; line-height: 22px; }
+@media (max-width: 600px) {
+  .automationTrigger__disconnected { flex-wrap: wrap; gap: 12px; }
+}
+/* Event-specific cards and searchable resource selection. */
+.automationTrigger__fields { border-top: 0; padding-top: 6px; }
+.automationResourcePicker { display: flex; flex-direction: column; gap: 8px; position: relative; width: 290px; max-width: 100%; }
+.automationTrigger__fieldLabel { color: #666; font-size: 12px; line-height: 16px; }
+.automationResourcePicker__trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 26px; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: inherit; text-align: left; cursor: pointer; }
+.automationResourcePicker__trigger > span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.automationResourcePicker__trigger svg { flex-shrink: 0; color: #666; }
+.automationResourcePicker__popover { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: 100%; overflow: hidden; border: 1px solid #ddd; border-radius: 10px; background: #fff; box-shadow: 0 4px 12px #00000014; }
+.automationResourcePicker__search { display: flex; align-items: center; gap: 8px; padding: 11px 12px; border-bottom: 1px solid #eee; color: #666; }
+.automationResourcePicker__search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: #202020; font: inherit; font-size: 12px; outline: none; }
+.automationCreate .automationResourcePicker__search input:focus-visible { outline: none; }
+.automationResourcePicker__search input::placeholder { color: #999; }
+.automationResourcePicker__list { max-height: 230px; overflow-y: auto; padding: 6px; }
+.automationResourcePicker__group { display: block; padding: 6px; color: #777; font-size: 12px; }
+.automationResourcePicker__option { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 6px; border-radius: 4px; color: #202020; cursor: pointer; }
+.automationResourcePicker__option:hover, .automationResourcePicker__option:focus-within { background: #f5f5f5; }
+.automationResourcePicker__option span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.automationResourcePicker__option input { flex-shrink: 0; width: 14px; height: 14px; margin: 0; accent-color: #4e58f9; }
+.automationResourcePicker__refresh { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid #eee; background: #fff; color: #202020; font: inherit; text-align: left; cursor: pointer; }
+.automationResourcePicker__refresh:disabled { color: #777; cursor: wait; }
+.automationResourcePicker__refresh svg { color: #777; }
+.automationResourcePicker__empty, .automationResourcePicker__error { margin: 0; padding: 8px 6px; color: #666; font-size: 12px; line-height: 18px; }
+.automationResourcePicker__error { padding: 8px 12px; color: #b42318; }

@@ -1,4 +1,5 @@
-import { and, eq } from "drizzle-orm";
+import { parseSubscriptionAuth } from "../automations/chatgpt-subscription.js";
+import { and, eq, or, isNull, lt } from "drizzle-orm";
 import type { AutomationModelProvider } from "../automations/config.js";
 import {
   decryptCredentials,
@@ -65,6 +66,7 @@ export async function rotateOrganizationModelCredential(input: {
       and(
         eq(organizationModelCredentials.id, input.credentialId),
         eq(organizationModelCredentials.organizationId, input.organizationId),
+        eq(organizationModelCredentials.authType, "api_key"),
       ),
     )
     .returning({ id: organizationModelCredentials.id });
@@ -76,6 +78,7 @@ export async function listOrganizationModelCredentials(organizationId: string) {
     .select({
       id: organizationModelCredentials.id,
       label: organizationModelCredentials.label,
+      authType: organizationModelCredentials.authType,
       lastFour: organizationModelCredentials.lastFour,
       lastValidatedAt: organizationModelCredentials.lastValidatedAt,
       provider: organizationModelCredentials.provider,
@@ -91,9 +94,10 @@ export async function getOrganizationModelCredential(input: {
   credentialId: string;
   organizationId: string;
   provider?: AutomationModelProvider;
-}): Promise<{ apiKey: string; provider: AutomationModelProvider } | null> {
+}): Promise<{ apiKey: string; provider: AutomationModelProvider; subscription?: { credentialId: string; authJson: string } } | null> {
   const rows = await getDatabase()
     .select({
+      authType: organizationModelCredentials.authType,
       credentialKeyVersion: organizationModelCredentials.credentialKeyVersion,
       encryptedCredentials: organizationModelCredentials.encryptedCredentials,
       provider: organizationModelCredentials.provider,
@@ -113,6 +117,13 @@ export async function getOrganizationModelCredential(input: {
     .limit(1);
   const credential = rows[0];
   if (!credential || credential.credentialKeyVersion !== 1) return null;
+  if (credential.authType === "chatgpt_subscription") {
+    if (credential.provider !== "openai") return null;
+    const stored = decryptCredentials<{ authJson: string }>(credential.encryptedCredentials);
+    parseSubscriptionAuth(stored.authJson);
+    return { apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: input.credentialId, authJson: stored.authJson } };
+  }
+
   const decrypted = decryptCredentials<StoredModelCredential>(
     credential.encryptedCredentials,
   );
@@ -130,6 +141,7 @@ export async function getOrganizationModelCredentialForValidation(input: {
 } | null> {
   const rows = await getDatabase()
     .select({
+      authType: organizationModelCredentials.authType,
       credentialKeyVersion: organizationModelCredentials.credentialKeyVersion,
       encryptedCredentials: organizationModelCredentials.encryptedCredentials,
       provider: organizationModelCredentials.provider,
@@ -143,7 +155,7 @@ export async function getOrganizationModelCredentialForValidation(input: {
     )
     .limit(1);
   const credential = rows[0];
-  if (!credential || credential.credentialKeyVersion !== 1) return null;
+  if (!credential || credential.credentialKeyVersion !== 1 || credential.authType === "chatgpt_subscription") return null;
   const decrypted = decryptCredentials<StoredModelCredential>(
     credential.encryptedCredentials,
   );
@@ -194,4 +206,31 @@ export async function deleteOrganizationModelCredential(input: {
     )
     .returning({ id: organizationModelCredentials.id });
   return rows.length > 0;
+}
+
+export async function acquireSubscriptionCredential(input: { credentialId: string; organizationId: string; leaseId: string; expiresAt: Date }): Promise<string> {
+  const rows = await getDatabase().update(organizationModelCredentials).set({ subscriptionLeaseId: input.leaseId, subscriptionLeaseExpiresAt: input.expiresAt }).where(and(
+    eq(organizationModelCredentials.id, input.credentialId), eq(organizationModelCredentials.organizationId, input.organizationId),
+    eq(organizationModelCredentials.authType, "chatgpt_subscription"), eq(organizationModelCredentials.status, "active"),
+    or(isNull(organizationModelCredentials.subscriptionLeaseId), lt(organizationModelCredentials.subscriptionLeaseExpiresAt, new Date())),
+  )).returning({ encryptedCredentials: organizationModelCredentials.encryptedCredentials });
+  if (!rows[0]) throw new Error("This ChatGPT subscription is already running an automation or needs reconnecting. Try again when the current run finishes.");
+  const { authJson } = decryptCredentials<{ authJson: string }>(rows[0].encryptedCredentials);
+  parseSubscriptionAuth(authJson);
+  return authJson;
+}
+
+export async function persistSubscriptionCredential(input: { credentialId: string; organizationId: string; leaseId: string; authJson: string; previousAccountId: string }): Promise<void> {
+  if (parseSubscriptionAuth(input.authJson).tokens.account_id !== input.previousAccountId) throw new Error("Subscription account changed during the run");
+  const rows = await getDatabase().update(organizationModelCredentials).set({ encryptedCredentials: encryptCredentials({ authJson: input.authJson }), updatedAt: new Date() }).where(and(
+    eq(organizationModelCredentials.id, input.credentialId), eq(organizationModelCredentials.organizationId, input.organizationId),
+    eq(organizationModelCredentials.authType, "chatgpt_subscription"), eq(organizationModelCredentials.subscriptionLeaseId, input.leaseId),
+  )).returning({ id: organizationModelCredentials.id });
+  if (!rows.length) throw new Error("Subscription credential lease was lost");
+}
+
+export async function releaseSubscriptionCredential(input: { credentialId: string; organizationId: string; leaseId: string }): Promise<void> {
+  await getDatabase().update(organizationModelCredentials).set({ subscriptionLeaseId: null, subscriptionLeaseExpiresAt: null }).where(and(
+    eq(organizationModelCredentials.id, input.credentialId), eq(organizationModelCredentials.organizationId, input.organizationId), eq(organizationModelCredentials.subscriptionLeaseId, input.leaseId),
+  ));
 }

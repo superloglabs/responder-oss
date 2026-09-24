@@ -1,3 +1,4 @@
+import { supportsAutomationHarness } from "../../../packages/core/src/automations/model-providers.js";
 import path from "node:path";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 
@@ -11,6 +12,7 @@ export type AutomationHarnessKind =
   | "opencode";
 
 export interface AutomationModelRoute {
+  subscription?: { authJson: string; persist: (authJson: string) => Promise<void> };
   brokerBaseUrl: string;
   model: string;
   provider: string;
@@ -61,8 +63,9 @@ export function assertAutomationHarnessModelCompatibility(
   ) {
     throw new Error("Model must be a non-empty identifier without control characters");
   }
-  if (harness === "claude_agent_sdk" && route.provider !== "anthropic") {
-    throw new Error("Claude Agent SDK automations require an Anthropic model");
+  if (harness === "claude_agent_sdk" && route.provider !== "anthropic") throw new Error("Claude Agent SDK automations require an Anthropic model");
+  if (!supportsAutomationHarness(route.provider, harness, Boolean(route.subscription))) {
+    throw new Error("The selected harness does not support this model provider");
   }
   validateBrokerBaseUrl(route.brokerBaseUrl);
 }

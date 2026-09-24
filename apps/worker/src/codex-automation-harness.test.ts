@@ -169,3 +169,35 @@ describe("Codex automation harness", () => {
     await expect(run).rejects.not.toThrow(secretShapedOutput);
   });
 });
+
+it("uses managed ChatGPT inference, persists refreshed auth, and removes the cache on failure", async () => {
+  const authJson = JSON.stringify({ tokens: { id_token: "id-token", access_token: "access-token", refresh_token: "refresh-token", account_id: "account" } });
+  const persist = vi.fn().mockResolvedValue(undefined);
+  const nativeInput = { ...input, model: { ...input.model, subscription: { authJson, persist } } };
+  const command = buildCodexAutomationCommand(nativeInput);
+  expect(command).toContain('forced_login_method="chatgpt"');
+  expect(command).not.toContain("model_providers.responder");
+  expect(command).not.toContain("access-token");
+  expect(command).toContain("unset OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN");
+  const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0\n").mockResolvedValueOnce("Process exited with code 0\n").mockResolvedValueOnce("Process exited with code 0\n").mockResolvedValueOnce("Process exited with code 0\n").mockResolvedValueOnce("Process exited with code 1\n"),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(new TextEncoder().encode(authJson)),
+  } as unknown as DaytonaSandboxSession;
+  await expect(runCodexAutomation(session, nativeInput)).rejects.toThrow("harness failed");
+  expect(persist).toHaveBeenCalledWith(authJson);
+  expect(session.materializeEntry).toHaveBeenCalledWith({ entry: { type: "file", content: authJson }, path: "/home/daytona/.responder-subscription-auth/auth.json" });
+  expect(session.execCommand).toHaveBeenLastCalledWith(expect.objectContaining({ cmd: "rm -rf /home/daytona/.responder-subscription-auth" }));
+});
+
+it("redacts native subscription tokens from persisted harness output", async () => {
+  const authJson = JSON.stringify({ tokens: { id_token: "secret-id", access_token: "secret-access", refresh_token: "secret-refresh", account_id: "account" } });
+  const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0\nsecret-access secret-refresh secret-id"),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(new TextEncoder().encode(authJson)),
+  } as unknown as DaytonaSandboxSession;
+  const result = await runCodexAutomation(session, { ...input, model: { ...input.model, subscription: { authJson, persist: vi.fn().mockResolvedValue(undefined) } } });
+  expect(result.eventStream).not.toContain("secret-");
+  expect(result.eventStream).toContain("[redacted]");
+});

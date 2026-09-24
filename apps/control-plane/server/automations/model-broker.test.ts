@@ -245,3 +245,33 @@ describe("automation model broker route", () => {
     expect(providerFetch).toHaveBeenCalledOnce();
   });
 });
+
+it.each([
+  ["google", "https://generativelanguage.googleapis.com/v1beta/openai"],
+  ["xai", "https://api.x.ai/v1"],
+  ["mistral", "https://api.mistral.ai/v1"],
+  ["deepseek", "https://api.deepseek.com"],
+  ["groq", "https://api.groq.com/openai/v1"],
+])("routes %s chat requests through scoped grants and enforces output limits", async (provider, endpoint) => {
+  const claimGrant = vi.fn().mockResolvedValue({ ...claim, model: "live-model" });
+  const providerFetch = vi.fn().mockResolvedValue(new Response('data: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } }));
+  const broker = createAutomationModelBrokerRoutes({ claimGrant, providerFetch });
+  const response = await broker.request(`/v1/providers/${provider}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${bearerToken()}`, "content-type": "application/json" }, body: JSON.stringify({ model: "live-model", messages: [{ role: "user", content: "hello" }], stream: true, max_completion_tokens: 500 }) });
+  expect(response.status).toBe(200);
+  expect(claimGrant).toHaveBeenCalledWith(expect.objectContaining({ provider, model: "live-model", requestedMaxOutputTokens: 500 }));
+  expect(providerFetch).toHaveBeenCalledWith(`${endpoint}/chat/completions`, expect.objectContaining({ redirect: "error" }));
+  const body = JSON.parse(providerFetch.mock.calls[0][1].body);
+  expect(body.max_tokens).toBe(4096);
+  expect(body.max_completion_tokens).toBeUndefined();
+  expect(await response.text()).not.toContain("provider-secret");
+});
+
+it("rejects unsupported provider routes and multiple completion budget bypasses", async () => {
+  const claimGrant = vi.fn(); const providerFetch = vi.fn();
+  const broker = createAutomationModelBrokerRoutes({ claimGrant, providerFetch });
+  const init = { method: "POST", headers: { authorization: `Bearer ${bearerToken()}`, "content-type": "application/json" }, body: JSON.stringify({ model: "model", messages: [], n: 2 }) };
+  expect((await broker.request("/v1/providers/groq/chat/completions", init)).status).toBe(400);
+  expect((await broker.request("/v1/providers/unknown/chat/completions", init)).status).toBe(400);
+  expect(claimGrant).not.toHaveBeenCalled();
+  expect(providerFetch).not.toHaveBeenCalled();
+});

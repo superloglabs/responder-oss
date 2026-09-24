@@ -1,3 +1,4 @@
+import { parseSubscriptionAuth } from "@responder/core/automations/chatgpt-subscription";
 import {
   appendAutomationRunEvent,
   automationRunCancellationRequested,
@@ -10,7 +11,7 @@ import {
   createAutomationModelBrokerGrant,
   revokeAutomationModelBrokerGrant,
 } from "@responder/core/db/automation-model-broker";
-import { getOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
+import { getOrganizationModelCredential, acquireSubscriptionCredential, persistSubscriptionCredential, releaseSubscriptionCredential } from "@responder/core/db/automation-model-credentials";
 import { getAutomationRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
@@ -42,6 +43,9 @@ interface AutomationRunDependencies {
   createGrant: typeof createAutomationModelBrokerGrant;
   executeActions: typeof executeAutomationActions;
   getCredential: typeof getOrganizationModelCredential;
+  acquireSubscription: typeof acquireSubscriptionCredential;
+  persistSubscription: typeof persistSubscriptionCredential;
+  releaseSubscription: typeof releaseSubscriptionCredential;
   getConnections: typeof getAutomationRuntimeConnections;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
   heartbeatRun: typeof heartbeatAutomationRun;
@@ -63,6 +67,9 @@ const defaultDependencies: AutomationRunDependencies = {
   createGrant: createAutomationModelBrokerGrant,
   executeActions: executeAutomationActions,
   getCredential: getOrganizationModelCredential,
+  acquireSubscription: acquireSubscriptionCredential,
+  persistSubscription: persistSubscriptionCredential,
+  releaseSubscription: releaseSubscriptionCredential,
   getConnections: getAutomationRuntimeConnections,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
   heartbeatRun: heartbeatAutomationRun,
@@ -180,6 +187,7 @@ export async function processAutomationRun(
     provider: run.modelProvider,
   });
 
+  let subscriptionLease: { credentialId: string; organizationId: string; leaseId: string } | undefined;
   let grantId: string | undefined;
   const runAbort = new AbortController();
   const runtimeTimeout = setTimeout(
@@ -236,8 +244,18 @@ export async function processAutomationRun(
     });
     if (!credential) throw new Error("The configured model credential is unavailable");
 
+    if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
+    let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
+    if (credential.subscription) {
+      const owner = { credentialId: run.modelCredentialId, organizationId: run.organizationId, leaseId: run.leaseId };
+      subscriptionLease = owner;
+      const authJson = await dependencies.acquireSubscription({ ...owner, expiresAt: new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 300) * 1000) });
+      nativeSubscription = { authJson, persist: (updated) => dependencies.persistSubscription({ ...owner, authJson: updated, previousAccountId: parseSubscriptionAuth(authJson).tokens.account_id }) };
+    }
     const grant = await dependencies.createGrant({
-      apiKey: credential.apiKey,
+      apiKey: credential.subscription ? "subscription-context-only" : credential.apiKey,
+      ...(credential.subscription ? { contextOnly: true } : {}),
+
       expiresAt: new Date(
         dependencies.now().getTime() + run.maxRuntimeSeconds * 1_000,
       ),
@@ -289,6 +307,7 @@ export async function processAutomationRun(
                 brokerBaseUrl: automationBrokerBaseUrl(environment),
                 model: run.model,
                 provider: run.modelProvider,
+                ...(nativeSubscription ? { subscription: nativeSubscription } : {}),
               },
               prompt: automationPrompt(run, repositories),
               workspacePath: automationWorkspaceRoot,
@@ -384,6 +403,7 @@ export async function processAutomationRun(
       }).catch(() => undefined);
     }
   } finally {
+    if (subscriptionLease) await dependencies.releaseSubscription(subscriptionLease).catch((error) => dependencies.reportException(error, { jobId, operation: "automation", organizationId: run.organizationId, requestId: run.runId }).catch(() => undefined));
     clearInterval(cancellationPoll);
     clearInterval(heartbeat);
     clearTimeout(runtimeTimeout);

@@ -1,6 +1,6 @@
 {
-  "id": "da0d2099-59f1-4666-9ca9-2696738c04ac",
-  "prevId": "593e92fa-b634-4826-9243-f34b25bc2404",
+  "id": "ee9edd8d-2dd4-457b-abc4-7b41c2d2713b",
+  "prevId": "da0d2099-59f1-4666-9ca9-2696738c04ac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4990,6 +4990,18 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "subscription_lease_id": {
+          "name": "subscription_lease_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscription_lease_expires_at": {
+          "name": "subscription_lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "auth_type": {
           "name": "auth_type",

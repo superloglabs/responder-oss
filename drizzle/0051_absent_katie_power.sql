@@ -1,0 +1,2 @@
+ALTER TABLE "organization_model_credentials" ADD COLUMN "subscription_lease_id" uuid;--> statement-breakpoint
+ALTER TABLE "organization_model_credentials" ADD COLUMN "subscription_lease_expires_at" timestamp with time zone;

@@ -1,7 +1,8 @@
 import { apiErrorMessage, type AgentOptions } from "./agents-api";
 
 export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode";
-export type AutomationModelProvider = "openai" | "anthropic";
+export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
+import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 export type AutomationRunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type AutomationTrigger =
@@ -86,6 +87,7 @@ export interface AutomationDetail {
 }
 
 export interface AutomationCredential {
+  authType?: "api_key" | "chatgpt_subscription";
   createdAt: string;
   id: string;
   label: string;
@@ -188,3 +190,10 @@ export function cancelAutomationRun(runId: string) {
     { method: "POST" },
   );
 }
+
+export interface SubscriptionConnection { connectionId: string; userCode: string; verificationUrl: string; interval: number; expiresAt: string }
+export function startAutomationSubscription() { return automationJson<SubscriptionConnection>("/api/automations/subscriptions/openai", { method: "POST" }); }
+export function pollAutomationSubscription(id: string) { return automationJson<{ status: "pending" | "expired" | "connected" | "failed"; error?: string; credentialId?: string }>(`/api/automations/subscriptions/openai/${encodeURIComponent(id)}/poll`, { method: "POST" }); }
+export function cancelAutomationSubscription(id: string) { return automationJson(`/api/automations/subscriptions/openai/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+
+export function fetchAutomationModels(credentialId: string, refresh = false) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/credentials/${encodeURIComponent(credentialId)}/models${refresh ? "?refresh=true" : ""}`); }

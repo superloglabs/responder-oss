@@ -59,6 +59,9 @@ function dependencies() {
       externalReference: "https://github.com/acme/app/pull/1",
       kind: "open_github_pull_request",
     }]),
+    acquireSubscription: vi.fn(),
+    persistSubscription: vi.fn().mockResolvedValue(undefined),
+    releaseSubscription: vi.fn().mockResolvedValue(undefined),
     getCredential: vi.fn().mockResolvedValue({
       apiKey: "customer-provider-secret",
       provider: "openai",
@@ -139,4 +142,18 @@ describe("automation run processor", () => {
       status: "failed",
     }));
   });
+  it("runs a subscription natively with a context-only broker grant and releases its lease", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "native-refresh", account_id: "account" } });
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+    deps.acquireSubscription.mockResolvedValue(authJson);
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+    expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ contextOnly: true, apiKey: "subscription-context-only" }));
+    expect(JSON.stringify(deps.createGrant.mock.calls)).not.toContain("native-refresh");
+    expect(deps.runCodex).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ model: expect.objectContaining({ subscription: { authJson, persist: expect.any(Function) } }) }));
+    expect(deps.releaseSubscription).toHaveBeenCalledWith(expect.objectContaining({ leaseId: claimedRun().leaseId, organizationId }));
+  });
+
 });

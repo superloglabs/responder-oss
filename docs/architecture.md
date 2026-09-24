@@ -122,3 +122,73 @@ operator-managed runtime configuration.
 Production operators are responsible for TLS termination, network isolation,
 database backups, secret injection, observability, scaling, and rollbacks. The
 application does not depend on one infrastructure provider.
+
+### Automation subscription credentials
+
+New automations start with “Choose model”. API-key credentials use the model
+broker. ChatGPT subscription credentials use the pinned official client directly.
+
+Sign-in creates a temporary, automatically deleted sandbox running the official
+app server. Responder calls `initialize` and `account/login/start` with
+`type: "chatgptDeviceCode"`, displays its verification link and code, and waits
+for `account/login/completed`. The official client owns OAuth, PKCE, token
+exchange and refresh. Responder does not implement provider OAuth endpoints,
+embed provider client IDs, or proxy undocumented subscription inference APIs.
+See https://developers.openai.com/codex/app-server/.
+
+Pending connections are scoped to the initiating user and workspace, expire after
+15 minutes, and hold an encrypted sandbox reference. After successful login, the
+native `auth.json` cache is read through the sandbox file API and encrypted in the
+workspace credential store. Browser responses contain only UI state and the
+credential ID. Cancellation deletes the login sandbox; ephemeral lifecycle limits
+bound abandoned sessions. The connection is shared by automations in its workspace.
+
+Subscription runs require the Codex harness, enforced by the API and worker.
+A fresh sandbox receives the native auth cache in a private directory outside the
+repository checkout, with directory mode 0700 and file mode 0600. The CLI uses
+managed ChatGPT authentication and makes inference requests directly. It receives
+no custom model-provider override or API key. The existing temporary broker token
+is context-only for these runs and cannot authorize model inference.
+
+The worker acquires an exclusive credential lease for each subscription run to
+prevent concurrent refresh-token rotations. A concurrent run fails with an explicit
+subscription-in-use message. After execution (including failures), the native cache
+is read back and encrypted under the owning lease, and its sandbox copy is removed.
+Credential leases expire after the maximum runtime plus cleanup time. The sandbox
+is destroyed using the existing run lifecycle. Known original and refreshed tokens
+are redacted from persisted harness output. Native auth files are available to the
+trusted CLI execution environment; file permissions do not isolate them from other
+processes running as that same sandbox user.
+
+Runtime limits and provider subscription quotas apply to subscription runs.
+Broker request-count and per-call output-token caps apply only to API-key runs;
+native subscription inference does not pass through that broker.
+Anthropic subscription login is not offered. A live sign-in and inference test
+requires the account holder to complete provider approval; automated tests mock
+that boundary.
+
+### Automation provider catalogs
+
+The model picker starts with providers: OpenAI, Anthropic, Google Gemini, xAI,
+Mistral, DeepSeek, and Groq. After selecting a saved connection or adding an API
+key, it fetches the provider's current model catalog using that credential on the
+server. New keys are checked against the catalog before storage. Catalog calls
+are tenant-scoped and use fixed provider URLs, bounded timeouts, and no redirects.
+The picker excludes non-conversational model types and explicitly incompatible
+capabilities. Catalog visibility does not guarantee inference quota or access to
+every feature of a model; the provider remains authoritative at run time.
+
+OpenAI uses the Responses API, Anthropic uses Messages, and the other providers
+use their OpenAI-compatible Chat Completions APIs through provider-specific
+broker routes. All broker calls validate provider, model, and run grant, reserve
+request/output budgets, and keep provider keys outside the sandbox. New providers
+run with OpenCode; the native Codex harness is limited to OpenAI and the Claude
+Agent SDK to Anthropic.
+
+Subscription catalogs come from the official client's `account/read` and
+`model/list` methods in a temporary sandbox with the encrypted saved auth cache.
+Discovery takes an exclusive credential lease, persists any managed refresh,
+and deletes the sandbox afterward. It cannot run concurrently with inference
+using the same subscription. Subscription model metadata is cached for five minutes per workspace and connection;
+in-flight requests share the same discovery. Explicit refresh bypasses cached results.
+API-key catalogs reload when opened. There is no hard-coded model list in the picker.

@@ -1,0 +1,32 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { acquireSubscriptionCredential, persistSubscriptionCredential, releaseSubscriptionCredential } from "./automation-model-credentials.js";
+import { getDatabase } from "./client.js";
+import { decryptCredentials, encryptCredentials } from "../credentials/encryption.js";
+vi.mock("./client.js", () => ({ getDatabase: vi.fn() }));
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
+const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+const owner = { credentialId: "credential", organizationId: "organization", leaseId: "lease" };
+it("acquires an exclusive scoped lease before exposing the native credential", async () => {
+  vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 1).toString("base64"));
+  const returning = vi.fn().mockResolvedValue([{ encryptedCredentials: encryptCredentials({ authJson }) }]);
+  const where = vi.fn().mockReturnValue({ returning });
+  const set = vi.fn().mockReturnValue({ where });
+  vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set }) } as never);
+  await expect(acquireSubscriptionCredential({ ...owner, expiresAt: new Date(Date.now() + 60000) })).resolves.toBe(authJson);
+  expect(new PgDialect().sqlToQuery(where.mock.calls[0][0]).params).toEqual(expect.arrayContaining(["credential", "organization", "chatgpt_subscription", "active"]));
+  returning.mockResolvedValue([]);
+  await expect(acquireSubscriptionCredential({ ...owner, expiresAt: new Date(Date.now() + 60000) })).rejects.toThrow("already running");
+});
+it("persists only under the owning lease and rejects account switches", async () => {
+  vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 1).toString("base64"));
+  const where = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: "credential" }]) });
+  const set = vi.fn().mockReturnValue({ where });
+  vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set }) } as never);
+  await persistSubscriptionCredential({ ...owner, authJson, previousAccountId: "account" });
+  expect(decryptCredentials(set.mock.calls[0][0].encryptedCredentials)).toEqual({ authJson });
+  expect(new PgDialect().sqlToQuery(where.mock.calls[0][0]).params).toEqual(["credential", "organization", "chatgpt_subscription", "lease"]);
+  await expect(persistSubscriptionCredential({ ...owner, authJson, previousAccountId: "another" })).rejects.toThrow("account changed");
+  await releaseSubscriptionCredential(owner);
+  expect(set).toHaveBeenLastCalledWith({ subscriptionLeaseId: null, subscriptionLeaseExpiresAt: null });
+});
