@@ -176,10 +176,13 @@ that boundary.
 
 ### Automation provider catalogs
 
-The model picker starts with providers: OpenAI, Anthropic, Google Gemini, xAI,
-Mistral, DeepSeek, and Groq. After selecting a saved connection or adding an API
-key, it fetches the provider's current model catalog using that credential on the
-server. New keys are checked against the catalog before storage. Catalog calls
+The automation model picker lists providers: OpenAI, Anthropic, Google Gemini,
+xAI, Mistral, and DeepSeek. Each provider opens a submenu of its included-usage
+models from the AI Gateway catalog, and choosing one bills the automation
+through Responder. API keys and subscriptions are managed in model access
+settings. For a saved connection, the server fetches the provider's current
+model catalog using that credential. New keys are checked against the catalog
+before storage. Catalog calls
 are tenant-scoped and use fixed provider URLs, bounded timeouts, and no redirects.
 The picker excludes non-conversational model types and explicitly incompatible
 capabilities. Catalog visibility does not guarantee inference quota or access to

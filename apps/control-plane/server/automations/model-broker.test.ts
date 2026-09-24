@@ -281,7 +281,6 @@ it.each([
   ["xai", "https://api.x.ai/v1"],
   ["mistral", "https://api.mistral.ai/v1"],
   ["deepseek", "https://api.deepseek.com"],
-  ["groq", "https://api.groq.com/openai/v1"],
 ])(
   "routes %s chat requests through scoped grants and enforces output limits",
   async (provider, endpoint) => {
@@ -350,7 +349,7 @@ it("rejects unsupported provider routes and multiple completion budget bypasses"
     body: JSON.stringify({ model: "model", messages: [], n: 2 }),
   };
   expect(
-    (await broker.request("/v1/providers/groq/chat/completions", init)).status,
+    (await broker.request("/v1/providers/deepseek/chat/completions", init)).status,
   ).toBe(400);
   expect(
     (await broker.request("/v1/providers/unknown/chat/completions", init))

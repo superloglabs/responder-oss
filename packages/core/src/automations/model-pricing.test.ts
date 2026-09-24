@@ -102,6 +102,22 @@ describe("AI Gateway model pricing", () => {
     await expect(listAIGatewayModels("xai", { fetch: fetchCatalog })).resolves.toEqual([
       { id: "grok-5", name: "Grok 5" },
     ]);
-    await expect(listAIGatewayModels("groq", { fetch: fetchCatalog })).resolves.toEqual([]);
+  });
+
+  it("orders a provider's gateway models from newest to oldest", async () => {
+    const priced = { input: "0.000001", output: "0.000002" };
+    const fetchCatalog = vi.fn().mockResolvedValue(Response.json({
+      data: [
+        { id: "anthropic/claude-undated", name: "Claude Undated", pricing: priced, type: "language" },
+        { id: "anthropic/claude-old", name: "Claude Old", pricing: priced, released: 1_700_000_000, type: "language" },
+        { id: "anthropic/claude-new", name: "Claude New", pricing: priced, released: 1_800_000_000, type: "language" },
+      ],
+    }));
+
+    await expect(listAIGatewayModels("anthropic", { fetch: fetchCatalog })).resolves.toEqual([
+      { id: "claude-new", name: "Claude New" },
+      { id: "claude-old", name: "Claude Old" },
+      { id: "claude-undated", name: "Claude Undated" },
+    ]);
   });
 });

@@ -24,6 +24,6 @@ describe("live provider model catalogs", () => {
   });
   it("does not expose provider error bodies or credentials", async () => {
     const request = vi.fn().mockResolvedValue(new Response('private-key secret', { status: 401 }));
-    await expect(listProviderModels("groq", "private-key", request)).rejects.toThrow(/^The provider rejected this API key\. Reconnect with a valid key\.$/);
+    await expect(listProviderModels("deepseek", "private-key", request)).rejects.toThrow(/^The provider rejected this API key\. Reconnect with a valid key\.$/);
   });
 });

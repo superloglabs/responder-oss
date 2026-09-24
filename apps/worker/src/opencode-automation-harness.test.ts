@@ -73,7 +73,7 @@ describe("OpenCode automation harness", () => {
   });
 });
 
-it.each(["google", "xai", "mistral", "deepseek", "groq"])("uses scoped chat completion routes for %s", provider => {
+it.each(["google", "xai", "mistral", "deepseek"])("uses scoped chat completion routes for %s", provider => {
   const config = openCodeAutomationConfig({ ...input, model: { ...input.model, provider, model: "current-model" } });
   expect(config.provider.responder.npm).toBe("@ai-sdk/openai-compatible");
   expect(config.provider.responder.options.baseURL).toBe(`https://models.responder.test/v1/providers/${provider}`);

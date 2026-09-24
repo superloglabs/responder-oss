@@ -1,0 +1,78 @@
+/* shadcn/ui theme (new-york, neutral). The app defines its own --background,
+   --foreground, and --border on :root, so these tokens are scoped to shadcn
+   components by their data-slot attributes. Radix renders menus, popovers,
+   and dialogs in portals outside the app tree. Tailwind maps these tokens
+   inline, so utilities read the scoped values; plain CSS here must use the
+   tokens directly rather than the --color-* aliases, which resolve at :root. */
+@import "tw-animate-css";
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+}
+
+/* The app does not load Tailwind preflight; shadcn components assume it. */
+@layer base {
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]),
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) *,
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) ::before,
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) ::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+  }
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) :is(input, button),
+  [data-slot="button"] {
+    font: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) :is(img, svg) {
+    display: block;
+    vertical-align: middle;
+  }
+}
