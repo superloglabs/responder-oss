@@ -11,6 +11,7 @@ import {
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { ProviderGlyph } from "../components/icons";
+import { providerDisplayName } from "../components/provider-glyphs";
 import { InvestigationThinking } from "../components/investigation-thinking";
 import { InvestigationDetailSkeleton } from "../components/screen-skeletons";
 import { Badge, Button, Panel } from "../design-system";
@@ -117,6 +118,18 @@ const toolNameAliases: Record<string, string> = {
   write_file: "Write file",
 };
 
+const toolNameProviders = [
+  "axiom",
+  "datadog",
+  "github",
+  "grafana",
+  "langfuse",
+  "sentry",
+  "slack",
+  "supabase",
+  "upstash",
+] as const;
+
 function humanizeToolName(value: unknown): string {
   const raw = typeof value === "string" ? value : "tool";
   if (toolNameAliases[raw]) return toolNameAliases[raw];
@@ -128,16 +141,13 @@ function humanizeToolName(value: unknown): string {
     .filter(Boolean)
     .map((word) => word.toLowerCase());
   const providerNames: Record<string, string> = {
-    axiom: "Axiom",
-    datadog: "Datadog",
-    github: "GitHub",
-    grafana: "Grafana",
-    langfuse: "Langfuse",
-    sentry: "Sentry",
-    slack: "Slack",
-    supabase: "Supabase",
+    ...Object.fromEntries(
+      toolNameProviders.map((provider) => [
+        provider,
+        providerDisplayName(provider),
+      ]),
+    ),
     superlog: "Superlog",
-    upstash: "Upstash",
   };
   const verbs = new Set([
     "create",

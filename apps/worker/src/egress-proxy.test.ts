@@ -1,7 +1,18 @@
 import { once } from "node:events";
 import { connect, createServer, type Server, type Socket } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { resolvePublicHostAddresses } from "@responder/core/integrations/custom-mcp";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startEgressProxy } from "./egress-proxy.js";
+
+vi.mock("@responder/core/integrations/custom-mcp", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@responder/core/integrations/custom-mcp")
+  >();
+  return {
+    ...actual,
+    resolvePublicHostAddresses: vi.fn(actual.resolvePublicHostAddresses),
+  };
+});
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -118,5 +129,46 @@ describe("egress proxy", () => {
     await readBytes(socket, 2);
     socket.write(Buffer.from([0x05, 0x02, 0x00, 0x01, 1, 1, 1, 1, 0, 80]));
     expect((await readBytes(socket, 10))[1]).toBe(0x07);
+  });
+
+  it("does not open an upstream connection after the client disconnects", async () => {
+    const upstreamSockets: Socket[] = [];
+    const echo = createServer((socket) => {
+      upstreamSockets.push(socket);
+      socket.pipe(socket);
+    });
+    const echoPort = await listen(echo);
+    cleanups.push(() => {
+      for (const socket of upstreamSockets) socket.destroy();
+    });
+    const proxy = await startEgressProxy({ allowLocal: true, name: "test" });
+    cleanups.push(proxy.close);
+    let resolveAddresses!: (
+      addresses: Array<{ address: string; family: number }>,
+    ) => void;
+    vi.mocked(resolvePublicHostAddresses).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveAddresses = resolve;
+      }),
+    );
+
+    const socket = connect(Number(new URL(proxy.url).port), "127.0.0.1");
+    await once(socket, "connect");
+    socket.write(Buffer.from([0x05, 0x01, 0x00]));
+    await readBytes(socket, 2);
+    const host = Buffer.from("slow.example", "utf8");
+    const port = Buffer.alloc(2);
+    port.writeUInt16BE(echoPort);
+    socket.write(
+      Buffer.concat([Buffer.from([0x05, 0x01, 0x00, 0x03, host.length]), host, port]),
+    );
+    await vi.waitFor(() => expect(resolveAddresses).toBeTypeOf("function"));
+    socket.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    resolveAddresses([{ address: "127.0.0.1", family: 4 }]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(upstreamSockets).toHaveLength(0);
   });
 });

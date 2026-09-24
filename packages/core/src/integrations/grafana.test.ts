@@ -39,6 +39,7 @@ describe("Grafana endpoints", () => {
   });
 
   it("normalizes self-hosted Grafana URLs with sub-paths", () => {
+    vi.stubEnv("NODE_ENV", "test");
     expect(normalizeGrafanaUrl("https://grafana.example.com/")).toBe(
       "https://grafana.example.com",
     );

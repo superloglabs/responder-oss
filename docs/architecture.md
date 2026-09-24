@@ -65,8 +65,9 @@ types. `drizzle/` contains the ordered schema history.
   MCP endpoint for one stack and requests only the read and query scopes.
   Self-hosted Grafana runs the pinned `mcp-grafana` binary in the worker with a
   service account token, write tools disabled, and a fixed category list. Its
-  outbound traffic goes through a worker-local SOCKS5 proxy that connects only
-  to public addresses. Both modes expose only tools annotated read-only.
+  outbound traffic goes through a worker-local SOCKS5 proxy. In production the
+  proxy connects only to public addresses; local development also permits
+  loopback hosts. Both modes expose only tools annotated read-only.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.

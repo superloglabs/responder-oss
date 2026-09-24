@@ -212,8 +212,9 @@ CloudWatch, alerting, dashboard, folder, annotation, incident, OnCall, Asserts,
 Sift, navigation, and query-example categories. Raw API, SQL, rendering,
 snapshot, plugin, admin, and provisioning tools stay off. The child process
 reaches Grafana through a worker-local SOCKS5 proxy that rejects private,
-link-local, and loopback addresses, and the token never enters the repository
-investigation sandbox.
+link-local, and loopback addresses in production. Local development also
+permits loopback hosts. The token never enters the repository investigation
+sandbox.
 
 In both modes the worker exposes only tools annotated read-only.
 

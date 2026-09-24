@@ -240,3 +240,30 @@ test("connects self-hosted Grafana with a service account token", async ({ page 
   });
   await expect(page).toHaveURL(/integration=grafana&status=connected/u);
 });
+
+test("keeps keyboard focus inside the Grafana dialog", async ({ page }) => {
+  await mockSettingsApis(page);
+  await page.goto("/settings");
+
+  const trigger = page.getByRole("button", { name: /Grafana/ });
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("combobox")).toBeFocused();
+
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press("Tab");
+    await expect
+      .poll(() => dialog.evaluate((element) => element.contains(document.activeElement)))
+      .toBe(true);
+  }
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press("Shift+Tab");
+    await expect
+      .poll(() => dialog.evaluate((element) => element.contains(document.activeElement)))
+      .toBe(true);
+  }
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+});

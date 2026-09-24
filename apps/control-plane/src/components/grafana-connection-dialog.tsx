@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useDialogFocusTrap } from "../use-dialog-focus-trap";
 
 type GrafanaDeployment = "cloud" | "self_hosted";
 
@@ -19,6 +20,8 @@ export function GrafanaConnectionDialog({
   const [serviceAccountToken, setServiceAccountToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocusTrap(dialogRef, open);
   const cancel = useCallback(() => {
     setDeployment("cloud");
     setStackUrl("");
@@ -80,6 +83,7 @@ export function GrafanaConnectionDialog({
         aria-labelledby="grafana-connection-title"
         aria-modal="true"
         className="siteDialog siteDialog--credentials"
+        ref={dialogRef}
         role="dialog"
       >
         <header className="siteDialog__header">
@@ -95,7 +99,6 @@ export function GrafanaConnectionDialog({
           <label className="siteDialog__field">
             <span>Deployment</span>
             <select
-              autoFocus
               disabled={isSubmitting}
               onChange={(event) => {
                 setDeployment(event.target.value as GrafanaDeployment);

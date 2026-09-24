@@ -147,10 +147,15 @@ async function readConnectTarget(
 function connectPinned(
   addresses: ReadonlyArray<{ address: string; family: number }>,
   port: number,
+  signal: AbortSignal,
 ): Promise<Socket> {
   return new Promise((resolve, reject) => {
     let index = 0;
     const attempt = () => {
+      if (signal.aborted) {
+        reject(new Error("SOCKS client disconnected"));
+        return;
+      }
       const target = addresses[index];
       if (!target) {
         reject(
@@ -167,12 +172,16 @@ function connectPinned(
       upstream.setTimeout(CONNECT_TIMEOUT_MS, () => {
         upstream.destroy(new Error("SOCKS connect timed out"));
       });
+      const cancel = () => upstream.destroy(new Error("SOCKS client disconnected"));
+      signal.addEventListener("abort", cancel, { once: true });
       const tryNextAddress = () => {
+        signal.removeEventListener("abort", cancel);
         upstream.destroy();
         attempt();
       };
       upstream.once("error", tryNextAddress);
       upstream.once("connect", () => {
+        signal.removeEventListener("abort", cancel);
         upstream.setTimeout(0);
         upstream.off("error", tryNextAddress);
         upstream.on("error", () => upstream.destroy());
@@ -200,20 +209,35 @@ async function handleConnection(
 ): Promise<void> {
   client.setTimeout(HANDSHAKE_TIMEOUT_MS, () => client.destroy());
   client.on("error", () => client.destroy());
+  // Cancel DNS resolution and connection attempts if the client goes away
+  // before the tunnel is established.
+  const clientClosed = new AbortController();
+  client.once("close", () => clientClosed.abort());
   const reader = new SocketReader(client);
   let target: { host: string; port: number } | undefined;
   try {
     target = await readConnectTarget(reader, client);
     const addresses = await resolvePublicHostAddresses(target.host, {
       allowLocal: options.allowLocal,
-      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
+      signal: AbortSignal.any([
+        clientClosed.signal,
+        AbortSignal.timeout(CONNECT_TIMEOUT_MS),
+      ]),
     }).catch(() => {
       throw new SocksReplyError(
         REPLY_NOT_ALLOWED,
         "SOCKS target is not a public address",
       );
     });
-    const upstream = await connectPinned(addresses, target.port);
+    const upstream = await connectPinned(
+      addresses,
+      target.port,
+      clientClosed.signal,
+    );
+    if (clientClosed.signal.aborted) {
+      upstream.destroy();
+      return;
+    }
     client.setTimeout(0);
     reply(client, REPLY_SUCCEEDED);
     const early = reader.release();
@@ -225,7 +249,7 @@ async function handleConnection(
   } catch (error) {
     const code =
       error instanceof SocksReplyError ? error.reply : REPLY_GENERAL_FAILURE;
-    if (code === REPLY_NOT_ALLOWED && target) {
+    if (code === REPLY_NOT_ALLOWED && target && !clientClosed.signal.aborted) {
       console.warn(
         JSON.stringify({
           event: "egress_proxy_target_rejected",
