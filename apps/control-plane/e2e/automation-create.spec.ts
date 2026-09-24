@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 const repositoryId = "11111111-1111-4111-8111-111111111111";
 const accountId = "22222222-2222-4222-8222-222222222222";
 const credentialId = "33333333-3333-4333-8333-333333333333";
+const githubAccountId = "55555555-5555-4555-8555-555555555555";
 
 test.beforeEach(async ({ context }) => {
   await context.route("**/api/**", async (route) => {
@@ -17,7 +18,7 @@ test.beforeEach(async ({ context }) => {
     if (path === "/api/context") return route.fulfill({ json: { capabilities: ["automations"] } });
     if (path === "/api/billing") return route.fulfill({ json: { configured: false, enabled: false } });
     if (path === "/api/automations/options") return route.fulfill({ json: {
-      accounts: [{ id: accountId, provider: "slack", displayName: "Engineering" }],
+      accounts: [{ id: accountId, provider: "slack", displayName: "Engineering" }, { id: githubAccountId, provider: "github", displayName: "acme" }],
       resources: [{ id: "channel", integrationAccountId: accountId, kind: "slack_channel", externalId: "C123", displayName: "#incidents" }],
       repositories: [{ id: repositoryId, fullName: "acme/api" }],
       credentials: [{ id: credentialId, provider: "openai", label: "Team key", lastFour: "1234", status: "active" }],
@@ -36,10 +37,8 @@ test("creates an automation using the compact editor and selected resources", as
   await expect(page.getByRole("heading", { name: "New automation" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Choose model", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Choose model", exact: true }).click();
-  await page.getByRole("button", { name: "OpenAI", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "Model connection" })).toHaveValue("");
-  await expect(page.getByText("Included usage is billed to your monthly allowance.", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "GPT-5.4" }).click();
+  await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
+  await page.getByRole("option", { name: "GPT-5.4" }).click();
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toBeEmpty();
   await expect(page.getByRole("button", { name: "Add repository", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("automation-create-desktop.png"), fullPage: true });
@@ -48,8 +47,9 @@ test("creates an automation using the compact editor and selected resources", as
   await page.getByLabel("Automation name").press("Enter");
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Investigate the event and open a pull request.");
   await page.getByRole("button", { name: "Add connector", exact: true }).click();
-  await page.getByRole("checkbox", { name: "Engineering · slack" }).check();
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByRole("option", { name: /^Engineering/ }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Remove Engineering" })).toBeVisible();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("menu", { name: "Trigger providers" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
@@ -58,8 +58,9 @@ test("creates an automation using the compact editor and selected resources", as
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
   await page.getByRole("button", { name: "Add repository", exact: true }).click();
-  await page.getByLabel("acme/api").check();
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByRole("option", { name: "acme/api" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Remove acme/api" })).toBeVisible();
   let saved: Record<string, unknown> | undefined;
   await page.route("**/api/automations", async (route) => {
     saved = route.request().postDataJSON();
@@ -186,6 +187,114 @@ test("connects from the trigger card and preserves the automation draft", async 
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
 });
 
+test("connects GitHub from the repositories section and searches its repositories", async ({ page, context }, testInfo) => {
+  let connected = false;
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: connected ? [{ id: githubAccountId, provider: "github", displayName: "acme" }] : [],
+    resources: [],
+    repositories: connected ? [{ id: repositoryId, fullName: "acme/api" }, { id: "66666666-6666-4666-8666-666666666666", fullName: "acme/web" }] : [],
+    credentials: [], secrets: [],
+  } }));
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: {
+    integrations: [{ id: "github", connectUrl: "/api/integrations/github/start?mode=install" }],
+  } }));
+  await context.route("**/api/integrations/github/start?**", async (route) => {
+    const url = new URL(route.request().url());
+    const destination = new URL(url.searchParams.get("returnTo")!, url.origin);
+    destination.searchParams.set("integration", "github");
+    destination.searchParams.set("status", "connected");
+    connected = true;
+    await route.fulfill({ status: 302, headers: { location: destination.toString() } });
+  });
+  await page.goto("/automations/new");
+  await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep this unsaved draft.");
+  await expect(page.getByRole("button", { name: "Add repository" })).toHaveCount(0);
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Add GitHub", exact: true }).click();
+  const popup = await popupPromise;
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  const search = page.getByPlaceholder("Search repositories…");
+  await expect(search).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep this unsaved draft.");
+  await search.fill("web");
+  await expect(page.getByRole("option", { name: "acme/api" })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("automation-repository-search.png") });
+  await page.keyboard.press("Enter");
+  await search.fill("");
+  await page.getByRole("option", { name: "acme/api" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Remove acme/web" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove acme/api" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add repository" })).toBeFocused();
+});
+
+test("connects a missing connector in the same tab and restores the draft", async ({ page, context }, testInfo) => {
+  let connected = false;
+  const datadogAccountId = "77777777-7777-4777-8777-777777777777";
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: [{ id: githubAccountId, provider: "github", displayName: "acme" }, ...(connected ? [{ id: datadogAccountId, provider: "datadog", displayName: "Datadog US1" }] : [])],
+    resources: [], repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [],
+  } }));
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: {
+    integrations: [{ id: "datadog", connectUrl: "/api/integrations/datadog/connect" }],
+  } }));
+  let submitted: Record<string, unknown> | undefined;
+  await context.route("**/api/integrations/datadog/connect", async (route) => {
+    submitted = route.request().postDataJSON();
+    connected = true;
+    const redirectUrl = new URL(String(submitted?.returnTo), route.request().url());
+    redirectUrl.searchParams.set("integration", "datadog");
+    redirectUrl.searchParams.set("status", "connected");
+    await route.fulfill({ json: { accountId: datadogAccountId, redirectUrl: redirectUrl.toString() } });
+  });
+  await page.goto("/automations/new");
+  await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep this unsaved draft.");
+  await page.getByRole("button", { name: "Add repository", exact: true }).click();
+  await page.getByRole("option", { name: "acme/api" }).click();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Add connector", exact: true }).click();
+  await expect(page.getByRole("option", { name: /Connect Slack/ })).toBeVisible();
+  await page.getByPlaceholder("Search connectors…").fill("data");
+  await expect(page.getByRole("option", { name: /Slack/ })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("automation-connector-search.png") });
+  await page.getByRole("option", { name: /Connect Datadog/ }).click();
+  await page.getByPlaceholder("Paste your Datadog API key").fill("api-key");
+  await page.getByPlaceholder("Paste your Datadog application key").fill("application-key");
+  await page.getByRole("button", { name: "Connect Datadog", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove Datadog US1" })).toBeVisible();
+  expect(submitted).toMatchObject({ returnTo: "/automations/new" });
+  await expect(page).toHaveURL(/\/automations\/new$/);
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep this unsaved draft.");
+  await expect(page.getByRole("button", { name: "Remove acme/api" })).toBeVisible();
+});
+
+test("connects an OAuth connector in the same tab", async ({ page, context }) => {
+  let connected = false;
+  const slackAccountId = "88888888-8888-4888-8888-888888888888";
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: connected ? [{ id: slackAccountId, provider: "slack", displayName: "Engineering" }] : [],
+    resources: [], repositories: [], credentials: [], secrets: [],
+  } }));
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: {
+    integrations: [{ id: "slack", connectUrl: "/api/integrations/slack/start" }],
+  } }));
+  await context.route("**/api/integrations/slack/start?**", async (route) => {
+    const url = new URL(route.request().url());
+    const destination = new URL(url.searchParams.get("returnTo")!, url.origin);
+    destination.searchParams.set("integration", "slack");
+    destination.searchParams.set("status", "connected");
+    connected = true;
+    await route.fulfill({ status: 302, headers: { location: destination.toString() } });
+  });
+  await page.goto("/automations/new");
+  await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep this unsaved draft.");
+  await page.getByRole("button", { name: "Add connector", exact: true }).click();
+  await page.getByRole("option", { name: /Connect Slack/ }).click();
+  await expect(page.getByRole("button", { name: "Remove Engineering" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep this unsaved draft.");
+  await expect(page).toHaveURL(/\/automations\/new$/);
+});
+
 test("shows connection setup errors on the trigger card", async ({ page }) => {
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: [], resources: [], repositories: [], credentials: [], secrets: [],
@@ -246,94 +355,44 @@ test("searches channels by name or ID, selects multiple, and refreshes the list"
   await page.screenshot({ path: testInfo.outputPath("automation-event-card.png"), fullPage: true });
 });
 
-test("connects a model inline and filters compatible harnesses", async ({ page }, testInfo) => {
-  let savedKey: unknown;
-  let fail = true;
-  await page.route("**/api/automations/credentials", async (route) => {
-    savedKey = route.request().postDataJSON();
-    await route.fulfill(fail ? { status: 400, json: { error: "Invalid API key" } } : { json: { credentialId } });
-  });
-  await page.route(`**/api/automations/credentials/${credentialId}/models*`, route => route.fulfill({ json: { models: [{ id: "claude-sonnet-current", name: "Claude Sonnet Current" }, { id: "gpt-5.4", name: "GPT-5.4" }] } }));
+test("chooses included models from the provider submenu and filters compatible harnesses", async ({ page }, testInfo) => {
   await page.goto("/automations/new");
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep my instructions");
-  await page.getByRole("button", { name: /^(Model:|Choose model)/ }).click();
-  await page.getByRole("button", { name: "Anthropic", exact: true }).click();
-  await page.getByRole("button", { name: "Add connection", exact: true }).click();
-  const connection = page.getByRole("dialog", { name: "Connect Anthropic" });
-  await expect(connection.getByLabel("Key name")).toHaveCount(0);
-  await connection.getByLabel("API key", { exact: true }).fill("test-only-key");
-  await connection.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(connection.getByRole("alert")).toContainText("Invalid API key");
-  await expect(connection.getByLabel("API key", { exact: true })).toHaveValue("test-only-key");
-  fail = false;
-  await connection.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(connection).toHaveCount(0);
-  expect(savedKey).toEqual({ provider: "anthropic", apiKey: "test-only-key", label: expect.stringMatching(/^Anthropic key /) });
-  await page.getByRole("button", { name: "Claude Sonnet Current" }).click();
+  await page.getByRole("button", { name: "Choose model" }).click();
+  await page.getByRole("menuitem", { name: "Anthropic", exact: true }).click();
+  await page.getByRole("option", { name: "Included Model" }).click();
+  await expect(page.getByRole("button", { name: "Model: included-model" })).toBeFocused();
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep my instructions");
   await page.getByRole("button", { name: /^Harness:/ }).click();
   await page.getByRole("menuitemradio", { name: "Anthropic Anthropic agent harness" }).click();
-  await page.getByRole("button", { name: /^(Model:|Choose model)/ }).click();
-  await page.getByRole("button", { name: "OpenAI", exact: true }).click();
-  await page.getByRole("button", { name: "GPT-5.4" }).click();
+  await page.getByRole("button", { name: /^Model:/ }).click();
+  await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
+  await page.getByRole("option", { name: "GPT-5.4" }).click();
   await page.getByRole("button", { name: "Harness: Codex" }).click();
   await expect(page.getByRole("menuitemradio", { name: "Anthropic Anthropic agent harness" })).toHaveCount(0);
   await page.getByRole("menuitemradio", { name: "OpenCode OpenCode agent harness" }).click();
   await expect(page.getByRole("button", { name: "Harness: OpenCode" })).toBeFocused();
-  await page.getByRole("button", { name: /^(Model:|Choose model)/ }).click();
+  await page.getByRole("button", { name: /^Model:/ }).click();
+  await page.getByRole("menuitem", { name: "OpenAI", exact: true }).hover();
   await page.screenshot({ path: testInfo.outputPath("automation-model-picker.png"), fullPage: true });
 });
 
-test("retries a temporary subscription polling failure without losing the draft and restricts harnesses", async ({ page }) => {
-  let connected = false;
-  let cancelled = false;
-  let polls = 0;
-  const connectionId = "44444444-4444-4444-8444-444444444444";
-  await page.route("**/api/automations/options", (route) => route.fulfill({ json: { accounts: [], resources: [], repositories: [], secrets: [], credentials: connected ? [{ id: credentialId, provider: "openai", authType: "chatgpt_subscription", label: "ChatGPT subscription", status: "active", lastFour: "" }] : [] } }));
-  await page.route("**/api/automations/subscriptions/openai", (route) => route.fulfill({ json: { connectionId, userCode: "ABCD-EFGH", verificationUrl: "https://auth.openai.com/codex/device", interval: 1, expiresAt: new Date(Date.now() + 60000).toISOString() } }));
-  await page.route(`**/api/automations/subscriptions/openai/${connectionId}`, async (route) => { cancelled = true; await route.fulfill({ json: { ok: true } }); });
-  await page.route(`**/api/automations/subscriptions/openai/${connectionId}/poll`, async (route) => {
-    if (++polls === 1) { await route.fulfill({ status: 502, json: { error: "Temporary sandbox connection failure" } }); return; }
-    connected = true; await route.fulfill({ json: { status: "connected", credentialId } });
-  });
-  await page.goto("/automations/new");
-  await expect(page.getByRole("button", { name: "Choose model" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Harness:/ })).toBeDisabled();
-  await page.getByRole("button", { name: "Choose model" }).click();
-  await page.getByRole("button", { name: "OpenAI", exact: true }).click();
-  await page.getByRole("button", { name: "Add connection", exact: true }).click();
-  await page.getByRole("button", { name: "Subscription · BYOS" }).click();
-  await page.getByRole("button", { name: "Connect subscription ↗" }).click();
-  await expect(page.getByText("ABCD-EFGH")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Continue to ChatGPT ↗" })).toHaveAttribute("href", "https://auth.openai.com/codex/device");
-  await expect(page.getByRole("dialog", { name: "Connect OpenAI" })).toHaveCount(0);
-  await page.getByRole("button", { name: "GPT-5.4" }).click();
-  await page.getByRole("button", { name: "Harness: Codex" }).click();
-  await expect(page.getByRole("menuitemradio")).toHaveCount(1);
-  await expect.poll(() => cancelled).toBe(true);
-});
-
-test("shows seven providers and loads, refreshes, and selects models from the chosen connection", async ({ page }, testInfo) => {
-  let loads = 0;
-  await page.route("**/api/automations/options", route => route.fulfill({ json: { accounts: [], resources: [], repositories: [], secrets: [], credentials: [{ id: credentialId, provider: "google", label: "Gemini team", status: "active", lastFour: "1234" }] } }));
-  await page.route(`**/api/automations/credentials/${credentialId}/models*`, route => route.fulfill({ json: { models: ++loads === 1 ? [{ id: "gemini-current", name: "Gemini Current" }] : [{ id: "gemini-new", name: "Gemini Newly Available" }] } }));
+test("shows six providers and selects a model from the provider submenu", async ({ page }, testInfo) => {
   await page.goto("/automations/new");
   await page.getByRole("button", { name: "Choose model" }).click();
-  const providers = page.getByRole("dialog", { name: "Choose a provider" });
-  for (const name of ["OpenAI", "Anthropic", "Google Gemini", "xAI", "Mistral", "DeepSeek", "Groq"]) await expect(providers.getByRole("button", { name, exact: true })).toBeVisible();
-  await expect(providers.getByText("OpenRouter")).toHaveCount(0);
-  await expect(providers.getByText("Together AI")).toHaveCount(0);
+  const providers = page.getByRole("menu", { name: "Choose model" });
+  await expect(providers.getByRole("menuitem")).toHaveCount(6);
+  for (const name of ["OpenAI", "Anthropic", "Google Gemini", "xAI", "Mistral", "DeepSeek"]) await expect(providers.getByRole("menuitem", { name, exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("automation-providers.png") });
-  await providers.getByRole("button", { name: "Google Gemini", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Included Model included-model" })).toBeVisible();
-  await page.getByRole("combobox", { name: "Model connection" }).selectOption(credentialId);
-  await expect(page.getByRole("button", { name: "Gemini Current gemini-current" })).toBeVisible();
-  await page.getByRole("button", { name: "Refresh models" }).click();
-  await expect(page.getByRole("button", { name: "Gemini Newly Available gemini-new" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Gemini Current gemini-current" })).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath("automation-live-models.png") });
-  await page.getByRole("button", { name: "Gemini Newly Available gemini-new" }).click();
-  await expect(page.getByRole("button", { name: "Model: gemini-new" })).toBeVisible();
+  await providers.getByRole("menuitem", { name: "Google Gemini", exact: true }).hover();
+  const models = page.getByRole("menu", { name: "Google Gemini" });
+  await expect(models.getByRole("option", { name: "Included Model" })).toBeVisible();
+  await expect(providers).toBeVisible();
+  await expect(providers.getByRole("menuitem", { name: "Google Gemini", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("Add connection")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("automation-model-submenu.png") });
+  await models.getByRole("option", { name: "Included Model" }).click();
+  await expect(page.getByRole("button", { name: "Model: included-model" })).toBeVisible();
   await page.getByRole("button", { name: "Harness: OpenCode" }).click();
   await expect(page.getByRole("menuitemradio")).toHaveCount(1);
 });
@@ -358,13 +417,31 @@ test("keeps removed resources deselectable after a refresh", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Channel", exact: true })).toContainText("Select channel");
 });
 
-test("moves from model search to the first model with ArrowDown", async ({ page }) => {
+test("searches models and navigates the submenus with the keyboard", async ({ page }) => {
   await page.goto("/automations/new");
-  await page.getByRole("button", { name: "Choose model", exact: true }).click();
-  await page.getByRole("button", { name: "OpenAI", exact: true }).click();
-  await expect(page.getByRole("button", { name: "GPT-5.4" })).toBeVisible();
-  await page.getByRole("textbox", { name: "Search models" }).press("ArrowDown");
-  await expect(page.getByRole("button", { name: "GPT-5.4" })).toBeFocused();
+  await page.getByRole("button", { name: "Choose model", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "OpenAI", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "Anthropic", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  const search = page.getByPlaceholder("Search models…");
+  await expect(search).toBeFocused();
+  await page.keyboard.type("nothing like this");
+  await expect(page.getByText("No models found.")).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("menu", { name: "Anthropic" })).toBeVisible();
+  await search.fill("");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("menu", { name: "Anthropic" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Anthropic", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(page.getByRole("menuitem", { name: "OpenAI", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(search).toBeFocused();
+  await page.keyboard.type("gpt");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Model: gpt-5.4" })).toBeFocused();
 });
 
 test("completes an asynchronous Sentry connection without losing the draft", async ({ page, context }, testInfo) => {

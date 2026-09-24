@@ -11,11 +11,18 @@ import {
   type AutomationModelProvider,
   type AutomationOptions,
 } from "../automations-api";
-import { FloppyDiskIcon, PencilSimpleIcon, PlusIcon, TrashIcon, GithubLogoIcon, PlugsIcon } from "@phosphor-icons/react";
+import { FloppyDiskIcon, PencilSimpleIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
+import { AutomationConnectorPicker } from "../components/automation-connector-picker";
+import type { AutomationConnectorProvider } from "../components/automation-connectors";
+import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
+import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
+import { ProviderGlyph } from "../components/icons";
+import { providerDisplayName } from "../components/provider-glyphs";
+import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft } from "./automation-draft";
 import { AutomationModelPicker } from "../components/automation-model-picker";
+import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { supportsIncludedUsage } from "../../../../packages/core/src/automations/model-pricing";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
-import { AutomationEditorDialog } from "../components/automation-editor-dialog";
 import "./automation-create.css";
 import { AppShell } from "../components/app-shell";
 import { useDocumentTitle } from "../use-document-title";
@@ -55,11 +62,12 @@ export function AutomationCreatePage() {
   const [description, setDescription] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [configuration, setConfiguration] = useState({ ...defaultConfiguration, prompt: "" });
-  const [panel, setPanel] = useState<"model" | "repositories" | "connectors" | null>(null);
+  const [connectDialog, setConnectDialog] = useState<{ provider: "datadog" | "custom_mcp"; connectUrl: string } | null>(null);
   const [triggerSelected, setTriggerSelected] = useState(false);
   const [triggerMenuOpen, setTriggerMenuOpen] = useState(false);
   const triggerSectionRef = useRef<HTMLElement>(null);
   const [githubIncluded, setGithubIncluded] = useState(true);
+  const [repositoryPickerOpen, setRepositoryPickerOpen] = useState(false);
   const [modelRequestedOpen, setModelRequestedOpen] = useState(0);
   const [renaming, setRenaming] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -86,7 +94,17 @@ export function AutomationCreatePage() {
           setEnabled(automation.enabled);
           setConfiguration(automation.configuration);
         } else {
-          setConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }));
+          const restored = restoreAutomationDraft(loadedOptions, window.location);
+          if (restored) {
+            setName(restored.draft.name);
+            setTriggerSelected(restored.draft.triggerSelected);
+            setGithubIncluded(restored.draft.githubIncluded);
+            setConfiguration(restored.draft.configuration);
+            setError(restored.error);
+            window.history.replaceState(window.history.state, "", "/automations/new");
+          } else {
+            setConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }));
+          }
         }
       })
       .catch((cause: unknown) => {
@@ -97,6 +115,29 @@ export function AutomationCreatePage() {
       });
     return () => { cancelled = true; };
   }, [automationId]);
+
+  // Connects in this tab. OAuth providers redirect; Datadog and custom MCP
+  // collect credentials in a dialog first. Both return to this page.
+  async function connectConnector(provider: AutomationConnectorProvider) {
+    setError(null);
+    try {
+      const response = await fetch("/api/integrations");
+      if (!response.ok) throw new Error("Unable to load connections. Please try again.");
+      const { integrations } = await response.json() as { integrations: Array<{ id: string; connectUrl: string | null }> };
+      const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
+      if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
+      saveAutomationDraft({ name, configuration, triggerSelected, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [] });
+      if (provider === "datadog" || provider === "custom_mcp") {
+        setConnectDialog({ provider, connectUrl });
+        return;
+      }
+      const url = new URL(connectUrl, window.location.origin);
+      url.searchParams.set("returnTo", "/automations/new");
+      window.location.assign(url.toString());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to start the connection.");
+    }
+  }
 
   const triggerAccounts = useMemo(
     () => options?.accounts.filter((account) =>
@@ -187,7 +228,7 @@ export function AutomationCreatePage() {
       }
       if (!configuration.repositoryIds.length) {
         setError("Choose at least one repository.");
-        setPanel("repositories");
+        setRepositoryPickerOpen(true);
         return;
       }
       if (!configuration.model.trim()) {
@@ -256,6 +297,18 @@ export function AutomationCreatePage() {
   if (!automationId) {
     const selectedRepositories = options?.repositories.filter((repository) => configuration.repositoryIds.includes(repository.id)) ?? [];
     const selectedConnectors = contextAccounts.filter((account) => configuration.contextAccountIds.includes(account.id));
+    const selectedSecrets = options?.secrets.filter((secret) => configuration.workspaceSecretIds.includes(secret.id)) ?? [];
+    const repositoryPicker = <AutomationRepositoryPicker options={options} selectedIds={configuration.repositoryIds} open={repositoryPickerOpen} onOpenChange={setRepositoryPickerOpen} onToggle={(repositoryId) => {
+      setGithubIncluded(true);
+      setConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repositoryId) }));
+    }} onGithubConnected={async (_kind, signal) => {
+      const loaded = await fetchAutomationOptions();
+      if (signal.aborted) return false;
+      setOptions(loaded);
+      const connected = loaded.accounts.some((account) => account.provider === "github");
+      if (connected) setRepositoryPickerOpen(true);
+      return connected;
+    }} />;
     return (
       <AppShell active="automations" redesigned density="create">
         <form className="automationCreate" onSubmit={(event) => void submit(event)}>
@@ -267,7 +320,7 @@ export function AutomationCreatePage() {
               <button className="automationCreate__save" disabled={saving || !options} type="submit"><FloppyDiskIcon size={14} />{saving ? "Saving…" : "Save"}</button>
             </div>
           </header>
-          {error && !panel ? <p className="formError" role="alert">{error}</p> : null}
+          {error ? <p className="formError" role="alert">{error}</p> : null}
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="automation-triggers" ref={triggerSectionRef}>
             <h2 id="automation-triggers">Triggers</h2>
             <AutomationTriggerEditor options={options} trigger={triggerSelected ? configuration.trigger : null} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
@@ -294,27 +347,30 @@ export function AutomationCreatePage() {
             <div className="automationCreate__instructions">
               <textarea aria-labelledby="automation-instructions" maxLength={50_000} onChange={(event) => setConfiguration((current) => ({ ...current, prompt: event.target.value }))} placeholder="Describe what the agent should do." required value={configuration.prompt} />
               <div className="automationCreate__toolbar">
-                <AutomationModelPicker configuration={configuration} options={options} onChange={(patch) => setConfiguration((current) => ({ ...current, ...patch }))} onOptions={setOptions} requestedOpen={modelRequestedOpen} />
+                <AutomationModelPicker configuration={configuration} options={options} onChange={(patch) => setConfiguration((current) => ({ ...current, ...patch }))} requestedOpen={modelRequestedOpen} />
               </div>
             </div>
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-repositories">
             <h2 id="automation-repositories">Repositories</h2>
-            {selectedRepositories.length ? <div className="automationCreate__rows">{selectedRepositories.map((repository) => <div className="automationCreate__row" key={repository.id}><GithubLogoIcon size={16} /><span>{repository.fullName}</span><button aria-label={`Remove ${repository.fullName}`} className="automationCreate__iconButton" onClick={() => setConfiguration((current) => ({ ...current, repositoryIds: current.repositoryIds.filter((id) => id !== repository.id) }))} type="button"><TrashIcon size={14} /></button></div>)}<button className="automationCreate__add" onClick={() => setPanel("repositories")} type="button"><PlusIcon size={16} />Add repository</button></div> : <button className="automationCreate__add" onClick={() => setPanel("repositories")} type="button"><PlusIcon size={16} />Add repository</button>}
+            {selectedRepositories.length ? <div className="automationCreate__rows">{selectedRepositories.map((repository) => <div className="automationCreate__row" key={repository.id}><GithubLogoIcon size={16} /><span>{repository.fullName}</span><button aria-label={`Remove ${repository.fullName}`} className="automationCreate__iconButton" onClick={() => setConfiguration((current) => ({ ...current, repositoryIds: current.repositoryIds.filter((id) => id !== repository.id) }))} type="button"><TrashIcon size={14} /></button></div>)}{repositoryPicker}</div> : repositoryPicker}
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-connectors">
             <h2 id="automation-connectors">Connectors</h2>
             <div className="automationCreate__rows">
               {githubIncluded && options?.repositories.length ? <div className="automationCreate__row"><GithubLogoIcon size={16} weight="fill" /><span>GitHub</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label="Remove GitHub connector" className="automationCreate__iconButton" onClick={() => { setGithubIncluded(false); setConfiguration((current) => ({ ...current, repositoryIds: [] })); }} type="button"><TrashIcon size={14} /></button></div> : null}
-              {selectedConnectors.map((account) => <div className="automationCreate__row" key={account.id}><PlugsIcon size={16} /><span>{account.displayName}</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label={`Remove ${account.displayName}`} className="automationCreate__iconButton" onClick={() => setConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => id !== account.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
-              <button className="automationCreate__add" onClick={() => setPanel("connectors")} type="button"><PlusIcon size={16} />Add connector</button>
+              {selectedConnectors.map((account) => <div className="automationCreate__row" key={account.id}><ProviderGlyph decorative provider={account.provider as AutomationConnectorProvider} /><span>{account.displayName}</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label={`Remove ${account.displayName}`} className="automationCreate__iconButton" onClick={() => setConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => id !== account.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
+              {selectedSecrets.map((secret) => <div className="automationCreate__row" key={secret.id}><KeyIcon size={16} /><span>{secret.name}</span><button aria-label={`Remove ${secret.name}`} className="automationCreate__iconButton" onClick={() => setConfiguration((current) => ({ ...current, workspaceSecretIds: current.workspaceSecretIds.filter((id) => id !== secret.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
+              <AutomationConnectorPicker options={options} triggerAccountId={triggerSelected ? configuration.trigger.integrationAccountId : ""} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} githubIncluded={githubIncluded}
+                onToggleAccount={(accountId) => setConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, accountId) }))}
+                onToggleSecret={(secretId) => setConfiguration((current) => ({ ...current, workspaceSecretIds: toggle(current.workspaceSecretIds, secretId) }))}
+                onToggleGithub={() => { if (githubIncluded) setConfiguration((current) => ({ ...current, repositoryIds: [] })); setGithubIncluded(!githubIncluded); }}
+                onConnect={(provider) => void connectConnector(provider)} />
             </div>
           </section>
         </form>
-        {panel ? <AutomationEditorDialog title={{ model: "Model and harness", repositories: "Choose repositories", connectors: "Add connector" }[panel]} onClose={() => setPanel(null)}>
-          {error ? <p className="formError" role="alert">{error}</p> : null}
-          {panel === "model" ? <div className="automationCreate__modelFields">{modelFields}</div> : panel === "repositories" ? <div onChange={() => setGithubIncluded(true)}>{repositoryFields}</div> : <>{!githubIncluded && options?.repositories.length ? <button className="automationCreate__add" onClick={() => setGithubIncluded(true)} type="button"><PlusIcon size={16} />GitHub</button> : null}{connectorFields}</>}
-        </AutomationEditorDialog> : null}
+        <DatadogConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "datadog"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo="/automations/new" />
+        <CustomMcpConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "custom_mcp"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo="/automations/new" />
       </AppShell>
     );
   }

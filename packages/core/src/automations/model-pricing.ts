@@ -29,7 +29,7 @@ type PricingFetch = (
 ) => Promise<Response>;
 
 interface GatewayCatalog {
-  models: AIGatewayModel[];
+  models: Array<AIGatewayModel & { released?: number }>;
   pricing: Map<string, GatewayModelPricing>;
 }
 
@@ -49,7 +49,7 @@ async function fetchCatalog(fetchCatalogImpl: PricingFetch): Promise<GatewayCata
     throw new Error(`AI Gateway model catalog returned ${response.status}`);
   }
   const body = (await response.json()) as {
-    data?: Array<{ id?: unknown; name?: unknown; pricing?: unknown; type?: unknown }>;
+    data?: Array<{ id?: unknown; name?: unknown; pricing?: unknown; released?: unknown; type?: unknown }>;
   };
   const catalog: GatewayCatalog = { models: [], pricing: new Map() };
   for (const model of body.data ?? []) {
@@ -61,6 +61,7 @@ async function fetchCatalog(fetchCatalogImpl: PricingFetch): Promise<GatewayCata
       catalog.models.push({
         id: model.id,
         name: typeof model.name === "string" ? model.name : model.id,
+        ...(typeof model.released === "number" ? { released: model.released } : {}),
       });
     }
   }
@@ -90,8 +91,8 @@ export async function getAIGatewayModelPricing(
   return (await loadCatalog(dependencies)).pricing.get(gatewayModelId) ?? null;
 }
 
-// AI Gateway lists models under their creator. Groq only hosts other
-// creators' models, so it has no included-usage models of its own.
+// AI Gateway lists models under their creator. A provider without a creator
+// entry has no included-usage models.
 export function supportsIncludedUsage(provider: AutomationModelProvider): boolean {
   return aiGatewayCreators[provider] !== null;
 }
@@ -100,7 +101,6 @@ const aiGatewayCreators: Record<AutomationModelProvider, string | null> = {
   anthropic: "anthropic",
   deepseek: "deepseek",
   google: "google",
-  groq: null,
   mistral: "mistral",
   openai: "openai",
   xai: "spacexai",
@@ -144,8 +144,9 @@ export async function listAIGatewayModels(
         pricing !== undefined &&
         automationModelCostMicros(pricing, zeroUsage) !== null;
     })
-    .map((model) => ({ id: model.id.slice(creator.length + 1), name: model.name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    // Newest first; models without a release date go last, by name.
+    .sort((a, b) => (b.released ?? 0) - (a.released ?? 0) || a.name.localeCompare(b.name))
+    .map((model) => ({ id: model.id.slice(creator.length + 1), name: model.name }));
 }
 
 function tierPrice(

@@ -1,0 +1,58 @@
+/* shadcn/ui theme (new-york, neutral). The app defines its own --background,
+   --foreground, and --border on :root, so these tokens are scoped to shadcn
+   menus and popovers, which Radix renders in portals outside the app tree. */
+@import "tw-animate-css";
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+}
+
+:is([data-slot^="dropdown-menu"], [data-slot^="popover"]) {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+}
+
+/* The app does not load Tailwind preflight; shadcn components assume it. */
+@layer base {
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"]),
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"]) *,
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"]) ::before,
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"]) ::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid var(--color-border);
+    outline-color: color-mix(in oklab, var(--color-ring) 50%, transparent);
+  }
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"]) :is(input, button) {
+    font: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"]) :is(img, svg) {
+    display: block;
+    vertical-align: middle;
+  }
+}

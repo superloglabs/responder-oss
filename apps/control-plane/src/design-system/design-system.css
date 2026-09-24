@@ -1,7 +1,10 @@
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "../components/ui/shadcn.css";
 @source inline("shadow-xl");
+@source "../components/ui";
+@source "../components/automation-*-picker.tsx";
 
 :root {
   --ds-canvas: rgb(7 7 7);

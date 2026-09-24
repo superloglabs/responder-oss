@@ -6,7 +6,6 @@ export const automationModelProviders = [
   { id: "xai", name: "xAI", baseUrl: "https://api.x.ai/v1" },
   { id: "mistral", name: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
   { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com" },
-  { id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1" },
 ] as const;
 export type ModelProviderId = typeof automationModelProviders[number]["id"];
 export interface AvailableAutomationModel { id: string; name: string }
