@@ -4,6 +4,7 @@ import {
   DatadogConnectionDialog,
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
+import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
@@ -39,6 +40,7 @@ interface IntegrationSummary {
     | "datadog"
     | "dash0"
     | "posthog"
+    | "grafana"
     | "axiom"
     | "upstash"
     | "langfuse"
@@ -376,6 +378,7 @@ function DefaultIntegrationCard({
       new URLSearchParams(window.location.search).get("status") === "connected",
   );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
+  const [connectingGrafana, setConnectingGrafana] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
 
   function startConnection() {
@@ -407,6 +410,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "clickstack") {
       setConnectingClickStack(true);
+      return;
+    }
+    if (integration.id === "grafana") {
+      setConnectingGrafana(true);
       return;
     }
     if (integration.id === "aws") {
@@ -504,6 +511,12 @@ function DefaultIntegrationCard({
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
         open={connectingClickStack}
+        returnTo="/settings"
+      />
+      <GrafanaConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingGrafana(false)}
+        open={connectingGrafana}
         returnTo="/settings"
       />
       <AwsConnectionDialog

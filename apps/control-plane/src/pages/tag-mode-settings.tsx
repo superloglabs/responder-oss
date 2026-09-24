@@ -13,6 +13,7 @@ import {
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
+import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import {
@@ -58,6 +59,7 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "supabase",
   "dash0",
   "posthog",
+  "grafana",
 ]);
 
 const contextProviderOrder: ContextAccount["provider"][] = [
@@ -70,6 +72,7 @@ const contextProviderOrder: ContextAccount["provider"][] = [
   "datadog",
   "dash0",
   "posthog",
+  "grafana",
   "axiom",
   "linear",
   "custom_mcp",
@@ -103,6 +106,8 @@ function accountDetail(account: ContextAccount): string {
       return `${prefix}Logs, metrics, traces, checks, and dashboards`;
     case "posthog":
       return `${prefix}Errors, logs, traces, replays, and product analytics`;
+    case "grafana":
+      return `${prefix}Dashboards, alerts, metrics, logs, and traces`;
     case "axiom":
       return `${prefix}Logs, traces, metrics, and monitor history`;
     case "linear":
@@ -144,6 +149,7 @@ export function TagModeSettingsPage() {
     Boolean(supabaseSelectionState),
   );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
+  const [connectingGrafana, setConnectingGrafana] = useState(false);
   const [configuration, setConfiguration] =
     useState<SlackThreadModeConfiguration>(defaultConfiguration);
   const [configurationTarget, setConfigurationTarget] =
@@ -345,6 +351,10 @@ export function TagModeSettingsPage() {
       setConnectingClickStack(true);
       return;
     }
+    if (integration.id === "grafana") {
+      setConnectingGrafana(true);
+      return;
+    }
     setConnectingProvider(integration.id);
     const url = new URL(connectionUrl, window.location.origin);
     url.searchParams.set("returnTo", "/settings/tag-mode");
@@ -425,6 +435,12 @@ export function TagModeSettingsPage() {
         connectUrl={integrations.find((item) => item.id === "clickstack")?.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
         open={connectingClickStack}
+        returnTo="/settings/tag-mode"
+      />
+      <GrafanaConnectionDialog
+        connectUrl={integrations.find((item) => item.id === "grafana")?.connectUrl ?? ""}
+        onCancel={() => setConnectingGrafana(false)}
+        open={connectingGrafana}
         returnTo="/settings/tag-mode"
       />
       <AwsConnectionDialog

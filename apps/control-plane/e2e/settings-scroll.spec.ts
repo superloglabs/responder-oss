@@ -27,6 +27,7 @@ const providers = [
   ["sentry", "Sentry"],
   ["datadog", "Datadog"],
   ["axiom", "Axiom"],
+  ["grafana", "Grafana"],
   ["upstash", "Upstash"],
   ["langfuse", "Langfuse"],
   ["supabase", "Supabase"],
@@ -206,4 +207,36 @@ test("selects a Supabase project after OAuth discovery", async ({ page }) => {
     selectionState: "selection-state",
   });
   await expect(page).toHaveURL(/integration=supabase&status=connected/u);
+});
+
+test("connects self-hosted Grafana with a service account token", async ({ page }) => {
+  await mockSettingsApis(page);
+  let requestBody: unknown;
+  await page.route("**/api/integrations/grafana/start", async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        accountId: "44444444-4444-4444-8444-444444444444",
+        redirectUrl: "/settings?integration=grafana&status=connected",
+      },
+    });
+  });
+  await page.goto("/settings");
+
+  await page.getByRole("button", { name: /Grafana/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Continue with Grafana Cloud" }),
+  ).toBeVisible();
+  await page.getByRole("dialog").getByRole("combobox").selectOption("self_hosted");
+  await page.getByLabel("Grafana URL").fill("https://grafana.example.com");
+  await page.getByLabel("Service account token").fill("glsa_token");
+  await page.getByRole("button", { name: "Connect Grafana", exact: true }).click();
+
+  await expect.poll(() => requestBody).toEqual({
+    deployment: "self_hosted",
+    grafanaUrl: "https://grafana.example.com",
+    returnTo: "/settings",
+    serviceAccountToken: "glsa_token",
+  });
+  await expect(page).toHaveURL(/integration=grafana&status=connected/u);
 });

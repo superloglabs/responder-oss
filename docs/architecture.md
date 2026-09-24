@@ -61,6 +61,12 @@ types. `drizzle/` contains the ordered schema history.
   The endpoint is fixed to read-only tools and a bounded set of observability and
   analytics features, and the worker additionally requires the MCP read-only annotation.
   PostHog alerts enter through watched Slack channels rather than a second webhook path.
+- Grafana Cloud uses dynamic OAuth client registration against Grafana's hosted
+  MCP endpoint for one stack and requests only the read and query scopes.
+  Self-hosted Grafana runs the pinned `mcp-grafana` binary in the worker with a
+  service account token, write tools disabled, and a fixed category list. Its
+  outbound traffic goes through a worker-local SOCKS5 proxy that connects only
+  to public addresses. Both modes expose only tools annotated read-only.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.

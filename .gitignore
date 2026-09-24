@@ -11,6 +11,7 @@ dist
 node_modules
 playwright-report
 test-results
+.tools
 tsconfig.tsbuildinfo
 *.log
 .env*

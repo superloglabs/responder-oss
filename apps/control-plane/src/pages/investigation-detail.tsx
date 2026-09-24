@@ -131,6 +131,7 @@ function humanizeToolName(value: unknown): string {
     axiom: "Axiom",
     datadog: "Datadog",
     github: "GitHub",
+    grafana: "Grafana",
     langfuse: "Langfuse",
     sentry: "Sentry",
     slack: "Slack",

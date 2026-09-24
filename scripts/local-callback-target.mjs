@@ -63,6 +63,7 @@ function printPublicEndpoints() {
   process.stdout.write(`  Sentry webhook:  ${publicUrl}/api/webhooks/sentry\n`);
   process.stdout.write(`  Axiom OAuth:     ${publicUrl}/api/integrations/axiom/callback\n`);
   process.stdout.write(`  ClickStack OAuth: ${publicUrl}/api/integrations/clickstack/callback\n`);
+  process.stdout.write(`  Grafana OAuth:   ${publicUrl}/api/integrations/grafana/callback\n`);
 }
 
 async function targetIsHealthy(origin) {

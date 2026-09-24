@@ -17,6 +17,7 @@ import {
 } from "../integrations/custom-mcp.js";
 import { parseDash0Credentials } from "../integrations/dash0.js";
 import { parsePostHogCredentials } from "../integrations/posthog.js";
+import { parseGrafanaCredentials } from "../integrations/grafana.js";
 import {
   CLICKSTACK_CLOUD_MCP_URL,
   CLICKSTACK_CLOUD_OAUTH_ISSUER,
@@ -1341,6 +1342,22 @@ export interface RuntimePostHogConnection {
   mcpUrl: string;
 }
 
+export type RuntimeGrafanaConnection =
+  | {
+      accessToken: string;
+      accountId: string;
+      authType: "oauth";
+      displayName: string;
+      mcpUrl: string;
+    }
+  | {
+      accountId: string;
+      authType: "service_account";
+      displayName: string;
+      grafanaUrl: string;
+      serviceAccountToken: string;
+    };
+
 export interface RuntimeCustomMcpConnection {
   accessToken: string;
   accountId: string;
@@ -1719,6 +1736,7 @@ function mcpOAuthRedirectUrl(
     | "axiom"
     | "custom_mcp"
     | "dash0"
+    | "grafana"
     | "linear"
     | "posthog"
     | "supabase",
@@ -2689,6 +2707,91 @@ export async function getRuntimeUpstashConnection(
     displayName: account.displayName,
     email: credentials.email,
   };
+}
+
+export async function getRuntimeGrafanaConnections(
+  versionId: string,
+): Promise<RuntimeGrafanaConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "grafana"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeGrafanaConnection[] = [];
+  for (const accountId of new Set(config.contextAccountIds)) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const connection = await withIntegrationAccountCredentialLease<RuntimeGrafanaConnection>({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseGrafanaCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        if (credentials.authType === "service_account") {
+          return {
+            value: {
+              accountId: account.id,
+              authType: "service_account" as const,
+              displayName: account.displayName,
+              grafanaUrl: credentials.grafanaUrl,
+              serviceAccountToken: credentials.serviceAccountToken,
+            },
+          };
+        }
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("grafana"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Grafana Cloud OAuth connection");
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessToken,
+            accountId: account.id,
+            authType: "oauth" as const,
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "grafana",
+    });
+    if (connection) connections.push(connection);
+  }
+  return connections;
 }
 
 export async function getRuntimeLangfuseConnections(

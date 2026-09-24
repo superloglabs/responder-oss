@@ -311,6 +311,42 @@ describe("sandbox agent configuration", () => {
     );
   });
 
+  it("keeps Grafana investigation access read-only", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      grafanaInstanceNames: ["acme.grafana.net", "grafana.example.com · Main Org."],
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("connected read-only Grafana tools");
+    expect(instructions).toContain("Never create, update, or delete Grafana resources");
+    expect(instructions).toContain(
+      "Connected Grafana instances: acme.grafana.net, grafana.example.com · Main Org.",
+    );
+    expect(instructions).not.toContain("No observability data source is connected");
+  });
+
+  it("identifies Grafana connection failures without exposing provider errors", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        customMcpConnections: [],
+        error: new Error("spawn failed with glsa_token"),
+        grafanaConnections: [{ accountId: "account-1" }],
+        investigationId: "investigation-123",
+        serverName: "grafana-account-1",
+      }),
+    ).toEqual({
+      accountId: "account-1",
+      error: "Unable to connect to Grafana context",
+      event: "context_server_connect_failed",
+      investigationId: "investigation-123",
+      server: "grafana-account-1",
+    });
+  });
+
   it("tells the agent to continue when live Sentry context is unavailable", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",

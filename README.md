@@ -20,7 +20,7 @@
 
 # Responder
 
-Responder investigates production alerts using Sentry, Datadog, Dash0, PostHog, Axiom, Slack,
+Responder investigates production alerts using Sentry, Datadog, Dash0, PostHog, Grafana, Axiom, Slack,
 Upstash, Langfuse, Supabase, and connected MCP servers. It keeps tenant configuration in
 Postgres,
 queues work for a separate worker, and runs repository inspection in an
@@ -33,7 +33,7 @@ maintained separately.
 ## What it does
 
 - Watches selected Slack channels, Sentry projects, and Dash0 failed checks for alerts.
-- Connects GitHub, Slack, Sentry, Datadog, Dash0, PostHog, Axiom, AWS, Google Cloud, Upstash,
+- Connects GitHub, Slack, Sentry, Datadog, Dash0, PostHog, Grafana, Axiom, AWS, Google Cloud, Upstash,
   Langfuse, Supabase,
   Vercel, ClickStack,
   and custom MCP servers.

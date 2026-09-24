@@ -37,6 +37,7 @@ export const issueEvidenceSchema = z.object({
     "datadog",
     "dash0",
     "posthog",
+    "grafana",
     "axiom",
     "sentry",
     "clickstack",
