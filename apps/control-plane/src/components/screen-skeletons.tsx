@@ -79,6 +79,14 @@ export function AgentListSkeleton() {
   );
 }
 
+export function AutomationListSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton screenSkeleton--list" label="Loading automations…">
+      <TableSkeleton kind="agents" />
+    </LoadingRegion>
+  );
+}
+
 export function IssueListSkeleton() {
   return (
     <LoadingRegion className="screenSkeleton screenSkeleton--list" label="Loading issues…">
