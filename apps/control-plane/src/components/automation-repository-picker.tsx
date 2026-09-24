@@ -1,5 +1,4 @@
-import { GithubLogoIcon, PlusIcon } from "@phosphor-icons/react";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, GithubLogoIcon, PlusIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { AutomationOptions } from "../automations-api";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";

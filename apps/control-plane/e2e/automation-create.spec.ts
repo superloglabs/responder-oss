@@ -295,6 +295,33 @@ test("connects an OAuth connector in the same tab", async ({ page, context }) =>
   await expect(page).toHaveURL(/\/automations\/new$/);
 });
 
+test("returns a Sentry connection that finishes on settings to the draft", async ({ page, context }) => {
+  let started = false;
+  let loadsAfterReturn = 0;
+  const sentryAccountId = "99999999-9999-4999-8999-999999999999";
+  await page.route("**/api/automations/options", (route) => {
+    if (started) loadsAfterReturn++;
+    return route.fulfill({ json: {
+      accounts: loadsAfterReturn > 2 ? [{ id: sentryAccountId, provider: "sentry", displayName: "Acme Sentry" }] : [],
+      resources: [], repositories: [], credentials: [], secrets: [],
+    } });
+  });
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: {
+    integrations: [{ id: "sentry", connectUrl: "/api/integrations/sentry/start" }],
+  } }));
+  await context.route("**/api/integrations/sentry/start?**", async (route) => {
+    started = true;
+    await route.fulfill({ status: 302, headers: { location: new URL("/settings?integration=sentry&status=finishing", route.request().url()).toString() } });
+  });
+  await page.goto("/automations/new");
+  await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep this unsaved draft.");
+  await page.getByRole("button", { name: "Add connector", exact: true }).click();
+  await page.getByRole("option", { name: /Connect Sentry/ }).click();
+  await expect(page).toHaveURL(/\/automations\/new$/);
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep this unsaved draft.");
+  await expect(page.getByRole("button", { name: "Remove Acme Sentry" })).toBeVisible({ timeout: 10_000 });
+});
+
 test("shows connection setup errors on the trigger card", async ({ page }) => {
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: [], resources: [], repositories: [], credentials: [], secrets: [],

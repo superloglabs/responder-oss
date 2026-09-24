@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CaretDownIcon } from "@phosphor-icons/react";
-import { CheckIcon } from "lucide-react";
+import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
 import { fetchIncludedAutomationModels, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
 import { automationModelProviders, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
 import { cn } from "@/lib/utils";

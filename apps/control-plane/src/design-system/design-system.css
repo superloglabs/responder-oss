@@ -4,7 +4,9 @@
 @import "../components/ui/shadcn.css";
 @source inline("shadow-xl");
 @source "../components/ui";
-@source "../components/automation-*-picker.tsx";
+@source "../components/automation-model-picker.tsx";
+@source "../components/automation-repository-picker.tsx";
+@source "../components/automation-connector-picker.tsx";
 
 :root {
   --ds-canvas: rgb(7 7 7);

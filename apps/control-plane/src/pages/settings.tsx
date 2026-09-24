@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { connectionHandoffUrl } from "../connection-handoff";
+import { pendingAutomationDraftProvider } from "./automation-draft";
 import { AppShell } from "../components/app-shell";
 import {
   DatadogConnectionDialog,
@@ -130,6 +132,10 @@ function connectionNotice(): {
 }
 
 export function SettingsPage() {
+  useLayoutEffect(() => {
+    const handoff = connectionHandoffUrl({ search: window.location.search, windowName: window.name, pendingDraftProvider: pendingAutomationDraftProvider() });
+    if (handoff) window.location.replace(handoff);
+  }, []);
   useDocumentTitle("Settings");
   const [query, setQuery] = useState("");
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);

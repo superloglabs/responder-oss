@@ -18,7 +18,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
-import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft } from "./automation-draft";
+import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft, waitForConnectedAccounts } from "./automation-draft";
 import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { supportsIncludedUsage } from "../../../../packages/core/src/automations/model-pricing";
@@ -102,6 +102,19 @@ export function AutomationCreatePage() {
             setConfiguration(restored.draft.configuration);
             setError(restored.error);
             window.history.replaceState(window.history.state, "", "/automations/new");
+            if (restored.finishing) {
+              const { draft } = restored;
+              void waitForConnectedAccounts(draft, restored.returnedAccountId, () => cancelled).then((result) => {
+                if (cancelled) return;
+                if (!result) {
+                  setError(`${providerDisplayName(draft.connecting)} connected, but it is not available yet. Add it from Add connector in a moment.`);
+                  return;
+                }
+                setOptions(result.options);
+                if (draft.connecting === "github") setGithubIncluded(true);
+                else setConfiguration((current) => ({ ...current, contextAccountIds: [...new Set([...current.contextAccountIds, ...result.accountIds])] }));
+              });
+            }
           } else {
             setConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }));
           }

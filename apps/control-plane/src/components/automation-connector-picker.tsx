@@ -1,5 +1,4 @@
-import { KeyIcon, PlusIcon } from "@phosphor-icons/react";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, KeyIcon, PlusIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { AutomationOptions } from "../automations-api";
 import { automationConnectorProviders, type AutomationConnectorProvider } from "./automation-connectors";
