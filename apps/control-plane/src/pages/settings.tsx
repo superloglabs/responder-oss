@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { connectionHandoffUrl } from "../connection-handoff";
-import { pendingAutomationDraftProvider } from "./automation-draft";
+import { pendingAutomationDraft } from "./automation-draft";
 import { AppShell } from "../components/app-shell";
 import {
   DatadogConnectionDialog,
@@ -133,7 +133,7 @@ function connectionNotice(): {
 
 export function SettingsPage() {
   useLayoutEffect(() => {
-    const handoff = connectionHandoffUrl({ search: window.location.search, windowName: window.name, pendingDraftProvider: pendingAutomationDraftProvider() });
+    const handoff = connectionHandoffUrl({ search: window.location.search, windowName: window.name, pendingDraft: pendingAutomationDraft() });
     if (handoff) window.location.replace(handoff);
   }, []);
   useDocumentTitle("Settings");

@@ -77,15 +77,20 @@ test.beforeEach(async ({ context }) => {
     } });
     if (path === `/api/automations/${automationId}`) return route.fulfill({ json: { automation } });
     if (path === `/api/automations/${automationId}/runs`) {
-      const page = Number(url.searchParams.get("page") ?? "1");
-      return route.fulfill({ json: page === 1 ? {
-        page, pageSize: 10, total: 12,
+      const page = url.searchParams.get("page");
+      const manual = { trigger: { provider: "manual", sourceUrl: null, title: "Manual run" } };
+      // Twelve runs, ten per page.
+      if (page === "1") return route.fulfill({ json: {
+        page: 1, pageSize: 10, total: 12,
         runs: [
           run(12, "running", "RESP-2841: TypeError in checkout handler", 3),
           run(11, "succeeded", "RESP-2839: Payment webhook timeout", 30, { resultSummary: "Opened PR #248 with a regression test" }),
           run(10, "failed", "RESP-2828: Database connection refused", 26 * 60, { failureMessage: "Connector unavailable" }),
+          ...Array.from({ length: 7 }, (_, index) => run(9 - index, "succeeded", "Manual run", 2 * 24 * 60 + index, manual)),
         ],
-      } : { page, pageSize: 10, total: 12, runs: [run(2, "succeeded", "Manual run", 3 * 24 * 60, { trigger: { provider: "manual", sourceUrl: null, title: "Manual run" } })] } });
+      } });
+      if (page === "2") return route.fulfill({ json: { page: 2, pageSize: 10, total: 12, runs: [run(2, "succeeded", "Manual run", 3 * 24 * 60, manual), run(1, "succeeded", "Manual run", 4 * 24 * 60, manual)] } });
+      return route.fulfill({ status: 400, json: { error: `Unexpected page ${page}` } });
     }
     if (path.startsWith("/api/automations/included-models/")) return route.fulfill({ json: { models: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }] } });
     return route.fulfill({ json: {} });
@@ -111,12 +116,12 @@ test("shows a saved automation and pages its run history", async ({ page }, test
   await expect(table.getByText("Run #12 · Sentry")).toBeVisible();
   await expect(table.getByText("Connector unavailable")).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel run #12" })).toBeVisible();
-  await expect(page.getByText("Showing 1–3 of 12 runs")).toBeVisible();
+  await expect(page.getByText("Showing 1–10 of 12 runs")).toBeVisible();
   await expect(page.getByRole("button", { name: "Previous" })).toBeDisabled();
   await page.screenshot({ path: testInfo.outputPath("automation-detail-history.png"), fullPage: true });
   await page.getByRole("button", { name: "Next" }).click();
-  await expect(table.getByText("Run #2 · Manual")).toBeVisible();
-  await expect(page.getByText("Showing 11–11 of 12 runs")).toBeVisible();
+  await expect(table.getByText("Run #1 · Manual")).toBeVisible();
+  await expect(page.getByText("Showing 11–12 of 12 runs")).toBeVisible();
   await expect(page.getByRole("button", { name: "Next" })).toBeDisabled();
 });
 

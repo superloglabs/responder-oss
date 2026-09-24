@@ -54,8 +54,9 @@ export function takeAutomationDraft(): AutomationDraft | null {
   return draft;
 }
 
-export function pendingAutomationDraftProvider(): string | null {
-  return readAutomationDraft()?.connecting ?? null;
+export function pendingAutomationDraft(): Pick<AutomationDraft, "automationId" | "connecting"> | null {
+  const draft = readAutomationDraft();
+  return draft ? { automationId: draft.automationId, connecting: draft.connecting } : null;
 }
 
 export function connectedAccountIds(draft: AutomationDraft, options: AutomationOptions, returnedAccountId: string | null): string[] {

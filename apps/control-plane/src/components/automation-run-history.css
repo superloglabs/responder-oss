@@ -1,7 +1,7 @@
 .automationRuns { display: flex; flex-direction: column; gap: 22px; }
 .automationRuns__message { margin: 0; color: #666; }
 .appShell--workspace .automationRuns .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: 0; }
-.appShell--workspace .automationRuns .dsDataTable--workspace td:last-child { padding: 0; text-align: center; }
+.appShell--workspace .automationRuns .dsDataTable--workspace td:last-child:not(.dsDataTable__empty) { padding: 0; text-align: center; }
 .automationRuns .agentTableTitle a { color: inherit; text-decoration: none; }
 .automationRuns .agentTableTitle a:hover strong { text-decoration: underline; }
 .automationRuns .agentTableTitle strong { overflow-wrap: anywhere; }

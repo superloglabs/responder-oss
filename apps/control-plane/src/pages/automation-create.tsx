@@ -21,6 +21,7 @@ import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
+import { availableAutomationConfiguration } from "../automation-configuration";
 import "./automation-create.css";
 import { AppShell } from "../components/app-shell";
 import { Switch } from "../design-system";
@@ -164,14 +165,13 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     const restored = restoreAutomationDraft(loadedOptions, window.location, automationId);
     if (!restored) {
       if (!automationId) updateConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }), false);
-      // Saved settings can reference connections removed since. The page
-      // cannot show them and the server rejects them, so drop them.
-      else updateConfiguration((current) => ({
-        ...current,
-        contextAccountIds: current.contextAccountIds.filter((id) => loadedOptions.accounts.some((account) => account.id === id)),
-        repositoryIds: current.repositoryIds.filter((id) => loadedOptions.repositories.some((repository) => repository.id === id)),
-        workspaceSecretIds: current.workspaceSecretIds.filter((id) => loadedOptions.secrets.some((secret) => secret.id === id)),
-      }), false);
+      // Removed connections cannot be saved. The cleaned settings are the
+      // baseline a failed save returns to; they save with the next change.
+      else {
+        updateConfiguration((current) => availableAutomationConfiguration(current, loadedOptions), false);
+        saved.current = { ...saved.current, configuration: configurationRef.current };
+        queuedSnapshot.current = JSON.stringify(saved.current);
+      }
       return;
     }
     nameRef.current = restored.draft.name;

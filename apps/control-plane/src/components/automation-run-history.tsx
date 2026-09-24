@@ -127,7 +127,11 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
         {
           header: "Started",
           key: "started",
-          render: (run) => <time className="agentTableCell" dateTime={run.createdAt} title={new Date(run.createdAt).toLocaleString()}>{startedLabel(run.createdAt)}</time>,
+          render: (run) => {
+            // Queued runs have not started; show when they were queued.
+            const started = run.startedAt ?? run.createdAt;
+            return <time className="agentTableCell" dateTime={started} title={new Date(started).toLocaleString()}>{startedLabel(started)}</time>;
+          },
           width: "16%",
         },
         { header: "Duration", key: "duration", render: (run) => <span className="agentTableCell">{durationLabel(run, now)}</span>, width: "9.5%" },
