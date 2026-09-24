@@ -277,7 +277,7 @@ export function AutomationCreatePage() {
               const loaded = await fetchAutomationOptions();
               if (signal.aborted) return false;
               setOptions(loaded);
-              const account = loaded.accounts.find((item) => item.provider === kind);
+              const account = loaded.accounts.find((item) => item.provider === kind && (!configuration.trigger.integrationAccountId || item.id === configuration.trigger.integrationAccountId));
               if (!account) return false;
               setConfiguration((current) => current.trigger.kind === kind ? { ...current, contextAccountIds: current.contextAccountIds.filter(id => id !== account.id), trigger: { ...current.trigger, integrationAccountId: account.id } } : current);
               return true;

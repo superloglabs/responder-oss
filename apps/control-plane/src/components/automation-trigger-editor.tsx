@@ -101,7 +101,7 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
       </div>
       <div className="automationTrigger__fields" ref={fieldsRef}>
         <AutomationResourcePicker key={`${trigger.kind}:${trigger.integrationAccountId}`} label={trigger.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(trigger.kind === "sentry" ? { ...trigger, projectIds: ids } : { ...trigger, channelIds: ids })} onRefresh={trigger.kind === "discord" ? undefined : () => onRefresh(trigger.kind)} />
-        {trigger.kind === "discord" ? <AutomationTriggerConnect kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
+        {trigger.kind === "discord" ? <AutomationTriggerConnect key={trigger.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
       </div>
     </div> : null}
     <div className="automationTrigger__chooser">

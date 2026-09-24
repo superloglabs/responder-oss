@@ -428,3 +428,34 @@ test("stops connection refresh retries after removing the trigger", async ({ pag
   expect(loads).toBe(stoppedAt);
   await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeVisible();
 });
+
+test("preserves the selected Discord server after reconnecting", async ({ page, context }) => {
+  const secondAccountId = "44444444-4444-4444-8444-444444444444";
+  await page.route("**/api/automations/options", route => route.fulfill({ json: {
+    accounts: [
+      { id: accountId, provider: "discord", displayName: "First server" },
+      { id: secondAccountId, provider: "discord", displayName: "Selected server" },
+    ], resources: [], repositories: [], credentials: [], secrets: [],
+  } }));
+  await page.route("**/api/integrations", route => route.fulfill({ json: {
+    integrations: [{ id: "discord", connectUrl: "/api/integrations/discord/start" }],
+  } }));
+  await context.route("**/api/integrations/discord/start?**", async route => {
+    const url = new URL(route.request().url());
+    const destination = new URL(url.searchParams.get("returnTo")!, url.origin);
+    destination.searchParams.set("integration", "discord");
+    destination.searchParams.set("status", "connected");
+    await route.fulfill({ status: 302, headers: { location: destination.toString() } });
+  });
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Discord", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Automation command in channel", exact: true }).click();
+  await page.getByRole("combobox", { name: "Trigger connection" }).selectOption(secondAccountId);
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Reconnect to refresh channels" }).click();
+  const popup = await popupPromise;
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  await expect(page.getByRole("button", { name: "Reconnect to refresh channels" })).toBeEnabled();
+  await expect(page.getByRole("combobox", { name: "Trigger connection" })).toHaveValue(secondAccountId);
+});
