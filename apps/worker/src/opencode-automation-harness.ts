@@ -53,7 +53,7 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
   const contextServers = validateAutomationContextServers(input.contextServers);
   const npm = input.model.provider === "anthropic"
     ? "@ai-sdk/anthropic"
-    : "@ai-sdk/openai";
+    : "@ai-sdk/openai-compatible";
   return {
     $schema: "https://opencode.ai/config.json",
     autoupdate: false,
@@ -74,13 +74,13 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
     provider: {
       responder: {
         models: {
-          [input.model.model]: { name: input.model.model },
+          [input.model.model]: { name: input.model.model, tool_call: true },
         },
         name: "Responder model broker",
         npm,
         options: {
           apiKey: `{env:${modelBrokerTokenEnvironmentVariable}}`,
-          baseURL: brokerBaseUrl,
+          baseURL: input.model.provider === "anthropic" ? brokerBaseUrl : `${brokerBaseUrl}/providers/${input.model.provider}`,
         },
       },
     },

@@ -314,7 +314,7 @@ async function validateConfigurationResources(
   }
 
   const credentialRows = await tx
-    .select({ id: organizationModelCredentials.id })
+    .select({ id: organizationModelCredentials.id, authType: organizationModelCredentials.authType })
     .from(organizationModelCredentials)
     .where(
       and(
@@ -330,6 +330,10 @@ async function validateConfigurationResources(
       "The selected model credential is unavailable",
       "credential_not_found",
     );
+  }
+
+  if (credentialRows[0].authType === "chatgpt_subscription" && (configuration.harness !== "codex" || configuration.modelProvider !== "openai")) {
+    throw new AutomationConfigurationError("ChatGPT subscriptions require the Codex harness", "credential_not_found");
   }
 
   const repositoryRows = await tx

@@ -1,3 +1,4 @@
+import { automationModelProviderSchema } from "../automations/config.js";
 import type { randomBytes as nodeRandomBytes } from "node:crypto";
 import { and, eq, gt, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
@@ -25,6 +26,7 @@ const runIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/u;
 const tokenHashPattern = /^[a-f0-9]{64}$/u;
 
 interface AutomationModelCredentials extends Record<string, unknown> {
+  contextOnly?: boolean;
   apiKey: string;
 }
 
@@ -41,6 +43,7 @@ interface ClaimGrantDependencies {
 }
 
 export interface CreateAutomationModelBrokerGrantInput {
+  contextOnly?: boolean;
   apiKey: string;
   expiresAt: Date;
   maxOutputTokensPerRequest: number;
@@ -92,7 +95,7 @@ function validateGrantInput(
   input: CreateAutomationModelBrokerGrantInput,
   now: Date,
 ): void {
-  if (!(["openai", "anthropic"] as const).includes(input.provider)) {
+  if (!automationModelProviderSchema.safeParse(input.provider).success) {
     throw new Error("Unsupported automation model provider");
   }
   if (!modelIdentifierPattern.test(input.model)) {
@@ -137,10 +140,11 @@ export async function createAutomationModelBrokerGrant(
   const issuedToken = issueAutomationModelBrokerToken(
     dependencies.randomBytes,
   );
-  const encryptedCredentials = encryptCredentials({ apiKey: input.apiKey });
+  const encryptedCredentials = encryptCredentials({ apiKey: input.apiKey, ...(input.contextOnly ? { contextOnly: true } : {}) });
   const rows = await getDatabase()
     .insert(automationModelBrokerGrants)
     .values({
+      contextOnly: input.contextOnly ?? false,
       credentialKeyVersion: 1,
       encryptedCredentials,
       expiresAt: input.expiresAt,
@@ -173,7 +177,7 @@ export async function claimAutomationModelBrokerGrant(
   if (
     !tokenHashPattern.test(input.tokenHash) ||
     !modelIdentifierPattern.test(input.model) ||
-    !(["openai", "anthropic"] as const).includes(input.provider)
+    !automationModelProviderSchema.safeParse(input.provider).success
   ) {
     return null;
   }
@@ -190,6 +194,7 @@ export async function claimAutomationModelBrokerGrant(
     ? automationModelBrokerGrants.maxOutputTokensPerRequest
     : sql`${input.requestedMaxOutputTokens}`;
   const conditions = [
+    eq(automationModelBrokerGrants.contextOnly, false),
     eq(automationModelBrokerGrants.tokenHash, input.tokenHash),
     eq(automationModelBrokerGrants.provider, input.provider),
     eq(automationModelBrokerGrants.model, input.model),
@@ -241,6 +246,7 @@ export async function claimAutomationModelBrokerGrant(
     ((encrypted: string) =>
       decryptCredentials<AutomationModelCredentials>(encrypted));
   const credentials = decrypt(grant.encryptedCredentials);
+  if (credentials.contextOnly) return null;
   if (
     typeof credentials.apiKey !== "string" ||
     credentials.apiKey.length === 0

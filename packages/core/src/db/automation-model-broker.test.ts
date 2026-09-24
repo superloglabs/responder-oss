@@ -1,3 +1,4 @@
+import { PgDialect } from "drizzle-orm/pg-core";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../credentials/encryption.js";
@@ -176,4 +177,12 @@ describe("automation model broker grant storage", () => {
       ]),
     );
   });
+});
+
+it("does not authorize model inference with a subscription context-only grant", async () => {
+  const returning = vi.fn().mockResolvedValue([{ encryptedCredentials: "cipher", id: grantId, maxOutputTokensPerRequest: 4096, model: "gpt-5.4", organizationId, runId: "run-1" }]);
+  const where = vi.fn().mockReturnValue({ returning });
+  vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set: () => ({ from: () => ({ where }) }) }) } as never);
+  await expect(claimAutomationModelBrokerGrant({ model: "gpt-5.4", provider: "openai", requestedMaxOutputTokens: null, tokenHash: "a".repeat(64) }, { decryptCredentials: () => ({ apiKey: "subscription-context-only", contextOnly: true }) })).resolves.toBeNull();
+  expect(new PgDialect().sqlToQuery(where.mock.calls[0][0]).sql).toContain("context_only");
 });

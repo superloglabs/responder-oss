@@ -1,0 +1,30 @@
+import { expect, it, vi } from "vitest";
+import { createModelCatalogCache } from "./model-catalog-cache.js";
+it("shares in-flight discovery, caches completed models, and supports refresh and expiry", async () => {
+  let now = 0;
+  const cache = createModelCatalogCache(() => now);
+  let resolve!: (models: { id: string; name: string }[]) => void;
+  const load = vi.fn(() => new Promise<{ id: string; name: string }[]>(done => { resolve = done; }));
+  const first = cache("org:connection", load);
+  const second = cache("org:connection", load, true);
+  await Promise.resolve();
+  expect(load).toHaveBeenCalledTimes(1);
+  resolve([{ id: "current", name: "Current" }]);
+  expect(await first).toEqual(await second);
+  await cache("org:connection", load);
+  expect(load).toHaveBeenCalledTimes(1);
+  const updated = vi.fn().mockResolvedValue([{ id: "new", name: "New" }]);
+  expect(await cache("org:connection", updated, true)).toEqual([{ id: "new", name: "New" }]);
+  now += 300001;
+  await cache("org:connection", updated);
+  expect(updated).toHaveBeenCalledTimes(2);
+  await cache("other-org:connection", updated);
+  expect(updated).toHaveBeenCalledTimes(3);
+});
+it("does not cache failures", async () => {
+  const cache = createModelCatalogCache();
+  const load = vi.fn().mockRejectedValueOnce(new Error("Temporary failure")).mockResolvedValueOnce([]);
+  await expect(cache("org:connection", load)).rejects.toThrow("Temporary failure");
+  await expect(cache("org:connection", load)).resolves.toEqual([]);
+  expect(load).toHaveBeenCalledTimes(2);
+});

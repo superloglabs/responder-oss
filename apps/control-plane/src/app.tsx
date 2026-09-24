@@ -5,6 +5,7 @@ import { AgentCreatePage } from "./pages/agent-create";
 import { AgentContextStoryboardPage } from "./pages/agent-context-storyboard";
 import { AgentsPage } from "./pages/agents";
 import { AutomationsPage } from "./pages/automations";
+import { AutomationConnectionCompletePage } from "./pages/automation-connection-complete";
 import { AutomationCreatePage } from "./pages/automation-create";
 import { AutomationDetailPage } from "./pages/automation-detail";
 import { BillingPage } from "./pages/billing";
@@ -98,6 +99,7 @@ export function App() {
         <Route element={<AgentsPage />} path="/agents" />
         <Route element={<AutomationsPage />} path="/automations" />
         <Route element={<AutomationCreatePage />} path="/automations/new" />
+        <Route element={<AutomationConnectionCompletePage />} path="/automations/connection-complete" />
         <Route element={<AutomationDetailPage />} path="/automations/:automationId" />
         <Route element={<AutomationCreatePage />} path="/automations/:automationId/edit" />
         <Route element={<IssuesPage />} path="/issues" />

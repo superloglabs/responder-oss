@@ -157,6 +157,7 @@ export const automationModelBrokerGrants = pgTable(
     model: text("model").notNull(),
     encryptedCredentials: text("encrypted_credentials").notNull(),
     credentialKeyVersion: integer("credential_key_version").notNull().default(1),
+    contextOnly: boolean("context_only").notNull().default(false),
     remainingRequests: integer("remaining_requests").notNull(),
     remainingOutputTokens: integer("remaining_output_tokens").notNull(),
     maxOutputTokensPerRequest: integer("max_output_tokens_per_request").notNull(),
@@ -528,6 +529,16 @@ export const organizationCapabilities = pgTable(
   ],
 );
 
+export const modelSubscriptionConnections = pgTable("model_subscription_connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  organizationId: uuid("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  encryptedState: text("encrypted_state").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  nextPollAt: timestamp("next_poll_at", { withTimezone: true }).notNull(),
+  credentialId: uuid("credential_id").references(() => organizationModelCredentials.id, { onDelete: "cascade" }),
+}, (table) => [uniqueIndex("model_subscription_connections_owner_idx").on(table.organizationId, table.userId)]);
+
 export const organizationModelCredentials = pgTable(
   "organization_model_credentials",
   {
@@ -536,6 +547,9 @@ export const organizationModelCredentials = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     provider: text("provider").$type<AutomationModelProvider>().notNull(),
+    subscriptionLeaseId: uuid("subscription_lease_id"),
+    subscriptionLeaseExpiresAt: timestamp("subscription_lease_expires_at", { withTimezone: true }),
+    authType: text("auth_type").$type<"api_key" | "chatgpt_subscription">().notNull().default("api_key"),
     label: text("label").notNull(),
     encryptedCredentials: text("encrypted_credentials").notNull(),
     credentialKeyVersion: integer("credential_key_version").notNull().default(1),

@@ -1,3 +1,5 @@
+import { automationModelProviderSchema } from "../../../../packages/core/src/automations/config.js";
+import { modelProvider, type ModelProviderId } from "../../../../packages/core/src/automations/model-providers.js";
 import { Hono } from "hono";
 import {
   automationModelBrokerTokenHash,
@@ -16,7 +18,7 @@ const modelIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u;
 
 type ClaimGrant = (input: {
   model: string;
-  provider: "anthropic" | "openai";
+  provider: ModelProviderId;
   requestedMaxOutputTokens: number | null;
   tokenHash: string;
 }) => Promise<AutomationModelBrokerClaim | null>;
@@ -122,7 +124,37 @@ function parseMessagesRequest(value: unknown): ParsedMessagesRequest | null {
 export function createAutomationModelBrokerRoutes(
   dependencies: AutomationModelBrokerDependencies = defaultDependencies,
 ) {
-  return new Hono().post("/v1/responses", async (context) => {
+  return new Hono().post("/v1/providers/:provider/chat/completions", async (context) => {
+    const provider = automationModelProviderSchema.safeParse(context.req.param("provider"));
+    if (!provider.success || provider.data === "anthropic") return context.json({ error: "Unsupported provider" }, 400);
+    const token = brokerToken(context);
+    if (!token) return context.json({ error: "Unauthorized" }, 401);
+    const body = await context.req.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body || typeof body.model !== "string" || !modelIdentifierPattern.test(body.model) || !Array.isArray(body.messages)) return context.json({ error: "Invalid model request" }, 400);
+    const limits = [body.max_tokens, body.max_completion_tokens].filter(value => value !== undefined && value !== null);
+    if (limits.some(value => !Number.isSafeInteger(value) || (value as number) <= 0) || (body.n !== undefined && body.n !== 1)) return context.json({ error: "Invalid model request limits" }, 400);
+    let grant: AutomationModelBrokerClaim | null;
+    try { grant = await dependencies.claimGrant({ model: body.model, provider: provider.data, requestedMaxOutputTokens: limits.length ? Math.max(...limits as number[]) : null, tokenHash: automationModelBrokerTokenHash(token) }); }
+    catch (error) {
+      console.error(JSON.stringify({ event: "automation_model_broker_claim_failed", errorCode: error instanceof Error ? error.constructor.name : "unknown", provider: provider.data, model: body.model }));
+      return context.json({ error: "Model broker is unavailable" }, 503);
+    }
+    if (!grant) return context.json({ error: "Model broker grant is invalid or exhausted" }, 401);
+    const forwarded: Record<string, unknown> = { ...body, model: grant.model, max_tokens: grant.maxOutputTokens };
+    delete forwarded.max_completion_tokens;
+    if (provider.data === "openai") { delete forwarded.max_tokens; forwarded.max_completion_tokens = grant.maxOutputTokens; }
+    try {
+      const response = await dependencies.providerFetch(`${modelProvider(provider.data).baseUrl}/chat/completions`, {
+        method: "POST", headers: { authorization: `Bearer ${grant.apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify(forwarded), redirect: "error",
+        signal: AbortSignal.any([context.req.raw.signal, AbortSignal.timeout(providerRequestTimeoutMs)]),
+      });
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers: providerResponseHeaders(response.headers) });
+    } catch (error) {
+      console.error(JSON.stringify({ event: "automation_model_provider_request_failed", errorCode: error instanceof Error ? error.constructor.name : "unknown", provider: provider.data, grantId: grant.grantId, organizationId: grant.organizationId, runId: grant.runId }));
+      return context.json({ error: "Model provider request failed" }, 502);
+    }
+  }).post("/v1/responses", async (context) => {
     const token = brokerToken(context);
     if (!token) return context.json({ error: "Unauthorized" }, 401);
 

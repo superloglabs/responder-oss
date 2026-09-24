@@ -8,10 +8,12 @@ import {
 } from "./codex-automation-harness.js";
 
 const input = {
-  contextServers: [{
-    name: "slack_61616161616141618161616161616161",
-    url: "https://responder.test/api/automation-context-broker/v1/61616161-6161-4161-8161-616161616161",
-  }],
+  contextServers: [
+    {
+      name: "slack_61616161616141618161616161616161",
+      url: "https://responder.test/api/automation-context-broker/v1/61616161-6161-4161-8161-616161616161",
+    },
+  ],
   model: {
     brokerBaseUrl: "https://models.responder.test/v1",
     model: "gpt-5.4",
@@ -24,12 +26,16 @@ const input = {
 describe("Codex automation harness", () => {
   it("uses a pinned CLI package inside the sandbox", async () => {
     const session = {
-      execCommand: vi.fn().mockResolvedValue(
-        "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
-      ),
+      execCommand: vi
+        .fn()
+        .mockResolvedValue(
+          "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+        ),
     } as unknown as DaytonaSandboxSession;
 
-    await expect(prepareCodexAutomationHarness(session)).resolves.toBeUndefined();
+    await expect(
+      prepareCodexAutomationHarness(session),
+    ).resolves.toBeUndefined();
 
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -47,9 +53,11 @@ describe("Codex automation harness", () => {
 
   it("fails safely when the pinned CLI cannot be prepared", async () => {
     const session = {
-      execCommand: vi.fn().mockResolvedValue(
-        "Chunk ID: install\nProcess exited with code 1\nOutput:\nnpm failed with a private registry message\n",
-      ),
+      execCommand: vi
+        .fn()
+        .mockResolvedValue(
+          "Chunk ID: install\nProcess exited with code 1\nOutput:\nnpm failed with a private registry message\n",
+        ),
     } as unknown as DaytonaSandboxSession;
 
     await expect(prepareCodexAutomationHarness(session)).rejects.toThrow(
@@ -71,14 +79,16 @@ describe("Codex automation harness", () => {
     expect(command).toContain(
       'model_providers.responder.env_key="RESPONDER_MODEL_BROKER_TOKEN"',
     );
-    expect(command).toContain("shell_environment_policy.inherit=\"core\"");
+    expect(command).toContain('shell_environment_policy.inherit="core"');
     expect(command).toContain(
       "shell_environment_policy.ignore_default_excludes=false",
     );
     expect(command).toContain(
       'shell_environment_policy.filters={ RESPONDER_MODEL_BROKER_TOKEN = "exclude" }',
     );
-    expect(command).toContain("mcp_servers.slack_61616161616141618161616161616161.url");
+    expect(command).toContain(
+      "mcp_servers.slack_61616161616141618161616161616161.url",
+    );
     expect(command).toContain("bearer_token_env_var");
     expect(command).not.toContain(input.prompt);
     expect(command).not.toContain("CUSTOMER_PROVIDER_KEY");
@@ -95,14 +105,14 @@ describe("Codex automation harness", () => {
           "Chunk ID: workspace\nProcess exited with code 0\nOutput:\n",
         )
         .mockResolvedValueOnce(
-          "Chunk ID: run\nProcess exited with code 0\nOutput:\n{\"type\":\"turn.completed\"}\n",
+          'Chunk ID: run\nProcess exited with code 0\nOutput:\n{"type":"turn.completed"}\n',
         ),
       materializeEntry: vi.fn().mockResolvedValue(undefined),
     } as unknown as DaytonaSandboxSession;
 
     await expect(runCodexAutomation(session, input)).resolves.toEqual({
       eventStream:
-        "Chunk ID: run\nProcess exited with code 0\nOutput:\n{\"type\":\"turn.completed\"}\n",
+        'Chunk ID: run\nProcess exited with code 0\nOutput:\n{"type":"turn.completed"}\n',
     });
     expect(session.materializeEntry).toHaveBeenCalledWith({
       entry: { type: "file", content: input.prompt },
@@ -163,9 +173,123 @@ describe("Codex automation harness", () => {
     } as unknown as DaytonaSandboxSession;
 
     const run = runCodexAutomation(session, input);
-    await expect(run).rejects.toThrow(
-      "Codex automation harness failed",
-    );
+    await expect(run).rejects.toThrow("Codex automation harness failed");
     await expect(run).rejects.not.toThrow(secretShapedOutput);
   });
+});
+
+it("uses managed ChatGPT inference, persists refreshed auth, and removes the cache on failure", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      account_id: "account",
+    },
+  });
+  const persist = vi.fn().mockResolvedValue(undefined);
+  const nativeInput = {
+    ...input,
+    model: { ...input.model, subscription: { authJson, persist } },
+  };
+  const command = buildCodexAutomationCommand(nativeInput);
+  expect(command).toContain('forced_login_method="chatgpt"');
+  expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+  expect(command).toContain('default_permissions="subscription"');
+  expect(command).toContain(
+    '"/home/daytona/.responder-subscription-auth"="deny"',
+  );
+  expect(command).not.toContain("model_providers.responder");
+  expect(command).not.toContain("access-token");
+  expect(command).toContain(
+    "unset OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN",
+  );
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 1\n"),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(new TextEncoder().encode(authJson)),
+  } as unknown as DaytonaSandboxSession;
+  await expect(runCodexAutomation(session, nativeInput)).rejects.toThrow(
+    "harness failed",
+  );
+  expect(persist).toHaveBeenCalledWith(authJson);
+  expect(session.materializeEntry).toHaveBeenCalledWith({
+    entry: { type: "file", content: authJson },
+    path: "/home/daytona/.responder-subscription-auth/auth.json",
+    runAs: "root",
+  });
+  expect(session.execCommand).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      cmd: expect.stringContaining(
+        "sudo -n rm -rf /home/daytona/.responder-subscription-auth",
+      ),
+    }),
+  );
+});
+
+it("redacts native subscription tokens from persisted harness output", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "secret-id",
+      access_token: "secret-access",
+      refresh_token: "secret-refresh",
+      account_id: "account",
+    },
+  });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue(
+        "Process exited with code 0\nsecret-access secret-refresh secret-id",
+      ),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(new TextEncoder().encode(authJson)),
+  } as unknown as DaytonaSandboxSession;
+  const result = await runCodexAutomation(session, {
+    ...input,
+    model: {
+      ...input.model,
+      subscription: { authJson, persist: vi.fn().mockResolvedValue(undefined) },
+    },
+  });
+  expect(result.eventStream).not.toContain("secret-");
+  expect(result.eventStream).toContain("[redacted]");
+});
+
+it("removes native credentials when materialization fails", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id",
+      access_token: "access",
+      refresh_token: "refresh",
+      account_id: "account",
+    },
+  });
+  const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0\n"),
+    materializeEntry: vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("upload failed")),
+    readFile: vi.fn().mockRejectedValue(new Error("missing")),
+  } as unknown as DaytonaSandboxSession;
+  await expect(
+    runCodexAutomation(session, {
+      ...input,
+      model: { ...input.model, subscription: { authJson, persist: vi.fn() } },
+    }),
+  ).rejects.toThrow();
+  expect(session.execCommand).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      cmd: expect.stringContaining(
+        "sudo -n rm -rf /home/daytona/.responder-subscription-auth",
+      ),
+    }),
+  );
 });

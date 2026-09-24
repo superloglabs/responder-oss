@@ -36,7 +36,7 @@ describe("OpenCode automation harness", () => {
     expect(command).toContain("unset RESPONDER_MODEL_BROKER_TOKEN");
   });
 
-  it("uses the Responses adapter for OpenAI and the Messages adapter for Anthropic", () => {
+  it("uses the Chat Completions adapter for OpenAI and the Messages adapter for Anthropic", () => {
     expect(openCodeAutomationConfig(input)).toMatchObject({
       permission: { "*": "allow" },
       mcp: {
@@ -46,9 +46,10 @@ describe("OpenCode automation harness", () => {
       },
       provider: {
         responder: {
-          npm: "@ai-sdk/openai",
+          npm: "@ai-sdk/openai-compatible",
           options: {
             apiKey: "{env:RESPONDER_MODEL_BROKER_TOKEN}",
+            baseURL: "https://models.responder.test/v1/providers/openai",
           },
         },
       },
@@ -70,4 +71,11 @@ describe("OpenCode automation harness", () => {
     expect(command).toContain('-- "$prompt"');
     expect(command).not.toContain(input.prompt);
   });
+});
+
+it.each(["google", "xai", "mistral", "deepseek", "groq"])("uses scoped chat completion routes for %s", provider => {
+  const config = openCodeAutomationConfig({ ...input, model: { ...input.model, provider, model: "current-model" } });
+  expect(config.provider.responder.npm).toBe("@ai-sdk/openai-compatible");
+  expect(config.provider.responder.options.baseURL).toBe(`https://models.responder.test/v1/providers/${provider}`);
+  expect(config.provider.responder.models["current-model"].tool_call).toBe(true);
 });

@@ -1,3 +1,9 @@
+import { listSubscriptionModels } from "./subscription-models.js";
+import { listProviderModels, ModelCatalogError } from "../../../../packages/core/src/automations/model-catalog.js";
+import { getOrganizationModelCredential } from "../../../../packages/core/src/db/automation-model-credentials.js";
+import type { AutomationModelProvider } from "../../../../packages/core/src/automations/config.js";
+import { SubscriptionLoginError, subscriptionLoginTransport } from "./subscription-login.js";
+import { startModelSubscription, pollModelSubscription, cancelModelSubscription } from "../../../../packages/core/src/db/model-subscriptions.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -76,43 +82,63 @@ function configurationError(error: unknown): {
 async function testProviderCredential(input: {
   apiKey: string;
   model: string;
-  provider: "anthropic" | "openai";
+  provider: AutomationModelProvider;
 }): Promise<{ authenticationFailed: boolean; valid: boolean }> {
-  let response: Response;
-  if (input.provider === "openai") {
-    response = await fetch(
-      `https://api.openai.com/v1/models/${encodeURIComponent(input.model)}`,
-      {
-        headers: { authorization: `Bearer ${input.apiKey}` },
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
-  } else {
-    response = await fetch("https://api.anthropic.com/v1/messages", {
-      body: JSON.stringify({
-        max_tokens: 1,
-        messages: [{ content: "Reply OK", role: "user" }],
-        model: input.model,
-      }),
-      headers: {
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-        "x-api-key": input.apiKey,
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(30_000),
-    });
+  try {
+    const models = await listProviderModels(input.provider, input.apiKey);
+    return { authenticationFailed: false, valid: models.some(model => model.id === input.model) };
+  } catch (error) {
+    if (error instanceof ModelCatalogError && error.authenticationFailed) return { authenticationFailed: true, valid: false };
+    throw error;
   }
-  if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
-    throw new Error("Model provider is temporarily unavailable");
-  }
-  return {
-    authenticationFailed: response.status === 401 || response.status === 403,
-    valid: response.ok,
-  };
 }
 
 export const automationRoutes = new Hono()
+  .get("/credentials/:credentialId/models", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const credentialId = context.req.param("credentialId");
+    if (!z.string().uuid().safeParse(credentialId).success) return context.json({ error: "Invalid connection" }, 400);
+    context.header("Cache-Control", "no-store");
+    const credential = await getOrganizationModelCredential({ credentialId, organizationId: access.tenant.organizationId });
+    if (!credential) return context.json({ error: "Connection not found" }, 404);
+    try {
+      const models = credential.subscription
+        ? await listSubscriptionModels({ credentialId, organizationId: access.tenant.organizationId }, context.req.query("refresh") === "true")
+        : await listProviderModels(credential.provider, credential.apiKey);
+      return context.json({ models });
+    } catch (error) {
+      return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to load models. Please retry when this connection is idle." }, error instanceof ModelCatalogError && error.authenticationFailed ? 400 : 502);
+    }
+  })
+  .post("/subscriptions/openai", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    context.header("Cache-Control", "no-store");
+    try { return context.json(await startModelSubscription({ organizationId: access.tenant.organizationId, userId: access.tenant.user.id }, subscriptionLoginTransport)); }
+    catch { return context.json({ error: "Unable to start ChatGPT sign-in. Try again." }, 502); }
+  })
+  .post("/subscriptions/openai/:connectionId/poll", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    if (!z.string().uuid().safeParse(context.req.param("connectionId")).success) return context.json({ error: "Invalid connection" }, 400);
+    context.header("Cache-Control", "no-store");
+    try { return context.json(await pollModelSubscription({ organizationId: access.tenant.organizationId, userId: access.tenant.user.id, connectionId: context.req.param("connectionId") }, subscriptionLoginTransport)); }
+    catch (error) {
+      const failure = error instanceof SubscriptionLoginError ? error : null;
+      // Never log exception messages or request bodies: they may contain credentials.
+      console.error(JSON.stringify({ event: "subscription_poll_failed", stage: failure?.stage ?? "storage", retryable: failure?.retryable ?? true }));
+      if (failure && !failure.retryable) return context.json({ status: "failed" as const, error: failure.message });
+      return context.json({ error: "Unable to check ChatGPT sign-in. Please try again." }, 502);
+    }
+  })
+  .delete("/subscriptions/openai/:connectionId", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    if (!z.string().uuid().safeParse(context.req.param("connectionId")).success) return context.json({ error: "Invalid connection" }, 400);
+    await cancelModelSubscription({ organizationId: access.tenant.organizationId, userId: access.tenant.user.id, connectionId: context.req.param("connectionId") }, subscriptionLoginTransport);
+    return context.json({ ok: true });
+  })
   .get("/", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
@@ -164,6 +190,8 @@ export const automationRoutes = new Hono()
         400,
       );
     }
+    try { await listProviderModels(parsed.data.provider, parsed.data.apiKey); }
+    catch (error) { return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to verify the provider connection. Please retry." }, error instanceof ModelCatalogError && error.authenticationFailed ? 400 : 503); }
     const credential = await createOrganizationModelCredential({
       ...parsed.data,
       organizationId: access.tenant.organizationId,

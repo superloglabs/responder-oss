@@ -119,9 +119,12 @@ describe("automation model broker route", () => {
       model: "claude-sonnet-4-5",
     });
     const providerFetch = vi.fn().mockResolvedValue(
-      Response.json({ content: [{ type: "text", text: "done" }] }, {
-        headers: { "request-id": "anthropic-request-1" },
-      }),
+      Response.json(
+        { content: [{ type: "text", text: "done" }] },
+        {
+          headers: { "request-id": "anthropic-request-1" },
+        },
+      ),
     );
     const routes = createAutomationModelBrokerRoutes({
       claimGrant,
@@ -195,7 +198,9 @@ describe("automation model broker route", () => {
   });
 
   it("does not retry or fall back when the selected provider is unavailable", async () => {
-    const providerFetch = vi.fn().mockRejectedValue(new Error("network failed"));
+    const providerFetch = vi
+      .fn()
+      .mockRejectedValue(new Error("network failed"));
     const routes = createAutomationModelBrokerRoutes({
       claimGrant: vi.fn().mockResolvedValue(claim),
       providerFetch,
@@ -218,12 +223,14 @@ describe("automation model broker route", () => {
   });
 
   it("returns provider authentication failures without substituting credentials", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(
-      Response.json(
-        { error: { message: "Incorrect API key" } },
-        { status: 401 },
-      ),
-    );
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { error: { message: "Incorrect API key" } },
+          { status: 401 },
+        ),
+      );
     const routes = createAutomationModelBrokerRoutes({
       claimGrant: vi.fn().mockResolvedValue(claim),
       providerFetch,
@@ -244,4 +251,89 @@ describe("automation model broker route", () => {
     });
     expect(providerFetch).toHaveBeenCalledOnce();
   });
+});
+
+it.each([
+  ["openai", "https://api.openai.com/v1"],
+  ["google", "https://generativelanguage.googleapis.com/v1beta/openai"],
+  ["xai", "https://api.x.ai/v1"],
+  ["mistral", "https://api.mistral.ai/v1"],
+  ["deepseek", "https://api.deepseek.com"],
+  ["groq", "https://api.groq.com/openai/v1"],
+])(
+  "routes %s chat requests through scoped grants and enforces output limits",
+  async (provider, endpoint) => {
+    const claimGrant = vi
+      .fn()
+      .mockResolvedValue({ ...claim, model: "live-model" });
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("data: [DONE]\n\n", {
+          headers: { "content-type": "text/event-stream" },
+        }),
+      );
+    const broker = createAutomationModelBrokerRoutes({
+      claimGrant,
+      providerFetch,
+    });
+    const response = await broker.request(
+      `/v1/providers/${provider}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken()}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "live-model",
+          messages: [{ role: "user", content: "hello" }],
+          stream: true,
+          max_completion_tokens: 500,
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(claimGrant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider,
+        model: "live-model",
+        requestedMaxOutputTokens: 500,
+      }),
+    );
+    expect(providerFetch).toHaveBeenCalledWith(
+      `${endpoint}/chat/completions`,
+      expect.objectContaining({ redirect: "error" }),
+    );
+    const body = JSON.parse(providerFetch.mock.calls[0][1].body);
+    expect(body[provider === "openai" ? "max_completion_tokens" : "max_tokens"]).toBe(4096);
+    expect(body[provider === "openai" ? "max_tokens" : "max_completion_tokens"]).toBeUndefined();
+    expect(await response.text()).not.toContain("provider-secret");
+  },
+);
+
+it("rejects unsupported provider routes and multiple completion budget bypasses", async () => {
+  const claimGrant = vi.fn();
+  const providerFetch = vi.fn();
+  const broker = createAutomationModelBrokerRoutes({
+    claimGrant,
+    providerFetch,
+  });
+  const init = {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bearerToken()}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ model: "model", messages: [], n: 2 }),
+  };
+  expect(
+    (await broker.request("/v1/providers/groq/chat/completions", init)).status,
+  ).toBe(400);
+  expect(
+    (await broker.request("/v1/providers/unknown/chat/completions", init))
+      .status,
+  ).toBe(400);
+  expect(claimGrant).not.toHaveBeenCalled();
+  expect(providerFetch).not.toHaveBeenCalled();
 });
