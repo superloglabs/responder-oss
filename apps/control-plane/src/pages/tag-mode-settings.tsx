@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AGENT_PROMPT_MAX_LENGTH } from "@responder/core/agents/config";
 import { useNavigate } from "react-router-dom";
 import {
@@ -24,6 +24,7 @@ import {
 import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { availableTagModeConfiguration } from "../tag-mode-configuration";
 import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
 import { BookBookmarkIcon as RepositoryIcon, MagnifyingGlassIcon as SearchIcon, XIcon } from "@phosphor-icons/react";
 import {
@@ -50,7 +51,6 @@ const defaultConfiguration: SlackThreadModeConfiguration = {
 
 type ContextAccount = AgentOptions["accounts"][number];
 type ConfigurationTarget = ContextAccount | "github" | "vercel" | "secrets";
-const tagModeDraftKey = "responder:tag-mode-settings-draft";
 const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "aws",
   "gcp",
@@ -157,6 +157,9 @@ export function TagModeSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const savedConfiguration = useRef(defaultConfiguration);
+  const saveQueue = useRef(Promise.resolve());
+  const pendingSaves = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,17 +172,12 @@ export function TagModeSettingsPage() {
         if (cancelled) return;
         setOptions(loadedOptions);
         setIntegrations(loadedIntegrations);
-        const storedDraft = window.sessionStorage.getItem(tagModeDraftKey);
-        if (storedDraft) {
-          window.sessionStorage.removeItem(tagModeDraftKey);
-          try {
-            setConfiguration(JSON.parse(storedDraft) as SlackThreadModeConfiguration);
-          } catch {
-            setConfiguration(loadedConfiguration ?? defaultConfiguration);
-          }
-        } else {
-          setConfiguration(loadedConfiguration ?? defaultConfiguration);
-        }
+        const available = availableTagModeConfiguration(
+          loadedConfiguration ?? defaultConfiguration,
+          loadedOptions,
+        );
+        savedConfiguration.current = available;
+        setConfiguration(available);
       })
       .catch((caught: unknown) => {
         if (!cancelled) {
@@ -241,9 +239,41 @@ export function TagModeSettingsPage() {
   const supabaseConnectUrl =
     integrations.find((item) => item.id === "supabase")?.connectUrl ?? "";
 
-  function update(patch: Partial<SlackThreadModeConfiguration>) {
-    setConfiguration((current) => ({ ...current, ...patch }));
+  // Every change saves immediately. Saves run in order so a slow request
+  // cannot overwrite a newer one; a failed save restores the last saved state.
+  function persist(next: SlackThreadModeConfiguration, successNotice?: string) {
+    if (!options) return;
+    setConfiguration(next);
+    setError(null);
     setNotice(null);
+    pendingSaves.current += 1;
+    setSaving(true);
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        savedConfiguration.current = await saveSlackThreadModeConfiguration(next);
+        if (successNotice) setNotice(successNotice);
+      } catch (caught) {
+        setConfiguration(savedConfiguration.current);
+        setError(caught instanceof Error ? caught.message : "Unable to save tag mode");
+      } finally {
+        pendingSaves.current -= 1;
+        if (pendingSaves.current === 0) setSaving(false);
+      }
+    });
+  }
+
+  function update(patch: Partial<SlackThreadModeConfiguration>) {
+    persist({ ...configuration, ...patch });
+  }
+
+  function saveInstructions() {
+    if (
+      configuration.instructions.trim() ===
+      savedConfiguration.current.instructions.trim()
+    ) {
+      return;
+    }
+    persist(configuration);
   }
 
   function toggleContextAccount(accountId: string) {
@@ -318,7 +348,6 @@ export function TagModeSettingsPage() {
       );
       return;
     }
-    window.sessionStorage.setItem(tagModeDraftKey, JSON.stringify(configuration));
     if (integration.id === "aws") {
       setConnectingAws(true);
       return;
@@ -361,41 +390,12 @@ export function TagModeSettingsPage() {
     window.location.assign(`${url.pathname}${url.search}`);
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const saved = await saveSlackThreadModeConfiguration(configuration);
-      setConfiguration(saved);
-      setNotice("Tag mode settings saved.");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save tag mode");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function toggleTagMode() {
-    const nextConfiguration = {
-      ...configuration,
-      enabled: !configuration.enabled,
-    };
-    setConfiguration(nextConfiguration);
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const saved = await saveSlackThreadModeConfiguration(nextConfiguration);
-      setConfiguration(saved);
-      setNotice(`Tag mode ${saved.enabled ? "enabled" : "disabled"}.`);
-    } catch (caught) {
-      setConfiguration(configuration);
-      setError(caught instanceof Error ? caught.message : "Unable to save tag mode");
-    } finally {
-      setSaving(false);
-    }
+  function toggleTagMode() {
+    const enabled = !configuration.enabled;
+    persist(
+      { ...configuration, enabled },
+      `Tag mode ${enabled ? "enabled" : "disabled"}.`,
+    );
   }
 
   return (
@@ -457,7 +457,7 @@ export function TagModeSettingsPage() {
       />
       <SettingsHeading active="tag-mode" />
 
-      <form className="tagModeSettings" onSubmit={submit}>
+      <form className="tagModeSettings" onSubmit={(event) => event.preventDefault()}>
         {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
         {notice ? <p className="settingsNotice settingsNotice--success">{notice}</p> : null}
 
@@ -468,10 +468,10 @@ export function TagModeSettingsPage() {
               <small>Control whether Slack mentions start ad-hoc investigations.</small>
             </span>
             <AgentContextIntegrationControls
-              disabled={saving || !options}
+              disabled={!options}
               enabled={configuration.enabled}
               label="Slack tag mode"
-              onToggle={() => void toggleTagMode()}
+              onToggle={toggleTagMode}
               toggleAriaLabel={`${configuration.enabled ? "Disable" : "Enable"} Slack tag mode`}
             />
           </div>
@@ -705,17 +705,21 @@ export function TagModeSettingsPage() {
               className="tagModeSettings__promptField"
               label="Agent prompt"
               maxLength={AGENT_PROMPT_MAX_LENGTH}
-              onChange={(event) => update({ instructions: event.target.value })}
+              onBlur={saveInstructions}
+              onChange={(event) =>
+                setConfiguration((current) => ({
+                  ...current,
+                  instructions: event.target.value,
+                }))
+              }
               rows={4}
               value={configuration.instructions}
             />
           </section>
 
-        <div className="tagModeSettings__actions">
-          <Button disabled={saving || !options} type="submit" variant="primary">
-            {saving ? "Saving…" : "Save tag mode"}
-          </Button>
-        </div>
+        <p aria-live="polite" className="tagModeSettings__status">
+          {saving ? "Saving…" : "Changes save automatically."}
+        </p>
 
         {configurationTarget === "github" && options ? (
           <div
