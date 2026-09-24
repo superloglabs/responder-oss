@@ -349,8 +349,8 @@ function automationPlanFromCustomer(customer: Customer): {
   };
 }
 
-// Existing customers predate the automation plan group, and customer creation
-// only auto-enables the investigation plan, so attach the free plan on demand.
+// The Autumn account is shared with another product, so the free automation
+// plan is not auto-enabled. Attach it the first time an organization needs it.
 async function ensureAutomationPlan(
   client: Autumn,
   organizationId: string,
@@ -441,8 +441,13 @@ export async function checkAutomationInferenceAllowance(
       featureId: AUTOMATION_INFERENCE_FEATURE_ID,
       requiredBalance: automationMinimumBalanceDollars,
     });
-  let result = await check();
-  if (!result.allowed && result.balance === null) {
+  // A new organization may have no Autumn customer yet (404), and an existing
+  // customer may have no automation plan yet (no balance). Set up both once.
+  let result = await check().catch((error: unknown) => {
+    if (hasStatus(error, 404)) return null;
+    throw error;
+  });
+  if (!result || (!result.allowed && result.balance === null)) {
     const customer = await ensureAutomationPlan(client, organizationId);
     if (customer.id === null) return { allowed: true, nextResetAt: null };
     result = await check();
@@ -453,12 +458,12 @@ export async function checkAutomationInferenceAllowance(
   };
 }
 
-function isDuplicateRequest(error: unknown): boolean {
+function hasStatus(error: unknown, status: number): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "statusCode" in error &&
-    error.statusCode === 409
+    error.statusCode === status
   );
 }
 
@@ -485,7 +490,7 @@ export async function trackAutomationInferenceUsage(input: {
       { headers: { "Idempotency-Key": `automation-usage:${input.usageId}` } },
     );
   } catch (error) {
-    if (!isDuplicateRequest(error)) throw error;
+    if (!hasStatus(error, 409)) throw error;
   }
 }
 
@@ -507,8 +512,8 @@ export async function changeAutomationPlan(
   return { url: result.paymentUrl ?? null };
 }
 
-// Paid automation plans end at the close of the billing period. The free
-// automation plan in the same group then becomes active again.
+// Paid automation plans end at the close of the billing period. The next
+// allowance check then attaches the free automation plan again.
 export async function cancelAutomationPlan(organizationId: string): Promise<boolean> {
   if (!billingIsEnabled()) throw new Error("Billing is disabled");
   const client = requireAutumnClient();

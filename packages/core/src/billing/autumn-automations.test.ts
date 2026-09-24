@@ -62,6 +62,21 @@ describe("automation billing", () => {
     });
   });
 
+  it("creates the customer when an organization has never been billed", async () => {
+    client.check
+      .mockRejectedValueOnce(Object.assign(new Error("Customer not found"), { statusCode: 404 }))
+      .mockResolvedValueOnce({ allowed: true, balance: { nextResetAt: 3 } });
+    client.customers.getOrCreate
+      .mockResolvedValueOnce(customer([{ planId: "responder_free", status: "active" }]))
+      .mockResolvedValueOnce(customer([{ planId: "responder_automations_free", status: "active" }]));
+
+    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+      allowed: true,
+      nextResetAt: 3,
+    });
+    expect(client.billing.attach).toHaveBeenCalledOnce();
+  });
+
   it("blocks Responder-funded inference once the balance is used up", async () => {
     client.check.mockResolvedValue({
       allowed: false,
