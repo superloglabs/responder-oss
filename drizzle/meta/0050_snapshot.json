@@ -1,5 +1,5 @@
 {
-  "id": "da0d2099-59f1-4666-9ca9-2696738c04ac",
+  "id": "258d861f-9cec-43ef-8907-4ad15b553acc",
   "prevId": "593e92fa-b634-4826-9243-f34b25bc2404",
   "version": "7",
   "dialect": "postgresql",
@@ -4776,111 +4776,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.model_subscription_connections": {
-      "name": "model_subscription_connections",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "encrypted_state": {
-          "name": "encrypted_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "next_poll_at": {
-          "name": "next_poll_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_id": {
-          "name": "credential_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "model_subscription_connections_owner_idx": {
-          "name": "model_subscription_connections_owner_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "model_subscription_connections_organization_id_organization_id_fk": {
-          "name": "model_subscription_connections_organization_id_organization_id_fk",
-          "tableFrom": "model_subscription_connections",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "model_subscription_connections_user_id_user_id_fk": {
-          "name": "model_subscription_connections_user_id_user_id_fk",
-          "tableFrom": "model_subscription_connections",
-          "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.organization_capabilities": {
       "name": "organization_capabilities",
       "schema": "",
@@ -4990,13 +4885,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "auth_type": {
-          "name": "auth_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'api_key'"
         },
         "label": {
           "name": "label",
@@ -6566,6 +6454,7 @@
         "datadog",
         "dash0",
         "posthog",
+        "grafana",
         "axiom",
         "clickstack",
         "upstash",
