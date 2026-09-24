@@ -117,7 +117,9 @@
 .appShell--workspace.appShell--settings .tagModeSettings .workspaceSecretsPanel .contextToolbar small { font-size: 12px; }
 .appShell--workspace.appShell--settings .tagModeSettings__actions { padding: 0; }
 .appShell--workspace.appShell--settings :is(.siteDialog, .configurationDialog) { background: #fff; color: #444; border: 1px solid #e6e8ec; border-radius: 12px; box-shadow: 0 12px 48px #00000024; }
-.appShell--workspace.appShell--settings :is(.siteDialog, .configurationDialog) :is(input, textarea) { background: #fff; color: #202020; border-color: #ddd; }
+.appShell--workspace.appShell--settings :is(.siteDialog, .configurationDialog) :is(input, textarea, select) { background: #fff; color: #202020; border-color: #ddd; }
+.appShell--workspace.appShell--settings :is(.siteDialog__instructions, .siteDialog__site) { background: #fafafa; color: #666; border-color: #e6e8ec; }
+.appShell--workspace.appShell--settings .siteDialog__site strong { color: #1a1a1a; }
 .appShell--workspace.appShell--settings .settingsNotice--success { color: #38643b; background: #f2f8f1; border-color: #d4e4d4; }
 .appShell--workspace.appShell--settings .settingsNotice--error { color: #a04444; background: #fdf1f2; border-color: #f1d8da; }
 @media (max-width: 900px) {
