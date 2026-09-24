@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   createAutomation: vi.fn(),
   getAutomation: vi.fn(),
   getAutomationRun: vi.fn(),
+  listAutomationRuns: vi.fn().mockResolvedValue({ runs: [], total: 0 }),
   listAutomations: vi.fn().mockResolvedValue([]),
   listCredentials: vi.fn().mockResolvedValue([]),
   credential: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock(
     createAutomation: mocks.createAutomation,
     getAutomation: mocks.getAutomation,
     getAutomationRun: mocks.getAutomationRun,
+    listAutomationRuns: mocks.listAutomationRuns,
     listAutomations: mocks.listAutomations,
     requestAutomationRunCancellation: vi.fn(),
     setAutomationEnabled: vi.fn(),
@@ -126,6 +128,19 @@ describe("automation control-plane routes", () => {
       organizationId,
       "31313131-3131-4131-8131-313131313131",
     );
+  });
+
+  it("pages run history within the active organization", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+
+    const second = await app.request(`/api/automations/${automationId}/runs?page=2`);
+    const invalid = await app.request(`/api/automations/${automationId}/runs?page=nope`);
+
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ page: 2, pageSize: 10, runs: [], total: 0 });
+    expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(1, organizationId, automationId, { limit: 10, offset: 10 });
+    expect(invalid.status).toBe(200);
+    expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(2, organizationId, automationId, { limit: 10, offset: 0 });
   });
 
   it("returns only redacted model credential metadata", async () => {

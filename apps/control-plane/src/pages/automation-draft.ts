@@ -9,6 +9,8 @@ const storageKey = "responder.automationDraft";
 const draftLifetimeMs = 10 * 60_000;
 
 export interface AutomationDraft {
+  // Set when the draft edits a saved automation instead of creating one.
+  automationId?: string;
   name: string;
   configuration: AutomationConfiguration;
   triggerSelected: boolean;
@@ -71,11 +73,11 @@ export function withConnectedAccounts(draft: AutomationDraft, accountIds: string
 // Returns the saved draft when the page is loaded by the connection flow,
 // with the connection it created added. `finishing` means the provider may
 // still be creating the account, so the caller keeps checking for it.
-export function restoreAutomationDraft(options: AutomationOptions, location: Location): { draft: AutomationDraft; error: string | null; finishing: boolean; returnedAccountId: string | null } | null {
+export function restoreAutomationDraft(options: AutomationOptions, location: Location, automationId?: string): { draft: AutomationDraft; error: string | null; finishing: boolean; returnedAccountId: string | null } | null {
   const draft = takeAutomationDraft();
   const search = new URLSearchParams(location.search);
   const provider = search.get("integration");
-  if (!draft || provider !== draft.connecting) return null;
+  if (!draft || provider !== draft.connecting || draft.automationId !== automationId) return null;
   const status = search.get("status");
   const connected = status === "connected" || status === "finishing";
   const returnedAccountId = search.get("integration_account_id");

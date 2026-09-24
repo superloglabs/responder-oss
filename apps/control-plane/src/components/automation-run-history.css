@@ -1,0 +1,23 @@
+.automationRuns { display: flex; flex-direction: column; gap: 22px; }
+.automationRuns__message { margin: 0; color: #666; }
+.appShell--workspace .automationRuns .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: 0; }
+.appShell--workspace .automationRuns .dsDataTable--workspace td:last-child { padding: 0; text-align: center; }
+.automationRuns .agentTableTitle a { color: inherit; text-decoration: none; }
+.automationRuns .agentTableTitle a:hover strong { text-decoration: underline; }
+.automationRuns .agentTableTitle strong { overflow-wrap: anywhere; }
+.automationRuns .agentTableRun { display: flex; flex-direction: column; min-width: 0; }
+.automationRuns .agentTableRun small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automationRuns time.agentTableCell { white-space: nowrap; }
+.automationRuns__status { display: flex; align-items: center; gap: 6px; color: #666; }
+.automationRuns__status > i { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
+.automationRuns__status--running { color: #4e58c7; }
+.automationRuns__status--succeeded { color: #38643b; }
+.automationRuns__status--failed { color: #b44545; }
+.automationRuns__cancel { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #777; cursor: pointer; }
+.automationRuns__cancel:hover { background: #f3f3f3; color: #121212; }
+.automationRuns__cancel:disabled { opacity: .5; cursor: default; }
+.automationRuns__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #666; font-size: 12px; line-height: 18px; }
+.automationRuns__footer > div { display: flex; gap: 8px; }
+.automationRuns__footer button { padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: inherit; font-size: 13px; cursor: pointer; }
+.automationRuns__footer button:disabled { border-color: #e8e8e8; background: #fcfcfc; color: #999; box-shadow: none; cursor: default; }
+.automationRuns :is(a, button):focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }

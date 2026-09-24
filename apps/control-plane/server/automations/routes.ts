@@ -17,6 +17,7 @@ import {
   createAutomation,
   getAutomation,
   getAutomationRun,
+  listAutomationRuns,
   listAutomations,
   requestAutomationRunCancellation,
   setAutomationEnabled,
@@ -36,6 +37,8 @@ import { getActiveTenant } from "../tenant.js";
 import { queueAutomationRun } from "./queue.js";
 
 const automationEnabledSchema = z.object({ enabled: z.boolean() });
+const runPageSize = 10;
+const runPageSchema = z.coerce.number().int().min(1).max(10_000).catch(1);
 const credentialInputSchema = z.object({
   apiKey: z.string().min(1).max(4_096),
   label: z.string().trim().min(1).max(120),
@@ -386,6 +389,17 @@ export const automationRoutes = new Hono()
     return updated
       ? context.json({ enabled: parsed.data.enabled })
       : context.json({ error: "Automation not found" }, 404);
+  })
+  .get("/:automationId/runs", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const page = runPageSchema.parse(context.req.query("page"));
+    const runs = await listAutomationRuns(
+      access.tenant.organizationId,
+      context.req.param("automationId"),
+      { limit: runPageSize, offset: (page - 1) * runPageSize },
+    );
+    return context.json({ ...runs, page, pageSize: runPageSize });
   })
   .post("/:automationId/runs", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
