@@ -4,14 +4,9 @@ import type { AutomationOptions, AutomationTrigger } from "../automations-api";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationResourcePicker } from "./automation-resource-picker";
+import { providerDisplayName } from "./provider-glyphs";
 import { ProviderGlyph } from "./icons";
 import "./automation-trigger-editor.css";
-
-const triggerChoices = [
-  { kind: "slack", name: "Slack", description: "Message posted or app mentioned" },
-  { kind: "sentry", name: "Sentry", description: "New issue or regression" },
-  { kind: "discord", name: "Discord", description: "Automation command in a channel" },
-] as const;
 
 type TriggerKind = AutomationTrigger["kind"];
 
@@ -22,7 +17,7 @@ function TriggerIcon({ kind }: { kind: TriggerKind }) {
 export function AutomationTriggerEditor({ options, trigger, onChange, open, onOpenChange, onConnected, onRefresh }: {
   options: AutomationOptions | null;
   onRefresh: (kind: TriggerKind) => Promise<void>;
-  onConnected: (kind: TriggerKind) => Promise<boolean>;
+  onConnected: (kind: TriggerKind, signal: AbortSignal) => Promise<boolean>;
   trigger: AutomationTrigger | null;
   onChange: (trigger: AutomationTrigger | null) => void;
   open: boolean;
@@ -67,7 +62,7 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
   const account = accounts.find((item) => item.id === trigger?.integrationAccountId);
   const resources = options?.resources.filter((resource) => resource.integrationAccountId === trigger?.integrationAccountId && resource.kind === (trigger?.kind === "sentry" ? "sentry_project" : trigger?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
   const selectedIds = trigger ? trigger.kind === "sentry" ? trigger.projectIds : trigger.channelIds : [];
-  const providerName = trigger?.kind === "discord" ? "Discord" : triggerChoices.find((choice) => choice.kind === trigger?.kind)?.name;
+  const providerName = trigger ? providerDisplayName(trigger.kind) : undefined;
 
   const title = trigger?.kind === "slack"
     ? trigger.eventMode === "every_message" ? "Slack message posted" : trigger.eventMode === "mentions" ? "Slack app mentioned" : "Slack message posted or app mentioned"
@@ -106,6 +101,7 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
       </div>
       <div className="automationTrigger__fields" ref={fieldsRef}>
         <AutomationResourcePicker key={`${trigger.kind}:${trigger.integrationAccountId}`} label={trigger.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(trigger.kind === "sentry" ? { ...trigger, projectIds: ids } : { ...trigger, channelIds: ids })} onRefresh={trigger.kind === "discord" ? undefined : () => onRefresh(trigger.kind)} />
+        {trigger.kind === "discord" ? <AutomationTriggerConnect kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
       </div>
     </div> : null}
     <div className="automationTrigger__chooser">

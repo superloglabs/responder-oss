@@ -189,8 +189,8 @@ OpenAI uses the Responses API, Anthropic uses Messages, and the other providers
 use their OpenAI-compatible Chat Completions APIs through provider-specific
 broker routes. All broker calls validate provider, model, and run grant, reserve
 request/output budgets, and keep provider keys outside the sandbox. New providers
-run with OpenCode; the native Codex harness is limited to OpenAI and the Claude
-Agent SDK to Anthropic.
+run with OpenCode. The native Codex harness is limited to OpenAI. The Claude
+Agent SDK is limited to Anthropic.
 
 Subscription catalogs come from the official client's `account/read` and
 `model/list` methods in a temporary sandbox with the encrypted saved auth cache.

@@ -12,7 +12,7 @@ export function AutomationConnectionCompletePage() {
     // The editor closes the window after receiving the result.
   }, [provider, requestId, status]);
   return <main className="automationConnectionComplete">
-    <h1>{status === "connecting" ? "Connecting…" : status === "connected" ? "Connection complete" : "Connection not completed"}</h1>
+    <h1>{status === "connecting" ? "Connecting…" : status === "finishing" ? "Finishing connection…" : status === "connected" ? "Connection complete" : "Connection not completed"}</h1>
     <p>{status === "connecting" ? "Opening the provider’s authorization page." : "You can return to your automation. Your draft is still open in the original tab."}</p>
     {status !== "connecting" ? <button onClick={() => window.close()} type="button">Close window</button> : null}
   </main>;

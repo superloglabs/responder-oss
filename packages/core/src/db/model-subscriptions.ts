@@ -163,6 +163,8 @@ export async function cancelModelSubscription(
       decryptCredentials<ManagedSubscriptionLogin>(row.encryptedState)
         .sandboxId,
     );
+    // This deletes only the child login row. The credential it references survives;
+    // ON DELETE CASCADE runs in the opposite direction when a credential is revoked.
     await tx
       .delete(modelSubscriptionConnections)
       .where(eq(modelSubscriptionConnections.id, row.id));

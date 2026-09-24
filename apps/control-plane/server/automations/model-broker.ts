@@ -135,7 +135,10 @@ export function createAutomationModelBrokerRoutes(
     if (limits.some(value => !Number.isSafeInteger(value) || (value as number) <= 0) || (body.n !== undefined && body.n !== 1)) return context.json({ error: "Invalid model request limits" }, 400);
     let grant: AutomationModelBrokerClaim | null;
     try { grant = await dependencies.claimGrant({ model: body.model, provider: provider.data, requestedMaxOutputTokens: limits.length ? Math.max(...limits as number[]) : null, tokenHash: automationModelBrokerTokenHash(token) }); }
-    catch { return context.json({ error: "Model broker is unavailable" }, 503); }
+    catch (error) {
+      console.error(JSON.stringify({ event: "automation_model_broker_claim_failed", errorCode: error instanceof Error ? error.constructor.name : "unknown", provider: provider.data, model: body.model }));
+      return context.json({ error: "Model broker is unavailable" }, 503);
+    }
     if (!grant) return context.json({ error: "Model broker grant is invalid or exhausted" }, 401);
     const forwarded: Record<string, unknown> = { ...body, model: grant.model, max_tokens: grant.maxOutputTokens };
     delete forwarded.max_completion_tokens;
@@ -147,7 +150,10 @@ export function createAutomationModelBrokerRoutes(
         signal: AbortSignal.any([context.req.raw.signal, AbortSignal.timeout(providerRequestTimeoutMs)]),
       });
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers: providerResponseHeaders(response.headers) });
-    } catch { return context.json({ error: "Model provider request failed" }, 502); }
+    } catch (error) {
+      console.error(JSON.stringify({ event: "automation_model_provider_request_failed", errorCode: error instanceof Error ? error.constructor.name : "unknown", provider: provider.data, grantId: grant.grantId, organizationId: grant.organizationId, runId: grant.runId }));
+      return context.json({ error: "Model provider request failed" }, 502);
+    }
   }).post("/v1/responses", async (context) => {
     const token = brokerToken(context);
     if (!token) return context.json({ error: "Unauthorized" }, 401);

@@ -11,7 +11,7 @@ it.skipIf(process.env.LIVE_SUBSCRIPTION_SANDBOX_TEST !== "1")("enforces the nati
   const sdk = new Daytona(daytonaClientOptions(config));
   let sandbox;
   try {
-    sandbox = await sdk.create({ snapshot: config.sandboxSnapshotName, ephemeral: true, autoStopInterval: 5, autoDeleteInterval: 0 }, { timeout: 60 });
+    sandbox = await sdk.create({ snapshot: config.sandboxSnapshotName, ephemeral: true, autoStopInterval: 5, autoDeleteInterval: 5 }, { timeout: 60 });
     const ready = await sandbox.process.executeCommand("sudo -n mkdir -p /home/daytona/workspace /home/daytona/.responder-subscription-auth; sudo -n chmod 755 /home/daytona; sudo -n chown root:root /home/daytona/workspace; printf synthetic-secret | sudo -n tee /home/daytona/.responder-subscription-auth/auth.json >/dev/null", undefined, undefined, 20);
     expect(ready.exitCode).toBe(0);
     const activeSandbox = sandbox;
@@ -35,7 +35,7 @@ it.skipIf(process.env.LIVE_SUBSCRIPTION_SANDBOX_TEST !== "1")("enforces the nati
       expect(result.result).not.toContain("synthetic-secret");
     }
   } finally {
-    try { if (sandbox) await sdk.delete(sandbox); }
+    try { if (sandbox) await sdk.delete(sandbox, 60, true); }
     finally { await sdk[Symbol.asyncDispose](); }
   }
 }, 180_000);

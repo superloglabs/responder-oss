@@ -27,7 +27,6 @@
 .automationCreate__instructions textarea::placeholder { color: #777; opacity: 1; }
 .automationCreate__instructions:has(textarea:focus-visible) { outline: 2px solid #4e58f9; outline-offset: 2px; }
 .automationCreate__toolbar { display: flex; align-items: center; gap: 16px; padding: 10px 16px 14px; }
-.automationCreate__toolbar > button { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: #444; font: inherit; cursor: pointer; }
 .automationCreate__toolbar svg { flex-shrink: 0; color: #666; }
 .automationCreate__divider { width: 1px; height: 14px; flex-shrink: 0; background: #e8e8e8; }
 .automationCreate__rows { padding: 0 12px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
@@ -38,8 +37,8 @@
 .automationCreate__rows > .automationCreate__add { min-height: 46px; padding: 12px 0; border: 0; border-radius: 0; }
 .automationCreate__row + .automationCreate__add { border-top: 1px solid #f0f0f0; }
 .automationCreate__manage { display: inline-flex; align-items: center; justify-content: center; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #000; box-shadow: 0 1px 3px #00000008; font: inherit; line-height: 18px; text-decoration: none; cursor: pointer; }
-.automationCreate__iconButton { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 20px; height: 24px; padding: 0; border: 0; background: transparent; color: #777; cursor: pointer; }
-.automationCreate__titleRow > .automationCreate__iconButton { width: 14px; color: #999; }
+.automationCreate__iconButton { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: #777; cursor: pointer; }
+.automationCreate__titleRow > .automationCreate__iconButton { color: #999; }
 .automationCreate :is(button, a, input):focus-visible { outline: 2px solid #4e58f9; outline-offset: 3px; }
 .automationEditorDialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100svh - 48px); margin: auto; padding: 24px; overflow: auto; border: 1px solid #e3e3e3; border-radius: 12px; background: #fff; color: #121212; font-family: var(--ds-font-sans); font-size: 13px; --foreground: #121212; --secondary: #444; --muted: #666; --surface: #fff; --border: #e3e3e3; --background: #fff; }
 .automationEditorDialog::backdrop { background: #0005; }
@@ -53,7 +52,6 @@
 .automationEditorDialog :focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
 @media (max-width: 600px) {
   .automationCreate__toolbar { gap: 10px; flex-wrap: wrap; }
-  .automationCreate__toolbar > button { font-size: 12px; }
   .automationCreate__section { padding-top: 16px; }
   .automationCreate__section--trigger { padding-top: 2px; }
   .automationEditorDialog .inlineFields { flex-direction: column; }

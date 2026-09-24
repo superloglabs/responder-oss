@@ -232,34 +232,37 @@ export async function acquireSubscriptionCredential(input: {
   leaseId: string;
   expiresAt: Date;
 }): Promise<string> {
-  const rows = await getDatabase()
-    .update(organizationModelCredentials)
-    .set({
-      subscriptionLeaseId: input.leaseId,
-      subscriptionLeaseExpiresAt: input.expiresAt,
-    })
-    .where(
-      and(
-        eq(organizationModelCredentials.id, input.credentialId),
-        eq(organizationModelCredentials.organizationId, input.organizationId),
-        eq(organizationModelCredentials.authType, "chatgpt_subscription"),
-        eq(organizationModelCredentials.status, "active"),
-        // Time alone cannot prove the old sandbox stopped. Fail closed until its owner releases.
-        isNull(organizationModelCredentials.subscriptionLeaseId),
-      ),
-    )
-    .returning({
-      encryptedCredentials: organizationModelCredentials.encryptedCredentials,
-    });
-  if (!rows[0])
-    throw new Error(
-      "This ChatGPT subscription is already running an automation or needs reconnecting. Try again when the current run finishes.",
+  // Roll back the claim if decryption or validation fails, before any sandbox starts.
+  return getDatabase().transaction(async (tx) => {
+    const rows = await tx
+      .update(organizationModelCredentials)
+      .set({
+        subscriptionLeaseId: input.leaseId,
+        subscriptionLeaseExpiresAt: input.expiresAt,
+      })
+      .where(
+        and(
+          eq(organizationModelCredentials.id, input.credentialId),
+          eq(organizationModelCredentials.organizationId, input.organizationId),
+          eq(organizationModelCredentials.authType, "chatgpt_subscription"),
+          eq(organizationModelCredentials.status, "active"),
+          // Time alone cannot prove the old sandbox stopped. Fail closed until its owner releases.
+          isNull(organizationModelCredentials.subscriptionLeaseId),
+        ),
+      )
+      .returning({
+        encryptedCredentials: organizationModelCredentials.encryptedCredentials,
+      });
+    if (!rows[0])
+      throw new Error(
+        "This ChatGPT subscription is already running an automation or needs reconnecting. Try again when the current run finishes.",
+      );
+    const { authJson } = decryptCredentials<{ authJson: string }>(
+      rows[0].encryptedCredentials,
     );
-  const { authJson } = decryptCredentials<{ authJson: string }>(
-    rows[0].encryptedCredentials,
-  );
-  parseSubscriptionAuth(authJson);
-  return authJson;
+    parseSubscriptionAuth(authJson);
+    return authJson;
+  });
 }
 
 export async function persistSubscriptionCredential(input: {

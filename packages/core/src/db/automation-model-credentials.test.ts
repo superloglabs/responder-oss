@@ -40,7 +40,7 @@ it("acquires an exclusive scoped lease before exposing the native credential", a
     ]);
   const where = vi.fn().mockReturnValue({ returning });
   const set = vi.fn().mockReturnValue({ where });
-  vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set }) } as never);
+  vi.mocked(getDatabase).mockReturnValue({ update: () => ({ set }), transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({ update: () => ({ set }) }) } as never);
   await expect(
     acquireSubscriptionCredential({
       ...owner,
@@ -108,4 +108,15 @@ it("persists only under the owning lease and rejects account switches", async ()
     subscriptionLeaseId: null,
     subscriptionLeaseExpiresAt: null,
   });
+});
+
+it("rolls back the lease claim when the stored credential is invalid", async () => {
+  vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 1).toString("base64"));
+  let committed = false;
+  const transaction = vi.fn(async (callback: (db: unknown) => Promise<unknown>) => { const result = await callback(tx); committed = true; return result; });
+  const tx = { update: () => ({ set: () => ({ where: () => ({ returning: async () => [{ encryptedCredentials: encryptCredentials({ authJson: "invalid" }) }] }) }) }) };
+  vi.mocked(getDatabase).mockReturnValue({ ...tx, transaction } as never);
+  await expect(acquireSubscriptionCredential({ ...owner, expiresAt: new Date() })).rejects.toThrow();
+  expect(transaction).toHaveBeenCalledOnce();
+  expect(committed).toBe(false);
 });

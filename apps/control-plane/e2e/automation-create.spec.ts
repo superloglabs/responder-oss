@@ -28,7 +28,7 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
-test("creates an automation using the compact editor and selected resources", async ({ page }) => {
+test("creates an automation using the compact editor and selected resources", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
   await expect(page.getByRole("heading", { name: "New automation" })).toBeVisible();
@@ -38,11 +38,14 @@ test("creates an automation using the compact editor and selected resources", as
   await page.getByRole("button", { name: "GPT-5.4" }).click();
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toBeEmpty();
   await expect(page.getByRole("button", { name: "Add repository", exact: true })).toBeVisible();
-  await page.screenshot({ path: "/tmp/automation-create-desktop.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-create-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: "Rename automation" }).click();
   await page.getByLabel("Automation name").fill("Fix incoming issues");
   await page.getByLabel("Automation name").press("Enter");
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Investigate the event and open a pull request.");
+  await page.getByRole("button", { name: "Add connector", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Engineering · slack" }).check();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("menu", { name: "Trigger providers" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
@@ -60,14 +63,14 @@ test("creates an automation using the compact editor and selected resources", as
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ name: "Fix incoming issues", configuration: {
-    repositoryIds: [repositoryId], modelCredentialId: credentialId,
+    repositoryIds: [repositoryId], modelCredentialId: credentialId, contextAccountIds: [],
     trigger: { integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" },
   } });
   await expect(page.getByRole("alert")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
 });
 
-test("keeps the create page usable on mobile and restores focus after closing the trigger menu", async ({ page }) => {
+test("keeps the create page usable on mobile and restores focus after closing the trigger menu", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/automations/new");
   const add = page.getByRole("button", { name: "Add trigger", exact: true });
@@ -76,11 +79,11 @@ test("keeps the create page usable on mobile and restores focus after closing th
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(add).toBeFocused();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: "/tmp/automation-create-mobile.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-create-mobile.png"), fullPage: true });
 });
 
 
-test("chooses and configures Sentry inline with only supported options", async ({ page }) => {
+test("chooses and configures Sentry inline with only supported options", async ({ page }, testInfo) => {
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: [
       { id: accountId, provider: "sentry", displayName: "Acme workspace" },
@@ -94,7 +97,7 @@ test("chooses and configures Sentry inline with only supported options", async (
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
   await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(3);
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).focus();
-  await page.screenshot({ path: "/tmp/automation-choose-trigger.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-choose-trigger.png"), fullPage: true });
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
   await page.getByRole("menuitem", { name: "New issue", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -104,7 +107,7 @@ test("chooses and configures Sentry inline with only supported options", async (
   await page.getByRole("checkbox", { name: "responder-web", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose projects" }).press("Escape");
   await expect(page.getByRole("combobox", { name: "Environment", exact: true })).toHaveCount(0);
-  await page.screenshot({ path: "/tmp/automation-configure-trigger.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-configure-trigger.png"), fullPage: true });
   await page.getByRole("combobox", { name: "Trigger connection", exact: true }).selectOption("other");
   await expect(page.getByRole("button", { name: "Project", exact: true })).toHaveText("Select project");
   await page.getByRole("button", { name: "Remove Sentry trigger" }).click();
@@ -116,7 +119,7 @@ test("chooses and configures Sentry inline with only supported options", async (
 });
 
 
-test("searches events and navigates the provider flyout with the keyboard", async ({ page }) => {
+test("searches events and navigates the provider flyout with the keyboard", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
@@ -129,7 +132,7 @@ test("searches events and navigates the provider flyout with the keyboard", asyn
   await search.press("ArrowDown");
   await page.getByRole("menuitem", { name: "Slack", exact: true }).press("ArrowRight");
   await expect(page.getByRole("menuitem", { name: "App mentioned", exact: true })).toBeFocused();
-  await page.screenshot({ path: "/tmp/automation-trigger-flyout.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-trigger-flyout.png"), fullPage: true });
   await page.getByRole("menuitem", { name: "App mentioned", exact: true }).press("Escape");
   await expect(page.getByRole("menuitem", { name: "Slack", exact: true })).toBeFocused();
   await expect(page.getByRole("menu", { name: "Slack events" })).toHaveCount(0);
@@ -139,7 +142,7 @@ test("searches events and navigates the provider flyout with the keyboard", asyn
 });
 
 
-test("connects from the trigger card and preserves the automation draft", async ({ page, context }) => {
+test("connects from the trigger card and preserves the automation draft", async ({ page, context }, testInfo) => {
   let connected = false;
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: connected ? [{ id: accountId, provider: "slack", displayName: "Engineering" }] : [],
@@ -165,7 +168,7 @@ test("connects from the trigger card and preserves the automation draft", async 
   await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
   await page.getByRole("menuitem", { name: "New message in channel", exact: true }).click();
   await expect(page.getByText("Connect Slack to use this trigger")).toBeVisible();
-  await page.screenshot({ path: "/tmp/automation-connect-trigger.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-connect-trigger.png"), fullPage: true });
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   const popup = await popupPromise;
@@ -196,7 +199,7 @@ test("shows connection setup errors on the trigger card", async ({ page }) => {
 });
 
 
-test("searches channels by name or ID, selects multiple, and refreshes the list", async ({ page }) => {
+test("searches channels by name or ID, selects multiple, and refreshes the list", async ({ page }, testInfo) => {
   let refreshed = false;
   await page.route("**/api/agents/options/refresh/slack", async (route) => {
     expect(route.request().method()).toBe("POST");
@@ -232,14 +235,14 @@ test("searches channels by name or ID, selects multiple, and refreshes the list"
   await page.getByRole("button", { name: "Refresh channels" }).click();
   await expect(page.getByRole("checkbox", { name: "new-channel" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "all-nbax" })).toBeChecked();
-  await page.screenshot({ path: "/tmp/automation-channel-picker.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-channel-picker.png"), fullPage: true });
   await search.press("Escape");
   await expect(page.getByRole("button", { name: "Channel", exact: true })).toBeFocused();
   await expect(page.getByRole("button", { name: "Channel", exact: true })).toContainText("all-nbax, 01-superlog-issues");
-  await page.screenshot({ path: "/tmp/automation-event-card.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-event-card.png"), fullPage: true });
 });
 
-test("connects a model inline and filters compatible harnesses", async ({ page }) => {
+test("connects a model inline and filters compatible harnesses", async ({ page }, testInfo) => {
   let savedKey: unknown;
   let fail = true;
   await page.route("**/api/automations/credentials", async (route) => {
@@ -273,7 +276,7 @@ test("connects a model inline and filters compatible harnesses", async ({ page }
   await page.getByRole("menuitemradio", { name: "OpenCode OpenCode agent harness" }).click();
   await expect(page.getByRole("button", { name: "Harness: OpenCode" })).toBeFocused();
   await page.getByRole("button", { name: /^(Model:|Choose model)/ }).click();
-  await page.screenshot({ path: "/tmp/automation-model-picker.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-model-picker.png"), fullPage: true });
 });
 
 test("retries a temporary subscription polling failure without losing the draft and restricts harnesses", async ({ page }) => {
@@ -304,7 +307,7 @@ test("retries a temporary subscription polling failure without losing the draft 
   await expect.poll(() => cancelled).toBe(true);
 });
 
-test("shows seven providers and loads, refreshes, and selects models from the chosen connection", async ({ page }) => {
+test("shows seven providers and loads, refreshes, and selects models from the chosen connection", async ({ page }, testInfo) => {
   let loads = 0;
   await page.route("**/api/automations/options", route => route.fulfill({ json: { accounts: [], resources: [], repositories: [], secrets: [], credentials: [{ id: credentialId, provider: "google", label: "Gemini team", status: "active", lastFour: "1234" }] } }));
   await page.route(`**/api/automations/credentials/${credentialId}/models*`, route => route.fulfill({ json: { models: ++loads === 1 ? [{ id: "gemini-current", name: "Gemini Current" }] : [{ id: "gemini-new", name: "Gemini Newly Available" }] } }));
@@ -314,13 +317,13 @@ test("shows seven providers and loads, refreshes, and selects models from the ch
   for (const name of ["OpenAI", "Anthropic", "Google Gemini", "xAI", "Mistral", "DeepSeek", "Groq"]) await expect(providers.getByRole("button", { name, exact: true })).toBeVisible();
   await expect(providers.getByText("OpenRouter")).toHaveCount(0);
   await expect(providers.getByText("Together AI")).toHaveCount(0);
-  await page.screenshot({ path: "/tmp/automation-providers.png" });
+  await page.screenshot({ path: testInfo.outputPath("automation-providers.png") });
   await providers.getByRole("button", { name: "Google Gemini", exact: true }).click();
   await expect(page.getByRole("button", { name: "Gemini Current gemini-current" })).toBeVisible();
   await page.getByRole("button", { name: "Refresh models" }).click();
   await expect(page.getByRole("button", { name: "Gemini Newly Available gemini-new" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Gemini Current gemini-current" })).toHaveCount(0);
-  await page.screenshot({ path: "/tmp/automation-live-models.png" });
+  await page.screenshot({ path: testInfo.outputPath("automation-live-models.png") });
   await page.getByRole("button", { name: "Gemini Newly Available gemini-new" }).click();
   await expect(page.getByRole("button", { name: "Model: gemini-new" })).toBeVisible();
   await page.getByRole("button", { name: "Harness: OpenCode" }).click();
@@ -356,7 +359,7 @@ test("moves from model search to the first model with ArrowDown", async ({ page 
   await expect(page.getByRole("button", { name: "GPT-5.4" })).toBeFocused();
 });
 
-test("completes an asynchronous Sentry connection without losing the draft", async ({ page, context }) => {
+test("completes an asynchronous Sentry connection without losing the draft", async ({ page, context }, testInfo) => {
   let connected = false;
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: connected ? [{ id: accountId, provider: "sentry", displayName: "Engineering" }] : [],
@@ -382,7 +385,7 @@ test("completes an asynchronous Sentry connection without losing the draft", asy
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
   await page.getByRole("menuitem", { name: "New issue", exact: true }).click();
   await expect(page.getByText("Connect Sentry to use this trigger")).toBeVisible();
-  await page.screenshot({ path: "/tmp/automation-connect-trigger.png", fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("automation-connect-trigger.png"), fullPage: true });
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   const popup = await popupPromise;
@@ -394,4 +397,34 @@ test("completes an asynchronous Sentry connection without losing the draft", asy
   await page.getByRole("button", { name: "Project", exact: true }).click();
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose projects" }).press("Escape");
+});
+
+test("stops connection refresh retries after removing the trigger", async ({ page, context }) => {
+  let loads = 0;
+  await page.route("**/api/automations/options", (route) => {
+    loads++;
+    return route.fulfill({ json: { accounts: [], resources: [], repositories: [], credentials: [], secrets: [] } });
+  });
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: {
+    integrations: [{ id: "sentry", connectUrl: "/api/integrations/sentry/start" }],
+  } }));
+  await context.route("**/api/integrations/sentry/start?**", async (route) => {
+    const url = new URL(route.request().url());
+    const destination = new URL(url.searchParams.get("returnTo")!, url.origin);
+    destination.searchParams.set("integration", "sentry");
+    destination.searchParams.set("status", "finishing");
+    await route.fulfill({ status: 302, headers: { location: destination.toString() } });
+  });
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New issue", exact: true }).click();
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect.poll(() => loads).toBeGreaterThan(1);
+  await page.getByRole("button", { name: "Remove Sentry trigger" }).click();
+  const stoppedAt = loads;
+  // Wait beyond the retry interval to detect an orphaned polling loop.
+  await page.waitForTimeout(2200);
+  expect(loads).toBe(stoppedAt);
+  await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeVisible();
 });

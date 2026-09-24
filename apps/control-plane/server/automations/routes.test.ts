@@ -87,6 +87,8 @@ const app = new Hono().route("/api/automations", automationRoutes);
 describe("automation control-plane routes", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    mocks.credential.mockReset();
+    mocks.modelCatalog.mockReset();
     mocks.capability.mockResolvedValue(true);
     mocks.tenant.mockResolvedValue({
       ok: true,
@@ -240,4 +242,12 @@ describe("automation control-plane routes", () => {
       expect(response.status).toBe(status);
     },
   );
+
+  it("reports an invalid saved model key as a credential error", async () => {
+    mocks.credential.mockResolvedValue({ provider: "openai", apiKey: "invalid" });
+    mocks.modelCatalog.mockRejectedValueOnce(new ModelCatalogError(true));
+    const response = await app.request("/api/automations/credentials/33333333-3333-4333-8333-333333333333/models");
+    expect(response.status).toBe(400);
+  });
+
 });

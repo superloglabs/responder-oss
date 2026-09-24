@@ -108,7 +108,7 @@ export const automationRoutes = new Hono()
         : await listProviderModels(credential.provider, credential.apiKey);
       return context.json({ models });
     } catch (error) {
-      return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to load models. Please retry when this connection is idle." }, 502);
+      return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to load models. Please retry when this connection is idle." }, error instanceof ModelCatalogError && error.authenticationFailed ? 400 : 502);
     }
   })
   .post("/subscriptions/openai", async (context) => {

@@ -13,20 +13,24 @@ export function AutomationEditorDialog({ children, onClose, title }: {
     const trigger = document.activeElement;
     dialog?.showModal();
     return () => {
-      dialog?.close();
+      if (dialog?.open) dialog.close();
       if (trigger instanceof HTMLElement) trigger.focus();
     };
   }, []);
+  function close() {
+    if (ref.current?.open) ref.current.close();
+    onClose();
+  }
   return (
-    <dialog aria-labelledby={titleId} className="automationEditorDialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
+    <dialog aria-labelledby={titleId} className="automationEditorDialog" onCancel={(event) => { event.preventDefault(); close(); }} onClick={(event) => {
       if (event.target === event.currentTarget) {
         const bounds = event.currentTarget.getBoundingClientRect();
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
       }
     }} ref={ref}>
-      <header><h2 id={titleId}>{title}</h2><button aria-label="Close" onClick={onClose} type="button"><XIcon size={16} /></button></header>
+      <header><h2 id={titleId}>{title}</h2><button aria-label="Close" onClick={close} type="button"><XIcon size={16} /></button></header>
       <div className="automationEditorDialog__body">{children}</div>
-      <footer><button className="automationCreate__manage" onClick={onClose} type="button">Done</button></footer>
+      <footer><button className="automationCreate__manage" onClick={close} type="button">Done</button></footer>
     </dialog>
   );
 }

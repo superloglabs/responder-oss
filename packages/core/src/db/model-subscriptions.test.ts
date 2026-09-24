@@ -63,10 +63,10 @@ describe("subscription connection storage", () => {
     expect(stored.encryptedState).not.toContain(device.sandboxId);
     expect(decryptCredentials(stored.encryptedState)).toEqual(device);
   });
-  it.each([null])(
-    "rejects missing or expired state without contacting the provider",
-    async (row) => {
-      const db = database(row);
+  it(
+    "rejects missing state without contacting the provider",
+    async () => {
+      const db = database(null);
       await expect(
         pollModelSubscription({ ...owner, connectionId }, transport),
       ).resolves.toEqual({ status: "expired" });

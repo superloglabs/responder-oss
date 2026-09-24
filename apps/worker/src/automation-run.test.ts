@@ -161,17 +161,15 @@ describe("automation run processor", () => {
     expect(deps.releaseSubscription).toHaveBeenCalledWith(expect.objectContaining({ leaseId: claimedRun().leaseId, organizationId }));
   });
 
-});
-
-it("retains the subscription lease when sandbox cleanup is unconfirmed", async () => {
-  vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
-  vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
-  const deps = dependencies();
-  const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
-  deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
-  deps.acquireSubscription.mockResolvedValue(authJson);
-  deps.runInSandbox.mockRejectedValue(new Error("cleanup failed"));
-  await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
-  expect(deps.releaseSubscription).not.toHaveBeenCalled();
-  vi.unstubAllEnvs();
+  it("retains the subscription lease when sandbox cleanup is unconfirmed", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+    deps.acquireSubscription.mockResolvedValue(authJson);
+    deps.runInSandbox.mockRejectedValue(new Error("cleanup failed"));
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+    expect(deps.releaseSubscription).not.toHaveBeenCalled();
+  });
 });

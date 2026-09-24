@@ -273,17 +273,18 @@ export function AutomationCreatePage() {
               const response = await fetch(endpoint, { method: "POST" });
               if (!response.ok) throw new Error("Could not refresh trigger resources");
               setOptions(await fetchAutomationOptions());
-            }} onConnected={async (kind) => {
+            }} onConnected={async (kind, signal) => {
               const loaded = await fetchAutomationOptions();
+              if (signal.aborted) return false;
               setOptions(loaded);
               const account = loaded.accounts.find((item) => item.provider === kind);
               if (!account) return false;
-              setConfiguration((current) => current.trigger.kind === kind ? { ...current, trigger: { ...current.trigger, integrationAccountId: account.id } } : current);
+              setConfiguration((current) => current.trigger.kind === kind ? { ...current, contextAccountIds: current.contextAccountIds.filter(id => id !== account.id), trigger: { ...current.trigger, integrationAccountId: account.id } } : current);
               return true;
             }} onChange={(trigger) => {
               setTriggerSelected(trigger !== null);
               setError(null);
-              setConfiguration((current) => ({ ...current, trigger: trigger ?? (current.trigger.kind === "sentry" ? { ...current.trigger, integrationAccountId: "", projectIds: [] } : { ...current.trigger, integrationAccountId: "", channelIds: [] }) }));
+              setConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter(id => id !== trigger?.integrationAccountId), trigger: trigger ?? (current.trigger.kind === "sentry" ? { ...current.trigger, integrationAccountId: "", projectIds: [] } : { ...current.trigger, integrationAccountId: "", channelIds: [] }) }));
             }} />
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-instructions">
