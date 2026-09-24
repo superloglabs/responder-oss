@@ -9,6 +9,7 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   "datadog",
   "dash0",
   "posthog",
+  "grafana",
   "axiom",
   "clickstack",
   "upstash",

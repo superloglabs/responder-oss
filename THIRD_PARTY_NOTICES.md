@@ -91,3 +91,10 @@ ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL,
 INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF
 CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
 THE FONT SOFTWARE OR FROM OTHER DEALINGS IN THE FONT SOFTWARE.
+
+---
+
+The worker container image includes the `mcp-grafana` binary from
+https://github.com/grafana/mcp-grafana, Copyright Grafana Labs, licensed under
+the Apache License, Version 2.0. The image includes its license at
+`/usr/share/licenses/mcp-grafana/LICENSE`.

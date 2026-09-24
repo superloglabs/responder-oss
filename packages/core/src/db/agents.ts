@@ -314,6 +314,7 @@ async function validateConfigurationResources(
         "datadog",
         "dash0",
         "posthog",
+        "grafana",
         "axiom",
         "clickstack",
         "upstash",

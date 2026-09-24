@@ -2860,6 +2860,279 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("offers the Grafana connection endpoint", async () => {
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.integrations).toContainEqual(
+      expect.objectContaining({
+        id: "grafana",
+        connectUrl: "/api/integrations/grafana/connect",
+      }),
+    );
+  });
+
+  it("starts Grafana Cloud OAuth for the stack with read and query scopes", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue(
+      null as never,
+    );
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://mcp.grafana.com/mcp/oauth/authorize?client_id=1",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request("/api/integrations/grafana/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deployment: "cloud",
+        returnTo: "/agents/new",
+        stackUrl: "https://Acme.grafana.net/dashboards",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      redirectUrl: "https://mcp.grafana.com/mcp/oauth/authorize?client_id=1",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "acme.grafana.net",
+        externalAccountId: "cloud:acme.grafana.net",
+        provider: "grafana",
+        status: "pending",
+      }),
+    );
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: "https://mcp.grafana.com/mcp/acme.grafana.net",
+      redirectUrl: "https://responder.example/api/integrations/grafana/callback",
+      scope: "grafana:read grafana:query",
+    });
+    expect(encryptCredentials).toHaveBeenLastCalledWith({
+      authType: "oauth",
+      mcpUrl: "https://mcp.grafana.com/mcp/acme.grafana.net",
+      oauth: { codeVerifier: "pkce-verifier" },
+      stackUrl: "https://acme.grafana.net",
+    });
+    expect(updateIntegrationConnectionStateMetadata).toHaveBeenCalledWith({
+      metadata: { encryptedCredentials: "encrypted-credentials" },
+      organizationId: tenant.organizationId,
+      provider: "grafana",
+      state: "oauth-state",
+      userId: tenant.user.id,
+    });
+  });
+
+  it("keeps a connected Grafana Cloud stack active while reconnecting", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "working-credentials",
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockRejectedValue(new Error("OAuth failed"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/grafana/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deployment: "cloud", stackUrl: "acme" }),
+    });
+
+    expect(response.status).toBe(502);
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+  });
+
+  it("rejects Grafana Cloud stacks outside grafana.net", async () => {
+    const response = await app.request("/api/integrations/grafana/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deployment: "cloud",
+        stackUrl: "https://grafana.example.com",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Enter a Grafana Cloud stack URL ending in .grafana.net",
+    });
+    expect(beginCustomMcpOAuth).not.toHaveBeenCalled();
+  });
+
+  it("finishes Grafana Cloud OAuth and stores the stack session", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        accountId: "30000000-0000-4000-8000-000000000000",
+        preserveExistingAccount: false,
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "encrypted-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: "https://mcp.grafana.com/mcp/acme.grafana.net",
+      oauth: { codeVerifier: "pkce-verifier" },
+      stackUrl: "https://acme.grafana.net",
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(42);
+    vi.mocked(encryptCredentials).mockReturnValue("updated-credentials");
+    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/grafana/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=grafana&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(verifyCustomMcpConnection).toHaveBeenCalledWith({
+      accessToken: "oauth-access-token",
+      mcpUrl: "https://mcp.grafana.com/mcp/acme.grafana.net",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      authType: "oauth",
+      mcpUrl: "https://mcp.grafana.com/mcp/acme.grafana.net",
+      oauth: {
+        tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+      },
+      stackUrl: "https://acme.grafana.net",
+    });
+    expect(updateIntegrationAccountCredentials).toHaveBeenCalledWith({
+      encryptedCredentials: "updated-credentials",
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "grafana",
+      status: "connected",
+    });
+  });
+
+  it("validates and encrypts a self-hosted Grafana service account", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: 1, name: "Main Org." }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/grafana/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deployment: "self_hosted",
+        grafanaUrl: "https://grafana.example.com/grafana/",
+        returnTo: "/agents/new",
+        serviceAccountToken: "glsa_token",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      redirectUrl:
+        "https://responder.example/agents/new?integration=grafana&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://grafana.example.com/grafana/api/org",
+      expect.objectContaining({
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer glsa_token",
+        },
+        redirect: "manual",
+      }),
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      authType: "service_account",
+      grafanaUrl: "https://grafana.example.com/grafana",
+      serviceAccountToken: "glsa_token",
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "grafana.example.com · Main Org.",
+        externalAccountId: "https://grafana.example.com/grafana:1",
+        organizationId: tenant.organizationId,
+        provider: "grafana",
+      }),
+    );
+  });
+
+  it("rejects a self-hosted Grafana token that Grafana refuses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/grafana/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deployment: "self_hosted",
+        grafanaUrl: "https://grafana.example.com",
+        serviceAccountToken: "glsa_revoked",
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Grafana rejected the service account token",
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("requires HTTPS for self-hosted Grafana outside localhost", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await app.request("/api/integrations/grafana/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deployment: "self_hosted",
+        grafanaUrl: "http://grafana.example.com",
+        serviceAccountToken: "glsa_token",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("validates and encrypts a self-hosted ClickStack connection", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);

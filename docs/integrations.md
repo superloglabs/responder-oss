@@ -181,6 +181,47 @@ errored lifecycle messages are acknowledged without starting investigations.
 The connected PostHog project remains read-only investigation context; alert
 delivery does not require a second public webhook or shared secret.
 
+## Grafana
+
+Connect Grafana from Settings and choose the deployment. Grafana is
+investigation context; alerts still arrive through a watched Slack channel or
+another trigger.
+
+**Grafana Cloud** uses Grafana's hosted MCP server. Enter the stack URL, for
+example `https://acme.grafana.net`. Responder derives the stack-scoped endpoint
+`https://mcp.grafana.com/mcp/<stack>.grafana.net`, dynamically registers an
+OAuth client, and requests only the `grafana:read` and `grafana:query` scopes.
+Each stack is a separate integration account. The OAuth callback is:
+
+```text
+<public>/api/integrations/grafana/callback
+```
+
+No deployment-level Grafana client ID, secret, or API key is required.
+
+**Self-hosted Grafana** uses the open source
+[`mcp-grafana`](https://github.com/grafana/mcp-grafana) server, which the worker
+runs as a child process. Create a service account with the Viewer role, add a
+token, and enter it with the Grafana URL. Responder verifies the token against
+`/api/org` and stores it in the encrypted tenant credential envelope. The URL
+must use public HTTPS; loopback HTTP is accepted only during local development.
+
+The worker starts `mcp-grafana` with write tools disabled and only the search,
+datasource, Prometheus, Loki, Tempo, Pyroscope, Elasticsearch, Graphite,
+CloudWatch, alerting, dashboard, folder, annotation, incident, OnCall, Asserts,
+Sift, navigation, and query-example categories. Raw API, SQL, rendering,
+snapshot, plugin, admin, and provisioning tools stay off. The child process
+reaches Grafana through a worker-local SOCKS5 proxy that rejects private,
+link-local, and loopback addresses in production. Local development also
+permits loopback hosts. The token never enters the repository investigation
+sandbox.
+
+In both modes the worker exposes only tools annotated read-only.
+
+The worker image installs a pinned `mcp-grafana` release and sets
+`MCP_GRAFANA_BINARY`. Local development downloads the same release into
+`.tools/` on the first `pnpm dev:worker` start.
+
 ## Axiom
 
 Connect Axiom from Settings through the hosted MCP server's browser OAuth flow.

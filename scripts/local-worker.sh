@@ -21,6 +21,18 @@ if [[ -z "${OPENAI_API_KEY:-}" || -z "${DAYTONA_API_KEY:-}" ]]; then
   echo "      jobs fail until both are present." >&2
 fi
 
+# Self-hosted Grafana context runs the pinned grafana/mcp-grafana binary. The
+# first start downloads and verifies it into .tools/.
+if [[ -z "${MCP_GRAFANA_BINARY:-}" ]]; then
+  if MCP_GRAFANA_BINARY="$(node scripts/install-mcp-grafana.mjs)"; then
+    export MCP_GRAFANA_BINARY
+  else
+    unset MCP_GRAFANA_BINARY
+    echo "Note: mcp-grafana could not be installed. Self-hosted Grafana context" >&2
+    echo "      is unavailable until scripts/install-mcp-grafana.mjs succeeds." >&2
+  fi
+fi
+
 pnpm --filter @responder/worker start &
 worker_pid=$!
 stopped=0

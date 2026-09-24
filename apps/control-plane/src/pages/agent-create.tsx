@@ -53,6 +53,7 @@ import {
   DatadogConnectionDialog,
 } from "../components/datadog-site-dialog";
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
+import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
@@ -105,6 +106,7 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "supabase",
   "dash0",
   "posthog",
+  "grafana",
 ]);
 
 const EMPTY_OPTIONS: AgentOptions = {
@@ -436,6 +438,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const datadogJustConnected = successfulConnectionReturn("datadog");
   const dash0JustConnected = successfulConnectionReturn("dash0");
   const postHogJustConnected = successfulConnectionReturn("posthog");
+  const grafanaJustConnected = successfulConnectionReturn("grafana");
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
@@ -492,6 +495,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     Boolean(supabaseSelectionState),
   );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
+  const [connectingGrafana, setConnectingGrafana] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
   const [connectingGcp, setConnectingGcp] = useState(false);
   const [connectingDash0, setConnectingDash0] = useState(false);
@@ -700,6 +704,20 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
         ) {
           loadedDraft.contextAccountIds.push(connectedPostHog.id);
         }
+        const connectedGrafana = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "grafana",
+            )
+          : accountsFor(loadedOptions, "grafana")[0];
+        if (
+          grafanaJustConnected &&
+          connectedGrafana &&
+          !loadedDraft.contextAccountIds.includes(connectedGrafana.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedGrafana.id);
+        }
         const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
         if (
           axiomJustConnected &&
@@ -859,6 +877,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     datadogJustConnected,
     dash0JustConnected,
     postHogJustConnected,
+    grafanaJustConnected,
     draftStorageKey,
     githubJustConnected,
     isEditing,
@@ -915,6 +934,10 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   );
   const postHogAccounts = useMemo(
     () => accountsFor(options, "posthog"),
+    [options],
+  );
+  const grafanaAccounts = useMemo(
+    () => accountsFor(options, "grafana"),
     [options],
   );
   const axiomAccounts = useMemo(
@@ -1169,6 +1192,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
       provider === "gcp" ||
       provider === "datadog" ||
       provider === "dash0" ||
+      provider === "grafana" ||
       provider === "clickstack" ||
       provider === "upstash" ||
       provider === "langfuse" ||
@@ -1180,6 +1204,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
       else if (provider === "datadog") setChoosingDatadogSite(true);
       else if (provider === "dash0") setConnectingDash0(true);
       else if (provider === "clickstack") setConnectingClickStack(true);
+      else if (provider === "grafana") setConnectingGrafana(true);
       else if (provider === "langfuse") setConnectingLangfuse(true);
       else if (provider === "supabase") setConnectingSupabase(true);
       else setConnectingUpstash(true);
@@ -1518,6 +1543,9 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     postHogAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    grafanaAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     axiomAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1611,6 +1639,12 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
         connectUrl={integrationFor("clickstack")?.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
         open={connectingClickStack}
+        returnTo={returnTo}
+      />
+      <GrafanaConnectionDialog
+        connectUrl={integrationFor("grafana")?.connectUrl ?? ""}
+        onCancel={() => setConnectingGrafana(false)}
+        open={connectingGrafana}
         returnTo={returnTo}
       />
       <AwsConnectionDialog
@@ -2727,6 +2761,26 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
                         key={account.id}
                         label={label}
                         provider="posthog"
+                      />
+                    );
+                  })}
+                  {grafanaAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = grafanaAccounts.length > 1 ? account.displayName : "Grafana";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            showConfigureLabel
+                            enabled={connected}
+                            label={label}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Dashboards, alerts, metrics, logs, and traces`}
+                        key={account.id}
+                        label={label}
+                        provider="grafana"
                       />
                     );
                   })}

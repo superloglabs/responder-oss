@@ -13,6 +13,7 @@ import {
   getRuntimeDatadogConnection,
   getRuntimeDash0Connections,
   getRuntimePostHogConnections,
+  getRuntimeGrafanaConnections,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
@@ -53,6 +54,7 @@ import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createDash0McpServer } from "./dash0.js";
 import { createPostHogMcpServer } from "./posthog.js";
+import { createGrafanaMcpServer } from "./grafana.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
@@ -151,6 +153,7 @@ export function contextServerConnectFailureEvent(input: {
   customMcpConnections: ReadonlyArray<{ accountId: string }>;
   dash0Connections?: ReadonlyArray<{ accountId: string }>;
   postHogConnections?: ReadonlyArray<{ accountId: string }>;
+  grafanaConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   supabaseConnections?: ReadonlyArray<{ accountId: string }>;
   error: unknown;
@@ -164,6 +167,8 @@ export function contextServerConnectFailureEvent(input: {
       ? "GCP"
       : input.serverName.startsWith("dash0-")
         ? "Dash0"
+        : input.serverName.startsWith("grafana-")
+          ? "Grafana"
         : input.serverName.startsWith("langfuse-")
           ? "Langfuse"
           : input.serverName.startsWith("supabase-")
@@ -190,6 +195,11 @@ export function contextServerConnectFailureEvent(input: {
             ? input.postHogConnections?.find(
                 (connection) =>
                   input.serverName === `posthog-${connection.accountId}`,
+              )?.accountId
+          : input.serverName.startsWith("grafana-")
+            ? input.grafanaConnections?.find(
+                (connection) =>
+                  input.serverName === `grafana-${connection.accountId}`,
               )?.accountId
           : input.serverName.startsWith("langfuse-")
             ? input.langfuseConnections?.find(
@@ -353,6 +363,7 @@ export function investigationInstructions(input: {
   datadogConnected: boolean;
   dash0AccountNames?: string[];
   postHogAccountNames?: string[];
+  grafanaInstanceNames?: string[];
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
@@ -384,6 +395,7 @@ export function investigationInstructions(input: {
   const customMcpNames = input.customMcpNames ?? [];
   const dash0AccountNames = input.dash0AccountNames ?? [];
   const postHogAccountNames = input.postHogAccountNames ?? [];
+  const grafanaInstanceNames = input.grafanaInstanceNames ?? [];
   const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const supabaseConnections = input.supabaseConnections ?? [];
@@ -397,6 +409,7 @@ export function investigationInstructions(input: {
     input.datadogConnected ||
     dash0AccountNames.length > 0 ||
     postHogAccountNames.length > 0 ||
+    grafanaInstanceNames.length > 0 ||
     input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
@@ -436,6 +449,9 @@ export function investigationInstructions(input: {
       : null,
     postHogAccountNames.length > 0
       ? prompt("posthog", { value1: postHogAccountNames.join(", ") })
+      : null,
+    grafanaInstanceNames.length > 0
+      ? prompt("grafana", { value1: grafanaInstanceNames.join(", ") })
       : null,
     input.axiomConnected
       ? prompt("axiom")
@@ -629,6 +645,7 @@ export async function runInvestigationAgent(
     datadogConnection,
     dash0Connections,
     postHogConnections,
+    grafanaConnections,
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
@@ -650,6 +667,7 @@ export async function runInvestigationAgent(
     getRuntimeDatadogConnection(job.config.id),
     getRuntimeDash0Connections(job.config.id),
     getRuntimePostHogConnections(job.config.id),
+    getRuntimeGrafanaConnections(job.config.id),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -683,6 +701,11 @@ export async function runInvestigationAgent(
     : null;
   const dash0Servers = dash0Connections.map(createDash0McpServer);
   const postHogServers = postHogConnections.map(createPostHogMcpServer);
+  const grafanaServers = await Promise.all(
+    grafanaConnections.map((connection) =>
+      createGrafanaMcpServer(connection, environment),
+    ),
+  );
   const sentryServer = sentryConnection
     ? createSentryMcpServer(sentryConnection, {
         investigationId: job.investigationId,
@@ -734,6 +757,7 @@ export async function runInvestigationAgent(
     upstashServer,
     ...dash0Servers,
     ...postHogServers,
+    ...grafanaServers,
     ...langfuseServers,
     ...supabaseServers,
     ...awsServers,
@@ -766,6 +790,7 @@ export async function runInvestigationAgent(
                 customMcpConnections,
                 dash0Connections,
                 postHogConnections,
+                grafanaConnections,
                 error,
                 investigationId: job.investigationId,
                 langfuseConnections,
@@ -786,6 +811,9 @@ export async function runInvestigationAgent(
           }
           if (server.name.startsWith("dash0-")) {
             throw new Error("Unable to connect to Dash0 context");
+          }
+          if (server.name.startsWith("grafana-")) {
+            throw new Error("Unable to connect to Grafana context");
           }
           if (server.name.startsWith("langfuse-")) {
             throw new Error("Unable to connect to Langfuse context");
@@ -935,6 +963,9 @@ export async function runInvestigationAgent(
         (connection) => connection.displayName,
       ),
       postHogAccountNames: postHogConnections.map(
+        (connection) => connection.displayName,
+      ),
+      grafanaInstanceNames: grafanaConnections.map(
         (connection) => connection.displayName,
       ),
       repositories,

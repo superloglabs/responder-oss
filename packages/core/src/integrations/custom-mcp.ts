@@ -201,16 +201,30 @@ async function resolveCustomMcpUrl(
   options: { allowLocal?: boolean; signal?: AbortSignal } = {},
 ): Promise<ResolvedCustomMcpUrl> {
   const url = new URL(input);
-  const hostname = url.hostname.replace(/^\[|\]$/g, "");
   if (url.username || url.password) {
     throw new Error("MCP URLs cannot contain credentials");
   }
 
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
   const localAllowed = options.allowLocal === true && localHostname(hostname);
   if (url.protocol !== "https:" && !(localAllowed && url.protocol === "http:")) {
     throw new Error("MCP URLs must use HTTPS");
   }
+  return { addresses: await resolvePublicHostAddresses(hostname, options), url };
+}
 
+/**
+ * Resolves a hostname and rejects it unless every address is publicly
+ * routable. Loopback and `.localhost` names are accepted only with
+ * `allowLocal`. Callers must connect to the returned addresses rather than
+ * resolving the hostname again.
+ */
+export async function resolvePublicHostAddresses(
+  host: string,
+  options: { allowLocal?: boolean; signal?: AbortSignal } = {},
+): Promise<LookupAddress[]> {
+  const hostname = host.replace(/^\[|\]$/g, "");
+  const localAllowed = options.allowLocal === true && localHostname(hostname);
   if (localHostname(hostname)) {
     if (!localAllowed) throw new Error("MCP URLs must use a public host");
   }
@@ -219,15 +233,12 @@ async function resolveCustomMcpUrl(
     if (!localAllowed && !addressIsPublic(hostname)) {
       throw new Error("MCP URLs must use a public host");
     }
-    return {
-      addresses: [
-        {
-          address: hostname,
-          family: ipaddr.parse(hostname).kind() === "ipv4" ? 4 : 6,
-        },
-      ],
-      url,
-    };
+    return [
+      {
+        address: hostname,
+        family: ipaddr.parse(hostname).kind() === "ipv4" ? 4 : 6,
+      },
+    ];
   }
 
   const lookupSignal = options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -258,13 +269,10 @@ async function resolveCustomMcpUrl(
   ) {
     throw new Error("MCP URLs must resolve only to public addresses");
   }
-  return {
-    addresses: addresses.map(({ address }) => ({
-      address,
-      family: ipaddr.parse(address).kind() === "ipv4" ? 4 : 6,
-    })),
-    url,
-  };
+  return addresses.map(({ address }) => ({
+    address,
+    family: ipaddr.parse(address).kind() === "ipv4" ? 4 : 6,
+  }));
 }
 
 function pinnedAddressAgent(target: ResolvedCustomMcpUrl): Agent {
@@ -426,6 +434,8 @@ export async function beginCustomMcpOAuth(input: {
   connectionState: string;
   mcpUrl: string;
   redirectUrl: string;
+  /** Overrides the scopes advertised by the server's challenge or metadata. */
+  scope?: string;
 }): Promise<{
   authorizationUrl: string;
   oauth: StoredCustomMcpOAuthState;
@@ -441,6 +451,7 @@ export async function beginCustomMcpOAuth(input: {
   const result = await auth(provider, {
     fetchFn: safeCustomMcpFetch,
     ...oauthChallenge,
+    ...(input.scope ? { scope: input.scope } : {}),
     serverUrl: mcpUrl,
   });
   if (result !== "REDIRECT" || !provider.authorizationUrl) {

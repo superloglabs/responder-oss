@@ -159,6 +159,7 @@ function humanizeToolName(value: string): string {
     datadog: "Datadog",
     dsn: "DSN",
     dsns: "DSNs",
+    grafana: "Grafana",
     mcp: "MCP",
     pr: "PR",
     rum: "RUM",
@@ -315,6 +316,7 @@ function sourceLabel(url: string): string {
   if (host.includes("datadog")) return "Open in Datadog";
   if (host.includes("sentry")) return "Open in Sentry";
   if (host.includes("slack")) return "Open in Slack";
+  if (host.includes("grafana")) return "Open in Grafana";
   if (host.includes("clickhouse") || host.includes("hyperdx")) {
     return "Open in ClickStack";
   }

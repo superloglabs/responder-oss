@@ -46,6 +46,12 @@ import {
   parsePostHogCredentials,
   POSTHOG_MCP_URL,
 } from "../../../../packages/core/src/integrations/posthog.js";
+import {
+  GRAFANA_CLOUD_OAUTH_SCOPE,
+  normalizeGrafanaCloudStackUrl,
+  normalizeGrafanaUrl,
+  parseGrafanaCredentials,
+} from "../../../../packages/core/src/integrations/grafana.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
@@ -115,6 +121,10 @@ import {
   upstashAccount,
   UpstashCredentialsError,
 } from "./upstash.js";
+import {
+  GrafanaCredentialsError,
+  grafanaServiceAccountOrganization,
+} from "./grafana.js";
 import {
   langfuseProject,
   LangfuseCredentialsError,
@@ -295,6 +305,19 @@ const clickStackConnectionSchema = z.discriminatedUnion("deployment", [
     returnTo: z.string().max(2_048).optional(),
   }),
 ]);
+const grafanaConnectionSchema = z.discriminatedUnion("deployment", [
+  z.object({
+    deployment: z.literal("cloud"),
+    returnTo: z.string().max(2_048).optional(),
+    stackUrl: z.string().trim().min(1).max(2_048),
+  }),
+  z.object({
+    deployment: z.literal("self_hosted"),
+    grafanaUrl: z.string().trim().url().max(2_048),
+    returnTo: z.string().max(2_048).optional(),
+    serviceAccountToken: z.string().trim().min(1).max(4_096),
+  }),
+]);
 const vercelCallbackSchema = z.object({
   code: z.string().trim().min(1).max(2_048),
   configurationId: z.string().regex(/^icfg_[A-Za-z0-9]+$/u),
@@ -309,6 +332,7 @@ type BrowserOAuthProvider =
   | "discord"
   | "gcp"
   | "github"
+  | "grafana"
   | "linear"
   | "posthog"
   | "sentry"
@@ -765,6 +789,7 @@ export const integrationRoutes = new Hono()
                   definition.id === "gcp" ||
                   definition.id === "datadog" ||
                   definition.id === "dash0" ||
+                  definition.id === "grafana" ||
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
                   definition.id === "langfuse" ||
@@ -915,6 +940,7 @@ export const integrationRoutes = new Hono()
       parsedProvider.data === "gcp" ||
       parsedProvider.data === "datadog" ||
       parsedProvider.data === "dash0" ||
+      parsedProvider.data === "grafana" ||
       parsedProvider.data === "clickstack" ||
       parsedProvider.data === "upstash" ||
       parsedProvider.data === "langfuse" ||
@@ -1706,6 +1732,279 @@ export const integrationRoutes = new Hono()
     } catch (error) {
       logCustomMcpError("webhook-config", error, accountId.data);
       return context.json({ error: "Unable to load Dash0 webhook setup" }, 500);
+    }
+  })
+  .post("/grafana/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+
+    const parsed = grafanaConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json(
+        { error: "Choose Grafana Cloud or enter self-hosted credentials" },
+        400,
+      );
+    }
+
+    if (parsed.data.deployment === "self_hosted") {
+      try {
+        normalizeGrafanaUrl(parsed.data.grafanaUrl);
+      } catch (error) {
+        return context.json(
+          { error: error instanceof Error ? error.message : "Invalid Grafana URL" },
+          400,
+        );
+      }
+      try {
+        const organization = await grafanaServiceAccountOrganization(
+          parsed.data,
+        );
+        const accountId = await upsertIntegrationAccount({
+          organizationId: tenant.organizationId,
+          provider: "grafana",
+          externalAccountId: organization.externalAccountId,
+          displayName: organization.displayName,
+          encryptedCredentials: encryptCredentials({
+            authType: "service_account",
+            grafanaUrl: organization.grafanaUrl,
+            serviceAccountToken: parsed.data.serviceAccountToken,
+          }),
+          credentialKeyVersion: 1,
+          metadata: organization.metadata,
+        });
+        await captureAnalyticsEvent({
+          distinctId: tenant.user.id,
+          event: "integration connected",
+          organizationId: tenant.organizationId,
+          properties: {
+            deployment: "self_hosted",
+            integration_account_id: accountId,
+            provider: "grafana",
+          },
+        });
+        console.info(
+          JSON.stringify({
+            accountId,
+            deployment: "self_hosted",
+            event: "grafana_connected",
+            organizationId: tenant.organizationId,
+            provider: "grafana",
+          }),
+        );
+        return context.json({
+          accountId,
+          redirectUrl: withIntegrationAccountId(
+            settingsRedirect(
+              parsed.data.returnTo ?? "/settings",
+              "grafana",
+              "connected",
+            ),
+            accountId,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof GrafanaCredentialsError) {
+          return context.json({ error: error.message }, 401);
+        }
+        logCallbackError("Grafana", error, {
+          deployment: "self_hosted",
+          organizationId: tenant.organizationId,
+        });
+        return context.json(
+          { error: "Unable to verify the Grafana connection" },
+          502,
+        );
+      }
+    }
+
+    let stack: ReturnType<typeof normalizeGrafanaCloudStackUrl>;
+    try {
+      stack = normalizeGrafanaCloudStackUrl(parsed.data.stackUrl);
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "Invalid Grafana Cloud stack" },
+        400,
+      );
+    }
+    const externalAccountId = `cloud:${stack.stackHost}`;
+    let accountId: string | undefined;
+    let preserveExistingAccount = false;
+    try {
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId,
+        organizationId: tenant.organizationId,
+        provider: "grafana",
+      });
+      preserveExistingAccount = Boolean(existing);
+      accountId =
+        existing?.id ??
+        (await upsertIntegrationAccount({
+          organizationId: tenant.organizationId,
+          provider: "grafana",
+          externalAccountId,
+          displayName: stack.stackHost,
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: stack.mcpUrl,
+            oauth: {},
+            stackUrl: stack.stackUrl,
+          }),
+          credentialKeyVersion: 1,
+          metadata: {
+            authType: "oauth",
+            mcpUrl: stack.mcpUrl,
+            stackUrl: stack.stackUrl,
+          },
+          status: "pending",
+        }));
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "grafana",
+        codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
+        returnTo: parsed.data.returnTo,
+        routingUrl: integrationCallbackUrl("grafana"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl: stack.mcpUrl,
+        redirectUrl: integrationCallbackUrl("grafana"),
+        scope: GRAFANA_CLOUD_OAUTH_SCOPE,
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: stack.mcpUrl,
+            oauth: oauthResult.oauth,
+            stackUrl: stack.stackUrl,
+          }),
+        },
+        organizationId: tenant.organizationId,
+        provider: "grafana",
+        state: connectionState,
+        userId: tenant.user.id,
+      });
+      if (!updated) throw new Error("The Grafana OAuth state was not updated");
+      return context.json({ redirectUrl: oauthResult.authorizationUrl });
+    } catch (error) {
+      logCustomMcpError("connect", error, accountId);
+      if (accountId && !preserveExistingAccount) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.json({ error: "Unable to start Grafana Cloud OAuth" }, 502);
+    }
+  })
+  .get("/grafana/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "grafana", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    let accountId: string | undefined;
+    let preserveExistingAccount = false;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "grafana",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "grafana", "error", "invalid_state"),
+        );
+      }
+      const callbackState = z
+        .object({
+          accountId: z.uuid(),
+          preserveExistingAccount: z.boolean().default(false),
+        })
+        .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
+      accountId = callbackState.accountId;
+      preserveExistingAccount = callbackState.preserveExistingAccount;
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const account = await getOrganizationIntegrationAccount({
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "grafana",
+      });
+      if (!account || (!preserveExistingAccount && account.status !== "pending")) {
+        throw new Error("The pending Grafana connection was not found");
+      }
+      const pendingCredentials = z
+        .object({ encryptedCredentials: z.string().min(1) })
+        .parse(connectionState.metadata);
+      const credentials = parseGrafanaCredentials(
+        decryptCredentials<Record<string, unknown>>(
+          pendingCredentials.encryptedCredentials,
+        ),
+      );
+      if (credentials.authType !== "oauth") {
+        throw new Error("The pending Grafana connection is not an OAuth connection");
+      }
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("grafana"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Grafana OAuth access token is missing");
+      const toolCount = await verifyCustomMcpConnection({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const updated = await updateIntegrationAccountCredentials({
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        integrationAccountId: accountId,
+        organizationId: connectionState.organizationId,
+        provider: "grafana",
+        status: "connected",
+      });
+      if (!updated) throw new Error("The Grafana connection was not updated");
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          deployment: "cloud",
+          integration_account_id: accountId,
+          provider: "grafana",
+          tool_count: toolCount,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "grafana", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error, accountId);
+      if (accountId && !preserveExistingAccount) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "grafana",
+          "error",
+          browserOAuthErrorReason(context.req.query("error")),
+        ),
+      );
     }
   })
   .get("/posthog/callback", async (context) => {

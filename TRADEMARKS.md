@@ -12,7 +12,7 @@ Do not use the names or logos in a way that suggests sponsorship, endorsement,
 or an official release when none exists. Modified distributions should use a
 distinct name and branding when confusion is likely.
 
-GitHub, Slack, Sentry, Datadog, ClickHouse, ClickStack, X, PostHog, and other
+GitHub, Slack, Sentry, Datadog, ClickHouse, ClickStack, X, PostHog, Grafana, and other
 third-party names and logos belong to their respective owners. Their appearance
 identifies an integration and does not imply endorsement.
 
