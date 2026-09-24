@@ -4,6 +4,7 @@ import { availableTagModeConfiguration } from "./tag-mode-configuration";
 
 const options: AgentOptions = {
   accounts: [
+    { id: "github", provider: "github", displayName: "acme" },
     { id: "grafana", provider: "grafana", displayName: "Grafana" },
     { id: "vercel", provider: "vercel", displayName: "Vercel" },
   ],
@@ -48,6 +49,28 @@ describe("availableTagModeConfiguration", () => {
       model: "instance/default",
       instructions: "Investigate",
       contextAccountIds: ["grafana", "vercel"],
+      contextResourceIds: ["project"],
+      repositoryIds: ["repository"],
+      secretIds: ["secret"],
+    });
+  });
+
+  it("drops duplicate references so the server accepts the next save", () => {
+    const configuration = availableTagModeConfiguration(
+      {
+        enabled: true,
+        model: "instance/default",
+        instructions: "Investigate",
+        contextAccountIds: ["grafana", "grafana"],
+        contextResourceIds: ["project", "project"],
+        repositoryIds: ["repository", "repository"],
+        secretIds: ["secret", "secret"],
+      },
+      options,
+    );
+
+    expect(configuration).toMatchObject({
+      contextAccountIds: ["grafana"],
       contextResourceIds: ["project"],
       repositoryIds: ["repository"],
       secretIds: ["secret"],

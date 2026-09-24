@@ -158,6 +158,7 @@ export function TagModeSettingsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savedConfiguration = useRef(defaultConfiguration);
+  const queuedConfiguration = useRef(defaultConfiguration);
   const saveQueue = useRef(Promise.resolve());
   const pendingSaves = useRef(0);
 
@@ -177,6 +178,7 @@ export function TagModeSettingsPage() {
           loadedOptions,
         );
         savedConfiguration.current = available;
+        queuedConfiguration.current = available;
         setConfiguration(available);
       })
       .catch((caught: unknown) => {
@@ -243,6 +245,7 @@ export function TagModeSettingsPage() {
   // cannot overwrite a newer one; a failed save restores the last saved state.
   function persist(next: SlackThreadModeConfiguration, successNotice?: string) {
     if (!options) return;
+    queuedConfiguration.current = next;
     setConfiguration(next);
     setError(null);
     setNotice(null);
@@ -253,6 +256,7 @@ export function TagModeSettingsPage() {
         savedConfiguration.current = await saveSlackThreadModeConfiguration(next);
         if (successNotice) setNotice(successNotice);
       } catch (caught) {
+        queuedConfiguration.current = savedConfiguration.current;
         setConfiguration(savedConfiguration.current);
         setError(caught instanceof Error ? caught.message : "Unable to save tag mode");
       } finally {
@@ -269,7 +273,7 @@ export function TagModeSettingsPage() {
   function saveInstructions() {
     if (
       configuration.instructions.trim() ===
-      savedConfiguration.current.instructions.trim()
+      queuedConfiguration.current.instructions.trim()
     ) {
       return;
     }
