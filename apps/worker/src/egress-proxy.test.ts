@@ -153,6 +153,9 @@ describe("egress proxy", () => {
     );
 
     const socket = connect(Number(new URL(proxy.url).port), "127.0.0.1");
+    cleanups.push(() => {
+      socket.destroy();
+    });
     await once(socket, "connect");
     socket.write(Buffer.from([0x05, 0x01, 0x00]));
     await readBytes(socket, 2);
