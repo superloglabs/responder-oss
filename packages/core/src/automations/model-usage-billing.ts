@@ -146,6 +146,24 @@ export function releaseResponderInference(reservationId: string): Promise<void> 
   return releaseResponderModelUsage(reservationId);
 }
 
+// A reservation that is never completed is purged without billing, so
+// recording the actual usage is retried through short database outages.
+const completionRetryDelaysMs = [1_000, 5_000, 15_000, 30_000];
+
+async function completeWithRetry<T>(
+  complete: () => Promise<T>,
+  delaysMs: number[],
+): Promise<T> {
+  for (const delayMs of delaysMs) {
+    try {
+      return await complete();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return complete();
+}
+
 // Replaces a reservation with the request's actual usage and reports it.
 export async function completeResponderInference(
   input: {
@@ -156,6 +174,7 @@ export async function completeResponderInference(
   },
   dependencies: SettlementDependencies & {
     complete: typeof completeResponderModelUsage;
+    retryDelaysMs?: number[];
   } = { ...defaultDependencies, complete: completeResponderModelUsage },
 ): Promise<void> {
   const costMicros = await usageCostMicros(
@@ -164,7 +183,10 @@ export async function completeResponderInference(
     input.usage,
     dependencies,
   ).catch(() => null);
-  const row = await dependencies.complete(input.reservationId, input.usage, costMicros);
+  const row = await completeWithRetry(
+    () => dependencies.complete(input.reservationId, input.usage, costMicros),
+    dependencies.retryDelaysMs ?? completionRetryDelaysMs,
+  );
   if (!row) return;
   if (!billingIsEnabled()) {
     await dependencies.markBilled(row.id);
@@ -191,9 +213,11 @@ export async function settleUnbilledAutomationModelUsage(
     now: Date.now,
     purgeAbandoned: purgeAbandonedResponderModelUsage,
   },
-): Promise<{ failed: number; settled: number }> {
+): Promise<{ abandoned: number; failed: number; settled: number }> {
   const now = dependencies.now();
-  await dependencies.purgeAbandoned(new Date(now));
+  // Abandoned reservations are dropped rather than billed at their estimate,
+  // which could charge for a request that never ran. Callers report them.
+  const abandoned = await dependencies.purgeAbandoned(new Date(now));
   const rows = await dependencies.list({
     createdAfter: new Date(now - retryWindowMs),
     createdBefore: new Date(now - retryDelayMs),
@@ -208,5 +232,5 @@ export async function settleUnbilledAutomationModelUsage(
     }
   }
   await dependencies.markAttempted(failed);
-  return { failed: failed.length, settled: rows.length - failed.length };
+  return { abandoned, failed: failed.length, settled: rows.length - failed.length };
 }

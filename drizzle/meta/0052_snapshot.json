@@ -1,5 +1,5 @@
 {
-  "id": "cb7b212a-0d4a-4154-b388-7ba3eb217f77",
+  "id": "d6329944-bd33-41b6-bf52-b7bb67acd19d",
   "prevId": "114ec146-fe07-44ff-9454-f296e3b48256",
   "version": "7",
   "dialect": "postgresql",
@@ -1455,7 +1455,7 @@
         },
         "automation_model_broker_grants_credential_check": {
           "name": "automation_model_broker_grants_credential_check",
-          "value": "(\"automation_model_broker_grants\".\"inference_source\" = 'responder') = (\"automation_model_broker_grants\".\"encrypted_credentials\" is null)"
+          "value": "\"automation_model_broker_grants\".\"inference_source\" in ('responder', 'byok', 'byos')\n        and (\"automation_model_broker_grants\".\"inference_source\" = 'responder') = (\"automation_model_broker_grants\".\"encrypted_credentials\" is null)"
         }
       },
       "isRLSEnabled": false

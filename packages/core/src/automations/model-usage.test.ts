@@ -43,6 +43,7 @@ describe("automation model usage observer", () => {
     const stream = [
       'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":20,"cache_creation_input_tokens":300,"cache_read_input_tokens":4000,"output_tokens":1}}}\n\n',
       'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":90}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":40}}\n\n',
       'event: message_stop\ndata: {"type":"message_stop"}\n\n',
     ];
 
@@ -83,6 +84,26 @@ describe("automation model usage observer", () => {
       cachedInputTokens: 20,
       inputTokens: 30,
       outputTokens: 4,
+    });
+  });
+
+  it("separates cache writes and reads usage from incomplete responses", () => {
+    const event = JSON.stringify({
+      response: {
+        usage: {
+          input_tokens: 1_000,
+          input_tokens_details: { cache_write_tokens: 300, cached_tokens: 500 },
+          output_tokens: 20,
+        },
+      },
+      type: "response.incomplete",
+    });
+
+    expect(observe("responses", "Text/Event-Stream", [`data: ${event}\n\n`])).toEqual({
+      cacheWriteTokens: 300,
+      cachedInputTokens: 500,
+      inputTokens: 200,
+      outputTokens: 20,
     });
   });
 });

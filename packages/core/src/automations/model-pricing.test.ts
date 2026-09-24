@@ -89,12 +89,13 @@ describe("AI Gateway model pricing", () => {
     expect(fetchPricing).toHaveBeenCalledOnce();
   });
 
-  it("lists a provider's gateway language models without the creator prefix", async () => {
+  it("lists a provider's priced gateway language models without the creator prefix", async () => {
     const fetchCatalog = vi.fn().mockResolvedValue(Response.json({
       data: [
-        { id: "spacexai/grok-5", name: "Grok 5", type: "language" },
-        { id: "spacexai/grok-imagine", name: "Grok Imagine", type: "image" },
-        { id: "openai/gpt-5.4", name: "GPT-5.4", type: "language" },
+        { id: "spacexai/grok-5", name: "Grok 5", pricing: { input: "0.000001", output: "0.000002" }, type: "language" },
+        { id: "spacexai/grok-unpriced", name: "Grok Unpriced", type: "language" },
+        { id: "spacexai/grok-imagine", name: "Grok Imagine", pricing: { image: "0.04" }, type: "image" },
+        { id: "openai/gpt-5.4", name: "GPT-5.4", pricing: { input: "0.000001", output: "0.000002" }, type: "language" },
       ],
     }));
 

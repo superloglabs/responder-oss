@@ -90,6 +90,7 @@ const app = new Hono().route("/api/automations", automationRoutes);
 
 describe("automation control-plane routes", () => {
   afterEach(() => {
+    mocks.gatewayModels.mockReset();
     vi.clearAllMocks();
     mocks.credential.mockReset();
     mocks.modelCatalog.mockReset();

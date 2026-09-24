@@ -120,6 +120,22 @@ describe("automation model usage billing", () => {
     expect(deps.markBilled).toHaveBeenCalledWith("reservation-1");
   });
 
+  it("retries recording actual usage through a short database outage", async () => {
+    vi.stubEnv("BILLING_ENABLED", "true");
+    const deps = { ...dependencies(), retryDelaysMs: [0, 0] };
+    deps.complete.mockRejectedValueOnce(new Error("connection reset"));
+
+    await completeResponderInference({
+      model: "gpt-5.4",
+      provider: "openai",
+      reservationId: "reservation-1",
+      usage,
+    }, deps);
+
+    expect(deps.complete).toHaveBeenCalledTimes(2);
+    expect(deps.markBilled).toHaveBeenCalledWith("reservation-1");
+  });
+
   it("closes a completed reservation without reporting when billing is disabled", async () => {
     vi.stubEnv("BILLING_ENABLED", "false");
     const deps = dependencies();
@@ -160,7 +176,7 @@ describe("automation model usage billing", () => {
     }));
   });
 
-  it("prices unpriced rows before billing and only prices organization-funded rows", async () => {
+  it("prices unpriced rows and bills only Responder-funded rows", async () => {
     vi.stubEnv("BILLING_ENABLED", "true");
     const deps = dependencies();
     deps.list.mockResolvedValue([
@@ -169,6 +185,7 @@ describe("automation model usage billing", () => {
     ]);
 
     await expect(settleUnbilledAutomationModelUsage(deps)).resolves.toEqual({
+      abandoned: 0,
       failed: 0,
       settled: 2,
     });
@@ -192,6 +209,7 @@ describe("automation model usage billing", () => {
     deps.track.mockRejectedValueOnce(new Error("Autumn unavailable"));
 
     await expect(settleUnbilledAutomationModelUsage(deps)).resolves.toEqual({
+      abandoned: 0,
       failed: 1,
       settled: 1,
     });

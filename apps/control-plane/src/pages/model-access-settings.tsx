@@ -46,7 +46,8 @@ export function ModelAccessSettingsPage() {
         if (active && generation === loadGeneration.current) setCredentials(loaded);
       })
       .catch((cause: unknown) => {
-        if (active) {
+        if (active && generation === loadGeneration.current) {
+          setCredentials([]);
           setError(cause instanceof Error ? cause.message : "Unable to load model access");
         }
       });
@@ -105,7 +106,9 @@ export function ModelAccessSettingsPage() {
   async function subscriptionConnected() {
     setConnectingSubscription(false);
     setNotice("ChatGPT subscription connected.");
-    await reload().catch(() => undefined);
+    await reload().catch(() => {
+      setError("ChatGPT subscription connected, but the list could not be refreshed. Reload the page.");
+    });
   }
 
   const keys = credentials?.filter((credential) => credential.authType !== "chatgpt_subscription") ?? [];

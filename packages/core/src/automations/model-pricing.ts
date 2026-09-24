@@ -92,6 +92,10 @@ export async function getAIGatewayModelPricing(
 
 // AI Gateway lists models under their creator. Groq only hosts other
 // creators' models, so it has no included-usage models of its own.
+export function supportsIncludedUsage(provider: AutomationModelProvider): boolean {
+  return aiGatewayCreators[provider] !== null;
+}
+
 const aiGatewayCreators: Record<AutomationModelProvider, string | null> = {
   anthropic: "anthropic",
   deepseek: "deepseek",
@@ -122,8 +126,9 @@ export interface AIGatewayModel {
   name: string;
 }
 
-// Language models the gateway serves for one provider, without the creator
-// prefix, for the automation model picker.
+// Priced language models the gateway serves for one provider, without the
+// creator prefix, for the automation model picker. Unpriced models are left
+// out because included usage cannot meter them.
 export async function listAIGatewayModels(
   provider: AutomationModelProvider,
   dependencies: { fetch?: PricingFetch; now?: () => number } = {},
@@ -131,8 +136,14 @@ export async function listAIGatewayModels(
   const creator = aiGatewayCreators[provider];
   if (!creator) return [];
   const catalog = await loadCatalog(dependencies);
+  const zeroUsage = { cacheWriteTokens: 0, cachedInputTokens: 0, inputTokens: 0, outputTokens: 0 };
   return catalog.models
-    .filter((model) => model.id.startsWith(`${creator}/`))
+    .filter((model) => {
+      const pricing = catalog.pricing.get(model.id);
+      return model.id.startsWith(`${creator}/`) &&
+        pricing !== undefined &&
+        automationModelCostMicros(pricing, zeroUsage) !== null;
+    })
     .map((model) => ({ id: model.id.slice(creator.length + 1), name: model.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

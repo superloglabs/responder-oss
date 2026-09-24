@@ -55,7 +55,7 @@ function AutomationBilling({
   redirecting,
   summary,
 }: {
-  onChangePlan: (planId: AutomationPlanId | "free") => void;
+  onChangePlan: (planId: AutomationPlanId | "free" | "resume") => void;
   redirecting: boolean;
   summary: AutomationBillingSummary;
 }) {
@@ -130,6 +130,16 @@ function AutomationBilling({
                 Switch to free
               </button>
             ) : null}
+            {paid && summary.cancelsAtPeriodEnd ? (
+              <button
+                className="button button--secondary"
+                disabled={redirecting}
+                onClick={() => onChangePlan("resume")}
+                type="button"
+              >
+                {`Keep ${automationPlanName(summary, summary.planId)}`}
+              </button>
+            ) : null}
           </div>
         </article>
       </section>
@@ -192,7 +202,7 @@ export function BillingPage() {
     }
   }
 
-  async function changeAutomationPlan(planId: AutomationPlanId | "free") {
+  async function changeAutomationPlan(planId: AutomationPlanId | "free" | "resume") {
     const plans = summary?.automations?.plans ?? [];
     const plan = plans.find((candidate) => candidate.id === planId);
     const currentPrice = plans.find(
@@ -200,7 +210,9 @@ export function BillingPage() {
     )?.price ?? 0;
     // Upgrades charge a saved payment method without a checkout page, so
     // confirm first. Downgrades take effect at the end of the period.
-    const confirmation = !plan
+    const confirmation = planId === "resume"
+      ? "Keep the current automation plan after this billing period?"
+      : !plan
       ? "Switch to the free automation plan at the end of this billing period?"
       : plan.price > currentPrice
         ? `Switch to the $${plan.price} / month automation plan now? A saved payment method is charged immediately, prorated for this period.`

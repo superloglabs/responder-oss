@@ -66,9 +66,9 @@ export async function markAutomationModelUsageBilled(id: string): Promise<void> 
     .where(and(eq(automationModelUsage.id, id), isNull(automationModelUsage.billedAt)));
 }
 
-// Completed rows that still need billing (Responder-funded) or pricing (any
-// source). Never-attempted rows come first so rows that keep failing cannot
-// starve newer ones.
+// Completed rows not yet settled: Responder-funded rows still need billing and
+// any row may still need a price. Never-attempted rows come first so rows
+// that keep failing cannot starve newer ones.
 export async function listUnbilledAutomationModelUsage(input: {
   createdAfter: Date;
   createdBefore: Date;
@@ -81,10 +81,6 @@ export async function listUnbilledAutomationModelUsage(input: {
       and(
         isNull(automationModelUsage.billedAt),
         isNotNull(automationModelUsage.completedAt),
-        or(
-          eq(automationModelUsage.inferenceSource, "responder"),
-          isNull(automationModelUsage.costMicros),
-        ),
         gt(automationModelUsage.createdAt, input.createdAfter),
         lt(automationModelUsage.createdAt, input.createdBefore),
       ),

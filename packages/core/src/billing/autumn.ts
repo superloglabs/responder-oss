@@ -362,11 +362,18 @@ async function ensureAutomationPlan(
   if (customer.id === null || automationPlanFromCustomer(customer).active) {
     return customer;
   }
-  await client.billing.attach({
-    customerId: organizationId,
-    planId: AUTOMATION_FREE_PLAN_ID,
-    redirectMode: "never",
-  });
+  try {
+    await client.billing.attach({
+      customerId: organizationId,
+      planId: AUTOMATION_FREE_PLAN_ID,
+      redirectMode: "never",
+    });
+  } catch (error) {
+    // A concurrent first run may have attached the plan already.
+    const current = await getOrCreateCustomer(client, organizationId, data);
+    if (automationPlanFromCustomer(current).active) return current;
+    throw error;
+  }
   return getOrCreateCustomer(client, organizationId, data);
 }
 
@@ -521,15 +528,23 @@ export async function changeAutomationPlan(
 // Paid automation plans end at the close of the billing period. The next
 // allowance check then attaches the free automation plan again.
 export async function cancelAutomationPlan(organizationId: string): Promise<boolean> {
+  return updateAutomationPlanCancellation(organizationId, "cancel_end_of_cycle");
+}
+
+// Keeps the current paid plan after a cancellation was scheduled.
+export async function resumeAutomationPlan(organizationId: string): Promise<boolean> {
+  return updateAutomationPlanCancellation(organizationId, "uncancel");
+}
+
+async function updateAutomationPlanCancellation(
+  organizationId: string,
+  cancelAction: "cancel_end_of_cycle" | "uncancel",
+): Promise<boolean> {
   if (!billingIsEnabled()) throw new Error("Billing is disabled");
   const client = requireAutumnClient();
   const customer = await getOrCreateCustomer(client, organizationId);
   const planId = automationPlanFromCustomer(customer).active;
   if (!isAutomationPaidPlanId(planId)) return false;
-  await client.billing.update({
-    cancelAction: "cancel_end_of_cycle",
-    customerId: organizationId,
-    planId,
-  });
+  await client.billing.update({ cancelAction, customerId: organizationId, planId });
   return true;
 }

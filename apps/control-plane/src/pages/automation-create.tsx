@@ -13,6 +13,7 @@ import {
 } from "../automations-api";
 import { FloppyDiskIcon, PencilSimpleIcon, PlusIcon, TrashIcon, GithubLogoIcon, PlugsIcon } from "@phosphor-icons/react";
 import { AutomationModelPicker } from "../components/automation-model-picker";
+import { supportsIncludedUsage } from "../../../../packages/core/src/automations/model-pricing";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
 import { AutomationEditorDialog } from "../components/automation-editor-dialog";
 import "./automation-create.css";
@@ -125,8 +126,8 @@ export function AutomationCreatePage() {
   ) ?? [];
 
   function setProvider(provider: AutomationModelProvider) {
-    // Groq has no included-usage models, so it starts on the first key.
-    const credential = provider === "groq"
+    // A provider without included-usage models starts on its first key.
+    const credential = !supportsIncludedUsage(provider)
       ? options?.credentials.find((item) => item.provider === provider && item.status === "active")
       : undefined;
     setConfiguration((current) => ({

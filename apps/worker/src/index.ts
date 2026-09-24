@@ -145,7 +145,7 @@ function settleAutomationUsageBilling(): Promise<void> {
 async function runAutomationUsageBillingPass(): Promise<void> {
   try {
     const result = await settleUnbilledAutomationModelUsage();
-    if (result.failed > 0 || result.settled > 0) {
+    if (result.abandoned > 0 || result.failed > 0 || result.settled > 0) {
       console.log(JSON.stringify({
         ...result,
         event: "automation_usage_billing_settled",
@@ -154,6 +154,12 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.failed > 0) {
       await reportWorkerException(
         new Error(`${result.failed} automation usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+    if (result.abandoned > 0) {
+      await reportWorkerException(
+        new Error(`${result.abandoned} automation usage reservations were never completed`),
         { operation: "worker" },
       ).catch(() => undefined);
     }
@@ -354,7 +360,11 @@ async function shutdown(signal: string): Promise<void> {
   if (pollers.automationUsageBilling) {
     clearInterval(pollers.automationUsageBilling);
   }
-  await automationUsageBillingPass;
+  // Unsettled rows are retried by the next worker, so do not hold shutdown.
+  await Promise.race([
+    automationUsageBillingPass,
+    new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
+  ]);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
   await replayRequestDrain;

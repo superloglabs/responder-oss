@@ -36,7 +36,8 @@ ALTER TABLE "automation_model_usage" ADD CONSTRAINT "automation_model_usage_orga
 CREATE INDEX "automation_model_usage_run_idx" ON "automation_model_usage" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "automation_model_usage_organization_created_idx" ON "automation_model_usage" USING btree ("organization_id","created_at");--> statement-breakpoint
 CREATE INDEX "automation_model_usage_unbilled_idx" ON "automation_model_usage" USING btree ("organization_id","created_at") WHERE "automation_model_usage"."billed_at" is null;--> statement-breakpoint
-ALTER TABLE "automation_model_broker_grants" ADD CONSTRAINT "automation_model_broker_grants_credential_check" CHECK (("automation_model_broker_grants"."inference_source" = 'responder') = ("automation_model_broker_grants"."encrypted_credentials" is null));--> statement-breakpoint
+ALTER TABLE "automation_model_broker_grants" ADD CONSTRAINT "automation_model_broker_grants_credential_check" CHECK ("automation_model_broker_grants"."inference_source" in ('responder', 'byok', 'byos')
+        and ("automation_model_broker_grants"."inference_source" = 'responder') = ("automation_model_broker_grants"."encrypted_credentials" is null));--> statement-breakpoint
 ALTER TABLE "automation_versions" ADD CONSTRAINT "automation_versions_inference_source_check" CHECK (("automation_versions"."inference_source" = 'responder' and "automation_versions"."model_credential_id" is null)
         or ("automation_versions"."inference_source" in ('byok', 'byos') and "automation_versions"."model_credential_id" is not null));--> statement-breakpoint
 CREATE OR REPLACE FUNCTION "validate_automation_version_scope"() RETURNS trigger

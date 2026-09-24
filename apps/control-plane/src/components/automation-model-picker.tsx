@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { createAutomationCredential, fetchAutomationModels, fetchAutomationOptions, fetchIncludedAutomationModels, type AutomationCredential, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
 import { automationModelProviders, modelProvider, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
+import { supportsIncludedUsage } from "../../../../packages/core/src/automations/model-pricing";
 import "./automation-model-picker.css";
 
 const harnesses = [
@@ -11,8 +12,7 @@ const harnesses = [
   { id: "opencode" as const, name: "OpenCode", description: "OpenCode agent harness" },
 ];
 type Panel = "providers" | "models" | "connection" | "harness" | null;
-// Groq hosts other creators' models, so AI Gateway has no Groq models.
-function includedUsageAvailable(provider: AutomationModelProvider) { return provider !== "groq"; }
+function includedUsageAvailable(provider: AutomationModelProvider) { return supportsIncludedUsage(provider); }
 export function AutomationModelPicker({ configuration, options, onChange, onOptions, requestedOpen }: {
   configuration: AutomationConfiguration;
   options: AutomationOptions | null;
@@ -133,7 +133,7 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
           {credentials.length + (includedUsageAvailable(provider) ? 1 : 0) > 1 ? <label className="automationModel__key"><span>Connection</span><select aria-label="Model connection" value={credentialId} onChange={event => { setLoading(true); setModels([]); setError(null); setRevision(0); setCredentialId(event.target.value); }}>{includedUsageAvailable(provider) ? <option value="">Included usage</option> : null}{credentials.map(item => <option key={item.id} value={item.id}>{item.label}{item.authType === "chatgpt_subscription" ? " · Subscription" : ""}</option>)}</select></label> : null}
           {!credentialId ? <p className="automationModel__hint">Included usage is billed to your monthly allowance. Add a connection to use your own key or subscription.</p> : null}
           {loading ? <p className="automationModel__hint" role="status">{credentials.some(item => item.id === credentialId && item.authType === "chatgpt_subscription") ? "Loading subscription models… The first load may take up to a minute." : "Loading available models…"}</p> : error ? <div className="automationModel__footer"><p role="alert">{error}</p><button type="button" onClick={() => refreshModels()}>Retry</button></div> : <>
-            {models.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query.toLowerCase().trim())).map(item => <button className="automationModel__row" key={item.id} type="button" onClick={() => chooseModel(item)}><span>{item.name}{item.name !== item.id ? <small>{item.id}</small> : null}</span>{configuration.modelCredentialId === credentialId && configuration.model === item.id ? <CheckIcon size={14} /> : null}</button>)}
+            {models.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query.toLowerCase().trim())).map(item => <button className="automationModel__row" key={item.id} type="button" onClick={() => chooseModel(item)}><span>{item.name}{item.name !== item.id ? <small>{item.id}</small> : null}</span>{(configuration.modelCredentialId ?? "") === credentialId && configuration.model === item.id ? <CheckIcon size={14} /> : null}</button>)}
             {!models.length ? <p className="automationModel__hint">No automation models are available for this connection.</p> : !models.some(item => `${item.name} ${item.id}`.toLowerCase().includes(query.toLowerCase().trim())) ? <p className="automationModel__hint">No matching models.</p> : null}
           </>}
           <div className="automationModel__footer"><button type="button" disabled={loading} onClick={() => refreshModels()}>Refresh models</button><button type="button" onClick={() => setPanel("connection")}>Add connection</button></div>

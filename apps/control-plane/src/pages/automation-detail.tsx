@@ -79,7 +79,15 @@ export function AutomationDetailPage() {
     };
   }, [automationId, load]);
   useEffect(() => {
-    if (!automation?.runs.some((run) => run.status === "pending" || run.status === "running")) return;
+    // Model usage is recorded just after a run finishes, so keep polling
+    // briefly for runs that completed without a cost yet.
+    const awaitingUsage = (run: AutomationRunSummary) =>
+      run.completedAt !== null &&
+      run.inferenceUsage === null &&
+      Date.now() - new Date(run.completedAt).getTime() < 30_000;
+    if (!automation?.runs.some((run) =>
+      run.status === "pending" || run.status === "running" || awaitingUsage(run)
+    )) return;
     const timer = window.setInterval(() => void load(), 2_000);
     return () => window.clearInterval(timer);
   }, [automation?.runs, load]);

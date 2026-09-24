@@ -16,6 +16,7 @@ import type {
   AutomationInput,
   AutomationTrigger,
 } from "../automations/config.js";
+import { supportsIncludedUsage } from "../automations/model-pricing.js";
 import { getDatabase } from "./client.js";
 import {
   automationModelUsage,
@@ -318,6 +319,12 @@ async function validateConfigurationResources(
   }
 
   let inferenceSource: AutomationInferenceSource = "responder";
+  if (!configuration.modelCredentialId && !supportsIncludedUsage(configuration.modelProvider)) {
+    throw new AutomationConfigurationError(
+      "This provider needs a model connection",
+      "credential_not_found",
+    );
+  }
   if (configuration.modelCredentialId) {
     const credentialRows = await tx
       .select({ id: organizationModelCredentials.id, authType: organizationModelCredentials.authType })

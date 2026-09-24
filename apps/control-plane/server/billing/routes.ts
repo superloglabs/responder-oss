@@ -1,6 +1,7 @@
 import {
   cancelAutomationPlan,
   changeAutomationPlan,
+  resumeAutomationPlan,
   createBillingPortal,
   createPayAsYouGoCheckout,
   getAutomationBillingSummary,
@@ -79,13 +80,15 @@ export const billingRoutes = new Hono()
       | { planId?: unknown }
       | null;
     const planId = body?.planId;
-    if (planId !== "free" && !isAutomationPaidPlanId(planId)) {
+    if (planId !== "free" && planId !== "resume" && !isAutomationPaidPlanId(planId)) {
       return context.json({ error: "Unknown automation plan" }, 400);
     }
 
     try {
-      if (planId === "free") {
-        await cancelAutomationPlan(tenant.organizationId);
+      if (planId === "free" || planId === "resume") {
+        await (planId === "free" ? cancelAutomationPlan : resumeAutomationPlan)(
+          tenant.organizationId,
+        );
         return context.json({ url: null });
       }
       return context.json(

@@ -295,9 +295,9 @@ function brokerResponse(
   });
 }
 
-// Input tokens are estimated from the request size. Three bytes per token
-// overestimates typical JSON, which keeps the reservation conservative.
-const reservationBytesPerInputToken = 3;
+// Byte-level tokenizers never produce more tokens than UTF-8 bytes, so the
+// request's byte size is a strict upper bound on its input tokens. Pricing
+// that count also selects the most expensive applicable long-context tier.
 
 async function reserveResponderRequest(
   grant: AutomationModelBrokerClaim,
@@ -322,9 +322,7 @@ async function reserveResponderRequest(
     ? automationModelCostMicros(pricing, {
         cacheWriteTokens: 0,
         cachedInputTokens: 0,
-        inputTokens: Math.ceil(
-          JSON.stringify(body).length / reservationBytesPerInputToken,
-        ),
+        inputTokens: Buffer.byteLength(JSON.stringify(body), "utf8"),
         outputTokens: grant.maxOutputTokens,
       })
     : null;

@@ -87,6 +87,21 @@ describe("automation billing", () => {
     expect(client.billing.attach).toHaveBeenCalledOnce();
   });
 
+  it("accepts a free plan attached by a concurrent first run", async () => {
+    client.check
+      .mockResolvedValueOnce({ allowed: false, balance: null })
+      .mockResolvedValueOnce({ allowed: true, balance: { nextResetAt: 4 } });
+    client.customers.getOrCreate
+      .mockResolvedValueOnce(customer([{ planId: "responder_free", status: "active" }]))
+      .mockResolvedValueOnce(customer([{ planId: "responder_automations_free", status: "active" }]));
+    client.billing.attach.mockRejectedValueOnce(new Error("Plan already attached"));
+
+    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+      allowed: true,
+      nextResetAt: 4,
+    });
+  });
+
   it("blocks Responder-funded inference once the balance is used up", async () => {
     client.check.mockResolvedValue({
       allowed: false,

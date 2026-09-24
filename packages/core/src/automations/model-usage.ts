@@ -135,7 +135,7 @@ export function createAutomationModelUsageObserver(
   format: AutomationModelWireFormat,
   contentType: string | null,
 ): AutomationModelUsageObserver {
-  const streaming = contentType?.includes("text/event-stream") ?? false;
+  const streaming = contentType?.toLowerCase().includes("text/event-stream") ?? false;
   const decoder = new TextDecoder();
   let pending = "";
   let bufferedBytes = 0;

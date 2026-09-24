@@ -190,7 +190,8 @@ export const automationModelBrokerGrants = pgTable(
     ),
     check(
       "automation_model_broker_grants_credential_check",
-      sql`(${table.inferenceSource} = 'responder') = (${table.encryptedCredentials} is null)`,
+      sql`${table.inferenceSource} in ('responder', 'byok', 'byos')
+        and (${table.inferenceSource} = 'responder') = (${table.encryptedCredentials} is null)`,
     ),
   ],
 );
