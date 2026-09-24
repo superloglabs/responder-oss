@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "../automations-api";
-import { connectedAccountIds, storedAutomationDraft, withConnectedAccounts, type AutomationDraft } from "./automation-draft";
+import { connectedAccountIds, isCurrentAutomationDraft, storedAutomationDraft, withConnectedAccounts, type AutomationDraft } from "./automation-draft";
 
 const configuration = { contextAccountIds: ["existing"], workspaceSecretIds: ["secret"] } as unknown as AutomationConfiguration;
-const draft = (connecting: string): AutomationDraft => ({ name: "Draft", configuration, triggerSelected: false, githubIncluded: false, connecting, knownAccountIds: ["old"] });
+const draft = (connecting: string): AutomationDraft => ({ name: "Draft", configuration, triggerSelected: false, githubIncluded: false, connecting, knownAccountIds: ["old"], savedAt: 0 });
 const options = (accounts: Array<{ id: string; provider: string }>) => ({ accounts }) as unknown as AutomationOptions;
 
 describe("automation draft", () => {
@@ -21,5 +21,10 @@ describe("automation draft", () => {
   it("adds new connections to the draft", () => {
     expect(withConnectedAccounts(draft("sentry"), ["new"]).configuration.contextAccountIds).toEqual(["existing", "new"]);
     expect(withConnectedAccounts(draft("github"), ["new"])).toMatchObject({ githubIncluded: true, configuration: { contextAccountIds: ["existing"] } });
+  });
+
+  it("ignores drafts older than a connection flow", () => {
+    expect(isCurrentAutomationDraft(draft("sentry"), 10 * 60_000)).toBe(true);
+    expect(isCurrentAutomationDraft(draft("sentry"), 10 * 60_000 + 1)).toBe(false);
   });
 });

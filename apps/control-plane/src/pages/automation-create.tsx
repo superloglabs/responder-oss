@@ -139,7 +139,7 @@ export function AutomationCreatePage() {
       const { integrations } = await response.json() as { integrations: Array<{ id: string; connectUrl: string | null }> };
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
-      saveAutomationDraft({ name, configuration, triggerSelected, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [] });
+      saveAutomationDraft({ name, configuration, triggerSelected, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
       if (provider === "datadog" || provider === "custom_mcp") {
         setConnectDialog({ provider, connectUrl });
         return;

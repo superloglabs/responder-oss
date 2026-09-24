@@ -4,6 +4,9 @@ import { providerDisplayName } from "../components/provider-glyphs";
 // Keeps a new automation's draft while a connector is connected in the same
 // tab. The connection flow returns to the create page with its result.
 const storageKey = "responder.automationDraft";
+// Matches the server's connection state lifetime; an older draft belongs to an
+// abandoned flow.
+const draftLifetimeMs = 10 * 60_000;
 
 export interface AutomationDraft {
   name: string;
@@ -13,6 +16,11 @@ export interface AutomationDraft {
   connecting: string;
   // Accounts of the connecting provider before the flow, to find the new one.
   knownAccountIds: string[];
+  savedAt: number;
+}
+
+export function isCurrentAutomationDraft(draft: AutomationDraft, now: number) {
+  return now - draft.savedAt <= draftLifetimeMs;
 }
 
 // Workspace secret selections stay in memory only and are chosen again after
@@ -30,8 +38,9 @@ function readAutomationDraft(): AutomationDraft | null {
   try {
     const value = window.sessionStorage.getItem(storageKey);
     if (!value) return null;
-    const draft = JSON.parse(value) as ReturnType<typeof storedAutomationDraft>;
-    return { ...draft, configuration: { ...draft.configuration, workspaceSecretIds: [] } };
+    const stored = JSON.parse(value) as ReturnType<typeof storedAutomationDraft>;
+    const draft = { ...stored, configuration: { ...stored.configuration, workspaceSecretIds: [] } };
+    return isCurrentAutomationDraft(draft, Date.now()) ? draft : null;
   } catch {
     return null;
   }

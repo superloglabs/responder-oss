@@ -317,6 +317,7 @@ test("returns a Sentry connection that finishes on settings to the draft", async
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep this unsaved draft.");
   await page.getByRole("button", { name: "Add connector", exact: true }).click();
   await page.getByRole("option", { name: /Connect Sentry/ }).click();
+  await page.waitForURL(/\/settings\?integration=sentry&status=finishing$/, { waitUntil: "commit" });
   await expect(page).toHaveURL(/\/automations\/new$/);
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue("Keep this unsaved draft.");
   await expect(page.getByRole("button", { name: "Remove Acme Sentry" })).toBeVisible({ timeout: 10_000 });
