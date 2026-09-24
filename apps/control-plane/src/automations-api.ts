@@ -49,12 +49,14 @@ export interface AutomationInput {
 }
 
 export interface AutomationListItem {
+  connectors: string[];
   inferenceSource: AutomationInferenceSource;
   createdAt: string;
   description: string;
   enabled: boolean;
   harness: AutomationHarness;
   id: string;
+  lastRun: { createdAt: string; status: AutomationRunStatus } | null;
   model: string;
   modelProvider: AutomationModelProvider;
   name: string;

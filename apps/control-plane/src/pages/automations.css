@@ -1,0 +1,2 @@
+.appShell--workspace .agentTableRun small.automationRunStatus--running { color: #4e58c7; }
+.appShell--workspace .agentTableRun small.automationRunStatus--failed { color: #b44545; }

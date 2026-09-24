@@ -580,7 +580,8 @@ export async function setAutomationEnabled(input: {
 }
 
 export async function listAutomations(organizationId: string) {
-  return getDatabase()
+  const db = getDatabase();
+  const rows = await db
     .select({
       createdAt: automations.createdAt,
       description: automations.description,
@@ -594,6 +595,7 @@ export async function listAutomations(organizationId: string) {
       trigger: automationVersions.trigger,
       updatedAt: automations.updatedAt,
       version: automationVersions.version,
+      versionId: automationVersions.id,
     })
     .from(automations)
     .innerJoin(
@@ -602,6 +604,79 @@ export async function listAutomations(organizationId: string) {
     )
     .where(eq(automations.organizationId, organizationId))
     .orderBy(desc(automations.updatedAt));
+  if (rows.length === 0) return [];
+  const versionIds = rows.map((row) => row.versionId);
+  const [accountRows, repositoryRows, runRows] = await Promise.all([
+    db
+      .select({
+        provider: integrationAccounts.provider,
+        versionId: automationVersionIntegrationAccounts.automationVersionId,
+      })
+      .from(automationVersionIntegrationAccounts)
+      .innerJoin(
+        integrationAccounts,
+        eq(
+          integrationAccounts.id,
+          automationVersionIntegrationAccounts.integrationAccountId,
+        ),
+      )
+      .where(
+        and(
+          inArray(automationVersionIntegrationAccounts.automationVersionId, versionIds),
+          eq(automationVersionIntegrationAccounts.role, "context"),
+        ),
+      ),
+    db
+      .selectDistinct({ versionId: automationVersionRepositories.automationVersionId })
+      .from(automationVersionRepositories)
+      .where(inArray(automationVersionRepositories.automationVersionId, versionIds)),
+    db
+      .selectDistinctOn([automationRuns.automationId], {
+        automationId: automationRuns.automationId,
+        createdAt: automationRuns.createdAt,
+        status: automationRuns.status,
+      })
+      .from(automationRuns)
+      .where(
+        and(
+          eq(automationRuns.organizationId, organizationId),
+          inArray(automationRuns.automationId, rows.map((row) => row.id)),
+        ),
+      )
+      .orderBy(automationRuns.automationId, desc(automationRuns.createdAt)),
+  ]);
+  return summarizeAutomationList(rows, { accountRows, repositoryRows, runRows });
+}
+
+// Connectors list GitHub first when the version has repositories, followed by
+// each distinct context provider in the order it was linked.
+export function summarizeAutomationList<
+  Row extends { id: string; versionId: string },
+>(
+  rows: Row[],
+  links: {
+    accountRows: Array<{ provider: string; versionId: string }>;
+    repositoryRows: Array<{ versionId: string }>;
+    runRows: Array<{ automationId: string; createdAt: Date; status: AutomationRunStatus }>;
+  },
+) {
+  const connectors = new Map<string, Set<string>>();
+  for (const { versionId } of links.repositoryRows) {
+    connectors.set(versionId, new Set(["github"]));
+  }
+  for (const { provider, versionId } of links.accountRows) {
+    const providers = connectors.get(versionId) ?? new Set<string>();
+    providers.add(provider);
+    connectors.set(versionId, providers);
+  }
+  const lastRuns = new Map(
+    links.runRows.map(({ automationId, ...run }) => [automationId, run]),
+  );
+  return rows.map(({ versionId, ...row }) => ({
+    ...row,
+    connectors: [...(connectors.get(versionId) ?? [])],
+    lastRun: lastRuns.get(row.id) ?? null,
+  }));
 }
 
 export async function getAutomation(
