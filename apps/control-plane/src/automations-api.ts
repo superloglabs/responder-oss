@@ -3,6 +3,7 @@ import { apiErrorMessage, type AgentOptions } from "./agents-api";
 export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode";
 export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
+export type AutomationInferenceSource = "responder" | "byok" | "byos";
 export type AutomationRunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type AutomationTrigger =
@@ -31,7 +32,7 @@ export interface AutomationConfiguration {
   maxOutputTokensPerRequest: number;
   maxRuntimeSeconds: number;
   model: string;
-  modelCredentialId: string;
+  modelCredentialId: string | null;
   modelProvider: AutomationModelProvider;
   prompt: string;
   repositoryIds: string[];
@@ -48,6 +49,7 @@ export interface AutomationInput {
 }
 
 export interface AutomationListItem {
+  inferenceSource: AutomationInferenceSource;
   createdAt: string;
   description: string;
   enabled: boolean;
@@ -61,7 +63,15 @@ export interface AutomationListItem {
   version: number;
 }
 
+export interface AutomationRunInferenceUsage {
+  costMicros: number;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+}
+
 export interface AutomationRunSummary {
+  inferenceUsage: AutomationRunInferenceUsage | null;
   completedAt: string | null;
   createdAt: string;
   failureCategory: string | null;
@@ -74,6 +84,7 @@ export interface AutomationRunSummary {
 }
 
 export interface AutomationDetail {
+  inferenceSource: AutomationInferenceSource;
   configuration: AutomationConfiguration;
   createdAt: string;
   description: string;
@@ -197,3 +208,23 @@ export function pollAutomationSubscription(id: string) { return automationJson<{
 export function cancelAutomationSubscription(id: string) { return automationJson(`/api/automations/subscriptions/openai/${encodeURIComponent(id)}`, { method: "DELETE" }); }
 
 export function fetchAutomationModels(credentialId: string, refresh = false) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/credentials/${encodeURIComponent(credentialId)}/models${refresh ? "?refresh=true" : ""}`); }
+
+// Models available with included usage, served through AI Gateway.
+export function fetchIncludedAutomationModels(provider: AutomationModelProvider) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/included-models/${encodeURIComponent(provider)}`); }
+
+export async function fetchAutomationCredentials(): Promise<AutomationCredential[]> {
+  const response = await automationJson<{ credentials: AutomationCredential[] }>("/api/automations/credentials");
+  return response.credentials;
+}
+
+export function rotateAutomationCredential(id: string, apiKey: string) {
+  return automationJson<{ updated: boolean }>(`/api/automations/credentials/${encodeURIComponent(id)}`, {
+    body: JSON.stringify({ apiKey }),
+    headers: { "content-type": "application/json" },
+    method: "PUT",
+  });
+}
+
+export function deleteAutomationCredential(id: string) {
+  return automationJson<{ deleted: boolean }>(`/api/automations/credentials/${encodeURIComponent(id)}`, { method: "DELETE" });
+}

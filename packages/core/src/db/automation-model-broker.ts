@@ -4,7 +4,10 @@ import { and, eq, gt, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
   issueAutomationModelBrokerToken,
 } from "../automations/model-broker.js";
-import type { AutomationModelProvider } from "../automations/config.js";
+import type {
+  AutomationInferenceSource,
+  AutomationModelProvider,
+} from "../automations/config.js";
 import {
   decryptCredentials,
   encryptCredentials,
@@ -42,9 +45,16 @@ interface ClaimGrantDependencies {
   now?: () => Date;
 }
 
+// Responder-funded grants hold no customer credential. BYOK grants copy the
+// organization key. Subscription grants only authorize context tools: the
+// managed client in the sandbox calls the model with its own login.
+export type AutomationModelBrokerGrantCredential =
+  | { inferenceSource: "responder" }
+  | { apiKey: string; inferenceSource: "byok" }
+  | { inferenceSource: "byos" };
+
 export interface CreateAutomationModelBrokerGrantInput {
-  contextOnly?: boolean;
-  apiKey: string;
+  credential: AutomationModelBrokerGrantCredential;
   expiresAt: Date;
   maxOutputTokensPerRequest: number;
   maxRequests: number;
@@ -56,11 +66,13 @@ export interface CreateAutomationModelBrokerGrantInput {
 }
 
 export interface AutomationModelBrokerClaim {
-  apiKey: string;
+  apiKey: string | null;
   grantId: string;
+  inferenceSource: AutomationInferenceSource;
   maxOutputTokens: number;
   model: string;
   organizationId: string;
+  provider: AutomationModelProvider;
   runId: string;
 }
 
@@ -104,11 +116,13 @@ function validateGrantInput(
   if (!runIdentifierPattern.test(input.runId)) {
     throw new Error("Automation run ID must be a normalized identifier");
   }
+  const { credential } = input;
   if (
-    input.apiKey.length === 0 ||
-    input.apiKey.length > 4_096 ||
-    input.apiKey.trim() !== input.apiKey ||
-    input.apiKey.includes("\0")
+    credential.inferenceSource === "byok" &&
+    (credential.apiKey.length === 0 ||
+      credential.apiKey.length > 4_096 ||
+      credential.apiKey.trim() !== credential.apiKey ||
+      credential.apiKey.includes("\0"))
   ) {
     throw new Error("Automation model credential is invalid");
   }
@@ -140,14 +154,20 @@ export async function createAutomationModelBrokerGrant(
   const issuedToken = issueAutomationModelBrokerToken(
     dependencies.randomBytes,
   );
-  const encryptedCredentials = encryptCredentials({ apiKey: input.apiKey, ...(input.contextOnly ? { contextOnly: true } : {}) });
+  const { credential } = input;
+  const encryptedCredentials = credential.inferenceSource === "byok"
+    ? encryptCredentials({ apiKey: credential.apiKey })
+    : credential.inferenceSource === "byos"
+      ? encryptCredentials({ apiKey: "subscription-context-only", contextOnly: true })
+      : null;
   const rows = await getDatabase()
     .insert(automationModelBrokerGrants)
     .values({
-      contextOnly: input.contextOnly ?? false,
+      contextOnly: credential.inferenceSource === "byos",
       credentialKeyVersion: 1,
       encryptedCredentials,
       expiresAt: input.expiresAt,
+      inferenceSource: credential.inferenceSource,
       leaseId: input.leaseId,
       maxOutputTokensPerRequest: input.maxOutputTokensPerRequest,
       model: input.model,
@@ -233,34 +253,45 @@ export async function claimAutomationModelBrokerGrant(
     .returning({
       encryptedCredentials: automationModelBrokerGrants.encryptedCredentials,
       id: automationModelBrokerGrants.id,
+      inferenceSource: automationModelBrokerGrants.inferenceSource,
       maxOutputTokensPerRequest:
         automationModelBrokerGrants.maxOutputTokensPerRequest,
       model: automationModelBrokerGrants.model,
       organizationId: automationModelBrokerGrants.organizationId,
+      provider: automationModelBrokerGrants.provider,
       runId: automationModelBrokerGrants.runId,
     });
   const grant = rows[0];
   if (!grant) return null;
 
-  const decrypt = dependencies.decryptCredentials ??
-    ((encrypted: string) =>
-      decryptCredentials<AutomationModelCredentials>(encrypted));
-  const credentials = decrypt(grant.encryptedCredentials);
-  if (credentials.contextOnly) return null;
-  if (
-    typeof credentials.apiKey !== "string" ||
-    credentials.apiKey.length === 0
-  ) {
-    throw new Error("Automation model credential is unavailable");
+  let apiKey: string | null = null;
+  if (grant.inferenceSource !== "responder") {
+    if (!grant.encryptedCredentials) {
+      throw new Error("Automation model credential is unavailable");
+    }
+    const decrypt = dependencies.decryptCredentials ??
+      ((encrypted: string) =>
+        decryptCredentials<AutomationModelCredentials>(encrypted));
+    const credentials = decrypt(grant.encryptedCredentials);
+    if (credentials.contextOnly) return null;
+    if (
+      typeof credentials.apiKey !== "string" ||
+      credentials.apiKey.length === 0
+    ) {
+      throw new Error("Automation model credential is unavailable");
+    }
+    apiKey = credentials.apiKey;
   }
 
   return {
-    apiKey: credentials.apiKey,
+    apiKey,
     grantId: grant.id,
+    inferenceSource: grant.inferenceSource,
     maxOutputTokens:
       input.requestedMaxOutputTokens ?? grant.maxOutputTokensPerRequest,
     model: grant.model,
     organizationId: grant.organizationId,
+    provider: grant.provider,
     runId: grant.runId,
   };
 }

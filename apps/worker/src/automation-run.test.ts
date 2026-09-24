@@ -11,12 +11,13 @@ function claimedRun() {
     automationVersionId: "41414141-4141-4141-8141-414141414141",
     cancelRequestedAt: null,
     harness: "codex" as const,
+    inferenceSource: "byok" as "byok" | "byos" | "responder",
     leaseId: "71717171-7171-4171-8171-717171717170",
     maxModelRequests: 8,
     maxOutputTokensPerRequest: 4_096,
     maxRuntimeSeconds: 600,
     model: "gpt-5.4",
-    modelCredentialId: "51515151-5151-4151-8151-515151515151",
+    modelCredentialId: "51515151-5151-4151-8151-515151515151" as string | null,
     modelProvider: "openai" as const,
     organizationId,
     prompt: "Fix the failing test.",
@@ -42,6 +43,7 @@ function dependencies() {
   return {
     appendEvent: vi.fn().mockResolvedValue(undefined),
     cancellationRequested: vi.fn().mockResolvedValue(false),
+    checkAllowance: vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -98,7 +100,10 @@ describe("automation run processor", () => {
     }, process.env, deps)).resolves.toEqual({ runId });
 
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
-      apiKey: "customer-provider-secret",
+      credential: {
+        apiKey: "customer-provider-secret",
+        inferenceSource: "byok",
+      },
       organizationId,
       provider: "openai",
       runId,
@@ -147,6 +152,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "native-refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "byos" });
     deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
     deps.acquireSubscription.mockResolvedValue(authJson);
     deps.runCodex.mockImplementation(async (_session, input) => {
@@ -154,7 +160,7 @@ describe("automation run processor", () => {
       return { eventStream: "" };
     });
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
-    expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ contextOnly: true, apiKey: "subscription-context-only" }));
+    expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
     expect(JSON.stringify(deps.createGrant.mock.calls)).not.toContain("native-refresh");
     expect(deps.runCodex).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ model: expect.objectContaining({ subscription: { authJson, persist: expect.any(Function) } }) }));
     expect(deps.persistSubscription).toHaveBeenCalledWith({ credentialId: claimedRun().modelCredentialId, organizationId, leaseId: claimedRun().leaseId, authJson, previousAccountId: "account" });
@@ -166,10 +172,64 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "byos" });
     deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
     deps.acquireSubscription.mockResolvedValue(authJson);
     deps.runInSandbox.mockRejectedValue(new Error("cleanup failed"));
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.releaseSubscription).not.toHaveBeenCalled();
+  });
+
+  it("uses Responder-funded inference without reading an organization key", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({
+      ...claimedRun(),
+      inferenceSource: "responder",
+      modelCredentialId: null,
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId);
+    expect(deps.getCredential).not.toHaveBeenCalled();
+    expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
+      credential: { inferenceSource: "responder" },
+    }));
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      status: "succeeded",
+    }));
+  });
+
+  it("stops before the sandbox when the included usage is used up", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({
+      ...claimedRun(),
+      inferenceSource: "responder",
+      modelCredentialId: null,
+    });
+    deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.createGrant).not.toHaveBeenCalled();
+    expect(deps.runInSandbox).not.toHaveBeenCalled();
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "usage_limit_reached",
+      failureMessage: expect.stringContaining("allowance"),
+      status: "failed",
+    }));
   });
 });

@@ -10,7 +10,9 @@ import {
 import {
   createAutomationModelBrokerGrant,
   revokeAutomationModelBrokerGrant,
+  type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
+import { checkAutomationInferenceAllowance } from "@responder/core/billing/autumn";
 import { getOrganizationModelCredential, acquireSubscriptionCredential, persistSubscriptionCredential, releaseSubscriptionCredential } from "@responder/core/db/automation-model-credentials";
 import { getAutomationRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
@@ -36,6 +38,7 @@ import {
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
 interface AutomationRunDependencies {
+  checkAllowance: typeof checkAutomationInferenceAllowance;
   appendEvent: typeof appendAutomationRunEvent;
   cancellationRequested: typeof automationRunCancellationRequested;
   checkoutRepositories: typeof checkoutAutomationRuntimeRepositories;
@@ -60,6 +63,7 @@ interface AutomationRunDependencies {
 }
 
 const defaultDependencies: AutomationRunDependencies = {
+  checkAllowance: checkAutomationInferenceAllowance,
   appendEvent: appendAutomationRunEvent,
   cancellationRequested: automationRunCancellationRequested,
   checkoutRepositories: checkoutAutomationRuntimeRepositories,
@@ -183,6 +187,7 @@ export async function processAutomationRun(
 
   await recordEvent(dependencies, run.runId, "run_started", {
     harness: run.harness,
+    inferenceSource: run.inferenceSource,
     model: run.model,
     provider: run.modelProvider,
   });
@@ -238,25 +243,38 @@ export async function processAutomationRun(
       return { runId: run.runId };
     }
 
-    const credential = await dependencies.getCredential({
-      credentialId: run.modelCredentialId,
-      organizationId: run.organizationId,
-      provider: run.modelProvider,
-    });
-    if (!credential) throw new Error("The configured model credential is unavailable");
-
-    if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
+    let grantCredential: AutomationModelBrokerGrantCredential;
     let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
-    if (credential.subscription) {
-      const owner = { credentialId: run.modelCredentialId, organizationId: run.organizationId, leaseId: run.leaseId };
-      subscriptionLease = owner;
-      const authJson = await dependencies.acquireSubscription({ ...owner, expiresAt: new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 300) * 1000) });
-      nativeSubscription = { authJson, persist: (updated) => dependencies.persistSubscription({ ...owner, authJson: updated, previousAccountId: parseSubscriptionAuth(authJson).tokens.account_id }) };
+    if (run.inferenceSource === "responder") {
+      // Responder-funded runs stop here, before a sandbox starts, when the
+      // organization's allowance is used up.
+      const access = await dependencies.checkAllowance(run.organizationId);
+      if (!access.allowed) throw new AutomationAllowanceExhaustedError();
+      grantCredential = { inferenceSource: "responder" };
+    } else {
+      if (!run.modelCredentialId) {
+        throw new Error("The configured model credential is unavailable");
+      }
+      const credential = await dependencies.getCredential({
+        credentialId: run.modelCredentialId,
+        organizationId: run.organizationId,
+        provider: run.modelProvider,
+      });
+      if (!credential) throw new Error("The configured model credential is unavailable");
+
+      if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
+      if (credential.subscription) {
+        const owner = { credentialId: run.modelCredentialId, organizationId: run.organizationId, leaseId: run.leaseId };
+        subscriptionLease = owner;
+        const authJson = await dependencies.acquireSubscription({ ...owner, expiresAt: new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 300) * 1000) });
+        nativeSubscription = { authJson, persist: (updated) => dependencies.persistSubscription({ ...owner, authJson: updated, previousAccountId: parseSubscriptionAuth(authJson).tokens.account_id }) };
+        grantCredential = { inferenceSource: "byos" };
+      } else {
+        grantCredential = { apiKey: credential.apiKey, inferenceSource: "byok" };
+      }
     }
     const grant = await dependencies.createGrant({
-      apiKey: credential.subscription ? "subscription-context-only" : credential.apiKey,
-      ...(credential.subscription ? { contextOnly: true } : {}),
-
+      credential: grantCredential,
       expiresAt: new Date(
         dependencies.now().getTime() + run.maxRuntimeSeconds * 1_000,
       ),
@@ -373,17 +391,24 @@ export async function processAutomationRun(
     const leaseLost = error instanceof AutomationRunLeaseLostError;
     const cancelled = error instanceof AutomationRunCancelledError;
     const timedOut = error instanceof AutomationRunTimeoutError;
+    const allowanceExhausted = error instanceof AutomationAllowanceExhaustedError;
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
+      : allowanceExhausted
+        ? error.message
       : safeInvestigationError(error, environment);
     if (!leaseLost) {
       await dependencies.setStatus({
         ...(cancelled
           ? {}
           : {
-              failureCategory: timedOut ? "runtime_limit_exceeded" : "execution_failed",
+              failureCategory: timedOut
+                ? "runtime_limit_exceeded"
+                : allowanceExhausted
+                  ? "usage_limit_reached"
+                  : "execution_failed",
               failureMessage: message,
             }),
         leaseId: run.leaseId,
@@ -397,7 +422,7 @@ export async function processAutomationRun(
         cancelled ? undefined : { message },
       );
     }
-    if (!cancelled && !leaseLost) {
+    if (!cancelled && !leaseLost && !allowanceExhausted) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",
@@ -439,6 +464,15 @@ export async function processAutomationRun(
     }
   }
   return { runId: run.runId };
+}
+
+class AutomationAllowanceExhaustedError extends Error {
+  constructor() {
+    super(
+      "The automation usage allowance for this billing period is used up. Upgrade the plan in billing settings or connect your own model key.",
+    );
+    this.name = "AutomationAllowanceExhaustedError";
+  }
 }
 
 class AutomationRunCancelledError extends Error {

@@ -1,4 +1,5 @@
 import { listSubscriptionModels } from "./subscription-models.js";
+import { listAIGatewayModels } from "../../../../packages/core/src/automations/model-pricing.js";
 import { listProviderModels, ModelCatalogError } from "../../../../packages/core/src/automations/model-catalog.js";
 import { getOrganizationModelCredential } from "../../../../packages/core/src/db/automation-model-credentials.js";
 import type { AutomationModelProvider } from "../../../../packages/core/src/automations/config.js";
@@ -94,6 +95,17 @@ async function testProviderCredential(input: {
 }
 
 export const automationRoutes = new Hono()
+  .get("/included-models/:provider", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const provider = automationModelProviderSchema.safeParse(context.req.param("provider"));
+    if (!provider.success) return context.json({ error: "Unsupported provider" }, 400);
+    try {
+      return context.json({ models: await listAIGatewayModels(provider.data) });
+    } catch {
+      return context.json({ error: "Unable to load models. Please retry." }, 502);
+    }
+  })
   .get("/credentials/:credentialId/models", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);

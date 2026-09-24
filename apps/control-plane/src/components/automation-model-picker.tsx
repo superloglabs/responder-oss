@@ -1,7 +1,7 @@
 import { AutomationSubscriptionConnect } from "./automation-subscription-connect";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { createAutomationCredential, fetchAutomationModels, fetchAutomationOptions, type AutomationCredential, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
+import { createAutomationCredential, fetchAutomationModels, fetchAutomationOptions, fetchIncludedAutomationModels, type AutomationCredential, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
 import { automationModelProviders, modelProvider, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
 import "./automation-model-picker.css";
 
@@ -11,6 +11,8 @@ const harnesses = [
   { id: "opencode" as const, name: "OpenCode", description: "OpenCode agent harness" },
 ];
 type Panel = "providers" | "models" | "connection" | "harness" | null;
+// Groq hosts other creators' models, so AI Gateway has no Groq models.
+function includedUsageAvailable(provider: AutomationModelProvider) { return provider !== "groq"; }
 export function AutomationModelPicker({ configuration, options, onChange, onOptions, requestedOpen }: {
   configuration: AutomationConfiguration;
   options: AutomationOptions | null;
@@ -20,7 +22,8 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
 }) {
   const [panel, setPanelState] = useState<Panel>(null);
   const [provider, setProvider] = useState<AutomationModelProvider>(configuration.modelProvider);
-  const [credentialId, setCredentialId] = useState(configuration.modelCredentialId);
+  // An empty connection ID means included usage through Responder.
+  const [credentialId, setCredentialId] = useState(configuration.modelCredentialId ?? "");
   const [method, setMethod] = useState<"api_key" | "chatgpt_subscription">("api_key");
   const [query, setQuery] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -64,20 +67,23 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
     return () => document.removeEventListener("pointerdown", dismiss);
   }, [panel, saving]);
   useEffect(() => {
-    if (panel !== "models" || !credentialId) return;
+    if (panel !== "models") return;
     let active = true;
-    void fetchAutomationModels(credentialId, revision > 0).then(result => { if (active) setModels(result.models); })
+    const request = credentialId ? fetchAutomationModels(credentialId, revision > 0) : fetchIncludedAutomationModels(provider);
+    void request.then(result => { if (active) setModels(result.models); })
       .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "Unable to load models."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [panel, credentialId, revision]);
+  }, [panel, credentialId, provider, revision]);
   const subscriptionSelected = allCredentials.some(item => item.id === configuration.modelCredentialId && item.authType === "chatgpt_subscription");
   function chooseProvider(id: AutomationModelProvider) {
     setProvider(id);
-    const credential = allCredentials.find(item => item.id === configuration.modelCredentialId && item.provider === id && item.status === "active")
-      ?? allCredentials.find(item => item.provider === id && item.status === "active");
-    setCredentialId(credential?.id ?? ""); setMethod("api_key"); setModels([]);
-    setPanel(credential ? "models" : "connection");
+    // Keep the automation's own connection for this provider; otherwise start
+    // with included usage, which needs no connection.
+    const credential = allCredentials.find(item => item.id === configuration.modelCredentialId && item.provider === id && item.status === "active");
+    const fallback = includedUsageAvailable(id) ? undefined : allCredentials.find(item => item.provider === id && item.status === "active");
+    setCredentialId(credential?.id ?? fallback?.id ?? ""); setMethod("api_key"); setModels([]);
+    setPanel(credential || fallback || includedUsageAvailable(id) ? "models" : "connection");
   }
   async function connected(id: string) {
     const now = new Date().toISOString();
@@ -99,7 +105,7 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
     const subscription = credentials.some(item => item.id === credentialId && item.authType === "chatgpt_subscription");
     const harness = supportsAutomationHarness(provider, configuration.harness, subscription) ? configuration.harness
       : subscription || provider === "openai" ? "codex" : provider === "anthropic" ? "claude_agent_sdk" : "opencode";
-    onChange({ modelProvider: provider, model: model.id, modelCredentialId: credentialId, harness });
+    onChange({ modelProvider: provider, model: model.id, modelCredentialId: credentialId || null, harness });
     setPanel(null); modelButton.current?.focus();
   }
   return <div className="automationModel" ref={root} onBlur={event => {
@@ -122,9 +128,10 @@ export function AutomationModelPicker({ configuration, options, onChange, onOpti
         {panel === "models" ? <div className="automationModel__heading"><button type="button" onClick={() => setPanel("providers")}>← Providers</button><strong>{providerName}</strong></div> : null}
         {panel === "models" ? <label className="automationModel__search"><MagnifyingGlassIcon size={16} /><input aria-label="Search models" placeholder="Search models…" ref={search} value={query} onChange={event => setQuery(event.target.value)} /></label> : null}
         {panel === "providers" ? <>
-          {automationModelProviders.map(item => <button key={item.id} type="button" className="automationModel__row automationModel__provider" onClick={() => chooseProvider(item.id)}><img className="automationModel__providerIcon" src={`/model-providers/${item.id}.svg`} alt="" aria-hidden="true" /><span>{item.name}</span>{allCredentials.some(credential => credential.provider === item.id && credential.status === "active") ? <CaretRightIcon size={14} aria-hidden="true" /> : null}</button>)}
+          {automationModelProviders.map(item => <button key={item.id} type="button" className="automationModel__row automationModel__provider" onClick={() => chooseProvider(item.id)}><img className="automationModel__providerIcon" src={`/model-providers/${item.id}.svg`} alt="" aria-hidden="true" /><span>{item.name}</span>{includedUsageAvailable(item.id) || allCredentials.some(credential => credential.provider === item.id && credential.status === "active") ? <CaretRightIcon size={14} aria-hidden="true" /> : null}</button>)}
         </> : <>
-          {credentials.length > 1 ? <label className="automationModel__key"><span>Connection</span><select aria-label="Model connection" value={credentialId} onChange={event => { setLoading(true); setModels([]); setError(null); setRevision(0); setCredentialId(event.target.value); }}>{credentials.map(item => <option key={item.id} value={item.id}>{item.label}{item.authType === "chatgpt_subscription" ? " · Subscription" : ""}</option>)}</select></label> : null}
+          {credentials.length + (includedUsageAvailable(provider) ? 1 : 0) > 1 ? <label className="automationModel__key"><span>Connection</span><select aria-label="Model connection" value={credentialId} onChange={event => { setLoading(true); setModels([]); setError(null); setRevision(0); setCredentialId(event.target.value); }}>{includedUsageAvailable(provider) ? <option value="">Included usage</option> : null}{credentials.map(item => <option key={item.id} value={item.id}>{item.label}{item.authType === "chatgpt_subscription" ? " · Subscription" : ""}</option>)}</select></label> : null}
+          {!credentialId ? <p className="automationModel__hint">Included usage is billed to your monthly allowance. Add a connection to use your own key or subscription.</p> : null}
           {loading ? <p className="automationModel__hint" role="status">{credentials.some(item => item.id === credentialId && item.authType === "chatgpt_subscription") ? "Loading subscription models… The first load may take up to a minute." : "Loading available models…"}</p> : error ? <div className="automationModel__footer"><p role="alert">{error}</p><button type="button" onClick={() => refreshModels()}>Retry</button></div> : <>
             {models.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query.toLowerCase().trim())).map(item => <button className="automationModel__row" key={item.id} type="button" onClick={() => chooseModel(item)}><span>{item.name}{item.name !== item.id ? <small>{item.id}</small> : null}</span>{configuration.modelCredentialId === credentialId && configuration.model === item.id ? <CheckIcon size={14} /> : null}</button>)}
             {!models.length ? <p className="automationModel__hint">No automation models are available for this connection.</p> : !models.some(item => `${item.name} ${item.id}`.toLowerCase().includes(query.toLowerCase().trim())) ? <p className="automationModel__hint">No matching models.</p> : null}

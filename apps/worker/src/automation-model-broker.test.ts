@@ -48,7 +48,7 @@ describe("brokered automation proof", () => {
     ).resolves.toEqual({ eventStream: "completed" });
 
     expect(deps.createGrant).toHaveBeenCalledWith({
-      apiKey: "provider-secret",
+      credential: { apiKey: "provider-secret", inferenceSource: "byok" },
       expiresAt: new Date("2026-09-22T16:10:00.000Z"),
       maxOutputTokensPerRequest: 4_096,
       maxRequests: 8,

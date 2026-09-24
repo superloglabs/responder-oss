@@ -9,6 +9,14 @@ export const automationHarnessSchema = z.enum([
 
 export const automationModelProviderSchema = z.enum(automationModelProviders.map(provider => provider.id));
 
+// Responder-funded inference is the default. An organization API key or a
+// ChatGPT subscription replaces it and does not draw on the usage allowance.
+export const automationInferenceSourceSchema = z.enum([
+  "responder",
+  "byok",
+  "byos",
+]);
+
 const externalResourceIdSchema = z.string().trim().min(1).max(255);
 const integrationAccountIdSchema = z.uuid();
 const uniqueIds = (ids: string[]) => new Set(ids).size === ids.length;
@@ -50,7 +58,7 @@ export const automationConfigurationSchema = z
       .min(1)
       .max(255)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u),
-    modelCredentialId: z.uuid(),
+    modelCredentialId: z.uuid().nullable().default(null),
     modelProvider: automationModelProviderSchema,
     prompt: z.string().trim().min(1).max(50_000),
     repositoryIds: z.array(z.uuid()).min(1).max(10)
@@ -66,7 +74,7 @@ export const automationConfigurationSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: configuration.harness === "claude_agent_sdk" ? "Claude Agent SDK requires an Anthropic model credential" : "The selected harness does not support this model provider",
+        message: configuration.harness === "claude_agent_sdk" ? "Claude Agent SDK requires an Anthropic model" : "The selected harness does not support this model provider",
         path: ["modelProvider"],
       });
     }
@@ -83,6 +91,9 @@ export type AutomationConfiguration = z.infer<
   typeof automationConfigurationSchema
 >;
 export type AutomationHarnessKind = z.infer<typeof automationHarnessSchema>;
+export type AutomationInferenceSource = z.infer<
+  typeof automationInferenceSourceSchema
+>;
 export type AutomationInput = z.infer<typeof automationInputSchema>;
 export type AutomationModelProvider = z.infer<
   typeof automationModelProviderSchema

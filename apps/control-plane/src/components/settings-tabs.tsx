@@ -1,10 +1,35 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-type SettingsSection = "billing" | "integrations" | "tag-mode" | "workspace";
+export type SettingsSection =
+  | "billing"
+  | "integrations"
+  | "models"
+  | "tag-mode"
+  | "workspace";
 
 export function SettingsTabs({ active }: { active: SettingsSection }) {
   const [billingEnabled, setBillingEnabled] = useState(false);
+  const [automationsEnabled, setAutomationsEnabled] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void fetch("/api/context")
+      .then(async (response) => response.ok
+        ? response.json() as Promise<{ capabilities?: string[] }>
+        : null)
+      .catch(() => null)
+      .then((context) => {
+        if (mounted) {
+          setAutomationsEnabled(
+            context?.capabilities?.includes("automations") ?? false,
+          );
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -46,6 +71,15 @@ export function SettingsTabs({ active }: { active: SettingsSection }) {
       >
         Workspace
       </Link>
+      {automationsEnabled || active === "models" ? (
+        <Link
+          aria-current={active === "models" ? "page" : undefined}
+          className={active === "models" ? "isActive" : undefined}
+          to="/settings/models"
+        >
+          Models
+        </Link>
+      ) : null}
       {billingEnabled || active === "billing" ? (
         <Link
           aria-current={active === "billing" ? "page" : undefined}

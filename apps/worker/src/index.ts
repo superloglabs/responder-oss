@@ -84,6 +84,7 @@ import { loadResponderSecrets } from "@responder/core/secrets";
 import { runInitialTriage } from "./initial-triage.js";
 import { processAutomationRun } from "./automation-run.js";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
+import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -108,6 +109,7 @@ let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
 const pollers: {
+  automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
@@ -122,6 +124,28 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
         deleted,
         event: "automation_broker_grants_purged",
       }));
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+}
+
+async function settleAutomationUsageBilling(): Promise<void> {
+  try {
+    const result = await settleUnbilledAutomationModelUsage();
+    if (result.failed > 0 || result.settled > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "automation_usage_billing_settled",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} automation usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
     }
   } catch (error) {
     await reportWorkerException(error, { operation: "worker" }).catch(
@@ -317,6 +341,9 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   if (pollers.replayRequest) clearInterval(pollers.replayRequest);
   if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
+  if (pollers.automationUsageBilling) {
+    clearInterval(pollers.automationUsageBilling);
+  }
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
   await replayRequestDrain;
@@ -795,6 +822,11 @@ pollers.brokerGrantCleanup = setInterval(
   60 * 60 * 1_000,
 );
 pollers.brokerGrantCleanup.unref();
+pollers.automationUsageBilling = setInterval(
+  () => void settleAutomationUsageBilling(),
+  60 * 1_000,
+);
+pollers.automationUsageBilling.unref();
 pollers.replayRequest = setInterval(
   () => void drainInvestigationReplayRequests(),
   2_000,

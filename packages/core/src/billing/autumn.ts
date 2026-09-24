@@ -286,3 +286,239 @@ export async function createBillingPortal(
   });
   return result.url;
 }
+
+// Automation inference is metered in US dollars against a separate plan group,
+// so automation plans change independently of investigation billing.
+export const AUTOMATION_INFERENCE_FEATURE_ID = "responder_automation_inference";
+export const AUTOMATION_FREE_PLAN_ID = "responder_automations_free";
+export const AUTOMATION_PAID_PLANS = [
+  { id: "responder_automations_100", included: 100, price: 100 },
+  { id: "responder_automations_200", included: 200, price: 200 },
+] as const;
+export const AUTOMATION_FREE_ALLOWANCE_DOLLARS = 20;
+
+// A run may start while at least one cent of the allowance remains.
+const automationMinimumBalanceDollars = 0.01;
+
+export type AutomationPaidPlanId = (typeof AUTOMATION_PAID_PLANS)[number]["id"];
+export type AutomationPlanId = typeof AUTOMATION_FREE_PLAN_ID | AutomationPaidPlanId;
+
+const automationPlanIds: readonly string[] = [
+  AUTOMATION_FREE_PLAN_ID,
+  ...AUTOMATION_PAID_PLANS.map((plan) => plan.id),
+];
+
+export function isAutomationPaidPlanId(value: unknown): value is AutomationPaidPlanId {
+  return AUTOMATION_PAID_PLANS.some((plan) => plan.id === value);
+}
+
+export interface AutomationBillingSummary {
+  allowance: number;
+  cancelsAtPeriodEnd: boolean;
+  configured: boolean;
+  enabled: boolean;
+  nextResetAt: number | null;
+  planId: AutomationPlanId;
+  plans: Array<{ id: AutomationPaidPlanId; included: number; price: number }>;
+  remaining: number;
+  scheduledPlanId: AutomationPlanId | null;
+  usage: number;
+}
+
+export interface AutomationInferenceAccess {
+  allowed: boolean;
+  nextResetAt: number | null;
+}
+
+function automationPlanFromCustomer(customer: Customer): {
+  active: AutomationPlanId | null;
+  cancelsAtPeriodEnd: boolean;
+  scheduled: AutomationPlanId | null;
+} {
+  const find = (status: "active" | "scheduled") =>
+    customer.subscriptions.find(
+      (subscription) =>
+        subscription.status === status &&
+        automationPlanIds.includes(subscription.planId),
+    );
+  const active = find("active");
+  return {
+    active: (active?.planId as AutomationPlanId | undefined) ?? null,
+    cancelsAtPeriodEnd: active?.canceledAt != null,
+    scheduled: (find("scheduled")?.planId as AutomationPlanId | undefined) ?? null,
+  };
+}
+
+// Existing customers predate the automation plan group, and customer creation
+// only auto-enables the investigation plan, so attach the free plan on demand.
+async function ensureAutomationPlan(
+  client: Autumn,
+  organizationId: string,
+  data?: BillingCustomerData,
+): Promise<Customer> {
+  const customer = await getOrCreateCustomer(client, organizationId, data);
+  if (customer.id === null || automationPlanFromCustomer(customer).active) {
+    return customer;
+  }
+  await client.billing.attach({
+    customerId: organizationId,
+    planId: AUTOMATION_FREE_PLAN_ID,
+    redirectMode: "never",
+  });
+  return getOrCreateCustomer(client, organizationId, data);
+}
+
+function disabledAutomationSummary(configured: boolean, enabled: boolean): AutomationBillingSummary {
+  return {
+    allowance: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
+    cancelsAtPeriodEnd: false,
+    configured,
+    enabled,
+    nextResetAt: null,
+    planId: AUTOMATION_FREE_PLAN_ID,
+    plans: AUTOMATION_PAID_PLANS.map((plan) => ({ ...plan })),
+    remaining: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
+    scheduledPlanId: null,
+    usage: 0,
+  };
+}
+
+export function summarizeAutomationBillingCustomer(
+  customer: Customer,
+): AutomationBillingSummary {
+  const balance = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
+  const plan = automationPlanFromCustomer(customer);
+  const planId = plan.active ?? AUTOMATION_FREE_PLAN_ID;
+  const allowance = balance?.granted ??
+    AUTOMATION_PAID_PLANS.find((candidate) => candidate.id === planId)?.included ??
+    AUTOMATION_FREE_ALLOWANCE_DOLLARS;
+  return {
+    allowance,
+    cancelsAtPeriodEnd: plan.cancelsAtPeriodEnd,
+    configured: true,
+    enabled: true,
+    nextResetAt: balance?.nextResetAt ?? null,
+    planId,
+    plans: AUTOMATION_PAID_PLANS.map((candidate) => ({ ...candidate })),
+    remaining: Math.max(0, balance?.remaining ?? allowance),
+    scheduledPlanId: plan.scheduled,
+    usage: Math.max(0, balance?.usage ?? 0),
+  };
+}
+
+export async function getAutomationBillingSummary(
+  organizationId: string,
+  data?: BillingCustomerData,
+): Promise<AutomationBillingSummary> {
+  if (!billingIsEnabled()) return disabledAutomationSummary(false, false);
+  const client = getAutomationClientOrNull();
+  if (!client) return disabledAutomationSummary(false, true);
+  return summarizeAutomationBillingCustomer(
+    await ensureAutomationPlan(client, organizationId, data),
+  );
+}
+
+function getAutomationClientOrNull(): Autumn | null {
+  const client = getAutumnClient();
+  if (!client && process.env.NODE_ENV === "production") {
+    throw new Error("AUTUMN_SECRET_KEY is required in production");
+  }
+  return client;
+}
+
+// Read-only check that Responder-funded inference may continue. It does not
+// deduct anything; usage is reported after each model response.
+export async function checkAutomationInferenceAllowance(
+  organizationId: string,
+): Promise<AutomationInferenceAccess> {
+  if (!billingIsEnabled()) return { allowed: true, nextResetAt: null };
+  const client = getAutomationClientOrNull();
+  if (!client) return { allowed: true, nextResetAt: null };
+
+  const check = () =>
+    client.check({
+      customerId: organizationId,
+      featureId: AUTOMATION_INFERENCE_FEATURE_ID,
+      requiredBalance: automationMinimumBalanceDollars,
+    });
+  let result = await check();
+  if (!result.allowed && result.balance === null) {
+    const customer = await ensureAutomationPlan(client, organizationId);
+    if (customer.id === null) return { allowed: true, nextResetAt: null };
+    result = await check();
+  }
+  return {
+    allowed: result.allowed,
+    nextResetAt: result.balance?.nextResetAt ?? null,
+  };
+}
+
+function isDuplicateRequest(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    error.statusCode === 409
+  );
+}
+
+// Reports one model request. The usage row ID is the idempotency key, so a
+// retry after an uncertain response cannot charge twice.
+export async function trackAutomationInferenceUsage(input: {
+  costMicros: number;
+  model: string;
+  organizationId: string;
+  runId: string;
+  usageId: string;
+}): Promise<void> {
+  if (!billingIsEnabled()) return;
+  const client = requireAutumnClient();
+  if (input.costMicros <= 0) return;
+  try {
+    await client.track(
+      {
+        customerId: input.organizationId,
+        featureId: AUTOMATION_INFERENCE_FEATURE_ID,
+        properties: { model: input.model, runId: input.runId },
+        value: input.costMicros / 1_000_000,
+      },
+      { headers: { "Idempotency-Key": `automation-usage:${input.usageId}` } },
+    );
+  } catch (error) {
+    if (!isDuplicateRequest(error)) throw error;
+  }
+}
+
+export async function changeAutomationPlan(
+  organizationId: string,
+  planId: AutomationPaidPlanId,
+  successUrl: string,
+  data?: BillingCustomerData,
+): Promise<{ url: string | null }> {
+  if (!billingIsEnabled()) throw new Error("Billing is disabled");
+  const client = requireAutumnClient();
+  await ensureAutomationPlan(client, organizationId, data);
+  const result = await client.billing.attach({
+    customerId: organizationId,
+    planId,
+    redirectMode: "if_required",
+    successUrl,
+  });
+  return { url: result.paymentUrl ?? null };
+}
+
+// Paid automation plans end at the close of the billing period. The free
+// automation plan in the same group then becomes active again.
+export async function cancelAutomationPlan(organizationId: string): Promise<boolean> {
+  if (!billingIsEnabled()) throw new Error("Billing is disabled");
+  const client = requireAutumnClient();
+  const customer = await getOrCreateCustomer(client, organizationId);
+  const planId = automationPlanFromCustomer(customer).active;
+  if (!isAutomationPaidPlanId(planId)) return false;
+  await client.billing.update({
+    cancelAction: "cancel_end_of_cycle",
+    customerId: organizationId,
+    planId,
+  });
+  return true;
+}

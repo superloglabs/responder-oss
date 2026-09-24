@@ -53,13 +53,27 @@ describe("automation configuration", () => {
     ).toBe("discord");
   });
 
-  it("restricts the Anthropic-only harness to Anthropic credentials", () => {
+  it("restricts the Anthropic-only harness to Anthropic models", () => {
     expect(() =>
       automationConfigurationSchema.parse({
         ...baseConfiguration,
         harness: "claude_agent_sdk",
       })
-    ).toThrow("requires an Anthropic model credential");
+    ).toThrow("requires an Anthropic model");
+  });
+
+  it("uses Responder-funded inference when no model credential is selected", () => {
+    const withoutCredential: Record<string, unknown> = { ...baseConfiguration };
+    delete withoutCredential.modelCredentialId;
+    expect(
+      automationConfigurationSchema.parse(withoutCredential).modelCredentialId,
+    ).toBeNull();
+    expect(
+      automationConfigurationSchema.parse({
+        ...baseConfiguration,
+        modelCredentialId: null,
+      }).modelCredentialId,
+    ).toBeNull();
   });
 
   it("requires at least one repository and bounded unattended limits", () => {

@@ -1,10 +1,22 @@
+import { Hono, type Context } from "hono";
 import { automationModelProviderSchema } from "../../../../packages/core/src/automations/config.js";
 import { modelProvider, type ModelProviderId } from "../../../../packages/core/src/automations/model-providers.js";
-import { Hono } from "hono";
 import {
   automationModelBrokerTokenHash,
   readAutomationModelBrokerBearerToken,
 } from "../../../../packages/core/src/automations/model-broker.js";
+import {
+  aiGatewayBaseUrl,
+  aiGatewayModelId,
+  getAIGatewayModelPricing,
+} from "../../../../packages/core/src/automations/model-pricing.js";
+import { recordBrokeredModelUsage } from "../../../../packages/core/src/automations/model-usage-billing.js";
+import {
+  createAutomationModelUsageObserver,
+  type AutomationModelUsage,
+  type AutomationModelWireFormat,
+} from "../../../../packages/core/src/automations/model-usage.js";
+import { checkAutomationInferenceAllowance } from "../../../../packages/core/src/billing/autumn.js";
 import {
   claimAutomationModelBrokerGrant,
   type AutomationModelBrokerClaim,
@@ -12,6 +24,9 @@ import {
 
 export const openAIResponsesEndpoint = "https://api.openai.com/v1/responses";
 export const anthropicMessagesEndpoint = "https://api.anthropic.com/v1/messages";
+export const aiGatewayResponsesEndpoint = `${aiGatewayBaseUrl}/responses`;
+export const aiGatewayMessagesEndpoint = `${aiGatewayBaseUrl}/messages`;
+export const aiGatewayChatCompletionsEndpoint = `${aiGatewayBaseUrl}/chat/completions`;
 
 const providerRequestTimeoutMs = 10 * 60_000;
 const modelIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u;
@@ -29,14 +44,37 @@ type ProviderFetch = (
 ) => Promise<Response>;
 
 interface AutomationModelBrokerDependencies {
+  checkAllowance: typeof checkAutomationInferenceAllowance;
   claimGrant: ClaimGrant;
+  gatewayApiKey(): string | undefined;
+  getPricing: typeof getAIGatewayModelPricing;
   providerFetch: ProviderFetch;
+  recordUsage: typeof recordBrokeredModelUsage;
 }
 
 const defaultDependencies: AutomationModelBrokerDependencies = {
+  checkAllowance: checkAutomationInferenceAllowance,
   claimGrant: claimAutomationModelBrokerGrant,
+  gatewayApiKey: () => process.env.AI_GATEWAY_API_KEY?.trim() || undefined,
+  getPricing: getAIGatewayModelPricing,
   providerFetch: fetch,
+  recordUsage: recordBrokeredModelUsage,
 };
+
+interface ProviderRequest {
+  body: Record<string, unknown>;
+  headers: Headers;
+  url: string;
+}
+
+class BrokerRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 402 | 409 | 503,
+  ) {
+    super(message);
+  }
+}
 
 interface ParsedResponsesRequest {
   body: Record<string, unknown>;
@@ -95,7 +133,7 @@ function providerResponseHeaders(headers: Headers): Headers {
   return forwarded;
 }
 
-function brokerToken(context: { req: { header(name: string): string | undefined } }): string | null {
+function brokerToken(context: Context): string | null {
   return readAutomationModelBrokerBearerToken(
     context.req.header("authorization") ?? null,
   ) ?? readAutomationModelBrokerBearerToken(
@@ -121,39 +159,349 @@ function parseMessagesRequest(value: unknown): ParsedMessagesRequest | null {
   };
 }
 
+function logBrokerError(
+  event: string,
+  error: unknown,
+  grant?: AutomationModelBrokerClaim,
+): void {
+  console.error(JSON.stringify({
+    errorCode: error instanceof Error ? error.constructor.name : "unknown",
+    event,
+    ...(grant
+      ? {
+          grantId: grant.grantId,
+          organizationId: grant.organizationId,
+          runId: grant.runId,
+        }
+      : {}),
+  }));
+}
+
+// Forwards the provider body unchanged while reading its token usage. When
+// `drainOnCancel` is set, a client disconnect does not stop the upstream read:
+// the provider still bills the whole response, so usage is read to the end.
+function meteredBody(
+  body: ReadableStream<Uint8Array>,
+  observer: ReturnType<typeof createAutomationModelUsageObserver>,
+  onFinish: (usage: AutomationModelUsage | null) => void,
+  drainOnCancel: boolean,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    onFinish(observer.finish());
+  };
+  const drain = async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        observer.observe(value);
+      }
+    } catch {
+      // The provider timeout or a network error ends the drain.
+    }
+    finish();
+  };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          finish();
+          controller.close();
+          return;
+        }
+        observer.observe(value);
+        controller.enqueue(value);
+      } catch (error) {
+        finish();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      if (drainOnCancel) {
+        void drain();
+        return;
+      }
+      finish();
+      await reader.cancel(reason);
+    },
+  });
+}
+
+function brokerResponse(
+  providerResponse: Response,
+  format: AutomationModelWireFormat,
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): Response {
+  const headers = providerResponseHeaders(providerResponse.headers);
+  const body = providerResponse.body && providerResponse.ok
+    ? meteredBody(
+        providerResponse.body,
+        createAutomationModelUsageObserver(
+          format,
+          providerResponse.headers.get("content-type"),
+        ),
+        (usage) => {
+          if (!usage) return;
+          void dependencies.recordUsage({
+            inferenceSource: grant.inferenceSource,
+            model: grant.model,
+            organizationId: grant.organizationId,
+            provider: grant.provider,
+            runId: grant.runId,
+            usage,
+          }).catch((error: unknown) => {
+            logBrokerError("automation_model_usage_record_failed", error, grant);
+          });
+        },
+        grant.inferenceSource === "responder",
+      )
+    : providerResponse.body;
+  return new Response(body, {
+    headers,
+    status: providerResponse.status,
+    statusText: providerResponse.statusText,
+  });
+}
+
+async function assertResponderAllowance(
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): Promise<string> {
+  const apiKey = dependencies.gatewayApiKey();
+  if (!apiKey) {
+    throw new BrokerRequestError(
+      "Responder-funded inference is not configured",
+      503,
+    );
+  }
+  // Included usage is billed from gateway pricing, so an unpriced model
+  // cannot be metered and is refused.
+  const pricing = await dependencies.getPricing(
+    aiGatewayModelId(grant.provider, grant.model),
+  ).catch(() => {
+    throw new BrokerRequestError("Model pricing is unavailable", 503);
+  });
+  if (!pricing) {
+    throw new BrokerRequestError(
+      `${grant.model} is not available with included usage`,
+      409,
+    );
+  }
+  const access = await dependencies.checkAllowance(grant.organizationId);
+  if (!access.allowed) {
+    throw new BrokerRequestError(
+      "The automation usage allowance for this billing period is used up",
+      402,
+    );
+  }
+  return apiKey;
+}
+
+async function openAIProviderRequest(
+  body: Record<string, unknown>,
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): Promise<ProviderRequest> {
+  const limitedBody = {
+    ...body,
+    background: false,
+    max_output_tokens: grant.maxOutputTokens,
+  };
+  if (grant.inferenceSource === "responder") {
+    const apiKey = await assertResponderAllowance(grant, dependencies);
+    return {
+      body: { ...limitedBody, model: aiGatewayModelId("openai", grant.model) },
+      headers: new Headers({
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      }),
+      url: aiGatewayResponsesEndpoint,
+    };
+  }
+  return {
+    body: { ...limitedBody, model: grant.model },
+    headers: new Headers({
+      authorization: `Bearer ${grant.apiKey}`,
+      "content-type": "application/json",
+    }),
+    url: openAIResponsesEndpoint,
+  };
+}
+
+async function anthropicProviderRequest(
+  context: Context,
+  body: Record<string, unknown>,
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): Promise<ProviderRequest> {
+  const headers = new Headers({
+    "anthropic-version": context.req.header("anthropic-version") ?? "2023-06-01",
+    "content-type": "application/json",
+  });
+  const beta = context.req.header("anthropic-beta");
+  if (beta) headers.set("anthropic-beta", beta);
+  const limitedBody = { ...body, max_tokens: grant.maxOutputTokens };
+  if (grant.inferenceSource === "responder") {
+    headers.set(
+      "authorization",
+      `Bearer ${await assertResponderAllowance(grant, dependencies)}`,
+    );
+    return {
+      body: { ...limitedBody, model: aiGatewayModelId("anthropic", grant.model) },
+      headers,
+      url: aiGatewayMessagesEndpoint,
+    };
+  }
+  if (!grant.apiKey) {
+    throw new BrokerRequestError("Model credential is unavailable", 409);
+  }
+  headers.set("x-api-key", grant.apiKey);
+  return {
+    body: { ...limitedBody, model: grant.model },
+    headers,
+    url: anthropicMessagesEndpoint,
+  };
+}
+
+async function chatCompletionsProviderRequest(
+  body: Record<string, unknown>,
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): Promise<ProviderRequest> {
+  const forwarded: Record<string, unknown> = { ...body, max_tokens: grant.maxOutputTokens };
+  delete forwarded.max_completion_tokens;
+  if (grant.provider === "openai") {
+    delete forwarded.max_tokens;
+    forwarded.max_completion_tokens = grant.maxOutputTokens;
+  }
+  if (grant.inferenceSource === "responder") {
+    const apiKey = await assertResponderAllowance(grant, dependencies);
+    // Streamed chat completions only report usage when asked to.
+    if (forwarded.stream === true) {
+      const streamOptions = forwarded.stream_options;
+      forwarded.stream_options = {
+        ...(streamOptions && typeof streamOptions === "object" ? streamOptions : {}),
+        include_usage: true,
+      };
+    }
+    return {
+      body: { ...forwarded, model: aiGatewayModelId(grant.provider, grant.model) },
+      headers: new Headers({
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      }),
+      url: aiGatewayChatCompletionsEndpoint,
+    };
+  }
+  if (!grant.apiKey) {
+    throw new BrokerRequestError("Model credential is unavailable", 409);
+  }
+  return {
+    body: { ...forwarded, model: grant.model },
+    headers: new Headers({
+      authorization: `Bearer ${grant.apiKey}`,
+      "content-type": "application/json",
+    }),
+    url: `${modelProvider(grant.provider).baseUrl}/chat/completions`,
+  };
+}
+
+async function claimGrant(
+  context: Context,
+  dependencies: AutomationModelBrokerDependencies,
+  input: {
+    model: string;
+    provider: ModelProviderId;
+    requestedMaxOutputTokens: number | null;
+    token: string;
+  },
+): Promise<AutomationModelBrokerClaim | Response> {
+  let grant: AutomationModelBrokerClaim | null;
+  try {
+    grant = await dependencies.claimGrant({
+      model: input.model,
+      provider: input.provider,
+      requestedMaxOutputTokens: input.requestedMaxOutputTokens,
+      tokenHash: automationModelBrokerTokenHash(input.token),
+    });
+  } catch (error) {
+    logBrokerError("automation_model_broker_claim_failed", error);
+    return context.json({ error: "Model broker is unavailable" }, 503);
+  }
+  return grant ?? context.json(
+    { error: "Model broker grant is invalid or exhausted" },
+    401,
+  );
+}
+
+async function forward(
+  context: Context,
+  format: AutomationModelWireFormat,
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+  buildRequest: () => Promise<ProviderRequest>,
+): Promise<Response> {
+  let providerResponse: Response;
+  try {
+    const request = await buildRequest();
+    providerResponse = await dependencies.providerFetch(request.url, {
+      body: JSON.stringify(request.body),
+      headers: request.headers,
+      method: "POST",
+      redirect: "error",
+      // Responder-funded requests are not cancelled with the client, so the
+      // full response can be metered. Organization-funded requests stop
+      // when the client disconnects.
+      signal: grant.inferenceSource === "responder"
+        ? AbortSignal.timeout(providerRequestTimeoutMs)
+        : AbortSignal.any([
+            context.req.raw.signal,
+            AbortSignal.timeout(providerRequestTimeoutMs),
+          ]),
+    });
+  } catch (error) {
+    if (error instanceof BrokerRequestError) {
+      return context.json({ error: error.message }, error.status);
+    }
+    logBrokerError("automation_model_provider_request_failed", error, grant);
+    return context.json({ error: "Model provider request failed" }, 502);
+  }
+  return brokerResponse(providerResponse, format, grant, dependencies);
+}
+
 export function createAutomationModelBrokerRoutes(
   dependencies: AutomationModelBrokerDependencies = defaultDependencies,
 ) {
   return new Hono().post("/v1/providers/:provider/chat/completions", async (context) => {
     const provider = automationModelProviderSchema.safeParse(context.req.param("provider"));
-    if (!provider.success || provider.data === "anthropic") return context.json({ error: "Unsupported provider" }, 400);
+    if (!provider.success || provider.data === "anthropic") {
+      return context.json({ error: "Unsupported provider" }, 400);
+    }
     const token = brokerToken(context);
     if (!token) return context.json({ error: "Unauthorized" }, 401);
     const body = await context.req.json().catch(() => null) as Record<string, unknown> | null;
-    if (!body || typeof body.model !== "string" || !modelIdentifierPattern.test(body.model) || !Array.isArray(body.messages)) return context.json({ error: "Invalid model request" }, 400);
+    if (!body || typeof body.model !== "string" || !modelIdentifierPattern.test(body.model) || !Array.isArray(body.messages)) {
+      return context.json({ error: "Invalid model request" }, 400);
+    }
     const limits = [body.max_tokens, body.max_completion_tokens].filter(value => value !== undefined && value !== null);
-    if (limits.some(value => !Number.isSafeInteger(value) || (value as number) <= 0) || (body.n !== undefined && body.n !== 1)) return context.json({ error: "Invalid model request limits" }, 400);
-    let grant: AutomationModelBrokerClaim | null;
-    try { grant = await dependencies.claimGrant({ model: body.model, provider: provider.data, requestedMaxOutputTokens: limits.length ? Math.max(...limits as number[]) : null, tokenHash: automationModelBrokerTokenHash(token) }); }
-    catch (error) {
-      console.error(JSON.stringify({ event: "automation_model_broker_claim_failed", errorCode: error instanceof Error ? error.constructor.name : "unknown", provider: provider.data, model: body.model }));
-      return context.json({ error: "Model broker is unavailable" }, 503);
+    if (limits.some(value => !Number.isSafeInteger(value) || (value as number) <= 0) || (body.n !== undefined && body.n !== 1)) {
+      return context.json({ error: "Invalid model request limits" }, 400);
     }
-    if (!grant) return context.json({ error: "Model broker grant is invalid or exhausted" }, 401);
-    const forwarded: Record<string, unknown> = { ...body, model: grant.model, max_tokens: grant.maxOutputTokens };
-    delete forwarded.max_completion_tokens;
-    if (provider.data === "openai") { delete forwarded.max_tokens; forwarded.max_completion_tokens = grant.maxOutputTokens; }
-    try {
-      const response = await dependencies.providerFetch(`${modelProvider(provider.data).baseUrl}/chat/completions`, {
-        method: "POST", headers: { authorization: `Bearer ${grant.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify(forwarded), redirect: "error",
-        signal: AbortSignal.any([context.req.raw.signal, AbortSignal.timeout(providerRequestTimeoutMs)]),
-      });
-      return new Response(response.body, { status: response.status, statusText: response.statusText, headers: providerResponseHeaders(response.headers) });
-    } catch (error) {
-      console.error(JSON.stringify({ event: "automation_model_provider_request_failed", errorCode: error instanceof Error ? error.constructor.name : "unknown", provider: provider.data, grantId: grant.grantId, organizationId: grant.organizationId, runId: grant.runId }));
-      return context.json({ error: "Model provider request failed" }, 502);
-    }
+    const grant = await claimGrant(context, dependencies, {
+      model: body.model,
+      provider: provider.data,
+      requestedMaxOutputTokens: limits.length ? Math.max(...limits as number[]) : null,
+      token,
+    });
+    if (grant instanceof Response) return grant;
+    return forward(context, "chat_completions", grant, dependencies, () =>
+      chatCompletionsProviderRequest(body, grant, dependencies));
   }).post("/v1/responses", async (context) => {
     const token = brokerToken(context);
     if (!token) return context.json({ error: "Unauthorized" }, 401);
@@ -164,72 +512,15 @@ export function createAutomationModelBrokerRoutes(
     if (!parsed) {
       return context.json({ error: "Invalid model provider request" }, 400);
     }
-
-    let grant: AutomationModelBrokerClaim | null;
-    try {
-      grant = await dependencies.claimGrant({
-        model: parsed.model,
-        provider: "openai",
-        requestedMaxOutputTokens: parsed.requestedMaxOutputTokens,
-        tokenHash: automationModelBrokerTokenHash(token),
-      });
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          errorCode: error instanceof Error ? error.constructor.name : "unknown",
-          event: "automation_model_broker_claim_failed",
-        }),
-      );
-      return context.json({ error: "Model broker is unavailable" }, 503);
-    }
-    if (!grant) {
-      return context.json(
-        { error: "Model broker grant is invalid or exhausted" },
-        401,
-      );
-    }
-
-    const providerBody = {
-      ...parsed.body,
-      background: false,
-      max_output_tokens: grant.maxOutputTokens,
-      model: grant.model,
-    };
-    let providerResponse: Response;
-    try {
-      providerResponse = await dependencies.providerFetch(
-        openAIResponsesEndpoint,
-        {
-          body: JSON.stringify(providerBody),
-          headers: {
-            authorization: `Bearer ${grant.apiKey}`,
-            "content-type": "application/json",
-          },
-          method: "POST",
-          signal: AbortSignal.any([
-            context.req.raw.signal,
-            AbortSignal.timeout(providerRequestTimeoutMs),
-          ]),
-        },
-      );
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          errorCode: error instanceof Error ? error.constructor.name : "unknown",
-          event: "automation_model_provider_request_failed",
-          grantId: grant.grantId,
-          organizationId: grant.organizationId,
-          runId: grant.runId,
-        }),
-      );
-      return context.json({ error: "Model provider request failed" }, 502);
-    }
-
-    return new Response(providerResponse.body, {
-      headers: providerResponseHeaders(providerResponse.headers),
-      status: providerResponse.status,
-      statusText: providerResponse.statusText,
+    const grant = await claimGrant(context, dependencies, {
+      model: parsed.model,
+      provider: "openai",
+      requestedMaxOutputTokens: parsed.requestedMaxOutputTokens,
+      token,
     });
+    if (grant instanceof Response) return grant;
+    return forward(context, "responses", grant, dependencies, () =>
+      openAIProviderRequest(parsed.body, grant, dependencies));
   }).post("/v1/messages", async (context) => {
     const token = brokerToken(context);
     if (!token) return context.json({ error: "Unauthorized" }, 401);
@@ -240,70 +531,15 @@ export function createAutomationModelBrokerRoutes(
     if (!parsed) {
       return context.json({ error: "Invalid model provider request" }, 400);
     }
-
-    let grant: AutomationModelBrokerClaim | null;
-    try {
-      grant = await dependencies.claimGrant({
-        model: parsed.model,
-        provider: "anthropic",
-        requestedMaxOutputTokens: parsed.requestedMaxOutputTokens,
-        tokenHash: automationModelBrokerTokenHash(token),
-      });
-    } catch (error) {
-      console.error(JSON.stringify({
-        errorCode: error instanceof Error ? error.constructor.name : "unknown",
-        event: "automation_model_broker_claim_failed",
-      }));
-      return context.json({ error: "Model broker is unavailable" }, 503);
-    }
-    if (!grant) {
-      return context.json(
-        { error: "Model broker grant is invalid or exhausted" },
-        401,
-      );
-    }
-
-    let providerResponse: Response;
-    try {
-      const headers = new Headers({
-        "anthropic-version": context.req.header("anthropic-version") ?? "2023-06-01",
-        "content-type": "application/json",
-        "x-api-key": grant.apiKey,
-      });
-      const beta = context.req.header("anthropic-beta");
-      if (beta) headers.set("anthropic-beta", beta);
-      providerResponse = await dependencies.providerFetch(
-        anthropicMessagesEndpoint,
-        {
-          body: JSON.stringify({
-            ...parsed.body,
-            max_tokens: grant.maxOutputTokens,
-            model: grant.model,
-          }),
-          headers,
-          method: "POST",
-          signal: AbortSignal.any([
-            context.req.raw.signal,
-            AbortSignal.timeout(providerRequestTimeoutMs),
-          ]),
-        },
-      );
-    } catch (error) {
-      console.error(JSON.stringify({
-        errorCode: error instanceof Error ? error.constructor.name : "unknown",
-        event: "automation_model_provider_request_failed",
-        grantId: grant.grantId,
-        organizationId: grant.organizationId,
-        runId: grant.runId,
-      }));
-      return context.json({ error: "Model provider request failed" }, 502);
-    }
-
-    return new Response(providerResponse.body, {
-      headers: providerResponseHeaders(providerResponse.headers),
-      status: providerResponse.status,
-      statusText: providerResponse.statusText,
+    const grant = await claimGrant(context, dependencies, {
+      model: parsed.model,
+      provider: "anthropic",
+      requestedMaxOutputTokens: parsed.requestedMaxOutputTokens,
+      token,
     });
+    if (grant instanceof Response) return grant;
+    return forward(context, "messages", grant, dependencies, () =>
+      anthropicProviderRequest(context, parsed.body, grant, dependencies));
   });
 }
 

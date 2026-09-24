@@ -11475,3 +11475,18 @@ body:has(.appShell--scans) {
 .authPage .authDescription { display: none; }
 .authPage .authHeading { flex-direction: column; gap: 8px; }
 .authPage .authHeading .authSwitch { max-width: none; margin: 0; text-align: center; }
+
+.appShell--settings .billingSectionTitle {
+  margin: 12px 0 0;
+  color: var(--ds-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.appShell--settings .billingPlanActions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

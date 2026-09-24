@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { issueAutomationModelBrokerToken } from "../../../../packages/core/src/automations/model-broker.js";
 import {
+  aiGatewayChatCompletionsEndpoint,
+  aiGatewayMessagesEndpoint,
+  aiGatewayResponsesEndpoint,
   anthropicMessagesEndpoint,
   createAutomationModelBrokerRoutes,
   openAIResponsesEndpoint,
@@ -8,13 +11,29 @@ import {
 import { app } from "../app.js";
 
 const claim = {
-  apiKey: "provider-secret",
+  apiKey: "provider-secret" as string | null,
   grantId: "21212121-2121-4121-8121-212121212121",
+  inferenceSource: "byok" as "byok" | "byos" | "responder",
   maxOutputTokens: 4_096,
   model: "gpt-5.1-codex",
   organizationId: "15151515-1515-4515-8515-151515151515",
+  provider: "openai" as string,
   runId: "run-1",
 };
+
+type BrokerDependencies = Parameters<typeof createAutomationModelBrokerRoutes>[0];
+
+function brokerRoutes(overrides: Partial<NonNullable<BrokerDependencies>>) {
+  return createAutomationModelBrokerRoutes({
+    checkAllowance: vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
+    claimGrant: vi.fn(),
+    gatewayApiKey: () => "gateway-secret",
+    getPricing: vi.fn().mockResolvedValue({ input: "0.000001", output: "0.000002" }),
+    providerFetch: vi.fn(),
+    recordUsage: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  });
+}
 
 function bearerToken() {
   return issueAutomationModelBrokerToken(() => Buffer.alloc(32, 2)).token;
@@ -41,7 +60,7 @@ describe("automation model broker route", () => {
         },
       }),
     );
-    const routes = createAutomationModelBrokerRoutes({
+    const routes = brokerRoutes({
       claimGrant,
       providerFetch,
     });
@@ -77,11 +96,11 @@ describe("automation model broker route", () => {
     expect(providerFetch).toHaveBeenCalledOnce();
     const [url, init] = providerFetch.mock.calls[0]!;
     expect(url).toBe(openAIResponsesEndpoint);
-    expect(init.headers).toEqual({
+    expect(Object.fromEntries(init.headers)).toEqual({
       authorization: "Bearer provider-secret",
       "content-type": "application/json",
     });
-    expect(init.headers.authorization).not.toContain(token);
+    expect(init.headers.get("authorization")).not.toContain(token);
     expect(JSON.parse(init.body)).toMatchObject({
       input: "Return a short acknowledgement.",
       max_output_tokens: 4_096,
@@ -92,7 +111,7 @@ describe("automation model broker route", () => {
 
   it("fails closed without calling a provider when the grant is unavailable", async () => {
     const providerFetch = vi.fn();
-    const routes = createAutomationModelBrokerRoutes({
+    const routes = brokerRoutes({
       claimGrant: vi.fn().mockResolvedValue(null),
       providerFetch,
     });
@@ -117,6 +136,7 @@ describe("automation model broker route", () => {
     const claimGrant = vi.fn().mockResolvedValue({
       ...claim,
       model: "claude-sonnet-4-5",
+      provider: "anthropic",
     });
     const providerFetch = vi.fn().mockResolvedValue(
       Response.json(
@@ -126,7 +146,7 @@ describe("automation model broker route", () => {
         },
       ),
     );
-    const routes = createAutomationModelBrokerRoutes({
+    const routes = brokerRoutes({
       claimGrant,
       providerFetch,
     });
@@ -168,7 +188,7 @@ describe("automation model broker route", () => {
   it("rejects malformed tokens and requests before spending an allowance", async () => {
     const claimGrant = vi.fn();
     const providerFetch = vi.fn();
-    const routes = createAutomationModelBrokerRoutes({
+    const routes = brokerRoutes({
       claimGrant,
       providerFetch,
     });
@@ -201,7 +221,7 @@ describe("automation model broker route", () => {
     const providerFetch = vi
       .fn()
       .mockRejectedValue(new Error("network failed"));
-    const routes = createAutomationModelBrokerRoutes({
+    const routes = brokerRoutes({
       claimGrant: vi.fn().mockResolvedValue(claim),
       providerFetch,
     });
@@ -231,7 +251,7 @@ describe("automation model broker route", () => {
           { status: 401 },
         ),
       );
-    const routes = createAutomationModelBrokerRoutes({
+    const routes = brokerRoutes({
       claimGrant: vi.fn().mockResolvedValue(claim),
       providerFetch,
     });
@@ -265,7 +285,7 @@ it.each([
   async (provider, endpoint) => {
     const claimGrant = vi
       .fn()
-      .mockResolvedValue({ ...claim, model: "live-model" });
+      .mockResolvedValue({ ...claim, model: "live-model", provider });
     const providerFetch = vi
       .fn()
       .mockResolvedValue(
@@ -273,7 +293,7 @@ it.each([
           headers: { "content-type": "text/event-stream" },
         }),
       );
-    const broker = createAutomationModelBrokerRoutes({
+    const broker = brokerRoutes({
       claimGrant,
       providerFetch,
     });
@@ -315,7 +335,7 @@ it.each([
 it("rejects unsupported provider routes and multiple completion budget bypasses", async () => {
   const claimGrant = vi.fn();
   const providerFetch = vi.fn();
-  const broker = createAutomationModelBrokerRoutes({
+  const broker = brokerRoutes({
     claimGrant,
     providerFetch,
   });
@@ -336,4 +356,266 @@ it("rejects unsupported provider routes and multiple completion budget bypasses"
   ).toBe(400);
   expect(claimGrant).not.toHaveBeenCalled();
   expect(providerFetch).not.toHaveBeenCalled();
+});
+
+describe("Responder-funded automation inference", () => {
+  it("routes Responder-funded requests through AI Gateway and records usage", async () => {
+    const recordUsage = vi.fn().mockResolvedValue(undefined);
+    const checkAllowance = vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null });
+    const providerFetch = vi.fn().mockResolvedValue(
+      new Response(
+        'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":400},"output_tokens":50}}}\n\n',
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+    );
+    const routes = brokerRoutes({
+      checkAllowance,
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+        model: "gpt-5.4",
+      }),
+      providerFetch,
+      recordUsage,
+    });
+
+    const response = await routes.request("/v1/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-5.4", stream: true }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    await response.text();
+    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledOnce());
+
+    expect(checkAllowance).toHaveBeenCalledWith(claim.organizationId);
+    const [url, init] = providerFetch.mock.calls[0]!;
+    expect(url).toBe(aiGatewayResponsesEndpoint);
+    expect(init.headers.get("authorization")).toBe("Bearer gateway-secret");
+    expect(JSON.parse(init.body)).toMatchObject({
+      max_output_tokens: 4_096,
+      model: "openai/gpt-5.4",
+    });
+    expect(recordUsage).toHaveBeenCalledWith({
+      inferenceSource: "responder",
+      model: "gpt-5.4",
+      organizationId: claim.organizationId,
+      provider: "openai",
+      runId: "run-1",
+      usage: {
+        cacheWriteTokens: 0,
+        cachedInputTokens: 400,
+        inputTokens: 600,
+        outputTokens: 50,
+      },
+    });
+  });
+
+  it("stops Responder-funded requests when the allowance is used up", async () => {
+    const providerFetch = vi.fn();
+    const routes = brokerRoutes({
+      checkAllowance: vi.fn().mockResolvedValue({ allowed: false, nextResetAt: null }),
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+      }),
+      providerFetch,
+    });
+
+    const response = await routes.request("/v1/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex" }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(402);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("fails Responder-funded requests when AI Gateway is not configured", async () => {
+    const providerFetch = vi.fn();
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+      }),
+      gatewayApiKey: () => undefined,
+      providerFetch,
+    });
+
+    const response = await routes.request("/v1/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex" }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(503);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("sends Responder-funded Anthropic requests to AI Gateway with a gateway slug", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(
+      Response.json({ usage: { input_tokens: 10, output_tokens: 2 } }),
+    );
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+        model: "claude-sonnet-4-5",
+        provider: "anthropic",
+      }),
+      providerFetch,
+    });
+
+    const response = await routes.request("/v1/messages", {
+      body: JSON.stringify({
+        max_tokens: 1_000,
+        messages: [{ content: "hello", role: "user" }],
+        model: "claude-sonnet-4-5",
+      }),
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": bearerToken(),
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const [url, init] = providerFetch.mock.calls[0]!;
+    expect(url).toBe(aiGatewayMessagesEndpoint);
+    expect(init.headers.get("authorization")).toBe("Bearer gateway-secret");
+    expect(init.headers.get("x-api-key")).toBeNull();
+    expect(JSON.parse(init.body).model).toBe("anthropic/claude-sonnet-4.5");
+  });
+
+  it("refuses included usage for a model without gateway pricing", async () => {
+    const providerFetch = vi.fn();
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+      }),
+      getPricing: vi.fn().mockResolvedValue(null),
+      providerFetch,
+    });
+
+    const response = await routes.request("/v1/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex" }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(409);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps reading a Responder-funded stream after the client disconnects", async () => {
+    const recordUsage = vi.fn().mockResolvedValue(undefined);
+    let push: (text: string) => void = () => undefined;
+    let close: () => void = () => undefined;
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (text) => controller.enqueue(new TextEncoder().encode(text));
+        close = () => controller.close();
+      },
+    });
+    const providerFetch = vi.fn().mockResolvedValue(new Response(upstream, {
+      headers: { "content-type": "text/event-stream" },
+    }));
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+      }),
+      providerFetch,
+      recordUsage,
+    });
+
+    const response = await routes.request("/v1/responses", {
+      body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex", stream: true }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    push('data: {"type":"response.output_text.delta"}\n\n');
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+    expect(recordUsage).not.toHaveBeenCalled();
+
+    push('data: {"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":3}}}\n\n');
+    close();
+    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledOnce());
+    expect(recordUsage.mock.calls[0]![0].usage).toMatchObject({
+      inputTokens: 9,
+      outputTokens: 3,
+    });
+    expect(providerFetch.mock.calls[0]![1].signal).toBeDefined();
+  });
+
+  it("sends Responder-funded chat completions to AI Gateway and asks for usage", async () => {
+    const recordUsage = vi.fn().mockResolvedValue(undefined);
+    const providerFetch = vi.fn().mockResolvedValue(new Response(
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3}}\n\ndata: [DONE]\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    ));
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({
+        ...claim,
+        apiKey: null,
+        inferenceSource: "responder",
+        model: "grok-5",
+        provider: "xai",
+      }),
+      providerFetch,
+      recordUsage,
+    });
+
+    const response = await routes.request("/v1/providers/xai/chat/completions", {
+      body: JSON.stringify({
+        messages: [{ content: "hello", role: "user" }],
+        model: "grok-5",
+        stream: true,
+      }),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    await response.text();
+    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledOnce());
+
+    const [url, init] = providerFetch.mock.calls[0]!;
+    expect(url).toBe(aiGatewayChatCompletionsEndpoint);
+    expect(init.headers.get("authorization")).toBe("Bearer gateway-secret");
+    expect(JSON.parse(init.body)).toMatchObject({
+      max_tokens: 4_096,
+      model: "spacexai/grok-5",
+      stream_options: { include_usage: true },
+    });
+    expect(recordUsage.mock.calls[0]![0]).toMatchObject({
+      provider: "xai",
+      usage: { inputTokens: 12, outputTokens: 3 },
+    });
+  });
 });
