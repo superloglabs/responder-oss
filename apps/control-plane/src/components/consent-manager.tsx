@@ -44,7 +44,7 @@ const consentTheme = {
   shadows: { lg: "0 16px 40px -12px rgb(0 0 0 / 45%)" },
   consentActions: {
     default: { variant: "neutral", mode: "lighter" },
-    primary: { variant: "primary", mode: "filled" },
+    primary: { variant: "neutral", mode: "lighter" },
   },
   slots: {
     consentBannerFooter: {
@@ -134,7 +134,7 @@ export function ConsentManager({
       }}
     >
       <ConsentBanner hideBranding legalLinks={["privacyPolicy"]} />
-      <ConsentDialog legalLinks={["privacyPolicy"]} />
+      <ConsentDialog hideBranding legalLinks={["privacyPolicy"]} />
       <ConsentEffects landingSearch={landingSearch} />
       <ConsentPreferencesProvider>{children}</ConsentPreferencesProvider>
     </ConsentManagerProvider>
