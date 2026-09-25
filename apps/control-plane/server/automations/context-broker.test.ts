@@ -20,7 +20,9 @@ function claim(provider: string, credentials: Record<string, unknown>) {
     resources: provider === "slack"
       ? [{ displayName: "incidents", externalId: "C123", kind: "slack_channel" }]
       : [],
+    roles: ["context" as const],
     runId: "21212121-2121-4121-8121-212121212121",
+    trigger: {},
   };
 }
 
@@ -31,12 +33,22 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
       tokens: { access_token: "fresh-oauth-token", refresh_token: "refresh-token" },
     }),
     resolveGrant: vi.fn().mockResolvedValue(activeClaim),
-    slackSearch: vi.fn().mockResolvedValue({
-      channel: { id: "C123", name: "incidents" },
-      matches: [],
-      query: "deploy failed",
-      totalMatches: 0,
-    }),
+    slack: {
+      addReaction: vi.fn(),
+      appendEvent: vi.fn(),
+      beginAttempt: vi.fn(),
+      completeAttempt: vi.fn(),
+      failAttempt: vi.fn(),
+      postMessage: vi.fn(),
+      readChannel: vi.fn(),
+      readThread: vi.fn(),
+      search: vi.fn().mockResolvedValue({
+        channel: { id: "C123", name: "incidents" },
+        matches: [],
+        query: "deploy failed",
+        totalMatches: 0,
+      }),
+    },
     withCredentialLease: vi.fn(async (input) => {
       if (!activeClaim?.account.encryptedCredentials) return null;
       const result = await input.operation(activeClaim.account.encryptedCredentials);
@@ -77,6 +89,22 @@ describe("automation context broker", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects unknown Slack tools", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app } = appFor(claim("slack", { accessToken: "xoxb-worker-only" }));
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "slack_delete_channel" },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
   it("exposes scoped Slack search without returning its credential", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
     const { app, dependencies } = appFor(
@@ -88,6 +116,7 @@ describe("automation context broker", () => {
     );
     const listBody = await list.text();
     expect(listBody).toContain("slack_search_channel");
+    expect(listBody).toContain("slack_post_message");
     expect(listBody).toContain("C123");
     expect(listBody).not.toContain("xoxp-worker-only");
 
@@ -104,7 +133,7 @@ describe("automation context broker", () => {
       }),
     );
     expect(call.status).toBe(200);
-    expect(dependencies.slackSearch).toHaveBeenCalledWith(expect.objectContaining({
+    expect(dependencies.slack.search).toHaveBeenCalledWith(expect.objectContaining({
       accessToken: "xoxp-worker-only",
       channel: { id: "C123", name: "incidents" },
       signal: expect.any(AbortSignal),

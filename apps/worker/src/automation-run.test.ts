@@ -103,6 +103,51 @@ function dependencies() {
 describe("automation run processor", () => {
   afterEach(() => vi.unstubAllEnvs());
 
+  it("serves a trigger-only Slack connection when Slack started the run", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const slackId = "61616161-6161-4161-8161-616161616161";
+    const sentryId = "62626262-6262-4262-8262-626262626262";
+    deps.getConnections.mockResolvedValue([
+      { id: slackId, provider: "slack", role: "trigger" },
+      { id: slackId, provider: "slack", role: "context" },
+      { id: sentryId, provider: "sentry", role: "trigger" },
+    ]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].contextServers).toEqual([{
+      name: "slack_61616161616141618161616161616161",
+      url: `https://responder.example/api/automation-context-broker/v1/${slackId}`,
+    }]);
+  });
+
+  it("does not serve a trigger-only Slack connection for other triggers", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({
+      ...claimedRun(),
+      triggerInput: { ...claimedRun().triggerInput, provider: "sentry" },
+    });
+    deps.getConnections.mockResolvedValue([
+      { id: "61616161-6161-4161-8161-616161616161", provider: "slack", role: "trigger" },
+    ]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].contextServers).toEqual([]);
+  });
+
   it("runs with only an opaque broker token in the fresh sandbox", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");

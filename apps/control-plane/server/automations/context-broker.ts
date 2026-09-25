@@ -20,8 +20,15 @@ import {
   safeCustomMcpFetch,
   type CustomMcpCredentials,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
-import { searchSlackChannel } from "../../../../packages/core/src/integrations/slack-search.js";
 import { integrationCallbackUrl } from "../integrations/urls.js";
+import {
+  callSlackTool,
+  defaultSlackToolDependencies,
+  slackToolDefinitions,
+  slackToolScope,
+  UnknownSlackToolError,
+  type SlackToolDependencies,
+} from "./slack-tools.js";
 
 const accountIdSchema = z.uuid();
 const requestSchema = z.object({
@@ -30,11 +37,6 @@ const requestSchema = z.object({
   method: z.string().min(1),
   params: z.record(z.string(), z.unknown()).optional(),
 });
-const slackToolInputSchema = z.object({
-  channel_id: z.string().min(1),
-  limit: z.number().int().min(1).max(20).default(10),
-  query: z.string().min(1).max(500),
-});
 
 type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
@@ -42,7 +44,7 @@ interface ContextBrokerDependencies {
   providerFetch: typeof safeCustomMcpFetch;
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
   resolveGrant: ResolveGrant;
-  slackSearch: typeof searchSlackChannel;
+  slack: SlackToolDependencies;
   withCredentialLease: typeof withIntegrationAccountCredentialLease;
 }
 
@@ -50,7 +52,7 @@ const defaultDependencies: ContextBrokerDependencies = {
   providerFetch: safeCustomMcpFetch,
   refreshCustomMcp: refreshCustomMcpOAuth,
   resolveGrant: resolveAutomationContextBrokerGrant,
-  slackSearch: searchSlackChannel,
+  slack: defaultSlackToolDependencies,
   withCredentialLease: withIntegrationAccountCredentialLease,
 };
 
@@ -167,32 +169,12 @@ async function slackResponse(
       protocolVersion: requestedVersion.success
         ? requestedVersion.data
         : "2025-03-26",
-      serverInfo: { name: "responder-slack-context", version: "1" },
+      serverInfo: { name: "responder-slack", version: "2" },
     }));
   }
-  const channels = claim.resources.filter((resource) =>
-    resource.kind === "slack_channel"
-  );
   if (request.method === "tools/list") {
     return Response.json(rpcResult(request.id, {
-      tools: [{
-        annotations: { readOnlyHint: true },
-        description: "Search messages in a Slack channel from this connected workspace.",
-        inputSchema: {
-          additionalProperties: false,
-          properties: {
-            channel_id: {
-              enum: channels.map((channel) => channel.externalId),
-              type: "string",
-            },
-            limit: { default: 10, maximum: 20, minimum: 1, type: "integer" },
-            query: { maxLength: 500, minLength: 1, type: "string" },
-          },
-          required: ["channel_id", "query"],
-          type: "object",
-        },
-        name: "slack_search_channel",
-      }],
+      tools: slackToolDefinitions(slackToolScope(claim)),
     }));
   }
   if (request.method !== "tools/call") {
@@ -201,35 +183,28 @@ async function slackResponse(
     });
   }
   const toolName = z.string().safeParse(request.params?.name);
-  const toolInput = slackToolInputSchema.safeParse(request.params?.arguments);
-  if (!toolName.success || toolName.data !== "slack_search_channel" || !toolInput.success) {
+  if (!toolName.success) {
     return Response.json(rpcError(request.id, -32602, "Invalid tool arguments"), {
       status: 400,
     });
   }
-  const channel = channels.find((candidate) =>
-    candidate.externalId === toolInput.data.channel_id
-  );
-  if (!channel || !claim.account.encryptedCredentials) {
-    return Response.json(rpcError(request.id, -32602, "Slack channel is unavailable"), {
-      status: 400,
+  try {
+    const result = await callSlackTool({
+      args: request.params?.arguments,
+      claim,
+      dependencies: dependencies.slack,
+      name: toolName.data,
+      signal,
     });
+    return Response.json(rpcResult(request.id, result));
+  } catch (error) {
+    if (error instanceof UnknownSlackToolError) {
+      return Response.json(rpcError(request.id, -32602, "Unknown tool"), {
+        status: 400,
+      });
+    }
+    throw error;
   }
-  const credentials = z.object({ userAccessToken: z.string().min(1) }).parse(
-    decryptCredentials<Record<string, unknown>>(
-      claim.account.encryptedCredentials,
-    ),
-  );
-  const result = await dependencies.slackSearch({
-    accessToken: credentials.userAccessToken,
-    channel: { id: channel.externalId, name: channel.displayName },
-    limit: toolInput.data.limit,
-    query: toolInput.data.query,
-    signal,
-  });
-  return Response.json(rpcResult(request.id, {
-    content: [{ text: JSON.stringify(result), type: "text" }],
-  }));
 }
 
 export function createAutomationContextBrokerRoutes(

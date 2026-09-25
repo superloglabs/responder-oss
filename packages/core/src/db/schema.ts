@@ -921,6 +921,11 @@ export const automationModelUsage = pgTable(
   ],
 );
 
+export type AutomationActionKind =
+  | "add_slack_reaction"
+  | "open_github_pull_request"
+  | "send_slack_message";
+
 export const automationActionAttempts = pgTable(
   "automation_action_attempts",
   {
@@ -929,9 +934,7 @@ export const automationActionAttempts = pgTable(
       .notNull()
       .references(() => automationRuns.id, { onDelete: "cascade" }),
     toolCallId: text("tool_call_id").notNull(),
-    kind: text("kind")
-      .$type<"open_github_pull_request" | "send_slack_message">()
-      .notNull(),
+    kind: text("kind").$type<AutomationActionKind>().notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     redactedInput: jsonb("redacted_input")
       .$type<Record<string, unknown>>()

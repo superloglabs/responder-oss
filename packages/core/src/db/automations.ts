@@ -37,6 +37,7 @@ import {
   organizationModelCredentials,
   repositories,
   workspaceSecrets,
+  type AutomationActionKind,
   type AutomationRunStatus,
 } from "./schema.js";
 
@@ -1285,22 +1286,37 @@ export async function saveAutomationRunSandbox(input: {
     );
 }
 
+// A live tool call sets retryFailed so the agent can repeat a call that
+// failed. Actions from the manifest never repeat a failed attempt.
 export async function beginAutomationActionAttempt(input: {
   idempotencyKey: string;
-  kind: "open_github_pull_request" | "send_slack_message";
+  kind: AutomationActionKind;
   redactedInput: Record<string, unknown>;
+  retryFailed?: boolean;
   runId: string;
   toolCallId: string;
 }): Promise<
   | { id: string; status: "started" }
   | { externalReference: string | null; id: string; status: "existing_succeeded" }
 > {
+  const { retryFailed, ...values } = input;
   const rows = await getDatabase()
     .insert(automationActionAttempts)
-    .values({ ...input, status: "running" })
+    .values({ ...values, status: "running" })
     .onConflictDoNothing()
     .returning({ id: automationActionAttempts.id });
   if (rows[0]) return { id: rows[0].id, status: "started" };
+  if (retryFailed) {
+    const retried = await getDatabase()
+      .update(automationActionAttempts)
+      .set({ failureMessage: null, status: "running", updatedAt: new Date() })
+      .where(and(
+        eq(automationActionAttempts.idempotencyKey, input.idempotencyKey),
+        eq(automationActionAttempts.status, "failed"),
+      ))
+      .returning({ id: automationActionAttempts.id });
+    if (retried[0]) return { id: retried[0].id, status: "started" };
+  }
   const existing = await getDatabase()
     .select({
       externalReference: automationActionAttempts.externalReference,

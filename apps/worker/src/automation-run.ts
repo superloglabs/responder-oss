@@ -133,22 +133,25 @@ function automationBrokerBaseUrl(environment: NodeJS.ProcessEnv): string {
   return url.toString().replace(/\/$/u, "");
 }
 
+// A Slack connection that only triggers the automation still gets a server
+// when Slack started the run, so the agent can work in that thread.
 function automationContextServers(
   environment: NodeJS.ProcessEnv,
   connections: Array<{ id: string; provider: string; role: "context" | "trigger" }>,
+  triggerInput: Record<string, unknown>,
 ) {
   const broker = new URL(automationBrokerBaseUrl(environment));
   broker.pathname = broker.pathname.replace(
     /\/api\/automation-model-broker\/v1$/u,
     "/api/automation-context-broker/v1/",
   );
-  return connections
-    .filter((connection) =>
-      connection.role === "context" &&
-      ["custom_mcp", "datadog", "sentry", "slack"].includes(
-        connection.provider,
-      )
-    )
+  const slackTriggered = triggerInput.provider === "slack";
+  const served = connections.filter((connection) =>
+    (connection.role === "context" &&
+      ["custom_mcp", "datadog", "sentry", "slack"].includes(connection.provider)) ||
+    (connection.role === "trigger" && connection.provider === "slack" && slackTriggered)
+  );
+  return [...new Map(served.map((connection) => [connection.id, connection])).values()]
     .map((connection) => ({
       name: `${connection.provider}_${connection.id.replaceAll("-", "")}`,
       url: new URL(encodeURIComponent(connection.id), broker).toString(),
@@ -407,7 +410,7 @@ export async function processAutomationRun(
       dependencies.getConnections(run.automationVersionId),
       dependencies.getConversation(run.runId),
     ]);
-    const contextServers = automationContextServers(environment, connections);
+    const contextServers = automationContextServers(environment, connections, run.triggerInput);
 
     subscriptionCleanupConfirmed = false;
     // Subscription runs always delete their sandbox, so cleanup confirms the
