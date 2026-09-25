@@ -580,9 +580,12 @@ test("starts an automation from a template on the automation list", async ({ pag
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations");
   const templates = page.getByRole("region", { name: "Start from a template" });
-  await expect(templates.getByRole("link")).toHaveCount(6);
+  await expect(templates.getByRole("link")).toHaveCount(10);
   await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(3);
+  await templates.getByRole("radio", { name: "Code review", exact: true }).click();
+  await expect(templates.getByRole("link")).toHaveCount(4);
+  await page.screenshot({ path: testInfo.outputPath("automation-templates-code-review.png"), fullPage: true });
   await templates.getByRole("radio", { name: "Support", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("automation-templates.png"), fullPage: true });
   await templates.getByRole("link", { name: /Answer support questions/ }).click();

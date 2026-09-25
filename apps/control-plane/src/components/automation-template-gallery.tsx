@@ -16,6 +16,7 @@ const filters: Array<{ label: string; value: CategoryFilter }> = [
   { label: "All", value: "all" },
   { label: automationTemplateCategoryLabels.support, value: "support" },
   { label: automationTemplateCategoryLabels.bug_triage, value: "bug_triage" },
+  { label: automationTemplateCategoryLabels.code_review, value: "code_review" },
 ];
 
 // Suggested automations shown under the automation list. Choosing one opens

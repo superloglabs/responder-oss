@@ -13,10 +13,11 @@ const configuration = {
 const options = (accounts: Array<{ id: string; provider: string }>) => ({ accounts }) as unknown as AutomationOptions;
 
 describe("automation templates", () => {
-  it("has unique ids and covers support and bug triage", () => {
+  it("has unique ids and covers every category", () => {
     expect(new Set(automationTemplates.map((template) => template.id)).size).toBe(automationTemplates.length);
-    expect(automationTemplates.filter((template) => template.category === "support").length).toBeGreaterThan(0);
-    expect(automationTemplates.filter((template) => template.category === "bug_triage").length).toBeGreaterThan(0);
+    for (const category of ["support", "bug_triage", "code_review"]) {
+      expect(automationTemplates.filter((template) => template.category === category).length).toBeGreaterThan(0);
+    }
   });
 
   it("uses only connectors an automation run can use, apart from the trigger", () => {
