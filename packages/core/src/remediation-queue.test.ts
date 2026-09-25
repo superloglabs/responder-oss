@@ -62,7 +62,7 @@ const config = {
 
 describe("remediation job queue", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.getIssuePullRequestForRemediation.mockResolvedValue(remediation);
     mocks.getRuntimeAgentConfig.mockResolvedValue(config);
   });
@@ -188,7 +188,7 @@ describe("remediation job queue", () => {
 
 describe("abandoned remediation recovery", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it("recovers only stale requests without a queued or active job", async () => {
