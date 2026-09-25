@@ -2,6 +2,7 @@ import { SentryConnectionUnavailableError } from "@responder/core/db/investigati
 import { describe, expect, it, vi } from "vitest";
 import {
   contextServerConnectFailureEvent,
+  connectContextServers,
   initialInvestigationMessage,
   investigationCapabilities,
   investigationMaxTurns,
@@ -15,6 +16,45 @@ import {
 } from "./investigate.js";
 
 describe("sandbox agent configuration", () => {
+  it("continues without Datadog when its context server cannot connect", async () => {
+    const failure = new TypeError("fetch failed");
+    const datadog = {
+      name: "datadog",
+      connect: vi.fn().mockRejectedValue(failure),
+    };
+    const sentry = {
+      name: "sentry",
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    const onFailure = vi.fn();
+
+    await expect(
+      connectContextServers(
+        [datadog, sentry] as Parameters<typeof connectContextServers>[0],
+        onFailure,
+      ),
+    ).resolves.toEqual({
+      connected: [sentry],
+      datadogDegraded: true,
+    });
+    expect(onFailure).toHaveBeenCalledWith(datadog, failure);
+  });
+
+  it("still fails when another context server cannot connect", async () => {
+    const failure = new Error("connection refused");
+    const server = {
+      name: "custom-mcp-account-1",
+      connect: vi.fn().mockRejectedValue(failure),
+    };
+
+    await expect(
+      connectContextServers(
+        [server] as Parameters<typeof connectContextServers>[0],
+        vi.fn(),
+      ),
+    ).rejects.toBe(failure);
+  });
+
   it("allows forty model turns for investigations", () => {
     expect(investigationMaxTurns).toBe(40);
   });
