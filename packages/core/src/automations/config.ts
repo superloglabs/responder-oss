@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { automationModelProviders, supportsAutomationHarness } from "./model-providers.js";
+import { isValidTimeZone } from "./schedule.js";
 
 export const automationHarnessSchema = z.enum([
   "codex",
@@ -42,6 +43,13 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       .refine(uniqueIds, "Channel IDs must be unique"),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("discord"),
+  }),
+  z.object({
+    frequency: z.enum(["hourly", "daily", "weekly"]),
+    hour: z.number().int().min(0).max(23),
+    kind: z.literal("schedule"),
+    timezone: z.string().min(1).max(64).refine(isValidTimeZone, "Choose a valid time zone"),
+    weekday: z.number().int().min(0).max(6),
   }),
 ]);
 

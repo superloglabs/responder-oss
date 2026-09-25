@@ -15,7 +15,7 @@ const options = (accounts: Array<{ id: string; provider: string }>) => ({ accoun
 describe("automation templates", () => {
   it("has unique ids and covers every category", () => {
     expect(new Set(automationTemplates.map((template) => template.id)).size).toBe(automationTemplates.length);
-    for (const category of ["support", "bug_triage", "code_review"]) {
+    for (const category of ["support", "bug_triage", "scans"]) {
       expect(automationTemplates.filter((template) => template.category === category).length).toBeGreaterThan(0);
     }
   });
@@ -47,6 +47,18 @@ describe("automation templates", () => {
     expect(applied.prompt).toBe(template.prompt);
     expect(applied.repositoryIds).toEqual(["repository"]);
     expect(applied.model).toBe("gpt-5.4");
+  });
+
+  it("runs scheduled templates in the member's time zone without a trigger connection", () => {
+    const template = findAutomationTemplate("reliability-check")!;
+    const applied = applyAutomationTemplate(configuration, template, options([
+      { id: "sentry-1", provider: "sentry" },
+      { id: "datadog-1", provider: "datadog" },
+      { id: "slack-1", provider: "slack" },
+    ]), "Europe/London");
+    expect(applied.trigger).toEqual({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 });
+    expect(applied.contextAccountIds).toEqual(["sentry-1", "datadog-1", "slack-1"]);
+    expect(findAutomationTemplate("review-architecture")!.trigger).toMatchObject({ frequency: "weekly", kind: "schedule" });
   });
 
   it("leaves missing connections for the user to connect", () => {

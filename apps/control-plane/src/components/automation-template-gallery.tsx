@@ -7,6 +7,7 @@ import {
   type AutomationTemplateCategory,
 } from "../pages/automation-templates";
 import { triggerEventLabel, triggerProviderLabel } from "../pages/automation-list-presentation";
+import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { ProviderGlyph } from "./icons";
 import { providerDisplayName } from "./provider-glyphs";
 
@@ -16,7 +17,7 @@ const filters: Array<{ label: string; value: CategoryFilter }> = [
   { label: "All", value: "all" },
   { label: automationTemplateCategoryLabels.support, value: "support" },
   { label: automationTemplateCategoryLabels.bug_triage, value: "bug_triage" },
-  { label: automationTemplateCategoryLabels.code_review, value: "code_review" },
+  { label: automationTemplateCategoryLabels.scans, value: "scans" },
 ];
 
 // Suggested automations shown under the automation list. Choosing one opens
@@ -36,20 +37,21 @@ export function AutomationTemplateGallery() {
       </header>
       <ul className="automationTemplates__grid">
         {templates.map((template) => {
-          const providers = [template.trigger.kind, ...template.connectors];
+          const { trigger } = template;
+          const providers = trigger.kind === "schedule" ? template.connectors : [trigger.kind, ...template.connectors];
           return (
             <li key={template.id}>
               <Link className="automationTemplate" to={`/automations/new?template=${template.id}`}>
                 <span className="automationTemplate__body">
                   <span className="automationTemplate__top">
-                    <span className="automationTemplate__icon"><ProviderGlyph decorative provider={template.trigger.kind} /></span>
+                    <span className="automationTemplate__icon"><AutomationTriggerIcon kind={trigger.kind} /></span>
                     <span className="automationTemplate__category">{automationTemplateCategoryLabels[template.category]}</span>
                   </span>
                   <strong>{template.name}</strong>
                   <span className="automationTemplate__description">{template.description}</span>
                 </span>
                 <span className="automationTemplate__footer">
-                  <span>{triggerProviderLabel(template.trigger)} · {triggerEventLabel(template.trigger)}</span>
+                  <span>{triggerProviderLabel(trigger)} · {triggerEventLabel(trigger)}</span>
                   <span className="automationTemplate__connectors">
                     <span className="srOnly">Uses {providers.map(providerDisplayName).join(", ")}</span>
                     {providers.map((provider) => <ProviderGlyph decorative key={provider} provider={provider} />)}

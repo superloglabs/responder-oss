@@ -68,6 +68,7 @@ export const contextProviderMetadata: Record<
 
 export function providerDisplayName(provider: string): string {
   if (provider === "clickstack") return "ClickStack / HyperDX";
+  if (provider === "schedule") return "Schedule";
   if (provider in providerGlyphs) {
     return providerGlyphs[provider as ProviderGlyphId].label;
   }

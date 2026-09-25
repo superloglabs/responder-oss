@@ -89,3 +89,4 @@
 .automationRun__composer:has(textarea:focus-visible) { outline: 1px solid #4e58f9; }
 .automationRun__composerActions { display: flex; justify-content: flex-end; gap: 10px; }
 .automationRun :is(a, button):focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.automationRun__triggerMeta > .automationTriggerIcon--schedule { flex: 0 0 auto; color: #666; }

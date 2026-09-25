@@ -3,6 +3,7 @@ import { apiErrorMessage, type AgentOptions } from "./agents-api";
 export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode";
 export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
+import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 export type AutomationInferenceSource = "responder" | "byok" | "byos";
 export type AutomationRunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -23,7 +24,21 @@ export type AutomationTrigger =
       channelIds: string[];
       integrationAccountId: string;
       kind: "discord";
+    }
+  | {
+      frequency: AutomationScheduleFrequency;
+      hour: number;
+      kind: "schedule";
+      timezone: string;
+      weekday: number;
     };
+
+export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "schedule" }>;
+
+// The trigger's connection. A schedule trigger has none.
+export function triggerAccountId(trigger: AutomationTrigger): string {
+  return trigger.kind === "schedule" ? "" : trigger.integrationAccountId;
+}
 
 export interface AutomationConfiguration {
   contextAccountIds: string[];

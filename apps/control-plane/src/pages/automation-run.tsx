@@ -35,6 +35,7 @@ import {
 } from "../automations-api";
 import { AppShell } from "../components/app-shell";
 import { ProviderGlyph } from "../components/icons";
+import { AutomationTriggerIcon } from "../components/automation-trigger-icon";
 import { providerDisplayName, providerGlyphs, type ProviderGlyphId } from "../components/provider-glyphs";
 import { copyToClipboard } from "../copy-to-clipboard";
 import { useDocumentTitle } from "../use-document-title";
@@ -90,6 +91,10 @@ function triggerMeta(run: AutomationRunDetail): string[] {
   }
   if (provider === "discord") return ["Discord", typeof attributes.username === "string" ? `@${attributes.username}` : "Command"];
   if (provider === "slack") return ["Slack", "Message"];
+  if (provider === "schedule") {
+    const frequency = attributes.frequency === "hourly" ? "Hourly" : attributes.frequency === "daily" ? "Daily" : "Weekly";
+    return ["Schedule", frequency];
+  }
   return [providerDisplayName(provider)];
 }
 
@@ -98,7 +103,7 @@ function TriggerCard({ run }: { run: AutomationRunDetail }) {
   const project = run.trigger.attributes.projectName ?? run.trigger.attributes.projectSlug;
   return <article className="automationRun__card automationRun__trigger" aria-label="Trigger">
     <div className="automationRun__triggerMeta">
-      {provider in providerGlyphs ? <ProviderGlyph decorative provider={provider as ProviderGlyphId} /> : null}
+      {provider === "schedule" ? <AutomationTriggerIcon kind="schedule" /> : provider in providerGlyphs ? <ProviderGlyph decorative provider={provider as ProviderGlyphId} /> : null}
       <span>{triggerMeta(run).join(" · ")}</span>
       <span className="automationCreate__spacer" />
       <time dateTime={run.createdAt} title={new Date(run.createdAt).toLocaleString()}>{clockTime(run.createdAt)}</time>

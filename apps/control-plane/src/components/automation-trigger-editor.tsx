@@ -1,19 +1,51 @@
 import { useEffect, useId, useRef } from "react";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import type { AutomationOptions, AutomationTrigger } from "../automations-api";
+import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
+import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
+import { defaultScheduleTrigger } from "../automation-configuration";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
+import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
 import { providerDisplayName } from "./provider-glyphs";
-import { ProviderGlyph } from "./icons";
 import "./automation-trigger-editor.css";
 
 type TriggerKind = AutomationTrigger["kind"];
+type ConnectedTriggerKind = ConnectedAutomationTrigger["kind"];
+type ScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
+
+const hours = Array.from({ length: 24 }, (_, hour) => hour);
+const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
+
+function ScheduleFields({ trigger, onChange }: { trigger: ScheduleTrigger; onChange: (trigger: ScheduleTrigger) => void }) {
+  return <>
+    <label className="automationTrigger__scheduleField">
+      <span className="automationTrigger__fieldLabel">Frequency</span>
+      <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, frequency: event.target.value as ScheduleTrigger["frequency"] })} value={trigger.frequency}>
+        <option value="hourly">Every hour</option>
+        <option value="daily">Every day</option>
+        <option value="weekly">Every week</option>
+      </select>
+    </label>
+    {trigger.frequency === "weekly" ? <label className="automationTrigger__scheduleField">
+      <span className="automationTrigger__fieldLabel">Day</span>
+      <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, weekday: Number(event.target.value) })} value={trigger.weekday}>
+        {weekdayOrder.map((weekday) => <option key={weekday} value={weekday}>{scheduleWeekdayName(weekday)}</option>)}
+      </select>
+    </label> : null}
+    {trigger.frequency !== "hourly" ? <label className="automationTrigger__scheduleField">
+      <span className="automationTrigger__fieldLabel">Time</span>
+      <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, hour: Number(event.target.value) })} value={trigger.hour}>
+        {hours.map((hour) => <option key={hour} value={hour}>{`${String(hour).padStart(2, "0")}:00`}</option>)}
+      </select>
+    </label> : null}
+  </>;
+}
 
 export function AutomationTriggerEditor({ options, trigger, onChange, open, onOpenChange, onConnected, onRefresh }: {
   options: AutomationOptions | null;
-  onRefresh: (kind: TriggerKind) => Promise<void>;
-  onConnected: (kind: TriggerKind, signal: AbortSignal) => Promise<boolean>;
+  onRefresh: (kind: ConnectedTriggerKind) => Promise<void>;
+  onConnected: (kind: ConnectedTriggerKind, signal: AbortSignal) => Promise<boolean>;
   trigger: AutomationTrigger | null;
   onChange: (trigger: AutomationTrigger | null) => void;
   open: boolean;
@@ -44,26 +76,33 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
   }, [trigger]);
 
   function choose(kind: TriggerKind, event: TriggerEvent) {
+    onOpenChange(false);
+    focusConfiguration.current = true;
+    if (kind === "schedule") {
+      onChange(defaultScheduleTrigger(event === "hourly" || event === "daily" ? event : "weekly"));
+      return;
+    }
     const account = options?.accounts.find((item) => item.provider === kind);
     onChange(kind === "sentry"
       ? { kind, integrationAccountId: account?.id ?? "", eventTypes: event === "both" ? ["new_issue", "regression"] : [event === "regression" ? "regression" : "new_issue"], projectIds: [] }
       : kind === "slack"
         ? { kind, integrationAccountId: account?.id ?? "", eventMode: event === "every_message" || event === "both" ? event : "mentions", channelIds: [] }
         : { kind, integrationAccountId: account?.id ?? "", channelIds: [] });
-    onOpenChange(false);
-    focusConfiguration.current = true;
   }
 
-  const accounts = options?.accounts.filter((account) => account.provider === trigger?.kind) ?? [];
-  const account = accounts.find((item) => item.id === trigger?.integrationAccountId);
-  const resources = options?.resources.filter((resource) => resource.integrationAccountId === trigger?.integrationAccountId && resource.kind === (trigger?.kind === "sentry" ? "sentry_project" : trigger?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
-  const selectedIds = trigger ? trigger.kind === "sentry" ? trigger.projectIds : trigger.channelIds : [];
+  const schedule = trigger?.kind === "schedule" ? trigger : null;
+  const connected = trigger?.kind === "schedule" ? null : trigger;
+  const accounts = options?.accounts.filter((account) => account.provider === connected?.kind) ?? [];
+  const account = accounts.find((item) => item.id === connected?.integrationAccountId);
+  const resources = options?.resources.filter((resource) => resource.integrationAccountId === connected?.integrationAccountId && resource.kind === (connected?.kind === "sentry" ? "sentry_project" : connected?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
+  const selectedIds = connected ? connected.kind === "sentry" ? connected.projectIds : connected.channelIds : [];
   const providerName = trigger ? providerDisplayName(trigger.kind) : undefined;
+  const removeTrigger = <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={() => { onChange(null); requestAnimationFrame(() => buttonRef.current?.focus()); }} type="button"><TrashIcon size={14} /></button>;
 
-  const title = trigger?.kind === "slack"
-    ? trigger.eventMode === "every_message" ? "Slack message posted" : trigger.eventMode === "mentions" ? "Slack app mentioned" : "Slack message posted or app mentioned"
-    : trigger?.kind === "sentry"
-      ? trigger.eventTypes.length === 2 ? "Sentry new issue or regression" : trigger.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue"
+  const title = connected?.kind === "slack"
+    ? connected.eventMode === "every_message" ? "Slack message posted" : connected.eventMode === "mentions" ? "Slack app mentioned" : "Slack message posted or app mentioned"
+    : connected?.kind === "sentry"
+      ? connected.eventTypes.length === 2 ? "Sentry new issue or regression" : connected.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue"
       : "Discord automation command";
 
 
@@ -76,28 +115,38 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
       buttonRef.current?.focus();
     }
   }}>
-    {trigger && !accounts.length ? <div className="automationTrigger__disconnected" ref={fieldsRef}>
+    {schedule ? <div className="automationTrigger__card">
+      <div className="automationTrigger__heading">
+        <AutomationTriggerIcon kind="schedule" />
+        <span className="automationTrigger__provider">Schedule</span>
+        <span className="automationTrigger__account">{schedule.timezone}</span>
+        {removeTrigger}
+      </div>
+      <div className="automationTrigger__fields" ref={fieldsRef}>
+        <ScheduleFields onChange={onChange} trigger={schedule} />
+      </div>
+    </div> : connected && !accounts.length ? <div className="automationTrigger__disconnected" ref={fieldsRef}>
       <div className="automationTrigger__connectionCopy">
-        <div><ProviderGlyph decorative provider={trigger.kind} /><span>{title}</span></div>
+        <div><AutomationTriggerIcon kind={connected.kind} /><span>{title}</span></div>
         <p>Connect {providerName} to use this trigger</p>
       </div>
       <div className="automationTrigger__connectionActions">
-        <AutomationTriggerConnect key={trigger.kind} kind={trigger.kind} name={providerName ?? trigger.kind} onConnected={onConnected} />
-        <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={() => { onChange(null); requestAnimationFrame(() => buttonRef.current?.focus()); }} type="button"><TrashIcon size={14} /></button>
+        <AutomationTriggerConnect key={connected.kind} kind={connected.kind} name={providerName ?? connected.kind} onConnected={onConnected} />
+        {removeTrigger}
       </div>
-    </div> : trigger ? <div className="automationTrigger__card">
+    </div> : connected ? <div className="automationTrigger__card">
       <div className="automationTrigger__heading">
-        <ProviderGlyph decorative provider={trigger.kind} />
+        <AutomationTriggerIcon kind={connected.kind} />
         <span className="automationTrigger__provider">{title}</span>
-        {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? trigger.integrationAccountId : ""} onChange={(event) => onChange(trigger.kind === "sentry" ? { ...trigger, integrationAccountId: event.target.value, projectIds: [] } : { ...trigger, integrationAccountId: event.target.value, channelIds: [] })}>
+        {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "sentry" ? { ...connected, integrationAccountId: event.target.value, projectIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
           <option value="" disabled>Choose a workspace</option>
           {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
         </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}
-        <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={() => { onChange(null); requestAnimationFrame(() => buttonRef.current?.focus()); }} type="button"><TrashIcon size={14} /></button>
+        {removeTrigger}
       </div>
       <div className="automationTrigger__fields" ref={fieldsRef}>
-        <AutomationResourcePicker key={`${trigger.kind}:${trigger.integrationAccountId}`} label={trigger.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(trigger.kind === "sentry" ? { ...trigger, projectIds: ids } : { ...trigger, channelIds: ids })} onRefresh={trigger.kind === "discord" ? undefined : () => onRefresh(trigger.kind)} />
-        {trigger.kind === "discord" ? <AutomationTriggerConnect key={trigger.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
+        <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label={connected.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(connected.kind === "sentry" ? { ...connected, projectIds: ids } : { ...connected, channelIds: ids })} onRefresh={connected.kind === "discord" ? undefined : () => onRefresh(connected.kind)} />
+        {connected.kind === "discord" ? <AutomationTriggerConnect key={connected.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
       </div>
     </div> : null}
     <div className="automationTrigger__chooser">

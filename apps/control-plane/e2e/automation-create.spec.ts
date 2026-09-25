@@ -100,7 +100,7 @@ test("chooses and configures Sentry inline with only supported options", async (
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
-  await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(3);
+  await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(4);
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).focus();
   await page.screenshot({ path: testInfo.outputPath("automation-choose-trigger.png"), fullPage: true });
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
@@ -580,12 +580,14 @@ test("starts an automation from a template on the automation list", async ({ pag
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations");
   const templates = page.getByRole("region", { name: "Start from a template" });
-  await expect(templates.getByRole("link")).toHaveCount(10);
+  await expect(templates.getByRole("link")).toHaveCount(11);
   await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(3);
-  await templates.getByRole("radio", { name: "Code review", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(4);
-  await page.screenshot({ path: testInfo.outputPath("automation-templates-code-review.png"), fullPage: true });
+  await templates.getByRole("radio", { name: "Scans", exact: true }).click();
+  await expect(templates.getByRole("link")).toHaveCount(5);
+  await expect(templates.getByText("Schedule · Every hour")).toBeVisible();
+  await expect(templates.getByText("Schedule · Mondays at 09:00")).toHaveCount(4);
+  await page.screenshot({ path: testInfo.outputPath("automation-templates-scans.png"), fullPage: true });
   await templates.getByRole("radio", { name: "Support", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("automation-templates.png"), fullPage: true });
   await templates.getByRole("link", { name: /Answer support questions/ }).click();
@@ -630,4 +632,57 @@ test("clears a template with Start blank", async ({ page }) => {
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toBeEmpty();
   await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeVisible();
   await expect(page.getByText(/Started from the/)).toHaveCount(0);
+});
+
+test.describe("scheduled automations", () => {
+  test.use({ timezoneId: "Europe/London" });
+
+  test("starts the hourly reliability check from its template", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1728, height: 997 });
+    await page.goto("/automations/new?template=reliability-check");
+    await expect(page.getByRole("heading", { name: "Reliability check" })).toBeVisible();
+    await expect(page.getByText("Choose a repository, then save.")).toBeVisible();
+    await expect(page.getByText("Europe/London", { exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Frequency" })).toHaveValue("hourly");
+    await expect(page.getByRole("combobox", { name: "Time" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove Engineering" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("automation-create-scheduled.png"), fullPage: true });
+
+    await page.getByRole("button", { name: "Add repository", exact: true }).click();
+    await page.getByRole("option", { name: "acme/api" }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Choose model", exact: true }).click();
+    await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
+    await page.getByRole("option", { name: "GPT-5.4" }).click();
+    let saved: Record<string, unknown> | undefined;
+    await page.route("**/api/automations", async (route) => {
+      saved = route.request().postDataJSON();
+      await route.fulfill({ status: 400, json: { error: "Please try again" } });
+    });
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => saved).toMatchObject({
+      name: "Reliability check",
+      configuration: {
+        contextAccountIds: [accountId],
+        trigger: { frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 },
+      },
+    });
+  });
+
+  test("chooses a weekly schedule from the trigger menu", async ({ page }) => {
+    await page.setViewportSize({ width: 1728, height: 997 });
+    await page.goto("/automations/new");
+    await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Every week", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "Frequency" })).toBeFocused();
+    await expect(page.getByRole("combobox", { name: "Day" })).toHaveValue("1");
+    await page.getByRole("combobox", { name: "Day" }).selectOption({ label: "Friday" });
+    await page.getByRole("combobox", { name: "Time" }).selectOption({ label: "16:00" });
+    await page.getByRole("combobox", { name: "Frequency" }).selectOption("daily");
+    await expect(page.getByRole("combobox", { name: "Day" })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Time" })).toHaveValue("16");
+    await page.getByRole("button", { name: "Remove Schedule trigger" }).click();
+    await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeFocused();
+  });
 });

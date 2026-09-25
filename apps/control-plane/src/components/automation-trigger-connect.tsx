@@ -1,12 +1,12 @@
 import { useIntegrationConnect } from "./use-integration-connect";
 import { PlugsConnectedIcon } from "@phosphor-icons/react";
-import type { AutomationTrigger } from "../automations-api";
+import type { ConnectedAutomationTrigger } from "../automations-api";
 
 export function AutomationTriggerConnect({ kind, name, onConnected, label = "Connect" }: {
-  kind: AutomationTrigger["kind"];
+  kind: ConnectedAutomationTrigger["kind"];
   name: string;
   label?: string;
-  onConnected: (kind: AutomationTrigger["kind"], signal: AbortSignal) => Promise<boolean>;
+  onConnected: (kind: ConnectedAutomationTrigger["kind"], signal: AbortSignal) => Promise<boolean>;
 }) {
   const { connect, connecting, error } = useIntegrationConnect(kind, name, onConnected);
   return <div className="automationTrigger__connectAction">

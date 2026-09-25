@@ -35,3 +35,4 @@
   .automationTemplates__header { flex-direction: column; align-items: flex-start; }
   .automationTemplates__grid { grid-template-columns: minmax(0, 1fr); }
 }
+.automationTemplate__icon .automationTriggerIcon--schedule { width: 18px; height: 18px; color: #444; }
