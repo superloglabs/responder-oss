@@ -16,7 +16,7 @@ export function sharedTriggerDescription(trigger: AutomationTrigger): string {
     return `When Sentry reports ${events} in a project you choose`;
   }
   if (trigger.kind === "discord") return "When someone runs /automate in a Discord channel you choose";
-  return scheduleLabel(trigger);
+  return `${scheduleLabel(trigger)}, in your time zone`;
 }
 
 export function sharedTemplateSetupPath(slug: string): string {

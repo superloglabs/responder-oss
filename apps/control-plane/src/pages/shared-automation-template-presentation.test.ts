@@ -12,7 +12,7 @@ describe("shared automation template presentation", () => {
     expect(sharedTriggerDescription({ channelIds: [], integrationAccountId: "", kind: "discord" }))
       .toBe("When someone runs /automate in a Discord channel you choose");
     expect(sharedTriggerDescription({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }))
-      .toBe("Every hour");
+      .toBe("Every hour, in your time zone");
   });
 
   it("opens the create page with the template", () => {

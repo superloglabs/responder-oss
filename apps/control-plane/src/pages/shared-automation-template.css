@@ -6,6 +6,5 @@
 .sharedTemplate__signIn:hover { background: #ededed; color: #202020; }
 .sharedTemplate__use { flex-shrink: 0; white-space: nowrap; text-decoration: none; }
 .sharedTemplate__description { display: block; margin-top: 4px; color: #444; }
-.sharedTemplate__triggerDetail { margin: 0; padding: 0 0 14px 30px; color: #666; font-size: 12px; line-height: 18px; }
 .automationCreate__row > .sharedTemplate__rowHint { flex: 0 0 auto; color: #666; font-size: 12px; }
 .automationCreate__instructions textarea[readonly] { cursor: default; }

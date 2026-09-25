@@ -81,21 +81,12 @@ export function SharedAutomationTemplatePage() {
           <section aria-labelledby="shared-template-triggers" className="automationCreate__section automationCreate__section--trigger">
             <h2 id="shared-template-triggers">Triggers</h2>
             <div className="automationTrigger">
-              {template.triggers.map((trigger, index) => trigger.kind === "schedule"
-                ? <div className="automationTrigger__card" key={index}>
-                    <div className="automationTrigger__heading">
-                      <AutomationTriggerIcon kind="schedule" />
-                      <span className="automationTrigger__provider">Schedule</span>
-                      <span className="automationTrigger__account">Your time zone</span>
-                    </div>
-                    <p className="sharedTemplate__triggerDetail">{sharedTriggerDescription(trigger)}</p>
-                  </div>
-                : <div className="automationTrigger__disconnected" key={index}>
-                    <div className="automationTrigger__connectionCopy">
-                      <div><AutomationTriggerIcon kind={trigger.kind} /><span>{triggerTitle(trigger)}</span></div>
-                      <p>{sharedTriggerDescription(trigger)}</p>
-                    </div>
-                  </div>)}
+              {template.triggers.map((trigger, index) => <div className="automationTrigger__disconnected" key={index}>
+                <div className="automationTrigger__connectionCopy">
+                  <div><AutomationTriggerIcon kind={trigger.kind} /><span>{triggerTitle(trigger)}</span></div>
+                  <p>{sharedTriggerDescription(trigger)}</p>
+                </div>
+              </div>)}
             </div>
           </section>
           <section aria-labelledby="shared-template-instructions" className="automationCreate__section">
