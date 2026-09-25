@@ -20,11 +20,12 @@ const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn().mockResolvedValue([]),
   credential: vi.fn(),
   modelCatalog: vi.fn(),
+  queueFollowUp: vi.fn(),
   queueRun: vi.fn(),
   tenant: vi.fn().mockResolvedValue({
     ok: true,
     organizationId: "15151515-1515-4515-8515-151515151515",
-    user: { id: "21212121-2121-4121-8121-212121212121" },
+    user: { id: "21212121-2121-4121-8121-212121212121", name: "Ash" },
   }),
 }));
 
@@ -76,7 +77,10 @@ vi.mock("../../../../packages/core/src/db/model-subscriptions.js", () => ({
   pollModelSubscription: mocks.pollSubscription,
   cancelModelSubscription: mocks.cancelSubscription,
 }));
-vi.mock("./queue.js", () => ({ queueAutomationRun: mocks.queueRun }));
+vi.mock("./queue.js", () => ({
+  queueAutomationRun: mocks.queueRun,
+  queueAutomationRunFollowUp: mocks.queueFollowUp,
+}));
 
 vi.mock(
   "../../../../packages/core/src/automations/model-catalog.js",
@@ -100,7 +104,7 @@ describe("automation control-plane routes", () => {
     mocks.tenant.mockResolvedValue({
       ok: true,
       organizationId,
-      user: { id: userId },
+      user: { id: userId, name: "Ash" },
     });
   });
 
@@ -141,6 +145,92 @@ describe("automation control-plane routes", () => {
     expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(1, organizationId, automationId, { limit: 10, offset: 10 });
     expect(invalid.status).toBe(200);
     expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(2, organizationId, automationId, { limit: 10, offset: 0 });
+  });
+
+  it("starts a test chat with the member's first message", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.getAutomation.mockResolvedValue({ id: automationId });
+    mocks.queueRun.mockResolvedValue({ duplicate: false, runId: "run-1" });
+
+    const response = await app.request(`/api/automations/${automationId}/runs`, {
+      body: JSON.stringify({ message: "  Checkout returns a 500\nfor guest users  " }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.queueRun).toHaveBeenCalledWith({
+      automationId,
+      message: { authorId: userId, authorName: "Ash", text: "Checkout returns a 500\nfor guest users" },
+      trigger: expect.objectContaining({
+        body: "Checkout returns a 500\nfor guest users",
+        provider: "manual",
+        title: "Checkout returns a 500",
+      }),
+    });
+  });
+
+  it("keeps a run without a body as a plain manual run", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.getAutomation.mockResolvedValue({ id: automationId });
+    mocks.queueRun.mockResolvedValue({ duplicate: false, runId: "run-1" });
+
+    const response = await app.request(`/api/automations/${automationId}/runs`, { method: "POST" });
+    const empty = await app.request(`/api/automations/${automationId}/runs`, {
+      body: JSON.stringify({ message: "   " }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.queueRun).toHaveBeenCalledWith({
+      automationId,
+      trigger: expect.objectContaining({ provider: "manual", title: "Manual run" }),
+    });
+    expect(empty.status).toBe(400);
+    expect(mocks.queueRun).toHaveBeenCalledOnce();
+  });
+
+  it("queues a follow-up for a finished run in the active organization", async () => {
+    const runId = "41414141-4141-4141-8141-414141414141";
+    mocks.queueFollowUp.mockResolvedValue({ jobId: "job-1" });
+
+    const response = await app.request(`/api/automations/runs/${runId}/messages`, {
+      body: JSON.stringify({ message: "Please add a regression test." }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.queueFollowUp).toHaveBeenCalledWith({
+      message: { authorId: userId, authorName: "Ash", text: "Please add a regression test." },
+      organizationId,
+      runId,
+    });
+  });
+
+  it("explains why a run cannot take a follow-up", async () => {
+    const runId = "41414141-4141-4141-8141-414141414141";
+    const send = () => app.request(`/api/automations/runs/${runId}/messages`, {
+      body: JSON.stringify({ message: "Continue" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    mocks.queueFollowUp.mockResolvedValue(null);
+
+    mocks.getAutomationRun.mockResolvedValueOnce({ automationEnabled: true });
+    const active = await send();
+    mocks.getAutomationRun.mockResolvedValueOnce({ automationEnabled: false });
+    const disabled = await send();
+    mocks.getAutomationRun.mockResolvedValueOnce(null);
+    const missing = await send();
+
+    expect(active.status).toBe(409);
+    expect(await active.json()).toEqual({ error: "Wait for this run to finish before sending a follow-up." });
+    expect(disabled.status).toBe(409);
+    expect(await disabled.json()).toEqual({ error: "Turn the automation on to continue this run." });
+    expect(missing.status).toBe(404);
+    expect(mocks.getAutomationRun).toHaveBeenCalledWith(organizationId, runId);
   });
 
   it("returns only redacted model credential metadata", async () => {

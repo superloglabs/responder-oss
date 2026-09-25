@@ -1,5 +1,6 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
+import { AutomationHarnessError } from "./automation-harness.js";
 import {
   buildCodexAutomationCommand,
   codexCliVersion,
@@ -35,7 +36,7 @@ describe("Codex automation harness", () => {
 
     await expect(
       prepareCodexAutomationHarness(session),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(`/home/daytona/workspace/.responder/codex/${codexCliVersion}/node_modules/.bin/codex`);
 
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -49,6 +50,34 @@ describe("Codex automation harness", () => {
       command?.indexOf("npm install") ?? -1,
     );
     expect(command).toContain("process.versions.node");
+  });
+
+  it("uses the snapshot's prebuilt CLI when it has the pinned version", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: install\nProcess exited with code 0\nOutput:\nresponder-harness=prebuilt\n",
+      ),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(prepareCodexAutomationHarness(session)).resolves.toBe(
+      `/opt/responder/codex/${codexCliVersion}/node_modules/.bin/codex`,
+    );
+    expect(buildCodexAutomationCommand(input, `/opt/responder/codex/${codexCliVersion}/node_modules/.bin/codex`))
+      .toContain(`'/opt/responder/codex/${codexCliVersion}/node_modules/.bin/codex' 'exec'`);
+  });
+
+  it("writes events to a file while it runs and prints them at the end", () => {
+    const command = buildCodexAutomationCommand({
+      ...input,
+      eventsPath: "/home/daytona/workspace/.responder/harness-events-1.jsonl",
+    });
+    expect(command).toContain("> '/home/daytona/workspace/.responder/harness-events-1.jsonl' || harness_status=$?");
+    expect(command.trimEnd().split("\n").slice(-2)).toEqual([
+      "cat '/home/daytona/workspace/.responder/harness-events-1.jsonl'",
+      'exit "$harness_status"',
+    ]);
+    expect(() => buildCodexAutomationCommand({ ...input, eventsPath: "/tmp/events.jsonl" }))
+      .toThrow("inside the sandbox workspace");
   });
 
   it("fails safely when the pinned CLI cannot be prepared", async () => {
@@ -175,6 +204,9 @@ describe("Codex automation harness", () => {
     const run = runCodexAutomation(session, input);
     await expect(run).rejects.toThrow("Codex automation harness failed");
     await expect(run).rejects.not.toThrow(secretShapedOutput);
+    // The output stays available for the run transcript.
+    await expect(run).rejects.toBeInstanceOf(AutomationHarnessError);
+    await expect(run).rejects.toHaveProperty("eventStream", expect.stringContaining("Process exited with code 1"));
   });
 });
 

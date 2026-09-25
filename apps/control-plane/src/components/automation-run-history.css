@@ -17,6 +17,7 @@
 .automationRuns__cancel { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #777; cursor: pointer; }
 .automationRuns__cancel:hover { background: #f3f3f3; color: #121212; }
 .automationRuns__cancel:disabled { opacity: .5; cursor: default; }
+.automationRuns__open { color: #777; vertical-align: middle; }
 .automationRuns__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #666; font-size: 12px; line-height: 18px; }
 .automationRuns__footer > div { display: flex; gap: 8px; }
 .automationRuns__footer button { padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: inherit; font-size: 13px; cursor: pointer; }

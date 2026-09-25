@@ -70,6 +70,8 @@ describe("automation trusted actions", () => {
     }, deps)).resolves.toEqual([{
       externalReference: "https://github.com/acme/app/pull/1",
       kind: "open_github_pull_request",
+      repository: "acme/app",
+      title: "Fix deployment check",
     }]);
 
     expect(activeSession.readFile).toHaveBeenCalledWith({

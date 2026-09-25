@@ -20,10 +20,17 @@ export interface AutomationModelRoute {
 
 export interface AutomationHarnessInput {
   contextServers: AutomationContextServer[];
+  // Where the harness writes its events while it runs, inside the workspace.
+  eventsPath?: string;
   model: AutomationModelRoute;
   prompt: string;
   workspacePath: string;
 }
+
+// The sandbox snapshot installs the pinned harnesses here. A harness uses its
+// prebuilt copy when the version matches and installs its own otherwise.
+export const prebuiltHarnessRoot = "/opt/responder";
+export const prebuiltHarnessMarker = "responder-harness=prebuilt";
 
 export interface AutomationContextServer {
   name: string;
@@ -32,6 +39,22 @@ export interface AutomationContextServer {
 
 export interface AutomationHarnessResult {
   eventStream: string;
+}
+
+// The run page shows the transcript parsed from this output, so keep all of it
+// rather than the middle-truncated default.
+export const automationHarnessMaxOutputTokens = 1_000_000;
+
+// Carries the output of a failed harness so the run can still store its
+// transcript. The message never includes the output.
+export class AutomationHarnessError extends Error {
+  constructor(
+    message: string,
+    readonly eventStream: string,
+  ) {
+    super(message);
+    this.name = "AutomationHarnessError";
+  }
 }
 
 export interface AutomationHarness {
@@ -86,6 +109,19 @@ export function resolveAutomationWorkspacePath(workspacePath: string): string {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+// Runs the harness with its output in the events file, then prints the file
+// so the command result still carries the whole stream.
+export function harnessInvocation(command: string, eventsPath?: string): string {
+  if (!eventsPath) return command;
+  const path = shellQuote(resolveAutomationWorkspacePath(eventsPath));
+  return [
+    "harness_status=0",
+    `${command} > ${path} || harness_status=$?`,
+    `cat ${path}`,
+    'exit "$harness_status"',
+  ].join("\n");
 }
 
 export async function assertAutomationWorkspaceHasNoSymlinkRedirects(

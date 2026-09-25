@@ -66,6 +66,7 @@ describe("fresh automation sandbox", () => {
       session,
       expect.any(Function),
       undefined,
+      false,
     );
     expect(
       session.state.environment.RESPONDER_MODEL_BROKER_TOKEN,
@@ -358,5 +359,73 @@ describe("fresh automation sandbox", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  it("pauses the sandbox and reports its state without the API key", async () => {
+    const { client, dependencies, session } = harness();
+    Object.assign(session, { close: vi.fn().mockResolvedValue(undefined) });
+    Object.assign(client, {
+      serializeSessionState: vi.fn().mockResolvedValue({
+        apiKey: "daytona-test",
+        environment: { RESPONDER_MODEL_BROKER_TOKEN: "leftover" },
+        sandboxId: "sandbox-1",
+      }),
+    });
+    const onPaused = vi.fn();
+
+    await expect(runInFreshAutomationSandbox({ ...input, keepPaused: true, onPaused }, dependencies)).resolves.toBe("completed");
+
+    expect(dependencies.createClient).toHaveBeenCalledWith(expect.objectContaining({ pauseOnExit: true }));
+    expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440);
+    expect(session.close).toHaveBeenCalledOnce();
+    expect(dependencies.close).not.toHaveBeenCalled();
+    expect(onPaused).toHaveBeenCalledWith({ id: "sandbox-1", sessionState: { environment: {}, sandboxId: "sandbox-1" } });
+  });
+
+  it("resumes a set-up sandbox without setting it up again", async () => {
+    const { client, dependencies, session } = harness();
+    Object.assign(session, { close: vi.fn(), pathExists: vi.fn().mockResolvedValue(true) });
+    Object.assign(client, {
+      deserializeSessionState: vi.fn(async (state: unknown) => state),
+      resume: vi.fn().mockResolvedValue(session),
+      serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }),
+    });
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" } }, dependencies);
+
+    expect(client.resume).toHaveBeenCalledWith({ sandboxId: "sandbox-1" });
+    expect(dependencies.createSession).not.toHaveBeenCalled();
+    expect(dependencies.configure).not.toHaveBeenCalled();
+    expect(dependencies.prepare).not.toHaveBeenCalled();
+    expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, true);
+  });
+
+  it("starts a fresh sandbox when the paused one cannot be resumed", async () => {
+    const { client, dependencies, session } = harness();
+    Object.assign(session, { close: vi.fn() });
+    Object.assign(client, {
+      deserializeSessionState: vi.fn(async (state: unknown) => state),
+      resume: vi.fn().mockRejectedValue(new Error("gone")),
+      serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-2" }),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" } }, dependencies);
+
+    expect(dependencies.createSession).toHaveBeenCalledOnce();
+    expect(dependencies.configure).toHaveBeenCalledOnce();
+    expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, false);
+  });
+
+  it("deletes the sandbox when it cannot be paused", async () => {
+    const { client, dependencies, session } = harness();
+    Object.assign(session, { close: vi.fn().mockRejectedValue(new Error("stop failed")) });
+    Object.assign(client, { serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }) });
+    const onPaused = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, onPaused }, dependencies);
+
+    expect(onPaused).not.toHaveBeenCalled();
+    expect(dependencies.close).toHaveBeenCalledOnce();
   });
 });

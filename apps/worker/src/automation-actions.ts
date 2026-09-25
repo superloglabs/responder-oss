@@ -39,6 +39,13 @@ const actionSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export interface AutomationActionResult {
+  externalReference: string | null;
+  kind: string;
+  repository?: string;
+  title?: string;
+}
+
 const manifestSchema = z.object({
   actions: z.array(actionSchema).max(20).refine(
     (actions) => new Set(actions.map((action) => action.id)).size === actions.length,
@@ -102,7 +109,7 @@ export async function executeAutomationActions(input: {
   session: DaytonaSandboxSession;
   signal?: AbortSignal;
 }, dependencies: AutomationActionDependencies = defaultDependencies): Promise<
-  Array<{ externalReference: string | null; kind: string }>
+  AutomationActionResult[]
 > {
   input.signal?.throwIfAborted();
   const manifest = await loadManifest(input.session);
@@ -111,7 +118,7 @@ export async function executeAutomationActions(input: {
     dependencies.getRepositories(input.automationVersionId),
     dependencies.getConnections(input.automationVersionId),
   ]);
-  const results: Array<{ externalReference: string | null; kind: string }> = [];
+  const results: AutomationActionResult[] = [];
 
   for (const action of manifest.actions) {
     input.signal?.throwIfAborted();
@@ -127,8 +134,12 @@ export async function executeAutomationActions(input: {
       runId: input.runId,
       toolCallId: action.id,
     });
+    // Pull request details are shown on the run page.
+    const details = action.kind === "open_github_pull_request"
+      ? { repository: action.repository, title: action.title }
+      : {};
     if (attempt.status === "existing_succeeded") {
-      results.push({ externalReference: attempt.externalReference, kind: action.kind });
+      results.push({ externalReference: attempt.externalReference, kind: action.kind, ...details });
       continue;
     }
 
@@ -198,7 +209,7 @@ export async function executeAutomationActions(input: {
         attemptId: attempt.id,
         externalReference,
       });
-      results.push({ externalReference, kind: action.kind });
+      results.push({ externalReference, kind: action.kind, ...details });
     } catch (error) {
       await dependencies.failAttempt({
         attemptId: attempt.id,

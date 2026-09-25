@@ -33,10 +33,14 @@ import {
   rotateOrganizationModelCredential,
 } from "../../../../packages/core/src/db/automation-model-credentials.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
 import { getActiveTenant } from "../tenant.js";
-import { queueAutomationRun } from "./queue.js";
+import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
 
 const automationEnabledSchema = z.object({ enabled: z.boolean() });
+const runMessageSchema = z.object({
+  message: z.string().trim().min(1).max(automationUserMessageMaxLength),
+});
 const runPageSize = 10;
 const runPageSchema = z.coerce.number().int().min(1).max(10_000).catch(1);
 const credentialInputSchema = z.object({
@@ -53,8 +57,14 @@ const credentialTestSchema = z.object({
 
 type AutomationTenant = {
   organizationId: string;
-  user: { id: string };
+  user: { id: string; name: string };
 };
+
+// A test chat run is listed under the first line of its first message.
+function chatRunTitle(message: string): string {
+  const line = message.split("\n").map((value) => value.trim()).find(Boolean) ?? "Test chat";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
 
 async function getAutomationTenant(
   headers: Headers,
@@ -336,6 +346,37 @@ export const automationRoutes = new Hono()
       ? context.json({ cancelRequested: true })
       : context.json({ error: "Automation run is not active" }, 409);
   })
+  .post("/runs/:runId/messages", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const runId = context.req.param("runId");
+    if (!z.string().uuid().safeParse(runId).success) {
+      return context.json({ error: "Automation run not found" }, 404);
+    }
+    const parsed = runMessageSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) return context.json({ error: "Write a message to send" }, 400);
+    const { organizationId, user } = access.tenant;
+    let queued: { jobId: string } | null;
+    try {
+      queued = await queueAutomationRunFollowUp({
+        message: { authorId: user.id, authorName: user.name, text: parsed.data.message },
+        organizationId,
+        runId,
+      });
+    } catch {
+      return context.json({ error: "Automation worker is unavailable" }, 503);
+    }
+    if (queued) return context.json({ queued: true }, 202);
+    const run = await getAutomationRun(organizationId, runId);
+    if (!run) return context.json({ error: "Automation run not found" }, 404);
+    return context.json({
+      error: run.automationEnabled
+        ? "Wait for this run to finish before sending a follow-up."
+        : "Turn the automation on to continue this run.",
+    }, 409);
+  })
   .get("/:automationId", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
@@ -409,15 +450,30 @@ export const automationRoutes = new Hono()
       context.req.param("automationId"),
     );
     if (!automation) return context.json({ error: "Automation not found" }, 404);
+    // A body with a message starts a test chat; no body is a plain manual run.
+    const body: unknown = await context.req.json().catch(() => null);
+    const chat = body === null ? null : runMessageSchema.safeParse(body);
+    if (chat && !chat.success) return context.json({ error: "Write a message to send" }, 400);
+    const { user } = access.tenant;
     try {
       const run = await queueAutomationRun({
         automationId: automation.id,
-        trigger: {
-          body: "Manual run requested from the Automations page.",
-          externalEventId: `manual:${randomUUID()}`,
-          provider: "manual",
-          title: "Manual run",
-        },
+        ...(chat
+          ? { message: { authorId: user.id, authorName: user.name, text: chat.data.message } }
+          : {}),
+        trigger: chat
+          ? {
+              body: chat.data.message,
+              externalEventId: `manual:${randomUUID()}`,
+              provider: "manual",
+              title: chatRunTitle(chat.data.message),
+            }
+          : {
+              body: "Manual run requested from the Automations page.",
+              externalEventId: `manual:${randomUUID()}`,
+              provider: "manual",
+              title: "Manual run",
+            },
       });
       return context.json(run, run.duplicate ? 200 : 202);
     } catch (error) {

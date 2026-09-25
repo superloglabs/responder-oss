@@ -17,6 +17,7 @@ import type {
   AutomationTrigger,
 } from "../automations/config.js";
 import { supportsIncludedUsage } from "../automations/model-pricing.js";
+import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { getDatabase } from "./client.js";
 import {
   automationModelUsage,
@@ -451,8 +452,9 @@ async function insertAutomationVersion(
       })),
     ),
     tx.insert(automationVersionRepositories).values(
-      input.configuration.repositoryIds.map((repositoryId) => ({
+      input.configuration.repositoryIds.map((repositoryId, position) => ({
         automationVersionId: versionId,
+        position,
         repositoryId,
       })),
     ),
@@ -747,6 +749,10 @@ export async function getAutomation(
           automationVersionRepositories.automationVersionId,
           automation.versionId,
         ),
+      )
+      .orderBy(
+        automationVersionRepositories.position,
+        automationVersionRepositories.repositoryId,
       ),
     db
       .select({ id: automationVersionSecrets.workspaceSecretId })
@@ -876,7 +882,9 @@ export async function getAutomationRun(
   const db = getDatabase();
   const rows = await db
     .select({
+      automationEnabled: automations.enabled,
       automationId: automationRuns.automationId,
+      automationName: automations.name,
       automationVersionId: automationRuns.automationVersionId,
       cancelRequestedAt: automationRuns.cancelRequestedAt,
       completedAt: automationRuns.completedAt,
@@ -895,6 +903,7 @@ export async function getAutomationRun(
       usage: automationRuns.usage,
     })
     .from(automationRuns)
+    .innerJoin(automations, eq(automations.id, automationRuns.automationId))
     .where(
       and(
         eq(automationRuns.id, runId),
@@ -902,20 +911,105 @@ export async function getAutomationRun(
       ),
     )
     .limit(1);
-  if (!rows[0]) return null;
-  const [events, inferenceUsage] = await Promise.all([
+  const run = rows[0];
+  if (!run) return null;
+  const [events, inferenceUsage, position] = await Promise.all([
     db
       .select()
       .from(automationRunEvents)
       .where(eq(automationRunEvents.runId, runId))
       .orderBy(automationRunEvents.id),
     summarizeRunsInferenceUsage([runId]),
+    // Matches the numbering in listAutomationRuns.
+    db
+      .select({ number: sql<string>`count(*)` })
+      .from(automationRuns)
+      .where(
+        and(
+          eq(automationRuns.automationId, run.automationId),
+          // Compared in SQL: a JavaScript date drops the microseconds.
+          sql`(${automationRuns.createdAt}, ${automationRuns.id}) <= (select created_at, id from automation_runs where id = ${runId})`,
+        ),
+      ),
   ]);
   return {
-    ...rows[0],
+    ...run,
     events,
     inferenceUsage: inferenceUsage.get(runId) ?? null,
+    number: Number(position[0]?.number ?? 1),
+    trigger: {
+      ...runTriggerSummary(run.redactedTrigger),
+      attributes: runTriggerAttributes(run.redactedTrigger),
+    },
   };
+}
+
+function runTriggerAttributes(
+  trigger: Record<string, unknown>,
+): Record<string, string | number | boolean | null> {
+  const attributes = trigger.attributes;
+  if (typeof attributes !== "object" || attributes === null) return {};
+  return Object.fromEntries(
+    Object.entries(attributes).filter(([, value]) =>
+      value === null || ["boolean", "number", "string"].includes(typeof value)
+    ),
+  ) as Record<string, string | number | boolean | null>;
+}
+
+// Follow-ups and transcripts from earlier turns, oldest first.
+export async function listAutomationRunConversation(runId: string) {
+  return getDatabase()
+    .select({ data: automationRunEvents.data, type: automationRunEvents.type })
+    .from(automationRunEvents)
+    .where(
+      and(
+        eq(automationRunEvents.runId, runId),
+        inArray(automationRunEvents.type, ["transcript", "user_message"]),
+      ),
+    )
+    .orderBy(automationRunEvents.id);
+}
+
+// Queues another turn of a finished run for a workspace member's follow-up.
+// Returns null when the run is missing, still active, or its automation is off.
+export async function continueAutomationRun(input: {
+  message: AutomationUserMessageEventData;
+  organizationId: string;
+  runId: string;
+}): Promise<{ automationId: string } | null> {
+  return getDatabase().transaction(async (tx) => {
+    const rows = await tx
+      .update(automationRuns)
+      .set({
+        cancelRequestedAt: null,
+        completedAt: null,
+        failureCategory: null,
+        failureMessage: null,
+        heartbeatAt: null,
+        leaseExpiresAt: null,
+        leaseId: null,
+        resultSummary: null,
+        status: "pending",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(automationRuns.id, input.runId),
+          eq(automationRuns.organizationId, input.organizationId),
+          inArray(automationRuns.status, ["succeeded", "failed", "cancelled"]),
+          sql`exists (select 1 from ${automations} where ${automations.id} = ${automationRuns.automationId} and ${automations.enabled})`,
+        ),
+      )
+      .returning({ automationId: automationRuns.automationId });
+    const run = rows[0];
+    if (!run) return null;
+    await tx.insert(automationRunEvents).values({
+      data: { ...input.message },
+      runId: input.runId,
+      type: "user_message",
+    });
+    return run;
+  });
 }
 
 export async function requestAutomationRunCancellation(input: {
@@ -947,6 +1041,8 @@ export interface AutomationTriggerInput {
 
 export async function beginAutomationRun(input: {
   automationId: string;
+  // A test chat's first message, shown in the run transcript.
+  message?: AutomationUserMessageEventData;
   trigger: AutomationTriggerInput;
 }): Promise<{ created: boolean; runId: string }> {
   return getDatabase().transaction(async (tx) => {
@@ -1003,7 +1099,16 @@ export async function beginAutomationRun(input: {
       })
       .onConflictDoNothing()
       .returning({ id: automationTriggerReceipts.id });
-    if (receipts.length > 0) return { created: true, runId };
+    if (receipts.length > 0) {
+      if (input.message) {
+        await tx.insert(automationRunEvents).values({
+          data: { ...input.message },
+          runId,
+          type: "user_message",
+        });
+      }
+      return { created: true, runId };
+    }
 
     await tx.delete(automationRuns).where(eq(automationRuns.id, runId));
     const existing = await tx
@@ -1042,8 +1147,52 @@ export async function appendAutomationRunEvent(input: {
   data?: Record<string, unknown>;
   runId: string;
   type: string;
+}): Promise<number | undefined> {
+  const rows = await getDatabase()
+    .insert(automationRunEvents)
+    .values(input)
+    .returning({ id: automationRunEvents.id });
+  return rows[0]?.id;
+}
+
+// Replaces the data of an event, such as a transcript that grows while the
+// harness runs.
+export async function updateAutomationRunEvent(input: {
+  data: Record<string, unknown>;
+  id: number;
+  runId: string;
 }): Promise<void> {
-  await getDatabase().insert(automationRunEvents).values(input);
+  await getDatabase()
+    .update(automationRunEvents)
+    .set({ data: input.data })
+    .where(
+      and(
+        eq(automationRunEvents.id, input.id),
+        eq(automationRunEvents.runId, input.runId),
+      ),
+    );
+}
+
+// Records the paused sandbox a follow-up resumes, or clears it when the
+// sandbox was deleted.
+export async function saveAutomationRunSandbox(input: {
+  leaseId: string;
+  runId: string;
+  sandbox: { id: string; sessionState: Record<string, unknown> } | null;
+}): Promise<void> {
+  await getDatabase()
+    .update(automationRuns)
+    .set({
+      sandboxId: input.sandbox?.id ?? null,
+      sandboxSessionState: input.sandbox?.sessionState ?? null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(automationRuns.id, input.runId),
+        eq(automationRuns.leaseId, input.leaseId),
+      ),
+    );
 }
 
 export async function beginAutomationActionAttempt(input: {
@@ -1152,7 +1301,8 @@ export async function claimAutomationRun(runId: string) {
       heartbeatAt: now,
       leaseId,
       leaseExpiresAt,
-      startedAt: now,
+      // A follow-up turn keeps the run's original start time.
+      startedAt: sql`coalesce(${automationRuns.startedAt}, ${now})`,
       status: "running",
       updatedAt: now,
     })
@@ -1176,6 +1326,7 @@ export async function claimAutomationRun(runId: string) {
       automationVersionId: automationRuns.automationVersionId,
       organizationId: automationRuns.organizationId,
       leaseId: automationRuns.leaseId,
+      sandboxSessionState: automationRuns.sandboxSessionState,
       triggerInput: automationRuns.triggerInput,
     });
   const run = claimed[0];
@@ -1303,7 +1454,11 @@ export async function getAutomationRuntimeRepositories(versionId: string) {
         eq(integrationAccounts.status, "connected"),
       ),
     )
-    .where(eq(automationVersionRepositories.automationVersionId, versionId));
+    .where(eq(automationVersionRepositories.automationVersionId, versionId))
+    .orderBy(
+      automationVersionRepositories.position,
+      automationVersionRepositories.repositoryId,
+    );
   return rows.map((repository) => {
     const installationId = Number(repository.installationId);
     if (!Number.isSafeInteger(installationId) || installationId <= 0) {

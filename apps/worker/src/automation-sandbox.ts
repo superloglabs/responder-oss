@@ -7,7 +7,10 @@ import {
   daytonaClientOptions,
   type DaytonaClientConfig,
 } from "@responder/core/daytona-config";
-import { modelBrokerTokenEnvironmentVariable } from "./automation-harness.js";
+import {
+  automationWorkspaceRoot,
+  modelBrokerTokenEnvironmentVariable,
+} from "./automation-harness.js";
 import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
@@ -35,17 +38,36 @@ const defaultDependencies: AutomationSandboxDependencies = {
   prepare: prepareDaytonaSandbox,
 };
 
+// Written once a sandbox has its tools and repositories. A resumed sandbox
+// without it is set up again.
+export const automationSandboxReadyMarker =
+  `${automationWorkspaceRoot}/.responder/automation-sandbox-ready`;
+
+// A paused sandbox is deleted by Daytona this long after it stops.
+export const pausedAutomationSandboxLifetimeMinutes = 24 * 60;
+
+export interface PausedAutomationSandbox {
+  id: string;
+  sessionState: Record<string, unknown>;
+}
+
 export interface FreshAutomationSandboxInput<T> {
   brokerToken: string;
   onCleanupConfirmed?: () => void;
   config: DaytonaClientConfig;
+  // Pause the sandbox after the run so a follow-up can resume it.
+  keepPaused?: boolean;
+  onPaused?: (sandbox: PausedAutomationSandbox) => void;
   organizationId: string;
+  // A paused sandbox from an earlier turn of the run.
+  resumeState?: Record<string, unknown>;
   signal?: AbortSignal;
   secrets?: DaytonaSandboxSecretMount[];
   run(
     session: DaytonaSandboxSession,
     withModelBroker: <Result>(operation: () => Promise<Result>) => Promise<Result>,
     signal: AbortSignal | undefined,
+    resumed: boolean,
   ): Promise<T>;
   runId: string;
 }
@@ -168,6 +190,33 @@ function serializedModelBrokerAccess(
   };
 }
 
+// Stops the sandbox and reports its state for the next turn. Returns false
+// when it could not be paused, so the caller deletes it instead.
+async function pauseSandbox(
+  client: DaytonaSandboxClient,
+  session: DaytonaSandboxSession,
+  input: Pick<FreshAutomationSandboxInput<unknown>, "onPaused" | "runId">,
+): Promise<boolean> {
+  try {
+    const sessionState = await client.serializeSessionState(session.state);
+    delete sessionState.apiKey;
+    const environment = sessionState.environment;
+    if (typeof environment === "object" && environment !== null) {
+      delete (environment as Record<string, unknown>)[modelBrokerTokenEnvironmentVariable];
+    }
+    await session.close();
+    input.onPaused?.({ id: session.state.sandboxId, sessionState });
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({
+      errorCode: error instanceof Error ? error.name : typeof error,
+      event: "automation_sandbox_pause_failed",
+      runId: input.runId,
+    }));
+    return false;
+  }
+}
+
 export async function runInFreshAutomationSandbox<T>(
   input: FreshAutomationSandboxInput<T>,
   dependencies: AutomationSandboxDependencies = defaultDependencies,
@@ -179,26 +228,52 @@ export async function runInFreshAutomationSandbox<T>(
   const client = dependencies.createClient({
     ...daytonaClientOptions(input.config),
     name: sandboxName,
-    pauseOnExit: false,
+    pauseOnExit: Boolean(input.keepPaused),
   });
   let session: DaytonaSandboxSession | null = null;
   let creationStarted = false;
+  let resumed = false;
   let executionOutcome:
     | { error: unknown; succeeded: false }
     | { succeeded: true; value: T };
 
   try {
     creationStarted = true;
-    session = await abortable(
+    if (input.resumeState) {
+      try {
+        session = await abortable(
+          client.resume(await client.deserializeSessionState(input.resumeState)),
+          input.signal,
+        );
+        // Daytona recreates a sandbox it no longer has; that one needs setup.
+        resumed = await session.pathExists(automationSandboxReadyMarker);
+      } catch (error) {
+        input.signal?.throwIfAborted();
+        console.error(JSON.stringify({
+          errorCode: error instanceof Error ? error.name : typeof error,
+          event: "automation_sandbox_resume_failed",
+          runId: input.runId,
+        }));
+        session = null;
+      }
+    }
+    session ??= await abortable(
       dependencies.createSession(client, input.config, sandboxName),
       input.signal,
     );
-    await abortable(
-      dependencies.configure(session, input.config, input.secrets ?? []),
-      input.signal,
-    );
-    if (!input.config.sandboxSnapshotName) {
-      await abortable(dependencies.prepare(session), input.signal);
+    if (!resumed) {
+      await abortable(
+        dependencies.configure(
+          session,
+          input.config,
+          input.secrets ?? [],
+          input.keepPaused ? pausedAutomationSandboxLifetimeMinutes : 0,
+        ),
+        input.signal,
+      );
+      if (!input.config.sandboxSnapshotName) {
+        await abortable(dependencies.prepare(session), input.signal);
+      }
     }
     const activeSession = session;
     const modelBroker = serializedModelBrokerAccess(
@@ -209,7 +284,7 @@ export async function runInFreshAutomationSandbox<T>(
       | { error: unknown; succeeded: false }
       | { succeeded: true; value: T };
     try {
-      const run = input.run(activeSession, modelBroker.run, input.signal);
+      const run = input.run(activeSession, modelBroker.run, input.signal, resumed);
       const value = await abortable(run, input.signal);
       outcome = { succeeded: true, value };
     } catch (error) {
@@ -229,6 +304,11 @@ export async function runInFreshAutomationSandbox<T>(
     executionOutcome = { succeeded: true, value: outcome.value };
   } catch (error) {
     executionOutcome = { error, succeeded: false };
+  }
+
+  if (session && input.keepPaused && await pauseSandbox(client, session, input)) {
+    if (!executionOutcome.succeeded) throw executionOutcome.error;
+    return executionOutcome.value;
   }
 
   let cleanupFailure: unknown;

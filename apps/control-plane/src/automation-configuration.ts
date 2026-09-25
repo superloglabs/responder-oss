@@ -28,3 +28,11 @@ export function availableAutomationConfiguration(
     workspaceSecretIds: configuration.workspaceSecretIds.filter((id) => options.secrets.some((secret) => secret.id === id)),
   };
 }
+
+// Moves `value` to `index`, keeping the order of the other items.
+export function moveItem<T>(list: T[], value: T, index: number): T[] {
+  const rest = list.filter((item) => item !== value);
+  if (rest.length === list.length) return list;
+  const target = Math.max(0, Math.min(index, rest.length));
+  return [...rest.slice(0, target), value, ...rest.slice(target)];
+}

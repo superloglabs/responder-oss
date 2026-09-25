@@ -4,12 +4,17 @@ import {
 } from "@responder/core/automations/chatgpt-subscription";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
+  AutomationHarnessError,
   assertAutomationHarnessModelCompatibility,
   assertAutomationWorkspaceHasNoSymlinkRedirects,
+  automationHarnessMaxOutputTokens,
   automationWorkspaceRoot,
   type AutomationHarnessInput,
   type AutomationHarnessResult,
+  harnessInvocation,
   modelBrokerTokenEnvironmentVariable,
+  prebuiltHarnessMarker,
+  prebuiltHarnessRoot,
   resolveAutomationWorkspacePath,
   validateAutomationContextServers,
   validateBrokerBaseUrl,
@@ -28,7 +33,7 @@ export const subscriptionPermissionConfig = [
 
 const codexMinimumNodeMajorVersion = 16;
 const codexInstallRoot = `${automationWorkspaceRoot}/.responder/codex/${codexCliVersion}`;
-const subscriptionInstallRoot = `/opt/responder/codex/${codexCliVersion}`;
+const subscriptionInstallRoot = `${prebuiltHarnessRoot}/codex/${codexCliVersion}`;
 const subscriptionExecutable = `${subscriptionInstallRoot}/node_modules/.bin/codex`;
 const codexExecutable = `${codexInstallRoot}/node_modules/.bin/codex`;
 const codexHome = `${automationWorkspaceRoot}/.responder/codex-home`;
@@ -52,6 +57,7 @@ function tomlString(value: string): string {
 
 export function buildCodexAutomationCommand(
   input: AutomationHarnessInput,
+  executable = input.model.subscription ? subscriptionExecutable : codexExecutable,
 ): string {
   assertAutomationHarnessModelCompatibility("codex", input.model);
   const workspacePath = resolveAutomationWorkspacePath(input.workspacePath);
@@ -95,6 +101,9 @@ export function buildCodexAutomationCommand(
           "--config",
           `model_providers.responder.wire_api=${tomlString("responses")}`,
         ]),
+    // Reasoning summaries are shown on the run page.
+    "--config",
+    `model_reasoning_summary=${tomlString("auto")}`,
     "--config",
     `shell_environment_policy.inherit=${tomlString("core")}`,
     "--config",
@@ -120,20 +129,26 @@ export function buildCodexAutomationCommand(
       ? ["unset OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN"]
       : []),
     `trap ${shellQuote(`rm -f ${shellQuote(promptPath)}`)} EXIT`,
-    `CODEX_HOME=${shellQuote(input.model.subscription ? subscriptionHome : codexHome)} ${shellQuote(input.model.subscription ? subscriptionExecutable : codexExecutable)} ${args.map(shellQuote).join(" ")} < ${shellQuote(promptPath)}`,
+    harnessInvocation(
+      `CODEX_HOME=${shellQuote(input.model.subscription ? subscriptionHome : codexHome)} ${shellQuote(executable)} ${args.map(shellQuote).join(" ")} < ${shellQuote(promptPath)}`,
+      input.eventsPath,
+    ),
   ].join("\n");
 }
 
+// Returns the executable to run: the snapshot's prebuilt copy when it has the
+// pinned version, otherwise a copy installed now.
 export async function prepareCodexAutomationHarness(
   session: DaytonaSandboxSession,
   subscription = false,
-): Promise<void> {
+): Promise<string> {
   const installRoot = subscription ? subscriptionInstallRoot : codexInstallRoot;
   const executable = subscription ? subscriptionExecutable : codexExecutable;
   const expectedVersion = `codex-cli ${codexCliVersion}`;
   const command = [
     "set -eu",
     `unset ${modelBrokerTokenEnvironmentVariable}`,
+    `if [ -x ${shellQuote(subscriptionExecutable)} ] && [ "$(${shellQuote(subscriptionExecutable)} --version)" = ${shellQuote(expectedVersion)} ]; then echo ${shellQuote(prebuiltHarnessMarker)}; exit 0; fi`,
     `mkdir -p ${shellQuote(installRoot)}`,
     `if [ -x ${shellQuote(executable)} ] && [ "$(${shellQuote(executable)} --version)" = ${shellQuote(expectedVersion)} ]; then exit 0; fi`,
     `node -e ${shellQuote(`if (Number(process.versions.node.split(".")[0]) < ${codexMinimumNodeMajorVersion}) process.exit(1)`)}`,
@@ -148,6 +163,7 @@ export async function prepareCodexAutomationHarness(
   if (!commandSucceeded(output)) {
     throw new Error("Unable to prepare the pinned Codex automation harness");
   }
+  return output.includes(prebuiltHarnessMarker) ? subscriptionExecutable : executable;
 }
 
 export async function runCodexAutomation(
@@ -158,7 +174,7 @@ export async function runCodexAutomation(
     session,
     input.workspacePath,
   );
-  await prepareCodexAutomationHarness(session, !!input.model.subscription);
+  const executable = await prepareCodexAutomationHarness(session, !!input.model.subscription);
   await session.materializeEntry({
     entry: { type: "file", content: input.prompt },
     path: promptPath,
@@ -192,14 +208,12 @@ export async function runCodexAutomation(
     output = await session.execCommand({
       cmd: input.model.subscription
         ? subscriptionRootCommand(
-            `chmod 600 ${subscriptionHome}/auth.json\n${buildCodexAutomationCommand(input)}`,
+            `chmod 600 ${subscriptionHome}/auth.json\n${buildCodexAutomationCommand(input, executable)}`,
           )
-        : buildCodexAutomationCommand(input),
-      maxOutputTokens: 20_000,
+        : buildCodexAutomationCommand(input, executable),
+      maxOutputTokens: automationHarnessMaxOutputTokens,
       workdir: automationWorkspaceRoot,
     });
-    if (!commandSucceeded(output))
-      throw new Error("Codex automation harness failed");
   } finally {
     if (input.model.subscription) {
       try {
@@ -231,5 +245,8 @@ export async function runCodexAutomation(
     ])
       output = output.replaceAll(secret, "[redacted]");
   }
+  // Checked after redaction so a failed run can keep its transcript.
+  if (!commandSucceeded(output))
+    throw new AutomationHarnessError("Codex automation harness failed", output);
   return { eventStream: output };
 }

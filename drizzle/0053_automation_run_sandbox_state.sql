@@ -1,0 +1,1 @@
+ALTER TABLE "automation_runs" ADD COLUMN "sandbox_session_state" jsonb;

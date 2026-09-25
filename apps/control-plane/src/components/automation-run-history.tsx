@@ -1,5 +1,6 @@
-import { XIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, XIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   cancelAutomationRun,
   fetchAutomationRuns,
@@ -60,6 +61,8 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const request = useRef(0);
+  const navigate = useNavigate();
+  const runPath = (run: AutomationRunSummary) => `/automations/${automationId}/runs/${run.id}`;
 
   const load = useCallback(async () => {
     const generation = ++request.current;
@@ -117,9 +120,7 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
           header: "Run",
           key: "run",
           render: (run) => <span className="agentTableTitle">
-            {run.trigger.sourceUrl
-              ? <a href={run.trigger.sourceUrl} rel="noreferrer" target="_blank"><strong>{run.trigger.title}</strong></a>
-              : <strong>{run.trigger.title}</strong>}
+            <Link to={runPath(run)}><strong>{run.trigger.title}</strong></Link>
             <small>Run #{run.number} · {providerLabel(run.trigger.provider)}</small>
           </span>,
           width: "52%",
@@ -147,12 +148,15 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
         {
           header: "",
           key: "actions",
-          render: (run) => isActive(run) ? <button aria-label={`Cancel run #${run.number}`} className="automationRuns__cancel" disabled={cancelling !== null} onClick={() => void cancel(run)} title="Cancel run" type="button"><XIcon size={14} /></button> : null,
+          render: (run) => isActive(run)
+            ? <button aria-label={`Cancel run #${run.number}`} className="automationRuns__cancel" disabled={cancelling !== null} onClick={() => void cancel(run)} title="Cancel run" type="button"><XIcon size={14} /></button>
+            : <CaretRightIcon aria-hidden="true" className="automationRuns__open" size={14} />,
           width: "44px",
         },
       ]}
       emptyMessage="No runs yet. A run starts when the trigger fires."
       getRowKey={(run) => run.id}
+      onRowClick={(run) => navigate(runPath(run))}
       rows={result.runs}
       variant="workspace"
     />

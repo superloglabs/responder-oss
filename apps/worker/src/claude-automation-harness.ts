@@ -1,9 +1,14 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
+  AutomationHarnessError,
   assertAutomationHarnessModelCompatibility,
   assertAutomationWorkspaceHasNoSymlinkRedirects,
+  automationHarnessMaxOutputTokens,
   automationWorkspaceRoot,
+  harnessInvocation,
   modelBrokerTokenEnvironmentVariable,
+  prebuiltHarnessMarker,
+  prebuiltHarnessRoot,
   resolveAutomationWorkspacePath,
   validateAutomationContextServers,
   type AutomationHarnessInput,
@@ -14,7 +19,9 @@ import {
 export const claudeAgentSdkVersion = "0.3.280";
 
 const installRoot = `${automationWorkspaceRoot}/.responder/claude-agent-sdk/${claudeAgentSdkVersion}`;
-const sdkModule = `${installRoot}/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs`;
+const sdkModulePath = "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs";
+const sdkModule = `${installRoot}/${sdkModulePath}`;
+const prebuiltSdkModule = `${prebuiltHarnessRoot}/claude-agent-sdk/${claudeAgentSdkVersion}/${sdkModulePath}`;
 const runnerPath = `${automationWorkspaceRoot}/.responder/claude-agent-sdk-runner.mjs`;
 const promptPath = `${automationWorkspaceRoot}/.responder/automation-prompt.txt`;
 
@@ -26,8 +33,8 @@ function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
-const runner = `import { readFile } from "node:fs/promises";
-import { query } from ${JSON.stringify(sdkModule)};
+const runner = (modulePath: string) => `import { readFile } from "node:fs/promises";
+import { query } from ${JSON.stringify(modulePath)};
 
 const prompt = await readFile(process.env.RESPONDER_AUTOMATION_PROMPT_PATH, "utf8");
 const contextServers = JSON.parse(process.env.RESPONDER_AUTOMATION_CONTEXT_SERVERS ?? "[]");
@@ -60,6 +67,7 @@ export async function prepareClaudeAutomationHarness(
     cmd: [
       "set -eu",
       `unset ${modelBrokerTokenEnvironmentVariable}`,
+      `if [ -f ${shellQuote(prebuiltSdkModule)} ]; then echo ${shellQuote(prebuiltHarnessMarker)}; exit 0; fi`,
       `mkdir -p ${shellQuote(installRoot)}`,
       `if [ -f ${shellQuote(sdkModule)} ]; then exit 0; fi`,
       `npm install --prefix ${shellQuote(installRoot)} --ignore-scripts --no-audit --no-fund --no-package-lock --no-save ${shellQuote(`@anthropic-ai/claude-agent-sdk@${claudeAgentSdkVersion}`)}`,
@@ -72,7 +80,7 @@ export async function prepareClaudeAutomationHarness(
     throw new Error("Unable to prepare the pinned Claude automation harness");
   }
   await session.materializeEntry({
-    entry: { type: "file", content: runner },
+    entry: { type: "file", content: runner(output.includes(prebuiltHarnessMarker) ? prebuiltSdkModule : sdkModule) },
     path: runnerPath,
   });
 }
@@ -88,7 +96,10 @@ export function buildClaudeAutomationCommand(
     "set -eu",
     `if [ -z "\${${modelBrokerTokenEnvironmentVariable}:-}" ]; then echo 'Model broker token is unavailable' >&2; exit 1; fi`,
     `trap ${shellQuote(`rm -f ${shellQuote(promptPath)}`)} EXIT`,
-    `ANTHROPIC_AUTH_TOKEN="$${modelBrokerTokenEnvironmentVariable}" ANTHROPIC_BASE_URL=${shellQuote(brokerBaseUrl)} CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 RESPONDER_AUTOMATION_CONTEXT_SERVERS=${shellQuote(JSON.stringify(contextServers))} RESPONDER_AUTOMATION_MODEL=${shellQuote(input.model.model)} RESPONDER_AUTOMATION_PROMPT_PATH=${shellQuote(promptPath)} RESPONDER_AUTOMATION_WORKSPACE=${shellQuote(workspacePath)} node ${shellQuote(runnerPath)}`,
+    harnessInvocation(
+      `ANTHROPIC_AUTH_TOKEN="$${modelBrokerTokenEnvironmentVariable}" ANTHROPIC_BASE_URL=${shellQuote(brokerBaseUrl)} CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 RESPONDER_AUTOMATION_CONTEXT_SERVERS=${shellQuote(JSON.stringify(contextServers))} RESPONDER_AUTOMATION_MODEL=${shellQuote(input.model.model)} RESPONDER_AUTOMATION_PROMPT_PATH=${shellQuote(promptPath)} RESPONDER_AUTOMATION_WORKSPACE=${shellQuote(workspacePath)} node ${shellQuote(runnerPath)}`,
+      input.eventsPath,
+    ),
   ].join("\n");
 }
 
@@ -107,9 +118,9 @@ export async function runClaudeAutomation(
   });
   const output = await session.execCommand({
     cmd: buildClaudeAutomationCommand(input),
-    maxOutputTokens: 20_000,
+    maxOutputTokens: automationHarnessMaxOutputTokens,
     workdir: automationWorkspaceRoot,
   });
-  if (!commandSucceeded(output)) throw new Error("Claude automation harness failed");
+  if (!commandSucceeded(output)) throw new AutomationHarnessError("Claude automation harness failed", output);
   return { eventStream: output };
 }

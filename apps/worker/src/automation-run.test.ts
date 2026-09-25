@@ -1,5 +1,6 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AutomationHarnessError } from "./automation-harness.js";
 import { processAutomationRun } from "./automation-run.js";
 
 const runId = "21212121-2121-4121-8121-212121212121";
@@ -39,7 +40,11 @@ function claimedRun() {
 }
 
 function dependencies() {
-  const session = { state: { environment: {} } } as unknown as DaytonaSandboxSession;
+  const session = {
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockRejectedValue(new Error("not found")),
+    state: { environment: {} },
+  } as unknown as DaytonaSandboxSession;
   return {
     appendEvent: vi.fn().mockResolvedValue(undefined),
     cancellationRequested: vi.fn().mockResolvedValue(false),
@@ -69,8 +74,16 @@ function dependencies() {
       provider: "openai",
     }),
     getConnections: vi.fn().mockResolvedValue([]),
+    getConversation: vi.fn().mockResolvedValue([]),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
     heartbeatRun: vi.fn().mockResolvedValue(true),
+    loadRepositories: vi.fn().mockResolvedValue([{
+      branch: "main",
+      path: "/home/daytona/workspace/repositories/acme/app",
+      repository: "acme/app",
+      sha: "b".repeat(40),
+      workspaceBaseSha: "a".repeat(40),
+    }]),
     now: () => new Date("2026-09-22T19:00:00.000Z"),
     reportException: vi.fn().mockResolvedValue(undefined),
     revokeGrant: vi.fn().mockResolvedValue(undefined),
@@ -81,7 +94,9 @@ function dependencies() {
       finally { input.onCleanupConfirmed?.(); }
     }),
     runOpenCode: vi.fn(),
+    saveSandbox: vi.fn().mockResolvedValue(undefined),
     setStatus: vi.fn().mockResolvedValue(true),
+    updateEvent: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -120,6 +135,13 @@ describe("automation run processor", () => {
         provider: "openai",
       },
     }));
+    // The first repository is the agent's working directory.
+    expect(deps.runCodex.mock.calls[0]![1]).toMatchObject({
+      workspacePath: "/home/daytona/workspace/repositories/acme/app",
+    });
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
+      "Your working directory is the acme/app repository, checked out at /home/daytona/workspace/repositories/acme/app.",
+    );
     expect(deps.executeActions).toHaveBeenCalledOnce();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       runId,
@@ -233,5 +255,130 @@ describe("automation run processor", () => {
       failureMessage: expect.stringContaining("allowance"),
       status: "failed",
     }));
+  });
+  it("stores the transcript and summarizes the result", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockResolvedValue({
+      eventStream: [
+        "Process exited with code 0",
+        "Output:",
+        JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixed the flaky test." } }),
+      ].join("\n"),
+    });
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.appendEvent).toHaveBeenCalledWith({
+      data: {
+        items: [{ kind: "message", observedAt: Date.parse("2026-09-22T19:00:00.000Z"), text: "Fixed the flaky test." }],
+        startedAt: Date.parse("2026-09-22T19:00:00.000Z"),
+        truncated: false,
+      },
+      runId,
+      type: "transcript",
+    });
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      resultSummary: "PR #1 opened",
+      status: "succeeded",
+    }));
+  });
+
+  it("gives a follow-up turn the earlier conversation", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getConversation.mockResolvedValue([
+      { data: { items: [{ kind: "message", text: "The deploy config is wrong." }], truncated: false }, type: "transcript" },
+      { data: { authorId: "user-1", authorName: "Ash", text: "Please add a regression test." }, type: "user_message" },
+    ]);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.getConversation).toHaveBeenCalledWith(runId);
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("This run continues an earlier conversation.");
+    expect(prompt).toContain("You:\nThe deploy config is wrong.");
+    expect(prompt.trimEnd()).toMatch(/Workspace member Ash:\nPlease add a regression test\.$/u);
+  });
+
+  it("does not add a conversation to a first turn", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getConversation.mockResolvedValue([
+      { data: { authorId: "user-1", authorName: "Ash", text: "Try the checkout flow." }, type: "user_message" },
+    ]);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("earlier conversation");
+  });
+
+  it("keeps the transcript of a failed harness", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError(
+      "Codex automation harness failed",
+      JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "pnpm test", exit_code: 1, status: "failed" } }),
+    ));
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    const types = deps.appendEvent.mock.calls.map(([event]) => event.type);
+    expect(types.slice(-2)).toEqual(["transcript", "run_failed"]);
+    expect(deps.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ items: [expect.objectContaining({ action: "run", kind: "tool", status: "failed", target: "pnpm test" })] }),
+      type: "transcript",
+    }));
+    expect(deps.executeActions).not.toHaveBeenCalled();
+  });
+  it("resumes the paused sandbox of an earlier turn and pauses it again", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const sessionState = { sandboxId: "sandbox-1" };
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), sandboxSessionState: sessionState });
+    deps.getConversation.mockResolvedValue([
+      { data: { items: [{ kind: "message", text: "Found it." }], truncated: false }, type: "transcript" },
+      { data: { authorId: "user-1", authorName: "Ash", text: "Now add a test." }, type: "user_message" },
+    ]);
+    const order: string[] = [];
+    deps.saveSandbox.mockImplementation(async () => { order.push("save"); });
+    deps.setStatus.mockImplementation(async () => { order.push("status"); return true; });
+    deps.runInSandbox.mockImplementation(async (input) => {
+      const session = { materializeEntry: vi.fn(), readFile: vi.fn().mockRejectedValue(new Error("not found")), state: { environment: {} } } as unknown as DaytonaSandboxSession;
+      const value = await input.run(session, async (operation: () => Promise<unknown>) => operation(), undefined, true);
+      input.onPaused?.({ id: "sandbox-1", sessionState });
+      return value;
+    });
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.runInSandbox.mock.calls[0]![0]).toMatchObject({ keepPaused: true, resumeState: sessionState });
+    expect(deps.loadRepositories).toHaveBeenCalledOnce();
+    expect(deps.checkoutRepositories).not.toHaveBeenCalled();
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("Earlier turns ran in this sandbox");
+    expect(deps.saveSandbox).toHaveBeenCalledWith({ leaseId: claimedRun().leaseId, runId, sandbox: { id: "sandbox-1", sessionState } });
+    expect(order).toEqual(["save", "status"]);
+  });
+
+  it("deletes the sandbox of a subscription run", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "byos", sandboxSessionState: { sandboxId: "sandbox-1" } });
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+    deps.acquireSubscription.mockResolvedValue(authJson);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    const sandboxInput = deps.runInSandbox.mock.calls[0]![0];
+    expect(sandboxInput.keepPaused).toBe(false);
+    expect(sandboxInput.resumeState).toBeUndefined();
+    expect(deps.saveSandbox).toHaveBeenCalledWith(expect.objectContaining({ sandbox: null }));
   });
 });

@@ -177,6 +177,30 @@ test("saves each change to a saved automation immediately", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Remove superloglabs/responder", exact: true })).toBeVisible();
 });
 
+test("reorders repositories and marks the first as the main directory", async ({ page }, testInfo) => {
+  const saves: Array<{ configuration: { repositoryIds: string[] } }> = [];
+  await page.route(`**/api/automations/${automationId}`, async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    saves.push(route.request().postDataJSON());
+    await route.fulfill({ json: { updated: true } });
+  });
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}`);
+  const rows = page.locator("section[aria-labelledby='automation-repositories'] .automationCreate__row");
+  await expect(rows.nth(0)).toContainText("superloglabs/responderMain directory");
+  await expect(rows.nth(1)).not.toContainText("Main directory");
+  await page.locator("section[aria-labelledby='automation-repositories']").screenshot({ path: testInfo.outputPath("automation-repositories.png") });
+
+  await page.getByRole("button", { name: /^Move superloglabs\/responder-oss/ }).press("ArrowUp");
+  await expect.poll(() => saves.at(-1)?.configuration.repositoryIds).toEqual([repositoryIds[1], repositoryIds[0]]);
+  await expect(rows.nth(0)).toContainText("superloglabs/responder-ossMain directory");
+  await expect(page.getByRole("button", { name: /^Move superloglabs\/responder-oss/ })).toBeFocused();
+
+  await page.getByRole("button", { name: /^Move superloglabs\/responder-oss/ }).dragTo(rows.nth(1));
+  await expect.poll(() => saves.at(-1)?.configuration.repositoryIds).toEqual(repositoryIds);
+  await expect(rows.nth(0)).toContainText("superloglabs/responderMain directory");
+});
+
 test("drops removed connections from a saved automation before saving it", async ({ page }) => {
   const stale = { ...automation, configuration: { ...automation.configuration, contextAccountIds: [datadogAccountId, "removed-account"], workspaceSecretIds: ["removed-secret"] } };
   let saved: Record<string, unknown> | undefined;
