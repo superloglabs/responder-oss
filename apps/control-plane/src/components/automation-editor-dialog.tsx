@@ -1,7 +1,9 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 import { XIcon } from "@phosphor-icons/react";
 
-export function AutomationEditorDialog({ children, onClose, title }: {
+// `actions` replaces the default Done button in the footer.
+export function AutomationEditorDialog({ actions, children, onClose, title }: {
+  actions?: ReactNode;
   children: ReactNode;
   onClose: () => void;
   title: string;
@@ -30,7 +32,7 @@ export function AutomationEditorDialog({ children, onClose, title }: {
     }} ref={ref}>
       <header><h2 id={titleId}>{title}</h2><button aria-label="Close" onClick={close} type="button"><XIcon size={16} /></button></header>
       <div className="automationEditorDialog__body">{children}</div>
-      <footer><button className="automationCreate__manage" onClick={close} type="button">Done</button></footer>
+      <footer>{actions ?? <button className="automationCreate__manage" onClick={close} type="button">Done</button>}</footer>
     </dialog>
   );
 }

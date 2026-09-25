@@ -12,6 +12,7 @@ import {
   tryLegacyEmailSignIn,
 } from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
+import { sharedTemplateSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
@@ -35,7 +36,10 @@ function AuthFrame({ children }: AuthGateProps) {
 }
 
 function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  // Most visitors setting up a shared template are new, so they start on
+  // account creation.
+  const [settingUpTemplate] = useState(() => sharedTemplateSetupReturnPath(window.location) !== null);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(settingUpTemplate);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [socialProvider, setSocialProvider] = useState<
@@ -53,6 +57,11 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
   let description = isCreatingAccount
     ? "Start a workspace for your incident response agents."
     : "Sign in to manage your agents and investigations.";
+  if (settingUpTemplate) {
+    description = isCreatingAccount
+      ? "Create an account to set up this automation in your own workspace."
+      : "Sign in to set up this automation in your workspace.";
+  }
   if (isInvitation) {
     heading = isCreatingAccount
       ? "Create your account to join"
@@ -189,7 +198,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
             : "Don’t have an account? Get started"}
         </button>
         </div>
-        <p className={isInvitation ? undefined : "authDescription"}>{description}</p>
+        <p className={isInvitation || settingUpTemplate ? undefined : "authDescription"}>{description}</p>
       </div>
       <div className="socialAuth">
         <button
@@ -365,7 +374,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
         organizationId: result.data.id,
       }),
     );
-    await activate(result.data.id, "/agents/new");
+    await activate(result.data.id, sharedTemplateSetupReturnPath(window.location) ?? "/agents/new");
   }
 
   return (

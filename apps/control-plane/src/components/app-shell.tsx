@@ -24,6 +24,9 @@ import "./workspace.css";
 interface AppShellProps {
   active: "agents" | "automations" | "issues" | "scans" | "settings" | "suggestions";
   children: ReactNode;
+  // Shown to a signed-out visitor of a public page in place of the account
+  // menu. The navigation stays as members see it.
+  guest?: ReactNode;
   redesigned?: boolean;
   density?:
     | "default"
@@ -36,7 +39,7 @@ interface AppShellProps {
     | "issues";
 }
 
-export function AppShell({ active, children, density = "default", redesigned = false }: AppShellProps) {
+export function AppShell({ active, children, density = "default", guest, redesigned = false }: AppShellProps) {
   const workspace = redesigned || density === "issues";
   const session = authClient.useSession();
   const activeOrganization = authClient.useActiveOrganization();
@@ -59,6 +62,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
     .toUpperCase();
 
   useEffect(() => {
+    if (guest) return;
     let cancelled = false;
     void fetch("/api/context")
       .then(async (response) => response.ok
@@ -71,7 +75,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [session.data?.session.activeOrganizationId]);
+  }, [guest, session.data?.session.activeOrganizationId]);
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -254,7 +258,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
               {workspace ? <LightningIcon size={16} aria-hidden="true" /> : null}
               Agents
             </Link>
-            {automationsEnabled ? (
+            {automationsEnabled || guest ? (
               <Link
                 aria-current={active === "automations" ? "page" : undefined}
                 className={active === "automations" ? "isActive" : undefined}
@@ -300,7 +304,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
         </div>
         <div className="globalHeader__right" ref={menuRef}>
           {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
-          <div className="accountMenu">
+          {guest ?? <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}
               aria-haspopup="menu"
@@ -397,7 +401,7 @@ export function AppShell({ active, children, density = "default", redesigned = f
                 </div>
               </div>
             ) : null}
-          </div>
+          </div>}
         </div>
       </header>
       {workspace ? (
@@ -415,9 +419,9 @@ export function AppShell({ active, children, density = "default", redesigned = f
               <ListIcon aria-hidden="true" size={20} />
             </button>
           </div>
-          <BillingBanner /><div className="workspaceContent">{children}</div>
+          {guest ? null : <BillingBanner />}<div className="workspaceContent">{children}</div>
         </div>
-      ) : <><BillingBanner />{children}</>}
+      ) : <>{guest ? null : <BillingBanner />}{children}</>}
     </main>
   );
 }

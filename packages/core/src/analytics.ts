@@ -9,6 +9,8 @@ export interface AnalyticsEvent {
   distinctId: string;
   event:
     | "agent created"
+    | "automation created"
+    | "automation template shared"
     | "integration connected"
     | "investigation created"
     | "investigation feedback submitted"

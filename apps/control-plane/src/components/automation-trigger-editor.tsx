@@ -9,6 +9,7 @@ import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
 import { movedElsewhereInApp } from "./popover-dismiss";
 import { providerDisplayName } from "./provider-glyphs";
+import { triggerTitle } from "../pages/automation-list-presentation";
 import "./automation-trigger-editor.css";
 
 type TriggerKind = AutomationTrigger["kind"];
@@ -64,11 +65,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
   const providerName = providerDisplayName(trigger.kind);
   const removeTrigger = <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={onRemove} type="button"><TrashIcon size={14} /></button>;
 
-  const title = connected?.kind === "slack"
-    ? connected.eventMode === "every_message" ? "Slack message posted" : connected.eventMode === "mentions" ? "Slack app mentioned" : "Slack message posted or app mentioned"
-    : connected?.kind === "sentry"
-      ? connected.eventTypes.length === 2 ? "Sentry new issue or regression" : connected.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue"
-      : "Discord automation command";
+  const title = triggerTitle(trigger);
 
   if (schedule) return <div className="automationTrigger__card">
     <div className="automationTrigger__heading">

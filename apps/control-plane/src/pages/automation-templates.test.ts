@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "../automations-api";
 import { automationConnectorProviders } from "../components/automation-connectors";
-import { applyAutomationTemplate, automationTemplates, findAutomationTemplate, suggestedAutomationTemplates } from "./automation-templates";
+import { applyAutomationTemplate, automationTemplateMissingFields, automationTemplates, findAutomationTemplate, suggestedAutomationTemplates } from "./automation-templates";
 
 const configuration = {
   contextAccountIds: ["previous"],
@@ -23,7 +23,7 @@ describe("automation templates", () => {
   it("uses only connectors an automation run can use, apart from the trigger", () => {
     for (const template of automationTemplates) {
       expect(template.connectors.every((provider) => automationConnectorProviders.includes(provider))).toBe(true);
-      expect(template.connectors).not.toContain(template.trigger.kind);
+      for (const trigger of template.triggers) expect(template.connectors).not.toContain(trigger.kind);
       expect(template.prompt.trim()).not.toBe("");
     }
   });
@@ -69,7 +69,7 @@ describe("automation templates", () => {
     ]), "Europe/London");
     expect(applied.triggers).toEqual([{ frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 }]);
     expect(applied.contextAccountIds).toEqual(["sentry-1", "datadog-1", "slack-1"]);
-    expect(findAutomationTemplate("review-architecture")!.trigger).toMatchObject({ frequency: "weekly", kind: "schedule" });
+    expect(findAutomationTemplate("review-architecture")!.triggers[0]).toMatchObject({ frequency: "weekly", kind: "schedule" });
   });
 
   it("leaves missing connections for the user to connect", () => {
@@ -85,5 +85,39 @@ describe("automation templates", () => {
     ]));
     expect(applied.triggers[0]).toMatchObject({ eventMode: "mentions", integrationAccountId: "slack-1", kind: "slack" });
     expect(applied.contextAccountIds).toEqual(["sentry-1"]);
+  });
+
+  it("fills every trigger of a shared template", () => {
+    const applied = applyAutomationTemplate(configuration, {
+      connectors: ["github", "slack"],
+      description: "",
+      name: "Shared",
+      prompt: "Do it.",
+      triggers: [
+        { eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: [] },
+        { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
+        { frequency: "daily", hour: 8, kind: "schedule", timezone: "UTC", weekday: 1 },
+      ],
+    }, options([
+      { id: "sentry-1", provider: "sentry" },
+      { id: "slack-1", provider: "slack" },
+    ]), "Asia/Tokyo");
+    expect(applied.triggers).toEqual([
+      { eventTypes: ["new_issue"], integrationAccountId: "sentry-1", kind: "sentry", projectIds: [] },
+      { channelIds: [], eventMode: "mentions", integrationAccountId: "slack-1", kind: "slack" },
+      { frequency: "daily", hour: 8, kind: "schedule", timezone: "Asia/Tokyo", weekday: 1 },
+    ]);
+    // Slack is already the trigger connection, so it is not added again.
+    expect(applied.contextAccountIds).toEqual([]);
+  });
+
+  it("lists what the user still chooses for each trigger", () => {
+    expect(automationTemplateMissingFields({ triggers: [{ frequency: "daily", hour: 8, kind: "schedule", timezone: "UTC", weekday: 1 }] })).toBe("a repository");
+    expect(automationTemplateMissingFields(findAutomationTemplate("triage-sentry-issues")!)).toBe("a Sentry project and a repository");
+    expect(automationTemplateMissingFields({ triggers: [
+      { eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: [] },
+      { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
+      { channelIds: [], eventMode: "every_message", integrationAccountId: "", kind: "slack" },
+    ] })).toBe("a Sentry project, a Slack channel, and a repository");
   });
 });

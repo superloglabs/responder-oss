@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   listAutomationRuns: vi.fn().mockResolvedValue({ runs: [], total: 0 }),
   listAutomations: vi.fn().mockResolvedValue([]),
   listCredentials: vi.fn().mockResolvedValue([]),
+  analytics: vi.fn(),
+  getShare: vi.fn(),
+  share: vi.fn(),
+  unshare: vi.fn(),
   credential: vi.fn(),
   modelCatalog: vi.fn(),
   queueFollowUp: vi.fn(),
@@ -76,6 +80,14 @@ vi.mock("../../../../packages/core/src/db/model-subscriptions.js", () => ({
   startModelSubscription: mocks.startSubscription,
   pollModelSubscription: mocks.pollSubscription,
   cancelModelSubscription: mocks.cancelSubscription,
+}));
+vi.mock("../../../../packages/core/src/db/shared-automation-templates.js", () => ({
+  getAutomationShare: mocks.getShare,
+  shareAutomation: mocks.share,
+  unshareAutomation: mocks.unshare,
+}));
+vi.mock("../../../../packages/core/src/analytics.js", () => ({
+  captureAnalyticsEvent: mocks.analytics,
 }));
 vi.mock("./queue.js", () => ({
   queueAutomationRun: mocks.queueRun,
@@ -372,5 +384,101 @@ describe("automation control-plane routes", () => {
     });
     expect(mocks.gatewayModels).toHaveBeenCalledWith("openai");
     expect(unknown.status).toBe(400);
+  });
+
+  describe("sharing", () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    const share = { connectors: ["github"], description: "", name: "Triage", prompt: "Rate it.", slug: "aB3_-xYz09aB3_-x", triggers: [], updatedAt: new Date("2026-09-25T10:00:00Z") };
+
+    it("shares an automation of the active organization", async () => {
+      mocks.share.mockResolvedValue({ created: true, share });
+
+      const response = await app.request(`/api/automations/${automationId}/share`, { method: "PUT" });
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toMatchObject({ share: { slug: share.slug } });
+      expect(mocks.share).toHaveBeenCalledWith({ automationId, organizationId, userId });
+      expect(mocks.analytics).toHaveBeenCalledWith(expect.objectContaining({
+        event: "automation template shared",
+        properties: { automation_id: automationId, template_slug: share.slug, updated: false },
+      }));
+    });
+
+    it("updates an existing share in place", async () => {
+      mocks.share.mockResolvedValue({ created: false, share });
+
+      const response = await app.request(`/api/automations/${automationId}/share`, { method: "PUT" });
+
+      expect(response.status).toBe(200);
+    });
+
+    it("returns not found for another organization's automation", async () => {
+      mocks.share.mockResolvedValue(null);
+
+      const response = await app.request(`/api/automations/${automationId}/share`, { method: "PUT" });
+
+      expect(response.status).toBe(404);
+      expect(mocks.analytics).not.toHaveBeenCalled();
+    });
+
+    it("returns not found for a malformed automation ID without a query", async () => {
+      const response = await app.request("/api/automations/not-a-uuid/share");
+
+      expect(response.status).toBe(404);
+      expect(mocks.getShare).not.toHaveBeenCalled();
+    });
+
+    it("does not share when the organization capability is disabled", async () => {
+      mocks.capability.mockResolvedValue(false);
+
+      const response = await app.request(`/api/automations/${automationId}/share`, { method: "PUT" });
+
+      expect(response.status).toBe(404);
+      expect(mocks.share).not.toHaveBeenCalled();
+    });
+
+    it("reads and stops the share within the active organization", async () => {
+      mocks.getShare.mockResolvedValue(share);
+      mocks.unshare.mockResolvedValue(true);
+
+      const read = await app.request(`/api/automations/${automationId}/share`);
+      const stopped = await app.request(`/api/automations/${automationId}/share`, { method: "DELETE" });
+
+      await expect(read.json()).resolves.toMatchObject({ share: { slug: share.slug } });
+      expect(mocks.getShare).toHaveBeenCalledWith(organizationId, automationId);
+      expect(stopped.status).toBe(200);
+      expect(mocks.unshare).toHaveBeenCalledWith(organizationId, automationId);
+    });
+
+    it("records the shared template an automation was created from", async () => {
+      mocks.createAutomation.mockResolvedValue({ id: automationId });
+
+      const response = await app.request("/api/automations", {
+        body: JSON.stringify({
+          configuration: {
+            harness: "codex",
+            maxModelRequests: 24,
+            maxOutputTokensPerRequest: 16_000,
+            maxRuntimeSeconds: 1_800,
+            model: "gpt-5.4",
+            modelProvider: "openai",
+            prompt: "Rate it.",
+            repositoryIds: ["41414141-4141-4141-8141-414141414141"],
+            toolPolicy: "full",
+            triggers: [{ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }],
+          },
+          name: "Triage",
+          sharedTemplate: share.slug,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(201);
+      expect(mocks.analytics).toHaveBeenCalledWith(expect.objectContaining({
+        event: "automation created",
+        properties: expect.objectContaining({ shared_template_slug: share.slug, trigger_kinds: "schedule" }),
+      }));
+    });
   });
 });

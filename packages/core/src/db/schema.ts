@@ -753,6 +753,44 @@ export const automationVersionSecrets = pgTable(
   ],
 );
 
+// A public snapshot of an automation that anyone with the slug can preview and
+// copy into their own workspace. It holds only what the owner chose to share:
+// triggers carry no connection, channel, or project, and connectors are
+// provider names. Editing the automation does not change the snapshot.
+export const sharedAutomationTemplates = pgTable(
+  "shared_automation_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    prompt: text("prompt").notNull(),
+    triggers: jsonb("triggers").$type<AutomationTrigger[]>().notNull(),
+    connectors: jsonb("connectors").$type<string[]>().notNull(),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("shared_automation_templates_slug_idx").on(table.slug),
+    uniqueIndex("shared_automation_templates_automation_idx").on(
+      table.automationId,
+    ),
+  ],
+);
+
 export type AutomationRunStatus =
   | "pending"
   | "running"

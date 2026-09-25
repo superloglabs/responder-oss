@@ -33,6 +33,7 @@ import { scanRoutes } from "./scans/routes.js";
 import { suggestionRoutes } from "./suggestions/routes.js";
 import { automationModelBrokerRoutes } from "./automations/model-broker.js";
 import { automationRoutes } from "./automations/routes.js";
+import { sharedAutomationTemplateRoutes } from "./automations/shared-templates.js";
 import { createAutomationContextBrokerRoutes } from "./automations/context-broker.js";
 import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/db/organization-capabilities.js";
 
@@ -410,6 +411,7 @@ export const app = instrumentedApp
     });
   })
   .route("/api/automations", automationRoutes)
+  .route("/api/automation-templates", sharedAutomationTemplateRoutes)
   .route("/api/agents", agentRoutes)
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)

@@ -204,9 +204,11 @@ export function fetchAutomationOptions(): Promise<AutomationOptions> {
   return automationJson<AutomationOptions>("/api/automations/options");
 }
 
+// `sharedTemplate` names the shared template a new automation started from.
 export async function saveAutomation(
   automationId: string | undefined,
   input: AutomationInput,
+  sharedTemplate?: string,
 ): Promise<string> {
   const response = await automationJson<{
     automationId?: string;
@@ -214,7 +216,7 @@ export async function saveAutomation(
   }>(automationId
     ? `/api/automations/${encodeURIComponent(automationId)}`
     : "/api/automations", {
-    body: JSON.stringify(input),
+    body: JSON.stringify(sharedTemplate ? { ...input, sharedTemplate } : input),
     headers: { "content-type": "application/json" },
     method: automationId ? "PUT" : "POST",
   });
@@ -312,4 +314,44 @@ export function rotateAutomationCredential(id: string, apiKey: string) {
 
 export function deleteAutomationCredential(id: string) {
   return automationJson<{ deleted: boolean }>(`/api/automations/credentials/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// A public snapshot of an automation. Triggers have no connection, channels,
+// or projects; connectors are provider names.
+export interface AutomationShare {
+  connectors: string[];
+  description: string;
+  name: string;
+  prompt: string;
+  slug: string;
+  triggers: AutomationTrigger[];
+  updatedAt: string;
+}
+
+export interface SharedAutomationTemplate extends AutomationShare {
+  workspaceName: string;
+}
+
+export function sharedAutomationTemplatePath(slug: string): string {
+  return `/templates/${encodeURIComponent(slug)}`;
+}
+
+export async function fetchSharedAutomationTemplate(slug: string): Promise<SharedAutomationTemplate> {
+  const response = await automationJson<{ template: SharedAutomationTemplate }>(`/api/automation-templates/${encodeURIComponent(slug)}`);
+  return response.template;
+}
+
+export async function fetchAutomationShare(automationId: string): Promise<AutomationShare | null> {
+  const response = await automationJson<{ share: AutomationShare | null }>(`/api/automations/${encodeURIComponent(automationId)}/share`);
+  return response.share;
+}
+
+// Shares the automation as it is now, or updates the shared copy.
+export async function shareAutomation(automationId: string): Promise<AutomationShare> {
+  const response = await automationJson<{ share: AutomationShare }>(`/api/automations/${encodeURIComponent(automationId)}/share`, { method: "PUT" });
+  return response.share;
+}
+
+export function unshareAutomation(automationId: string) {
+  return automationJson<{ shared: false }>(`/api/automations/${encodeURIComponent(automationId)}/share`, { method: "DELETE" });
 }
