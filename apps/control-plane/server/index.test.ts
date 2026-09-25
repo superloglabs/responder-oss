@@ -28,6 +28,7 @@ import {
   sentryIssueBody,
   verifySentrySignature,
 } from "./webhooks/sentry.js";
+import { queueAutomationRun } from "./automations/queue.js";
 import { startSlackIssueRemediation } from "./issues/remediation.js";
 import {
   queueInvestigation,
@@ -1540,6 +1541,116 @@ describe("control-plane API", () => {
       ignored: true,
       reason: "datadog_recovery",
     });
+  });
+
+  async function postSignedSlackEvent(event: Record<string, unknown>) {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvAutomation",
+      event,
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+    return app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+  }
+
+  it.each([
+    {
+      name: "Datadog recoveries",
+      reason: "datadog_recovery",
+      event: {
+        type: "message",
+        bot_id: "B-DATADOG",
+        bot_profile: { app_id: "A-DATADOG", name: "Datadog" },
+        channel: "C123",
+        ts: "1700000004.000001",
+        text: "",
+        attachments: [{
+          title: "Recovered: Error logs",
+          text: "Less than 1 log event matched. <https://app.datadoghq.eu/logs?query=status%3Aerror|View in Log Explorer>",
+        }],
+      },
+    },
+    {
+      name: "Sentry resolutions",
+      reason: "unsupported_sentry_message",
+      event: {
+        type: "message",
+        bot_id: "B-SENTRY",
+        bot_profile: { app_id: "A-SENTRY", name: "Sentry" },
+        channel: "C123",
+        ts: "1700000002.000001",
+        text: "Example User marked <https://example.sentry.io/issues/140145603/|APP-FRONTEND-94> as resolved in an upcoming release",
+      },
+    },
+    {
+      name: "resolved app alerts",
+      reason: "resolved_alert",
+      event: {
+        type: "message",
+        bot_id: "B-CLICKSTACK",
+        bot_profile: { app_id: "A-CLICKSTACK", name: "ClickStack" },
+        channel: "C123",
+        ts: "1700000002.000001",
+        text: ':white_check_mark: Alert for "test" - 0 lines found',
+      },
+    },
+  ])("does not start automations for $name", async ({ event, reason }) => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    slackWebhookMocks.findAutomationsForSlackEvent.mockResolvedValueOnce([
+      { automationId: "31313131-3131-4313-8313-313131313131" },
+    ]);
+
+    const response = await postSignedSlackEvent(event);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason,
+    });
+    expect(slackWebhookMocks.findAutomationsForSlackEvent).not.toHaveBeenCalled();
+    expect(queueAutomationRun).not.toHaveBeenCalled();
+    expect(queueInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("starts automations for teammate messages that are not alerts", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    slackWebhookMocks.findAutomationsForSlackEvent.mockResolvedValueOnce([
+      { automationId: "31313131-3131-4313-8313-313131313131" },
+    ]);
+    vi.mocked(queueAutomationRun).mockResolvedValueOnce({
+      duplicate: false,
+      jobId: "job-1",
+      runId: "run-1",
+    });
+
+    const response = await postSignedSlackEvent({
+      type: "message",
+      user: "U123",
+      channel: "C123",
+      ts: "1700000005.000001",
+      text: "Checkout looks resolved on my side",
+    });
+
+    expect(response.status).toBe(200);
+    expect(queueAutomationRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: "31313131-3131-4313-8313-313131313131",
+      }),
+    );
   });
 
   it("adds valid investigations to the worker queue", async () => {

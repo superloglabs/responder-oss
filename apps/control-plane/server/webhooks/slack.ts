@@ -424,6 +424,45 @@ export function slackAlertProvider(input: {
   return /\balert\b/i.test(input.body) ? "app" : null;
 }
 
+export type SlackAlertIgnoreReason =
+  | "datadog_recovery"
+  | "error_recap"
+  | "resolved_alert"
+  | "unsupported_sentry_message";
+
+export function slackAlertIgnoreReason(input: {
+  alertProvider: SlackAlertProvider;
+  body: string;
+  senderName?: string;
+  subtype?: string;
+}): SlackAlertIgnoreReason | null {
+  if (
+    shouldIgnoreResolvedSlackAlert(
+      input.alertProvider,
+      input.body,
+      input.senderName,
+    )
+  ) {
+    return "resolved_alert";
+  }
+  if (input.alertProvider === "app" && isSlackErrorRecap(input.body)) {
+    return "error_recap";
+  }
+  if (
+    input.alertProvider === "sentry" &&
+    !isSentryIssueAlert(input.body, input.subtype)
+  ) {
+    return "unsupported_sentry_message";
+  }
+  if (
+    input.alertProvider === "datadog" &&
+    isDatadogRecoveryMessage(input.body)
+  ) {
+    return "datadog_recovery";
+  }
+  return null;
+}
+
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -807,6 +846,40 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   const body = event.type === "app_mention"
     ? rawMessageBody.replace(/^\s*<@[A-Z0-9]+>\s*/iu, "").trim() || rawMessageBody
     : rawMessageBody;
+  const senderName = event.bot_profile?.name ?? event.username;
+  const alertProvider = event.type === "message"
+    ? slackAlertProvider({
+      body,
+      botAppId: event.app_id ?? event.bot_profile?.app_id,
+      botId: event.bot_id,
+      botName: event.bot_profile?.name,
+      subtype: event.subtype,
+      username: event.username,
+    })
+    : null;
+  const ignoreReason = alertProvider
+    ? slackAlertIgnoreReason({
+      alertProvider,
+      body,
+      senderName,
+      subtype: event.subtype,
+    })
+    : null;
+  if (ignoreReason) {
+    console.info(
+      JSON.stringify({
+        botAppId: event.app_id ?? event.bot_profile?.app_id ?? null,
+        botId: event.bot_id ?? null,
+        channelId: event.channel,
+        event: "slack_app_alert_ignored",
+        eventId: callback.data.event_id,
+        reason: ignoreReason,
+        teamId: callback.data.team_id,
+      }),
+    );
+    return context.json({ ok: true, ignored: true, reason: ignoreReason });
+  }
+
   const automationMatches = await findAutomationsForSlackEvent({
     channelId: event.channel,
     eventType: event.type,
@@ -903,18 +976,8 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     }
   }
   let matches: Awaited<ReturnType<typeof findAgentsForSlackEvent>> = [];
-  let alertProvider: SlackAlertProvider | null = null;
   let awsAlarm: SlackAwsAlarm | null = null;
   if (event.type === "message") {
-    const senderName = event.bot_profile?.name ?? event.username;
-    alertProvider = slackAlertProvider({
-      body,
-      botAppId: event.app_id ?? event.bot_profile?.app_id,
-      botId: event.bot_id,
-      botName: event.bot_profile?.name,
-      subtype: event.subtype,
-      username: event.username,
-    });
     if (!alertProvider) {
       console.info(
         JSON.stringify({
@@ -936,66 +999,6 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     }
     if (alertProvider === "aws") {
       awsAlarm = slackAwsAlarm({ body, senderName });
-    }
-    if (
-      alertProvider &&
-      shouldIgnoreResolvedSlackAlert(
-        alertProvider,
-        body,
-        senderName,
-      )
-    ) {
-      console.info(
-        JSON.stringify({
-          botAppId: event.app_id ?? event.bot_profile?.app_id ?? null,
-          botId: event.bot_id ?? null,
-          channelId: event.channel,
-          event: "slack_app_alert_ignored",
-          eventId: callback.data.event_id,
-          reason: "resolved_alert",
-          teamId: callback.data.team_id,
-        }),
-      );
-      return context.json({
-        ok: true,
-        ignored: true,
-        reason: "resolved_alert",
-      });
-    }
-    if (alertProvider === "app" && isSlackErrorRecap(body)) {
-      console.info(
-        JSON.stringify({
-          botAppId: event.app_id ?? event.bot_profile?.app_id ?? null,
-          botId: event.bot_id ?? null,
-          channelId: event.channel,
-          event: "slack_app_alert_ignored",
-          eventId: callback.data.event_id,
-          reason: "error_recap",
-          teamId: callback.data.team_id,
-        }),
-      );
-      return context.json({
-        ok: true,
-        ignored: true,
-        reason: "error_recap",
-      });
-    }
-    if (
-      alertProvider === "sentry" &&
-      !isSentryIssueAlert(body, event.subtype)
-    ) {
-      return context.json({
-        ok: true,
-        ignored: true,
-        reason: "unsupported_sentry_message",
-      });
-    }
-    if (alertProvider === "datadog" && isDatadogRecoveryMessage(body)) {
-      return context.json({
-        ok: true,
-        ignored: true,
-        reason: "datadog_recovery",
-      });
     }
     if (alertProvider === "app" || alertProvider === "aws") {
       logAcceptedSlackAppAlert({
