@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowClockwiseIcon, CaretDownIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { movedElsewhereInApp } from "./popover-dismiss";
 import { searchInputProps } from "./search-input-props";
 
 export function AutomationResourcePicker({ label, resources, selected, onChange, onRefresh }: {
@@ -25,7 +26,7 @@ export function AutomationResourcePicker({ label, resources, selected, onChange,
     if (!open) return;
     input.current?.focus();
     function dismiss(event: PointerEvent) {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+      if (movedElsewhereInApp(root.current, event.target)) setOpen(false);
     }
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
@@ -38,9 +39,10 @@ export function AutomationResourcePicker({ label, resources, selected, onChange,
     finally { setRefreshing(false); }
   }
   return <div className="automationResourcePicker" ref={root} onBlur={(event) => {
-    // Label clicks briefly blur the search before focusing their checkbox.
-    // Outside pointer clicks are handled by the document listener above.
-    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    // Label clicks briefly blur the search with no related target before
+    // focusing their checkbox. Outside pointer clicks are handled by the
+    // document listener above.
+    if (movedElsewhereInApp(event.currentTarget, event.relatedTarget)) setOpen(false);
   }} onKeyDown={(event) => {
     if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); button.current?.focus(); }
     if (open && ["ArrowDown", "ArrowUp"].includes(event.key)) {

@@ -670,6 +670,40 @@ test("saves several triggers and keeps password managers off the trigger search"
   await expect(page.getByRole("combobox", { name: "Frequency" })).toHaveValue("daily");
 });
 
+test("keeps the trigger menu open when a password manager menu takes focus", async ({ page }) => {
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  const search = page.getByRole("textbox", { name: "Search triggers" });
+  await expect(search).toBeFocused();
+
+  // 1Password appends a shadow host with an iframe to the body and focuses
+  // the iframe.
+  await page.evaluate(() => {
+    const host = document.createElement("com-1password-menu");
+    host.style.cssText = "position: fixed; right: 24px; bottom: 24px; width: 240px; height: 120px;";
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "width: 100%; height: 100%;";
+    host.attachShadow({ mode: "closed" }).appendChild(frame);
+    document.body.appendChild(host);
+    frame.focus();
+  });
+  await expect(search).toBeVisible();
+  await page.mouse.click(1600, 900);
+  await expect(search).toBeVisible();
+
+  await search.click();
+  await search.fill("slack");
+  await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
+  await page.getByRole("menuitem", { name: "App mentioned", exact: true }).click();
+  await expect(page.getByText("Slack app mentioned", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Add another trigger", exact: true }).click();
+  await expect(search).toBeVisible();
+  await page.getByRole("heading", { name: "Triggers" }).click();
+  await expect(search).toHaveCount(0);
+});
+
 test("clears a template with Start blank", async ({ page }) => {
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new?template=triage-sentry-issues");
