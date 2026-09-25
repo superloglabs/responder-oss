@@ -72,7 +72,7 @@ export async function findAutomationsForSlackEvent(input: {
       accountId: integrationAccounts.id,
       accountMetadata: integrationAccounts.metadata,
       automationId: automations.id,
-      trigger: automationVersions.trigger,
+      triggers: automationVersions.triggers,
     })
     .from(automations)
     .innerJoin(
@@ -109,17 +109,19 @@ export async function findAutomationsForSlackEvent(input: {
 
   return rows.flatMap((row) => {
     if (
-      row.trigger.kind !== "slack" ||
-      row.trigger.integrationAccountId !== row.accountId ||
-      !row.trigger.channelIds.includes(input.channelId) ||
       (input.userId && row.accountMetadata.botUserId === input.userId) ||
       (input.senderAppId && row.accountMetadata.appId === input.senderAppId)
     ) {
       return [];
     }
-    const matches = row.trigger.eventMode === "both" ||
-      (row.trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
-      (row.trigger.eventMode === "every_message" && input.eventType === "message");
+    const matches = row.triggers.some((trigger) =>
+      trigger.kind === "slack" &&
+      trigger.integrationAccountId === row.accountId &&
+      trigger.channelIds.includes(input.channelId) &&
+      (trigger.eventMode === "both" ||
+        (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
+        (trigger.eventMode === "every_message" && input.eventType === "message"))
+    );
     return matches ? [{ automationId: row.automationId }] : [];
   });
 }
@@ -133,7 +135,7 @@ export async function findAutomationsForSentryIssue(input: {
     .select({
       accountId: integrationAccounts.id,
       automationId: automations.id,
-      trigger: automationVersions.trigger,
+      triggers: automationVersions.triggers,
     })
     .from(automations)
     .innerJoin(
@@ -169,10 +171,12 @@ export async function findAutomationsForSentryIssue(input: {
     .where(eq(automations.enabled, true));
   const eventType = input.action === "created" ? "new_issue" : "regression";
   return rows.flatMap((row) =>
-    row.trigger.kind === "sentry" &&
-      row.trigger.integrationAccountId === row.accountId &&
-      row.trigger.projectIds.includes(input.projectId) &&
-      row.trigger.eventTypes.includes(eventType)
+    row.triggers.some((trigger) =>
+      trigger.kind === "sentry" &&
+      trigger.integrationAccountId === row.accountId &&
+      trigger.projectIds.includes(input.projectId) &&
+      trigger.eventTypes.includes(eventType)
+    )
       ? [{ automationId: row.automationId }]
       : []
   );
@@ -186,7 +190,7 @@ export async function findAutomationsForDiscordCommand(input: {
     .select({
       accountId: integrationAccounts.id,
       automationId: automations.id,
-      trigger: automationVersions.trigger,
+      triggers: automationVersions.triggers,
     })
     .from(automations)
     .innerJoin(
@@ -222,9 +226,11 @@ export async function findAutomationsForDiscordCommand(input: {
     .where(eq(automations.enabled, true));
 
   return rows.flatMap((row) =>
-    row.trigger.kind === "discord" &&
-      row.trigger.integrationAccountId === row.accountId &&
-      row.trigger.channelIds.includes(input.channelId)
+    row.triggers.some((trigger) =>
+      trigger.kind === "discord" &&
+      trigger.integrationAccountId === row.accountId &&
+      trigger.channelIds.includes(input.channelId)
+    )
       ? [{ automationId: row.automationId }]
       : []
   );
@@ -237,6 +243,7 @@ export function scheduleExternalEventId(scheduledFor: Date): string {
 }
 
 // Returns enabled schedule automations whose latest slot has not run yet.
+// Schedules of one automation that share a slot run it once.
 export async function findDueScheduledAutomations(now: Date): Promise<Array<{
   automationId: string;
   scheduledFor: Date;
@@ -246,7 +253,7 @@ export async function findDueScheduledAutomations(now: Date): Promise<Array<{
   const rows = await database
     .select({
       automationId: automations.id,
-      trigger: automationVersions.trigger,
+      triggers: automationVersions.triggers,
       versionCreatedAt: automationVersions.createdAt,
     })
     .from(automations)
@@ -265,15 +272,24 @@ export async function findDueScheduledAutomations(now: Date): Promise<Array<{
     .where(
       and(
         eq(automations.enabled, true),
-        sql`${automationVersions.trigger}->>'kind' = 'schedule'`,
+        sql`${automationVersions.triggers} @> '[{"kind":"schedule"}]'::jsonb`,
       ),
     );
-  const due = rows.flatMap((row) => {
-    if (row.trigger.kind !== "schedule") return [];
-    const scheduledFor = dueScheduleSlot(row.trigger, row.versionCreatedAt, now);
-    if (!scheduledFor) return [];
-    return [{ automationId: row.automationId, scheduledFor, trigger: row.trigger }];
-  });
+  const slots = new Map<string, {
+    automationId: string;
+    scheduledFor: Date;
+    trigger: AutomationScheduleTrigger;
+  }>();
+  for (const row of rows) {
+    for (const trigger of row.triggers) {
+      if (trigger.kind !== "schedule") continue;
+      const scheduledFor = dueScheduleSlot(trigger, row.versionCreatedAt, now);
+      if (!scheduledFor) continue;
+      const key = `${row.automationId}:${scheduleExternalEventId(scheduledFor)}`;
+      if (!slots.has(key)) slots.set(key, { automationId: row.automationId, scheduledFor, trigger });
+    }
+  }
+  const due = [...slots.values()];
   if (due.length === 0) return [];
   const received = await database
     .select({
@@ -295,9 +311,11 @@ export async function findDueScheduledAutomations(now: Date): Promise<Array<{
   return due.filter((item) => !receivedKeys.has(`${item.automationId}:${scheduleExternalEventId(item.scheduledFor)}`));
 }
 
-// A schedule trigger has no connection.
-function triggerAccountId(trigger: AutomationTrigger): string | null {
-  return trigger.kind === "schedule" ? null : trigger.integrationAccountId;
+// The distinct connections of the triggers. A schedule trigger has none.
+function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
+  return [...new Set(triggers.flatMap((trigger) =>
+    trigger.kind === "schedule" ? [] : [trigger.integrationAccountId]
+  ))];
 }
 
 // Returns the inference source implied by the selected model credential.
@@ -306,10 +324,9 @@ async function validateConfigurationResources(
   organizationId: string,
   configuration: AutomationConfiguration,
 ): Promise<AutomationInferenceSource> {
-  const { trigger } = configuration;
   const accountIds = [
     ...new Set([
-      ...(trigger.kind === "schedule" ? [] : [trigger.integrationAccountId]),
+      ...triggerAccountIds(configuration.triggers),
       ...configuration.contextAccountIds,
     ]),
   ];
@@ -329,7 +346,8 @@ async function validateConfigurationResources(
       "integration_not_found",
     );
   }
-  if (trigger.kind !== "schedule") {
+  for (const trigger of configuration.triggers) {
+    if (trigger.kind === "schedule") continue;
     const triggerAccount = accountRows.find(
       (account) => account.id === trigger.integrationAccountId,
     );
@@ -493,18 +511,19 @@ async function insertAutomationVersion(
       modelProvider: input.configuration.modelProvider,
       prompt: input.configuration.prompt,
       toolPolicy: input.configuration.toolPolicy,
-      trigger: input.configuration.trigger,
+      trigger: input.configuration.triggers[0],
+      triggers: input.configuration.triggers,
       version: input.version,
     })
     .returning({ id: automationVersions.id });
   const versionId = rows[0]?.id;
   if (!versionId) throw new Error("Unable to create automation version");
 
-  const triggerAccount = triggerAccountId(input.configuration.trigger);
   const accountLinks = [
-    ...(triggerAccount
-      ? [{ integrationAccountId: triggerAccount, role: "trigger" as const }]
-      : []),
+    ...triggerAccountIds(input.configuration.triggers).map((integrationAccountId) => ({
+      integrationAccountId,
+      role: "trigger" as const,
+    })),
     ...input.configuration.contextAccountIds.map((integrationAccountId) => ({
       integrationAccountId,
       role: "context" as const,
@@ -665,7 +684,7 @@ export async function listAutomations(organizationId: string) {
       model: automationVersions.model,
       modelProvider: automationVersions.modelProvider,
       name: automations.name,
-      trigger: automationVersions.trigger,
+      triggers: automationVersions.triggers,
       updatedAt: automations.updatedAt,
       version: automationVersions.version,
       versionId: automationVersions.id,
@@ -773,7 +792,7 @@ export async function getAutomation(
         modelProvider: automationVersions.modelProvider,
         prompt: automationVersions.prompt,
         toolPolicy: automationVersions.toolPolicy,
-        trigger: automationVersions.trigger,
+        triggers: automationVersions.triggers,
       },
       createdAt: automations.createdAt,
       description: automations.description,
@@ -1417,7 +1436,7 @@ export async function claimAutomationRun(runId: string) {
       modelProvider: automationVersions.modelProvider,
       prompt: automationVersions.prompt,
       toolPolicy: automationVersions.toolPolicy,
-      trigger: automationVersions.trigger,
+      triggers: automationVersions.triggers,
     })
     .from(automationRuns)
     .innerJoin(

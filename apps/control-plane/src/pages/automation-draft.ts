@@ -15,7 +15,6 @@ export interface AutomationDraft {
   configuration: AutomationConfiguration;
   // The template a new automation started from, if any.
   templateId?: string;
-  triggerSelected: boolean;
   githubIncluded: boolean;
   connecting: string;
   // Accounts of the connecting provider before the flow, to find the new one.
@@ -43,6 +42,8 @@ function readAutomationDraft(): AutomationDraft | null {
     const value = window.sessionStorage.getItem(storageKey);
     if (!value) return null;
     const stored = JSON.parse(value) as ReturnType<typeof storedAutomationDraft>;
+    // Drafts saved before automations had several triggers cannot be restored.
+    if (!Array.isArray(stored.configuration.triggers)) return null;
     const draft = { ...stored, configuration: { ...stored.configuration, workspaceSecretIds: [] } };
     return isCurrentAutomationDraft(draft, Date.now()) ? draft : null;
   } catch {

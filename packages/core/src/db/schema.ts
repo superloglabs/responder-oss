@@ -643,7 +643,10 @@ export const automationVersions = pgTable(
       () => organizationModelCredentials.id,
       { onDelete: "restrict" },
     ),
-    trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
+    // Holds the first trigger for services still reading it during a rolling
+    // deploy. Read `triggers`.
+    trigger: jsonb("trigger").$type<AutomationTrigger>(),
+    triggers: jsonb("triggers").$type<AutomationTrigger[]>().notNull(),
     connectionMode: text("connection_mode")
       .$type<"all_selected">()
       .notNull()

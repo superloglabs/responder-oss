@@ -8,7 +8,7 @@ const configuration = {
   model: "gpt-5.4",
   prompt: "",
   repositoryIds: ["repository"],
-  trigger: { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
+  triggers: [],
 } as unknown as AutomationConfiguration;
 const options = (accounts: Array<{ id: string; provider: string }>) => ({ accounts }) as unknown as AutomationOptions;
 
@@ -53,7 +53,7 @@ describe("automation templates", () => {
       { id: "slack-1", provider: "slack" },
       { id: "github-1", provider: "github" },
     ]));
-    expect(applied.trigger).toEqual({ eventTypes: ["new_issue"], integrationAccountId: "sentry-1", kind: "sentry", projectIds: [] });
+    expect(applied.triggers).toEqual([{ eventTypes: ["new_issue"], integrationAccountId: "sentry-1", kind: "sentry", projectIds: [] }]);
     expect(applied.contextAccountIds).toEqual(["slack-1"]);
     expect(applied.prompt).toBe(template.prompt);
     expect(applied.repositoryIds).toEqual(["repository"]);
@@ -67,14 +67,14 @@ describe("automation templates", () => {
       { id: "datadog-1", provider: "datadog" },
       { id: "slack-1", provider: "slack" },
     ]), "Europe/London");
-    expect(applied.trigger).toEqual({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 });
+    expect(applied.triggers).toEqual([{ frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 }]);
     expect(applied.contextAccountIds).toEqual(["sentry-1", "datadog-1", "slack-1"]);
     expect(findAutomationTemplate("review-architecture")!.trigger).toMatchObject({ frequency: "weekly", kind: "schedule" });
   });
 
   it("leaves missing connections for the user to connect", () => {
     const applied = applyAutomationTemplate(configuration, findAutomationTemplate("fix-sentry-regressions")!, options([]));
-    expect(applied.trigger).toMatchObject({ eventTypes: ["regression"], integrationAccountId: "", kind: "sentry" });
+    expect(applied.triggers[0]).toMatchObject({ eventTypes: ["regression"], integrationAccountId: "", kind: "sentry" });
     expect(applied.contextAccountIds).toEqual([]);
   });
 
@@ -83,7 +83,7 @@ describe("automation templates", () => {
       { id: "slack-1", provider: "slack" },
       { id: "sentry-1", provider: "sentry" },
     ]));
-    expect(applied.trigger).toMatchObject({ eventMode: "mentions", integrationAccountId: "slack-1", kind: "slack" });
+    expect(applied.triggers[0]).toMatchObject({ eventMode: "mentions", integrationAccountId: "slack-1", kind: "slack" });
     expect(applied.contextAccountIds).toEqual(["sentry-1"]);
   });
 });

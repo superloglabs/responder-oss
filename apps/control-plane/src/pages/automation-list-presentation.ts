@@ -11,11 +11,25 @@ export const runStatusLabels: Record<AutomationRunStatus, string> = {
   succeeded: "Completed",
 };
 
-export function triggerProviderLabel(trigger: AutomationListItem["trigger"]): string {
+type AutomationListTrigger = AutomationListItem["triggers"][number];
+
+export function triggerProviderLabel(trigger: AutomationListTrigger): string {
   return providerDisplayName(trigger.kind);
 }
 
-export function triggerEventLabel(trigger: AutomationListItem["trigger"]): string {
+// Names the first trigger's provider and counts the others.
+export function triggerSummary(triggers: AutomationListTrigger[]): string {
+  const first = triggers[0];
+  if (!first) return "None";
+  const label = triggerProviderLabel(first);
+  return triggers.length > 1 ? `${label} +${triggers.length - 1}` : label;
+}
+
+export function triggerNames(triggers: AutomationListTrigger[]): string {
+  return triggers.map((trigger) => `${triggerProviderLabel(trigger)}: ${triggerEventLabel(trigger)}`).join(", ");
+}
+
+export function triggerEventLabel(trigger: AutomationListTrigger): string {
   if (trigger.kind === "slack") {
     if (trigger.eventMode === "mentions") return "App mentioned";
     if (trigger.eventMode === "every_message") return "New message";

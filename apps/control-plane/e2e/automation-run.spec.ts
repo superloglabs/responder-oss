@@ -17,7 +17,7 @@ const automation = {
     prompt: "Investigate the reported issue.",
     repositoryIds: ["11111111-1111-4111-8111-111111111111"],
     toolPolicy: "full",
-    trigger: { eventTypes: ["new_issue"], integrationAccountId: "22222222-2222-4222-8222-222222222222", kind: "sentry", projectIds: ["responder-web"] },
+    triggers: [{ eventTypes: ["new_issue"], integrationAccountId: "22222222-2222-4222-8222-222222222222", kind: "sentry", projectIds: ["responder-web"] }],
     workspaceSecretIds: [],
   },
   createdAt: "2026-09-01T10:00:00Z",

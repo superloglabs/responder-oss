@@ -2,6 +2,7 @@ import { type KeyboardEvent, useRef, useState } from "react";
 import { CaretRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import type { AutomationTrigger } from "../automations-api";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
+import { searchInputProps } from "./search-input-props";
 
 export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "command" | "hourly" | "daily" | "weekly";
 const providers = [
@@ -54,7 +55,7 @@ export function AutomationTriggerMenu({ onChoose }: {
   }
 
   return <div ref={root} onKeyDown={(event) => moveFocus(event, ".automationTrigger__providerOption")}>
-    <label className="automationTrigger__search"><MagnifyingGlassIcon size={16} /><input aria-label="Search triggers" placeholder="Search triggers…" value={query} onChange={(event) => { setQuery(event.target.value); setActive(null); }} /></label>
+    <label className="automationTrigger__search"><MagnifyingGlassIcon size={16} /><input {...searchInputProps} aria-label="Search triggers" placeholder="Search triggers…" value={query} onChange={(event) => { setQuery(event.target.value); setActive(null); }} /></label>
     <div role="menu" aria-label="Trigger providers" className="automationTrigger__providers">
       {filtered.map((provider) => <div className="automationTrigger__providerItem" key={provider.kind} onPointerEnter={(event) => { if (event.pointerType === "mouse") setActive(provider.kind); }}>
         <button aria-haspopup="menu" aria-expanded={active === provider.kind} className={`automationTrigger__providerOption${active === provider.kind ? " isActive" : ""}`} data-provider={provider.kind} onClick={() => focusEvents(provider.kind)} onFocus={() => setActive(provider.kind)} onKeyDown={(event) => {

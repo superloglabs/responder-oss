@@ -226,7 +226,7 @@ export function applyAutomationTemplate(configuration: AutomationConfiguration, 
     ...configuration,
     contextAccountIds,
     prompt: template.prompt,
-    trigger: trigger.kind === "schedule" ? { ...trigger, timezone } : { ...trigger, integrationAccountId: triggerAccountId },
+    triggers: [trigger.kind === "schedule" ? { ...trigger, timezone } : { ...trigger, integrationAccountId: triggerAccountId }],
   };
 }
 

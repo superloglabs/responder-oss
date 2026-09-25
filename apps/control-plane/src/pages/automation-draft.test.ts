@@ -3,7 +3,7 @@ import type { AutomationConfiguration, AutomationOptions } from "../automations-
 import { connectedAccountIds, isCurrentAutomationDraft, storedAutomationDraft, withConnectedAccounts, type AutomationDraft } from "./automation-draft";
 
 const configuration = { contextAccountIds: ["existing"], workspaceSecretIds: ["secret"] } as unknown as AutomationConfiguration;
-const draft = (connecting: string): AutomationDraft => ({ name: "Draft", configuration, triggerSelected: false, githubIncluded: false, connecting, knownAccountIds: ["old"], savedAt: 0 });
+const draft = (connecting: string): AutomationDraft => ({ name: "Draft", configuration, githubIncluded: false, connecting, knownAccountIds: ["old"], savedAt: 0 });
 const options = (accounts: Array<{ id: string; provider: string }>) => ({ accounts }) as unknown as AutomationOptions;
 
 describe("automation draft", () => {

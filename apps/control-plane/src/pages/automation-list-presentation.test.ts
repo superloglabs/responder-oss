@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { connectorNames, connectorSummary, triggerEventLabel, triggerProviderLabel } from "./automation-list-presentation";
+import type { AutomationTrigger } from "../automations-api";
+import { connectorNames, connectorSummary, triggerEventLabel, triggerNames, triggerProviderLabel, triggerSummary } from "./automation-list-presentation";
 
 describe("automation list presentation", () => {
   it("summarizes connectors by the first provider and a count", () => {
@@ -23,5 +24,14 @@ describe("automation list presentation", () => {
     expect(triggerEventLabel({ eventTypes: ["new_issue", "regression"], integrationAccountId: "a", kind: "sentry", projectIds: [] })).toBe("New issue or regression");
     expect(triggerEventLabel({ channelIds: [], integrationAccountId: "a", kind: "discord" })).toBe("Command in channel");
     expect(triggerEventLabel({ frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("Mondays at 09:00");
+  });
+
+  it("summarizes several triggers by the first provider and a count", () => {
+    const slack: AutomationTrigger = { channelIds: [], eventMode: "mentions", integrationAccountId: "a", kind: "slack" };
+    const schedule: AutomationTrigger = { frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 };
+    expect(triggerSummary([])).toBe("None");
+    expect(triggerSummary([slack])).toBe("Slack");
+    expect(triggerSummary([slack, schedule])).toBe("Slack +1");
+    expect(triggerNames([slack, schedule])).toBe("Slack: App mentioned, Schedule: Every hour");
   });
 });
