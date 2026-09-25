@@ -19,3 +19,22 @@ export function legacyHeartbeatHandoffWaitMs(
 ): number {
   return workerGracefulShutdownTimeoutMs(environment) + 15_000;
 }
+
+type ShutdownSignal = "SIGINT" | "SIGTERM";
+
+// The listeners stay registered after the first signal. The OpenAI Agents SDK
+// calls process.exit from its own listener when no other listener remains,
+// which would cut the graceful queue drain short.
+export function onShutdownSignal(
+  handler: (signal: ShutdownSignal) => void,
+  target: Pick<NodeJS.Process, "on"> = process,
+): void {
+  let received = false;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    target.on(signal, () => {
+      if (received) return;
+      received = true;
+      handler(signal);
+    });
+  }
+}

@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  automationRunQueue,
   createJobBoss,
   investigationJobSchema,
   investigationLocalConcurrency,
   investigationQueue,
+  legacyAutomationRunQueue,
   linearTicketQueue,
+  migrateLegacyAutomationRunJobs,
   migrateLegacyInvestigationHeartbeats,
   prepareWorkerQueues,
   pullRequestReviewJobSchema,
@@ -154,6 +157,74 @@ describe("background jobs", () => {
         retryLimit: 3,
       }),
     );
+  });
+
+  it("runs automation jobs without per-automation ordering", async () => {
+    const createQueue = vi.fn().mockResolvedValue(undefined);
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const updateQueue = vi.fn().mockResolvedValue(undefined);
+
+    await prepareWorkerQueues({
+      createQueue,
+      getDb: () => ({ executeSql }),
+      updateQueue,
+    } as never);
+
+    expect(automationRunQueue).toBe("responder-automation-runs-v2");
+    const options = createQueue.mock.calls.find(
+      ([name]) => name === automationRunQueue,
+    )?.[1];
+    expect(options).toMatchObject({ heartbeatSeconds: 60, retryLimit: 2 });
+    expect(options).not.toHaveProperty("policy");
+  });
+
+  it("moves waiting legacy automation jobs, including failed ones that block their key", async () => {
+    const executeSql = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [
+          { data: { kind: "automation_run", queuedAt: "2026-09-25T14:46:05.000Z", runId: "9675b171-8931-4f9b-aaea-098f400f93b2" }, id: "job-1" },
+          { data: { kind: "automation_run", queuedAt: "2026-09-25T14:46:29.000Z", runId: "d000a095-c747-40b6-8ce6-7894c63ba6ab" }, id: "job-2" },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [] });
+    const insert = vi.fn().mockResolvedValue(null);
+
+    await expect(migrateLegacyAutomationRunJobs({
+      getDb: () => ({ executeSql }),
+      insert,
+    } as never)).resolves.toBe(2);
+
+    expect(executeSql).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("state IN ('created', 'retry', 'failed')"),
+      [legacyAutomationRunQueue],
+    );
+    expect(insert).toHaveBeenCalledWith(automationRunQueue, [
+      { data: expect.objectContaining({ runId: "9675b171-8931-4f9b-aaea-098f400f93b2" }) },
+      { data: expect.objectContaining({ runId: "d000a095-c747-40b6-8ce6-7894c63ba6ab" }) },
+    ]);
+    expect(executeSql).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("DELETE FROM pgboss.job"),
+      [legacyAutomationRunQueue, ["job-1", "job-2"]],
+    );
+    expect(insert.mock.invocationCallOrder[0]).toBeLessThan(
+      executeSql.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("leaves the legacy automation queue alone when nothing is waiting", async () => {
+    const executeSql = vi.fn().mockResolvedValue({ rows: [] });
+    const insert = vi.fn();
+
+    await expect(migrateLegacyAutomationRunJobs({
+      getDb: () => ({ executeSql }),
+      insert,
+    } as never)).resolves.toBe(0);
+
+    expect(insert).not.toHaveBeenCalled();
+    expect(executeSql).toHaveBeenCalledTimes(1);
   });
 
   it("accepts an investigation job", () => {

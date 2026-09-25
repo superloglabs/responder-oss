@@ -4,8 +4,10 @@ import {
   createJobBoss,
   investigationLocalConcurrency,
   investigationQueue,
+  legacyAutomationRunQueue,
   linearTicketJobSchema,
   linearTicketQueue,
+  migrateLegacyAutomationRunJobs,
   migrateLegacyInvestigationHeartbeats,
   prepareWorkerQueues,
   pullRequestReviewJobSchema,
@@ -62,6 +64,7 @@ import {
 } from "./investigation-completion.js";
 import {
   legacyHeartbeatHandoffWaitMs,
+  onShutdownSignal,
   workerGracefulShutdownTimeoutMs,
 } from "./shutdown-policy.js";
 import {
@@ -381,21 +384,19 @@ async function shutdown(signal: string): Promise<void> {
   }
 }
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void shutdown(signal)
-      .then(() => process.exit(0))
-      .catch((error: unknown) => {
-        console.error(
-          JSON.stringify({
-            error: error instanceof Error ? error.message : String(error),
-            event: "worker_shutdown_failed",
-          }),
-        );
-        process.exit(1);
-      });
-  });
-}
+onShutdownSignal((signal) => {
+  void shutdown(signal)
+    .then(() => process.exit(0))
+    .catch((error: unknown) => {
+      console.error(
+        JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          event: "worker_shutdown_failed",
+        }),
+      );
+      process.exit(1);
+    });
+});
 
 await boss.start();
 await prepareWorkerQueues(boss);
@@ -415,10 +416,14 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
 
   return { marker: payload.marker, processedAt };
 });
-await boss.work(automationRunQueue, { localConcurrency: 2 }, async ([job]) => {
+const automationRunHandler = async ([job]: Array<{ data: unknown; id: string }>) => {
   const payload = automationRunJobSchema.parse(job.data);
   return processAutomationRun(job.id, payload, process.env);
-});
+};
+await migrateLegacyAutomationRunJobs(boss);
+await boss.work(automationRunQueue, { localConcurrency: 2 }, automationRunHandler);
+// Drains jobs sent by control-plane tasks that predate the unordered queue.
+await boss.work(legacyAutomationRunQueue, { localConcurrency: 1 }, automationRunHandler);
 await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
   const payload = linearTicketJobSchema.parse(job.data);
   try {

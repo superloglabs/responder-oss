@@ -20,7 +20,13 @@ export const slackThreadInvestigationQueue =
 export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
 export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
-export const automationRunQueue = "responder-automation-runs-v1";
+// Runs are independent. The run lease keeps two workers off the same run, so
+// this queue has no per-automation ordering and one busy automation never
+// holds back another run.
+export const automationRunQueue = "responder-automation-runs-v2";
+// Per-automation strict FIFO queue. Remove it and its drain after 2026-10-03,
+// when pg-boss's seven-day retention guarantees no job can remain.
+export const legacyAutomationRunQueue = "responder-automation-runs-v1";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -208,6 +214,36 @@ export async function migrateLegacyInvestigationHeartbeats(
   }
 }
 
+// Moves waiting jobs off the strict FIFO queue. A failed job there blocks its
+// automation forever, and pg-boss then fails every fetch on that queue. A moved
+// job for a run that already finished is harmless because claiming it finds
+// nothing to do.
+export async function migrateLegacyAutomationRunJobs(boss: PgBoss): Promise<number> {
+  const database = boss.getDb();
+  const waiting = await database.executeSql(
+    `SELECT id, data
+     FROM pgboss.job
+     WHERE name = $1
+       AND state IN ('created', 'retry', 'failed')
+     ORDER BY created_on`,
+    [legacyAutomationRunQueue],
+  );
+  const jobs = waiting.rows as Array<{ data: unknown; id: string }>;
+  if (jobs.length === 0) return 0;
+  await boss.insert(
+    automationRunQueue,
+    jobs.map((job) => ({ data: job.data as object })),
+  );
+  await database.executeSql(
+    `DELETE FROM pgboss.job
+     WHERE name = $1
+       AND id = ANY($2::uuid[])
+       AND state IN ('created', 'retry', 'failed')`,
+    [legacyAutomationRunQueue, jobs.map((job) => job.id)],
+  );
+  return jobs.length;
+}
+
 export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
   await Promise.all([
     boss.createQueue(workerHealthQueue, {
@@ -272,6 +308,15 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryLimit: 5,
     }),
     boss.createQueue(automationRunQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 3_600,
+      heartbeatSeconds: investigationHeartbeatSeconds,
+      notify: true,
+      retryBackoff: true,
+      retryDelay: 30,
+      retryLimit: 2,
+    }),
+    boss.createQueue(legacyAutomationRunQueue, {
       deleteAfterSeconds: 604_800,
       expireInSeconds: 3_600,
       heartbeatSeconds: investigationHeartbeatSeconds,

@@ -53,16 +53,12 @@ async function getBoss() {
   }
 }
 
-async function sendAutomationRunJob(automationId: string, runId: string): Promise<string> {
-  const jobId = await (await getBoss()).send(
-    automationRunQueue,
-    {
-      kind: "automation_run",
-      queuedAt: new Date().toISOString(),
-      runId,
-    },
-    { singletonKey: automationId },
-  );
+async function sendAutomationRunJob(runId: string): Promise<string> {
+  const jobId = await (await getBoss()).send(automationRunQueue, {
+    kind: "automation_run",
+    queuedAt: new Date().toISOString(),
+    runId,
+  });
   if (!jobId) throw new Error("Automation run job was not created");
   return jobId;
 }
@@ -76,7 +72,7 @@ export async function queueAutomationRun(input: {
   if (!run.created) return { duplicate: true, runId: run.runId };
 
   try {
-    const jobId = await sendAutomationRunJob(input.automationId, run.runId);
+    const jobId = await sendAutomationRunJob(run.runId);
     return { duplicate: false, jobId, runId: run.runId };
   } catch (error) {
     await abandonPendingAutomationRun(run.runId);
@@ -94,7 +90,7 @@ export async function queueAutomationRunFollowUp(input: {
   const run = await continueAutomationRun(input);
   if (!run) return null;
   try {
-    return { jobId: await sendAutomationRunJob(run.automationId, input.runId) };
+    return { jobId: await sendAutomationRunJob(input.runId) };
   } catch (error) {
     await setAutomationRunStatus({
       failureCategory: "queue_unavailable",
