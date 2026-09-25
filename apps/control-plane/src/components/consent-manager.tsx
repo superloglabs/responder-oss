@@ -47,6 +47,10 @@ const consentTheme = {
     primary: { variant: "neutral", mode: "lighter" },
   },
   slots: {
+    // c15t places the banner by text direction; keep it bottom-right.
+    consentBanner: {
+      style: { alignItems: "flex-end", left: "auto", right: 0 },
+    },
     consentBannerFooter: {
       style: { borderTop: "1px solid var(--consent-divider)" },
     },
