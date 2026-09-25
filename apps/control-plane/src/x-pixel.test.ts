@@ -51,19 +51,57 @@ describe("xSignupEventIds", () => {
     ]);
   });
 
-  it("configures and reports a signup to each browser pixel once", () => {
+});
+
+describe("xPixelScripts", () => {
+  it("is empty when no browser event ids are configured", () => {
+    vi.stubEnv("VITE_X_ADS_SIGNUP_EVENT_ID", "");
+    vi.stubEnv("VITE_X_ADS_SIGNUP_EVENT_IDS", "");
+
+    expect(xPixel.xPixelScripts()).toEqual([]);
+  });
+
+  it("loads uwt.js once and configures every browser pixel", () => {
+    const twq = vi.fn();
+    vi.stubGlobal("window", { twq });
+    vi.stubEnv("VITE_X_ADS_SIGNUP_EVENT_ID", "tw-browser1-event1");
+    vi.stubEnv(
+      "VITE_X_ADS_SIGNUP_EVENT_IDS",
+      "tw-browser2-event2,tw-browser1-event3",
+    );
+
+    const scripts = xPixel.xPixelScripts();
+    expect(scripts).toEqual([
+      expect.objectContaining({
+        category: "marketing",
+        src: "https://static.ads-twitter.com/uwt.js",
+      }),
+    ]);
+    scripts[0]?.onBeforeLoad?.({
+      consents: {} as never,
+      elementId: "x-pixel",
+      hasConsent: true,
+      id: "x-pixel",
+    });
+
+    expect(twq.mock.calls).toEqual([
+      ["config", "browser1"],
+      ["config", "browser2"],
+    ]);
+  });
+});
+
+describe("trackXSignupPixel", () => {
+  it("reports a signup to each browser event once", () => {
     const twq = vi.fn();
     vi.stubGlobal("window", { twq });
     vi.stubEnv("VITE_X_ADS_SIGNUP_EVENT_ID", "tw-browser1-event1");
     vi.stubEnv("VITE_X_ADS_SIGNUP_EVENT_IDS", "tw-browser2-event2");
 
-    xPixel.initializeXPixel();
     xPixel.trackXSignupPixel("user-1");
     xPixel.trackXSignupPixel("user-1");
 
     expect(twq.mock.calls).toEqual([
-      ["config", "browser1"],
-      ["config", "browser2"],
       ["event", "tw-browser1-event1", { conversion_id: "user-1" }],
       ["event", "tw-browser2-event2", { conversion_id: "user-1" }],
     ]);

@@ -24,6 +24,7 @@
     "callbacks:clear": "bash scripts/local-tunnel.sh clear",
     "callbacks:status": "bash scripts/local-tunnel.sh status",
     "callbacks:use": "bash scripts/local-tunnel.sh claim",
+    "consent:generate": "tsx apps/control-plane/scripts/generate-consent-schema.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "legacy-redirect:import": "tsx scripts/import-legacy-account-redirects.ts",

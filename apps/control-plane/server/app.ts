@@ -19,6 +19,7 @@ import {
   shouldRedirectLegacyAccount,
 } from "../../../packages/core/src/db/legacy-account-redirect.js";
 import { billingRoutes } from "./billing/routes.js";
+import { consentBasePath, handleConsentRequest } from "./consent.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
@@ -390,6 +391,9 @@ export const app = instrumentedApp
   })
   .on(["GET", "POST"], "/api/auth/*", (context) =>
     handleAuthRequest(context.req.raw),
+  )
+  .all(`${consentBasePath}/*`, (context) =>
+    handleConsentRequest(context.req.raw),
   )
   .get("/api/context", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

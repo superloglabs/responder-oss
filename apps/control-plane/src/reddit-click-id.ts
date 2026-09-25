@@ -1,4 +1,8 @@
-import { adClickIdCookie, rememberAdClickId } from "./ad-click-id";
+import {
+  adClickIdCookie,
+  forgetAdClickId,
+  rememberAdClickId,
+} from "./ad-click-id";
 
 const redditClickIdOptions = {
   cookieName: "_rdt_cid",
@@ -13,6 +17,13 @@ export function redditClickIdCookie(
 }
 
 /** Persists Reddit's landing-page click id for server-side attribution. */
-export function rememberRedditClickId(document: Document = window.document) {
-  rememberAdClickId(document, redditClickIdOptions);
+export function rememberRedditClickId(
+  landingSearch: string,
+  document: Document = window.document,
+) {
+  rememberAdClickId(landingSearch, document, redditClickIdOptions);
+}
+
+export function forgetRedditClickId(document: Document = window.document) {
+  forgetAdClickId(document, redditClickIdOptions);
 }
