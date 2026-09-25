@@ -7,6 +7,7 @@ import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-m
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
+import { movedElsewhereInApp } from "./popover-dismiss";
 import { providerDisplayName } from "./provider-glyphs";
 import "./automation-trigger-editor.css";
 
@@ -130,7 +131,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
     if (!open) return;
     menuRef.current?.querySelector<HTMLInputElement>("input")?.focus();
     function dismiss(event: PointerEvent) {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) onOpenChange(false);
+      if (movedElsewhereInApp(rootRef.current, event.target)) onOpenChange(false);
     }
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
@@ -159,10 +160,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
   }
 
   return <div className="automationTrigger" ref={rootRef} onBlur={(event) => {
-    // Focus moving to no element, such as another window or a browser
-    // extension frame, leaves the menu open. Outside pointer clicks are
-    // handled by the document listener above.
-    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) onOpenChange(false);
+    if (movedElsewhereInApp(event.currentTarget, event.relatedTarget)) onOpenChange(false);
   }} onKeyDown={(event) => {
     if (event.key === "Escape" && open) {
       event.preventDefault();

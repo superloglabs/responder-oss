@@ -1,6 +1,6 @@
-// Props for search boxes inside popovers. Password managers such as 1Password
-// otherwise treat them as form fields and open an inline menu that takes
-// focus, which closes the popover.
+// Props for search boxes inside popovers. They ask password managers not to
+// offer to fill the field; not every version honors them, so popovers also
+// ignore focus that moves into a password manager menu.
 export const searchInputProps = {
   autoComplete: "off",
   "data-1p-ignore": "true",
