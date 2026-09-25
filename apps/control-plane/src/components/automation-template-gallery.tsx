@@ -41,7 +41,7 @@ export function AutomationTemplateGallery() {
       </header>
       <ul className="automationTemplates__grid">
         {templates.map((template) => {
-          const { trigger } = template;
+          const [trigger] = template.triggers;
           const providers = trigger.kind === "schedule" ? template.connectors : [trigger.kind, ...template.connectors];
           return (
             <li key={template.id}>

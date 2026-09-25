@@ -2,15 +2,17 @@ import { type FormEvent, useEffect, useEffectEvent, useState, useRef } from "rea
 import { Link, useNavigate } from "react-router-dom";
 import {
   fetchAutomationOptions,
+  fetchSharedAutomationTemplate,
   runAutomation,
   saveAutomation,
   setAutomationEnabled,
   type AutomationConfiguration,
   type AutomationDetail,
   type AutomationOptions,
+  type SharedAutomationTemplate,
   triggerAccountIds,
 } from "../automations-api";
-import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
+import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import type { AutomationConnectorProvider } from "../components/automation-connectors";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
@@ -18,13 +20,14 @@ import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft, waitForConnectedAccounts } from "./automation-draft";
-import { applyAutomationTemplate, automationTemplateMissingFields, findAutomationTemplate } from "./automation-templates";
+import { applyAutomationTemplate, automationTemplateMissingFields, findAutomationTemplate, type AutomationTemplate } from "./automation-templates";
 import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
 import { availableAutomationConfiguration, isTriggerComplete, moveItem } from "../automation-configuration";
 import { AutomationRepositoryList } from "../components/automation-repository-list";
+import { AutomationShareDialog } from "../components/automation-share-dialog";
 import "./automation-create.css";
 import { AppShell } from "../components/app-shell";
 import { AutomationEditorSkeleton } from "../components/screen-skeletons";
@@ -58,6 +61,10 @@ function incompleteReason(configuration: AutomationConfiguration): { field: "tri
   return null;
 }
 
+function isSharedTemplate(template: AutomationTemplate | SharedAutomationTemplate | undefined): template is SharedAutomationTemplate {
+  return template !== undefined && "slug" in template;
+}
+
 function toggle(list: string[], value: string): string[] {
   return list.includes(value)
     ? list.filter((candidate) => candidate !== value)
@@ -71,8 +78,10 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const editorPath = automationId ? `/automations/${automationId}` : "/automations/new";
   const navigate = useNavigate();
   const [options, setOptions] = useState<AutomationOptions | null>(null);
-  // A new automation can start from a template chosen on the automation list.
-  const [template, setTemplate] = useState(() => automationId ? undefined : findAutomationTemplate(new URLSearchParams(window.location.search).get("template")));
+  // A new automation can start from a template chosen on the automation list,
+  // or from one another workspace shared, which loads with the options.
+  const [template, setTemplate] = useState<AutomationTemplate | SharedAutomationTemplate | undefined>(() => automationId ? undefined : findAutomationTemplate(new URLSearchParams(window.location.search).get("template")));
+  const [sharedTemplateSlug] = useState(() => automationId ? null : new URLSearchParams(window.location.search).get("shared"));
   const [name, setName] = useState(initialAutomation?.name ?? template?.name ?? "New automation");
   const [savedName, setSavedName] = useState(initialAutomation?.name ?? "");
   const description = initialAutomation?.description ?? template?.description ?? "";
@@ -92,6 +101,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const [startingRun, setStartingRun] = useState(false);
   const [runsRefreshKey, setRunsRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<"settings" | "history">("settings");
+  const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useDocumentTitle(automationId ? savedName : "New automation");
   // A saved automation saves every change. Handlers read the latest values
@@ -155,7 +165,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     });
   }
 
-  const optionsLoaded = useEffectEvent((loadedOptions: AutomationOptions, isCancelled: () => boolean) => {
+  const optionsLoaded = useEffectEvent((loadedOptions: AutomationOptions, sharedTemplate: SharedAutomationTemplate | null, isCancelled: () => boolean) => {
     setOptions(loadedOptions);
     const restored = restoreAutomationDraft(loadedOptions, window.location, automationId);
     // Saved settings and drafts can reference connections removed since. The
@@ -166,14 +176,25 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       queuedSnapshot.current = JSON.stringify(saved.current);
     }
     if (!restored) {
-      if (automationId) updateConfiguration(() => saved.current.configuration, false);
-      else updateConfiguration((current) => {
+      if (automationId) {
+        updateConfiguration(() => saved.current.configuration, false);
+        return;
+      }
+      const starting = sharedTemplate ?? template;
+      if (sharedTemplate) {
+        setTemplate(sharedTemplate);
+        nameRef.current = sharedTemplate.name;
+        setName(sharedTemplate.name);
+      } else if (sharedTemplateSlug) {
+        setError("This shared template is no longer available. Set up the automation below or pick a template from Automations.");
+      }
+      updateConfiguration((current) => {
         const blank = { ...current, model: "", modelCredentialId: null, repositoryIds: [] };
-        return template ? applyAutomationTemplate(blank, template, loadedOptions) : blank;
+        return starting ? applyAutomationTemplate(blank, starting, loadedOptions) : blank;
       }, false);
       return;
     }
-    setTemplate(findAutomationTemplate(restored.draft.templateId));
+    setTemplate(restored.draft.sharedTemplate ?? findAutomationTemplate(restored.draft.templateId));
     nameRef.current = restored.draft.name;
     setName(restored.draft.name);
     setGithubIncluded(restored.draft.githubIncluded);
@@ -196,9 +217,12 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
 
   useEffect(() => {
     let cancelled = false;
-    void fetchAutomationOptions()
-      .then((loadedOptions) => {
-        if (!cancelled) optionsLoaded(loadedOptions, () => cancelled);
+    void Promise.all([
+      fetchAutomationOptions(),
+      sharedTemplateSlug ? fetchSharedAutomationTemplate(sharedTemplateSlug).catch(() => null) : null,
+    ])
+      .then(([loadedOptions, sharedTemplate]) => {
+        if (!cancelled) optionsLoaded(loadedOptions, sharedTemplate, () => cancelled);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Unable to load automation");
@@ -207,7 +231,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [sharedTemplateSlug]);
 
   // Connects in this tab. OAuth providers redirect; Datadog and custom MCP
   // collect credentials in a dialog first. Both return to this page.
@@ -219,7 +243,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const { integrations } = await response.json() as { integrations: Array<{ id: string; connectUrl: string | null }> };
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
-      saveAutomationDraft({ automationId, name, configuration, templateId: template?.id, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
+      saveAutomationDraft({ automationId, name, configuration, ...(isSharedTemplate(template) ? { sharedTemplate: template } : { templateId: template?.id }), githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
       if (provider === "datadog" || provider === "custom_mcp") {
         setConnectDialog({ provider, connectUrl });
         return;
@@ -254,7 +278,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     setSaving(true);
     setError(null);
     try {
-      const id = await saveAutomation(undefined, { configuration, description, enabled, name });
+      const id = await saveAutomation(undefined, { configuration, description, enabled, name }, isSharedTemplate(template) ? template.slug : undefined);
       navigate(`/automations/${id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save automation");
@@ -339,6 +363,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             {!automationId
               ? <button className="automationCreate__save" disabled={saving || !options} form="automation-settings" type="submit"><FloppyDiskIcon size={14} />{saving ? "Saving…" : "Save"}</button>
               : activeTab === "history" ? <button className="automationCreate__secondary" disabled={startingRun || !enabled} onClick={() => void startRun()} title={enabled ? undefined : "Turn the automation on to run it"} type="button"><PlayIcon size={14} />{startingRun ? "Starting…" : "Run now"}</button> : null}
+            {automationId ? <button className="automationCreate__secondary" onClick={() => setSharing(true)} title="Share this automation as a template" type="button"><ShareNetworkIcon size={14} />Share</button> : null}
             {automationId ? <button className="automationCreate__save" disabled={!enabled || saveStatus === "saving"} onClick={() => navigate(`/automations/${automationId}/test`)} title={enabled ? "Chat with the agent to test this automation" : "Turn the automation on to test it"} type="button"><ChatCircleIcon size={14} />Test</button> : null}
           </div>
           {automationId ? <div className="automationCreate__tabs" role="tablist" aria-label="Automation sections">
@@ -348,7 +373,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         </header>
         {template && !automationId ? <div className="automationCreate__template" role="status">
           <SquaresFourIcon aria-hidden="true" size={16} />
-          <p>Started from the {template.name} template. Choose {automationTemplateMissingFields(template)}, then save.</p>
+          <p>Started from the {template.name} template{isSharedTemplate(template) ? ` shared by ${template.workspaceName}` : ""}. Choose {automationTemplateMissingFields(template)}, then save.</p>
           <button onClick={startBlank} type="button">Start blank</button>
         </div> : null}
         {error ? <p className="formError" role="alert">{error}</p> : null}
@@ -414,6 +439,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
           </section>
         </form>
       </div>
+      {automationId && sharing ? <AutomationShareDialog automationId={automationId} onClose={() => setSharing(false)} /> : null}
       <DatadogConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "datadog"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <CustomMcpConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "custom_mcp"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
     </AppShell>

@@ -16,6 +16,7 @@ import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
 import { ScanDetailPage } from "./pages/scan-detail";
 import { ScansPage } from "./pages/scans";
+import { SharedAutomationTemplatePage } from "./pages/shared-automation-template";
 import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
@@ -69,6 +70,7 @@ export function App() {
       <Route element={<DpaPage />} path="/dpa" />
       <Route element={<SecurityPage />} path="/security" />
       <Route element={<SubprocessorsPage />} path="/subprocessors" />
+      <Route element={<SharedAutomationTemplatePage />} path="/templates/:slug" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}

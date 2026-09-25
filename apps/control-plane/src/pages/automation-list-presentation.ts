@@ -52,3 +52,16 @@ export function connectorSummary(connectors: string[]): string {
 export function connectorNames(connectors: string[]): string {
   return connectors.map(providerDisplayName).join(", ");
 }
+
+// The heading of a trigger card on the automation page.
+export function triggerTitle(trigger: AutomationListTrigger): string {
+  if (trigger.kind === "slack") {
+    if (trigger.eventMode === "every_message") return "Slack message posted";
+    return trigger.eventMode === "mentions" ? "Slack app mentioned" : "Slack message posted or app mentioned";
+  }
+  if (trigger.kind === "sentry") {
+    if (trigger.eventTypes.length === 2) return "Sentry new issue or regression";
+    return trigger.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue";
+  }
+  return trigger.kind === "discord" ? "Discord automation command" : "Schedule";
+}

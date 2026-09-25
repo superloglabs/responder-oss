@@ -34,6 +34,13 @@ import {
 } from "../../../../packages/core/src/db/automation-model-credentials.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
+import { sharedAutomationTemplateSlugSchema } from "../../../../packages/core/src/automations/shared-template.js";
+import {
+  getAutomationShare,
+  shareAutomation,
+  unshareAutomation,
+} from "../../../../packages/core/src/db/shared-automation-templates.js";
+import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
 
@@ -303,21 +310,35 @@ export const automationRoutes = new Hono()
   .post("/", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
-    const parsed = automationInputSchema.safeParse(
-      await context.req.json().catch(() => null),
-    );
+    const body: unknown = await context.req.json().catch(() => null);
+    const parsed = automationInputSchema.safeParse(body);
     if (!parsed.success) {
       return context.json(
         { error: "Invalid automation", issues: parsed.error.issues },
         400,
       );
     }
+    // Set when the automation started from a shared template, for analytics.
+    const sharedTemplate = sharedAutomationTemplateSlugSchema.safeParse(
+      (body as { sharedTemplate?: unknown }).sharedTemplate,
+    );
     try {
       const automation = await createAutomation(
         access.tenant.organizationId,
         access.tenant.user.id,
         parsed.data,
       );
+      await captureAnalyticsEvent({
+        distinctId: access.tenant.user.id,
+        event: "automation created",
+        organizationId: access.tenant.organizationId,
+        properties: {
+          automation_id: automation.id,
+          model: parsed.data.configuration.model,
+          shared_template_slug: sharedTemplate.success ? sharedTemplate.data : null,
+          trigger_kinds: [...new Set(parsed.data.configuration.triggers.map((trigger) => trigger.kind))].join(","),
+        },
+      });
       return context.json({ automationId: automation.id }, 201);
     } catch (error) {
       const response = configurationError(error);
@@ -430,6 +451,54 @@ export const automationRoutes = new Hono()
     return updated
       ? context.json({ enabled: parsed.data.enabled })
       : context.json({ error: "Automation not found" }, 404);
+  })
+  .get("/:automationId/share", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automationId = context.req.param("automationId");
+    if (!z.uuid().safeParse(automationId).success) {
+      return context.json({ error: "Automation not found" }, 404);
+    }
+    return context.json({
+      share: await getAutomationShare(access.tenant.organizationId, automationId),
+    });
+  })
+  .put("/:automationId/share", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automationId = context.req.param("automationId");
+    if (!z.uuid().safeParse(automationId).success) {
+      return context.json({ error: "Automation not found" }, 404);
+    }
+    const result = await shareAutomation({
+      automationId,
+      organizationId: access.tenant.organizationId,
+      userId: access.tenant.user.id,
+    });
+    if (!result) return context.json({ error: "Automation not found" }, 404);
+    await captureAnalyticsEvent({
+      distinctId: access.tenant.user.id,
+      event: "automation template shared",
+      organizationId: access.tenant.organizationId,
+      properties: {
+        automation_id: automationId,
+        template_slug: result.share.slug,
+        updated: !result.created,
+      },
+    });
+    return context.json({ share: result.share }, result.created ? 201 : 200);
+  })
+  .delete("/:automationId/share", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automationId = context.req.param("automationId");
+    if (!z.uuid().safeParse(automationId).success) {
+      return context.json({ error: "Automation not found" }, 404);
+    }
+    const deleted = await unshareAutomation(access.tenant.organizationId, automationId);
+    return deleted
+      ? context.json({ shared: false })
+      : context.json({ error: "Automation is not shared" }, 404);
   })
   .get("/:automationId/runs", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

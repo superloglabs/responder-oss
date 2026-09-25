@@ -15,6 +15,8 @@ activity can be separated from other products sharing the PostHog project.
 | `organization created` | A workspace is created | `organization_id`, `organization_name`, `organization_slug` |
 | `integration connected` | An OAuth callback finishes and resources are synced | `provider`, `integration_account_id`, `resource_count` |
 | `agent created` | A new agent and its initial configuration are persisted | `agent_id`, `trigger_kind`, `model`, `enabled`, `pr_mode` |
+| `automation created` | A new automation and its first version are persisted | `automation_id`, `trigger_kinds`, `model`, `shared_template_slug` |
+| `automation template shared` | A member shares an automation as a public template, or updates the shared snapshot | `automation_id`, `template_slug`, `updated` |
 | `prompt copied` | A user clicks **Copy prompt** in Slack | `issue_id`, `issue_found`, `team_id`, `channel_id`, `surface` |
 | `investigation created` | A new investigation or replay is persisted and accepted for processing | `investigation_id`, `agent_id`, `provider`, `is_replay`, `source_investigation_id` |
 | `investigation feedback submitted` | A Slack user rates a completed investigation response | `investigation_id`, `agent_id`, `feedback`, `organization_id`, `organization_name`, `slack_user_id`, `user_name`, `team_id`, `channel_id`, `surface` |

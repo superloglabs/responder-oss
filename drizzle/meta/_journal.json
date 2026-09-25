@@ -400,6 +400,13 @@
       "when": 1790343354295,
       "tag": "0056_consent_records",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1790350175119,
+      "tag": "0057_shared_automation_templates",
+      "breakpoints": true
     }
   ]
 }
