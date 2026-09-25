@@ -1,5 +1,19 @@
 :root {
   --consent-font-family: var(--ds-font-sans);
+  --consent-surface: #ffffff;
+  --consent-text: #202020;
+  --consent-text-muted: #646464;
+  --consent-primary: #202020;
+  --consent-primary-hover: #3a3a3a;
+  --consent-text-on-primary: #ffffff;
+  --consent-border: #e0e0e0;
+  --consent-border-hover: #c8c8c8;
+  --consent-divider: #efefef;
+  --consent-switch-track: #e0e0e0;
+}
+
+/* The dashboard follows the app's light or dark color theme. */
+:root:has(.appShell) {
   --consent-surface: var(--ds-surface-base);
   --consent-text: var(--ds-text-primary);
   --consent-text-muted: var(--ds-text-secondary);

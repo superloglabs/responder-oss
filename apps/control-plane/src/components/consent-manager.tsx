@@ -18,8 +18,8 @@ import { forgetXClickId, rememberXClickId } from "../x-click-id";
 import { xPixelScripts } from "../x-pixel";
 import "./consent-manager.css";
 
-// Tokens read the --consent-* variables from consent-manager.css, which follow
-// the app's color theme and which pages with their own palette can override.
+// Tokens read the --consent-* variables from consent-manager.css: a light
+// palette by default, and the app's color theme inside the dashboard.
 const consentTheme = {
   colors: {
     primary: "var(--consent-primary)",
