@@ -117,6 +117,10 @@ export function buildCodexAutomationCommand(
       `mcp_servers.${server.name}.url=${tomlString(server.url)}`,
       "--config",
       `mcp_servers.${server.name}.bearer_token_env_var=${tomlString(modelBrokerTokenEnvironmentVariable)}`,
+      // Nobody can answer an approval prompt in an unattended run, and the
+      // broker already limits what each server can do.
+      "--config",
+      `mcp_servers.${server.name}.default_tools_approval_mode=${tomlString("approve")}`,
     ]),
     "-",
   ];

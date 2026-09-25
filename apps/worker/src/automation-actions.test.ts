@@ -1,6 +1,5 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { encryptCredentials } from "@responder/core/credentials/encryption";
+import { describe, expect, it, vi } from "vitest";
 import {
   automationActionsPath,
   executeAutomationActions,
@@ -29,15 +28,12 @@ function dependencies() {
       url: "https://github.com/acme/app/pull/1",
     }),
     failAttempt: vi.fn().mockResolvedValue(undefined),
-    getConnections: vi.fn().mockResolvedValue([]),
     getRepositories: vi.fn().mockResolvedValue([{
       defaultBranch: "main",
       fullName: "acme/app",
       installationId: 123,
       private: true,
     }]),
-    openDirectMessage: vi.fn().mockResolvedValue("D123"),
-    postMessage: vi.fn().mockResolvedValue("171234.001"),
   };
 }
 
@@ -49,18 +45,18 @@ const checkout = {
   workspaceBaseSha: "a".repeat(40),
 };
 
-describe("automation trusted actions", () => {
-  afterEach(() => vi.unstubAllEnvs());
+const pullRequestAction = {
+  body: "Fixes the deployment check.",
+  id: "pr-1",
+  kind: "open_github_pull_request",
+  repository: "acme/app",
+  title: "Fix deployment check",
+};
 
+describe("automation trusted actions", () => {
   it("publishes a pull request only for a selected checked-out repository", async () => {
     const deps = dependencies();
-    const activeSession = session({ actions: [{
-      body: "Fixes the deployment check.",
-      id: "pr-1",
-      kind: "open_github_pull_request",
-      repository: "acme/app",
-      title: "Fix deployment check",
-    }] });
+    const activeSession = session({ actions: [pullRequestAction] });
 
     await expect(executeAutomationActions({
       automationVersionId: versionId,
@@ -95,65 +91,40 @@ describe("automation trusted actions", () => {
   it("reuses a completed action without repeating the external write", async () => {
     const deps = dependencies();
     deps.beginAttempt.mockResolvedValue({
-      externalReference: "C123:171234.001",
+      externalReference: "https://github.com/acme/app/pull/1",
       id: "attempt-1",
       status: "existing_succeeded",
     });
-    const activeSession = session({ actions: [{
-      id: "slack-1",
-      integrationAccountId: "61616161-6161-4161-8161-616161616161",
-      kind: "send_slack_message",
-      target: { channelId: "C123", type: "channel" },
-      text: "The fix is ready.",
-    }] });
 
     await expect(executeAutomationActions({
       automationVersionId: versionId,
       checkedOutRepositories: [checkout],
       runId,
-      session: activeSession,
+      session: session({ actions: [pullRequestAction] }),
     }, deps)).resolves.toEqual([{
-      externalReference: "C123:171234.001",
-      kind: "send_slack_message",
+      externalReference: "https://github.com/acme/app/pull/1",
+      kind: "open_github_pull_request",
+      repository: "acme/app",
+      title: "Fix deployment check",
     }]);
-    expect(deps.postMessage).not.toHaveBeenCalled();
+    expect(deps.createPullRequest).not.toHaveBeenCalled();
     expect(deps.completeAttempt).not.toHaveBeenCalled();
   });
 
-  it("keeps Slack credentials on the worker while delivering a DM", async () => {
-    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+  it("rejects Slack messages, which are live tools", async () => {
     const deps = dependencies();
-    deps.getConnections.mockResolvedValue([{
-      encryptedCredentials: encryptCredentials({ accessToken: "xoxb-secret" }),
-      externalAccountId: "T123",
-      id: "61616161-6161-4161-8161-616161616161",
-      metadata: {},
-      provider: "slack",
-    }]);
-    const activeSession = session({ actions: [{
-      id: "slack-1",
-      kind: "send_slack_message",
-      target: { type: "dm", userId: "U123" },
-      text: "The fix is ready.",
-    }] });
-
-    await executeAutomationActions({
+    await expect(executeAutomationActions({
       automationVersionId: versionId,
       checkedOutRepositories: [checkout],
       runId,
-      session: activeSession,
-    }, deps);
-
-    expect(deps.openDirectMessage).toHaveBeenCalledWith({
-      accessToken: "xoxb-secret",
-      userId: "U123",
-    });
-    expect(deps.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      accessToken: "xoxb-secret",
-      channelId: "D123",
-      clientMessageId: "attempt-1",
-    }));
-    expect(JSON.stringify(activeSession)).not.toContain("xoxb-secret");
+      session: session({ actions: [{
+        id: "slack-1",
+        kind: "send_slack_message",
+        target: { channelId: "C123", type: "channel" },
+        text: "The fix is ready.",
+      }] }),
+    }, deps)).rejects.toThrow();
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
   });
 
   it("rejects duplicate action IDs without starting an external write", async () => {
@@ -175,33 +146,23 @@ describe("automation trusted actions", () => {
     expect(deps.createPullRequest).not.toHaveBeenCalled();
   });
 
-  it("checks cancellation immediately before a trusted write", async () => {
-    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+  it("checks the run is active immediately before a trusted write", async () => {
     const deps = dependencies();
-    deps.getConnections.mockResolvedValue([{
-      encryptedCredentials: encryptCredentials({ accessToken: "xoxb-secret" }),
-      externalAccountId: "T123",
-      id: "61616161-6161-4161-8161-616161616161",
-      metadata: {},
-      provider: "slack",
-    }]);
-    const controller = new AbortController();
-    deps.openDirectMessage.mockImplementation(async () => {
-      controller.abort(new Error("run cancelled"));
-      return "D123";
-    });
+    let checks = 0;
     await expect(executeAutomationActions({
+      assertActive: async () => {
+        checks += 1;
+        if (checks === 2) throw new Error("run cancelled");
+      },
       automationVersionId: versionId,
       checkedOutRepositories: [checkout],
       runId,
-      session: session({ actions: [{
-        id: "slack-1",
-        kind: "send_slack_message",
-        target: { type: "dm", userId: "U123" },
-        text: "The fix is ready.",
-      }] }),
-      signal: controller.signal,
+      session: session({ actions: [pullRequestAction] }),
     }, deps)).rejects.toThrow("run cancelled");
-    expect(deps.postMessage).not.toHaveBeenCalled();
+    expect(deps.createPullRequest).not.toHaveBeenCalled();
+    expect(deps.failAttempt).toHaveBeenCalledWith({
+      attemptId: "attempt-1",
+      failureMessage: "run cancelled",
+    });
   });
 });

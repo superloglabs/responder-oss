@@ -90,7 +90,10 @@ export interface AutomationContextBrokerClaim {
     externalId: string;
     kind: string;
   }>;
+  // A trigger link only grants Slack tools scoped to the triggering thread.
+  roles: Array<"context" | "trigger">;
   runId: string;
+  trigger: Record<string, unknown>;
 }
 
 function assertPositiveIntegerWithin(
@@ -341,7 +344,9 @@ export async function resolveAutomationContextBrokerGrant(input: {
       metadata: integrationAccounts.metadata,
       organizationId: automationModelBrokerGrants.organizationId,
       provider: integrationAccounts.provider,
+      role: automationVersionIntegrationAccounts.role,
       runId: automationModelBrokerGrants.runId,
+      trigger: automationRuns.triggerInput,
     })
     .from(automationModelBrokerGrants)
     .innerJoin(
@@ -364,7 +369,6 @@ export async function resolveAutomationContextBrokerGrant(input: {
           automationVersionIntegrationAccounts.integrationAccountId,
           input.integrationAccountId,
         ),
-        eq(automationVersionIntegrationAccounts.role, "context"),
       ),
     )
     .innerJoin(
@@ -383,9 +387,12 @@ export async function resolveAutomationContextBrokerGrant(input: {
           automationModelBrokerGrants.expiresAt,
           dependencies.now?.() ?? new Date(),
         ),
+        or(
+          eq(automationVersionIntegrationAccounts.role, "context"),
+          eq(integrationAccounts.provider, "slack"),
+        ),
       ),
-    )
-    .limit(1);
+    );
   const row = rows[0];
   if (!row) return null;
   const resources = await db
@@ -411,6 +418,8 @@ export async function resolveAutomationContextBrokerGrant(input: {
     },
     organizationId: row.organizationId,
     resources,
+    roles: [...new Set(rows.map((candidate) => candidate.role))],
     runId: row.runId,
+    trigger: row.trigger,
   };
 }

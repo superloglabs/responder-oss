@@ -119,6 +119,9 @@ describe("Codex automation harness", () => {
       "mcp_servers.slack_61616161616141618161616161616161.url",
     );
     expect(command).toContain("bearer_token_env_var");
+    expect(command).toContain(
+      'mcp_servers.slack_61616161616141618161616161616161.default_tools_approval_mode="approve"',
+    );
     expect(command).not.toContain(input.prompt);
     expect(command).not.toContain("CUSTOMER_PROVIDER_KEY");
   });
