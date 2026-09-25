@@ -27,6 +27,7 @@ import { availableAutomationConfiguration, isTriggerComplete, moveItem } from ".
 import { AutomationRepositoryList } from "../components/automation-repository-list";
 import "./automation-create.css";
 import { AppShell } from "../components/app-shell";
+import { AutomationEditorSkeleton } from "../components/screen-skeletons";
 import { Switch } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 
@@ -306,7 +307,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   }
 
   if (loading) {
-    return <AppShell active="automations" redesigned density="create"><p className="automationLoading">Loading automation…</p></AppShell>;
+    return <AppShell active="automations" redesigned density="create"><AutomationEditorSkeleton saved={Boolean(automationId)} /></AppShell>;
   }
 
   // In run order: the first repository is the agent's working directory.

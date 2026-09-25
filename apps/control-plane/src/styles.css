@@ -11,12 +11,6 @@
   --live: #b8e6a3;
 }
 
-/* Capability-gated automation workspace */
-.automationLoading {
-  margin: 80px 0;
-  color: var(--muted);
-}
-
 :root[data-color-theme="light"] {
   --background: var(--ds-canvas);
   --surface: var(--ds-surface-base);
@@ -4652,6 +4646,10 @@ button:disabled {
 
 .screenSkeletonTable--issues .screenSkeletonTable__row {
   grid-template-columns: minmax(0, 1fr) 150px 90px 100px 36px;
+}
+
+.screenSkeletonTable--automationRuns .screenSkeletonTable__row {
+  grid-template-columns: 52fr 16fr 9.5fr 18fr 44px;
 }
 
 .screenSkeletonTable--investigations .screenSkeletonTable__row {

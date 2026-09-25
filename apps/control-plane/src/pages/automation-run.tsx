@@ -34,6 +34,7 @@ import {
   type AutomationRunStatus,
 } from "../automations-api";
 import { AppShell } from "../components/app-shell";
+import { AutomationRunSkeleton } from "../components/screen-skeletons";
 import { ProviderGlyph } from "../components/icons";
 import { AutomationTriggerIcon } from "../components/automation-trigger-icon";
 import { providerDisplayName, providerGlyphs, type ProviderGlyphId } from "../components/provider-glyphs";
@@ -338,7 +339,7 @@ function AutomationRunContent({ automationId, runId }: { automationId: string; r
     return <AppShell active="automations" redesigned density="create">
       {error
         ? <div className="automationRun__loading" role="alert"><p>{error}</p><button className="automationCreate__secondary" onClick={() => { setError(null); void load(); }} type="button">Retry</button></div>
-        : <p className="automationRun__loading" role="status">Loading run…</p>}
+        : <AutomationRunSkeleton label="Loading run…" />}
     </AppShell>;
   }
 
@@ -434,7 +435,7 @@ export function AutomationTestChatPage() {
   if (!automationId || missing) return <Navigate replace to="/automations" />;
   if (!automation) {
     return <AppShell active="automations" redesigned density="create">
-      <p className="automationRun__loading" role={error ? "alert" : "status"}>{error ?? "Loading automation…"}</p>
+      {error ? <p className="automationRun__loading" role="alert">{error}</p> : <AutomationRunSkeleton label="Loading automation…" transcript={false} />}
     </AppShell>;
   }
 
