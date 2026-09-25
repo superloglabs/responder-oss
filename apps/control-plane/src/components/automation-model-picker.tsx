@@ -5,6 +5,7 @@ import { automationModelProviders, supportsAutomationHarness } from "../../../..
 import { cn } from "@/lib/utils";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { searchInputProps } from "./search-input-props";
 import "./automation-model-picker.css";
 
 const harnesses = [
@@ -68,7 +69,7 @@ export function AutomationModelPicker({ configuration, options, onChange, reques
             <DropdownMenuPortal>
               <DropdownMenuSubContent className="p-0" onPointerEnter={() => focusSearch(provider.id)} onFocus={event => { if (event.target === event.currentTarget) focusSearch(provider.id); }}>
                 <Command>
-                  <CommandInput placeholder="Search models…" className="h-9"
+                  <CommandInput {...searchInputProps} placeholder="Search models…" className="h-9"
                     ref={input => { if (input) searchInputs.current.set(provider.id, input); else searchInputs.current.delete(provider.id); }}
                     onKeyDown={event => { if (["ArrowLeft", "ArrowRight"].includes(event.key) && event.currentTarget.value) event.stopPropagation(); }} />
                   <CommandList>

@@ -25,7 +25,8 @@ import {
   connectorSummary,
   runStatusLabels,
   triggerEventLabel,
-  triggerProviderLabel,
+  triggerNames,
+  triggerSummary,
 } from "./automation-list-presentation";
 import "./automations.css";
 
@@ -164,9 +165,9 @@ export function AutomationsPage() {
                 header: "Triggers",
                 key: "trigger",
                 render: (automation) => (
-                  <span className="agentTableRun">
-                    <span>{triggerProviderLabel(automation.trigger)}</span>
-                    <small>{triggerEventLabel(automation.trigger)}</small>
+                  <span className="agentTableRun" title={automation.triggers.length > 1 ? triggerNames(automation.triggers) : undefined}>
+                    <span>{triggerSummary(automation.triggers)}</span>
+                    {automation.triggers[0] ? <small>{triggerEventLabel(automation.triggers[0])}</small> : null}
                   </span>
                 ),
                 width: "19%",

@@ -13,12 +13,12 @@ const baseConfiguration = {
   prompt: "Investigate the alert and make the smallest safe fix.",
   repositoryIds: ["31313131-3131-4131-8131-313131313131"],
   toolPolicy: "full",
-  trigger: {
+  triggers: [{
     channelIds: ["C123"],
     eventMode: "both",
     integrationAccountId: "41414141-4141-4141-8141-414141414141",
     kind: "slack",
-  },
+  }],
   workspaceSecretIds: [],
 };
 
@@ -33,24 +33,37 @@ describe("automation configuration", () => {
     expect(
       automationConfigurationSchema.parse({
         ...baseConfiguration,
-        trigger: {
+        triggers: [{
           eventTypes: ["new_issue", "regression"],
           integrationAccountId: "41414141-4141-4141-8141-414141414141",
           kind: "sentry",
           projectIds: ["project-1"],
-        },
-      }).trigger.kind,
+        }],
+      }).triggers[0]?.kind,
     ).toBe("sentry");
     expect(
       automationConfigurationSchema.parse({
         ...baseConfiguration,
-        trigger: {
+        triggers: [{
           channelIds: ["discord-channel-1"],
           integrationAccountId: "41414141-4141-4141-8141-414141414141",
           kind: "discord",
-        },
-      }).trigger.kind,
+        }],
+      }).triggers[0]?.kind,
     ).toBe("discord");
+  });
+
+  it("accepts several triggers and requires at least one", () => {
+    const schedule = { frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 };
+    expect(
+      automationConfigurationSchema.parse({
+        ...baseConfiguration,
+        triggers: [...baseConfiguration.triggers, schedule],
+      }).triggers.map((trigger) => trigger.kind),
+    ).toEqual(["slack", "schedule"]);
+    expect(() =>
+      automationConfigurationSchema.parse({ ...baseConfiguration, triggers: [] })
+    ).toThrow();
   });
 
   it("restricts the Anthropic-only harness to Anthropic models", () => {

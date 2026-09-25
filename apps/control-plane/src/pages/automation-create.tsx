@@ -8,8 +8,7 @@ import {
   type AutomationConfiguration,
   type AutomationDetail,
   type AutomationOptions,
-  type AutomationTrigger,
-  triggerAccountId,
+  triggerAccountIds,
 } from "../automations-api";
 import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
@@ -24,7 +23,7 @@ import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
-import { availableAutomationConfiguration, moveItem } from "../automation-configuration";
+import { availableAutomationConfiguration, isTriggerComplete, moveItem } from "../automation-configuration";
 import { AutomationRepositoryList } from "../components/automation-repository-list";
 import "./automation-create.css";
 import { AppShell } from "../components/app-shell";
@@ -43,33 +42,19 @@ const defaultConfiguration: AutomationConfiguration = {
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
   repositoryIds: [],
   toolPolicy: "full",
-  trigger: {
-    channelIds: [],
-    eventMode: "mentions",
-    integrationAccountId: "",
-    kind: "slack",
-  },
+  triggers: [],
   workspaceSecretIds: [],
 };
 
 // Returns why the configuration cannot be saved yet, or null when it can.
-function incompleteReason(configuration: AutomationConfiguration, triggerSelected: boolean): { field: "trigger" | "repositories" | "model"; message: string } | null {
-  const { trigger } = configuration;
-  const triggerComplete = trigger.kind === "schedule" || Boolean(
-    trigger.integrationAccountId && (trigger.kind === "sentry" ? trigger.projectIds.length && trigger.eventTypes.length : trigger.channelIds.length),
-  );
-  if (!triggerSelected || !triggerComplete) {
-    return { field: "trigger", message: "Choose a trigger connection and at least one channel or project and event." };
+function incompleteReason(configuration: AutomationConfiguration): { field: "trigger" | "repositories" | "model"; message: string } | null {
+  if (!configuration.triggers.length) return { field: "trigger", message: "Add at least one trigger." };
+  if (!configuration.triggers.every(isTriggerComplete)) {
+    return { field: "trigger", message: "Choose a connection and at least one channel or project for each trigger." };
   }
   if (!configuration.repositoryIds.length) return { field: "repositories", message: "Choose at least one repository." };
   if (!configuration.model.trim()) return { field: "model", message: "Choose a model." };
   return null;
-}
-
-// The trigger left in the draft after removing it, without its connection.
-function clearedTrigger(trigger: AutomationTrigger): AutomationTrigger {
-  if (trigger.kind === "schedule") return trigger;
-  return trigger.kind === "sentry" ? { ...trigger, integrationAccountId: "", projectIds: [] } : { ...trigger, integrationAccountId: "", channelIds: [] };
 }
 
 function toggle(list: string[], value: string): string[] {
@@ -93,7 +78,6 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const [enabled, setEnabled] = useState(initialAutomation?.enabled ?? true);
   const [configuration, setConfiguration] = useState<AutomationConfiguration>(initialAutomation?.configuration ?? { ...defaultConfiguration, prompt: "" });
   const [connectDialog, setConnectDialog] = useState<{ provider: "datadog" | "custom_mcp"; connectUrl: string } | null>(null);
-  const [triggerSelected, setTriggerSelected] = useState(Boolean(initialAutomation || template));
   const [triggerMenuOpen, setTriggerMenuOpen] = useState(false);
   const triggerSectionRef = useRef<HTMLElement>(null);
   const [githubIncluded, setGithubIncluded] = useState(initialAutomation ? initialAutomation.configuration.repositoryIds.length > 0 : true);
@@ -114,7 +98,6 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const configurationRef = useRef(configuration);
   const nameRef = useRef(name);
   const enabledRef = useRef(enabled);
-  const triggerSelectedRef = useRef(triggerSelected);
   const saved = useRef({ configuration, name });
   const queuedSnapshot = useRef(JSON.stringify({ configuration, name }));
   const saveQueue = useRef(Promise.resolve());
@@ -125,11 +108,6 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     configurationRef.current = update(configurationRef.current);
     setConfiguration(configurationRef.current);
     if (persistChange) persist();
-  }
-
-  function selectTrigger(selected: boolean) {
-    triggerSelectedRef.current = selected;
-    setTriggerSelected(selected);
   }
 
   // Saves run in order so a slow request cannot overwrite a newer one. A failed
@@ -148,7 +126,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   function persist() {
     if (!automationId) return;
     const next = { configuration: configurationRef.current, name: nameRef.current.trim() || saved.current.name };
-    const incomplete = incompleteReason(next.configuration, triggerSelectedRef.current);
+    const incomplete = incompleteReason(next.configuration);
     setUnsavedReason(incomplete ? `${incomplete.message} Changes save once the automation is complete.` : null);
     if (incomplete) return;
     const snapshot = JSON.stringify(next);
@@ -169,7 +147,6 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
           setConfiguration(saved.current.configuration);
           setName(saved.current.name);
           setGithubIncluded(saved.current.configuration.repositoryIds.length > 0);
-          selectTrigger(true);
         }
         setSaveStatus("idle");
         setError(cause instanceof Error ? cause.message : "Unable to save automation");
@@ -198,7 +175,6 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     setTemplate(findAutomationTemplate(restored.draft.templateId));
     nameRef.current = restored.draft.name;
     setName(restored.draft.name);
-    selectTrigger(restored.draft.triggerSelected);
     setGithubIncluded(restored.draft.githubIncluded);
     updateConfiguration(() => availableAutomationConfiguration(restored.draft.configuration, loadedOptions));
     if (restored.error) setError(restored.error);
@@ -242,7 +218,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const { integrations } = await response.json() as { integrations: Array<{ id: string; connectUrl: string | null }> };
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
-      saveAutomationDraft({ automationId, name, configuration, templateId: template?.id, triggerSelected, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
+      saveAutomationDraft({ automationId, name, configuration, templateId: template?.id, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
       if (provider === "datadog" || provider === "custom_mcp") {
         setConnectDialog({ provider, connectUrl });
         return;
@@ -255,19 +231,20 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     }
   }
 
+  const selectedTriggerAccountIds = triggerAccountIds(configuration.triggers);
   const contextAccounts = options?.accounts.filter((account) =>
-    account.id !== triggerAccountId(configuration.trigger) &&
+    !selectedTriggerAccountIds.includes(account.id) &&
     ["custom_mcp", "datadog", "sentry", "slack"].includes(account.provider)
   ) ?? [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (automationId) return;
-    const incomplete = incompleteReason(configuration, triggerSelected);
+    const incomplete = incompleteReason(configuration);
     if (incomplete) {
       setError(incomplete.message);
       if (incomplete.field === "trigger") {
-        if (!triggerSelected) setTriggerMenuOpen(true);
+        if (!configuration.triggers.length) setTriggerMenuOpen(true);
         triggerSectionRef.current?.scrollIntoView({ block: "nearest" });
       } else if (incomplete.field === "repositories") setRepositoryPickerOpen(true);
       else setModelRequestedOpen((value) => value + 1);
@@ -289,9 +266,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     setTemplate(undefined);
     nameRef.current = "New automation";
     setName(nameRef.current);
-    selectTrigger(false);
     setError(null);
-    updateConfiguration((current) => ({ ...current, contextAccountIds: [], prompt: "", trigger: defaultConfiguration.trigger }), false);
+    updateConfiguration((current) => ({ ...current, contextAccountIds: [], prompt: "", triggers: [] }), false);
     window.history.replaceState(window.history.state, "", editorPath);
   }
 
@@ -380,7 +356,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         <form className="automationCreate__form" hidden={activeTab !== "settings"} id="automation-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="automation-triggers" ref={triggerSectionRef}>
             <h2 id="automation-triggers">Triggers</h2>
-            <AutomationTriggerEditor options={options} trigger={triggerSelected ? configuration.trigger : null} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
+            <AutomationTriggerEditor options={options} triggers={configuration.triggers} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
               const endpoint = kind === "slack" ? "/api/agents/options/refresh/slack" : "/api/integrations/sentry/check";
               const response = await fetch(endpoint, { method: "POST" });
               if (!response.ok) throw new Error("Could not refresh trigger resources");
@@ -389,16 +365,19 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
               const loaded = await fetchAutomationOptions();
               if (signal.aborted) return false;
               setOptions(loaded);
-              const currentAccountId = triggerAccountId(configuration.trigger);
-              const account = loaded.accounts.find((item) => item.provider === kind && (!currentAccountId || item.id === currentAccountId));
+              const account = loaded.accounts.find((item) => item.provider === kind);
               if (!account) return false;
-              updateConfiguration((current) => current.trigger.kind !== "schedule" && current.trigger.kind === kind ? { ...current, contextAccountIds: current.contextAccountIds.filter(id => id !== account.id), trigger: { ...current.trigger, integrationAccountId: account.id } } : current);
+              // Triggers waiting for this provider use the new connection.
+              updateConfiguration((current) => ({
+                ...current,
+                contextAccountIds: current.contextAccountIds.filter((id) => id !== account.id),
+                triggers: current.triggers.map((trigger) => trigger.kind === kind && !trigger.integrationAccountId ? { ...trigger, integrationAccountId: account.id } : trigger),
+              }));
               return true;
-            }} onChange={(trigger) => {
-              selectTrigger(trigger !== null);
+            }} onChange={(triggers) => {
               setError(null);
-              const accountId = trigger ? triggerAccountId(trigger) : "";
-              updateConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter(id => id !== accountId), trigger: trigger ?? clearedTrigger(current.trigger) }));
+              const accountIds = triggerAccountIds(triggers);
+              updateConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => !accountIds.includes(id)), triggers }));
             }} />
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-instructions">
@@ -425,7 +404,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
               {githubIncluded && options?.repositories.length ? <div className="automationCreate__row"><GithubLogoIcon size={16} weight="fill" /><span>GitHub</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label="Remove GitHub connector" className="automationCreate__iconButton" onClick={() => { setGithubIncluded(false); updateConfiguration((current) => ({ ...current, repositoryIds: [] })); }} type="button"><TrashIcon size={14} /></button></div> : null}
               {selectedConnectors.map((account) => <div className="automationCreate__row" key={account.id}><ProviderGlyph decorative provider={account.provider as AutomationConnectorProvider} /><span>{account.displayName}</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label={`Remove ${account.displayName}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => id !== account.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
               {selectedSecrets.map((secret) => <div className="automationCreate__row" key={secret.id}><KeyIcon size={16} /><span>{secret.name}</span><button aria-label={`Remove ${secret.name}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, workspaceSecretIds: current.workspaceSecretIds.filter((id) => id !== secret.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
-              <AutomationConnectorPicker options={options} triggerAccountId={triggerSelected ? triggerAccountId(configuration.trigger) : ""} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} githubIncluded={githubIncluded}
+              <AutomationConnectorPicker options={options} triggerAccountIds={selectedTriggerAccountIds} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} githubIncluded={githubIncluded}
                 onToggleAccount={(accountId) => updateConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, accountId) }))}
                 onToggleSecret={(secretId) => updateConfiguration((current) => ({ ...current, workspaceSecretIds: toggle(current.workspaceSecretIds, secretId) }))}
                 onToggleGithub={() => { if (githubIncluded) updateConfiguration((current) => ({ ...current, repositoryIds: [] })); setGithubIncluded(!githubIncluded); }}

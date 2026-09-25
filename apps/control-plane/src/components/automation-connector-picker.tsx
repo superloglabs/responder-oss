@@ -6,12 +6,13 @@ import { ProviderGlyph } from "./icons";
 import { providerDisplayName } from "./provider-glyphs";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { searchInputProps } from "./search-input-props";
 
 // Lists every connector. Connections already in the workspace are added to the
 // draft; the rest start a connection, after which the page adds them.
-export function AutomationConnectorPicker({ options, triggerAccountId, selectedAccountIds, selectedSecretIds, githubIncluded, onToggleAccount, onToggleSecret, onToggleGithub, onConnect }: {
+export function AutomationConnectorPicker({ options, triggerAccountIds, selectedAccountIds, selectedSecretIds, githubIncluded, onToggleAccount, onToggleSecret, onToggleGithub, onConnect }: {
   options: AutomationOptions | null;
-  triggerAccountId: string;
+  triggerAccountIds: string[];
   selectedAccountIds: string[];
   selectedSecretIds: string[];
   githubIncluded: boolean;
@@ -26,7 +27,7 @@ export function AutomationConnectorPicker({ options, triggerAccountId, selectedA
     <PopoverTrigger asChild><button className="automationCreate__add" disabled={!options} type="button"><PlusIcon size={16} />Add connector</button></PopoverTrigger>
     <PopoverContent align="start" className="w-80 p-0">
       <Command>
-        <CommandInput placeholder="Search connectors…" className="h-9" />
+        <CommandInput {...searchInputProps} placeholder="Search connectors…" className="h-9" />
         <CommandList>
           <CommandEmpty>No connectors found.</CommandEmpty>
           <CommandGroup heading="Connectors">
@@ -37,7 +38,7 @@ export function AutomationConnectorPicker({ options, triggerAccountId, selectedA
               if (provider === "github" && connected.length) {
                 return [<CommandItem key="github" value="github" keywords={[name]} onSelect={onToggleGithub}>{glyph}{name}{check(githubIncluded)}</CommandItem>];
               }
-              const items = provider === "github" ? [] : connected.map(account => account.id === triggerAccountId
+              const items = provider === "github" ? [] : connected.map(account => triggerAccountIds.includes(account.id)
                 ? <CommandItem key={account.id} value={account.id} keywords={[account.displayName, name]} disabled>{glyph}<span className="truncate">{account.displayName}</span><span className="ml-auto text-xs text-muted-foreground">Trigger</span></CommandItem>
                 : <CommandItem key={account.id} value={account.id} keywords={[account.displayName, name]} onSelect={() => onToggleAccount(account.id)}>{glyph}<span className="truncate">{account.displayName}</span><span className="text-xs text-muted-foreground">{name}</span>{check(selectedAccountIds.includes(account.id))}</CommandItem>);
               // Custom MCP can have several servers, so it can always add another.

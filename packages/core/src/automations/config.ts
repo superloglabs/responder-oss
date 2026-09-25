@@ -72,7 +72,8 @@ export const automationConfigurationSchema = z
     repositoryIds: z.array(z.uuid()).min(1).max(10)
       .refine(uniqueIds, "Repository IDs must be unique"),
     toolPolicy: z.literal("full"),
-    trigger: automationTriggerSchema,
+    // Every trigger starts a run on its own.
+    triggers: z.array(automationTriggerSchema).min(1).max(10),
     workspaceSecretIds: z.array(z.uuid()).max(20).default([])
       .refine(uniqueIds, "Workspace secret IDs must be unique"),
   })

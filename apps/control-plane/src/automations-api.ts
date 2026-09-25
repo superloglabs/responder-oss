@@ -35,9 +35,9 @@ export type AutomationTrigger =
 
 export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "schedule" }>;
 
-// The trigger's connection. A schedule trigger has none.
-export function triggerAccountId(trigger: AutomationTrigger): string {
-  return trigger.kind === "schedule" ? "" : trigger.integrationAccountId;
+// The distinct connections of the triggers. A schedule trigger has none.
+export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
+  return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
 export interface AutomationConfiguration {
@@ -52,7 +52,7 @@ export interface AutomationConfiguration {
   prompt: string;
   repositoryIds: string[];
   toolPolicy: "full";
-  trigger: AutomationTrigger;
+  triggers: AutomationTrigger[];
   workspaceSecretIds: string[];
 }
 
@@ -75,7 +75,7 @@ export interface AutomationListItem {
   model: string;
   modelProvider: AutomationModelProvider;
   name: string;
-  trigger: AutomationTrigger;
+  triggers: AutomationTrigger[];
   updatedAt: string;
   version: number;
 }

@@ -69,7 +69,7 @@ test("creates an automation using the compact editor and selected resources", as
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ name: "Fix incoming issues", configuration: {
     repositoryIds: [repositoryId], modelCredentialId: null, contextAccountIds: [],
-    trigger: { integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" },
+    triggers: [{ integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" }],
   } });
   await expect(page.getByRole("alert")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
@@ -622,8 +622,52 @@ test("starts an automation from a template on the automation list", async ({ pag
   await expect.poll(() => saved).toMatchObject({
     name: "Answer support questions",
     description: expect.stringContaining("support channel"),
-    configuration: { trigger: { integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" } },
+    configuration: { triggers: [{ integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" }] },
   });
+});
+
+test("saves several triggers and keeps password managers off the trigger search", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto("/automations/new?template=answer-support-questions");
+  await page.getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+
+  await page.getByRole("button", { name: "Add another trigger", exact: true }).click();
+  const search = page.getByRole("textbox", { name: "Search triggers" });
+  await expect(search).toBeFocused();
+  await expect(search).toHaveAttribute("data-1p-ignore", "true");
+  await expect(search).toHaveAttribute("autocomplete", "off");
+  await search.fill("sched");
+  await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Every day", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Frequency" })).toBeFocused();
+  await expect(page.getByText("Slack message posted", { exact: true })).toBeVisible();
+  await expect(page.getByText("Any trigger starts a run")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("automation-several-triggers.png"), fullPage: true });
+
+  await page.getByRole("button", { name: "Add repository", exact: true }).click();
+  await page.getByRole("option", { name: "acme/api" }).click();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Choose model", exact: true }).click();
+  await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
+  await page.getByRole("option", { name: "GPT-5.4" }).click();
+  let saved: Record<string, unknown> | undefined;
+  await page.route("**/api/automations", async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ status: 400, json: { error: "Please try again" } });
+  });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => saved).toMatchObject({
+    configuration: { triggers: [
+      { integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" },
+      { frequency: "daily", hour: 9, kind: "schedule", weekday: 1 },
+    ] },
+  });
+
+  await page.getByRole("button", { name: "Remove Slack trigger" }).click();
+  await expect(page.getByText("Slack message posted", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Frequency" })).toHaveValue("daily");
 });
 
 test("clears a template with Start blank", async ({ page }) => {
@@ -669,7 +713,7 @@ test.describe("scheduled automations", () => {
       name: "Reliability check",
       configuration: {
         contextAccountIds: [accountId],
-        trigger: { frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 },
+        triggers: [{ frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 }],
       },
     });
   });

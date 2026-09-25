@@ -18,7 +18,7 @@ const automation = {
     prompt: "Investigate the reported issue and identify the root cause across the selected repositories.",
     repositoryIds,
     toolPolicy: "full",
-    trigger: { eventTypes: ["new_issue"], integrationAccountId: sentryAccountId, kind: "sentry", projectIds: ["responder-web"] },
+    triggers: [{ eventTypes: ["new_issue"], integrationAccountId: sentryAccountId, kind: "sentry", projectIds: ["responder-web"] }],
     workspaceSecretIds: [],
   },
   createdAt: "2026-09-01T10:00:00Z",

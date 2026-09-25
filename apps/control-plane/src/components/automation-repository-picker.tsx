@@ -4,6 +4,7 @@ import type { AutomationOptions } from "../automations-api";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { useIntegrationConnect } from "./use-integration-connect";
+import { searchInputProps } from "./search-input-props";
 
 const repositoryLimit = 10;
 
@@ -29,7 +30,7 @@ export function AutomationRepositoryPicker({ options, selectedIds, onToggle, ope
     <PopoverTrigger asChild><button className="automationCreate__add" type="button"><PlusIcon size={16} />Add repository</button></PopoverTrigger>
     <PopoverContent align="start" className="w-80 p-0">
       <Command>
-        <CommandInput placeholder="Search repositories…" className="h-9" />
+        <CommandInput {...searchInputProps} placeholder="Search repositories…" className="h-9" />
         <CommandList>
           <CommandEmpty>No repositories found.</CommandEmpty>
           <CommandGroup heading={atLimit ? `Up to ${repositoryLimit} repositories` : undefined}>

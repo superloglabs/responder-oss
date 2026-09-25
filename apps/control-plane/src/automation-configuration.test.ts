@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, moveItem } from "./automation-configuration";
+import { availableAutomationConfiguration, isTriggerComplete, moveItem } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -25,7 +25,7 @@ const configuration = {
   prompt: "Investigate",
   repositoryIds: ["repository", "removed-repository"],
   toolPolicy: "full",
-  trigger: { eventTypes: ["new_issue"], integrationAccountId: "sentry", kind: "sentry", projectIds: ["web", "removed-project"] },
+  triggers: [{ eventTypes: ["new_issue"], integrationAccountId: "sentry", kind: "sentry", projectIds: ["web", "removed-project"] }],
   workspaceSecretIds: ["secret", "removed-secret"],
 } satisfies AutomationConfiguration;
 
@@ -34,19 +34,32 @@ describe("availableAutomationConfiguration", () => {
     expect(availableAutomationConfiguration(configuration, options)).toMatchObject({
       contextAccountIds: ["datadog"],
       repositoryIds: ["repository"],
-      trigger: { integrationAccountId: "sentry", projectIds: ["web"] },
+      triggers: [{ integrationAccountId: "sentry", projectIds: ["web"] }],
       workspaceSecretIds: ["secret"],
     });
   });
 
   it("clears a trigger whose connection is gone", () => {
-    const removed = { ...configuration, trigger: { ...configuration.trigger, integrationAccountId: "removed-account" } };
-    expect(availableAutomationConfiguration(removed, options).trigger).toMatchObject({ integrationAccountId: "", projectIds: [] });
+    const removed = { ...configuration, triggers: [{ ...configuration.triggers[0], integrationAccountId: "removed-account" }] };
+    expect(availableAutomationConfiguration(removed, options).triggers[0]).toMatchObject({ integrationAccountId: "", projectIds: [] });
   });
 
-  it("clears a trigger connection from another provider", () => {
-    const slack = { ...configuration, trigger: { channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "sentry", kind: "slack" } } satisfies AutomationConfiguration;
-    expect(availableAutomationConfiguration(slack, options).trigger).toMatchObject({ integrationAccountId: "", channelIds: [] });
+  it("clears a trigger connection from another provider and keeps the other triggers", () => {
+    const schedule = { frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 } as const;
+    const mixed = { ...configuration, triggers: [{ channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "sentry", kind: "slack" }, schedule] } satisfies AutomationConfiguration;
+    expect(availableAutomationConfiguration(mixed, options).triggers).toEqual([
+      { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
+      schedule,
+    ]);
+  });
+});
+
+describe("isTriggerComplete", () => {
+  it("requires a connection and a channel or project for connected triggers", () => {
+    expect(isTriggerComplete({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(true);
+    expect(isTriggerComplete({ channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(true);
+    expect(isTriggerComplete({ channelIds: [], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(false);
+    expect(isTriggerComplete({ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: ["web"] })).toBe(false);
   });
 });
 

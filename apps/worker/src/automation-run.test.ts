@@ -24,12 +24,12 @@ function claimedRun() {
     prompt: "Fix the failing test.",
     runId,
     toolPolicy: "full" as const,
-    trigger: {
+    triggers: [{
       channelIds: ["C123"],
       eventMode: "mentions" as const,
       integrationAccountId: "61616161-6161-4161-8161-616161616161",
       kind: "slack" as const,
-    },
+    }],
     triggerInput: {
       body: "The deployment failed",
       externalEventId: "event-1",
