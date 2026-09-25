@@ -580,6 +580,11 @@ test("starts an automation from a template on the automation list", async ({ pag
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations");
   const templates = page.getByRole("region", { name: "Start from a template" });
+  await expect(templates.getByRole("radio", { name: "Suggested", exact: true })).toBeChecked();
+  await expect(templates.getByRole("link")).toHaveCount(6);
+  await expect(templates.getByRole("link").first()).toContainText("Answer community questions");
+  await page.screenshot({ path: testInfo.outputPath("automation-templates-suggested.png"), fullPage: true });
+  await templates.getByRole("radio", { name: "All", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(11);
   await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(3);

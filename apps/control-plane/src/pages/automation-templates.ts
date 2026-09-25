@@ -196,6 +196,18 @@ export const automationTemplates: AutomationTemplate[] = [
   },
 ];
 
+// Shown first, in this order, before the member picks a category.
+const suggestedTemplateIds = [
+  "answer-community-questions",
+  "triage-sentry-issues",
+  "reliability-check",
+  "review-observability",
+  "answer-support-questions",
+  "review-performance",
+];
+
+export const suggestedAutomationTemplates = suggestedTemplateIds.flatMap((id) => automationTemplates.find((template) => template.id === id) ?? []);
+
 export function findAutomationTemplate(id: string | null | undefined): AutomationTemplate | undefined {
   return id ? automationTemplates.find((template) => template.id === id) : undefined;
 }

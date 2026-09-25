@@ -4,6 +4,7 @@ import { SegmentedControl } from "../design-system";
 import {
   automationTemplateCategoryLabels,
   automationTemplates,
+  suggestedAutomationTemplates,
   type AutomationTemplateCategory,
 } from "../pages/automation-templates";
 import { triggerEventLabel, triggerProviderLabel } from "../pages/automation-list-presentation";
@@ -11,9 +12,10 @@ import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { ProviderGlyph } from "./icons";
 import { providerDisplayName } from "./provider-glyphs";
 
-type CategoryFilter = AutomationTemplateCategory | "all";
+type CategoryFilter = AutomationTemplateCategory | "suggested" | "all";
 
 const filters: Array<{ label: string; value: CategoryFilter }> = [
+  { label: "Suggested", value: "suggested" },
   { label: "All", value: "all" },
   { label: automationTemplateCategoryLabels.support, value: "support" },
   { label: automationTemplateCategoryLabels.bug_triage, value: "bug_triage" },
@@ -23,8 +25,10 @@ const filters: Array<{ label: string; value: CategoryFilter }> = [
 // Suggested automations shown under the automation list. Choosing one opens
 // the create page with the template applied.
 export function AutomationTemplateGallery() {
-  const [filter, setFilter] = useState<CategoryFilter>("all");
-  const templates = automationTemplates.filter((template) => filter === "all" || template.category === filter);
+  const [filter, setFilter] = useState<CategoryFilter>("suggested");
+  const templates = filter === "suggested"
+    ? suggestedAutomationTemplates
+    : automationTemplates.filter((template) => filter === "all" || template.category === filter);
 
   return (
     <section aria-labelledby="automation-templates" className="automationTemplates">

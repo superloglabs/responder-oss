@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "../automations-api";
 import { automationConnectorProviders } from "../components/automation-connectors";
-import { applyAutomationTemplate, automationTemplates, findAutomationTemplate } from "./automation-templates";
+import { applyAutomationTemplate, automationTemplates, findAutomationTemplate, suggestedAutomationTemplates } from "./automation-templates";
 
 const configuration = {
   contextAccountIds: ["previous"],
@@ -26,6 +26,17 @@ describe("automation templates", () => {
       expect(template.connectors).not.toContain(template.trigger.kind);
       expect(template.prompt.trim()).not.toBe("");
     }
+  });
+
+  it("suggests six templates in a fixed order", () => {
+    expect(suggestedAutomationTemplates.map((template) => template.id)).toEqual([
+      "answer-community-questions",
+      "triage-sentry-issues",
+      "reliability-check",
+      "review-observability",
+      "answer-support-questions",
+      "review-performance",
+    ]);
   });
 
   it("finds templates by id", () => {
