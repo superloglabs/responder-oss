@@ -21,6 +21,7 @@ import { dueScheduleSlot } from "../automations/schedule.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { getDatabase } from "./client.js";
 import {
+  automationModelBrokerGrants,
   automationModelUsage,
   automationRunEvents,
   automationActionAttempts,
@@ -1401,40 +1402,59 @@ export async function claimAutomationRun(runId: string) {
   const now = new Date();
   const leaseId = randomUUID();
   const leaseExpiresAt = new Date(now.getTime() + 60_000);
-  const claimed = await db
-    .update(automationRuns)
-    .set({
-      heartbeatAt: now,
-      leaseId,
-      leaseExpiresAt,
-      // A follow-up turn keeps the run's original start time.
-      startedAt: sql`coalesce(${automationRuns.startedAt}, ${now})`,
-      status: "running",
-      updatedAt: now,
-    })
-    .where(
+  const claimable = and(
+    eq(automationRuns.id, runId),
+    or(
+      eq(automationRuns.status, "pending"),
       and(
-        eq(automationRuns.id, runId),
+        eq(automationRuns.status, "running"),
         or(
-          eq(automationRuns.status, "pending"),
-          and(
-            eq(automationRuns.status, "running"),
-            or(
-              isNull(automationRuns.leaseExpiresAt),
-              lt(automationRuns.leaseExpiresAt, now),
-            ),
-          ),
+          isNull(automationRuns.leaseExpiresAt),
+          lt(automationRuns.leaseExpiresAt, now),
         ),
       ),
-    )
-    .returning({
-      automationId: automationRuns.automationId,
-      automationVersionId: automationRuns.automationVersionId,
-      organizationId: automationRuns.organizationId,
-      leaseId: automationRuns.leaseId,
-      sandboxSessionState: automationRuns.sandboxSessionState,
-      triggerInput: automationRuns.triggerInput,
-    });
+    ),
+  );
+  const claimed = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ leaseId: automationRuns.leaseId })
+      .from(automationRuns)
+      .where(claimable)
+      .for("update");
+    if (!current) return [];
+    // A worker that stopped mid-run leaves its broker grant behind. The grant
+    // references the expired lease, so it must go before the lease changes.
+    if (current.leaseId) {
+      await tx
+        .delete(automationModelBrokerGrants)
+        .where(
+          and(
+            eq(automationModelBrokerGrants.runId, runId),
+            eq(automationModelBrokerGrants.leaseId, current.leaseId),
+          ),
+        );
+    }
+    return tx
+      .update(automationRuns)
+      .set({
+        heartbeatAt: now,
+        leaseId,
+        leaseExpiresAt,
+        // A follow-up turn keeps the run's original start time.
+        startedAt: sql`coalesce(${automationRuns.startedAt}, ${now})`,
+        status: "running",
+        updatedAt: now,
+      })
+      .where(claimable)
+      .returning({
+        automationId: automationRuns.automationId,
+        automationVersionId: automationRuns.automationVersionId,
+        organizationId: automationRuns.organizationId,
+        leaseId: automationRuns.leaseId,
+        sandboxSessionState: automationRuns.sandboxSessionState,
+        triggerInput: automationRuns.triggerInput,
+      });
+  });
   const run = claimed[0];
   if (!run?.leaseId) return null;
 

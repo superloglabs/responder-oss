@@ -1,6 +1,14 @@
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
-import { findAutomationsForSentryIssue, findDueScheduledAutomations, summarizeAutomationList } from "./automations.js";
+import {
+  claimAutomationRun,
+  findAutomationsForSentryIssue,
+  findDueScheduledAutomations,
+  summarizeAutomationList,
+} from "./automations.js";
 import { getDatabase } from "./client.js";
+import { automationModelBrokerGrants } from "./schema.js";
 
 vi.mock("./client.js", () => ({ getDatabase: vi.fn() }));
 
@@ -88,5 +96,78 @@ describe("trigger matching", () => {
     await expect(findDueScheduledAutomations(now)).resolves.toEqual([
       { automationId: "automation", scheduledFor: new Date("2026-09-21T09:00:00Z"), trigger: daily },
     ]);
+  });
+});
+
+describe("claimAutomationRun", () => {
+  const runId = "96751171-8931-4f9b-aaea-098f400f93b2";
+  const expiredLeaseId = "3400aa41-f315-4e0e-b9e0-9468832d98d8";
+
+  function claimDatabase(current: Array<{ leaseId: string | null }>) {
+    const deleted: Array<{ table: unknown; where: SQL }> = [];
+    const update = vi.fn(() => ({
+      set: () => ({
+        where: () => ({
+          returning: async () => [{
+            automationId: "automation",
+            automationVersionId: "version",
+            leaseId: "new-lease",
+            organizationId: "organization",
+            sandboxSessionState: null,
+            triggerInput: {},
+          }],
+        }),
+      }),
+    }));
+    const tx = {
+      delete: (table: unknown) => ({
+        where: async (where: SQL) => {
+          deleted.push({ table, where });
+        },
+      }),
+      select: () => ({ from: () => ({ where: () => ({ for: async () => current }) }) }),
+      update,
+    };
+    const configuration = {
+      from: () => configuration,
+      innerJoin: () => configuration,
+      limit: async () => [{ harness: "codex", prompt: "Triage it" }],
+      where: () => configuration,
+    };
+    vi.mocked(getDatabase).mockReturnValue({
+      select: () => configuration,
+      transaction: (callback: (transaction: typeof tx) => unknown) => callback(tx),
+    } as never);
+    return { deleted, update };
+  }
+
+  it("removes the expired lease's broker grant before taking over the run", async () => {
+    const { deleted, update } = claimDatabase([{ leaseId: expiredLeaseId }]);
+
+    const run = await claimAutomationRun(runId);
+
+    expect(run).toMatchObject({ prompt: "Triage it", runId });
+    expect(run?.leaseId).not.toBe(expiredLeaseId);
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]!.table).toBe(automationModelBrokerGrants);
+    const where = new PgDialect().sqlToQuery(deleted[0]!.where);
+    expect(where.params).toEqual([runId, expiredLeaseId]);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("claims a pending run without touching grants", async () => {
+    const { deleted, update } = claimDatabase([{ leaseId: null }]);
+
+    await expect(claimAutomationRun(runId)).resolves.toMatchObject({ runId });
+    expect(deleted).toHaveLength(0);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a run with a live lease alone", async () => {
+    const { deleted, update } = claimDatabase([]);
+
+    await expect(claimAutomationRun(runId)).resolves.toBeNull();
+    expect(deleted).toHaveLength(0);
+    expect(update).not.toHaveBeenCalled();
   });
 });
