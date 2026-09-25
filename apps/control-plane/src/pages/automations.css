@@ -1,2 +1,38 @@
 .appShell--workspace .agentTableRun small.automationRunStatus--running { color: #4e58c7; }
 .appShell--workspace .agentTableRun small.automationRunStatus--failed { color: #b44545; }
+
+/* Templates follow the empty state, so it does not fill the page. */
+.appShell--workspace .emptyState.automationsEmpty { min-height: 0; margin: 0 auto; padding: 24px 0; }
+
+.automationTemplates { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.automationTemplates__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 8px; }
+.automationTemplates__header h2 { margin: 0; color: #1a1a1a; font-size: 13px; font-weight: 500; line-height: 20px; }
+.automationTemplates__header p { margin: 2px 0 0; color: #666; font-size: 12px; line-height: 18px; }
+.automationTemplates .dsSegmentedControl { flex-shrink: 0; padding: 2px; border: 0; border-radius: 8px; background: #f2f2f2; }
+.automationTemplates .dsSegmentedControl__option { min-height: 24px; padding: 0 10px; border-radius: 6px; color: #666; font-size: 12px; font-weight: 400; line-height: 18px; }
+.automationTemplates .dsSegmentedControl__option[aria-checked="true"] { background: #fff; color: #1a1a1a; font-weight: 500; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d; }
+.automationTemplates__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.automationTemplates__grid > li { display: flex; min-width: 0; }
+.automationTemplate { display: flex; flex: 1; flex-direction: column; min-width: 0; border-radius: 12px; background: #fff; color: #1a1a1a; text-decoration: none; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; transition: box-shadow 120ms ease; }
+.automationTemplate:hover { box-shadow: 0 0 0 1px #0000002e, 0 2px 4px #0000000f, 0 6px 12px #00000008; }
+.automationTemplate:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.automationTemplate__body { display: flex; flex: 1; flex-direction: column; gap: 4px; padding: 16px; }
+.automationTemplate__top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.automationTemplate__icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: #f6f6f6; }
+.automationTemplate__category { color: #888; font-size: 12px; line-height: 18px; }
+.automationTemplate strong { font-size: 13px; font-weight: 500; line-height: 20px; }
+.automationTemplate__description { color: #666; font-size: 12px; line-height: 18px; }
+.automationTemplate__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: .5px solid #e6e8ec; color: #666; font-size: 12px; line-height: 18px; }
+.automationTemplate__connectors { display: flex; align-items: center; gap: 6px; }
+.automationTemplate__connectors .providerGlyph, .automationTemplate__connectors .providerGlyph > svg { width: 14px; height: 14px; }
+.automationTemplate .providerGlyph--sentry { color: #584164; }
+
+@media (max-width: 1100px) {
+  .automationTemplates__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .automationTemplates__header { flex-direction: column; align-items: flex-start; }
+  .automationTemplates__grid { grid-template-columns: minmax(0, 1fr); }
+}
+.automationTemplate__icon .automationTriggerIcon--schedule { width: 18px; height: 18px; color: #444; }

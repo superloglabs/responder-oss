@@ -1,4 +1,14 @@
-import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
+import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
+import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+
+export function browserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+// New schedules run at 09:00, on Mondays when weekly, in the member's time zone.
+export function defaultScheduleTrigger(frequency: AutomationScheduleFrequency, timezone = browserTimeZone()): Extract<AutomationTrigger, { kind: "schedule" }> {
+  return { frequency, hour: 9, kind: "schedule", timezone, weekday: 1 };
+}
 
 // Saved automation settings can reference connections, trigger resources,
 // repositories, or secrets that were removed since. The page cannot show them
@@ -10,6 +20,13 @@ export function availableAutomationConfiguration(
   options: AutomationOptions,
 ): AutomationConfiguration {
   const { trigger } = configuration;
+  const available = {
+    ...configuration,
+    contextAccountIds: configuration.contextAccountIds.filter((id) => options.accounts.some((account) => account.id === id)),
+    repositoryIds: configuration.repositoryIds.filter((id) => options.repositories.some((repository) => repository.id === id)),
+    workspaceSecretIds: configuration.workspaceSecretIds.filter((id) => options.secrets.some((secret) => secret.id === id)),
+  };
+  if (trigger.kind === "schedule") return available;
   const triggerAccountAvailable = options.accounts.some((account) =>
     account.id === trigger.integrationAccountId && account.provider === trigger.kind
   );
@@ -19,13 +36,10 @@ export function availableAutomationConfiguration(
     .map((resource) => resource.externalId));
   const integrationAccountId = triggerAccountAvailable ? trigger.integrationAccountId : "";
   return {
-    ...configuration,
-    contextAccountIds: configuration.contextAccountIds.filter((id) => options.accounts.some((account) => account.id === id)),
-    repositoryIds: configuration.repositoryIds.filter((id) => options.repositories.some((repository) => repository.id === id)),
+    ...available,
     trigger: trigger.kind === "sentry"
       ? { ...trigger, integrationAccountId, projectIds: trigger.projectIds.filter((id) => resourceIds.has(id)) }
       : { ...trigger, integrationAccountId, channelIds: trigger.channelIds.filter((id) => resourceIds.has(id)) },
-    workspaceSecretIds: configuration.workspaceSecretIds.filter((id) => options.secrets.some((secret) => secret.id === id)),
   };
 }
 

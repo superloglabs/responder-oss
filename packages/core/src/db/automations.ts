@@ -17,6 +17,7 @@ import type {
   AutomationTrigger,
 } from "../automations/config.js";
 import { supportsIncludedUsage } from "../automations/model-pricing.js";
+import { dueScheduleSlot } from "../automations/schedule.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { getDatabase } from "./client.js";
 import {
@@ -229,8 +230,74 @@ export async function findAutomationsForDiscordCommand(input: {
   );
 }
 
-function triggerProvider(trigger: AutomationTrigger): "discord" | "sentry" | "slack" {
-  return trigger.kind;
+type AutomationScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
+
+export function scheduleExternalEventId(scheduledFor: Date): string {
+  return `schedule:${scheduledFor.toISOString()}`;
+}
+
+// Returns enabled schedule automations whose latest slot has not run yet.
+export async function findDueScheduledAutomations(now: Date): Promise<Array<{
+  automationId: string;
+  scheduledFor: Date;
+  trigger: AutomationScheduleTrigger;
+}>> {
+  const database = getDatabase();
+  const rows = await database
+    .select({
+      automationId: automations.id,
+      trigger: automationVersions.trigger,
+      versionCreatedAt: automationVersions.createdAt,
+    })
+    .from(automations)
+    .innerJoin(
+      organizationCapabilities,
+      and(
+        eq(organizationCapabilities.organizationId, automations.organizationId),
+        eq(organizationCapabilities.capability, "automations"),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automations.activeVersionId),
+    )
+    .where(
+      and(
+        eq(automations.enabled, true),
+        sql`${automationVersions.trigger}->>'kind' = 'schedule'`,
+      ),
+    );
+  const due = rows.flatMap((row) => {
+    if (row.trigger.kind !== "schedule") return [];
+    const scheduledFor = dueScheduleSlot(row.trigger, row.versionCreatedAt, now);
+    if (!scheduledFor) return [];
+    return [{ automationId: row.automationId, scheduledFor, trigger: row.trigger }];
+  });
+  if (due.length === 0) return [];
+  const received = await database
+    .select({
+      automationId: automationTriggerReceipts.automationId,
+      externalEventId: automationTriggerReceipts.externalEventId,
+    })
+    .from(automationTriggerReceipts)
+    .where(
+      and(
+        eq(automationTriggerReceipts.provider, "schedule"),
+        inArray(automationTriggerReceipts.automationId, due.map((item) => item.automationId)),
+        inArray(
+          automationTriggerReceipts.externalEventId,
+          [...new Set(due.map((item) => scheduleExternalEventId(item.scheduledFor)))],
+        ),
+      ),
+    );
+  const receivedKeys = new Set(received.map((row) => `${row.automationId}:${row.externalEventId}`));
+  return due.filter((item) => !receivedKeys.has(`${item.automationId}:${scheduleExternalEventId(item.scheduledFor)}`));
+}
+
+// A schedule trigger has no connection.
+function triggerAccountId(trigger: AutomationTrigger): string | null {
+  return trigger.kind === "schedule" ? null : trigger.integrationAccountId;
 }
 
 // Returns the inference source implied by the selected model credential.
@@ -239,13 +306,14 @@ async function validateConfigurationResources(
   organizationId: string,
   configuration: AutomationConfiguration,
 ): Promise<AutomationInferenceSource> {
+  const { trigger } = configuration;
   const accountIds = [
     ...new Set([
-      configuration.trigger.integrationAccountId,
+      ...(trigger.kind === "schedule" ? [] : [trigger.integrationAccountId]),
       ...configuration.contextAccountIds,
     ]),
   ];
-  const accountRows = await tx
+  const accountRows = accountIds.length === 0 ? [] : await tx
     .select({ id: integrationAccounts.id, provider: integrationAccounts.provider })
     .from(integrationAccounts)
     .where(
@@ -261,45 +329,44 @@ async function validateConfigurationResources(
       "integration_not_found",
     );
   }
-  const triggerAccount = accountRows.find(
-    (account) => account.id === configuration.trigger.integrationAccountId,
-  );
-  if (triggerAccount?.provider !== triggerProvider(configuration.trigger)) {
-    throw new AutomationConfigurationError(
-      "The selected trigger integration has the wrong provider",
-      "integration_not_found",
+  if (trigger.kind !== "schedule") {
+    const triggerAccount = accountRows.find(
+      (account) => account.id === trigger.integrationAccountId,
     );
-  }
-  const triggerResource = configuration.trigger.kind === "sentry"
-    ? {
-        externalIds: configuration.trigger.projectIds,
-        kind: "sentry_project" as const,
-      }
-    : {
-        externalIds: configuration.trigger.channelIds,
-        kind: configuration.trigger.kind === "slack"
-          ? "slack_channel" as const
-          : "discord_channel" as const,
-      };
-  const triggerResources = await tx
-    .select({ externalId: integrationResources.externalId })
-    .from(integrationResources)
-    .where(
-      and(
-        eq(
-          integrationResources.integrationAccountId,
-          configuration.trigger.integrationAccountId,
+    if (triggerAccount?.provider !== trigger.kind) {
+      throw new AutomationConfigurationError(
+        "The selected trigger integration has the wrong provider",
+        "integration_not_found",
+      );
+    }
+    const triggerResource = trigger.kind === "sentry"
+      ? {
+          externalIds: trigger.projectIds,
+          kind: "sentry_project" as const,
+        }
+      : {
+          externalIds: trigger.channelIds,
+          kind: trigger.kind === "slack"
+            ? "slack_channel" as const
+            : "discord_channel" as const,
+        };
+    const triggerResources = await tx
+      .select({ externalId: integrationResources.externalId })
+      .from(integrationResources)
+      .where(
+        and(
+          eq(integrationResources.integrationAccountId, trigger.integrationAccountId),
+          eq(integrationResources.kind, triggerResource.kind),
+          eq(integrationResources.available, true),
+          inArray(integrationResources.externalId, triggerResource.externalIds),
         ),
-        eq(integrationResources.kind, triggerResource.kind),
-        eq(integrationResources.available, true),
-        inArray(integrationResources.externalId, triggerResource.externalIds),
-      ),
-    );
-  if (triggerResources.length !== triggerResource.externalIds.length) {
-    throw new AutomationConfigurationError(
-      "One or more selected trigger resources are unavailable",
-      "integration_not_found",
-    );
+      );
+    if (triggerResources.length !== triggerResource.externalIds.length) {
+      throw new AutomationConfigurationError(
+        "One or more selected trigger resources are unavailable",
+        "integration_not_found",
+      );
+    }
   }
   const supportedContextProviders = new Set([
     "custom_mcp",
@@ -433,24 +500,28 @@ async function insertAutomationVersion(
   const versionId = rows[0]?.id;
   if (!versionId) throw new Error("Unable to create automation version");
 
+  const triggerAccount = triggerAccountId(input.configuration.trigger);
   const accountLinks = [
-    {
-      integrationAccountId: input.configuration.trigger.integrationAccountId,
-      role: "trigger" as const,
-    },
+    ...(triggerAccount
+      ? [{ integrationAccountId: triggerAccount, role: "trigger" as const }]
+      : []),
     ...input.configuration.contextAccountIds.map((integrationAccountId) => ({
       integrationAccountId,
       role: "context" as const,
     })),
   ];
   await Promise.all([
-    tx.insert(automationVersionIntegrationAccounts).values(
-      accountLinks.map(({ integrationAccountId, role }) => ({
-        automationVersionId: versionId,
-        integrationAccountId,
-        role,
-      })),
-    ),
+    ...(accountLinks.length > 0
+      ? [
+          tx.insert(automationVersionIntegrationAccounts).values(
+            accountLinks.map(({ integrationAccountId, role }) => ({
+              automationVersionId: versionId,
+              integrationAccountId,
+              role,
+            })),
+          ),
+        ]
+      : []),
     tx.insert(automationVersionRepositories).values(
       input.configuration.repositoryIds.map((repositoryId, position) => ({
         automationVersionId: versionId,
@@ -1034,7 +1105,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "discord" | "manual" | "sentry" | "slack";
+  provider: "discord" | "manual" | "schedule" | "sentry" | "slack";
   sourceUrl?: string;
   title: string;
 }

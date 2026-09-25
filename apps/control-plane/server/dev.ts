@@ -12,6 +12,8 @@ initializeServerMonitoring();
 const { app } = await import("./app.js");
 const { startScanScheduler } = await import("./scans/scheduler.js");
 startScanScheduler();
+const { startAutomationScheduler } = await import("./automations/scheduler.js");
+startAutomationScheduler();
 
 serve(
   {

@@ -1,5 +1,6 @@
 import type { AutomationListItem, AutomationRunStatus } from "../automations-api";
 import { providerDisplayName } from "../components/provider-glyphs";
+import { scheduleLabel } from "../../../../packages/core/src/automations/schedule";
 
 
 export const runStatusLabels: Record<AutomationRunStatus, string> = {
@@ -20,6 +21,7 @@ export function triggerEventLabel(trigger: AutomationListItem["trigger"]): strin
     if (trigger.eventMode === "every_message") return "New message";
     return "Message or mention";
   }
+  if (trigger.kind === "schedule") return scheduleLabel(trigger);
   if (trigger.kind === "sentry") {
     if (trigger.eventTypes.length > 1) return "New issue or regression";
     return trigger.eventTypes[0] === "regression" ? "Issue regression" : "New issue";

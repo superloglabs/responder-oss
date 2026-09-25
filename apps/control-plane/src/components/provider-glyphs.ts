@@ -5,7 +5,7 @@ export const providerGlyphs = {
   custom_mcp: { label: "Custom MCP", text: "MCP" },
   datadog: { label: "Datadog", logo: "datadog" },
   dash0: { label: "Dash0", text: "D0" },
-  discord: { label: "Discord", text: "DC" },
+  discord: { label: "Discord", logo: "discord" },
   posthog: { label: "PostHog", text: "PH" },
   github: { label: "GitHub", logo: "github" },
   gcp: { label: "Google Cloud", logo: "google" },
@@ -68,6 +68,7 @@ export const contextProviderMetadata: Record<
 
 export function providerDisplayName(provider: string): string {
   if (provider === "clickstack") return "ClickStack / HyperDX";
+  if (provider === "schedule") return "Schedule";
   if (provider in providerGlyphs) {
     return providerGlyphs[provider as ProviderGlyphId].label;
   }

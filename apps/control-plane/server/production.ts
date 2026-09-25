@@ -15,6 +15,10 @@ const { startScanScheduler, stopScanScheduler } = await import(
   "./scans/scheduler.js"
 );
 startScanScheduler();
+const { startAutomationScheduler, stopAutomationScheduler } = await import(
+  "./automations/scheduler.js"
+);
+startAutomationScheduler();
 
 const port = Number(
   process.env.PORT ?? process.env.CONTROL_PLANE_API_PORT ?? 3000,
@@ -53,6 +57,7 @@ async function shutdown(signal: NodeJS.Signals) {
   timeout.unref();
 
   await stopScanScheduler();
+  await stopAutomationScheduler();
   server.close(async (error) => {
     clearTimeout(timeout);
     if (error) {
