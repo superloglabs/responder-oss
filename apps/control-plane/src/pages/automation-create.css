@@ -54,6 +54,14 @@
 .automationCreate__row > .providerGlyph { width: 16px; height: 16px; flex: 0 0 auto; overflow-wrap: normal; }
 .automationCreate__row > .providerGlyph > svg { width: 16px; height: 16px; }
 .automationCreate__row + .automationCreate__row { border-top: 1px solid #f0f0f0; }
+.automationCreate__row--dragging { opacity: .5; }
+.automationCreate__row--dropBefore { box-shadow: inset 0 2px 0 #4e58f9; }
+.automationCreate__row--dropAfter { box-shadow: inset 0 -2px 0 #4e58f9; }
+.automationCreate__dragHandle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 16px; height: 24px; margin-right: -4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #aaa; cursor: grab; }
+.automationCreate__dragHandle:hover { color: #444; }
+.automationCreate__dragHandle:active { cursor: grabbing; }
+.automationCreate__row > span + .automationCreate__mainDirectory { flex: 0 0 auto; }
+.automationCreate__mainDirectory { color: #666; font-size: 12px; line-height: 16px; white-space: nowrap; }
 .automationCreate__rows > .automationCreate__add { min-height: 46px; padding: 12px 0; border: 0; border-radius: 0; }
 .automationCreate__row + .automationCreate__add { border-top: 1px solid #f0f0f0; }
 .automationCreate__manage { display: inline-flex; align-items: center; justify-content: center; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #000; box-shadow: 0 1px 3px #00000008; font: inherit; line-height: 18px; text-decoration: none; cursor: pointer; }

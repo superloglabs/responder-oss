@@ -8,6 +8,7 @@ import { AutomationsPage } from "./pages/automations";
 import { AutomationConnectionCompletePage } from "./pages/automation-connection-complete";
 import { AutomationCreatePage } from "./pages/automation-create";
 import { AutomationDetailPage, AutomationEditRedirect } from "./pages/automation-detail";
+import { AutomationRunPage, AutomationTestChatPage } from "./pages/automation-run";
 import { BillingPage } from "./pages/billing";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
@@ -103,6 +104,8 @@ export function App() {
         <Route element={<AutomationConnectionCompletePage />} path="/automations/connection-complete" />
         <Route element={<AutomationDetailPage />} path="/automations/:automationId" />
         <Route element={<AutomationEditRedirect />} path="/automations/:automationId/edit" />
+        <Route element={<AutomationTestChatPage />} path="/automations/:automationId/test" />
+        <Route element={<AutomationRunPage />} path="/automations/:automationId/runs/:runId" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />

@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "sandbox:snapshot": "node --import tsx src/build-sandbox-snapshot.ts",
     "start": "node --import tsx src/index.ts",
     "typecheck": "tsc --noEmit"
   },

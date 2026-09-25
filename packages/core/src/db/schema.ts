@@ -725,6 +725,8 @@ export const automationVersionRepositories = pgTable(
     repositoryId: uuid("repository_id")
       .notNull()
       .references(() => repositories.id, { onDelete: "restrict" }),
+    // The first repository is the agent's working directory.
+    position: integer("position").notNull().default(0),
   },
   (table) => [
     primaryKey({ columns: [table.automationVersionId, table.repositoryId] }),
@@ -779,6 +781,10 @@ export const automationRuns = pgTable(
       .$type<Record<string, unknown>>()
       .notNull(),
     sandboxId: text("sandbox_id"),
+    // The paused sandbox a follow-up turn resumes, without the API key.
+    sandboxSessionState: jsonb("sandbox_session_state").$type<
+      Record<string, unknown>
+    >(),
     harnessSessionId: text("harness_session_id"),
     resultSummary: text("result_summary"),
     usage: jsonb("usage").$type<Record<string, unknown>>(),

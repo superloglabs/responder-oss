@@ -95,6 +95,33 @@ export interface AutomationRunPage {
   total: number;
 }
 
+export interface AutomationRunEvent {
+  createdAt: string;
+  data: Record<string, unknown> | null;
+  id: number;
+  type: string;
+}
+
+export interface AutomationRunDetail {
+  automationEnabled: boolean;
+  automationId: string;
+  automationName: string;
+  cancelRequestedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  events: AutomationRunEvent[];
+  failureCategory: string | null;
+  failureMessage: string | null;
+  id: string;
+  number: number;
+  resultSummary: string | null;
+  startedAt: string | null;
+  status: AutomationRunStatus;
+  trigger: AutomationRunSummary["trigger"] & {
+    attributes: Record<string, string | number | boolean | null>;
+  };
+}
+
 export interface AutomationDetail {
   inferenceSource: AutomationInferenceSource;
   configuration: AutomationConfiguration;
@@ -206,10 +233,35 @@ export function setAutomationEnabled(id: string, enabled: boolean) {
   );
 }
 
-export function runAutomation(id: string) {
+// With a message, starts a test chat that sends it to the agent.
+export function runAutomation(id: string, message?: string) {
   return automationJson<{ duplicate: boolean; runId: string }>(
     `/api/automations/${encodeURIComponent(id)}/runs`,
-    { method: "POST" },
+    message === undefined
+      ? { method: "POST" }
+      : {
+          body: JSON.stringify({ message }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+  );
+}
+
+export async function fetchAutomationRun(runId: string): Promise<AutomationRunDetail> {
+  const response = await automationJson<{ run: AutomationRunDetail }>(
+    `/api/automations/runs/${encodeURIComponent(runId)}`,
+  );
+  return response.run;
+}
+
+export function sendAutomationRunMessage(runId: string, message: string) {
+  return automationJson<{ queued: boolean }>(
+    `/api/automations/runs/${encodeURIComponent(runId)}/messages`,
+    {
+      body: JSON.stringify({ message }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    },
   );
 }
 

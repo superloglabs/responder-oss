@@ -34,6 +34,8 @@ describe("OpenCode automation harness", () => {
     const command = vi.mocked(session.execCommand).mock.calls[0]![0].cmd;
     expect(command).toContain(`opencode-ai@${openCodeVersion}`);
     expect(command).toContain("unset RESPONDER_MODEL_BROKER_TOKEN");
+    // The package's own postinstall links the platform binary.
+    expect(command).toContain(`node '/home/daytona/workspace/.responder/opencode/${openCodeVersion}/node_modules/opencode-ai/postinstall.mjs'`);
   });
 
   it("uses the Chat Completions adapter for OpenAI and the Messages adapter for Anthropic", () => {

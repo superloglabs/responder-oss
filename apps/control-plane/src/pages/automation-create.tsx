@@ -9,7 +9,7 @@ import {
   type AutomationDetail,
   type AutomationOptions,
 } from "../automations-api";
-import { FloppyDiskIcon, PencilSimpleIcon, PlayIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
+import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import type { AutomationConnectorProvider } from "../components/automation-connectors";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
@@ -21,7 +21,8 @@ import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
-import { availableAutomationConfiguration } from "../automation-configuration";
+import { availableAutomationConfiguration, moveItem } from "../automation-configuration";
+import { AutomationRepositoryList } from "../components/automation-repository-list";
 import "./automation-create.css";
 import { AppShell } from "../components/app-shell";
 import { Switch } from "../design-system";
@@ -303,7 +304,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     return <AppShell active="automations" redesigned density="create"><p className="automationLoading">Loading automation…</p></AppShell>;
   }
 
-  const selectedRepositories = options?.repositories.filter((repository) => configuration.repositoryIds.includes(repository.id)) ?? [];
+  // In run order: the first repository is the agent's working directory.
+  const selectedRepositories = configuration.repositoryIds.flatMap((id) => options?.repositories.find((repository) => repository.id === id) ?? []);
   const selectedConnectors = contextAccounts.filter((account) => configuration.contextAccountIds.includes(account.id));
   const selectedSecrets = options?.secrets.filter((secret) => configuration.workspaceSecretIds.includes(secret.id)) ?? [];
   const repositoryPicker = <AutomationRepositoryPicker options={options} selectedIds={configuration.repositoryIds} open={repositoryPickerOpen} onOpenChange={setRepositoryPickerOpen} onToggle={(repositoryId) => {
@@ -331,6 +333,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             {!automationId
               ? <button className="automationCreate__save" disabled={saving || !options} form="automation-settings" type="submit"><FloppyDiskIcon size={14} />{saving ? "Saving…" : "Save"}</button>
               : activeTab === "history" ? <button className="automationCreate__secondary" disabled={startingRun || !enabled} onClick={() => void startRun()} title={enabled ? undefined : "Turn the automation on to run it"} type="button"><PlayIcon size={14} />{startingRun ? "Starting…" : "Run now"}</button> : null}
+            {automationId ? <button className="automationCreate__save" disabled={!enabled || saveStatus === "saving"} onClick={() => navigate(`/automations/${automationId}/test`)} title={enabled ? "Chat with the agent to test this automation" : "Turn the automation on to test it"} type="button"><ChatCircleIcon size={14} />Test</button> : null}
           </div>
           {automationId ? <div className="automationCreate__tabs" role="tablist" aria-label="Automation sections">
             <button aria-selected={activeTab === "settings"} onClick={() => setActiveTab("settings")} role="tab" type="button">Settings</button>
@@ -373,7 +376,12 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-repositories">
             <h2 id="automation-repositories">Repositories</h2>
-            {selectedRepositories.length ? <div className="automationCreate__rows">{selectedRepositories.map((repository) => <div className="automationCreate__row" key={repository.id}><GithubLogoIcon size={16} /><span>{repository.fullName}</span><button aria-label={`Remove ${repository.fullName}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, repositoryIds: current.repositoryIds.filter((id) => id !== repository.id) }))} type="button"><TrashIcon size={14} /></button></div>)}{repositoryPicker}</div> : repositoryPicker}
+            {selectedRepositories.length ? <AutomationRepositoryList
+              onMove={(repositoryId, index) => updateConfiguration((current) => ({ ...current, repositoryIds: moveItem(current.repositoryIds, repositoryId, index) }))}
+              onRemove={(repositoryId) => updateConfiguration((current) => ({ ...current, repositoryIds: current.repositoryIds.filter((id) => id !== repositoryId) }))}
+              picker={repositoryPicker}
+              repositories={selectedRepositories}
+            /> : repositoryPicker}
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-connectors">
             <h2 id="automation-connectors">Connectors</h2>

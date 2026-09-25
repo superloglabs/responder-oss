@@ -1,8 +1,11 @@
 import {
   abandonPendingAutomationRun,
   beginAutomationRun,
+  continueAutomationRun,
+  setAutomationRunStatus,
   type AutomationTriggerInput,
 } from "../../../../packages/core/src/db/automations.js";
+import type { AutomationUserMessageEventData } from "../../../../packages/core/src/automations/transcript.js";
 import {
   automationRunQueue,
   createJobBoss,
@@ -50,27 +53,55 @@ async function getBoss() {
   }
 }
 
+async function sendAutomationRunJob(automationId: string, runId: string): Promise<string> {
+  const jobId = await (await getBoss()).send(
+    automationRunQueue,
+    {
+      kind: "automation_run",
+      queuedAt: new Date().toISOString(),
+      runId,
+    },
+    { singletonKey: automationId },
+  );
+  if (!jobId) throw new Error("Automation run job was not created");
+  return jobId;
+}
+
 export async function queueAutomationRun(input: {
   automationId: string;
+  message?: AutomationUserMessageEventData;
   trigger: AutomationTriggerInput;
 }): Promise<{ duplicate: boolean; jobId?: string; runId: string }> {
   const run = await beginAutomationRun(input);
   if (!run.created) return { duplicate: true, runId: run.runId };
 
   try {
-    const jobId = await (await getBoss()).send(
-      automationRunQueue,
-      {
-        kind: "automation_run",
-        queuedAt: new Date().toISOString(),
-        runId: run.runId,
-      },
-      { singletonKey: input.automationId },
-    );
-    if (!jobId) throw new Error("Automation run job was not created");
+    const jobId = await sendAutomationRunJob(input.automationId, run.runId);
     return { duplicate: false, jobId, runId: run.runId };
   } catch (error) {
     await abandonPendingAutomationRun(run.runId);
+    throw new Error("Automation worker is unavailable", { cause: error });
+  }
+}
+
+// Queues the next turn of a finished run. Returns null when the run cannot
+// take a follow-up.
+export async function queueAutomationRunFollowUp(input: {
+  message: AutomationUserMessageEventData;
+  organizationId: string;
+  runId: string;
+}): Promise<{ jobId: string } | null> {
+  const run = await continueAutomationRun(input);
+  if (!run) return null;
+  try {
+    return { jobId: await sendAutomationRunJob(run.automationId, input.runId) };
+  } catch (error) {
+    await setAutomationRunStatus({
+      failureCategory: "queue_unavailable",
+      failureMessage: "The follow-up could not be queued. Try sending it again.",
+      runId: input.runId,
+      status: "failed",
+    });
     throw new Error("Automation worker is unavailable", { cause: error });
   }
 }
