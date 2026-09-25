@@ -1,0 +1,20 @@
+:root {
+  --consent-font-family: var(--ds-font-sans);
+  --consent-surface: var(--ds-surface-base);
+  --consent-text: var(--ds-text-primary);
+  --consent-text-muted: var(--ds-text-secondary);
+  --consent-primary: var(--ds-text-primary);
+  --consent-primary-hover: var(--ds-text-secondary);
+  --consent-text-on-primary: var(--ds-canvas);
+  --consent-border: var(--ds-border-strong);
+  --consent-border-hover: var(--ds-text-disabled);
+  --consent-divider: var(--ds-border-default);
+  --consent-switch-track: var(--ds-surface-hover);
+}
+
+/* The app's element resets are unlayered, so they outrank c15t's layered
+   component styles. Hand text styling back to c15t; buttons stay borderless. */
+:is(button, a)[class*="c15t-ui-"] {
+  color: revert-layer;
+  font: revert-layer;
+}

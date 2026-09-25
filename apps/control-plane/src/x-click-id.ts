@@ -1,4 +1,8 @@
-import { adClickIdCookie, rememberAdClickId } from "./ad-click-id";
+import {
+  adClickIdCookie,
+  forgetAdClickId,
+  rememberAdClickId,
+} from "./ad-click-id";
 
 const xClickIdOptions = {
   cookieName: "responder_twclid",
@@ -14,6 +18,13 @@ export function xClickIdCookie(search: string, secure: boolean): string | null {
  * the signup request carries it to the server, where the conversion is
  * reported to X out of reach of content blockers.
  */
-export function rememberXClickId(document: Document = window.document) {
-  rememberAdClickId(document, xClickIdOptions);
+export function rememberXClickId(
+  landingSearch: string,
+  document: Document = window.document,
+) {
+  rememberAdClickId(landingSearch, document, xClickIdOptions);
+}
+
+export function forgetXClickId(document: Document = window.document) {
+  forgetAdClickId(document, xClickIdOptions);
 }

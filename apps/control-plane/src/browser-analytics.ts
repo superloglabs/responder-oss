@@ -5,9 +5,16 @@ const ANALYTICS_PROJECT = "responder";
 
 let clientPromise: Promise<PostHog | null> | undefined;
 let lastPageViewUrl: string | undefined;
+let grantMeasurementConsent: () => void;
+// PostHog loads only after the visitor grants measurement consent. Calls made
+// earlier wait here and are delivered once consent arrives.
+const measurementConsent = new Promise<void>((resolve) => {
+  grantMeasurementConsent = resolve;
+});
 
 async function getBrowserAnalyticsClient() {
   if (typeof window === "undefined") return null;
+  await measurementConsent;
   if (clientPromise) return clientPromise;
 
   const projectToken = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN?.trim();
@@ -43,8 +50,15 @@ async function getBrowserAnalyticsClient() {
   return clientPromise;
 }
 
-export async function initializeBrowserAnalytics() {
+export async function allowBrowserAnalytics() {
+  grantMeasurementConsent();
   await getBrowserAnalyticsClient();
+}
+
+/** Clears PostHog's browser storage before a consent revocation reload. */
+export async function revokeBrowserAnalytics() {
+  const client = await clientPromise;
+  client?.reset();
 }
 
 export async function captureBrowserPageView(url: string) {
@@ -84,7 +98,7 @@ export async function identifyBrowserUser(
 }
 
 export async function resetBrowserAnalytics() {
-  const client = await getBrowserAnalyticsClient();
   lastPageViewUrl = undefined;
+  const client = await clientPromise;
   client?.reset();
 }

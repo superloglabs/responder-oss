@@ -393,6 +393,13 @@
       "when": 1790338599847,
       "tag": "0055_automation_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1790343354295,
+      "tag": "0056_consent_records",
+      "breakpoints": true
     }
   ]
 }

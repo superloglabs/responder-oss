@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { redditClickIdCookie } from "./reddit-click-id";
+import {
+  forgetRedditClickId,
+  redditClickIdCookie,
+  rememberRedditClickId,
+} from "./reddit-click-id";
 
 describe("redditClickIdCookie", () => {
   it("stores the click id in a long-lived first-party cookie", () => {
@@ -23,5 +27,32 @@ describe("redditClickIdCookie", () => {
     expect(
       redditClickIdCookie("?rdt_cid=abc;%20Domain=evil.test", true),
     ).toBeNull();
+  });
+});
+
+describe("remembering and forgetting the Reddit click id", () => {
+  function fakeDocument() {
+    return {
+      cookie: "",
+      location: { protocol: "https:" },
+    } as unknown as Document;
+  }
+
+  it("stores the click id from the landing query", () => {
+    const document = fakeDocument();
+
+    rememberRedditClickId("?rdt_cid=abc123", document);
+
+    expect(document.cookie).toBe(
+      "_rdt_cid=abc123; Max-Age=2592000; Path=/; SameSite=Lax; Secure",
+    );
+  });
+
+  it("expires the cookie", () => {
+    const document = fakeDocument();
+
+    forgetRedditClickId(document);
+
+    expect(document.cookie).toBe("_rdt_cid=; Max-Age=0; Path=/");
   });
 });

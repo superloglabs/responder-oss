@@ -9,6 +9,7 @@ export default defineConfig({
   schema: [
     "./packages/core/src/db/auth-schema.ts",
     "./packages/core/src/db/schema.ts",
+    "./packages/core/src/db/consent-schema.ts",
   ],
   out: "./drizzle",
   dbCredentials: {

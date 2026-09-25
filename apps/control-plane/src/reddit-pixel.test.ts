@@ -32,56 +32,42 @@ describe("redditPixelId", () => {
   });
 });
 
-describe("Reddit Pixel", () => {
-  it("loads the pixel-specific Reddit script", () => {
-    const script: { async?: boolean; src?: string } = {};
-    const appendChild = vi.fn();
-    vi.stubGlobal("window", {});
-    vi.stubGlobal("document", {
-      createElement: vi.fn(() => script),
-      head: { appendChild },
-    });
-    vi.stubEnv("VITE_REDDIT_PIXEL_ID", "a2_pixel123");
+describe("redditPixelScripts", () => {
+  it("is empty when the pixel is not configured", () => {
+    vi.stubEnv("VITE_REDDIT_PIXEL_ID", "");
 
-    redditPixel.initializeRedditPixel();
-
-    expect(script).toEqual({
-      async: true,
-      src: "https://www.redditstatic.com/ads/pixel.js?pixel_id=a2_pixel123",
-    });
-    expect(appendChild).toHaveBeenCalledWith(script);
+    expect(redditPixel.redditPixelScripts()).toEqual([]);
   });
 
-  it("initializes once and reports a page visit", () => {
-    const rdt = vi.fn();
-    vi.stubGlobal("window", { rdt });
+  it("loads the Reddit pixel with marketing consent", () => {
     vi.stubEnv("VITE_REDDIT_PIXEL_ID", "a2_pixel123");
 
-    redditPixel.initializeRedditPixel();
-    redditPixel.initializeRedditPixel();
-
-    expect(rdt.mock.calls).toEqual([
-      [
-        "init",
-        "a2_pixel123",
-        { optOut: false, useDecimalCurrencyValues: true },
-      ],
-      ["track", "PageVisit"],
+    expect(redditPixel.redditPixelScripts()).toEqual([
+      expect.objectContaining({
+        category: "marketing",
+        id: "reddit-pixel",
+        src: "https://www.redditstatic.com/ads/pixel.js",
+      }),
     ]);
+  });
+});
+
+describe("trackRedditSignupPixel", () => {
+  it("does nothing until the pixel is loaded", () => {
+    vi.stubGlobal("window", {});
+
+    expect(() => redditPixel.trackRedditSignupPixel("user-1")).not.toThrow();
   });
 
   it("reports each signup conversion once", () => {
     const rdt = vi.fn();
     vi.stubGlobal("window", { rdt });
-    vi.stubEnv("VITE_REDDIT_PIXEL_ID", "a2_pixel123");
 
-    redditPixel.initializeRedditPixel();
     redditPixel.trackRedditSignupPixel("user-1");
     redditPixel.trackRedditSignupPixel("user-1");
 
-    expect(rdt).toHaveBeenLastCalledWith("track", "SignUp", {
-      conversionId: "user-1",
-    });
-    expect(rdt).toHaveBeenCalledTimes(3);
+    expect(rdt.mock.calls).toEqual([
+      ["track", "SignUp", { conversionId: "user-1" }],
+    ]);
   });
 });

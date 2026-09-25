@@ -22,14 +22,27 @@ export function adClickIdCookie(
   );
 }
 
+/**
+ * Stores the click id from the landing URL's query string. Callers pass the
+ * query captured at page load because the visitor may navigate before granting
+ * marketing consent.
+ */
 export function rememberAdClickId(
+  landingSearch: string,
   document: Document,
   options: AdClickIdCookieOptions,
 ) {
   const cookie = adClickIdCookie(
-    document.location.search,
+    landingSearch,
     document.location.protocol === "https:",
     options,
   );
   if (cookie) document.cookie = cookie;
+}
+
+export function forgetAdClickId(
+  document: Document,
+  options: AdClickIdCookieOptions,
+) {
+  document.cookie = `${options.cookieName}=; Max-Age=0; Path=/`;
 }

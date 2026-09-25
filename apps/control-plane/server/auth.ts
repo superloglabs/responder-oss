@@ -23,6 +23,7 @@ import {
   adminAc as organizationAdminAc,
   memberAc as organizationMemberAc,
 } from "better-auth/plugins/organization/access";
+import { allowsMarketing } from "./consent-policy.js";
 import { sendEmail, workspaceInvitationEmailBody } from "./email.js";
 
 export const superuserRoles = {
@@ -193,6 +194,7 @@ export function createResponderAuth() {
                 signup_method: signupMethod,
               },
             });
+            if (!allowsMarketing(new Headers(context?.headers))) return;
             await Promise.all([
               captureRedditSignupConversion({
                 clickId: context?.getCookie("_rdt_cid") ?? undefined,

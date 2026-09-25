@@ -1,10 +1,11 @@
 # Product analytics
 
 Responder captures browser activity and a small, explicit server-side PostHog
-event taxonomy when PostHog is explicitly configured. The browser SDK runs in
-the authenticated app. It captures initial and client-side navigation `$pageview`
-events without URL query strings or fragments, plus session recordings. All
-form input values are masked in recordings.
+event taxonomy when PostHog is explicitly configured. The browser SDK loads
+once the visitor allows analytics (see [Cookie consent](#cookie-consent)). It
+captures initial and client-side navigation `$pageview` events without URL
+query strings or fragments, plus session recordings. All form input values are
+masked in recordings.
 Every browser and server event includes `project: "responder"` so Responder
 activity can be separated from other products sharing the PostHog project.
 
@@ -51,18 +52,21 @@ Signups are reported to X Ads through two channels that deduplicate against
 each other with the Better Auth user ID as the `conversion_id` key:
 
 - **Browser pixel** (`uwt.js`), which works without any Ads API approval. The
-  web app loads the tag at startup and fires the signup event after email
-  signup succeeds, or on the first-time social login landing marked by the
-  `signed_up=1` callback parameter. Content blockers can suppress it.
+  web app loads the tag once the visitor allows marketing and fires the signup
+  event after email signup succeeds, or on the first-time social login landing
+  marked by the `signed_up=1` callback parameter. Content blockers can suppress
+  it.
 - **Server-side [Conversion API](https://docs.x.com/x-ads-api/measurement/web-conversions)**,
   called from the `user.create` hook alongside the `user signed up` PostHog
   event. It is out of reach of content blockers but requires Ads API
   ("Conversion Only" tier) approval for the developer app that issued the
   OAuth credentials. X matches the conversion through the SHA-256 hash of the
   account email plus the `twclid` click id when the visitor arrived through an
-  ad; the web app stores `twclid` from the landing URL in the first-party
-  `responder_twclid` cookie for 30 days, and the signup request carries it to
-  the server. Delivery failures are logged and never fail the signup.
+  ad; once the visitor allows marketing, the web app stores `twclid` from the
+  landing URL in the first-party `responder_twclid` cookie for 30 days, and the
+  signup request carries it to the server. The server reports the conversion
+  only when the signup request's consent allows marketing. Delivery failures
+  are logged and never fail the signup.
 
 Configure these variables in the control-plane project for the server-side
 path. The OAuth 1.0a credentials come from a developer app attached to the X
@@ -89,7 +93,32 @@ is combined with the backward-compatible singular value.
 ## Reddit Pixel
 
 Set `VITE_REDDIT_PIXEL_ID` during the web build to enable Reddit measurement.
-The pixel loads when the app starts, reports a page visit, and sends
-deduplicated `SignUp` events after successful email and first-time social
+The pixel loads once the visitor allows marketing, reports a page visit, and
+sends deduplicated `SignUp` events after successful email and first-time social
 signups. The pixel is disabled when the variable is empty, and content blockers
 can suppress browser events.
+
+## Cookie consent
+
+The web app records cookie consent with [c15t](https://c15t.com). The control
+plane serves the c15t backend at `/api/c15t` and stores consent records in the
+`c15t_*` Postgres tables, with truncated IP addresses. The backend picks the
+visitor's policy from CDN location headers (`CloudFront-Viewer-Country` and
+`CloudFront-Viewer-Country-Region`):
+
+| Region | Model | Banner |
+| --- | --- | --- |
+| EEA, United Kingdom, Switzerland, unknown location | Opt-in | Yes |
+| Quebec | Opt-in | Yes |
+| California | Opt-out, honors Global Privacy Control | No |
+| Everywhere else | Allowed by default | No |
+
+PostHog runs in the `measurement` category. The Reddit and X pixels, their
+click-id cookies, and the server-side conversion reports run in the
+`marketing` category. Error monitoring with Sentry is not gated. Revoking a
+category reloads the page so scripts that already ran stop. Visitors can
+reopen their choices from **Cookie settings** in the site footer.
+
+Regenerate `packages/core/src/db/consent-schema.ts` with
+`pnpm consent:generate` after upgrading `@c15t/backend`, then run
+`pnpm db:generate` for any schema change.
