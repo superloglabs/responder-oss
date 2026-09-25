@@ -572,3 +572,59 @@ test("preserves the selected Discord server after reconnecting", async ({ page, 
   await expect(page.getByRole("button", { name: "Reconnect to refresh channels" })).toBeEnabled();
   await expect(page.getByRole("combobox", { name: "Trigger connection" })).toHaveValue(secondAccountId);
 });
+
+test("starts an automation from a template on the automation list", async ({ page }, testInfo) => {
+  await page.route("**/api/automations", (route) => route.request().method() === "GET"
+    ? route.fulfill({ json: { automations: [] } })
+    : route.fallback());
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto("/automations");
+  const templates = page.getByRole("region", { name: "Start from a template" });
+  await expect(templates.getByRole("link")).toHaveCount(6);
+  await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
+  await expect(templates.getByRole("link")).toHaveCount(3);
+  await templates.getByRole("radio", { name: "Support", exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath("automation-templates.png"), fullPage: true });
+  await templates.getByRole("link", { name: /Answer support questions/ }).click();
+
+  await expect(page).toHaveURL(/\/automations\/new\?template=answer-support-questions$/);
+  await expect(page.getByRole("heading", { name: "Answer support questions" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Started from the Answer support questions template" })).toBeVisible();
+  await expect(page.getByText("Slack message posted", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue(/A question was posted in the support channel/);
+  await page.screenshot({ path: testInfo.outputPath("automation-create-from-template.png"), fullPage: true });
+
+  await page.getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  await page.getByRole("button", { name: "Add repository", exact: true }).click();
+  await page.getByRole("option", { name: "acme/api" }).click();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Choose model", exact: true }).click();
+  await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
+  await page.getByRole("option", { name: "GPT-5.4" }).click();
+  let saved: Record<string, unknown> | undefined;
+  await page.route("**/api/automations", async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ status: 400, json: { error: "Please try again" } });
+  });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => saved).toMatchObject({
+    name: "Answer support questions",
+    description: expect.stringContaining("support channel"),
+    configuration: { trigger: { integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" } },
+  });
+});
+
+test("clears a template with Start blank", async ({ page }) => {
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto("/automations/new?template=triage-sentry-issues");
+  await expect(page.getByRole("heading", { name: "Triage new Sentry issues" })).toBeVisible();
+  await expect(page.getByText("Connect Sentry to use this trigger")).toBeVisible();
+  await page.getByRole("button", { name: "Start blank", exact: true }).click();
+  await expect(page).toHaveURL(/\/automations\/new$/);
+  await expect(page.getByRole("heading", { name: "New automation" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toBeEmpty();
+  await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeVisible();
+  await expect(page.getByText(/Started from the/)).toHaveCount(0);
+});

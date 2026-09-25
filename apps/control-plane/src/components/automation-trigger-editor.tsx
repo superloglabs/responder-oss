@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { DiscordLogoIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger } from "../automations-api";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
@@ -9,10 +9,6 @@ import { ProviderGlyph } from "./icons";
 import "./automation-trigger-editor.css";
 
 type TriggerKind = AutomationTrigger["kind"];
-
-function TriggerIcon({ kind }: { kind: TriggerKind }) {
-  return kind === "discord" ? <DiscordLogoIcon size={16} /> : <ProviderGlyph decorative provider={kind} />;
-}
 
 export function AutomationTriggerEditor({ options, trigger, onChange, open, onOpenChange, onConnected, onRefresh }: {
   options: AutomationOptions | null;
@@ -82,7 +78,7 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
   }}>
     {trigger && !accounts.length ? <div className="automationTrigger__disconnected" ref={fieldsRef}>
       <div className="automationTrigger__connectionCopy">
-        <div><TriggerIcon kind={trigger.kind} /><span>{title}</span></div>
+        <div><ProviderGlyph decorative provider={trigger.kind} /><span>{title}</span></div>
         <p>Connect {providerName} to use this trigger</p>
       </div>
       <div className="automationTrigger__connectionActions">
@@ -91,7 +87,7 @@ export function AutomationTriggerEditor({ options, trigger, onChange, open, onOp
       </div>
     </div> : trigger ? <div className="automationTrigger__card">
       <div className="automationTrigger__heading">
-        <TriggerIcon kind={trigger.kind} />
+        <ProviderGlyph decorative provider={trigger.kind} />
         <span className="automationTrigger__provider">{title}</span>
         {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? trigger.integrationAccountId : ""} onChange={(event) => onChange(trigger.kind === "sentry" ? { ...trigger, integrationAccountId: event.target.value, projectIds: [] } : { ...trigger, integrationAccountId: event.target.value, channelIds: [] })}>
           <option value="" disabled>Choose a workspace</option>

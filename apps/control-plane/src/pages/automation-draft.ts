@@ -13,6 +13,8 @@ export interface AutomationDraft {
   automationId?: string;
   name: string;
   configuration: AutomationConfiguration;
+  // The template a new automation started from, if any.
+  templateId?: string;
   triggerSelected: boolean;
   githubIncluded: boolean;
   connecting: string;

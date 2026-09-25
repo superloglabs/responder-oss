@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useRef, useState } from "react";
-import { CaretRightIcon, DiscordLogoIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import type { AutomationTrigger } from "../automations-api";
 import { ProviderGlyph } from "./icons";
 
@@ -55,7 +55,7 @@ export function AutomationTriggerMenu({ onChoose }: {
         <button aria-haspopup="menu" aria-expanded={active === provider.kind} className={`automationTrigger__providerOption${active === provider.kind ? " isActive" : ""}`} data-provider={provider.kind} onClick={() => focusEvents(provider.kind)} onFocus={() => setActive(provider.kind)} onKeyDown={(event) => {
           if (event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); focusEvents(provider.kind); }
         }} role="menuitem" type="button">
-          <span className="automationTrigger__icon">{provider.kind === "discord" ? <DiscordLogoIcon size={16} /> : <ProviderGlyph decorative provider={provider.kind} />}</span><span>{provider.name}</span><CaretRightIcon size={14} />
+          <span className="automationTrigger__icon"><ProviderGlyph decorative provider={provider.kind} /></span><span>{provider.name}</span><CaretRightIcon size={14} />
         </button>
         {active === provider.kind ? <div className="automationTrigger__flyout" data-events={provider.kind}>
           <div aria-label={`${provider.name} events`} className="automationTrigger__events" role="menu" onKeyDown={(event) => {

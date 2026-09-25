@@ -41,7 +41,7 @@
 .automationCreate__add > svg { flex-shrink: 0; color: #666; }
 .automationCreate__add:hover { background: #fafafa; }
 .automationCreate__instructions { overflow: visible; border: 1px solid #e8e8e8; border-radius: 8px; background: #fff; }
-.automationCreate__instructions textarea { display: block; width: 100%; min-height: 98px; padding: 14px 16px; resize: vertical; border: 0; border-radius: 0; outline: none; background: transparent; color: #121212; font: inherit; line-height: 18px; }
+.automationCreate__instructions textarea { display: block; width: 100%; min-height: 98px; max-height: 360px; padding: 14px 16px; resize: vertical; field-sizing: content; border: 0; border-radius: 0; outline: none; background: transparent; color: #121212; font: inherit; line-height: 18px; }
 .automationCreate__instructions textarea::placeholder { color: #777; opacity: 1; }
 .automationCreate__instructions:has(textarea:focus-visible) { outline: 2px solid #4e58f9; outline-offset: 2px; }
 .automationCreate__toolbar { display: flex; align-items: center; gap: 16px; padding: 10px 16px 14px; }
@@ -86,3 +86,8 @@
 }
 
 .automationCreate .formError, .automationEditorDialog .formError { color: #8a2f2b; background: #fdf4f4; border-color: #d6a8a8; }
+.automationCreate__template { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e1e3fe; border-radius: 8px; background: #f5f6ff; color: #2f3780; }
+.automationCreate__template > svg { flex-shrink: 0; color: #4e58c7; }
+.automationCreate__template p { flex: 1; min-width: 0; margin: 0; }
+.automationCreate__template button { flex-shrink: 0; padding: 0; border: 0; background: transparent; color: #4e58c7; font: inherit; cursor: pointer; }
+.automationCreate__template button:hover { text-decoration: underline; }

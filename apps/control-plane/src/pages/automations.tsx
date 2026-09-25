@@ -10,6 +10,7 @@ import {
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { AutomationListSkeleton } from "../components/screen-skeletons";
+import { AutomationTemplateGallery } from "../components/automation-template-gallery";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -134,7 +135,7 @@ export function AutomationsPage() {
         <AutomationListSkeleton />
       ) : automations.length === 0 ? (
         error ? null : (
-          <section className="emptyState emptyState--list">
+          <section className="emptyState emptyState--list automationsEmpty">
             <h2>No automations yet</h2>
             <p>Choose a trigger and a model, and run a coding task in a fresh sandbox.</p>
             <Link className="dsButton dsButton--primary dsButton--medium" to="/automations/new">
@@ -228,6 +229,7 @@ export function AutomationsPage() {
           />
         </section>
       )}
+      {loading ? null : <AutomationTemplateGallery />}
     </AppShell>
   );
 }

@@ -16,6 +16,7 @@ describe("ProviderGlyph", () => {
     ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],
     ["datadog", "Datadog", "DD"],
+    ["discord", "Discord", "DC"],
     ["github", "GitHub", "GH"],
     ["grafana", "Grafana", "GF"],
     ["linear", "Linear", "LI"],

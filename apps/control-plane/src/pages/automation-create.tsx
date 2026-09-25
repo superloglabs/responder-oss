@@ -9,7 +9,7 @@ import {
   type AutomationDetail,
   type AutomationOptions,
 } from "../automations-api";
-import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
+import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import type { AutomationConnectorProvider } from "../components/automation-connectors";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
@@ -17,6 +17,7 @@ import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft, waitForConnectedAccounts } from "./automation-draft";
+import { applyAutomationTemplate, automationTemplateMissingFields, findAutomationTemplate } from "./automation-templates";
 import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
@@ -73,13 +74,15 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const editorPath = automationId ? `/automations/${automationId}` : "/automations/new";
   const navigate = useNavigate();
   const [options, setOptions] = useState<AutomationOptions | null>(null);
-  const [name, setName] = useState(initialAutomation?.name ?? "New automation");
+  // A new automation can start from a template chosen on the automation list.
+  const [template, setTemplate] = useState(() => automationId ? undefined : findAutomationTemplate(new URLSearchParams(window.location.search).get("template")));
+  const [name, setName] = useState(initialAutomation?.name ?? template?.name ?? "New automation");
   const [savedName, setSavedName] = useState(initialAutomation?.name ?? "");
-  const description = initialAutomation?.description ?? "";
+  const description = initialAutomation?.description ?? template?.description ?? "";
   const [enabled, setEnabled] = useState(initialAutomation?.enabled ?? true);
   const [configuration, setConfiguration] = useState<AutomationConfiguration>(initialAutomation?.configuration ?? { ...defaultConfiguration, prompt: "" });
   const [connectDialog, setConnectDialog] = useState<{ provider: "datadog" | "custom_mcp"; connectUrl: string } | null>(null);
-  const [triggerSelected, setTriggerSelected] = useState(Boolean(initialAutomation));
+  const [triggerSelected, setTriggerSelected] = useState(Boolean(initialAutomation || template));
   const [triggerMenuOpen, setTriggerMenuOpen] = useState(false);
   const triggerSectionRef = useRef<HTMLElement>(null);
   const [githubIncluded, setGithubIncluded] = useState(initialAutomation ? initialAutomation.configuration.repositoryIds.length > 0 : true);
@@ -175,9 +178,13 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     }
     if (!restored) {
       if (automationId) updateConfiguration(() => saved.current.configuration, false);
-      else updateConfiguration((current) => ({ ...current, model: "", modelCredentialId: null, repositoryIds: [] }), false);
+      else updateConfiguration((current) => {
+        const blank = { ...current, model: "", modelCredentialId: null, repositoryIds: [] };
+        return template ? applyAutomationTemplate(blank, template, loadedOptions) : blank;
+      }, false);
       return;
     }
+    setTemplate(findAutomationTemplate(restored.draft.templateId));
     nameRef.current = restored.draft.name;
     setName(restored.draft.name);
     selectTrigger(restored.draft.triggerSelected);
@@ -224,7 +231,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const { integrations } = await response.json() as { integrations: Array<{ id: string; connectUrl: string | null }> };
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
-      saveAutomationDraft({ automationId, name, configuration, triggerSelected, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
+      saveAutomationDraft({ automationId, name, configuration, templateId: template?.id, triggerSelected, githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
       if (provider === "datadog" || provider === "custom_mcp") {
         setConnectDialog({ provider, connectUrl });
         return;
@@ -264,6 +271,17 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       setError(cause instanceof Error ? cause.message : "Unable to save automation");
       setSaving(false);
     }
+  }
+
+  // Clears what the template filled in and keeps the model and repositories.
+  function startBlank() {
+    setTemplate(undefined);
+    nameRef.current = "New automation";
+    setName(nameRef.current);
+    selectTrigger(false);
+    setError(null);
+    updateConfiguration((current) => ({ ...current, contextAccountIds: [], prompt: "", trigger: defaultConfiguration.trigger }), false);
+    window.history.replaceState(window.history.state, "", editorPath);
   }
 
   function updateEnabled(next: boolean) {
@@ -323,7 +341,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     <AppShell active="automations" redesigned density="create">
       <div className="automationCreate">
         <header className="automationCreate__header">
-          <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb"><Link to="/automations">Automations</Link><span aria-hidden="true">›</span><span>{automationId ? savedName : "Create automation"}</span></nav>
+          <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb"><Link to="/automations">Automations</Link><span aria-hidden="true">›</span><span>{automationId ? savedName : template ? "New from template" : "Create automation"}</span></nav>
           <div className="automationCreate__titleRow">
             {renaming ? <input aria-label="Automation name" autoFocus className="automationCreate__name" maxLength={120} onBlur={() => { if (!name.trim()) { nameRef.current = savedName || "New automation"; setName(nameRef.current); } setRenaming(false); persist(); }} onChange={(event) => { nameRef.current = event.target.value; setName(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); event.currentTarget.blur(); } }} value={name} /> : <h1>{name}</h1>}
             {activeTab === "settings" ? <button aria-label="Rename automation" className="automationCreate__iconButton" onClick={() => setRenaming(true)} type="button"><PencilSimpleIcon size={14} /></button> : null}
@@ -340,6 +358,11 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             <button aria-selected={activeTab === "history"} onClick={() => { setActiveTab("history"); setRenaming(false); }} role="tab" type="button">Run history</button>
           </div> : null}
         </header>
+        {template && !automationId ? <div className="automationCreate__template" role="status">
+          <SquaresFourIcon aria-hidden="true" size={16} />
+          <p>Started from the {template.name} template. Choose {automationTemplateMissingFields(template)}, then save.</p>
+          <button onClick={startBlank} type="button">Start blank</button>
+        </div> : null}
         {error ? <p className="formError" role="alert">{error}</p> : null}
         {unsavedReason && activeTab === "settings" ? <p className="automationCreate__unsaved" role="status">{unsavedReason}</p> : null}
         {automationId && activeTab === "history" ? <AutomationRunHistory automationId={automationId} refreshKey={runsRefreshKey} /> : null}
