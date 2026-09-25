@@ -120,7 +120,7 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
           header: "Run",
           key: "run",
           render: (run) => <span className="agentTableTitle">
-            <Link to={runPath(run)}><strong>{run.trigger.title}</strong></Link>
+            <Link title={run.trigger.title} to={runPath(run)}><strong>{run.trigger.title}</strong></Link>
             <small>Run #{run.number} · {providerLabel(run.trigger.provider)}</small>
           </span>,
           width: "52%",

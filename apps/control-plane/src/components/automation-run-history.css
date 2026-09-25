@@ -3,9 +3,8 @@
 .automationRuns__message p { margin: 0; }
 .automationRuns__message button, .appShell--workspace .automationRuns .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: 0; }
 .appShell--workspace .automationRuns .dsDataTable--workspace td:last-child:not(.dsDataTable__empty) { padding: 0; text-align: center; }
-.automationRuns .agentTableTitle a { color: inherit; text-decoration: none; }
+.automationRuns .agentTableTitle a { overflow: hidden; color: inherit; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .automationRuns .agentTableTitle a:hover strong { text-decoration: underline; }
-.automationRuns .agentTableTitle strong { overflow-wrap: anywhere; }
 .automationRuns .agentTableRun { display: flex; flex-direction: column; min-width: 0; }
 .automationRuns .agentTableRun small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automationRuns time.agentTableCell { white-space: nowrap; }
