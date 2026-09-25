@@ -91,3 +91,14 @@
 .automationCreate__template p { flex: 1; min-width: 0; margin: 0; }
 .automationCreate__template button { flex-shrink: 0; padding: 0; border: 0; background: transparent; color: #4e58c7; font: inherit; cursor: pointer; }
 .automationCreate__template button:hover { text-decoration: underline; }
+
+/* Loading skeleton */
+.automationSkeleton__small.dsSkeleton { flex: 0 0 auto; height: 8px; }
+.automationSkeleton__title.dsSkeleton { max-width: 100%; height: 14px; }
+.automationSkeleton__button.dsSkeleton { width: 64px; height: 24px; flex: 0 0 auto; border-radius: 6px; }
+.automationSkeleton__icon.dsSkeleton { width: 16px; height: 16px; }
+.automationSkeleton__rows .automationCreate__row > .dsSkeleton { flex: 0 0 auto; }
+.automationSkeleton__tabs { align-items: center; }
+.automationSkeleton__tabs .dsSkeleton { flex: 0 0 auto; height: 10px; }
+.automationSkeleton__prompt { display: flex; flex-direction: column; gap: 10px; min-height: 98px; padding: 17px 16px; }
+.automationSkeleton__message { display: flex; flex-direction: column; gap: 10px; max-width: 800px; }

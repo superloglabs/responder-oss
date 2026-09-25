@@ -21,18 +21,19 @@ function TableSkeleton({
   kind,
   rows = 5,
 }: {
-  kind: "agents" | "investigations" | "issues";
+  kind: "agents" | "automationRuns" | "investigations" | "issues";
   rows?: number;
 }) {
   const cellCounts = {
     agents: 6,
+    automationRuns: 5,
     investigations: 4,
     issues: 5,
   } as const;
 
   return (
     <div className={`screenSkeletonTable screenSkeletonTable--${kind}`}>
-      {kind !== "investigations" ? (
+      {kind === "agents" || kind === "issues" ? (
         <div className="screenSkeletonTable__filters">
           <Skeleton className="screenSkeletonTable__filter" />
           <Skeleton className="screenSkeletonTable__filter" />
@@ -83,6 +84,125 @@ export function AutomationListSkeleton() {
   return (
     <LoadingRegion className="screenSkeleton screenSkeleton--list" label="Loading automations…">
       <TableSkeleton kind="agents" />
+    </LoadingRegion>
+  );
+}
+
+export function AutomationRunHistorySkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading runs…">
+      <TableSkeleton kind="automationRuns" />
+    </LoadingRegion>
+  );
+}
+
+// Mirrors the automation editor: breadcrumb, title row, tabs, then the
+// trigger, instructions, repository and connector sections.
+export function AutomationEditorSkeleton({ saved = true }: { saved?: boolean }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading automation…">
+      <div className="automationCreate">
+        <header className="automationCreate__header">
+          <div className="automationCreate__breadcrumb">
+            <Skeleton className="automationSkeleton__small" style={{ width: "72px" }} />
+            <Skeleton className="automationSkeleton__small" style={{ width: "120px" }} />
+          </div>
+          <div className="automationCreate__titleRow">
+            <Skeleton className="automationSkeleton__title" style={{ width: "220px" }} />
+            <span className="automationCreate__spacer" />
+            {saved ? <Skeleton className="automationSkeleton__small" style={{ width: "76px" }} /> : null}
+            <Skeleton className="automationSkeleton__button" />
+          </div>
+          {saved ? (
+            <div className="automationCreate__tabs automationSkeleton__tabs">
+              <Skeleton style={{ width: "52px" }} />
+              <Skeleton style={{ width: "76px" }} />
+            </div>
+          ) : null}
+        </header>
+        <div className="automationCreate__form">
+          <section className="automationCreate__section automationCreate__section--trigger">
+            <Skeleton className="automationSkeleton__small" style={{ width: "56px" }} />
+            <AutomationRowsSkeleton widths={["34%"]} />
+          </section>
+          <section className="automationCreate__section">
+            <Skeleton className="automationSkeleton__small" style={{ width: "112px" }} />
+            <div className="automationCreate__instructions">
+              <div className="automationSkeleton__prompt">
+                {["92%", "84%", "46%"].map((width) => <Skeleton key={width} style={{ width }} />)}
+              </div>
+              <div className="automationCreate__toolbar">
+                <Skeleton style={{ width: "132px" }} />
+              </div>
+            </div>
+          </section>
+          <section className="automationCreate__section">
+            <Skeleton className="automationSkeleton__small" style={{ width: "84px" }} />
+            <AutomationRowsSkeleton widths={["28%"]} />
+          </section>
+          <section className="automationCreate__section">
+            <Skeleton className="automationSkeleton__small" style={{ width: "76px" }} />
+            <AutomationRowsSkeleton widths={["22%", "30%"]} />
+          </section>
+        </div>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+function AutomationRowsSkeleton({ widths }: { widths: string[] }) {
+  return (
+    <div className="automationCreate__rows automationSkeleton__rows">
+      {widths.map((width) => (
+        <div className="automationCreate__row" key={width}>
+          <Skeleton className="automationSkeleton__icon" variant="circle" />
+          <Skeleton style={{ width }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Mirrors a run or test chat: breadcrumb, title, transcript and composer.
+export function AutomationRunSkeleton({ label, transcript = true }: { label: string; transcript?: boolean }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label={label}>
+      <div className="automationCreate automationRun">
+        <header className="automationCreate__header">
+          <div className="automationCreate__breadcrumb">
+            {["72px", "120px", "56px"].map((width) => (
+              <Skeleton className="automationSkeleton__small" key={width} style={{ width }} />
+            ))}
+          </div>
+          <div className="automationCreate__titleRow">
+            <Skeleton className="automationSkeleton__title" style={{ width: "260px" }} />
+          </div>
+        </header>
+        <div className="automationRun__transcript">
+          {transcript ? (
+            <>
+              <div className="automationRun__card automationRun__trigger">
+                <Skeleton className="automationSkeleton__small" style={{ width: "140px" }} />
+                <Skeleton style={{ width: "72%" }} />
+              </div>
+              <div className="automationSkeleton__message">
+                {["88%", "94%", "62%"].map((width) => <Skeleton key={width} style={{ width }} />)}
+              </div>
+            </>
+          ) : (
+            <div className="automationSkeleton__message">
+              <Skeleton style={{ width: "min(550px, 80%)" }} />
+              <Skeleton style={{ width: "min(360px, 60%)" }} />
+            </div>
+          )}
+        </div>
+        <div className="automationRun__card automationRun__composer">
+          <Skeleton style={{ width: "40%" }} />
+          <div className="automationRun__composerActions">
+            <Skeleton className="automationSkeleton__button" />
+          </div>
+        </div>
+      </div>
     </LoadingRegion>
   );
 }

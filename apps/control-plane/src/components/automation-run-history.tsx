@@ -10,6 +10,7 @@ import {
 import { dateGroupLabel } from "../date-presentation";
 import { DataTable } from "../design-system";
 import { providerDisplayName } from "./provider-glyphs";
+import { AutomationRunHistorySkeleton } from "./screen-skeletons";
 import "./automation-run-history.css";
 
 const statusLabels = {
@@ -105,7 +106,7 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
   if (!result) {
     return error
       ? <div className="automationRuns__message" role="alert"><p>{error}</p><button onClick={() => { setError(null); void load(); }} type="button">Retry</button></div>
-      : <p className="automationRuns__message" role="status">Loading runs…</p>;
+      : <AutomationRunHistorySkeleton />;
   }
 
   const first = (result.page - 1) * result.pageSize;

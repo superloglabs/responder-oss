@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { fetchAutomation, type AutomationDetail } from "../automations-api";
 import { AppShell } from "../components/app-shell";
+import { AutomationEditorSkeleton } from "../components/screen-skeletons";
 import { Button } from "../design-system";
 import { AutomationCreatePage } from "./automation-create";
 
@@ -31,9 +32,10 @@ function AutomationDetailContent({ automationId }: { automationId?: string }) {
 
   if (missing || !automationId) return <Navigate replace to="/automations" />;
   if (automation) return <AutomationCreatePage key={automation.id} initialAutomation={automation} />;
+  if (!error) return <AppShell active="automations" redesigned density="create"><AutomationEditorSkeleton /></AppShell>;
   return <AppShell active="automations" redesigned density="create"><section className="emptyState">
-    <h1>{error ? "Unable to load automation" : "Loading automation…"}</h1>
-    {error ? <><p>{error}</p><Button onClick={() => window.location.reload()} variant="secondary">Retry</Button><Link to="/automations">Back to automations</Link></> : null}
+    <h1>Unable to load automation</h1>
+    <p>{error}</p><Button onClick={() => window.location.reload()} variant="secondary">Retry</Button><Link to="/automations">Back to automations</Link>
   </section></AppShell>;
 }
 
