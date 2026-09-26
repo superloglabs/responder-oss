@@ -12,7 +12,9 @@ export function normalizeProviderModels(provider: ModelProviderId, items: unknow
   const models = new Map<string, AvailableAutomationModel>();
   for (const value of items) {
     const item = record(value);
-    const id = item.id;
+    // Google's OpenAI-compatible endpoint lists `models/gemini-...`; requests
+    // and gateway slugs use the bare model name.
+    const id = provider === "google" && typeof item.id === "string" ? item.id.replace(/^models\//u, "") : item.id;
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u.test(id)) continue;
     if (item.active === false) continue;
     // These APIs also list non-conversational models that cannot run an automation.
