@@ -37,6 +37,43 @@ describe("automation schedule", () => {
     expect(latestScheduleSlot(weekly, new Date("2026-11-03T12:00:00Z"))).toEqual(new Date("2026-11-02T09:00:00Z"));
   });
 
+  it("runs a daily or weekly slot once when the clocks go back", () => {
+    // Sunday 1 November 2026, New York repeats 01:00-01:59: first at 05:00 UTC
+    // (EDT), then again at 06:00 UTC (EST).
+    const savedAt = new Date("2026-10-01T00:00:00Z");
+    const daily = schedule({ frequency: "daily", hour: 1, timezone: "America/New_York" });
+    const weekly = schedule({ hour: 1, timezone: "America/New_York", weekday: 0 });
+    for (const repeated of [daily, weekly]) {
+      expect(dueScheduleSlot(repeated, savedAt, new Date("2026-11-01T05:10:00Z"))).toEqual(new Date("2026-11-01T05:00:00Z"));
+      expect(latestScheduleSlot(repeated, new Date("2026-11-01T06:10:00Z"))).toEqual(new Date("2026-11-01T05:00:00Z"));
+      expect(dueScheduleSlot(repeated, savedAt, new Date("2026-11-01T06:10:00Z"))).toBeNull();
+    }
+  });
+
+  it("runs a slot the clocks skip at the first local time after it", () => {
+    // Sunday 8 March 2026, New York jumps from 01:59 EST to 03:00 EDT at 07:00 UTC.
+    const savedAt = new Date("2026-03-01T00:00:00Z");
+    const daily = schedule({ frequency: "daily", hour: 2, timezone: "America/New_York" });
+    const weekly = schedule({ hour: 2, timezone: "America/New_York", weekday: 0 });
+    for (const skipped of [daily, weekly]) {
+      expect(dueScheduleSlot(skipped, savedAt, new Date("2026-03-08T07:10:00Z"))).toEqual(new Date("2026-03-08T07:00:00Z"));
+    }
+    // The next day runs at 02:00 EDT as usual.
+    expect(latestScheduleSlot(daily, new Date("2026-03-09T06:10:00Z"))).toEqual(new Date("2026-03-09T06:00:00Z"));
+  });
+
+  it("runs a slot the clocks skip at midnight on the day it belongs to", () => {
+    // Nuuk jumps from Saturday 28 March 22:45 to Sunday 00:00 at 01:00 UTC.
+    const savedAt = new Date("2026-03-01T00:00:00Z");
+    const daily = schedule({ frequency: "daily", hour: 23, timezone: "America/Nuuk" });
+    const saturday = schedule({ hour: 23, timezone: "America/Nuuk", weekday: 6 });
+    const sunday = schedule({ hour: 0, timezone: "America/Nuuk", weekday: 0 });
+    for (const skipped of [daily, saturday, sunday]) {
+      expect(dueScheduleSlot(skipped, savedAt, new Date("2026-03-29T01:10:00Z"))).toEqual(new Date("2026-03-29T01:00:00Z"));
+    }
+    expect(latestScheduleSlot(saturday, new Date("2026-04-03T12:00:00Z"))).toEqual(new Date("2026-03-29T01:00:00Z"));
+  });
+
   it("runs a slot once it passes, within an hour, and only for current settings", () => {
     const hourly = schedule({ frequency: "hourly" });
     const savedAt = new Date("2026-09-25T08:30:00Z");

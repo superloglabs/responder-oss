@@ -43,10 +43,25 @@ function localTime(instant: Date, timezone: string): { hour: number; minute: num
 
 function matchesSlot(schedule: AutomationSchedule, instant: Date): boolean {
   const local = localTime(instant, schedule.timezone);
-  if (local.minute !== 0) return false;
-  if (schedule.frequency === "hourly") return true;
-  if (local.hour !== schedule.hour) return false;
-  return schedule.frequency === "daily" || local.weekday === schedule.weekday;
+  if (schedule.frequency === "hourly") return local.minute === 0;
+  // A daily or weekly slot is the first quarter hour of a local day at or
+  // after the hour. When clocks go back the repeated hour does not run again,
+  // and when they skip the hour the slot moves to the first time after it,
+  // even when that time falls on the next day.
+  const target = schedule.hour * 60;
+  const minutes = local.hour * 60 + local.minute;
+  const previous = localTime(new Date(instant.getTime() - quarterHourMs), schedule.timezone);
+  const previousMinutes = previous.hour * 60 + previous.minute;
+  let day: number | null = null;
+  if (previous.weekday === local.weekday) {
+    if (previousMinutes < target && minutes >= target) day = local.weekday;
+  } else if (minutes >= target) {
+    day = local.weekday;
+  } else if (previousMinutes < target) {
+    day = previous.weekday;
+  }
+  if (day === null) return false;
+  return schedule.frequency === "daily" || day === schedule.weekday;
 }
 
 // Returns the most recent slot at or before `now`. Every time zone offset is
