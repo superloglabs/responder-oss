@@ -62,6 +62,18 @@ describe("automation schedule", () => {
     expect(latestScheduleSlot(daily, new Date("2026-03-09T06:10:00Z"))).toEqual(new Date("2026-03-09T06:00:00Z"));
   });
 
+  it("runs a slot the clocks skip at midnight on the day it belongs to", () => {
+    // Nuuk jumps from Saturday 28 March 22:45 to Sunday 00:00 at 01:00 UTC.
+    const savedAt = new Date("2026-03-01T00:00:00Z");
+    const daily = schedule({ frequency: "daily", hour: 23, timezone: "America/Nuuk" });
+    const saturday = schedule({ hour: 23, timezone: "America/Nuuk", weekday: 6 });
+    const sunday = schedule({ hour: 0, timezone: "America/Nuuk", weekday: 0 });
+    for (const skipped of [daily, saturday, sunday]) {
+      expect(dueScheduleSlot(skipped, savedAt, new Date("2026-03-29T01:10:00Z"))).toEqual(new Date("2026-03-29T01:00:00Z"));
+    }
+    expect(latestScheduleSlot(saturday, new Date("2026-04-03T12:00:00Z"))).toEqual(new Date("2026-03-29T01:00:00Z"));
+  });
+
   it("runs a slot once it passes, within an hour, and only for current settings", () => {
     const hourly = schedule({ frequency: "hourly" });
     const savedAt = new Date("2026-09-25T08:30:00Z");
