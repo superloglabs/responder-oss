@@ -201,8 +201,11 @@ describe("agent creation modes", () => {
         },
       },
     },
-  ])("rejects new agents using $label", async ({ configuration }) => {
+  ])("creates agents using $label", async ({ configuration }) => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(createAgent).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
 
     const response = await app.request("/api/agents", {
       method: "POST",
@@ -210,14 +213,15 @@ describe("agent creation modes", () => {
       body: JSON.stringify(configuration),
     });
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "New agents must use a Slack channel alert and reply in its thread",
+    expect(response.status).toBe(201);
+    expect(createAgent).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      configuration,
     });
-    expect(createAgent).not.toHaveBeenCalled();
   });
 
-  it("continues to accept legacy modes when updating existing agents", async () => {
+  it("accepts output channels when updating existing agents", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     const configuration = {
       ...agentConfiguration,
