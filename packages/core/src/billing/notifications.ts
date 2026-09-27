@@ -329,14 +329,18 @@ export async function notifyBillingLimitReached(
     ? `reset:${nextResetAt}`
     : `month:${new Date().toISOString().slice(0, 7)}`;
   // Channel membership is cached, so refresh it once before the first notice
-  // of a period rather than on every blocked investigation.
+  // of a period rather than on every blocked investigation. If the refresh
+  // fails, send nothing so the next blocked investigation retries both.
   if (
     options.refreshSlackChannels &&
     !(await hasDeliveriesForPeriod(organizationId, periodKey))
   ) {
-    await options.refreshSlackChannels(organizationId).catch((error: unknown) => {
+    try {
+      await options.refreshSlackChannels(organizationId);
+    } catch (error) {
       console.error("Unable to refresh Slack channels for billing notices", error);
-    });
+      return;
+    }
   }
   const destinations = await notificationDestinations(organizationId);
   await Promise.all(
