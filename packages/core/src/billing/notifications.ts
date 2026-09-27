@@ -301,13 +301,43 @@ async function deliverNotification(
   }
 }
 
+async function hasDeliveriesForPeriod(
+  organizationId: string,
+  periodKey: string,
+): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: billingNotificationDeliveries.id })
+    .from(billingNotificationDeliveries)
+    .where(
+      and(
+        eq(billingNotificationDeliveries.organizationId, organizationId),
+        eq(billingNotificationDeliveries.periodKey, periodKey),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function notifyBillingLimitReached(
   organizationId: string,
   nextResetAt: number | null,
+  options: {
+    refreshSlackChannels?: (organizationId: string) => Promise<void>;
+  } = {},
 ): Promise<void> {
   const periodKey = nextResetAt
     ? `reset:${nextResetAt}`
     : `month:${new Date().toISOString().slice(0, 7)}`;
+  // Channel membership is cached, so refresh it once before the first notice
+  // of a period rather than on every blocked investigation.
+  if (
+    options.refreshSlackChannels &&
+    !(await hasDeliveriesForPeriod(organizationId, periodKey))
+  ) {
+    await options.refreshSlackChannels(organizationId).catch((error: unknown) => {
+      console.error("Unable to refresh Slack channels for billing notices", error);
+    });
+  }
   const destinations = await notificationDestinations(organizationId);
   await Promise.all(
     destinations.map((destination) =>

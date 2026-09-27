@@ -37,6 +37,9 @@ vi.mock("../../../../packages/core/src/billing/notifications.js", () => ({
   notifyBillingLimitReached: mocks.notifyBillingLimitReached,
 }));
 
+vi.mock("../integrations/slack-resources.js", () => ({
+  refreshSlackChannelResources: vi.fn(),
+}));
 vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   beginInvestigation: mocks.beginInvestigation,
   beginSlackThreadInvestigation: mocks.beginSlackThreadInvestigation,
@@ -368,6 +371,7 @@ describe("investigation queue", () => {
     expect(mocks.notifyBillingLimitReached).toHaveBeenCalledWith(
       created.config.organizationId,
       1_800_000_000,
+      { refreshSlackChannels: expect.any(Function) },
     );
     expect(mocks.prepareInvestigationRetry).not.toHaveBeenCalled();
     expect(mocks.bossSend).not.toHaveBeenCalled();

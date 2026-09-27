@@ -4,6 +4,7 @@ import {
   reserveInvestigation,
 } from "../../../../packages/core/src/billing/autumn.js";
 import { notifyBillingLimitReached } from "../../../../packages/core/src/billing/notifications.js";
+import { refreshSlackChannelResources } from "../integrations/slack-resources.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import {
   beginInvestigation,
@@ -105,6 +106,7 @@ export async function queueInvestigation(
       await notifyBillingLimitReached(
         result.config.organizationId,
         access.nextResetAt,
+        { refreshSlackChannels: refreshSlackChannelResources },
       ).catch((error: unknown) => {
         console.error("Unable to send billing limit notifications", error);
       });
@@ -188,6 +190,7 @@ export async function queueSlackThreadInvestigation(
       await notifyBillingLimitReached(
         result.config.organizationId,
         access.nextResetAt,
+        { refreshSlackChannels: refreshSlackChannelResources },
       ).catch(() => undefined);
       return { kind: "blocked" };
     }
@@ -282,6 +285,7 @@ export async function queueInvestigationRetry(input: {
       await notifyBillingLimitReached(
         input.organizationId,
         reservation.nextResetAt,
+        { refreshSlackChannels: refreshSlackChannelResources },
       ).catch((error: unknown) => {
         console.error("Unable to send billing limit notifications", error);
       });
