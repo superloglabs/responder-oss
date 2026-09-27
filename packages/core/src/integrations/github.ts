@@ -13,6 +13,11 @@ interface GitHubAppCredentials {
   privateKey: string;
 }
 
+export interface GitHubInstallationTokenOptions {
+  permissions?: Record<string, "read" | "write">;
+  repositories?: string[];
+}
+
 function githubAppCredentials(
   environment: NodeJS.ProcessEnv = process.env,
 ): GitHubAppCredentials {
@@ -58,12 +63,20 @@ export function githubAppHeaders(token: string): HeadersInit {
 
 export async function createGitHubInstallationToken(
   installationId: number,
+  options: GitHubInstallationTokenOptions = {},
 ): Promise<string> {
+  const hasOptions =
+    Object.keys(options.permissions ?? {}).length > 0 ||
+    (options.repositories?.length ?? 0) > 0;
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
       method: "POST",
-      headers: githubAppHeaders(createGitHubAppJwt()),
+      headers: {
+        ...githubAppHeaders(createGitHubAppJwt()),
+        ...(hasOptions ? { "content-type": "application/json" } : {}),
+      },
+      ...(hasOptions ? { body: JSON.stringify(options) } : {}),
     },
   );
   if (!response.ok) {
