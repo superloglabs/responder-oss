@@ -25,8 +25,35 @@ const baseConfiguration = {
 describe("automation configuration", () => {
   it("accepts an unattended full-access Slack automation", () => {
     expect(automationConfigurationSchema.parse(baseConfiguration)).toEqual(
-      baseConfiguration,
+      { ...baseConfiguration, notifications: [] },
     );
+  });
+
+  it("allows up to 1,000 model requests per run", () => {
+    expect(automationConfigurationSchema.safeParse({ ...baseConfiguration, maxModelRequests: 1_000 }).success).toBe(true);
+    expect(automationConfigurationSchema.safeParse({ ...baseConfiguration, maxModelRequests: 1_001 }).success).toBe(false);
+  });
+
+  it("posts notifications only for scheduled automations", () => {
+    const notification = {
+      channelId: "C999",
+      integrationAccountId: "41414141-4141-4141-8141-414141414141",
+      kind: "slack",
+    };
+    const schedule = { frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 };
+
+    expect(automationConfigurationSchema.parse(baseConfiguration).notifications).toEqual([]);
+    expect(automationConfigurationSchema.safeParse({ ...baseConfiguration, notifications: [notification] }).success).toBe(false);
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [schedule],
+    }).notifications).toEqual([notification]);
+    expect(automationConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      notifications: [notification, notification],
+      triggers: [schedule],
+    }).success).toBe(false);
   });
 
   it("supports Sentry and Discord trigger contracts", () => {

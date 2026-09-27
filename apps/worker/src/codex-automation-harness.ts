@@ -16,7 +16,9 @@ import {
   prebuiltHarnessMarker,
   prebuiltHarnessRoot,
   resolveAutomationWorkspacePath,
+  automationToolCallTimeoutMs,
   validateAutomationContextServers,
+  validateAutomationToolServer,
   validateBrokerBaseUrl,
 } from "./automation-harness.js";
 
@@ -63,6 +65,7 @@ export function buildCodexAutomationCommand(
   const workspacePath = resolveAutomationWorkspacePath(input.workspacePath);
   const brokerBaseUrl = validateBrokerBaseUrl(input.model.brokerBaseUrl);
   const contextServers = validateAutomationContextServers(input.contextServers);
+  const toolServer = validateAutomationToolServer(input.toolServer, contextServers);
   const args = [
     "exec",
     "--json",
@@ -122,6 +125,19 @@ export function buildCodexAutomationCommand(
       "--config",
       `mcp_servers.${server.name}.default_tools_approval_mode=${tomlString("approve")}`,
     ]),
+    ...(toolServer
+      ? [
+          "--config",
+          `mcp_servers.${toolServer.name}.command=${tomlString(toolServer.command)}`,
+          "--config",
+          `mcp_servers.${toolServer.name}.args=[${toolServer.args.map(tomlString).join(", ")}]`,
+          "--config",
+          `mcp_servers.${toolServer.name}.default_tools_approval_mode=${tomlString("approve")}`,
+          // Opening a pull request can outlast Codex's default tool timeout.
+          "--config",
+          `mcp_servers.${toolServer.name}.tool_timeout_sec=${Math.ceil(automationToolCallTimeoutMs / 1_000)}`,
+        ]
+      : []),
     "-",
   ];
 

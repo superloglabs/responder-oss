@@ -1,0 +1,1 @@
+ALTER TABLE "automation_versions" ADD COLUMN "notifications" jsonb DEFAULT '[]'::jsonb NOT NULL;

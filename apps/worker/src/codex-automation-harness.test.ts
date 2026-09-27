@@ -24,7 +24,26 @@ const input = {
   workspacePath: "/home/daytona/workspace/repositories/responder",
 };
 
+const toolServer = {
+  args: ["/home/daytona/workspace/.responder/tools/server.mjs"],
+  command: "node",
+  name: "responder",
+};
+
 describe("Codex automation harness", () => {
+  it("starts the worker's tool server with room for a slow tool call", () => {
+    const command = buildCodexAutomationCommand({ ...input, toolServer });
+
+    expect(command).toContain('mcp_servers.responder.command="node"');
+    expect(command).toContain('mcp_servers.responder.args=["/home/daytona/workspace/.responder/tools/server.mjs"]');
+    expect(command).toContain('mcp_servers.responder.default_tools_approval_mode="approve"');
+    expect(command).toContain("mcp_servers.responder.tool_timeout_sec=150");
+    expect(() => buildCodexAutomationCommand({
+      ...input,
+      toolServer: { ...toolServer, name: "slack_61616161616141618161616161616161" },
+    })).toThrow("unique identifier");
+  });
+
   it("uses a pinned CLI package inside the sandbox", async () => {
     const session = {
       execCommand: vi

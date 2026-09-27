@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
+import type { AutomationTranscriptItem } from "../automations/transcript.js";
 import {
+  responderAutomationRunUrl,
   responderInvestigationUrl,
   responderIssueUrl,
 } from "../responder-urls.js";
@@ -830,6 +832,110 @@ export function slackInvestigationCard(input: {
               traceTask(input.investigationId, item, input.status),
             ),
           summaryTask,
+        ],
+      },
+    ],
+  };
+}
+
+const automationToolTitles: Record<
+  Exclude<Extract<AutomationTranscriptItem, { kind: "tool" }>["action"], "query" | "other">,
+  string
+> = {
+  edit: "Edited a file",
+  fetch: "Fetched a URL",
+  read: "Read a file",
+  run: "Ran a command",
+  search: "Searched",
+};
+
+// Transcript tools appear once they finish, so each task is already complete
+// or failed. Reasoning and what sub-agents did stay on the run page; a
+// sub-agent shows as one task.
+function automationTraceTask(
+  runId: string,
+  item: AutomationTranscriptItem,
+  index: number,
+) {
+  const taskId = `${runId}:${index}`.slice(0, 255);
+  if (item.kind === "reasoning" || item.subagentId) return null;
+  if (item.kind === "message") {
+    return {
+      task_id: taskId,
+      title: "Assistant turn",
+      status: "complete",
+      output: richText(item.text),
+    };
+  }
+  const described = item.action === "query" || item.action === "other";
+  return {
+    task_id: taskId,
+    title: truncate(
+      item.action === "query"
+        ? displayToolTitle(item.target)
+        : item.subagent
+          ? `Sub-agent: ${nonEmptyText(item.target, 180, "Task")}`
+          : item.action === "other"
+            ? nonEmptyText(item.target, 180, "Tool")
+            : automationToolTitles[item.action],
+      180,
+    ),
+    status: item.status === "failed" ? "error" : "complete",
+    ...(described ? {} : { details: richText(item.target, item.action === "run") }),
+  };
+}
+
+// The card an automation run keeps in the Slack thread that started it.
+export function slackAutomationRunCard(input: {
+  automationId: string;
+  // Why the run stopped; shown on the error card.
+  detail?: string;
+  items: AutomationTranscriptItem[];
+  organizationId?: string;
+  runId: string;
+  status: Exclude<SlackInvestigationCardStatus, "pending">;
+}): { blocks: unknown[]; text: string } {
+  const summary =
+    input.status === "complete"
+      ? "Automation complete"
+      : input.status === "error"
+        ? "Automation stopped"
+        : "Automation running";
+  const tasks = input.items
+    .map((item, index) => automationTraceTask(input.runId, item, index))
+    .filter((task) => task !== null)
+    .slice(-11);
+  return {
+    text: input.status === "error" && input.detail
+      ? `${summary}: ${truncate(input.detail, 300)}`
+      : summary,
+    blocks: [
+      {
+        type: "plan",
+        block_id: `automation_plan_${input.status}_${randomUUID()}`,
+        title: "Trace",
+        tasks: [
+          ...tasks,
+          {
+            task_id: `${input.runId}:current`.slice(0, 255),
+            title: summary,
+            status: input.status,
+            ...(input.status === "error" && input.detail
+              ? { output: richText(input.detail) }
+              : {}),
+            sources: [
+              {
+                type: "url",
+                text: "View run",
+                url: responderAutomationRunUrl({
+                  automationId: input.automationId,
+                  organizationId: input.organizationId,
+                  origin: responderAppUrl(),
+                  runId: input.runId,
+                }),
+              },
+            ],
+          },
         ],
       },
     ],

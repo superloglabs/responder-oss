@@ -22,7 +22,7 @@ import {
 } from "./schema.js";
 
 const maximumGrantLifetimeMs = 60 * 60_000;
-const maximumGrantRequests = 128;
+const maximumGrantRequests = 1_000;
 const maximumOutputTokensPerRequest = 100_000;
 const modelIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u;
 const runIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/u;

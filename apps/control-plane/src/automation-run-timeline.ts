@@ -1,6 +1,7 @@
 import type {
   AutomationToolAction,
   AutomationTranscriptEventData,
+  AutomationTranscriptMessage,
   AutomationTranscriptReasoning,
   AutomationTranscriptTool,
   AutomationUserMessageEventData,
@@ -8,8 +9,16 @@ import type {
 import type { AutomationRunDetail } from "./automations-api";
 import { providerDisplayName } from "./components/provider-glyphs";
 
-// Reasoning and tool calls between two messages.
-export type AutomationActivityStep = AutomationTranscriptReasoning | AutomationTranscriptTool;
+// Reasoning, tool calls and sub-agents between two messages.
+export type AutomationActivityStep = AutomationTranscriptReasoning | AutomationTranscriptTool | AutomationSubagentStep;
+
+// A sub-agent the agent started, with the work it did. `tool` is the call
+// that started it.
+export interface AutomationSubagentStep {
+  kind: "subagent";
+  steps: Array<AutomationActivityStep | AutomationTranscriptMessage>;
+  tool: AutomationTranscriptTool & { subagent: NonNullable<AutomationTranscriptTool["subagent"]> };
+}
 
 export type AutomationRunEntry =
   | { kind: "trigger"; key: string }
@@ -47,20 +56,31 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
       // from the item before it to its last step.
       let previousAt = event.data.startedAt;
       let activityStartedAt: number | undefined;
+      // Sub-agent work nests under the tool call that started it.
+      const subagents = new Map<string, AutomationSubagentStep>();
       event.data.items.forEach((item, index) => {
+        const step = item.kind === "tool" && item.subagent
+          ? { kind: "subagent" as const, steps: [], tool: { ...item, subagent: item.subagent } }
+          : item;
+        if (step.kind === "subagent") subagents.set(step.tool.subagent.id, step);
+        const parent = item.subagentId ? subagents.get(item.subagentId) : undefined;
+        if (parent) {
+          parent.steps.push(step);
+          return;
+        }
         const previous = entries.at(-1);
-        if (item.kind === "message") {
+        if (step.kind === "message") {
           // An activity lasts until the message that follows it.
           if (previous?.kind === "activity" && previous.key.startsWith(`${key}-`)) {
             previous.durationMs = elapsed(activityStartedAt, item.observedAt) ?? previous.durationMs;
           }
-          entries.push({ key: `${key}-${index}`, kind: "message", text: item.text });
+          entries.push({ key: `${key}-${index}`, kind: "message", text: step.text });
         } else if (previous?.kind === "activity" && previous.key.startsWith(`${key}-`)) {
-          previous.steps.push(item);
+          previous.steps.push(step);
           previous.durationMs = elapsed(activityStartedAt, item.observedAt) ?? previous.durationMs;
         } else {
           activityStartedAt = previousAt;
-          entries.push({ durationMs: elapsed(activityStartedAt, item.observedAt), key: `${key}-${index}`, kind: "activity", steps: [item] });
+          entries.push({ durationMs: elapsed(activityStartedAt, item.observedAt), key: `${key}-${index}`, kind: "activity", steps: [step] });
         }
         previousAt = item.observedAt ?? previousAt;
       });
@@ -151,8 +171,29 @@ export function toolGroupSummary(tools: AutomationTranscriptTool[]): string {
   ].filter(Boolean).join(" · ");
 }
 
-export function activityTools(steps: AutomationActivityStep[]): AutomationTranscriptTool[] {
+export function activityTools(steps: AutomationSubagentStep["steps"]): AutomationTranscriptTool[] {
   return steps.filter((step): step is AutomationTranscriptTool => step.kind === "tool");
+}
+
+function activitySubagents(steps: AutomationSubagentStep["steps"]): AutomationSubagentStep[] {
+  return steps.filter((step): step is AutomationSubagentStep => step.kind === "subagent");
+}
+
+// A sub-agent that has not reported back, here or in a sub-agent it started.
+export function subagentWorking(steps: AutomationSubagentStep["steps"]): boolean {
+  return activitySubagents(steps).some((step) => !step.tool.subagent.finished || subagentWorking(step.steps));
+}
+
+// For example "11 tools · 7 sub-agents".
+export function subagentSummary(step: AutomationSubagentStep): string {
+  const tools = activityTools(step.steps);
+  const subagents = activitySubagents(step.steps).length;
+  const failed = tools.filter((tool) => tool.status === "failed").length;
+  return [
+    tools.length ? count(tools.length, "tool", "tools") : null,
+    subagents ? count(subagents, "sub-agent", "sub-agents") : null,
+    failed ? `${failed} failed` : null,
+  ].filter(Boolean).join(" · ");
 }
 
 // The observed duration, or the tools' own timing when a run predates it.
@@ -166,19 +207,21 @@ export function activityDuration(entry: Extract<AutomationRunEntry, { kind: "act
 // For example "Thought for 12s" or "Ran 4 tools", with what the tools did.
 export function activityLabel(entry: Extract<AutomationRunEntry, { kind: "activity" }>): { detail: string; title: string } {
   const tools = activityTools(entry.steps);
+  const subagents = activitySubagents(entry.steps).length;
   const duration = activityDuration(entry);
   const thought = entry.steps.some((step) => step.kind === "reasoning");
   const ran = tools.length ? `Ran ${tools.length} ${tools.length === 1 ? "tool" : "tools"}` : null;
+  const started = subagents ? count(subagents, "sub-agent started", "sub-agents started") : null;
   if (thought) {
     return {
-      detail: [ran, toolGroupSummary(tools)].filter(Boolean).join(" · "),
+      detail: [ran, started, toolGroupSummary(tools)].filter(Boolean).join(" · "),
       title: duration === null ? "Thought" : `Thought for ${formatDuration(Math.max(1, Math.round(duration / 1_000)) * 1_000).replace(".0s", "s")}`,
     };
   }
   return {
     // Steps seen in the same read of the harness output have no useful time.
-    detail: [duration === null || duration < 1_000 ? null : formatDuration(duration), toolGroupSummary(tools)].filter(Boolean).join(" · "),
-    title: ran ?? "Worked",
+    detail: [duration === null || duration < 1_000 ? null : formatDuration(duration), ran ? started : null, toolGroupSummary(tools)].filter(Boolean).join(" · "),
+    title: ran ?? (subagents ? `Started ${count(subagents, "sub-agent", "sub-agents")}` : "Worked"),
   };
 }
 

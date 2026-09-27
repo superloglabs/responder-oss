@@ -109,8 +109,10 @@ Configure a public GitHub App with:
 - Repository-access updates can return to the OAuth redirect URI with
   `setup_action=update` and no OAuth code. Responder preserves the installation
   and completes an explicit OAuth authorization before synchronizing it.
-- Repository permissions: Contents read/write, Pull requests read/write, and
-  Metadata read
+- Repository permissions: Contents read/write, Pull requests read/write,
+  Metadata read, and read-only Actions, Checks, Commit statuses, and Issues.
+  Automation agents read pull request CI state and issues on private
+  repositories through the worker's `github_api` tool.
 - Account permission: Email addresses read-only
 - Webhook URL: `<public>/api/webhooks/github`
 - Subscribe to: Pull request and Pull request review comment

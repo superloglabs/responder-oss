@@ -3,6 +3,7 @@ import {
   and,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -14,6 +15,7 @@ import type {
   AutomationConfiguration,
   AutomationInferenceSource,
   AutomationInput,
+  AutomationNotification,
   AutomationTrigger,
 } from "../automations/config.js";
 import { supportsIncludedUsage } from "../automations/model-pricing.js";
@@ -388,6 +390,33 @@ async function validateConfigurationResources(
       );
     }
   }
+  for (const notification of configuration.notifications) {
+    const channels = await tx
+      .select({ id: integrationResources.id })
+      .from(integrationResources)
+      .innerJoin(
+        integrationAccounts,
+        eq(integrationAccounts.id, integrationResources.integrationAccountId),
+      )
+      .where(
+        and(
+          eq(integrationAccounts.id, notification.integrationAccountId),
+          eq(integrationAccounts.organizationId, organizationId),
+          eq(integrationAccounts.provider, notification.kind),
+          eq(integrationAccounts.status, "connected"),
+          eq(integrationResources.kind, "slack_channel"),
+          eq(integrationResources.externalId, notification.channelId),
+          eq(integrationResources.available, true),
+        ),
+      )
+      .limit(1);
+    if (channels.length === 0) {
+      throw new AutomationConfigurationError(
+        "A notification channel is unavailable",
+        "integration_not_found",
+      );
+    }
+  }
   const supportedContextProviders = new Set([
     "custom_mcp",
     "datadog",
@@ -511,6 +540,7 @@ async function insertAutomationVersion(
       model: input.configuration.model,
       modelCredentialId: input.configuration.modelCredentialId,
       modelProvider: input.configuration.modelProvider,
+      notifications: input.configuration.notifications,
       prompt: input.configuration.prompt,
       toolPolicy: input.configuration.toolPolicy,
       trigger: input.configuration.triggers[0],
@@ -792,6 +822,7 @@ export async function getAutomation(
         model: automationVersions.model,
         modelCredentialId: automationVersions.modelCredentialId,
         modelProvider: automationVersions.modelProvider,
+        notifications: automationVersions.notifications,
         prompt: automationVersions.prompt,
         toolPolicy: automationVersions.toolPolicy,
         triggers: automationVersions.triggers,
@@ -1051,7 +1082,11 @@ function runTriggerAttributes(
 // Follow-ups and transcripts from earlier turns, oldest first.
 export async function listAutomationRunConversation(runId: string) {
   return getDatabase()
-    .select({ data: automationRunEvents.data, type: automationRunEvents.type })
+    .select({
+      data: automationRunEvents.data,
+      id: automationRunEvents.id,
+      type: automationRunEvents.type,
+    })
     .from(automationRunEvents)
     .where(
       and(
@@ -1060,6 +1095,27 @@ export async function listAutomationRunConversation(runId: string) {
       ),
     )
     .orderBy(automationRunEvents.id);
+}
+
+const reopenedRun = () => ({
+  cancelRequestedAt: null,
+  completedAt: null,
+  failureCategory: null,
+  failureMessage: null,
+  heartbeatAt: null,
+  leaseExpiresAt: null,
+  leaseId: null,
+  resultSummary: null,
+  status: "pending" as const,
+  updatedAt: new Date(),
+});
+
+function reopenableRun(runId: string) {
+  return and(
+    eq(automationRuns.id, runId),
+    inArray(automationRuns.status, ["succeeded", "failed", "cancelled"]),
+    sql`exists (select 1 from ${automations} where ${automations.id} = ${automationRuns.automationId} and ${automations.enabled})`,
+  );
 }
 
 // Queues another turn of a finished run for a workspace member's follow-up.
@@ -1072,26 +1128,11 @@ export async function continueAutomationRun(input: {
   return getDatabase().transaction(async (tx) => {
     const rows = await tx
       .update(automationRuns)
-      .set({
-        cancelRequestedAt: null,
-        completedAt: null,
-        failureCategory: null,
-        failureMessage: null,
-        heartbeatAt: null,
-        leaseExpiresAt: null,
-        leaseId: null,
-        resultSummary: null,
-        status: "pending",
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(automationRuns.id, input.runId),
-          eq(automationRuns.organizationId, input.organizationId),
-          inArray(automationRuns.status, ["succeeded", "failed", "cancelled"]),
-          sql`exists (select 1 from ${automations} where ${automations.id} = ${automationRuns.automationId} and ${automations.enabled})`,
-        ),
-      )
+      .set(reopenedRun())
+      .where(and(
+        reopenableRun(input.runId),
+        eq(automationRuns.organizationId, input.organizationId),
+      ))
       .returning({ automationId: automationRuns.automationId });
     const run = rows[0];
     if (!run) return null;
@@ -1102,6 +1143,84 @@ export async function continueAutomationRun(input: {
     });
     return run;
   });
+}
+
+// The latest run of an automation that Slack started in a thread.
+export async function findSlackThreadAutomationRun(input: {
+  automationId: string;
+  channelId: string;
+  teamId: string;
+  threadTimestamp: string;
+}): Promise<{ id: string; organizationId: string } | null> {
+  const rows = await getDatabase()
+    .select({ id: automationRuns.id, organizationId: automationRuns.organizationId })
+    .from(automationRuns)
+    .where(and(
+      eq(automationRuns.automationId, input.automationId),
+      sql`${automationRuns.triggerInput}->>'provider' = 'slack'`,
+      sql`${automationRuns.triggerInput}->'attributes'->>'teamId' = ${input.teamId}`,
+      sql`${automationRuns.triggerInput}->'attributes'->>'channelId' = ${input.channelId}`,
+      sql`${automationRuns.triggerInput}->'attributes'->>'threadTimestamp' = ${input.threadTimestamp}`,
+    ))
+    .orderBy(desc(automationRuns.createdAt))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+// Stores a reply from the run's Slack thread, whatever state the run is in.
+// Returns false for a Slack event that was already stored.
+export async function addAutomationRunReply(input: {
+  message: AutomationUserMessageEventData & { externalEventId: string };
+  runId: string;
+}): Promise<boolean> {
+  return getDatabase().transaction(async (tx) => {
+    // Slack can deliver an event again while the first delivery is stored.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.runId}))`);
+    const existing = await tx
+      .select({ id: automationRunEvents.id })
+      .from(automationRunEvents)
+      .where(and(
+        eq(automationRunEvents.runId, input.runId),
+        eq(automationRunEvents.type, "user_message"),
+        sql`${automationRunEvents.data}->>'externalEventId' = ${input.message.externalEventId}`,
+      ))
+      .limit(1);
+    if (existing.length > 0) return false;
+    await tx.insert(automationRunEvents).values({
+      data: { ...input.message },
+      runId: input.runId,
+      type: "user_message",
+    });
+    return true;
+  });
+}
+
+// Queues another turn of a finished run for messages it has not answered.
+// Only one caller can reopen a run, so only that caller queues its job.
+export async function reopenAutomationRun(runId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .update(automationRuns)
+    .set(reopenedRun())
+    .where(reopenableRun(runId))
+    .returning({ id: automationRuns.id });
+  return rows.length > 0;
+}
+
+// Whether a message arrived after the conversation a turn started with.
+export async function automationRunHasNewMessages(input: {
+  afterEventId: number;
+  runId: string;
+}): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: automationRunEvents.id })
+    .from(automationRunEvents)
+    .where(and(
+      eq(automationRunEvents.runId, input.runId),
+      eq(automationRunEvents.type, "user_message"),
+      gt(automationRunEvents.id, input.afterEventId),
+    ))
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function requestAutomationRunCancellation(input: {
@@ -1470,6 +1589,8 @@ export async function claimAutomationRun(runId: string) {
       model: automationVersions.model,
       modelCredentialId: automationVersions.modelCredentialId,
       modelProvider: automationVersions.modelProvider,
+      automationName: automations.name,
+      notifications: automationVersions.notifications,
       prompt: automationVersions.prompt,
       toolPolicy: automationVersions.toolPolicy,
       triggers: automationVersions.triggers,
@@ -1592,6 +1713,48 @@ export async function getAutomationRuntimeRepositories(versionId: string) {
     }
     return { ...repository, installationId };
   });
+}
+
+// The names of the channels an automation's notifications post to.
+export async function getAutomationNotificationChannelNames(input: {
+  notifications: AutomationNotification[];
+  organizationId: string;
+}): Promise<Map<string, string>> {
+  if (input.notifications.length === 0) return new Map();
+  const rows = await getDatabase()
+    .select({
+      channelId: integrationResources.externalId,
+      integrationAccountId: integrationResources.integrationAccountId,
+      name: integrationResources.displayName,
+    })
+    .from(integrationResources)
+    .innerJoin(integrationAccounts, eq(integrationAccounts.id, integrationResources.integrationAccountId))
+    .where(and(
+      eq(integrationAccounts.organizationId, input.organizationId),
+      eq(integrationResources.kind, "slack_channel"),
+      inArray(integrationResources.integrationAccountId, input.notifications.map((notification) => notification.integrationAccountId)),
+      inArray(integrationResources.externalId, input.notifications.map((notification) => notification.channelId)),
+    ));
+  return new Map(rows.map((row) => [`${row.integrationAccountId}:${row.channelId}`, row.name]));
+}
+
+// The Slack connection a notification posts through, while it is connected.
+export async function getAutomationNotificationAccount(input: {
+  integrationAccountId: string;
+  organizationId: string;
+}): Promise<{ encryptedCredentials: string } | null> {
+  const rows = await getDatabase()
+    .select({ encryptedCredentials: integrationAccounts.encryptedCredentials })
+    .from(integrationAccounts)
+    .where(and(
+      eq(integrationAccounts.id, input.integrationAccountId),
+      eq(integrationAccounts.organizationId, input.organizationId),
+      eq(integrationAccounts.provider, "slack"),
+      eq(integrationAccounts.status, "connected"),
+    ))
+    .limit(1);
+  const encryptedCredentials = rows[0]?.encryptedCredentials;
+  return encryptedCredentials ? { encryptedCredentials } : null;
 }
 
 export async function getAutomationRuntimeConnections(versionId: string) {

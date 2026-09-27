@@ -40,6 +40,13 @@ export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
+// Where a scheduled automation posts each finished run.
+export interface AutomationNotification {
+  channelId: string;
+  integrationAccountId: string;
+  kind: "slack";
+}
+
 export interface AutomationConfiguration {
   contextAccountIds: string[];
   harness: AutomationHarness;
@@ -49,6 +56,7 @@ export interface AutomationConfiguration {
   model: string;
   modelCredentialId: string | null;
   modelProvider: AutomationModelProvider;
+  notifications: AutomationNotification[];
   prompt: string;
   repositoryIds: string[];
   toolPolicy: "full";
@@ -191,7 +199,12 @@ export async function fetchAutomation(id: string): Promise<AutomationDetail> {
   const response = await automationJson<{ automation: AutomationDetail }>(
     `/api/automations/${encodeURIComponent(id)}`,
   );
-  return response.automation;
+  const { automation } = response;
+  // An automation saved before notifications existed has none.
+  return {
+    ...automation,
+    configuration: { ...automation.configuration, notifications: automation.configuration.notifications ?? [] },
+  };
 }
 
 export function fetchAutomationRuns(id: string, page: number): Promise<AutomationRunPage> {

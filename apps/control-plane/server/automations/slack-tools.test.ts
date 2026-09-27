@@ -51,6 +51,7 @@ function dependencies() {
     postMessage: vi.fn().mockResolvedValue("100.000009"),
     readChannel: vi.fn().mockResolvedValue({ channelId: "C123", messages: [] }),
     readThread: vi.fn().mockResolvedValue({ channelId: "C999", messages: [] }),
+    removeReaction: vi.fn().mockResolvedValue(undefined),
     search: vi.fn(),
   };
 }
@@ -89,6 +90,7 @@ describe("automation Slack tools", () => {
       ["slack_read_thread", true],
       ["slack_post_message", false],
       ["slack_add_reaction", false],
+      ["slack_remove_reaction", false],
     ]);
   });
 
@@ -100,6 +102,7 @@ describe("automation Slack tools", () => {
       "slack_read_thread",
       "slack_post_message",
       "slack_add_reaction",
+      "slack_remove_reaction",
     ]);
     const post = slackToolDefinitions(slackToolScope(triggerOnly))
       .find((tool) => tool.name === "slack_post_message")!;
@@ -131,6 +134,7 @@ describe("automation Slack tools", () => {
       ["slack_read_thread", { channel_id: "C999", thread_ts: "50.000001" }],
       ["slack_read_channel", { channel_id: "C999" }],
       ["slack_add_reaction", { channel_id: "C999", name: "eyes", timestamp: "100.000007" }],
+      ["slack_remove_reaction", { channel_id: "C999", name: "eyes", timestamp: "100.000007" }],
     ] as const) {
       await expect(call(triggerOnly, deps, name, args)).resolves.toMatchObject({ isError: true });
     }
@@ -138,6 +142,7 @@ describe("automation Slack tools", () => {
     expect(deps.readThread).not.toHaveBeenCalled();
     expect(deps.readChannel).not.toHaveBeenCalled();
     expect(deps.addReaction).not.toHaveBeenCalled();
+    expect(deps.removeReaction).not.toHaveBeenCalled();
 
     await call(triggerOnly, deps, "slack_add_reaction", {
       channel_id: "C999",
@@ -150,6 +155,26 @@ describe("automation Slack tools", () => {
       name: "eyes",
       timestamp: "100.000005",
     });
+
+    // Removing the same reaction is its own recorded action, not a repeat of
+    // the add.
+    await call(triggerOnly, deps, "slack_remove_reaction", {
+      channel_id: "C999",
+      name: "eyes",
+      timestamp: "100.000005",
+    });
+    expect(deps.removeReaction).toHaveBeenCalledWith({
+      accessToken: "xoxb-bot",
+      channelId: "C999",
+      name: "eyes",
+      timestamp: "100.000005",
+    });
+    expect(deps.beginAttempt).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: "remove_slack_reaction",
+    }));
+    expect(deps.beginAttempt.mock.calls.at(-1)![0].idempotencyKey).not.toBe(
+      deps.beginAttempt.mock.calls.at(-2)![0].idempotencyKey,
+    );
   });
 
   it("ignores a Slack trigger from another workspace", () => {

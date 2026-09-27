@@ -45,7 +45,8 @@ function readAutomationDraft(): AutomationDraft | null {
     const stored = JSON.parse(value) as ReturnType<typeof storedAutomationDraft>;
     // Drafts saved before automations had several triggers cannot be restored.
     if (!Array.isArray(stored.configuration.triggers)) return null;
-    const draft = { ...stored, configuration: { ...stored.configuration, workspaceSecretIds: [] } };
+    // A draft saved before notifications existed has none.
+    const draft = { ...stored, configuration: { ...stored.configuration, notifications: stored.configuration.notifications ?? [], workspaceSecretIds: [] } };
     return isCurrentAutomationDraft(draft, Date.now()) ? draft : null;
   } catch {
     return null;

@@ -13,6 +13,8 @@ export type AutomationToolAction =
 interface AutomationTranscriptItemBase {
   // When the worker first saw the item, in epoch milliseconds.
   observedAt?: number;
+  // The sub-agent that produced the item; absent for the main agent.
+  subagentId?: string;
 }
 
 export interface AutomationTranscriptMessage extends AutomationTranscriptItemBase {
@@ -34,7 +36,18 @@ export interface AutomationTranscriptTool extends AutomationTranscriptItemBase {
   // Context server name for MCP tools, for example "sentry".
   provider?: string;
   status: "failed" | "succeeded";
+  // Set when the tool started a sub-agent (Claude's Agent tool). The target
+  // is its description, and items with this `subagentId` are its work.
+  subagent?: AutomationTranscriptSubagent;
   target: string;
+}
+
+export interface AutomationTranscriptSubagent {
+  // False while the sub-agent works, including in the background.
+  finished: boolean;
+  id: string;
+  // The sub-agent type, for example "general-purpose".
+  type?: string;
 }
 
 export type AutomationTranscriptItem =
@@ -49,10 +62,14 @@ export interface AutomationTranscriptEventData {
   truncated: boolean;
 }
 
-// A follow-up or test chat message from a workspace member.
+// A follow-up or test chat message from a workspace member, or a reply in
+// the Slack thread that started the run.
 export interface AutomationUserMessageEventData {
   authorId: string;
   authorName: string;
+  // The Slack event, so a redelivered event is stored once.
+  externalEventId?: string;
+  source?: "slack";
   text: string;
 }
 

@@ -12,6 +12,7 @@ import { decryptCredentials } from "../../../../packages/core/src/credentials/en
 import {
   addSlackReaction,
   postSlackMessage,
+  removeSlackReaction,
   SlackApiError,
 } from "../../../../packages/core/src/integrations/slack.js";
 import {
@@ -23,7 +24,8 @@ import { searchSlackChannel } from "../../../../packages/core/src/integrations/s
 
 // Slack tools for automation runs. A context link grants every tool on the
 // connection's available channels. A trigger link, or any link when Slack
-// started the run, grants reading, replying, and reacting in that thread.
+// started the run, grants reading, replying, and adding or removing reactions
+// in that thread.
 
 export interface SlackToolDependencies {
   addReaction: typeof addSlackReaction;
@@ -34,6 +36,7 @@ export interface SlackToolDependencies {
   postMessage: typeof postSlackMessage;
   readChannel: typeof readSlackChannelHistory;
   readThread: typeof readSlackThread;
+  removeReaction: typeof removeSlackReaction;
   search: typeof searchSlackChannel;
 }
 
@@ -46,6 +49,7 @@ export const defaultSlackToolDependencies: SlackToolDependencies = {
   postMessage: postSlackMessage,
   readChannel: readSlackChannelHistory,
   readThread: readSlackThread,
+  removeReaction: removeSlackReaction,
   search: searchSlackChannel,
 };
 
@@ -131,7 +135,7 @@ const postMessageInput = z.object({
   text: z.string().trim().min(1).max(40_000),
   thread_ts: timestampSchema.optional(),
 });
-const addReactionInput = z.object({
+const reactionInput = z.object({
   channel_id: z.string().min(1),
   name: z.string().trim().transform((value) => value.replace(/^:+|:+$/gu, ""))
     .pipe(z.string().regex(/^[a-z0-9_+'\-:]{1,100}$/u)),
@@ -237,6 +241,26 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         type: "object",
       },
       name: "slack_add_reaction",
+    },
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description: `Remove an emoji reaction that the Responder app added to a Slack message, for example "eyes" once the work is done.${onlyThread ? " Only the message that started this run and its thread's first message are allowed." : ""}${scope.thread ? ` The message that started this run is channel_id ${scope.thread.channelId}, timestamp ${scope.thread.timestamp}.` : ""}`,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          channel_id: { enum: allChannels, type: "string" },
+          name: { maxLength: 100, minLength: 1, type: "string" },
+          timestamp,
+        },
+        required: ["channel_id", "timestamp", "name"],
+        type: "object",
+      },
+      name: "slack_remove_reaction",
     },
   ];
 }
@@ -409,22 +433,23 @@ async function runTool(
       ...(result.repeated ? { note: "This message was already posted in this run." } : {}),
     });
   }
-  if (name === "slack_add_reaction") {
-    const parsed = addReactionInput.safeParse(args);
+  if (name === "slack_add_reaction" || name === "slack_remove_reaction") {
+    const parsed = reactionInput.safeParse(args);
     if (!parsed.success) return failure("Invalid tool arguments");
     const { channel_id: channelId, name: reaction, timestamp } = parsed.data;
     const triggerMessage = scope.thread?.channelId === channelId &&
       (scope.thread.timestamp === timestamp || scope.thread.threadTimestamp === timestamp);
     if (!scope.channels.has(channelId) && !triggerMessage) return notAllowed;
+    const adding = name === "slack_add_reaction";
     await recordedWrite({
       claim,
       dependencies,
       identity: [channelId, timestamp, reaction],
-      kind: "add_slack_reaction",
+      kind: adding ? "add_slack_reaction" : "remove_slack_reaction",
       redactedInput: { channelId, name: reaction, timestamp },
       toolName: name,
       write: async () => {
-        await dependencies.addReaction({
+        await (adding ? dependencies.addReaction : dependencies.removeReaction)({
           accessToken: botToken,
           channelId,
           name: reaction,
@@ -443,6 +468,7 @@ const slackToolNames = new Set([
   "slack_post_message",
   "slack_read_channel",
   "slack_read_thread",
+  "slack_remove_reaction",
   "slack_search_channel",
 ]);
 

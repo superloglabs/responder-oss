@@ -87,14 +87,40 @@ async function getAutomationTenant(
   return { ok: true, tenant };
 }
 
-function configurationError(error: unknown): {
+// Drizzle wraps the Postgres error, so the violation is on its cause.
+function isAutomationNameConflict(error: unknown): boolean {
+  for (let current = error; current; current = (current as { cause?: unknown }).cause) {
+    if (
+      typeof current === "object" &&
+      "code" in current &&
+      current.code === "23505" &&
+      "constraint" in current &&
+      current.constraint === "automations_organization_name_idx"
+    ) {
+      return true;
+    }
+    if (typeof current !== "object") break;
+  }
+  return false;
+}
+
+function configurationError(error: unknown, name: string): {
   body: { code?: string; error: string };
-  status: 400 | 404;
+  status: 400 | 404 | 409;
 } {
   if (error instanceof AutomationConfigurationError) {
     return {
       body: { code: error.code, error: error.message },
       status: error.code === "automation_not_found" ? 404 : 400,
+    };
+  }
+  if (isAutomationNameConflict(error)) {
+    return {
+      body: {
+        code: "automation_name_taken",
+        error: `An automation named "${name}" already exists. Choose a different name.`,
+      },
+      status: 409,
     };
   }
   throw error;
@@ -341,7 +367,7 @@ export const automationRoutes = new Hono()
       });
       return context.json({ automationId: automation.id }, 201);
     } catch (error) {
-      const response = configurationError(error);
+      const response = configurationError(error, parsed.data.name);
       return context.json(response.body, response.status);
     }
   })
@@ -432,7 +458,7 @@ export const automationRoutes = new Hono()
         ? context.json({ updated: true })
         : context.json({ error: "Automation not found" }, 404);
     } catch (error) {
-      const response = configurationError(error);
+      const response = configurationError(error, parsed.data.name);
       return context.json(response.body, response.status);
     }
   })

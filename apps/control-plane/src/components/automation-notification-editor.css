@@ -1,0 +1,4 @@
+.automationNotifications__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.automationNotifications__description { margin: 2px 0 0; color: #888; font-size: 12px; line-height: 16px; }
+.automationCreate__row > .automationNotifications__title { flex: 0 0 auto; }
+.automationCreate__row > .automationNotifications__hint { flex: 1; min-width: 0; overflow: hidden; color: #888; text-overflow: ellipsis; white-space: nowrap; }

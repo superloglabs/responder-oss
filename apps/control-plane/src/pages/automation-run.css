@@ -50,6 +50,19 @@
 .automationRun__tool code { flex: 1; min-width: 0; overflow: hidden; color: #666; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .automationRun__toolResult { width: 80px; flex-shrink: 0; color: #b44545; }
 .automationRun__toolDuration { width: 40px; flex-shrink: 0; color: #777; text-align: right; }
+.automationRun__subagent { display: flex; flex-direction: column; }
+.automationRun__subagentToggle { display: flex; align-items: center; gap: 10px; min-height: 30px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; line-height: 21px; text-align: left; cursor: pointer; }
+.automationRun__subagentToggle:disabled { cursor: default; }
+.automationRun__subagentToggle > svg { flex-shrink: 0; color: #999; }
+.automationRun__subagentName { min-width: 0; overflow: hidden; color: #202020; text-overflow: ellipsis; white-space: nowrap; }
+.automationRun__subagentToggle small { flex-shrink: 0; color: #777; font-size: 12px; }
+.automationRun__subagentType { padding: 0 6px; border-radius: 4px; background: #f3f3f3; line-height: 18px; }
+.automationRun__subagentToggle:hover:enabled .automationRun__subagentName { text-decoration: underline; text-decoration-color: #ccc; }
+.automationRun__subagent > .automationRun__toolList { margin: 2px 0 6px 6px; }
+.automationRun__subagentMessage { padding: 4px 0; color: #202020; line-height: 20px; overflow-wrap: anywhere; }
+.automationRun__subagentMessage > * { margin: 0; }
+.automationRun__subagentMessage > * + * { margin-top: 6px; }
+.automationRun__subagentMessage code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; }
 
 .automationRun__pullRequest { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
 .automationRun__pullRequest > svg { flex-shrink: 0; color: #588451; }

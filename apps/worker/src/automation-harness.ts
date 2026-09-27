@@ -14,8 +14,32 @@ export type AutomationHarnessKind =
 export interface AutomationModelRoute {
   subscription?: { authJson: string; persist: (authJson: string) => Promise<void> };
   brokerBaseUrl: string;
+  // The broker refuses requests that ask for more output than the grant allows.
+  maxOutputTokensPerRequest?: number;
   model: string;
   provider: string;
+}
+
+// Longer than the tool server's own wait, so the server's "call again"
+// answer reaches the agent before the harness gives up on the call.
+export const automationToolCallTimeoutMs = 150_000;
+
+// The worker's own tools, served to the agent by a local MCP server: GitHub
+// reads and pull requests, and Slack notifications.
+export const automationToolServerName = "responder";
+
+export const postNotificationToolName = "post_notification";
+
+// The service each worker tool acts on, shown on the run page.
+export function automationToolProvider(tool: string): string {
+  return tool === postNotificationToolName ? "slack" : "github";
+}
+
+// A local MCP server the harness starts in the sandbox.
+export interface AutomationToolServer {
+  args: string[];
+  command: string;
+  name: string;
 }
 
 export interface AutomationHarnessInput {
@@ -24,6 +48,7 @@ export interface AutomationHarnessInput {
   eventsPath?: string;
   model: AutomationModelRoute;
   prompt: string;
+  toolServer?: AutomationToolServer;
   workspacePath: string;
 }
 
@@ -164,6 +189,20 @@ export function validateBrokerBaseUrl(value: string): string {
     );
   }
   return url.toString().replace(/\/$/u, "");
+}
+
+export function validateAutomationToolServer(
+  server: AutomationToolServer | undefined,
+  contextServers: AutomationContextServer[],
+): AutomationToolServer | undefined {
+  if (!server) return undefined;
+  if (
+    !/^[a-z][a-z0-9_]{0,63}$/u.test(server.name) ||
+    contextServers.some((contextServer) => contextServer.name === server.name)
+  ) {
+    throw new Error("The automation tool server name must be a unique identifier");
+  }
+  return server;
 }
 
 export function validateAutomationContextServers(

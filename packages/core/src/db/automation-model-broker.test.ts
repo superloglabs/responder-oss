@@ -22,6 +22,30 @@ describe("automation model broker grant storage", () => {
     vi.unstubAllEnvs();
   });
 
+  it("grants as many requests as an automation allows", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", encryptionKey);
+    const values = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: grantId }]) });
+    vi.mocked(getDatabase).mockReturnValue({ insert: vi.fn(() => ({ values })) } as never);
+    const grant = (maxRequests: number) => createAutomationModelBrokerGrant({
+      credential: { inferenceSource: "responder" },
+      expiresAt: new Date("2026-09-22T16:10:00.000Z"),
+      maxOutputTokensPerRequest: 16_000,
+      maxRequests,
+      model: "claude-opus-5.5",
+      leaseId: "31313131-3131-4131-8131-313131313131",
+      organizationId,
+      provider: "anthropic",
+      runId: "run-1",
+    }, { now: () => new Date("2026-09-22T16:00:00.000Z") });
+
+    await expect(grant(1_000)).resolves.toMatchObject({ id: grantId });
+    expect(values).toHaveBeenLastCalledWith(expect.objectContaining({
+      remainingOutputTokens: 16_000_000,
+      remainingRequests: 1_000,
+    }));
+    await expect(grant(1_001)).rejects.toThrow();
+  });
+
   it("stores only a token hash and an encrypted provider credential", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", encryptionKey);
     const returning = vi.fn().mockResolvedValue([{ id: grantId }]);

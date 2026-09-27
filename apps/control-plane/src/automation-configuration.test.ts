@@ -22,6 +22,7 @@ const configuration = {
   model: "gpt-5.4",
   modelCredentialId: null,
   modelProvider: "openai",
+  notifications: [],
   prompt: "Investigate",
   repositoryIds: ["repository", "removed-repository"],
   toolPolicy: "full",
