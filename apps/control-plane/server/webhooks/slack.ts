@@ -938,6 +938,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           return;
         }
       }
+      if (!match.startsRun) return;
       await queueAutomationRun({
         automationId: match.automationId,
         trigger: {

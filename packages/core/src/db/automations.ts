@@ -64,13 +64,16 @@ export class AutomationConfigurationError extends Error {
   }
 }
 
+// Every enabled automation with a Slack trigger on the channel. A reply in a
+// run's thread continues that run whatever the trigger's event mode, so
+// `startsRun` says only whether this event starts a new run.
 export async function findAutomationsForSlackEvent(input: {
   channelId: string;
   eventType: "app_mention" | "message";
   senderAppId?: string;
   teamId: string;
   userId?: string;
-}): Promise<Array<{ automationId: string }>> {
+}): Promise<Array<{ automationId: string; startsRun: boolean }>> {
   const rows = await getDatabase()
     .select({
       accountId: integrationAccounts.id,
@@ -118,15 +121,19 @@ export async function findAutomationsForSlackEvent(input: {
     ) {
       return [];
     }
-    const matches = row.triggers.some((trigger) =>
+    const watching = row.triggers.filter((trigger) =>
       trigger.kind === "slack" &&
       trigger.integrationAccountId === row.accountId &&
-      trigger.channelIds.includes(input.channelId) &&
+      trigger.channelIds.includes(input.channelId)
+    );
+    if (watching.length === 0) return [];
+    const startsRun = watching.some((trigger) =>
+      trigger.kind === "slack" &&
       (trigger.eventMode === "both" ||
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
         (trigger.eventMode === "every_message" && input.eventType === "message"))
     );
-    return matches ? [{ automationId: row.automationId }] : [];
+    return [{ automationId: row.automationId, startsRun }];
   });
 }
 

@@ -339,7 +339,7 @@ describe("automation run processor", () => {
       deps.claimRun.mockResolvedValue(scheduledRun());
       deps.getNotificationChannelNames.mockResolvedValue(new Map([[`${notification.integrationAccountId}:C999`, "ops"]]));
       deps.runCodex.mockImplementation(async () => {
-        deps.createToolHandler.mock.calls.at(-1)![0].notifications!.onPosted();
+        deps.createToolHandler.mock.calls.at(-1)![0].notifications!.onPosted(notification);
         return { eventStream: "completed" };
       });
 
@@ -355,6 +355,22 @@ describe("automation run processor", () => {
         }),
       }));
       expect(deps.notify).not.toHaveBeenCalled();
+    });
+
+    it("posts the final reply only to channels the agent did not reach", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const second = { ...notification, channelId: "C888" };
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue({ ...scheduledRun(), notifications: [notification, second] });
+      deps.runCodex.mockImplementation(async () => {
+        deps.createToolHandler.mock.calls.at(-1)![0].notifications!.onPosted(notification);
+        return { eventStream: "completed" };
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({ notifications: [second] }));
     });
 
     it("reports a failed run and records a channel that could not be reached", async () => {
@@ -377,6 +393,21 @@ describe("automation run processor", () => {
         runId,
         type: "notification_failed",
       });
+    });
+
+    it("reports a run that fails before its sandbox starts", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue({ ...scheduledRun(), inferenceSource: "responder" });
+      deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: expect.objectContaining({ status: "failed" }),
+      }));
     });
 
     it("does not notify for follow-up turns, cancelled runs, or automations without notifications", async () => {

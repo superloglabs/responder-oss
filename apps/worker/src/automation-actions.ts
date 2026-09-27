@@ -102,7 +102,7 @@ export function createAutomationToolHandler(input: {
   notifications?: {
     channelNames: Map<string, string>;
     notifications: AutomationNotification[];
-    onPosted(): void;
+    onPosted(notification: AutomationNotification): void;
     organizationId: string;
     runUrl: string | null;
   };
@@ -114,48 +114,64 @@ export function createAutomationToolHandler(input: {
   const channelName = (notification: AutomationNotification) =>
     `#${input.notifications?.channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`;
 
+  // Each channel is its own attempt, so posting the same text again reaches
+  // only the channels that did not get it.
   async function postNotification(args: unknown): Promise<AutomationToolResult> {
     const target = input.notifications;
     if (!target?.notifications.length) return toolError("This automation has no notification channels.");
     const parsed = notificationSchema.safeParse(args);
     if (!parsed.success) return toolError("Invalid tool arguments");
     const kind = "send_slack_message";
-    const channels = target.notifications.map(channelName);
-    input.signal?.throwIfAborted();
-    await input.assertActive?.();
-    const attempt = await dependencies.beginAttempt({
-      idempotencyKey: idempotencyKey(input.runId, kind, ["notification", parsed.data.text]),
-      kind,
-      redactedInput: { channels },
-      retryFailed: true,
-      runId: input.runId,
-      toolCallId: postNotificationToolName,
-    });
-    if (attempt.status === "existing_succeeded") {
-      return toolText({ channels, note: "This message was already posted." });
+    const message = agentNotificationMessage(parsed.data.text, target.runUrl);
+    const alreadyPosted: string[] = [];
+    const posted: string[] = [];
+    const failed: Array<{ channel: string; error: string }> = [];
+    for (const notification of target.notifications) {
+      const channel = channelName(notification);
+      input.signal?.throwIfAborted();
+      await input.assertActive?.();
+      const attempt = await dependencies.beginAttempt({
+        idempotencyKey: idempotencyKey(input.runId, kind, [
+          "notification",
+          notification.integrationAccountId,
+          notification.channelId,
+          parsed.data.text,
+        ]),
+        kind,
+        redactedInput: { channel },
+        retryFailed: true,
+        runId: input.runId,
+        toolCallId: postNotificationToolName,
+      });
+      if (attempt.status === "existing_succeeded") {
+        alreadyPosted.push(channel);
+        target.onPosted(notification);
+        continue;
+      }
+      const [delivery] = await dependencies.postNotification({
+        ...message,
+        notifications: [notification],
+        organizationId: target.organizationId,
+        seed: attempt.id,
+      });
+      if (!delivery || "error" in delivery) {
+        const error = delivery?.error instanceof Error ? delivery.error.message.slice(0, 200) : "Failed";
+        await dependencies.failAttempt({ attemptId: attempt.id, failureMessage: error });
+        failed.push({ channel, error });
+        continue;
+      }
+      const externalReference = `${notification.channelId}:${delivery.timestamp ?? "sent"}`;
+      await dependencies.completeAttempt({ attemptId: attempt.id, externalReference });
+      await input.onAction({ externalReference, kind });
+      target.onPosted(notification);
+      posted.push(channel);
     }
-    const deliveries = await dependencies.postNotification({
-      ...agentNotificationMessage(parsed.data.text, target.runUrl),
-      notifications: target.notifications,
-      organizationId: target.organizationId,
-      seed: attempt.id,
-    });
-    const posted = deliveries.flatMap((delivery) => "error" in delivery ? [] : [delivery]);
-    const failed = deliveries.flatMap((delivery) => "error" in delivery
-      ? [{ channel: channelName(delivery.notification), error: delivery.error instanceof Error ? delivery.error.message.slice(0, 200) : "Failed" }]
-      : []);
-    if (posted.length === 0) {
-      await dependencies.failAttempt({ attemptId: attempt.id, failureMessage: JSON.stringify(failed).slice(0, 2_000) });
+    if (posted.length === 0 && alreadyPosted.length === 0) {
       return toolError(`Unable to post the notification: ${failed.map((item) => `${item.channel}: ${item.error}`).join("; ")}`);
     }
-    const externalReference = posted
-      .map((delivery) => `${delivery.notification.channelId}:${delivery.timestamp ?? "sent"}`)
-      .join(",");
-    await dependencies.completeAttempt({ attemptId: attempt.id, externalReference });
-    await input.onAction({ externalReference, kind });
-    target.onPosted();
     return toolText({
-      posted: posted.map((delivery) => channelName(delivery.notification)),
+      ...(alreadyPosted.length > 0 ? { alreadyPosted } : {}),
+      posted,
       ...(failed.length > 0 ? { failed } : {}),
     });
   }

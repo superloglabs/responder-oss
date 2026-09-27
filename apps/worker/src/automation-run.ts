@@ -406,8 +406,10 @@ export async function processAutomationRun(
   // A scheduled automation reports each run once, when its first turn ends.
   let firstTurn = false;
   let outcome: AutomationRunOutcome | undefined;
-  // Set when the agent posted to the notification channels itself.
-  let agentNotified = false;
+  // The notification channels the agent posted to itself.
+  const agentNotified = new Set<string>();
+  const notificationKey = (notification: { channelId: string; integrationAccountId: string }) =>
+    `${notification.integrationAccountId}:${notification.channelId}`;
   const runAbort = new AbortController();
   const runtimeTimeout = setTimeout(
     () => runAbort.abort(new AutomationRunTimeoutError()),
@@ -456,6 +458,12 @@ export async function processAutomationRun(
       return { runId: run.runId };
     }
 
+    // Read before any setup that can fail, so a failed first turn still
+    // reports to the automation's notification channels.
+    const conversation = await dependencies.getConversation(run.runId);
+    answeredThrough = conversation.reduce((newest, event) => Math.max(newest, event.id), 0);
+    firstTurn = !conversation.some((event) => event.type === "transcript");
+
     let grantCredential: AutomationModelBrokerGrantCredential;
     let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
     if (run.inferenceSource === "responder") {
@@ -500,14 +508,11 @@ export async function processAutomationRun(
       runId: run.runId,
     });
     grantId = grant.id;
-    const [daytonaConfig, workspaceSecrets, connections, conversation] = await Promise.all([
+    const [daytonaConfig, workspaceSecrets, connections] = await Promise.all([
       Promise.resolve(requireDaytonaClientConfig(environment)),
       dependencies.getWorkspaceSecrets(run.automationVersionId),
       dependencies.getConnections(run.automationVersionId),
-      dependencies.getConversation(run.runId),
     ]);
-    answeredThrough = conversation.reduce((newest, event) => Math.max(newest, event.id), 0);
-    firstTurn = !conversation.some((event) => event.type === "transcript");
     const contextServers = automationContextServers(environment, connections, run.triggerInput);
     const channelNames = await dependencies.getNotificationChannelNames({
       notifications: run.notifications,
@@ -566,7 +571,7 @@ export async function processAutomationRun(
                   notifications: {
                     channelNames,
                     notifications: run.notifications,
-                    onPosted: () => { agentNotified = true; },
+                    onPosted: (notification) => { agentNotified.add(notificationKey(notification)); },
                     organizationId: run.organizationId,
                     runUrl: automationRunUrl({ ...run, environment }),
                   },
@@ -782,13 +787,17 @@ export async function processAutomationRun(
       }
     }
   }
-  // The agent reports its own result; a failed run is reported for it.
-  if (outcome && firstTurn && run.notifications.length > 0 && !(outcome.status === "succeeded" && agentNotified)) {
+  // The agent reports its own result; channels it did not reach get its final
+  // reply, and a failed run is reported to every channel.
+  const unreported = outcome?.status === "succeeded"
+    ? run.notifications.filter((notification) => !agentNotified.has(notificationKey(notification)))
+    : run.notifications;
+  if (outcome && firstTurn && unreported.length > 0) {
     await dependencies.notify({
       automationId: run.automationId,
       automationName: run.automationName,
       environment,
-      notifications: run.notifications,
+      notifications: unreported,
       onError: (notification, error) => recordEvent(dependencies, run.runId, "notification_failed", {
         channelId: notification.channelId,
         kind: notification.kind,

@@ -3,6 +3,7 @@ import type { SQL } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 import {
   claimAutomationRun,
+  findAutomationsForSlackEvent,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   summarizeAutomationList,
@@ -75,6 +76,24 @@ describe("trigger matching", () => {
   const accountId = "41414141-4141-4141-8141-414141414141";
   const slack = { channelIds: ["C1"], eventMode: "mentions", integrationAccountId: accountId, kind: "slack" } as const;
   const sentry = { eventTypes: ["regression"], integrationAccountId: accountId, kind: "sentry", projectIds: ["web"] } as const;
+
+  it("finds every automation watching a Slack channel and which ones the message starts", async () => {
+    const everyMessage = { ...slack, eventMode: "every_message" } as const;
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { accountId, accountMetadata: metadata, automationId: "mentions", triggers: [slack] },
+      { accountId, accountMetadata: metadata, automationId: "messages", triggers: [everyMessage] },
+      { accountId, accountMetadata: metadata, automationId: "other-channel", triggers: [{ ...slack, channelIds: ["C9"] }] },
+    ]]));
+
+    // A plain message starts only "every message" automations, but a reply in
+    // a run's thread reaches every automation watching the channel.
+    await expect(findAutomationsForSlackEvent({ channelId: "C1", eventType: "message", teamId: "T1", userId: "U1" }))
+      .resolves.toEqual([
+        { automationId: "mentions", startsRun: false },
+        { automationId: "messages", startsRun: true },
+      ]);
+  });
 
   it("matches an event against any of an automation's triggers", async () => {
     vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[

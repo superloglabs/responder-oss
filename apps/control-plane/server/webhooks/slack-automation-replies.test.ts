@@ -50,7 +50,7 @@ describe("Slack replies to automation runs", () => {
   beforeEach(() => {
     vi.stubEnv("SLACK_SIGNING_SECRET", signingSecret);
     mocks.findAgents.mockResolvedValue([]);
-    mocks.findAutomations.mockResolvedValue([{ automationId }]);
+    mocks.findAutomations.mockResolvedValue([{ automationId, startsRun: true }]);
     mocks.findThreadRun.mockResolvedValue({ id: runId, organizationId: "org" });
     mocks.queueReply.mockResolvedValue("queued");
     mocks.queueRun.mockResolvedValue({ duplicate: false, runId });
@@ -84,6 +84,26 @@ describe("Slack replies to automation runs", () => {
       },
       runId,
     });
+    expect(mocks.queueRun).not.toHaveBeenCalled();
+  });
+
+  it("continues a mention-only automation's run from a reply without a mention", async () => {
+    mocks.findAutomations.mockResolvedValue([{ automationId, startsRun: false }]);
+
+    await deliver({ thread_ts: "1790000000.000100", user: "U123" });
+
+    expect(mocks.queueReply).toHaveBeenCalledWith(expect.objectContaining({ runId }));
+    expect(mocks.queueRun).not.toHaveBeenCalled();
+  });
+
+  it("does not start a run for a message the automation does not start on", async () => {
+    mocks.findAutomations.mockResolvedValue([{ automationId, startsRun: false }]);
+    mocks.findThreadRun.mockResolvedValue(null);
+
+    await deliver({ thread_ts: "1790000000.000100", user: "U123" });
+    await deliver({ user: "U123" });
+
+    expect(mocks.queueReply).not.toHaveBeenCalled();
     expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 

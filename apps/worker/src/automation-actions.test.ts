@@ -222,11 +222,11 @@ describe("automation notification tool", () => {
     });
     expect(deps.beginAttempt).toHaveBeenCalledWith(expect.objectContaining({
       kind: "send_slack_message",
-      redactedInput: { channels: ["#ops"] },
+      redactedInput: { channel: "#ops" },
       toolCallId: "post_notification",
     }));
     expect(onAction).toHaveBeenCalledWith({ externalReference: "C100:1790000000.000100", kind: "send_slack_message" });
-    expect(onPosted).toHaveBeenCalledOnce();
+    expect(onPosted).toHaveBeenCalledWith(notification);
   });
 
   it("does not post the same report twice", async () => {
@@ -237,8 +237,9 @@ describe("automation notification tool", () => {
 
     const result = await handle({ arguments: { text: "All clear." }, name: "post_notification" });
 
-    expect(resultText(result)).toMatchObject({ note: "This message was already posted." });
+    expect(resultText(result)).toEqual({ alreadyPosted: ["#ops"], posted: [] });
     expect(deps.postNotification).not.toHaveBeenCalled();
+    expect(onPosted).toHaveBeenCalledWith(notification);
   });
 
   it("reports channels it could not post to", async () => {
@@ -253,6 +254,40 @@ describe("automation notification tool", () => {
     });
     expect(deps.failAttempt).toHaveBeenCalled();
     expect(onPosted).not.toHaveBeenCalled();
+  });
+
+  it("retries only the channels a post did not reach", async () => {
+    const second = { ...notification, channelId: "C200" };
+    const deps = dependencies();
+    // Each channel is its own attempt; the first post reached only #ops.
+    const attempts = new Map<string, { externalReference?: string; status: string }>();
+    deps.beginAttempt.mockImplementation(async ({ idempotencyKey }: { idempotencyKey: string }) => {
+      const existing = attempts.get(idempotencyKey);
+      if (existing?.status === "succeeded") return { externalReference: existing.externalReference, id: idempotencyKey, status: "existing_succeeded" };
+      return { id: idempotencyKey, status: "started" };
+    });
+    deps.completeAttempt.mockImplementation(async ({ attemptId, externalReference }: { attemptId: string; externalReference: string }) => {
+      attempts.set(attemptId, { externalReference, status: "succeeded" });
+    });
+    deps.postNotification
+      .mockResolvedValueOnce([{ notification, timestamp: "1.1" }])
+      .mockResolvedValueOnce([{ error: new Error("not_in_channel"), notification: second }])
+      .mockResolvedValueOnce([{ notification: second, timestamp: "2.2" }]);
+    const onPosted = vi.fn();
+    const { handle } = handler(deps, {
+      notifications: { ...target(onPosted), notifications: [notification, second] },
+    });
+
+    const first = await handle({ arguments: { text: "All clear." }, name: "post_notification" });
+    expect(resultText(first)).toMatchObject({ failed: [{ channel: "#C200", error: "not_in_channel" }], posted: ["#ops"] });
+    expect(onPosted).toHaveBeenCalledTimes(1);
+    expect(onPosted).toHaveBeenLastCalledWith(notification);
+
+    const retry = await handle({ arguments: { text: "All clear." }, name: "post_notification" });
+    expect(resultText(retry)).toEqual({ alreadyPosted: ["#ops"], posted: ["#C200"] });
+    expect(deps.postNotification).toHaveBeenCalledTimes(3);
+    expect(deps.postNotification.mock.calls[2]![0].notifications).toEqual([second]);
+    expect(onPosted).toHaveBeenLastCalledWith(second);
   });
 
   it("is unavailable without notification channels", async () => {
