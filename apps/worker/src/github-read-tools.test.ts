@@ -87,6 +87,23 @@ describe("github_api tool", () => {
     expect(dependencies.fetch).not.toHaveBeenCalled();
   });
 
+  it("stops reading a large download instead of buffering it", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(64 * 1024).fill(120));
+        if (pulled > 10_000) controller.close();
+      },
+    });
+    const { github_api: githubApi } = tools(vi.fn<typeof fetch>().mockResolvedValue(new Response(body)));
+
+    const text = resultText(await githubApi!({ path: "/repos/acme/app/zipball/main" }));
+
+    expect(text).toContain("[Response truncated.");
+    expect(pulled).toBeLessThan(20);
+  });
+
   it("returns GitHub errors and truncates long responses", async () => {
     const fetchImpl = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ message: "Not Found" }, { status: 404 }))

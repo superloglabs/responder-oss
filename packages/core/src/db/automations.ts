@@ -1222,6 +1222,20 @@ export async function reopenAutomationRun(runId: string, leaseId?: string): Prom
   return rows.length > 0;
 }
 
+// Whether any turn of the run has finished. A turn retried after its worker
+// stopped may already have stored part of a transcript.
+export async function automationRunHasFinishedTurn(runId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: automationRunEvents.id })
+    .from(automationRunEvents)
+    .where(and(
+      eq(automationRunEvents.runId, runId),
+      inArray(automationRunEvents.type, ["run_succeeded", "run_failed", "run_cancelled"]),
+    ))
+    .limit(1);
+  return rows.length > 0;
+}
+
 // Whether a message arrived after the conversation a turn started with.
 export async function automationRunHasNewMessages(input: {
   afterEventId: number;

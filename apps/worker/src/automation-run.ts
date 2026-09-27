@@ -3,6 +3,7 @@ import { parseSubscriptionAuth } from "@responder/core/automations/chatgpt-subsc
 import {
   appendAutomationRunEvent,
   automationRunCancellationRequested,
+  automationRunHasFinishedTurn,
   automationRunHasNewMessages,
   claimAutomationRun,
   getAutomationNotificationChannelNames,
@@ -94,6 +95,7 @@ interface AutomationRunDependencies {
   getConversation: typeof listAutomationRunConversation;
   getNotificationChannelNames: typeof getAutomationNotificationChannelNames;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
+  hasFinishedTurn: typeof automationRunHasFinishedTurn;
   hasNewMessages: typeof automationRunHasNewMessages;
   heartbeatRun: typeof heartbeatAutomationRun;
   loadRepositories: typeof loadCheckedOutRepositories;
@@ -130,6 +132,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getConversation: listAutomationRunConversation,
   getNotificationChannelNames: getAutomationNotificationChannelNames,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
+  hasFinishedTurn: automationRunHasFinishedTurn,
   hasNewMessages: automationRunHasNewMessages,
   heartbeatRun: heartbeatAutomationRun,
   loadRepositories: loadCheckedOutRepositories,
@@ -347,8 +350,8 @@ async function startSlackCard(
   run: ClaimedAutomationRun,
   connections: Awaited<ReturnType<typeof getAutomationRuntimeConnections>>,
   conversation: AutomationConversation,
+  firstTurn: boolean,
 ): Promise<AutomationSlackCard | null> {
-  const firstTurn = !conversation.some((event) => event.type === "transcript");
   if (!firstTurn && !slackReplyTurn(conversation)) return null;
   const onError = (error: unknown) => console.error(JSON.stringify({
     errorCode: error instanceof Error ? error.name : typeof error,
@@ -472,9 +475,12 @@ export async function processAutomationRun(
 
     // Read before any setup that can fail, so a failed first turn still
     // reports to the automation's notification channels.
-    const conversation = await dependencies.getConversation(run.runId);
+    const [conversation, finishedTurn] = await Promise.all([
+      dependencies.getConversation(run.runId),
+      dependencies.hasFinishedTurn(run.runId),
+    ]);
     answeredThrough = conversation.reduce((newest, event) => Math.max(newest, event.id), 0);
-    firstTurn = !conversation.some((event) => event.type === "transcript");
+    firstTurn = !finishedTurn;
 
     let grantCredential: AutomationModelBrokerGrantCredential;
     let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
@@ -533,7 +539,7 @@ export async function processAutomationRun(
     // Only the first turn reports; follow-ups continue on the run page.
     const notificationChannels = (firstTurn ? run.notifications : []).map((notification) =>
       `#${channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`);
-    slackCard = await startSlackCard(dependencies, run, connections, conversation);
+    slackCard = await startSlackCard(dependencies, run, connections, conversation, firstTurn);
 
     subscriptionCleanupConfirmed = false;
     // Subscription runs always delete their sandbox, so cleanup confirms the

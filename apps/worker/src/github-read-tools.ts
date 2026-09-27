@@ -105,9 +105,32 @@ function failure(message: string): AutomationToolResult {
 
 const notSelected = failure("This repository is not selected for this automation.");
 
-function truncated(body: string): string {
-  return body.length > maxResponseCharacters
-    ? `${body.slice(0, maxResponseCharacters)}\n[Response truncated. Request a smaller page or a narrower path.]`
+const truncationNote = "[Response truncated. Request a smaller page or a narrower path.]";
+// A response is read only this far, so a download cannot fill the worker's
+// memory before it is cut to what the agent sees.
+const maxResponseBytes = 200_000;
+
+async function limitedText(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let body = "";
+  let bytes = 0;
+  let cut = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    body += decoder.decode(value, { stream: true });
+    if (bytes >= maxResponseBytes || body.length > maxResponseCharacters) {
+      cut = true;
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+  }
+  if (!cut) body += decoder.decode();
+  return body.length > maxResponseCharacters || cut
+    ? `${body.slice(0, maxResponseCharacters)}\n${truncationNote}`
     : body;
 }
 
@@ -164,7 +187,7 @@ export function createGitHubReadTools(input: {
         url,
         parsed.data.format === "diff" ? "application/vnd.github.diff" : "application/vnd.github+json",
       );
-      body = await response.text();
+      body = await limitedText(response);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Request failed";
       return failure(`GitHub request failed: ${message.slice(0, 500)}`);
@@ -174,7 +197,7 @@ export function createGitHubReadTools(input: {
       `HTTP ${response.status}`,
       ...(link ? [`Link: ${link}`] : []),
       "",
-      truncated(body),
+      body,
     ].join("\n");
     return response.ok ? text(result) : failure(result);
   }

@@ -99,6 +99,7 @@ function dependencies() {
     getConnections: vi.fn().mockResolvedValue([]),
     getConversation: vi.fn().mockResolvedValue([]),
     getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
+    hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
@@ -280,6 +281,7 @@ describe("automation run processor", () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
       const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
       deps.claimRun.mockResolvedValue(slackStartedRun());
       deps.getConnections.mockResolvedValue([slackConnection]);
       deps.getConversation.mockResolvedValue([
@@ -399,6 +401,7 @@ describe("automation run processor", () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
       const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
       deps.claimRun.mockResolvedValue(scheduledRun());
       deps.getConversation.mockResolvedValue([
         { data: { items: [], truncated: false }, id: 1, type: "transcript" },
@@ -409,6 +412,23 @@ describe("automation run processor", () => {
 
       expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("post_notification");
       expect(deps.createToolHandler.mock.calls[0]![0].notifications).toBeUndefined();
+    });
+
+    it("still reports a first turn retried after its worker stopped", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      // The stopped worker stored part of a transcript but never finished.
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [{ kind: "message", text: "Starting." }], truncated: false }, id: 1, type: "transcript" },
+      ]);
+      deps.hasFinishedTurn.mockResolvedValue(false);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.createToolHandler.mock.calls[0]![0].notifications).toBeDefined();
+      expect(deps.notify).toHaveBeenCalled();
     });
 
     it("reports a failed run and records a channel that could not be reached", async () => {
@@ -452,6 +472,7 @@ describe("automation run processor", () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
       const followUp = dependencies();
+      followUp.hasFinishedTurn.mockResolvedValue(true);
       followUp.claimRun.mockResolvedValue(scheduledRun());
       followUp.getConversation.mockResolvedValue([
         { data: { items: [], truncated: false }, id: 1, type: "transcript" },
