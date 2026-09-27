@@ -201,7 +201,18 @@ const maxConversationLength = 60_000;
 // Earlier turns of a run that a workspace member continued with a follow-up.
 // Returns null for a run's first turn.
 function conversationPrompt(conversation: AutomationConversation, resumed: boolean): string | null {
-  if (!conversation.some((event) => event.type === "transcript")) return null;
+  if (!conversation.some((event) => event.type === "transcript")) {
+    // Replies can reach a run while its first turn waits in the queue.
+    const replies = conversation.flatMap((event) => {
+      const message = event.data as unknown as AutomationUserMessageEventData;
+      return event.type === "user_message" && message.source === "slack"
+        ? [`Slack reply from ${message.authorName} (<@${message.authorId}>):\n${message.text}`]
+        : [];
+    });
+    return replies.length > 0
+      ? ["People replied in the Slack thread before you started. Take their replies into account and answer them in that thread.", ...replies].join("\n\n")
+      : null;
+  }
   const turns = conversation.flatMap((event) => {
     if (event.type === "user_message") {
       const message = event.data as unknown as AutomationUserMessageEventData;
@@ -825,7 +836,7 @@ async function answerNewMessages(
 ): Promise<void> {
   try {
     if (!(await dependencies.hasNewMessages({ afterEventId, runId: run.runId }))) return;
-    if (!(await dependencies.reopenRun(run.runId))) return;
+    if (!(await dependencies.reopenRun(run.runId, run.leaseId))) return;
   } catch (error) {
     await dependencies.reportException(error, {
       jobId,

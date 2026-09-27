@@ -1158,9 +1158,13 @@ export async function findSlackThreadAutomationRun(input: {
   channelId: string;
   teamId: string;
   threadTimestamp: string;
-}): Promise<{ id: string; organizationId: string } | null> {
+}): Promise<{ id: string; organizationId: string; triggerTimestamp: string | null } | null> {
   const rows = await getDatabase()
-    .select({ id: automationRuns.id, organizationId: automationRuns.organizationId })
+    .select({
+      id: automationRuns.id,
+      organizationId: automationRuns.organizationId,
+      triggerTimestamp: sql<string | null>`${automationRuns.triggerInput}->'attributes'->>'timestamp'`,
+    })
     .from(automationRuns)
     .where(and(
       eq(automationRuns.automationId, input.automationId),
@@ -1203,12 +1207,17 @@ export async function addAutomationRunReply(input: {
 }
 
 // Queues another turn of a finished run for messages it has not answered.
-// Only one caller can reopen a run, so only that caller queues its job.
-export async function reopenAutomationRun(runId: string): Promise<boolean> {
+// Only one caller can reopen a run, so only that caller queues its job. With
+// a lease, it reopens only if no turn has claimed or reopened the run since
+// the turn holding that lease finished.
+export async function reopenAutomationRun(runId: string, leaseId?: string): Promise<boolean> {
   const rows = await getDatabase()
     .update(automationRuns)
     .set(reopenedRun())
-    .where(reopenableRun(runId))
+    .where(and(
+      reopenableRun(runId),
+      ...(leaseId ? [eq(automationRuns.leaseId, leaseId)] : []),
+    ))
     .returning({ id: automationRuns.id });
   return rows.length > 0;
 }

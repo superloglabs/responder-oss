@@ -107,6 +107,15 @@ describe("Slack replies to automation runs", () => {
     expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 
+  it("ignores a redelivery of the message that started the thread's run", async () => {
+    mocks.findThreadRun.mockResolvedValue({ id: runId, organizationId: "org", triggerTimestamp: "1790000002.000100" });
+
+    await deliver({ thread_ts: "1790000000.000100", user: "U123" });
+
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(mocks.queueRun).toHaveBeenCalledOnce();
+  });
+
   it("starts a new run for a reply in a thread without one", async () => {
     mocks.findThreadRun.mockResolvedValue(null);
 

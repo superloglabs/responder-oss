@@ -453,7 +453,8 @@ describe("automation run processor", () => {
       await processAutomationRun("job-1", job, process.env, deps);
 
       expect(deps.hasNewMessages).toHaveBeenCalledWith({ afterEventId: 7, runId });
-      expect(deps.reopenRun).toHaveBeenCalledWith(runId);
+      // Only while no other turn has claimed or reopened the run since.
+      expect(deps.reopenRun).toHaveBeenCalledWith(runId, "71717171-7171-4171-8171-717171717170");
       expect(deps.requeueRun).toHaveBeenCalledWith(runId);
       // The run finished this turn before it was reopened.
       expect(deps.setStatus.mock.invocationCallOrder[0]).toBeLessThan(
@@ -812,6 +813,23 @@ describe("automation run processor", () => {
     expect(prompt).toContain("This run continues an earlier conversation.");
     expect(prompt).toContain("You:\nThe deploy config is wrong.");
     expect(prompt.trimEnd()).toMatch(/Workspace member Ash:\nPlease add a regression test\.$/u);
+  });
+
+  it("gives a first turn the Slack replies that arrived while it was queued", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getConversation.mockResolvedValue([
+      {
+        data: { authorId: "U123", authorName: "Ada", externalEventId: "C123:2.0", source: "slack", text: "Also check the staging deploy." },
+        id: 3,
+        type: "user_message",
+      },
+    ]);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("Slack reply from Ada (<@U123>):\nAlso check the staging deploy.");
   });
 
   it("does not add a conversation to a first turn", async () => {

@@ -926,7 +926,9 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           teamId: callback.data.team_id,
           threadTimestamp,
         });
-        if (run) {
+        // A redelivery of the message that started this run is not a reply;
+        // starting the run again finds it as a duplicate.
+        if (run && run.triggerTimestamp !== event.ts) {
           const outcome = await queueAutomationRunReply({ message, runId: run.id });
           console.info(JSON.stringify({
             automationId: match.automationId,
