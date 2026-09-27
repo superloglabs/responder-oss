@@ -228,6 +228,31 @@ export function contextServerConnectFailureEvent(input: {
   };
 }
 
+export async function connectContextServers(
+  contextServers: MCPServer[],
+  onFailure: (server: MCPServer, error: unknown) => unknown,
+): Promise<{ connected: MCPServer[]; datadogDegraded: boolean }> {
+  let datadogDegraded = false;
+  const connected = (
+    await Promise.all(
+      contextServers.map(async (server) => {
+        try {
+          await server.connect();
+          return server;
+        } catch (error) {
+          const failure = onFailure(server, error);
+          if (server.name === "datadog") {
+            datadogDegraded = true;
+            return null;
+          }
+          throw failure;
+        }
+      }),
+    )
+  ).filter((server): server is MCPServer => server !== null);
+  return { connected, datadogDegraded };
+}
+
 export async function loadSentryConnectionForInvestigation(input: {
   getConnection?: typeof getRuntimeSentryConnection;
   investigationId: string;
@@ -775,13 +800,13 @@ export async function runInvestigationAgent(
   });
 
   let session: DaytonaSandboxSession | null = null;
+  let connectedContextServers: MCPServer[] = [];
+  let datadogConnectionDegraded = false;
 
   try {
-    await Promise.all(
-      contextServers.map(async (server) => {
-        try {
-          await server.connect();
-        } catch (error) {
+    const contextConnection = await connectContextServers(
+      contextServers,
+      (server, error) => {
           console.error(
             JSON.stringify(
               contextServerConnectFailureEvent({
@@ -800,31 +825,32 @@ export async function runInvestigationAgent(
               }),
             ),
           );
-          if (server.name.startsWith("upstash-")) {
-            throw new Error("Unable to connect to Upstash context");
-          }
-          if (server.name.startsWith("aws-")) {
-            throw new Error("Unable to connect to AWS context");
-          }
-          if (server.name.startsWith("gcp-")) {
-            throw new Error("Unable to connect to GCP context");
-          }
-          if (server.name.startsWith("dash0-")) {
-            throw new Error("Unable to connect to Dash0 context");
-          }
-          if (server.name.startsWith("grafana-")) {
-            throw new Error("Unable to connect to Grafana context");
-          }
-          if (server.name.startsWith("langfuse-")) {
-            throw new Error("Unable to connect to Langfuse context");
-          }
-          if (server.name.startsWith("supabase-")) {
-            throw new Error("Unable to connect to Supabase context");
-          }
-          throw error;
+        if (server.name.startsWith("upstash-")) {
+          return new Error("Unable to connect to Upstash context");
         }
-      }),
+        if (server.name.startsWith("aws-")) {
+          return new Error("Unable to connect to AWS context");
+        }
+        if (server.name.startsWith("gcp-")) {
+          return new Error("Unable to connect to GCP context");
+        }
+        if (server.name.startsWith("dash0-")) {
+          return new Error("Unable to connect to Dash0 context");
+        }
+        if (server.name.startsWith("grafana-")) {
+          return new Error("Unable to connect to Grafana context");
+        }
+        if (server.name.startsWith("langfuse-")) {
+          return new Error("Unable to connect to Langfuse context");
+        }
+        if (server.name.startsWith("supabase-")) {
+          return new Error("Unable to connect to Supabase context");
+        }
+        return error;
+      },
     );
+    connectedContextServers = contextConnection.connected;
+    datadogConnectionDegraded = contextConnection.datadogDegraded;
     let awsSkillContext = "";
     if (awsAlarmTriggered && awsServers[0]) {
       const loadedSkills = await loadAwsAlarmSkillContext(awsServers[0]);
@@ -958,7 +984,8 @@ export async function runInvestigationAgent(
         ? []
         : customMcpConnections.map((connection) => connection.displayName),
       clickStackConnected: clickStackServer !== null,
-      datadogConnected: datadogServer !== null,
+      datadogConnected:
+        datadogServer !== null && !datadogConnectionDegraded,
       dash0AccountNames: dash0Connections.map(
         (connection) => connection.displayName,
       ),
@@ -1087,7 +1114,7 @@ export async function runInvestigationAgent(
       }
     }
     await Promise.all(
-      contextServers.map((server) =>
+      connectedContextServers.map((server) =>
         server.close().catch(() => undefined),
       ),
     );
