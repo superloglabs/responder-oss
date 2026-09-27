@@ -254,6 +254,28 @@ describe("automation run processor", () => {
       }));
     });
 
+    it("answers a Slack reply saved before the previous turn's transcript", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun());
+      deps.getConnections.mockResolvedValue([slackConnection]);
+      // The reply was stored while the previous turn was starting up.
+      deps.getConversation.mockResolvedValue([
+        {
+          data: { authorId: "U123", authorName: "Ada", externalEventId: "C123:2.0", source: "slack", text: "Is staging affected too?" },
+          id: 2,
+          type: "user_message",
+        },
+        { data: { items: [{ kind: "message", text: "Found the cause." }], truncated: false }, id: 3, type: "transcript" },
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("Answer it in that thread");
+      expect(deps.slackCard.post).toHaveBeenCalled();
+    });
+
     it("leaves follow-up turns to the run page", async () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
@@ -371,6 +393,22 @@ describe("automation run processor", () => {
       await processAutomationRun("job-1", job, process.env, deps);
 
       expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({ notifications: [second] }));
+    });
+
+    it("offers the notification tool only on the first turn", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [], truncated: false }, id: 1, type: "transcript" },
+        { data: { authorId: "user-1", authorName: "Ash", text: "Shorten the summary." }, id: 2, type: "user_message" },
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("post_notification");
+      expect(deps.createToolHandler.mock.calls[0]![0].notifications).toBeUndefined();
     });
 
     it("reports a failed run and records a channel that could not be reached", async () => {

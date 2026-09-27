@@ -331,11 +331,12 @@ async function runHarness(
   return dependencies.runOpenCode(session, input);
 }
 
-// Whether this turn answers a reply in the run's Slack thread.
+// Whether this turn answers a reply in the run's Slack thread. Every later
+// turn answers the newest message, which a turn's transcript can follow.
 function slackReplyTurn(conversation: AutomationConversation): boolean {
-  const latest = conversation.at(-1);
-  return latest?.type === "user_message" &&
-    (latest.data as unknown as AutomationUserMessageEventData).source === "slack";
+  const latest = conversation.findLast((event) => event.type === "user_message");
+  return (latest?.data as AutomationUserMessageEventData | undefined)?.source === "slack" &&
+    conversation.some((event) => event.type === "transcript");
 }
 
 // A Slack-started run keeps a live card in the triggering thread, like an
@@ -529,7 +530,8 @@ export async function processAutomationRun(
       notifications: run.notifications,
       organizationId: run.organizationId,
     });
-    const notificationChannels = run.notifications.map((notification) =>
+    // Only the first turn reports; follow-ups continue on the run page.
+    const notificationChannels = (firstTurn ? run.notifications : []).map((notification) =>
       `#${channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`);
     slackCard = await startSlackCard(dependencies, run, connections, conversation);
 
@@ -577,7 +579,7 @@ export async function processAutomationRun(
         await installAutomationToolServer(session, notificationChannels);
         const tools = serveAutomationTools({
           handle: dependencies.createToolHandler({
-            ...(run.notifications.length > 0
+            ...(firstTurn && run.notifications.length > 0
               ? {
                   notifications: {
                     channelNames,

@@ -177,6 +177,26 @@ describe("automation Slack tools", () => {
     );
   });
 
+  it("adds a reaction again after removing it", async () => {
+    const triggerOnly = claim({ roles: ["trigger"], trigger: slackTrigger });
+    const deps = dependencies();
+    // A write with the same key returns its earlier result.
+    const done = new Set<string>();
+    deps.beginAttempt.mockImplementation(async ({ idempotencyKey }: { idempotencyKey: string }) =>
+      done.has(idempotencyKey)
+        ? { externalReference: "earlier", id: idempotencyKey, status: "existing_succeeded" }
+        : { id: idempotencyKey, status: "started" });
+    deps.completeAttempt.mockImplementation(async ({ attemptId }: { attemptId: string }) => { done.add(attemptId); });
+    const reaction = { channel_id: "C999", name: "eyes", timestamp: "100.000005" };
+
+    await call(triggerOnly, deps, "slack_add_reaction", reaction);
+    await call(triggerOnly, deps, "slack_remove_reaction", reaction);
+    await call(triggerOnly, deps, "slack_add_reaction", reaction);
+
+    expect(deps.addReaction).toHaveBeenCalledTimes(2);
+    expect(deps.removeReaction).toHaveBeenCalledOnce();
+  });
+
   it("ignores a Slack trigger from another workspace", () => {
     const other = claim({
       roles: ["trigger"],

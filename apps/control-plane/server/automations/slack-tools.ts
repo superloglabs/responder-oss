@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AutomationContextBrokerClaim } from "../../../../packages/core/src/db/automation-model-broker.js";
 import {
@@ -444,7 +444,9 @@ async function runTool(
     await recordedWrite({
       claim,
       dependencies,
-      identity: [channelId, timestamp, reaction],
+      // Adding and removing can alternate, and Slack already ignores a
+      // repeat, so each call is its own write rather than an earlier result.
+      identity: [channelId, timestamp, reaction, randomUUID()],
       kind: adding ? "add_slack_reaction" : "remove_slack_reaction",
       redactedInput: { channelId, name: reaction, timestamp },
       toolName: name,
