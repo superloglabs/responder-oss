@@ -88,14 +88,18 @@ function triggerChannels(
   return null;
 }
 
+// Slack's chat:write.public scope lets the bot post in public channels it has
+// not joined, so notices are limited to channels where the bot is a member.
 export function watchedChannelIds(
   trigger: "slack_channel" | "slack_mention",
   configuredChannelIds: string[],
-  availableChannelIds: string[],
+  memberChannelIds: string[],
 ): string[] {
-  return trigger === "slack_mention" && configuredChannelIds.length === 0
-    ? availableChannelIds
-    : configuredChannelIds;
+  if (trigger === "slack_mention" && configuredChannelIds.length === 0) {
+    return memberChannelIds;
+  }
+  const members = new Set(memberChannelIds);
+  return configuredChannelIds.filter((channelId) => members.has(channelId));
 }
 
 async function notificationDestinations(
@@ -127,6 +131,7 @@ async function notificationDestinations(
         .select({
           accountId: integrationResources.integrationAccountId,
           channelId: integrationResources.externalId,
+          metadata: integrationResources.metadata,
         })
         .from(integrationResources)
         .where(
@@ -139,10 +144,11 @@ async function notificationDestinations(
             eq(integrationResources.available, true),
           ),
         );
-  const availableChannels = new Map<string, string[]>();
+  const memberChannels = new Map<string, string[]>();
   for (const resource of resourceRows) {
-    availableChannels.set(resource.accountId, [
-      ...(availableChannels.get(resource.accountId) ?? []),
+    if (resource.metadata.isMember !== true) continue;
+    memberChannels.set(resource.accountId, [
+      ...(memberChannels.get(resource.accountId) ?? []),
       resource.channelId,
     ]);
   }
@@ -158,7 +164,7 @@ async function notificationDestinations(
     const watchedChannels = watchedChannelIds(
       row.trigger,
       watched.channelIds,
-      availableChannels.get(account.id) ?? [],
+      memberChannels.get(account.id) ?? [],
     );
     for (const channel of watchedChannels) {
       destinations.set(`${account.id}:channel:${channel}`, {
