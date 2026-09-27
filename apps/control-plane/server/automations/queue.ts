@@ -1,7 +1,9 @@
 import {
   abandonPendingAutomationRun,
+  addAutomationRunReply,
   beginAutomationRun,
   continueAutomationRun,
+  reopenAutomationRun,
   setAutomationRunStatus,
   type AutomationTriggerInput,
 } from "../../../../packages/core/src/db/automations.js";
@@ -95,6 +97,28 @@ export async function queueAutomationRunFollowUp(input: {
     await setAutomationRunStatus({
       failureCategory: "queue_unavailable",
       failureMessage: "The follow-up could not be queued. Try sending it again.",
+      runId: input.runId,
+      status: "failed",
+    });
+    throw new Error("Automation worker is unavailable", { cause: error });
+  }
+}
+
+// Sends a reply from the run's Slack thread to the run. A finished run starts
+// its next turn now; an active run answers it in the turn after this one.
+export async function queueAutomationRunReply(input: {
+  message: AutomationUserMessageEventData & { externalEventId: string };
+  runId: string;
+}): Promise<"duplicate" | "queued" | "waiting"> {
+  if (!(await addAutomationRunReply(input))) return "duplicate";
+  if (!(await reopenAutomationRun(input.runId))) return "waiting";
+  try {
+    await sendAutomationRunJob(input.runId);
+    return "queued";
+  } catch (error) {
+    await setAutomationRunStatus({
+      failureCategory: "queue_unavailable",
+      failureMessage: "The Slack reply could not be queued. Reply again to retry.",
       runId: input.runId,
       status: "failed",
     });

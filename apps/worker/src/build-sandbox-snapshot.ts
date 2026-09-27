@@ -7,6 +7,7 @@ import {
   sandboxSnapshotBaseImage,
   sandboxSnapshotCommands,
   sandboxSnapshotName,
+  sandboxSnapshotResources,
 } from "./sandbox-snapshot.js";
 
 const config = requireDaytonaClientConfig();
@@ -29,7 +30,7 @@ try {
 if (!exists) {
   const image = Image.base(sandboxSnapshotBaseImage).runCommands(...sandboxSnapshotCommands());
   await daytona.snapshot.create(
-    { entrypoint: ["sleep", "infinity"], image, name },
+    { entrypoint: ["sleep", "infinity"], image, name, resources: sandboxSnapshotResources },
     { onLogs: (chunk) => process.stdout.write(chunk.endsWith("\n") ? chunk : `${chunk}\n`) },
   );
   console.log(`Built snapshot ${name}.`);

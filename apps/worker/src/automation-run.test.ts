@@ -1,7 +1,13 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { createAutomationToolHandler } from "./automation-actions.js";
 import { AutomationHarnessError } from "./automation-harness.js";
 import { processAutomationRun } from "./automation-run.js";
+import type { runCodexAutomation } from "./codex-automation-harness.js";
+
+vi.mock("@responder/core/credentials/encryption", () => ({
+  decryptCredentials: vi.fn(() => ({ accessToken: "xoxb-token" })),
+}));
 
 const runId = "21212121-2121-4121-8121-212121212121";
 const organizationId = "15151515-1515-4515-8515-151515151515";
@@ -9,6 +15,7 @@ const organizationId = "15151515-1515-4515-8515-151515151515";
 function claimedRun() {
   return {
     automationId: "31313131-3131-4131-8131-313131313131",
+    automationName: "Weekly digest",
     automationVersionId: "41414141-4141-4141-8141-414141414141",
     cancelRequestedAt: null,
     harness: "codex" as const,
@@ -20,6 +27,7 @@ function claimedRun() {
     model: "gpt-5.4",
     modelCredentialId: "51515151-5151-4151-8151-515151515151" as string | null,
     modelProvider: "openai" as const,
+    notifications: [] as Array<{ channelId: string; integrationAccountId: string; kind: "slack" }>,
     organizationId,
     prompt: "Fix the failing test.",
     runId,
@@ -39,7 +47,21 @@ function claimedRun() {
   };
 }
 
+type ToolHandlerInput = Parameters<typeof createAutomationToolHandler>[0];
+
+const pullRequest = {
+  externalReference: "https://github.com/acme/app/pull/1",
+  kind: "open_github_pull_request",
+  repository: "acme/app",
+  title: "Fix the failing test",
+};
+
 function dependencies() {
+  const toolHandlers: ToolHandlerInput[] = [];
+  // Plays an agent that opens a pull request with the tool mid-run.
+  const openPullRequest = async () => {
+    await toolHandlers.at(-1)!.onAction(pullRequest);
+  };
   const session = {
     materializeEntry: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockRejectedValue(new Error("not found")),
@@ -62,10 +84,11 @@ function dependencies() {
       id: "71717171-7171-4171-8171-717171717171",
       token: "opaque-run-token",
     }),
-    executeActions: vi.fn().mockResolvedValue([{
-      externalReference: "https://github.com/acme/app/pull/1",
-      kind: "open_github_pull_request",
-    }]),
+    createToolHandler: vi.fn((input: ToolHandlerInput) => {
+      toolHandlers.push(input);
+      return vi.fn();
+    }),
+    openPullRequest,
     acquireSubscription: vi.fn(),
     persistSubscription: vi.fn().mockResolvedValue(undefined),
     releaseSubscription: vi.fn().mockResolvedValue(undefined),
@@ -75,7 +98,10 @@ function dependencies() {
     }),
     getConnections: vi.fn().mockResolvedValue([]),
     getConversation: vi.fn().mockResolvedValue([]),
+    getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
+    hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
+    hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
     loadRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
@@ -84,11 +110,17 @@ function dependencies() {
       sha: "b".repeat(40),
       workspaceBaseSha: "a".repeat(40),
     }]),
+    notify: vi.fn().mockResolvedValue(undefined),
     now: () => new Date("2026-09-22T19:00:00.000Z"),
+    reopenRun: vi.fn().mockResolvedValue(true),
     reportException: vi.fn().mockResolvedValue(undefined),
+    requeueRun: vi.fn().mockResolvedValue(undefined),
     revokeGrant: vi.fn().mockResolvedValue(undefined),
     runClaude: vi.fn(),
-    runCodex: vi.fn().mockResolvedValue({ eventStream: "completed" }),
+    runCodex: vi.fn<typeof runCodexAutomation>(async () => {
+      await openPullRequest();
+      return { eventStream: "completed" };
+    }),
     runInSandbox: vi.fn(async (input) => {
       try { return await input.run(session, async (operation: () => Promise<unknown>) => operation()); }
       finally { input.onCleanupConfirmed?.(); }
@@ -96,6 +128,11 @@ function dependencies() {
     runOpenCode: vi.fn(),
     saveSandbox: vi.fn().mockResolvedValue(undefined),
     setStatus: vi.fn().mockResolvedValue(true),
+    slackCard: {
+      now: () => Date.parse("2026-09-22T19:00:00.000Z"),
+      post: vi.fn().mockResolvedValue("1790000001.000200"),
+      update: vi.fn().mockResolvedValue(undefined),
+    },
     updateEvent: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -125,6 +162,416 @@ describe("automation run processor", () => {
       name: "slack_61616161616141618161616161616161",
       url: `https://responder.example/api/automation-context-broker/v1/${slackId}`,
     }]);
+  });
+
+  describe("Slack plan card", () => {
+    const slackStartedRun = () => ({
+      ...claimedRun(),
+      triggerInput: {
+        ...claimedRun().triggerInput,
+        attributes: {
+          channelId: "C123",
+          teamId: "T123",
+          threadTimestamp: "1790000000.000100",
+          timestamp: "1790000000.000200",
+        },
+      },
+    });
+    const slackConnection = {
+      encryptedCredentials: "encrypted-slack-token",
+      externalAccountId: "T123",
+      id: "61616161-6161-4161-8161-616161616161",
+      metadata: {},
+      provider: "slack",
+      role: "trigger" as const,
+    };
+    const job = {
+      kind: "automation_run" as const,
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    };
+
+    it("posts a card in the triggering thread before the sandbox starts and completes it", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun());
+      deps.getConnections.mockResolvedValue([slackConnection]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.slackCard.post).toHaveBeenCalledWith(expect.objectContaining({
+        accessToken: "xoxb-token",
+        channelId: "C123",
+        text: "Automation running",
+        threadTimestamp: "1790000000.000100",
+      }));
+      expect(deps.slackCard.post.mock.invocationCallOrder[0]).toBeLessThan(
+        deps.runInSandbox.mock.invocationCallOrder[0]!,
+      );
+      expect(deps.slackCard.update).toHaveBeenLastCalledWith(expect.objectContaining({
+        text: "Automation complete",
+        timestamp: "1790000001.000200",
+      }));
+    });
+
+    it("marks the card stopped when the run fails", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun());
+      deps.getConnections.mockResolvedValue([slackConnection]);
+      deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.slackCard.update).toHaveBeenLastCalledWith(expect.objectContaining({
+        text: expect.stringMatching(/^Automation stopped: /u),
+      }));
+    });
+
+    it("answers a Slack reply in the thread with a new card", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun());
+      deps.getConnections.mockResolvedValue([slackConnection]);
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [{ kind: "message", text: "The JSON literal is malformed." }], truncated: false }, id: 1, type: "transcript" },
+        {
+          data: { authorId: "U123", authorName: "Ada", externalEventId: "C123:1790000002.000100", source: "slack", text: "Can you open a PR?" },
+          id: 2,
+          type: "user_message",
+        },
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+      expect(prompt).toContain("Slack reply from Ada (<@U123>):\nCan you open a PR?");
+      expect(prompt).toContain("Answer it in that thread");
+      expect(deps.slackCard.post).toHaveBeenCalledWith(expect.objectContaining({
+        threadTimestamp: "1790000000.000100",
+      }));
+    });
+
+    it("answers a Slack reply saved before the previous turn's transcript", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun());
+      deps.getConnections.mockResolvedValue([slackConnection]);
+      // The reply was stored while the previous turn was starting up.
+      deps.getConversation.mockResolvedValue([
+        {
+          data: { authorId: "U123", authorName: "Ada", externalEventId: "C123:2.0", source: "slack", text: "Is staging affected too?" },
+          id: 2,
+          type: "user_message",
+        },
+        { data: { items: [{ kind: "message", text: "Found the cause." }], truncated: false }, id: 3, type: "transcript" },
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("Answer it in that thread");
+      expect(deps.slackCard.post).toHaveBeenCalled();
+    });
+
+    it("leaves follow-up turns to the run page", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.claimRun.mockResolvedValue(slackStartedRun());
+      deps.getConnections.mockResolvedValue([slackConnection]);
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [], truncated: false }, id: 1, type: "transcript" },
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.slackCard.post).not.toHaveBeenCalled();
+    });
+  });
+
+  it("records a cancel as cancelled when cleanup also fails", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    vi.useFakeTimers();
+    try {
+      const deps = dependencies();
+      deps.cancellationRequested.mockResolvedValueOnce(false).mockResolvedValue(true);
+      // The sandbox reports the abort together with a failed model operation.
+      deps.runInSandbox.mockImplementation((input) => new Promise((_, reject) => {
+        input.signal!.addEventListener("abort", () => reject(new AggregateError(
+          [input.signal!.reason, new Error("model operation failed")],
+          "Automation callback and queued model operation failed",
+        )));
+      }));
+
+      const processing = processAutomationRun("job-1", {
+        kind: "automation_run",
+        queuedAt: "2026-09-22T19:00:00.000Z",
+        runId,
+      }, process.env, deps);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await processing;
+
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "cancelled" }));
+      expect(deps.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "run_cancelled" }));
+      expect(deps.reportException).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("notifications", () => {
+    const notification = {
+      channelId: "C999",
+      integrationAccountId: "61616161-6161-4161-8161-616161616161",
+      kind: "slack" as const,
+    };
+    const job = { kind: "automation_run" as const, queuedAt: "2026-09-22T19:00:00.000Z", runId };
+    const scheduledRun = () => ({ ...claimedRun(), notifications: [notification] });
+
+    it("posts the agent's final response when the first turn succeeds", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.runCodex.mockResolvedValue({
+        eventStream: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Three issues still need fixes." } }),
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+        automationId: "31313131-3131-4131-8131-313131313131",
+        automationName: "Weekly digest",
+        notifications: [notification],
+        organizationId,
+        outcome: { message: "Three issues still need fixes.", status: "succeeded" },
+        runId,
+      }));
+    });
+
+    it("lets the agent post its own report and skips the fallback", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.getNotificationChannelNames.mockResolvedValue(new Map([[`${notification.integrationAccountId}:C999`, "ops"]]));
+      deps.runCodex.mockImplementation(async () => {
+        deps.createToolHandler.mock.calls.at(-1)![0].notifications!.onPosted(notification);
+        return { eventStream: "completed" };
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+      expect(prompt).toContain("This automation reports to Slack: #ops.");
+      expect(prompt).toContain("post_notification");
+      expect(deps.createToolHandler).toHaveBeenCalledWith(expect.objectContaining({
+        notifications: expect.objectContaining({
+          notifications: [notification],
+          runUrl: expect.stringContaining(`/runs/${runId}`),
+        }),
+      }));
+      expect(deps.notify).not.toHaveBeenCalled();
+    });
+
+    it("posts the final reply only to channels the agent did not reach", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const second = { ...notification, channelId: "C888" };
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue({ ...scheduledRun(), notifications: [notification, second] });
+      deps.runCodex.mockImplementation(async () => {
+        deps.createToolHandler.mock.calls.at(-1)![0].notifications!.onPosted(notification);
+        return { eventStream: "completed" };
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({ notifications: [second] }));
+    });
+
+    it("offers the notification tool only on the first turn", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [], truncated: false }, id: 1, type: "transcript" },
+        { data: { authorId: "user-1", authorName: "Ash", text: "Shorten the summary." }, id: 2, type: "user_message" },
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("post_notification");
+      expect(deps.createToolHandler.mock.calls[0]![0].notifications).toBeUndefined();
+    });
+
+    it("still reports a first turn retried after its worker stopped", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      // The stopped worker stored part of a transcript but never finished.
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [{ kind: "message", text: "Starting." }], truncated: false }, id: 1, type: "transcript" },
+      ]);
+      deps.hasFinishedTurn.mockResolvedValue(false);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.createToolHandler.mock.calls[0]![0].notifications).toBeDefined();
+      expect(deps.notify).toHaveBeenCalled();
+    });
+
+    it("reports a failed run and records a channel that could not be reached", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+      deps.notify.mockImplementation(async (input) => {
+        await input.onError(notification, new Error("not_in_channel"));
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: { message: "Codex automation harness failed", status: "failed" },
+      }));
+      expect(deps.appendEvent).toHaveBeenCalledWith({
+        data: { channelId: "C999", kind: "slack", message: "not_in_channel" },
+        runId,
+        type: "notification_failed",
+      });
+    });
+
+    it("reports a run that fails before its sandbox starts", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue({ ...scheduledRun(), inferenceSource: "responder" });
+      deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: expect.objectContaining({ status: "failed" }),
+      }));
+    });
+
+    it("does not notify for follow-up turns, cancelled runs, or automations without notifications", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const followUp = dependencies();
+      followUp.hasFinishedTurn.mockResolvedValue(true);
+      followUp.claimRun.mockResolvedValue(scheduledRun());
+      followUp.getConversation.mockResolvedValue([
+        { data: { items: [], truncated: false }, id: 1, type: "transcript" },
+        { data: { authorId: "user-1", authorName: "Ash", text: "Add a summary." }, id: 2, type: "user_message" },
+      ]);
+      await processAutomationRun("job-1", job, process.env, followUp);
+      expect(followUp.notify).not.toHaveBeenCalled();
+
+      const cancelled = dependencies();
+      cancelled.claimRun.mockResolvedValue(scheduledRun());
+      cancelled.cancellationRequested.mockResolvedValueOnce(false).mockResolvedValue(true);
+      await processAutomationRun("job-1", job, process.env, cancelled);
+      expect(cancelled.notify).not.toHaveBeenCalled();
+
+      const none = dependencies();
+      await processAutomationRun("job-1", job, process.env, none);
+      expect(none.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("replies that arrive during a turn", () => {
+    const job = {
+      kind: "automation_run" as const,
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    };
+
+    it("starts the next turn for a reply stored after the prompt was read", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [], truncated: false }, id: 7, type: "transcript" },
+      ]);
+      deps.hasNewMessages.mockResolvedValue(true);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.hasNewMessages).toHaveBeenCalledWith({ afterEventId: 7, runId });
+      // Only while no other turn has claimed or reopened the run since.
+      expect(deps.reopenRun).toHaveBeenCalledWith(runId, "71717171-7171-4171-8171-717171717170");
+      expect(deps.requeueRun).toHaveBeenCalledWith(runId);
+      // The run finished this turn before it was reopened.
+      expect(deps.setStatus.mock.invocationCallOrder[0]).toBeLessThan(
+        deps.reopenRun.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it("leaves the turn to the control plane when it already reopened the run", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasNewMessages.mockResolvedValue(true);
+      deps.reopenRun.mockResolvedValue(false);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.requeueRun).not.toHaveBeenCalled();
+    });
+
+    it("finishes normally without new replies", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.hasNewMessages).toHaveBeenCalledWith({ afterEventId: 0, runId });
+      expect(deps.reopenRun).not.toHaveBeenCalled();
+      expect(deps.requeueRun).not.toHaveBeenCalled();
+    });
+
+    it("marks the run failed when the next turn cannot be queued", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasNewMessages.mockResolvedValue(true);
+      deps.requeueRun.mockRejectedValue(new Error("queue down"));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.setStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+        failureCategory: "queue_unavailable",
+        runId,
+        status: "failed",
+      }));
+    });
+
+    it("does not continue a cancelled run", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasNewMessages.mockResolvedValue(true);
+      deps.cancellationRequested.mockResolvedValueOnce(false).mockResolvedValue(true);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.reopenRun).not.toHaveBeenCalled();
+    });
   });
 
   it("does not serve a trigger-only Slack connection for other triggers", async () => {
@@ -176,6 +623,7 @@ describe("automation run processor", () => {
     expect(deps.runCodex).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       model: {
         brokerBaseUrl: "https://responder.example/api/automation-model-broker/v1",
+        maxOutputTokensPerRequest: 4_096,
         model: "gpt-5.4",
         provider: "openai",
       },
@@ -187,7 +635,22 @@ describe("automation run processor", () => {
     expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
       "Your working directory is the acme/app repository, checked out at /home/daytona/workspace/repositories/acme/app.",
     );
-    expect(deps.executeActions).toHaveBeenCalledOnce();
+    // The agent opens pull requests with a tool while it works.
+    expect(deps.runCodex.mock.calls[0]![1].toolServer).toEqual({
+      args: ["/home/daytona/workspace/.responder/tools/server.mjs"],
+      command: "node",
+      name: "responder",
+    });
+    expect(deps.createToolHandler).toHaveBeenCalledWith(expect.objectContaining({
+      automationVersionId: "41414141-4141-4141-8141-414141414141",
+      checkedOutRepositories: [expect.objectContaining({ repository: "acme/app" })],
+      runId,
+    }));
+    expect(deps.appendEvent).toHaveBeenCalledWith({
+      data: pullRequest,
+      runId,
+      type: "action_succeeded",
+    });
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       runId,
       status: "succeeded",
@@ -305,12 +768,15 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    deps.runCodex.mockResolvedValue({
-      eventStream: [
-        "Process exited with code 0",
-        "Output:",
-        JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixed the flaky test." } }),
-      ].join("\n"),
+    deps.runCodex.mockImplementation(async () => {
+      await deps.openPullRequest();
+      return {
+        eventStream: [
+          "Process exited with code 0",
+          "Output:",
+          JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixed the flaky test." } }),
+        ].join("\n"),
+      };
     });
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
@@ -330,13 +796,73 @@ describe("automation run processor", () => {
     }));
   });
 
+  it("leaves sub-agent work out of the result summary and the conversation", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getConversation.mockResolvedValue([
+      {
+        data: {
+          items: [
+            { kind: "message", text: "Checking both repositories." },
+            { kind: "message", subagentId: "toolu_1", text: "Sub-agent notes on PR #127." },
+          ],
+          truncated: false,
+        },
+        id: 1,
+        type: "transcript",
+      },
+      { data: { authorId: "user-1", authorName: "Ash", text: "Summarize again." }, id: 2, type: "user_message" },
+    ]);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(prompt).toContain("You:\nChecking both repositories.");
+    expect(prompt).not.toContain("Sub-agent notes");
+  });
+
+  it("stores the whole transcript from the events file when the printed output was cut", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const events = [
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "First finding." } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Final summary." } }),
+    ].join("\n");
+    deps.runInSandbox.mockImplementation(async (input) => {
+      const session = {
+        materializeEntry: vi.fn().mockResolvedValue(undefined),
+        readFile: vi.fn(async ({ path }: { path: string }) => {
+          if (path.includes("harness-events-")) return new TextEncoder().encode(events);
+          throw new Error("not found");
+        }),
+        state: { environment: {} },
+      } as unknown as DaytonaSandboxSession;
+      return input.run(session, async (operation: () => Promise<unknown>) => operation());
+    });
+    deps.runCodex.mockResolvedValue({
+      eventStream: `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "First finding." } })}\n...2048 tokens truncated...`,
+    });
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    const stored = [...deps.appendEvent.mock.calls, ...deps.updateEvent.mock.calls]
+      .map(([event]) => event)
+      .filter((event) => (event as { type?: string }).type === "transcript" || !("type" in (event as object)))
+      .map((event) => (event as { data: { items: Array<{ text?: string }>; truncated: boolean } }).data)
+      .at(-1)!;
+    expect(stored.items.map((item) => item.text)).toEqual(["First finding.", "Final summary."]);
+    expect(stored.truncated).toBe(false);
+  });
+
   it("gives a follow-up turn the earlier conversation", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     deps.getConversation.mockResolvedValue([
-      { data: { items: [{ kind: "message", text: "The deploy config is wrong." }], truncated: false }, type: "transcript" },
-      { data: { authorId: "user-1", authorName: "Ash", text: "Please add a regression test." }, type: "user_message" },
+      { data: { items: [{ kind: "message", text: "The deploy config is wrong." }], truncated: false }, id: 1, type: "transcript" },
+      { data: { authorId: "user-1", authorName: "Ash", text: "Please add a regression test." }, id: 2, type: "user_message" },
     ]);
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
@@ -348,12 +874,29 @@ describe("automation run processor", () => {
     expect(prompt.trimEnd()).toMatch(/Workspace member Ash:\nPlease add a regression test\.$/u);
   });
 
+  it("gives a first turn the Slack replies that arrived while it was queued", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getConversation.mockResolvedValue([
+      {
+        data: { authorId: "U123", authorName: "Ada", externalEventId: "C123:2.0", source: "slack", text: "Also check the staging deploy." },
+        id: 3,
+        type: "user_message",
+      },
+    ]);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("Slack reply from Ada (<@U123>):\nAlso check the staging deploy.");
+  });
+
   it("does not add a conversation to a first turn", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     deps.getConversation.mockResolvedValue([
-      { data: { authorId: "user-1", authorName: "Ash", text: "Try the checkout flow." }, type: "user_message" },
+      { data: { authorId: "user-1", authorName: "Ash", text: "Try the checkout flow." }, id: 1, type: "user_message" },
     ]);
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
@@ -378,7 +921,7 @@ describe("automation run processor", () => {
       data: expect.objectContaining({ items: [expect.objectContaining({ action: "run", kind: "tool", status: "failed", target: "pnpm test" })] }),
       type: "transcript",
     }));
-    expect(deps.executeActions).not.toHaveBeenCalled();
+    expect(types).not.toContain("action_succeeded");
   });
   it("resumes the paused sandbox of an earlier turn and pauses it again", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
@@ -387,8 +930,8 @@ describe("automation run processor", () => {
     const sessionState = { sandboxId: "sandbox-1" };
     deps.claimRun.mockResolvedValue({ ...claimedRun(), sandboxSessionState: sessionState });
     deps.getConversation.mockResolvedValue([
-      { data: { items: [{ kind: "message", text: "Found it." }], truncated: false }, type: "transcript" },
-      { data: { authorId: "user-1", authorName: "Ash", text: "Now add a test." }, type: "user_message" },
+      { data: { items: [{ kind: "message", text: "Found it." }], truncated: false }, id: 1, type: "transcript" },
+      { data: { authorId: "user-1", authorName: "Ash", text: "Now add a test." }, id: 2, type: "user_message" },
     ]);
     const order: string[] = [];
     deps.saveSandbox.mockImplementation(async () => { order.push("save"); });

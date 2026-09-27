@@ -29,6 +29,7 @@ import type {
   AutomationHarnessKind,
   AutomationInferenceSource,
   AutomationModelProvider,
+  AutomationNotification,
   AutomationTrigger,
 } from "../automations/config.js";
 import { organization, user } from "./auth-schema.js";
@@ -647,6 +648,10 @@ export const automationVersions = pgTable(
     // deploy. Read `triggers`.
     trigger: jsonb("trigger").$type<AutomationTrigger>(),
     triggers: jsonb("triggers").$type<AutomationTrigger[]>().notNull(),
+    notifications: jsonb("notifications")
+      .$type<AutomationNotification[]>()
+      .notNull()
+      .default([]),
     connectionMode: text("connection_mode")
       .$type<"all_selected">()
       .notNull()
@@ -678,7 +683,7 @@ export const automationVersions = pgTable(
     ),
     check(
       "automation_versions_model_request_check",
-      sql`${table.maxModelRequests} between 1 and 128`,
+      sql`${table.maxModelRequests} between 1 and 1000`,
     ),
     check(
       "automation_versions_output_tokens_check",
@@ -962,6 +967,7 @@ export const automationModelUsage = pgTable(
 export type AutomationActionKind =
   | "add_slack_reaction"
   | "open_github_pull_request"
+  | "remove_slack_reaction"
   | "send_slack_message";
 
 export const automationActionAttempts = pgTable(

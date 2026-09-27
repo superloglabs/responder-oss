@@ -152,11 +152,14 @@ async function writeRepositoryArchiveWithLimit(
   archivePath: string,
   archiveLimitBytes: number,
 ): Promise<void> {
+  // macOS tar otherwise adds AppleDouble "._" files and extended attribute
+  // headers, which GNU tar in the sandbox warns about.
   const archiveProcess = spawn(
     "tar",
     [
       "-czf",
       "-",
+      "--no-xattrs",
       "--exclude=.git",
       "--exclude=*/.git",
       "-C",
@@ -164,6 +167,7 @@ async function writeRepositoryArchiveWithLimit(
       ".",
     ],
     {
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
       killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: repositoryDownloadTimeoutMs,
@@ -609,6 +613,82 @@ async function fetchRepositorySnapshot(
   return { sha };
 }
 
+// Brings another commit of a checked-out repository into its sandbox checkout
+// as a commit on localRef, without history, so the agent can diff against it.
+// The GitHub token stays in the worker.
+export async function importRuntimeRepositoryCommit(
+  session: DaytonaSandboxSession,
+  input: {
+    checkout: CheckedOutRepository;
+    localRef: string;
+    ref: string;
+    repository: RuntimeRepository;
+    sha: string;
+    token: string;
+  },
+  dependencies: Pick<
+    RepositoryCheckoutDependencies,
+    "downloadWithGit" | "fetch" | "maxArchiveBytes" | "temporaryDirectory" | "uploadArchive"
+  > = defaultDependencies,
+): Promise<string> {
+  if (!/^[a-f0-9]{40}$/i.test(input.sha)) {
+    throw new Error(`Invalid commit for ${input.repository.fullName}`);
+  }
+  const [owner, name] = safeRepositoryParts(input.repository.fullName);
+  const temporaryRoot = await mkdtemp(join(
+    dependencies.temporaryDirectory ?? process.env.RESPONDER_REPOSITORY_TEMP_DIR ?? tmpdir(),
+    "responder-repository-",
+  ));
+  const localArchivePath = join(temporaryRoot, "repository.tar.gz");
+  try {
+    await fetchRepositorySnapshot(
+      input.repository,
+      input.token,
+      dependencies.fetch,
+      localArchivePath,
+      dependencies.maxArchiveBytes ?? repositoryArchiveLimit(),
+      dependencies.downloadWithGit ?? downloadRepositorySnapshotWithGit,
+      { branch: input.ref, sha: input.sha },
+    );
+    const archivePath =
+      `${workspaceRoot}/.responder/archives/${owner}-${name}-${input.sha}-ref.tar.gz`;
+    await (dependencies.uploadArchive ?? uploadRepositoryArchive)(
+      session,
+      localArchivePath,
+      archivePath,
+    );
+    const repository = shellQuote(input.checkout.path);
+    const output = await runSandboxCommand(
+      session,
+      [
+        "set -eu",
+        "files=$(mktemp -d)",
+        'index="$files.index"',
+        `trap 'rm -rf "$files" "$index"' EXIT`,
+        [
+          `tar -xzf ${shellQuote(archivePath)}`,
+          "--no-same-owner --no-same-permissions --strip-components=1",
+          '-C "$files"',
+        ].join(" "),
+        `rm -f ${shellQuote(archivePath)}`,
+        `GIT_INDEX_FILE="$index" git -C ${repository} --work-tree="$files" add -A`,
+        `tree=$(GIT_INDEX_FILE="$index" git -C ${repository} write-tree)`,
+        `commit=$(git -C ${repository} commit-tree "$tree" -m ${shellQuote(`GitHub ${input.ref} at ${input.sha}`)})`,
+        `git -C ${repository} update-ref ${shellQuote(input.localRef)} "$commit"`,
+        'echo "$commit"',
+      ].join("\n"),
+      `import ${input.repository.fullName}@${input.ref}`,
+    );
+    const commit = output.split("\n").at(-1)?.trim() ?? "";
+    if (!/^[a-f0-9]{40}$/i.test(commit)) {
+      throw new Error(`Repository sandbox returned an invalid commit for ${input.repository.fullName}`);
+    }
+    return commit;
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+}
+
 export async function checkoutRuntimeRepositories(
   session: DaytonaSandboxSession,
   versionId: string,
@@ -793,7 +873,7 @@ async function checkoutRuntimeRepositoriesWithRefs(
         `${workspaceRoot}/.responder/archives/${owner}-${name}-${snapshot.sha}.tar.gz`;
 
       await uploadArchive(session, localArchivePath, archivePath);
-      const workspaceBaseSha = await runSandboxCommand(
+      const extractOutput = await runSandboxCommand(
         session,
         [
           "set -eu",
@@ -814,6 +894,8 @@ async function checkoutRuntimeRepositoriesWithRefs(
         ].join("\n"),
         `extract ${repository.fullName}`,
       );
+      // The commit is the last line; tar or git may print warnings before it.
+      const workspaceBaseSha = extractOutput.split("\n").at(-1)?.trim() ?? "";
       if (!/^[a-f0-9]{40}$/i.test(workspaceBaseSha)) {
         throw new Error(
           `Repository sandbox returned an invalid baseline for ${repository.fullName}`,

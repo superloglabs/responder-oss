@@ -5,7 +5,10 @@ import {
   automationRunTimeline,
   formatDuration,
   lastAgentMessage,
+  subagentSummary,
+  subagentWorking,
   toolGroupSummary,
+  type AutomationSubagentStep,
 } from "./automation-run-timeline";
 import type { AutomationRunDetail, AutomationRunEvent } from "./automations-api";
 
@@ -99,6 +102,40 @@ describe("automationRunTimeline", () => {
       detail: "11s · 1 command run",
       title: "Ran 1 tool",
     });
+  });
+
+  it("nests sub-agent work under the tool call that started it", () => {
+    const agent = (id: string, target: string, finished: boolean, subagentId?: string) => ({
+      action: "other", kind: "tool", status: "succeeded", subagent: { finished, id, type: "general-purpose" }, target, ...(subagentId ? { subagentId } : {}),
+    });
+    const entries = automationRunTimeline(run([
+      { data: { items: [
+        { action: "read", kind: "tool", status: "succeeded", target: "src/app.ts" },
+        agent("agent-1", "Inventory open PRs", true),
+        { action: "run", kind: "tool", status: "failed", subagentId: "agent-1", target: "gh pr list" },
+        agent("agent-2", "PR batch 1-5", false, "agent-1"),
+        { kind: "message", text: "I started a sub-agent." },
+        { action: "read", kind: "tool", status: "succeeded", subagentId: "agent-2", target: "README.md" },
+        { kind: "message", subagentId: "agent-1", text: "Three pull requests are open." },
+        { kind: "message", subagentId: "missing", text: "An orphan stays in the main flow." },
+      ], truncated: false }, type: "transcript" },
+    ]));
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["trigger", "activity", "message", "message"]);
+    const activity = entries[1] as Extract<typeof entries[number], { kind: "activity" }>;
+    expect(activity.steps).toMatchObject([
+      { kind: "tool", target: "src/app.ts" },
+      { kind: "subagent", steps: [
+        { kind: "tool", target: "gh pr list" },
+        { kind: "subagent", steps: [{ kind: "tool", target: "README.md" }], tool: { target: "PR batch 1-5" } },
+        { kind: "message", text: "Three pull requests are open." },
+      ], tool: { target: "Inventory open PRs" } },
+    ]);
+    expect(activityLabel(activity)).toEqual({ detail: "1 sub-agent started · 1 file read", title: "Ran 1 tool" });
+    const subagent = activity.steps[1] as AutomationSubagentStep;
+    expect(subagentSummary(subagent)).toBe("1 tool · 1 sub-agent · 1 failed");
+    expect(subagentWorking(activity.steps)).toBe(true);
+    expect(lastAgentMessage(entries)).toBe("An orphan stays in the main flow.");
   });
 });
 

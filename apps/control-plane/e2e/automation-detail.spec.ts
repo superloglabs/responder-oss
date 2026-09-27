@@ -231,3 +231,124 @@ test("retries run history after a failed load", async ({ page }) => {
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("Showing 1–10 of 12 runs")).toBeVisible();
 });
+
+test("runs a scheduled automation from Settings and opens the run", async ({ page }, testInfo) => {
+  const scheduled = {
+    ...automation,
+    configuration: {
+      ...automation.configuration,
+      triggers: [{ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }],
+    },
+    name: "Morning error digest",
+  };
+  const started: string[] = [];
+  await page.route(`**/api/automations/${automationId}`, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({ json: { automation: scheduled } });
+  });
+  await page.route(`**/api/automations/${automationId}/runs`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    started.push(route.request().url());
+    await route.fulfill({ status: 202, json: { duplicate: false, jobId: "job", runId: "run-13" } });
+  });
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}`);
+  await expect(page.getByRole("heading", { name: "Morning error digest" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
+  await page.screenshot({ path: testInfo.outputPath("automation-detail-scheduled.png") });
+
+  await page.getByRole("button", { name: "Run now" }).click();
+
+  await expect.poll(() => started.length).toBe(1);
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/runs/run-13$`));
+});
+
+test("keeps Run now in the history of an event-triggered automation", async ({ page }) => {
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}`);
+  await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run now" })).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "Run history" }).click();
+  await expect(page.getByRole("button", { name: "Run now" })).toBeVisible();
+});
+
+test("adds a Slack notification to a scheduled automation", async ({ page }, testInfo) => {
+  const slackAccountId = "88888888-8888-4888-8888-888888888888";
+  const scheduled = {
+    ...automation,
+    configuration: {
+      ...automation.configuration,
+      notifications: [],
+      triggers: [{ frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }],
+    },
+    name: "Weekly digest",
+  };
+  const saves: Array<{ configuration: { notifications: unknown[] } }> = [];
+  await page.route(`**/api/automations/${automationId}`, async (route) => {
+    if (route.request().method() === "PUT") {
+      saves.push(route.request().postDataJSON());
+      return route.fulfill({ json: { updated: true } });
+    }
+    return route.fulfill({ json: { automation: scheduled } });
+  });
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: [
+      { id: slackAccountId, provider: "slack", displayName: "Acme Slack" },
+      { id: datadogAccountId, provider: "datadog", displayName: "Datadog" },
+      { id: "github", provider: "github", displayName: "superloglabs" },
+    ],
+    credentials: [],
+    repositories: [{ id: repositoryIds[0], fullName: "superloglabs/responder" }, { id: repositoryIds[1], fullName: "superloglabs/responder-oss" }],
+    resources: [
+      { id: "ops", integrationAccountId: slackAccountId, kind: "slack_channel", externalId: "C100", displayName: "ops" },
+      { id: "eng", integrationAccountId: slackAccountId, kind: "slack_channel", externalId: "C200", displayName: "eng" },
+      // Enough channels that the list scrolls.
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: `team-${index}`,
+        integrationAccountId: slackAccountId,
+        kind: "slack_channel",
+        externalId: `C3${String(index).padStart(2, "0")}`,
+        displayName: `team-${index}`,
+      })),
+    ],
+    secrets: [],
+  } }));
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}`);
+  await expect(page.getByRole("heading", { name: "Weekly digest" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Add notification" }).click();
+  await page.getByRole("menuitem", { name: "Post to Slack" }).click();
+  // The same searchable, scrolling channel picker as the Slack trigger.
+  const picker = page.getByRole("dialog", { name: "Choose channel" });
+  await expect(picker.getByRole("searchbox", { name: "Search channels" }).or(picker.getByRole("textbox", { name: "Search channels" }))).toBeFocused();
+  const list = picker.locator(".automationResourcePicker__list");
+  expect(await list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("automation-notifications-picker.png") });
+  await page.keyboard.type("ops");
+  await expect(picker.getByRole("radio")).toHaveCount(1);
+  await picker.getByText("#ops").click();
+
+  await expect(picker).toHaveCount(0);
+  await expect.poll(() => saves.at(-1)?.configuration.notifications).toEqual([
+    { channelId: "C100", integrationAccountId: slackAccountId, kind: "slack" },
+  ]);
+  const channel = page.getByRole("button", { name: "Channel" });
+  await expect(channel).toContainText("#ops");
+  await page.getByRole("heading", { name: "Notifications" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("automation-notifications.png") });
+
+  await channel.click();
+  await page.getByRole("dialog", { name: "Choose channel" }).getByText("#eng").click();
+  await expect.poll(() => saves.at(-1)?.configuration.notifications).toEqual([
+    { channelId: "C200", integrationAccountId: slackAccountId, kind: "slack" },
+  ]);
+});
+
+test("hides notifications for event-triggered automations", async ({ page }) => {
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}`);
+  await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Notifications" })).toHaveCount(0);
+});

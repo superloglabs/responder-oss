@@ -20,8 +20,11 @@ import {
   automationRunTimeline,
   formatDuration,
   lastAgentMessage,
+  subagentSummary,
+  subagentWorking,
   toolActionLabels,
   type AutomationRunEntry,
+  type AutomationSubagentStep,
 } from "../automation-run-timeline";
 import {
   cancelAutomationRun,
@@ -125,12 +128,46 @@ function ToolRow({ tool }: { tool: AutomationTranscriptTool }) {
   </li>;
 }
 
+function Steps({ active, steps }: { active: boolean; steps: AutomationSubagentStep["steps"] }) {
+  return steps.map((step, index) => {
+    switch (step.kind) {
+      case "tool":
+        return <ToolRow key={index} tool={step} />;
+      case "subagent":
+        return <SubagentRow active={active} key={index} step={step} />;
+      case "message":
+        return <li className="automationRun__subagentMessage" key={index}><Markdown components={markdownComponents}>{step.text}</Markdown></li>;
+      case "reasoning":
+        return <li className="automationRun__reasoning" key={index}><Markdown components={markdownComponents}>{step.text}</Markdown></li>;
+    }
+  });
+}
+
+// A sub-agent and the work it did, folded under the call that started it.
+function SubagentRow({ active, step }: { active: boolean; step: AutomationSubagentStep }) {
+  const [open, setOpen] = useState(false);
+  const working = active && !step.tool.subagent.finished;
+  const summary = subagentSummary(step);
+  return <li className="automationRun__subagent">
+    <button aria-expanded={open} className="automationRun__subagentToggle" disabled={step.steps.length === 0} onClick={() => setOpen(!open)} type="button">
+      {open ? <CaretDownIcon size={14} /> : <CaretRightIcon size={14} />}
+      <span className="automationRun__toolAction">Agent</span>
+      <span className="automationRun__subagentName" title={step.tool.target}>{step.tool.target}</span>
+      {step.tool.subagent.type ? <small className="automationRun__subagentType">{step.tool.subagent.type}</small> : null}
+      {working ? <small className="automationRun__shimmer">Working</small> : summary ? <small>{summary}</small> : null}
+      {step.tool.status === "failed" ? <span className="automationRun__toolResult">Failed</span> : null}
+    </button>
+    {open ? <ul className="automationRun__toolList"><Steps active={active} steps={step.steps} /></ul> : null}
+  </li>;
+}
+
 // Reasoning and tool calls between two messages. While the agent is still
 // working on it, it stays open under a shimmering "Thinking" label; once the
-// next message arrives it folds into "Thought for 12s".
-function ActivityGroup({ entry, live }: { entry: Extract<AutomationRunEntry, { kind: "activity" }>; live: boolean }) {
+// next message arrives it folds into "Thought for 12s". It also stays open
+// while a sub-agent it started is working.
+function ActivityGroup({ active, entry, live }: { active: boolean; entry: Extract<AutomationRunEntry, { kind: "activity" }>; live: boolean }) {
   const [chosen, setChosen] = useState<boolean | null>(null);
-  const open = chosen ?? live;
+  const open = chosen ?? (live || (active && subagentWorking(entry.steps)));
   const label = activityLabel(entry);
   return <div className="automationRun__tools">
     <button aria-expanded={open} className="automationRun__toolsToggle" onClick={() => setChosen(!open)} type="button">
@@ -138,11 +175,7 @@ function ActivityGroup({ entry, live }: { entry: Extract<AutomationRunEntry, { k
       <span className={live ? "automationRun__shimmer" : undefined}>{live ? "Thinking" : label.title}</span>
       {label.detail ? <small>{label.detail}</small> : null}
     </button>
-    {open ? <ul className="automationRun__toolList">
-      {entry.steps.map((step, index) => step.kind === "tool"
-        ? <ToolRow key={index} tool={step} />
-        : <li className="automationRun__reasoning" key={index}><Markdown components={markdownComponents}>{step.text}</Markdown></li>)}
-    </ul> : null}
+    {open ? <ul className="automationRun__toolList"><Steps active={active} steps={entry.steps} /></ul> : null}
   </div>;
 }
 
@@ -233,7 +266,7 @@ function Entry({ animate, entry, live, run }: { animate: boolean; entry: Automat
     case "message":
       return <AgentMessage animate={animate} text={entry.text} />;
     case "activity":
-      return <ActivityGroup entry={entry} live={live} />;
+      return <ActivityGroup active={isActive(run.status)} entry={entry} live={live} />;
     case "pullRequest":
       return <PullRequestCard entry={entry} />;
     case "notice":

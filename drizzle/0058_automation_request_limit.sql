@@ -1,0 +1,2 @@
+ALTER TABLE "automation_versions" DROP CONSTRAINT "automation_versions_model_request_check";--> statement-breakpoint
+ALTER TABLE "automation_versions" ADD CONSTRAINT "automation_versions_model_request_check" CHECK ("automation_versions"."max_model_requests" between 1 and 1000);

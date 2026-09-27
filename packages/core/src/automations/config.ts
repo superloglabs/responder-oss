@@ -53,12 +53,21 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+// Where a scheduled automation reports each finished run. Slack only for now.
+export const automationNotificationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    channelId: externalResourceIdSchema,
+    integrationAccountId: integrationAccountIdSchema,
+    kind: z.literal("slack"),
+  }),
+]);
+
 export const automationConfigurationSchema = z
   .object({
     contextAccountIds: z.array(z.uuid()).max(50).default([])
       .refine(uniqueIds, "Context account IDs must be unique"),
     harness: automationHarnessSchema,
-    maxModelRequests: z.number().int().min(1).max(128),
+    maxModelRequests: z.number().int().min(1).max(1_000),
     maxOutputTokensPerRequest: z.number().int().min(256).max(100_000),
     maxRuntimeSeconds: z.number().int().min(60).max(3_600),
     model: z
@@ -68,6 +77,12 @@ export const automationConfigurationSchema = z
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u),
     modelCredentialId: z.uuid().nullable().default(null),
     modelProvider: automationModelProviderSchema,
+    notifications: z.array(automationNotificationSchema).max(10).default([])
+      .refine(
+        (notifications) => uniqueIds(notifications.map((notification) =>
+          `${notification.integrationAccountId}:${notification.channelId}`)),
+        "Each notification needs a different channel",
+      ),
     prompt: z.string().trim().min(1).max(50_000),
     repositoryIds: z.array(z.uuid()).min(1).max(10)
       .refine(uniqueIds, "Repository IDs must be unique"),
@@ -85,6 +100,17 @@ export const automationConfigurationSchema = z
         code: "custom",
         message: configuration.harness === "claude_agent_sdk" ? "Claude Agent SDK requires an Anthropic model" : "The selected harness does not support this model provider",
         path: ["modelProvider"],
+      });
+    }
+    // Event-triggered runs answer where their event came from.
+    if (
+      configuration.notifications.length > 0 &&
+      !configuration.triggers.some((trigger) => trigger.kind === "schedule")
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Notifications are only available for scheduled automations",
+        path: ["notifications"],
       });
     }
   });
@@ -107,4 +133,5 @@ export type AutomationInput = z.infer<typeof automationInputSchema>;
 export type AutomationModelProvider = z.infer<
   typeof automationModelProviderSchema
 >;
+export type AutomationNotification = z.infer<typeof automationNotificationSchema>;
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;

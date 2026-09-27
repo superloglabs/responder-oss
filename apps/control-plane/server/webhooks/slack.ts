@@ -4,7 +4,10 @@ import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents.js";
-import { findAutomationsForSlackEvent } from "../../../../packages/core/src/db/automations.js";
+import {
+  findAutomationsForSlackEvent,
+  findSlackThreadAutomationRun,
+} from "../../../../packages/core/src/db/automations.js";
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
 import {
   getInvestigationForSlackAction,
@@ -44,7 +47,10 @@ import {
   queueInvestigation,
   queueSlackThreadInvestigation,
 } from "../investigations/queue.js";
-import { queueAutomationRun } from "../automations/queue.js";
+import {
+  queueAutomationRun,
+  queueAutomationRunReply,
+} from "../automations/queue.js";
 
 const slackUrlVerificationSchema = z.object({
   type: z.literal("url_verification"),
@@ -57,6 +63,13 @@ const slackMessageSchema = z.object({
   ts: z.string().min(1),
   thread_ts: z.string().optional(),
   user: z.string().optional(),
+  user_profile: z
+    .object({
+      display_name: z.string().optional(),
+      real_name: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
   app_id: z.string().optional(),
   bot_id: z.string().optional(),
   username: z.string().optional(),
@@ -887,25 +900,64 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     teamId: callback.data.team_id,
     userId: event.user,
   });
+  // A person replying in a thread that an automation is working in continues
+  // that run. Alerts from other apps in the thread still start new runs.
+  const reply = event.thread_ts && event.user && !event.bot_id && !event.app_id && !event.bot_profile
+    ? {
+        authorId: event.user,
+        authorName:
+          event.user_profile?.display_name?.trim() ||
+          event.user_profile?.real_name?.trim() ||
+          `<@${event.user}>`,
+        // Slack sends a mention as both a message and an app_mention event.
+        externalEventId: `${event.channel}:${event.ts}`,
+        source: "slack" as const,
+        text: body,
+        threadTimestamp: event.thread_ts,
+      }
+    : null;
   const automationResults = await Promise.allSettled(
-    automationMatches.map((match) =>
-        queueAutomationRun({
+    automationMatches.map(async (match) => {
+      if (reply) {
+        const { threadTimestamp, ...message } = reply;
+        const run = await findSlackThreadAutomationRun({
           automationId: match.automationId,
-          trigger: {
-            attributes: {
-              channelId: event.channel,
-              teamId: callback.data.team_id,
-              threadTimestamp: event.thread_ts ?? event.ts,
-              timestamp: event.ts,
-            },
-            body,
-            externalEventId: `${callback.data.event_id}:${match.automationId}`,
-            provider: "slack",
-            sourceUrl: `https://slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`,
-            title: slackMessageTitle(body),
+          channelId: event.channel,
+          teamId: callback.data.team_id,
+          threadTimestamp,
+        });
+        // A redelivery of the message that started this run is not a reply;
+        // starting the run again finds it as a duplicate.
+        if (run && run.triggerTimestamp !== event.ts) {
+          const outcome = await queueAutomationRunReply({ message, runId: run.id });
+          console.info(JSON.stringify({
+            automationId: match.automationId,
+            event: "slack_automation_reply",
+            eventId: callback.data.event_id,
+            outcome,
+            runId: run.id,
+          }));
+          return;
+        }
+      }
+      if (!match.startsRun) return;
+      await queueAutomationRun({
+        automationId: match.automationId,
+        trigger: {
+          attributes: {
+            channelId: event.channel,
+            teamId: callback.data.team_id,
+            threadTimestamp: event.thread_ts ?? event.ts,
+            timestamp: event.ts,
           },
-        })
-      ),
+          body,
+          externalEventId: `${callback.data.event_id}:${match.automationId}`,
+          provider: "slack",
+          sourceUrl: `https://slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`,
+          title: slackMessageTitle(body),
+        },
+      });
+    }),
   );
   if (automationResults.some((result) => result.status === "rejected")) {
     console.error(JSON.stringify({

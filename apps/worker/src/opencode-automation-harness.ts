@@ -11,6 +11,7 @@ import {
   prebuiltHarnessRoot,
   resolveAutomationWorkspacePath,
   validateAutomationContextServers,
+  validateAutomationToolServer,
   type AutomationHarnessInput,
   type AutomationHarnessResult,
   validateBrokerBaseUrl,
@@ -63,6 +64,7 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
   assertAutomationHarnessModelCompatibility("opencode", input.model);
   const brokerBaseUrl = validateBrokerBaseUrl(input.model.brokerBaseUrl);
   const contextServers = validateAutomationContextServers(input.contextServers);
+  const toolServer = validateAutomationToolServer(input.toolServer, contextServers);
   const npm = input.model.provider === "anthropic"
     ? "@ai-sdk/anthropic"
     : "@ai-sdk/openai-compatible";
@@ -70,17 +72,28 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
     $schema: "https://opencode.ai/config.json",
     autoupdate: false,
     model: `responder/${input.model.model}`,
-    mcp: Object.fromEntries(contextServers.map((server) => [
-      server.name,
-      {
-        enabled: true,
-        headers: {
-          authorization: `Bearer {env:${modelBrokerTokenEnvironmentVariable}}`,
+    mcp: {
+      ...Object.fromEntries(contextServers.map((server) => [
+        server.name,
+        {
+          enabled: true,
+          headers: {
+            authorization: `Bearer {env:${modelBrokerTokenEnvironmentVariable}}`,
+          },
+          type: "remote",
+          url: server.url,
         },
-        type: "remote",
-        url: server.url,
-      },
-    ])),
+      ])),
+      ...(toolServer
+        ? {
+            [toolServer.name]: {
+              command: [toolServer.command, ...toolServer.args],
+              enabled: true,
+              type: "local",
+            },
+          }
+        : {}),
+    },
     permission: { "*": "allow" },
     shell: shellPath,
     provider: {

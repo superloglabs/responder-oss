@@ -29,3 +29,19 @@ export function responderInvestigationUrl(input: {
   }
   return url.toString();
 }
+
+export function responderAutomationRunUrl(input: {
+  automationId: string;
+  organizationId?: string;
+  origin: string;
+  runId: string;
+}): string {
+  const url = responderUrl(input.origin);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/automations/${encodeURIComponent(input.automationId)}/runs/${encodeURIComponent(input.runId)}`;
+  url.search = "";
+  url.hash = "";
+  if (input.organizationId) {
+    url.searchParams.set("organization_id", input.organizationId);
+  }
+  return url.toString();
+}

@@ -106,6 +106,33 @@ const thinkingRun = {
   ],
 };
 
+const subagent = (id: string, target: string, extra: Record<string, unknown> = {}) =>
+  ({ action: "other", kind: "tool", status: "succeeded", subagent: { finished: true, id, type: "general-purpose" }, target, ...extra });
+
+const subagentRun = {
+  ...completedRun,
+  resultSummary: "Two pull requests are ready to merge.",
+  trigger: { ...completedRun.trigger, title: "Review open pull requests" },
+  events: [
+    { createdAt: minutesAgo(30), data: {}, id: 1, type: "run_started" },
+    { createdAt: minutesAgo(29), data: { items: [
+      { kind: "message", text: "I'll split the pull request review across two sub-agents." },
+      ...tools(["query", "list_pull_requests", { provider: "github" }]),
+      subagent("agent-1", "Review responder-oss pull requests"),
+      ...tools(["query", "get_pull_request", { provider: "github", subagentId: "agent-1" }], ["run", "gh pr checks 248", { status: "failed", subagentId: "agent-1" }]),
+      subagent("agent-2", "Check CI for PR #248", { subagentId: "agent-1" }),
+      ...tools(["query", "list_check_runs", { provider: "github", subagentId: "agent-2" }]),
+      subagent("agent-3", "Review responder pull requests"),
+      { kind: "message", subagentId: "agent-2", text: "CI passes on the latest commit of **#248**." },
+      ...tools(["read", "src/automations/transcript.ts", { subagentId: "agent-1" }], ["read", "apps/worker/src/automation-run.ts", { subagentId: "agent-3" }]),
+      { kind: "message", subagentId: "agent-1", text: "PR #248 is approved and mergeable. PR #251 needs a rebase." },
+      { kind: "message", subagentId: "agent-3", text: "PR #263 is ready to merge." },
+      { kind: "message", text: "Two pull requests are ready to merge: **#248** and **#263**. **#251** needs a rebase." },
+    ], truncated: false }, id: 2, type: "transcript" },
+    { createdAt: minutesAgo(24), data: null, id: 3, type: "run_succeeded" },
+  ],
+};
+
 async function mockApi(page: Page, overrides: { run?: Record<string, unknown> } = {}) {
   const requests: Array<{ body: unknown; path: string }> = [];
   await page.context().route("**/api/**", async (route) => {
@@ -168,6 +195,52 @@ test("shows a run as a chat transcript and sends a follow-up", async ({ page }, 
   await composer.press("Enter");
   await expect.poll(() => requests.find((request) => request.path.endsWith("/messages"))?.body).toEqual({ message: "Also cover retries." });
   await expect(composer).toHaveValue("");
+});
+
+test("nests each sub-agent's work under the call that started it", async ({ page }, testInfo) => {
+  await mockApi(page, { run: subagentRun });
+  await page.setViewportSize({ width: 1728, height: 1100 });
+  await page.goto(`/automations/${automationId}/runs/${runId}`);
+
+  const group = page.getByRole("button", { name: /Ran 1 tool/ });
+  await expect(group).toContainText("2 sub-agents started · GitHub queried");
+  await expect(page.getByText("PR #248 is approved")).toHaveCount(0);
+  await group.click();
+
+  const review = page.getByRole("button", { name: /Review responder-oss pull requests/ });
+  await expect(review).toContainText("general-purpose");
+  await expect(review).toContainText("3 tools · 1 sub-agent · 1 failed");
+  await expect(page.getByRole("button", { name: /Review responder pull requests/ })).toContainText("1 tool");
+  await review.click();
+  await expect(page.getByText("PR #248 is approved and mergeable. PR #251 needs a rebase.")).toBeVisible();
+  await expect(page.getByText("gh pr checks 248")).toBeVisible();
+  await expect(page.getByText("apps/worker/src/automation-run.ts")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Check CI for PR #248/ }).click();
+  await expect(page.getByText("CI passes on the latest commit of")).toBeVisible();
+  // The main agent's messages stay outside the sub-agents.
+  const transcript = page.getByRole("region", { name: "Run transcript" });
+  await expect(transcript.locator(":scope > .automationRun__message")).toHaveText([
+    "I'll split the pull request review across two sub-agents.",
+    "Two pull requests are ready to merge: #248 and #263. #251 needs a rebase.",
+  ]);
+  await page.screenshot({ path: testInfo.outputPath("automation-run-subagents.png"), fullPage: true });
+});
+
+test("keeps a working sub-agent open while the run is active", async ({ page }) => {
+  await mockApi(page, { run: { ...thinkingRun, id: runId, events: [
+    ...thinkingRun.events,
+    { createdAt: minutesAgo(0), data: { items: [
+      subagent("agent-1", "Reproduce the guest checkout", { subagent: { finished: false, id: "agent-1", type: "Explore" } }),
+      { kind: "message", text: "A sub-agent is reproducing it while I read the handler." },
+      ...tools(["read", "src/checkout/session.ts", { subagentId: "agent-1" }]),
+    ], truncated: false }, id: 15, type: "transcript" },
+  ] } });
+  await page.goto(`/automations/${automationId}/runs/${runId}`);
+
+  const group = page.getByRole("button", { name: /Started 1 sub-agent/ });
+  await expect(group).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: /Reproduce the guest checkout/ })).toContainText("Working");
 });
 
 test("stops an active run and holds follow-ups until it finishes", async ({ page }, testInfo) => {

@@ -480,5 +480,41 @@ describe("automation control-plane routes", () => {
         properties: expect.objectContaining({ shared_template_slug: share.slug, trigger_kinds: "schedule" }),
       }));
     });
+
+    it("explains a duplicate automation name instead of failing", async () => {
+      // Drizzle reports the Postgres violation as the cause of its own error.
+      mocks.createAutomation.mockRejectedValue(new Error("Failed query", {
+        cause: Object.assign(new Error("duplicate key value violates unique constraint"), {
+          code: "23505",
+          constraint: "automations_organization_name_idx",
+        }),
+      }));
+
+      const response = await app.request("/api/automations", {
+        body: JSON.stringify({
+          configuration: {
+            harness: "codex",
+            maxModelRequests: 128,
+            maxOutputTokensPerRequest: 16_000,
+            maxRuntimeSeconds: 1_800,
+            model: "gpt-5.4",
+            modelProvider: "openai",
+            prompt: "Rate it.",
+            repositoryIds: ["41414141-4141-4141-8141-414141414141"],
+            toolPolicy: "full",
+            triggers: [{ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }],
+          },
+          name: "Triage",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        code: "automation_name_taken",
+        error: 'An automation named "Triage" already exists. Choose a different name.',
+      });
+    });
   });
 });

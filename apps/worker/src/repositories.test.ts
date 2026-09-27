@@ -10,6 +10,7 @@ import {
   checkoutRuntimeRepositoryAtRef,
   checkoutRuntimeRepositories,
   checkoutRuntimeRepositoriesAtRefs,
+  importRuntimeRepositoryCommit,
   refreshRuntimeRepositories,
   repositoryWorkspacePath,
 } from "./repositories.js";
@@ -73,6 +74,69 @@ describe("Daytona repository checkout", () => {
       `https://api.github.com/repos/example-org/example-repo/tarball/${sha}`,
       expect.anything(),
     );
+  });
+
+  it("reads the workspace baseline after warnings from extracting the archive", async () => {
+    const session = fakeSession();
+    vi.mocked(session.execCommand).mockResolvedValue([
+      "Chunk ID: abc123",
+      "Process exited with code 0",
+      "Output:",
+      "tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'",
+      sha,
+    ].join("\n"));
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ sha }))
+      .mockResolvedValueOnce(missingGitmodules())
+      .mockResolvedValueOnce(new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }));
+
+    await expect(checkoutRuntimeRepositories(session, "version-id", {
+      createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+      fetch: fetchMock,
+      getRepositories: vi.fn().mockResolvedValue([{
+        defaultBranch: "main",
+        fullName: "example-org/example-repo",
+        installationId: 123,
+        private: true,
+      }]),
+      uploadArchive: uploadArchive(),
+    })).resolves.toEqual([expect.objectContaining({ workspaceBaseSha: sha })]);
+  });
+
+  it("imports another commit's files as a local ref without the token", async () => {
+    const session = fakeSession();
+    const upload = uploadArchive();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(missingGitmodules())
+      .mockResolvedValueOnce(new Response(new Uint8Array([31, 139, 8, 0]), { status: 200 }));
+    const otherSha = "b".repeat(40);
+
+    await expect(importRuntimeRepositoryCommit(session, {
+      checkout: {
+        branch: "main",
+        path: "/home/daytona/workspace/repositories/example-org/example-repo",
+        repository: "example-org/example-repo",
+        sha,
+        workspaceBaseSha: sha,
+      },
+      localRef: "refs/remotes/github/main",
+      ref: "main",
+      repository: { defaultBranch: "main", fullName: "example-org/example-repo", installationId: 123, private: true },
+      sha: otherSha,
+      token: "github-secret",
+    }, { fetch: fetchMock, uploadArchive: upload })).resolves.toBe(sha);
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `https://api.github.com/repos/example-org/example-repo/tarball/${otherSha}`,
+      expect.anything(),
+    );
+    const command = vi.mocked(session.execCommand).mock.calls[0]![0].cmd;
+    expect(command).toContain("--work-tree=\"$files\" add -A");
+    expect(command).toContain("update-ref 'refs/remotes/github/main' \"$commit\"");
+    expect(JSON.stringify(vi.mocked(session.execCommand).mock.calls)).not.toContain("github-secret");
+    expect(JSON.stringify(upload.mock.calls)).not.toContain("github-secret");
   });
 
   it("downloads selected repositories without placing the GitHub token in the sandbox", async () => {

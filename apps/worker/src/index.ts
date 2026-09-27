@@ -85,7 +85,10 @@ import { processRemediationJob } from "./remediation-job.js";
 import { processPullRequestReviewJob } from "./pull-request-review-job.js";
 import { loadResponderSecrets } from "@responder/core/secrets";
 import { runInitialTriage } from "./initial-triage.js";
-import { processAutomationRun } from "./automation-run.js";
+import {
+  defaultAutomationRunDependencies,
+  processAutomationRun,
+} from "./automation-run.js";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 
@@ -416,9 +419,20 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
 
   return { marker: payload.marker, processedAt };
 });
+const automationRunDependencies = {
+  ...defaultAutomationRunDependencies,
+  requeueRun: async (runId: string) => {
+    const queued = await boss.send(automationRunQueue, {
+      kind: "automation_run",
+      queuedAt: new Date().toISOString(),
+      runId,
+    });
+    if (!queued) throw new Error("Automation run job was not created");
+  },
+};
 const automationRunHandler = async ([job]: Array<{ data: unknown; id: string }>) => {
   const payload = automationRunJobSchema.parse(job.data);
-  return processAutomationRun(job.id, payload, process.env);
+  return processAutomationRun(job.id, payload, process.env, automationRunDependencies);
 };
 await migrateLegacyAutomationRunJobs(boss);
 await boss.work(automationRunQueue, { localConcurrency: 2 }, automationRunHandler);

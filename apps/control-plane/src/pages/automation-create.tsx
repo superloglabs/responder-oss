@@ -24,6 +24,7 @@ import { applyAutomationTemplate, automationTemplateMissingFields, findAutomatio
 import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
+import { AutomationNotificationEditor } from "../components/automation-notification-editor";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
 import { availableAutomationConfiguration, isTriggerComplete, moveItem } from "../automation-configuration";
 import { AutomationRepositoryList } from "../components/automation-repository-list";
@@ -37,12 +38,13 @@ import { useDocumentTitle } from "../use-document-title";
 const defaultConfiguration: AutomationConfiguration = {
   contextAccountIds: [],
   harness: "codex",
-  maxModelRequests: 24,
+  maxModelRequests: 500,
   maxOutputTokensPerRequest: 16_000,
   maxRuntimeSeconds: 1_800,
   model: "gpt-5.4",
   modelCredentialId: null,
   modelProvider: "openai",
+  notifications: [],
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
   repositoryIds: [],
   toolPolicy: "full",
@@ -257,6 +259,9 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   }
 
   const selectedTriggerAccountIds = triggerAccountIds(configuration.triggers);
+  // Scheduled automations can run now from any tab; event-triggered ones run
+  // from their history.
+  const scheduled = configuration.triggers.some((trigger) => trigger.kind === "schedule");
   const contextAccounts = options?.accounts.filter((account) =>
     !selectedTriggerAccountIds.includes(account.id) &&
     ["custom_mcp", "datadog", "sentry", "slack"].includes(account.provider)
@@ -321,8 +326,10 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     setStartingRun(true);
     setError(null);
     try {
-      await runAutomation(automationId);
-      setRunsRefreshKey((value) => value + 1);
+      const { runId } = await runAutomation(automationId);
+      // A scheduled automation can be started from Settings, so open the run.
+      if (scheduled) navigate(`/automations/${automationId}/runs/${runId}`);
+      else setRunsRefreshKey((value) => value + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to start automation");
     } finally {
@@ -362,7 +369,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             {automationId ? <Switch checked={enabled} className="automationCreate__status" label="Active" onCheckedChange={updateEnabled} /> : null}
             {!automationId
               ? <button className="automationCreate__save" disabled={saving || !options} form="automation-settings" type="submit"><FloppyDiskIcon size={14} />{saving ? "Saving…" : "Save"}</button>
-              : activeTab === "history" ? <button className="automationCreate__secondary" disabled={startingRun || !enabled} onClick={() => void startRun()} title={enabled ? undefined : "Turn the automation on to run it"} type="button"><PlayIcon size={14} />{startingRun ? "Starting…" : "Run now"}</button> : null}
+              : activeTab === "history" || scheduled ? <button className="automationCreate__secondary" disabled={startingRun || !enabled} onClick={() => void startRun()} title={enabled ? undefined : "Turn the automation on to run it"} type="button"><PlayIcon size={14} />{startingRun ? "Starting…" : "Run now"}</button> : null}
             {automationId ? <button className="automationCreate__secondary" onClick={() => setSharing(true)} title="Share this automation as a template" type="button"><ShareNetworkIcon size={14} />Share</button> : null}
             {automationId ? <button className="automationCreate__save" disabled={!enabled || saveStatus === "saving"} onClick={() => navigate(`/automations/${automationId}/test`)} title={enabled ? "Chat with the agent to test this automation" : "Turn the automation on to test it"} type="button"><ChatCircleIcon size={14} />Test</button> : null}
           </div>
@@ -403,7 +410,14 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             }} onChange={(triggers) => {
               setError(null);
               const accountIds = triggerAccountIds(triggers);
-              updateConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => !accountIds.includes(id)), triggers }));
+              // Only scheduled automations post notifications.
+              const stillScheduled = triggers.some((trigger) => trigger.kind === "schedule");
+              updateConfiguration((current) => ({
+                ...current,
+                contextAccountIds: current.contextAccountIds.filter((id) => !accountIds.includes(id)),
+                notifications: stillScheduled ? current.notifications : [],
+                triggers,
+              }));
             }} />
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-instructions">
@@ -437,6 +451,11 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
                 onConnect={(provider) => void connectConnector(provider)} />
             </div>
           </section>
+          {scheduled ? <AutomationNotificationEditor notifications={configuration.notifications} onChange={(notifications) => updateConfiguration((current) => ({ ...current, notifications }))} onRefresh={async () => {
+            const response = await fetch("/api/agents/options/refresh/slack", { method: "POST" });
+            if (!response.ok) throw new Error("Could not refresh Slack channels");
+            setOptions(await fetchAutomationOptions());
+          }} options={options} /> : null}
         </form>
       </div>
       {automationId && sharing ? <AutomationShareDialog automationId={automationId} onClose={() => setSharing(false)} /> : null}

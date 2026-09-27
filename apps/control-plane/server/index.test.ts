@@ -1610,7 +1610,7 @@ describe("control-plane API", () => {
   ])("does not start automations for $name", async ({ event, reason }) => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     slackWebhookMocks.findAutomationsForSlackEvent.mockResolvedValueOnce([
-      { automationId: "31313131-3131-4313-8313-313131313131" },
+      { automationId: "31313131-3131-4313-8313-313131313131", startsRun: true },
     ]);
 
     const response = await postSignedSlackEvent(event);
@@ -1629,7 +1629,7 @@ describe("control-plane API", () => {
   it("starts automations for teammate messages that are not alerts", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     slackWebhookMocks.findAutomationsForSlackEvent.mockResolvedValueOnce([
-      { automationId: "31313131-3131-4313-8313-313131313131" },
+      { automationId: "31313131-3131-4313-8313-313131313131", startsRun: true },
     ]);
     vi.mocked(queueAutomationRun).mockResolvedValueOnce({
       duplicate: false,

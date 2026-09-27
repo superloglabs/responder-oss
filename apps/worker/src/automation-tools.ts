@@ -1,0 +1,252 @@
+import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { z } from "zod";
+import {
+  automationToolServerName,
+  automationWorkspaceRoot,
+  postNotificationToolName,
+  type AutomationToolServer,
+} from "./automation-harness.js";
+import { watchHarnessEvents } from "./automation-live-transcript.js";
+import { githubReadToolDefinitions } from "./github-read-tools.js";
+
+// Tools that need Responder's credentials, such as opening a pull request,
+// run in the worker. A small MCP server in the sandbox forwards each call: it
+// appends the request to a file and waits for the worker to write the result.
+// The worker polls the requests file like the harness events file.
+
+const toolsRoot = `${automationWorkspaceRoot}/.responder/tools`;
+const serverPath = `${toolsRoot}/server.mjs`;
+const requestsPath = `${toolsRoot}/requests.jsonl`;
+const responsesDirectory = `${toolsRoot}/responses`;
+
+// The sandbox server gives up before a harness's own tool timeout, and asks
+// the agent to call again; a repeated call returns the earlier result.
+export const automationToolServerWaitMs = 100_000;
+const requestsMaxBytes = 1_000_000;
+
+export const automationToolServer: AutomationToolServer = {
+  args: [serverPath],
+  command: "node",
+  name: automationToolServerName,
+};
+
+export interface AutomationToolResult {
+  content: Array<{ text: string; type: "text" }>;
+  isError?: true;
+}
+
+export const openPullRequestToolName = "open_pull_request";
+
+const repositoryToolDefinitions = [
+  {
+    annotations: {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+    description:
+      "Open a GitHub pull request with the current changes in a checked-out repository's working tree, against the branch it was checked out from. Make and test the changes first. Returns the pull request URL so it can be linked in messages. Calling again with the same repository and title returns the same pull request.",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        body: { maxLength: 12_000, minLength: 1, type: "string" },
+        repository: {
+          description: "The checked-out repository, as owner/name.",
+          maxLength: 255,
+          minLength: 1,
+          type: "string",
+        },
+        title: { maxLength: 240, minLength: 1, type: "string" },
+      },
+      required: ["repository", "title", "body"],
+      type: "object",
+    },
+    name: openPullRequestToolName,
+  },
+  ...githubReadToolDefinitions,
+];
+
+// The Slack message limit, less room for the link to the run.
+export const maxNotificationLength = 11_000;
+
+// A run with notification channels can post to them itself, so the agent
+// knows where its results go.
+export function automationToolDefinitions(notificationChannels: string[] = []) {
+  if (notificationChannels.length === 0) return repositoryToolDefinitions;
+  return [
+    ...repositoryToolDefinitions,
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description: `Post a message to this automation's Slack notification channels (${notificationChannels.join(", ")}). People read the automation's results there, so post the complete report, not a pointer to it. Uses Markdown. Returns where the message was posted. Posting the same text again does not post it twice.`,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          text: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
+        },
+        required: ["text"],
+        type: "object",
+      },
+      name: postNotificationToolName,
+    },
+  ];
+}
+
+// Runs with the sandbox's Node.js, so it uses only built-in modules.
+export function automationToolServerSource(
+  root = toolsRoot,
+  waitMs = automationToolServerWaitMs,
+  tools = automationToolDefinitions(),
+): string {
+  return `import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline";
+
+const requestsPath = ${JSON.stringify(`${root}/requests.jsonl`)};
+const responsesDirectory = ${JSON.stringify(`${root}/responses`)};
+const waitMs = ${waitMs};
+const tools = ${JSON.stringify(tools)};
+
+mkdirSync(responsesDirectory, { recursive: true });
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function call(name, args) {
+  const id = randomUUID();
+  appendFileSync(requestsPath, JSON.stringify({ arguments: args ?? {}, id, name }) + "\\n");
+  const responsePath = responsesDirectory + "/" + id + ".json";
+  for (const deadline = Date.now() + waitMs; Date.now() < deadline; await sleep(500)) {
+    if (!existsSync(responsePath)) continue;
+    try {
+      return JSON.parse(readFileSync(responsePath, "utf8"));
+    } catch {
+      // The worker is still writing the response.
+    }
+  }
+  return {
+    content: [{ type: "text", text: "Responder is still working on this request. Call the tool again with the same arguments to get its result." }],
+    isError: true,
+  };
+}
+
+createInterface({ input: process.stdin }).on("line", async (line) => {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (message.id === undefined || message.id === null) return;
+  const reply = (result) => send({ id: message.id, jsonrpc: "2.0", result });
+  if (message.method === "initialize") {
+    reply({
+      capabilities: { tools: {} },
+      protocolVersion: message.params?.protocolVersion ?? "2025-03-26",
+      serverInfo: { name: "responder-github", version: "1" },
+    });
+  } else if (message.method === "tools/list") {
+    reply({ tools });
+  } else if (message.method === "tools/call") {
+    reply(await call(message.params?.name, message.params?.arguments));
+  } else if (message.method === "ping") {
+    reply({});
+  } else {
+    send({ error: { code: -32601, message: "Method not found" }, id: message.id, jsonrpc: "2.0" });
+  }
+});
+`;
+}
+
+// Writes the server and clears requests left by an earlier turn.
+export async function installAutomationToolServer(
+  session: Pick<DaytonaSandboxSession, "materializeEntry">,
+  notificationChannels: string[] = [],
+): Promise<void> {
+  await session.materializeEntry({
+    entry: {
+      type: "file",
+      content: automationToolServerSource(
+        toolsRoot,
+        automationToolServerWaitMs,
+        automationToolDefinitions(notificationChannels),
+      ),
+    },
+    path: serverPath,
+  });
+  await session.materializeEntry({
+    entry: { type: "file", content: "" },
+    path: requestsPath,
+  });
+}
+
+const requestSchema = z.object({
+  arguments: z.unknown(),
+  id: z.string().regex(/^[0-9a-f-]{36}$/u),
+  name: z.string().max(100),
+});
+
+export type AutomationToolRequest = Omit<z.infer<typeof requestSchema>, "id">;
+
+// Answers tool calls while the harness runs. Requests are handled one at a
+// time, in order.
+export function serveAutomationTools(input: {
+  handle(request: AutomationToolRequest): Promise<AutomationToolResult>;
+  intervalMs?: number;
+  onError(error: unknown): void;
+  session: Pick<DaytonaSandboxSession, "materializeEntry" | "readFile">;
+}): { stop(): Promise<void> } {
+  // The requests file only grows, so each read handles the lines after the
+  // ones already seen.
+  let handledLines = 0;
+  let queue = Promise.resolve();
+
+  const respond = async (id: string, request: AutomationToolRequest) => {
+    const result = await input.handle(request).catch((error: unknown) => {
+      input.onError(error);
+      return {
+        content: [{ text: "The tool failed unexpectedly.", type: "text" as const }],
+        isError: true as const,
+      };
+    });
+    await input.session.materializeEntry({
+      entry: { type: "file", content: JSON.stringify(result) },
+      path: `${responsesDirectory}/${id}.json`,
+    });
+  };
+
+  const watcher = watchHarnessEvents({
+    ...(input.intervalMs === undefined ? {} : { intervalMs: input.intervalMs }),
+    onEvents: (requests) => {
+      // The server may still be appending the last line.
+      const lines = requests.split("\n").slice(0, -1);
+      for (const line of lines.slice(handledLines)) {
+        handledLines += 1;
+        if (!line.trim()) continue;
+        let parsed: z.infer<typeof requestSchema>;
+        try {
+          parsed = requestSchema.parse(JSON.parse(line));
+        } catch (error) {
+          input.onError(error);
+          continue;
+        }
+        const { id, ...request } = parsed;
+        queue = queue.then(() => respond(id, request)).catch(input.onError);
+      }
+    },
+    read: async () => new TextDecoder().decode(
+      await input.session.readFile({ maxBytes: requestsMaxBytes, path: requestsPath }),
+    ),
+  });
+
+  return {
+    async stop() {
+      await watcher.stop();
+      await queue;
+    },
+  };
+}

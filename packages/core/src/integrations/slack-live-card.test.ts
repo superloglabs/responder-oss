@@ -18,6 +18,7 @@ import {
   investigationIdFromFeedbackBlockId,
   slackCardFailureMetricEvent,
   slackErrorLogFields,
+  slackAutomationRunCard,
   slackInvestigationCard,
   updateInvestigationSlackProgress,
 } from "./slack-live-card.js";
@@ -150,6 +151,99 @@ describe("Slack live investigation card", () => {
                 url: `https://responder.example/agents/${context.agentId}/investigations/${context.investigationId}`,
               },
             ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("renders an automation run's transcript as plan tasks with a run link", () => {
+    vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    const organizationId = "24242424-2424-4424-8424-242424242424";
+    const runId = "21212121-2121-4121-8121-212121212121";
+
+    const message = slackAutomationRunCard({
+      automationId,
+      items: [
+        { kind: "reasoning", text: "Thinking about the alert." },
+        { action: "query", kind: "tool", provider: "sentry", status: "succeeded", target: "search_events" },
+        { action: "run", kind: "tool", status: "failed", target: "pnpm test" },
+        { kind: "message", text: "The JSON literal is malformed." },
+      ],
+      organizationId,
+      runId,
+      status: "in_progress",
+    });
+
+    expect(message.text).toBe("Automation running");
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: "plan",
+        title: "Trace",
+        tasks: [
+          expect.objectContaining({ task_id: `${runId}:1`, status: "complete", title: "Search Sentry events" }),
+          expect.objectContaining({ task_id: `${runId}:2`, status: "error", title: "Ran a command" }),
+          expect.objectContaining({ task_id: `${runId}:3`, status: "complete", title: "Assistant turn" }),
+          expect.objectContaining({
+            task_id: `${runId}:current`,
+            status: "in_progress",
+            title: "Automation running",
+            sources: [{
+              type: "url",
+              text: "View run",
+              url: `https://responder.example/automations/${automationId}/runs/${runId}?organization_id=${organizationId}`,
+            }],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("shows each sub-agent as one task without its own work", () => {
+    const runId = "21212121-2121-4121-8121-212121212121";
+    const message = slackAutomationRunCard({
+      automationId: "31313131-3131-4131-8131-313131313131",
+      items: [
+        { action: "other", kind: "tool", status: "succeeded", subagent: { finished: true, id: "agent-1", type: "general-purpose" }, target: "Inventory open PRs" },
+        { action: "run", kind: "tool", status: "succeeded", subagentId: "agent-1", target: "gh pr list" },
+        { kind: "message", subagentId: "agent-1", text: "Found 3 open pull requests." },
+        { kind: "message", text: "Three pull requests are open." },
+      ],
+      runId,
+      status: "complete",
+    });
+
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({ task_id: `${runId}:0`, status: "complete", title: "Sub-agent: Inventory open PRs" }),
+          expect.objectContaining({ task_id: `${runId}:3`, title: "Assistant turn" }),
+          expect.objectContaining({ task_id: `${runId}:current` }),
+        ],
+      }),
+    ]);
+  });
+
+  it("explains why an automation run stopped", () => {
+    const message = slackAutomationRunCard({
+      automationId: "31313131-3131-4131-8131-313131313131",
+      detail: "Automation run exceeded its configured runtime limit",
+      items: [],
+      runId: "21212121-2121-4121-8121-212121212121",
+      status: "error",
+    });
+
+    expect(message.text).toBe(
+      "Automation stopped: Automation run exceeded its configured runtime limit",
+    );
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            status: "error",
+            title: "Automation stopped",
+            output: expect.objectContaining({ type: "rich_text" }),
           }),
         ],
       }),
