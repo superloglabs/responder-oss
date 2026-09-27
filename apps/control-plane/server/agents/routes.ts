@@ -22,10 +22,8 @@ import {
 import {
   getSlackChannelConnection,
   listConnectedIntegrationAccounts,
-  listConnectedIntegrationAccountCredentials,
   markSlackChannelJoined,
   replaceRepositories,
-  replaceIntegrationResources,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
   getInvestigationDetail,
@@ -41,12 +39,12 @@ import { workspaceSecretEnvironmentVariableNameReservation } from "../../../../p
 import type { InvestigationTraceEvent } from "../../../../packages/core/src/db/schema.js";
 import {
   joinSlackChannel,
-  listSlackChannels,
   SlackChannelJoinError,
 } from "../integrations/slack.js";
 import { listGitHubRepositories } from "../integrations/github.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
+import { refreshSlackChannelResources } from "../integrations/slack-resources.js";
 import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
@@ -118,31 +116,6 @@ function tenantVisibleTraceEvents(
   events: InvestigationTraceEvent[],
 ): InvestigationTraceEvent[] {
   return events.filter((event) => !tenantHiddenTraceEventTypes.has(event.type));
-}
-
-export async function refreshSlackChannelResources(
-  organizationId: string,
-): Promise<void> {
-  const accounts = await listConnectedIntegrationAccountCredentials(
-    organizationId,
-    "slack",
-  );
-
-  await Promise.all(
-    accounts.map(async (account) => {
-      const credentials = slackCredentialsSchema.parse(
-        decryptCredentials<Record<string, unknown>>(
-          account.encryptedCredentials!,
-        ),
-      );
-      const channels = await listSlackChannels(credentials.accessToken);
-      await replaceIntegrationResources(
-        account.id,
-        "slack_channel",
-        channels,
-      );
-    }),
-  );
 }
 
 export async function refreshGitHubRepositories(

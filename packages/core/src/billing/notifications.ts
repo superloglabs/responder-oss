@@ -88,14 +88,18 @@ function triggerChannels(
   return null;
 }
 
+// Slack's chat:write.public scope lets the bot post in public channels it has
+// not joined, so notices are limited to channels where the bot is a member.
 export function watchedChannelIds(
   trigger: "slack_channel" | "slack_mention",
   configuredChannelIds: string[],
-  availableChannelIds: string[],
+  memberChannelIds: string[],
 ): string[] {
-  return trigger === "slack_mention" && configuredChannelIds.length === 0
-    ? availableChannelIds
-    : configuredChannelIds;
+  if (trigger === "slack_mention" && configuredChannelIds.length === 0) {
+    return memberChannelIds;
+  }
+  const members = new Set(memberChannelIds);
+  return configuredChannelIds.filter((channelId) => members.has(channelId));
 }
 
 async function notificationDestinations(
@@ -127,6 +131,7 @@ async function notificationDestinations(
         .select({
           accountId: integrationResources.integrationAccountId,
           channelId: integrationResources.externalId,
+          metadata: integrationResources.metadata,
         })
         .from(integrationResources)
         .where(
@@ -139,10 +144,11 @@ async function notificationDestinations(
             eq(integrationResources.available, true),
           ),
         );
-  const availableChannels = new Map<string, string[]>();
+  const memberChannels = new Map<string, string[]>();
   for (const resource of resourceRows) {
-    availableChannels.set(resource.accountId, [
-      ...(availableChannels.get(resource.accountId) ?? []),
+    if (resource.metadata.isMember !== true) continue;
+    memberChannels.set(resource.accountId, [
+      ...(memberChannels.get(resource.accountId) ?? []),
       resource.channelId,
     ]);
   }
@@ -158,7 +164,7 @@ async function notificationDestinations(
     const watchedChannels = watchedChannelIds(
       row.trigger,
       watched.channelIds,
-      availableChannels.get(account.id) ?? [],
+      memberChannels.get(account.id) ?? [],
     );
     for (const channel of watchedChannels) {
       destinations.set(`${account.id}:channel:${channel}`, {
@@ -295,13 +301,47 @@ async function deliverNotification(
   }
 }
 
+async function hasDeliveriesForPeriod(
+  organizationId: string,
+  periodKey: string,
+): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: billingNotificationDeliveries.id })
+    .from(billingNotificationDeliveries)
+    .where(
+      and(
+        eq(billingNotificationDeliveries.organizationId, organizationId),
+        eq(billingNotificationDeliveries.periodKey, periodKey),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function notifyBillingLimitReached(
   organizationId: string,
   nextResetAt: number | null,
+  options: {
+    refreshSlackChannels?: (organizationId: string) => Promise<void>;
+  } = {},
 ): Promise<void> {
   const periodKey = nextResetAt
     ? `reset:${nextResetAt}`
     : `month:${new Date().toISOString().slice(0, 7)}`;
+  // Channel membership is cached, so refresh it once before the first notice
+  // of a period rather than on every blocked investigation. If the refresh
+  // fails, send nothing so the next blocked investigation retries both.
+  if (
+    options.refreshSlackChannels &&
+    !(await hasDeliveriesForPeriod(organizationId, periodKey))
+  ) {
+    try {
+      await options.refreshSlackChannels(organizationId);
+    } catch (error) {
+      console.error("Unable to refresh Slack channels for billing notices", error);
+      return;
+    }
+  }
   const destinations = await notificationDestinations(organizationId);
   await Promise.all(
     destinations.map((destination) =>

@@ -18,12 +18,21 @@ describe("billing limit notifications", () => {
     );
   });
 
-  it("alerts every available channel for an all-channel mention trigger", () => {
+  it("alerts every member channel for an all-channel mention trigger", () => {
     expect(
       watchedChannelIds("slack_mention", [], ["channel-1", "channel-2"]),
     ).toEqual(["channel-1", "channel-2"]);
     expect(
       watchedChannelIds("slack_mention", ["channel-2"], ["channel-1", "channel-2"]),
+    ).toEqual(["channel-2"]);
+  });
+
+  it("skips configured channels the bot has not joined", () => {
+    expect(
+      watchedChannelIds("slack_channel", ["channel-1"], ["channel-2"]),
+    ).toEqual([]);
+    expect(
+      watchedChannelIds("slack_mention", ["channel-1", "channel-2"], ["channel-2"]),
     ).toEqual(["channel-2"]);
   });
 });
