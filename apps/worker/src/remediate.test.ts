@@ -176,6 +176,7 @@ describe("proposed diff remediation", () => {
         "git apply --whitespace=nowarn /home/daytona/workspace/.responder/proposed.patch",
         "git apply --whitespace=nowarn --recount /home/daytona/workspace/.responder/proposed.patch",
         "git apply --whitespace=nowarn --recount --unidiff-zero /home/daytona/workspace/.responder/proposed.patch",
+        "git apply --whitespace=nowarn --recount --unidiff-zero -C3 /home/daytona/workspace/.responder/proposed.patch",
       ].join(" || "),
       maxOutputTokens: 2_000,
       workdir: "/workspace/acme/api",
@@ -324,6 +325,68 @@ describe("proposed diff application with git", () => {
     );
     expect(applied["judge.ts"]).toContain(
       "// middle 41\nconst MODELS = { primary: 'primary', fallback: 'fallback' };\nexport { MODELS };\n// tail 1",
+    );
+  });
+
+  it("drops invented context beyond three lines from a change", async () => {
+    const source = [
+      "export function prepScript(selector) {",
+      "  return `(() => {",
+      "    const sel = ${JSON.stringify(selector)};",
+      "    if (!sel) return { found: false };",
+      "    const el = document.querySelector(sel);",
+      "    if (!el) return { found: false };",
+      "    const r = el.getBoundingClientRect();",
+      "    return { found: true, x: r.left };",
+      "  })()`;",
+      "}",
+    ].join("\n") + "\n";
+    const diff = [
+      "diff --git a/route.ts b/route.ts",
+      "--- a/route.ts",
+      "+++ b/route.ts",
+      "@@ -1,10 +1,15 @@",
+      " export function prepScript(selector) {",
+      "   return `(() => {",
+      "     const sel = ${JSON.stringify(selector)};",
+      "     if (!sel) return { found: false };",
+      "-    const el = document.querySelector(sel);",
+      "+    let el;",
+      "+    try {",
+      "+      el = document.querySelector(sel);",
+      "+    } catch {",
+      "+      return { found: false };",
+      "+    }",
+      "     if (!el) return { found: false };",
+      "     const r = el.getBoundingClientRect();",
+      "     return { found: true, x: r.left };",
+      "     })()`;",
+      " }",
+    ].join("\n");
+
+    const applied = await applyInRepository({ "route.ts": source }, diff);
+    expect(applied["route.ts"]).toContain(
+      "    let el;\n    try {\n      el = document.querySelector(sel);\n    } catch {",
+    );
+    expect(applied["route.ts"]).toContain("  })()`;\n}\n");
+  });
+
+  it("does not drop context next to a change", async () => {
+    const files = { "app.py": "a = 1\nb = 2\nc = 3\nd = 4\n" };
+    const diff = [
+      "diff --git a/app.py b/app.py",
+      "--- a/app.py",
+      "+++ b/app.py",
+      "@@ -1,4 +1,4 @@",
+      " a = 1",
+      " b = 9",
+      "-c = 3",
+      "+c = 30",
+      " d = 4",
+    ].join("\n");
+
+    await expect(applyInRepository(files, diff)).rejects.toThrow(
+      "The proposed diff no longer applies cleanly",
     );
   });
 
