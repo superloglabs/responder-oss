@@ -100,8 +100,9 @@ test.beforeEach(async ({ context }) => {
 test("shows a saved automation and pages its run history", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto(`/automations/${automationId}/edit`);
-  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}$`));
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/settings$`));
   await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveText(["Run history", "Settings"]);
   await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue(automation.configuration.prompt);
@@ -111,6 +112,7 @@ test("shows a saved automation and pages its run history", async ({ page }, test
 
   await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
   await page.getByRole("tab", { name: "Run history" }).click();
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}$`));
   const table = page.getByRole("table");
   await expect(table.getByRole("link", { name: "RESP-2841: TypeError in checkout handler" })).toBeVisible();
   await expect(table.getByText("Run #12 · Sentry")).toBeVisible();
@@ -123,6 +125,22 @@ test("shows a saved automation and pages its run history", async ({ page }, test
   await expect(table.getByText("Run #1 · Manual")).toBeVisible();
   await expect(page.getByText("Showing 11–12 of 12 runs")).toBeVisible();
   await expect(page.getByRole("button", { name: "Next" })).toBeDisabled();
+
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/settings$`));
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue(automation.configuration.prompt);
+});
+
+test("opens a saved automation on its run history", async ({ page }) => {
+  await page.goto(`/automations/${automationId}`);
+  await expect(page.getByRole("tab", { name: "Run history" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Showing 1–10 of 12 runs")).toBeVisible();
+  await page.getByRole("tab", { name: "Settings" }).click();
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/settings$`));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}$`));
+  await expect(page.getByRole("tab", { name: "Run history" })).toHaveAttribute("aria-selected", "true");
 });
 
 test("saves each change to a saved automation immediately", async ({ page }) => {
@@ -138,7 +156,7 @@ test("saves each change to a saved automation immediately", async ({ page }) => 
     await route.fulfill({ json: { updated: true } });
   });
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   const instructions = page.getByRole("textbox", { name: "Agent instructions" });
   await expect(instructions).toHaveValue(automation.configuration.prompt);
 
@@ -185,7 +203,7 @@ test("reorders repositories and marks the first as the main directory", async ({
     await route.fulfill({ json: { updated: true } });
   });
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   const rows = page.locator("section[aria-labelledby='automation-repositories'] .automationCreate__row");
   await expect(rows.nth(0)).toContainText("superloglabs/responderMain directory");
   await expect(rows.nth(1)).not.toContainText("Main directory");
@@ -212,7 +230,7 @@ test("drops removed connections from a saved automation before saving it", async
     return route.fulfill({ json: { automation: stale } });
   });
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Only investigate regressions.");
   await page.getByRole("textbox", { name: "Agent instructions" }).blur();
   await expect.poll(() => saved).toMatchObject({ configuration: { contextAccountIds: [datadogAccountId], workspaceSecretIds: [] } });
@@ -225,7 +243,6 @@ test("retries run history after a failed load", async ({ page }) => {
     await route.fulfill({ status: 503, json: { error: "Run history is unavailable" } });
   });
   await page.goto(`/automations/${automationId}`);
-  await page.getByRole("tab", { name: "Run history" }).click();
   await expect(page.getByRole("alert")).toContainText("Run history is unavailable");
   available = true;
   await page.getByRole("button", { name: "Retry" }).click();
@@ -252,7 +269,7 @@ test("runs a scheduled automation from Settings and opens the run", async ({ pag
     await route.fulfill({ status: 202, json: { duplicate: false, jobId: "job", runId: "run-13" } });
   });
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   await expect(page.getByRole("heading", { name: "Morning error digest" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
   await page.screenshot({ path: testInfo.outputPath("automation-detail-scheduled.png") });
@@ -265,7 +282,7 @@ test("runs a scheduled automation from Settings and opens the run", async ({ pag
 
 test("keeps Run now in the history of an event-triggered automation", async ({ page }) => {
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Run now" })).toHaveCount(0);
 
@@ -315,7 +332,7 @@ test("adds a Slack notification to a scheduled automation", async ({ page }, tes
     secrets: [],
   } }));
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   await expect(page.getByRole("heading", { name: "Weekly digest" })).toBeVisible();
 
   await page.getByRole("button", { name: "Add notification" }).click();
@@ -348,7 +365,7 @@ test("adds a Slack notification to a scheduled automation", async ({ page }, tes
 
 test("hides notifications for event-triggered automations", async ({ page }) => {
   await page.setViewportSize({ width: 1728, height: 997 });
-  await page.goto(`/automations/${automationId}`);
+  await page.goto(`/automations/${automationId}/settings`);
   await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Notifications" })).toHaveCount(0);
 });
