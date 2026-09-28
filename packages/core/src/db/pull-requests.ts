@@ -73,6 +73,29 @@ async function prepareIssuePullRequestWrite(
   return activeIndexAvailable;
 }
 
+async function attachedRepositoryNames(
+  tx: IssuePullRequestTransaction,
+  agentConfigVersionId: string,
+  fullNames: string[],
+): Promise<Set<string>> {
+  if (fullNames.length === 0) return new Set();
+  const rows = await tx
+    .select({ fullName: repositories.fullName })
+    .from(agentVersionRepositories)
+    .innerJoin(
+      repositories,
+      eq(repositories.id, agentVersionRepositories.repositoryId),
+    )
+    .where(
+      and(
+        eq(agentVersionRepositories.agentConfigVersionId, agentConfigVersionId),
+        eq(repositories.available, true),
+        inArray(repositories.fullName, fullNames),
+      ),
+    );
+  return new Set(rows.map((row) => row.fullName));
+}
+
 export async function queueAutomaticIssuePullRequests(
   tx: IssuePullRequestTransaction,
   input: {
@@ -93,7 +116,26 @@ export async function queueAutomaticIssuePullRequests(
       ]),
     ).values(),
   ];
-  const uniqueIssueIds = uniqueRemediations.map(
+  // A recurrence keeps the code change from the investigation that filed the
+  // issue. That change can target a repository this agent does not attach, and
+  // its pull request could never be opened.
+  const attachedRepositories = await attachedRepositoryNames(
+    tx,
+    input.agentConfigVersionId,
+    [
+      ...new Set(
+        uniqueRemediations.flatMap((remediation) =>
+          remediation.repositoryFullName ? [remediation.repositoryFullName] : []
+        ),
+      ),
+    ],
+  );
+  const eligibleRemediations = uniqueRemediations.filter(
+    (remediation) =>
+      !remediation.repositoryFullName ||
+      attachedRepositories.has(remediation.repositoryFullName),
+  );
+  const uniqueIssueIds = eligibleRemediations.map(
     (remediation) => remediation.issueId,
   );
   if (uniqueIssueIds.length === 0) return [];
@@ -109,7 +151,7 @@ export async function queueAutomaticIssuePullRequests(
       ),
     );
   const existingIssueIds = new Set(existing.map((request) => request.issueId));
-  const requestedRemediations = uniqueRemediations.filter(
+  const requestedRemediations = eligibleRemediations.filter(
     (remediation) => !existingIssueIds.has(remediation.issueId),
   );
   if (requestedRemediations.length === 0) return [];

@@ -53,6 +53,16 @@ const daytonaAppearanceRetryDelaysMs = [
   10_000,
   10_000,
 ] as const;
+const daytonaStartAttempts = 2;
+const daytonaStartRetryDelayMs = 5_000;
+
+// Daytona returns this when the runner it picked cannot start the container,
+// for example when the runner's container runtime is broken. A new attempt
+// can be placed on a healthy runner.
+function isDaytonaStartFailure(error: unknown): boolean {
+  return error instanceof Error &&
+    error.message.includes("Sandbox failed to start");
+}
 
 function isTransientDaytonaError(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "statusCode" in error) {
@@ -171,23 +181,35 @@ export async function createDaytonaSandboxSession(
     false,
     dependencies,
   );
-  try {
-    return await creator.create();
-  } catch (createError) {
+  for (let attempt = 1; ; attempt += 1) {
     try {
-      await deleteDaytonaSandboxByReference(
-        sandboxName,
-        config,
-        true,
-        dependencies,
-      );
-    } catch (cleanupError) {
-      throw new AggregateError(
-        [createError, cleanupError],
-        `Unable to create or clean up Daytona sandbox ${sandboxName}`,
-      );
+      return await creator.create();
+    } catch (createError) {
+      try {
+        await deleteDaytonaSandboxByReference(
+          sandboxName,
+          config,
+          true,
+          dependencies,
+        );
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [createError, cleanupError],
+          `Unable to create or clean up Daytona sandbox ${sandboxName}`,
+        );
+      }
+      if (
+        attempt >= daytonaStartAttempts ||
+        !isDaytonaStartFailure(createError)
+      ) {
+        throw createError;
+      }
+      console.error(JSON.stringify({
+        event: "daytona_sandbox_start_retry",
+        sandboxId: sandboxName,
+      }));
+      await dependencies.sleep(daytonaStartRetryDelayMs);
     }
-    throw createError;
   }
 }
 

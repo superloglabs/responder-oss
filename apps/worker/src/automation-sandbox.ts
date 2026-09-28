@@ -231,14 +231,15 @@ export async function runInFreshAutomationSandbox<T>(
     pauseOnExit: Boolean(input.keepPaused),
   });
   let session: DaytonaSandboxSession | null = null;
-  let creationStarted = false;
+  // Set while a sandbox may exist that `session` does not hold yet.
+  let pendingSandbox = false;
   let resumed = false;
   let executionOutcome:
     | { error: unknown; succeeded: false }
     | { succeeded: true; value: T };
 
   try {
-    creationStarted = true;
+    pendingSandbox = true;
     if (input.resumeState) {
       try {
         session = await abortable(
@@ -257,10 +258,19 @@ export async function runInFreshAutomationSandbox<T>(
         session = null;
       }
     }
-    session ??= await abortable(
-      dependencies.createSession(client, input.config, sandboxName),
-      input.signal,
-    );
+    if (!session) {
+      const creation = dependencies.createSession(
+        client,
+        input.config,
+        sandboxName,
+      );
+      // A failed creation already cleaned up its own sandbox. This handler
+      // runs before the rejection reaches the cleanup below.
+      creation.catch(() => {
+        pendingSandbox = false;
+      });
+      session = await abortable(creation, input.signal);
+    }
     if (!resumed) {
       await abortable(
         dependencies.configure(
@@ -318,7 +328,7 @@ export async function runInFreshAutomationSandbox<T>(
         jobId: input.runId,
         organizationId: input.organizationId,
       });
-    } else if (creationStarted) {
+    } else if (pendingSandbox) {
       await dependencies.closePending(sandboxName, input.config);
     }
   } catch (error) {

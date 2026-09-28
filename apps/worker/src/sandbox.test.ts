@@ -180,6 +180,80 @@ describe("Daytona sandbox cleanup", () => {
     expect(harness.sleep).toHaveBeenCalledWith(500);
   });
 
+  it("deletes a sandbox that failed to start and creates it again", async () => {
+    const harness = cleanupHarness();
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const startFailure = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start: Error response from daemon: failed to start shim (status: 400)",
+    );
+    const creator = {
+      create: vi.fn()
+        .mockRejectedValueOnce(startFailure)
+        .mockResolvedValueOnce(createdSession),
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(creator.create).toHaveBeenCalledTimes(2);
+    // Once before the first attempt, then once for the failed sandbox.
+    expect(harness.deleteSandbox).toHaveBeenCalledTimes(2);
+    expect(harness.deleteSandbox.mock.invocationCallOrder[1]).toBeLessThan(
+      creator.create.mock.invocationCallOrder[1]!,
+    );
+    expect(harness.sleep).toHaveBeenCalledWith(5_000);
+    expect(harness.reportException).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("daytona_sandbox_start_retry"),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("stops after a second sandbox start failure", async () => {
+    const harness = cleanupHarness();
+    const startFailure = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start (status: 400)",
+    );
+    const creator = { create: vi.fn().mockRejectedValue(startFailure) };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).rejects.toBe(startFailure);
+
+    expect(creator.create).toHaveBeenCalledTimes(2);
+    consoleError.mockRestore();
+  });
+
+  it("does not repeat other creation failures", async () => {
+    const harness = cleanupHarness();
+    const quotaError = new Error("Sandbox quota exceeded");
+    const creator = { create: vi.fn().mockRejectedValue(quotaError) };
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).rejects.toBe(quotaError);
+
+    expect(creator.create).toHaveBeenCalledOnce();
+  });
+
   it("reports when a pending sandbox never appears for deletion", async () => {
     const harness = cleanupHarness({ missing: true });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

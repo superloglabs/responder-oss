@@ -151,19 +151,38 @@ describe("fresh automation sandbox", () => {
     expect(dependencies.configure).not.toHaveBeenCalled();
   });
 
-  it("preserves the setup failure when pending sandbox cleanup also fails", async () => {
+  it("does not clean up again after sandbox creation fails", async () => {
     const { dependencies } = harness();
     const setupError = new Error("sandbox creation failed");
     dependencies.createSession.mockRejectedValue(setupError);
-    dependencies.closePending.mockRejectedValue(
-      new Error("pending sandbox cleanup failed"),
-    );
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
       runInFreshAutomationSandbox(input, dependencies),
     ).rejects.toBe(setupError);
 
+    expect(dependencies.closePending).not.toHaveBeenCalled();
+    expect(dependencies.close).not.toHaveBeenCalled();
+  });
+
+  it("preserves the setup failure when pending sandbox cleanup also fails", async () => {
+    const { dependencies } = harness();
+    const controller = new AbortController();
+    const timeout = new Error("runtime limit reached during setup");
+    dependencies.createSession.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    dependencies.closePending.mockRejectedValue(
+      new Error("pending sandbox cleanup failed"),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = runInFreshAutomationSandbox(
+      { ...input, signal: controller.signal },
+      dependencies,
+    );
+
+    controller.abort(timeout);
+
+    await expect(run).rejects.toBe(timeout);
     expect(dependencies.closePending).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("automation_pending_sandbox_cleanup_failed"),

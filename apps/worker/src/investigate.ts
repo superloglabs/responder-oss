@@ -147,6 +147,36 @@ export function investigationTraceWriteFailure(
   };
 }
 
+const contextServerConnectRetryDelaysMs = [0, 1_000, 3_000] as const;
+
+// Node's fetch reports DNS, TLS, and socket failures as this TypeError.
+function isFetchNetworkFailure(error: unknown): boolean {
+  return error instanceof TypeError && error.message === "fetch failed";
+}
+
+// A brief network failure while opening a context server otherwise fails the
+// whole investigation.
+export async function connectContextServer(
+  server: { connect(): Promise<void> },
+  sleep: (delayMs: number) => Promise<void> = (delayMs) =>
+    new Promise((resolve) => setTimeout(resolve, delayMs)),
+): Promise<void> {
+  for (const [index, delayMs] of contextServerConnectRetryDelaysMs.entries()) {
+    if (delayMs > 0) await sleep(delayMs);
+    try {
+      await server.connect();
+      return;
+    } catch (error) {
+      if (
+        !isFetchNetworkFailure(error) ||
+        index === contextServerConnectRetryDelaysMs.length - 1
+      ) {
+        throw error;
+      }
+    }
+  }
+}
+
 export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
   gcpConnections?: ReadonlyArray<{ accountId: string }>;
@@ -780,7 +810,7 @@ export async function runInvestigationAgent(
     await Promise.all(
       contextServers.map(async (server) => {
         try {
-          await server.connect();
+          await connectContextServer(server);
         } catch (error) {
           console.error(
             JSON.stringify(
