@@ -14,6 +14,7 @@ import {
 import { workspaceSlug } from "./workspace";
 import { sharedTemplateSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ImpersonationBanner } from "./impersonation-banner";
+import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 
@@ -514,7 +515,7 @@ function InvitationGate({
       }),
     );
     await onReady();
-    window.location.replace("/agents");
+    window.location.replace("/app");
   }
 
   return (
@@ -736,7 +737,15 @@ export function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       <ImpersonationBanner />
-      {children}
+      <OrganizationCapabilitiesProvider
+        fallback={
+          <AuthFrame>
+            <p className="authMuted">Loading Superlog…</p>
+          </AuthFrame>
+        }
+      >
+        {children}
+      </OrganizationCapabilitiesProvider>
     </>
   );
 }

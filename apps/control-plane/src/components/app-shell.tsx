@@ -3,6 +3,12 @@ import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
+import { useOrganizationCapabilities } from "../organization-capabilities";
+import {
+  activeNavigationSection,
+  primaryNavigation,
+  type NavigationSection,
+} from "../primary-navigation";
 import { BillingBanner } from "./billing-banner";
 import {
   CaretDownIcon,
@@ -12,17 +18,30 @@ import {
   LightningIcon,
   ListIcon,
   ListBulletsIcon,
+  PlugsConnectedIcon,
   ScanIcon,
   RobotIcon,
   SignOutIcon,
+  TagIcon,
   UserCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import "./workspace.css";
 
+const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
+  agents: LightningIcon,
+  automations: RobotIcon,
+  integrations: PlugsConnectedIcon,
+  issues: ListBulletsIcon,
+  scans: ScanIcon,
+  settings: GearIcon,
+  suggestions: FlagIcon,
+  "tag-mode": TagIcon,
+};
+
 interface AppShellProps {
-  active: "agents" | "automations" | "issues" | "scans" | "settings" | "suggestions";
+  active: NavigationSection;
   children: ReactNode;
   // Shown to a signed-out visitor of a public page in place of the account
   // menu. The navigation stays as members see it.
@@ -48,7 +67,13 @@ export function AppShell({ active, children, density = "default", guest, redesig
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
-  const [automationsEnabled, setAutomationsEnabled] = useState(false);
+  const capabilities = useOrganizationCapabilities(!guest);
+  const simplifiedNavigation = capabilities.includes("simplified_navigation");
+  const navigation = primaryNavigation({
+    automations: capabilities.includes("automations") || Boolean(guest),
+    simplified: simplifiedNavigation,
+  });
+  const activeSection = activeNavigationSection(active, simplifiedNavigation);
   const menuRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
@@ -60,22 +85,6 @@ export function AppShell({ active, children, density = "default", guest, redesig
     .join("")
     .slice(0, 2)
     .toUpperCase();
-
-  useEffect(() => {
-    if (guest) return;
-    let cancelled = false;
-    void fetch("/api/context")
-      .then(async (response) => response.ok
-        ? response.json() as Promise<{ capabilities?: string[] }>
-        : null)
-      .then((context) => {
-        if (!cancelled) {
-          setAutomationsEnabled(context?.capabilities?.includes("automations") ?? false);
-        }
-      })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [guest, session.data?.session.activeOrganizationId]);
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -173,7 +182,7 @@ export function AppShell({ active, children, density = "default", guest, redesig
         organizationId,
       }),
     );
-    window.location.assign("/agents");
+    window.location.assign("/app");
   }
 
   async function signOut() {
@@ -236,7 +245,7 @@ export function AppShell({ active, children, density = "default", guest, redesig
           </button>
         ) : null}
         <div className="globalHeader__left">
-          <Link aria-label="Superlog home" className="brand" onClick={() => setIsSidebarOpen(false)} to="/agents">
+          <Link aria-label="Superlog home" className="brand" onClick={() => setIsSidebarOpen(false)} to={navigation[0].to}>
             {workspace ? (
               <svg aria-hidden="true" className="brandPictogram" width="16" height="16" viewBox="175 175 350 350" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                 <rect x="347.464" y="347.464" width="96.3768" height="96.3768" />
@@ -250,56 +259,21 @@ export function AppShell({ active, children, density = "default", guest, redesig
             )}
           </Link>
           <nav aria-label="Primary navigation" className="primaryNav" onClick={() => setIsSidebarOpen(false)}>
-            <Link
-              aria-current={active === "agents" ? "page" : undefined}
-              className={active === "agents" ? "isActive" : undefined}
-              to="/agents"
-            >
-              {workspace ? <LightningIcon size={16} aria-hidden="true" /> : null}
-              Agents
-            </Link>
-            {automationsEnabled || guest ? (
-              <Link
-                aria-current={active === "automations" ? "page" : undefined}
-                className={active === "automations" ? "isActive" : undefined}
-                to="/automations"
-              >
-                {workspace ? <RobotIcon size={16} aria-hidden="true" /> : null}
-                Automations
-              </Link>
-            ) : null}
-            <Link
-              aria-current={active === "issues" ? "page" : undefined}
-              className={active === "issues" ? "isActive" : undefined}
-              to="/issues"
-            >
-              {workspace ? <ListBulletsIcon size={16} aria-hidden="true" /> : null}
-              Issues
-            </Link>
-            <Link
-              aria-current={active === "scans" ? "page" : undefined}
-              className={active === "scans" ? "isActive" : undefined}
-              to="/scans"
-            >
-              {workspace ? <ScanIcon size={16} aria-hidden="true" /> : null}
-              Scans
-            </Link>
-            <Link
-              aria-current={active === "suggestions" ? "page" : undefined}
-              className={active === "suggestions" ? "isActive" : undefined}
-              to="/suggestions"
-            >
-              {workspace ? <FlagIcon size={16} aria-hidden="true" /> : null}
-              Suggestions
-            </Link>
-            <Link
-              aria-current={active === "settings" ? "page" : undefined}
-              className={active === "settings" ? "isActive" : undefined}
-              to="/settings"
-            >
-              {workspace ? <GearIcon size={16} aria-hidden="true" /> : null}
-              Settings
-            </Link>
+            {navigation.map((item) => {
+              const Icon = navigationIcons[item.section];
+              const isActive = item.section === activeSection;
+              return (
+                <Link
+                  aria-current={isActive ? "page" : undefined}
+                  className={isActive ? "isActive" : undefined}
+                  key={item.section}
+                  to={item.to}
+                >
+                  {workspace ? <Icon size={16} aria-hidden="true" /> : null}
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
         </div>
         <div className="globalHeader__right" ref={menuRef}>

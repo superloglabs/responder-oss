@@ -249,7 +249,7 @@ export function SettingsPage() {
   );
 
   return (
-    <AppShell active="settings" density="settings" redesigned>
+    <AppShell active="integrations" density="settings" redesigned>
       <SettingsHeading active="integrations" />
 
       {notice ? (
