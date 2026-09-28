@@ -177,6 +177,10 @@ export async function connectContextServer(
   }
 }
 
+export function isOptionalContextServer(serverName: string): boolean {
+  return serverName.startsWith("custom-mcp-");
+}
+
 export function contextServerConnectFailureEvent(input: {
   awsConnections?: ReadonlyArray<{ accountId: string }>;
   gcpConnections?: ReadonlyArray<{ accountId: string }>;
@@ -850,6 +854,9 @@ export async function runInvestigationAgent(
           }
           if (server.name.startsWith("supabase-")) {
             throw new Error("Unable to connect to Supabase context");
+          }
+          if (isOptionalContextServer(server.name)) {
+            return;
           }
           throw error;
         }

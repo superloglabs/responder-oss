@@ -9,6 +9,7 @@ import {
   investigationInstructions,
   investigationInstructionsTraceEvent,
   investigationTraceWriteFailure,
+  isOptionalContextServer,
   loadAxiomConnectionForInvestigation,
   loadSentryConnectionForInvestigation,
   safeInvestigationError,
@@ -784,6 +785,12 @@ describe("profile-specific investigation guidance", () => {
 });
 
 describe("context server connection", () => {
+  it("allows custom MCP failures without making provider failures optional", () => {
+    expect(isOptionalContextServer("custom-mcp-account-1")).toBe(true);
+    expect(isOptionalContextServer("sentry")).toBe(false);
+    expect(isOptionalContextServer("aws-account-1")).toBe(false);
+  });
+
   it("retries a network failure before giving up on the server", async () => {
     const networkFailure = new TypeError("fetch failed");
     const server = {
