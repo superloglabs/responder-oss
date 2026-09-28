@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useEffectEvent, useState, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useMatch, useNavigate } from "react-router-dom";
 import {
   fetchAutomationOptions,
   fetchSharedAutomationTemplate,
@@ -77,7 +77,10 @@ function toggle(list: string[], value: string): string[] {
 // A saved automation also shows its run history.
 export function AutomationCreatePage({ initialAutomation }: { initialAutomation?: AutomationDetail } = {}) {
   const automationId = initialAutomation?.id;
-  const editorPath = automationId ? `/automations/${automationId}` : "/automations/new";
+  const editorPath = automationId ? `/automations/${automationId}/settings` : "/automations/new";
+  // A saved automation opens on its run history; settings have their own URL.
+  const settingsMatch = useMatch("/automations/:automationId/settings");
+  const activeTab = !automationId || settingsMatch ? "settings" : "history";
   const navigate = useNavigate();
   const [options, setOptions] = useState<AutomationOptions | null>(null);
   // A new automation can start from a template chosen on the automation list,
@@ -102,7 +105,6 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const [unsavedReason, setUnsavedReason] = useState<string | null>(null);
   const [startingRun, setStartingRun] = useState(false);
   const [runsRefreshKey, setRunsRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState<"settings" | "history">("settings");
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useDocumentTitle(automationId ? savedName : "New automation");
@@ -374,8 +376,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             {automationId ? <button className="automationCreate__save" disabled={!enabled || saveStatus === "saving"} onClick={() => navigate(`/automations/${automationId}/test`)} title={enabled ? "Chat with the agent to test this automation" : "Turn the automation on to test it"} type="button"><ChatCircleIcon size={14} />Test</button> : null}
           </div>
           {automationId ? <div className="automationCreate__tabs" role="tablist" aria-label="Automation sections">
-            <button aria-selected={activeTab === "settings"} onClick={() => setActiveTab("settings")} role="tab" type="button">Settings</button>
-            <button aria-selected={activeTab === "history"} onClick={() => { setActiveTab("history"); setRenaming(false); }} role="tab" type="button">Run history</button>
+            <button aria-selected={activeTab === "history"} onClick={() => { if (activeTab !== "history") navigate(`/automations/${automationId}`); setRenaming(false); }} role="tab" type="button">Run history</button>
+            <button aria-selected={activeTab === "settings"} onClick={() => { if (activeTab !== "settings") navigate(editorPath); }} role="tab" type="button">Settings</button>
           </div> : null}
         </header>
         {template && !automationId ? <div className="automationCreate__template" role="status">

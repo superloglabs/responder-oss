@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { fetchAgent, type AgentDetail } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { Button } from "../design-system";
@@ -31,4 +31,10 @@ function AgentDetailContent({ agentId }: { agentId?: string }) {
     <h1>{error ? "Unable to load agent" : "Loading agent…"}</h1>
     {error ? <><p>{error}</p><Button onClick={() => window.location.reload()} variant="secondary">Retry</Button><Link to="/agents">Back to agents</Link></> : null}
   </section></AppShell>;
+}
+
+// Settings live on the detail page's settings tab.
+export function AgentEditRedirect() {
+  const { agentId } = useParams();
+  return <Navigate replace to={agentId ? `/agents/${agentId}/settings` : "/agents"} />;
 }

@@ -23,7 +23,7 @@ import {
   AGENT_PROMPT_MAX_LENGTH,
   defaultLinearIssueTemplate,
 } from "@responder/core/agents/config";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useMatch, useNavigate, useParams } from "react-router-dom";
 import {
   type AgentDetail,
   type AgentConfiguration,
@@ -431,7 +431,10 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const isEditing = Boolean(agentId);
   const draftStorageKey = storageKey(DRAFT_STORAGE_KEY, agentId);
   const stepStorageKey = storageKey(DRAFT_STEP_STORAGE_KEY, agentId);
-  const returnTo = agentId ? `/agents/${agentId}` : "/agents/new";
+  const returnTo = agentId ? `/agents/${agentId}/settings` : "/agents/new";
+  // A saved agent opens on its run history; settings have their own URL.
+  const settingsMatch = useMatch("/agents/:agentId/settings");
+  const activeTab = !isEditing || settingsMatch ? "settings" : "history";
   const sentryJustConnected = successfulConnectionReturn("sentry");
   const slackJustConnected = successfulConnectionReturn("slack");
   const githubJustConnected = successfulConnectionReturn("github");
@@ -460,7 +463,6 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const [draft, setDraft] = useState<CreateDraft | null>(() => initialAgent ? createInitialDraft(EMPTY_OPTIONS, {}, initialAgent.configuration, true) : null);
   const triggerPickerRef = useRef<HTMLDetailsElement>(null);
   const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(initialAgent ?? null);
-  const [activeTab, setActiveTab] = useState<"settings" | "history">("settings");
   const [updatingEnabled, setUpdatingEnabled] = useState(false);
   const [refreshingInput, setRefreshingInput] = useState(false);
   const [inputRefreshError, setInputRefreshError] = useState<string | null>(null);
@@ -1685,8 +1687,8 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
           </Button> : null}
         </div>
         {isEditing ? <div className="agentDetailTabs" role="tablist" aria-label="Agent sections">
-          <button type="button" role="tab" aria-selected={activeTab === "settings"} onClick={() => setActiveTab("settings")}>Settings</button>
-          <button type="button" role="tab" aria-selected={activeTab === "history"} onClick={() => setActiveTab("history")}>Run history</button>
+          <button type="button" role="tab" aria-selected={activeTab === "history"} onClick={() => { if (activeTab !== "history") navigate(`/agents/${agentId}`); }}>Run history</button>
+          <button type="button" role="tab" aria-selected={activeTab === "settings"} onClick={() => { if (activeTab !== "settings") navigate(`/agents/${agentId}/settings`); }}>Settings</button>
         </div> : null}
       </header>
 

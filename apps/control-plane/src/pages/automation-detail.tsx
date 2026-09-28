@@ -39,8 +39,8 @@ function AutomationDetailContent({ automationId }: { automationId?: string }) {
   </section></AppShell>;
 }
 
-// Editing happens on the detail page.
+// Settings live on the detail page's settings tab.
 export function AutomationEditRedirect() {
   const { automationId } = useParams();
-  return <Navigate replace to={automationId ? `/automations/${automationId}` : "/automations"} />;
+  return <Navigate replace to={automationId ? `/automations/${automationId}/settings` : "/automations"} />;
 }

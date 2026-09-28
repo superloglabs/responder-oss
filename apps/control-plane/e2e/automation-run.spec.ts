@@ -315,7 +315,6 @@ test("opens a run from the run history", async ({ page }) => {
   await mockApi(page);
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto(`/automations/${automationId}`);
-  await page.getByRole("tab", { name: "Run history" }).click();
   await page.getByRole("cell", { name: "Today" }).click();
   await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/runs/${runId}$`));
   await expect(page.getByRole("heading", { name: "Payment webhook timeout" })).toBeVisible();

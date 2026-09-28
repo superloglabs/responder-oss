@@ -1,6 +1,6 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { AuthGate } from "./components/auth-gate";
-import { AgentDetailPage } from "./pages/agent-detail";
+import { AgentDetailPage, AgentEditRedirect } from "./pages/agent-detail";
 import { AgentCreatePage } from "./pages/agent-create";
 import { AgentContextStoryboardPage } from "./pages/agent-context-storyboard";
 import { AgentsPage } from "./pages/agents";
@@ -111,7 +111,12 @@ export function App() {
         <Route element={<AutomationsPage />} path="/automations" />
         <Route element={<AutomationCreatePage />} path="/automations/new" />
         <Route element={<AutomationConnectionCompletePage />} path="/automations/connection-complete" />
-        <Route element={<AutomationDetailPage />} path="/automations/:automationId" />
+        {/* Detail pages show run history at their index and the editor at
+            /settings. One parent route keeps the editor mounted across tabs. */}
+        <Route element={<AutomationDetailPage />} path="/automations/:automationId">
+          <Route element={null} index />
+          <Route element={null} path="settings" />
+        </Route>
         <Route element={<AutomationEditRedirect />} path="/automations/:automationId/edit" />
         <Route element={<AutomationTestChatPage />} path="/automations/:automationId/test" />
         <Route element={<AutomationRunPage />} path="/automations/:automationId/runs/:runId" />
@@ -121,8 +126,11 @@ export function App() {
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />
         <Route element={<SuggestionsPage />} path="/suggestions/:suggestionId?" />
         <Route element={<AgentCreatePage />} path="/agents/new" />
-        <Route element={<AgentDetailPage />} path="/agents/:agentId" />
-        <Route element={<AgentCreatePage />} path="/agents/:agentId/edit" />
+        <Route element={<AgentDetailPage />} path="/agents/:agentId">
+          <Route element={null} index />
+          <Route element={null} path="settings" />
+        </Route>
+        <Route element={<AgentEditRedirect />} path="/agents/:agentId/edit" />
         <Route element={<LegacyBillingRedirect />} path="/billing" />
         <Route
           element={<InvestigationDetailPage />}

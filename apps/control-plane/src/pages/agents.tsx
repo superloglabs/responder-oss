@@ -72,7 +72,7 @@ function AgentRowMenu({ agent }: { agent: AgentListItem }) {
           <Link
             className="agentRowMenu__item"
             role="menuitem"
-            to={`/agents/${agent.id}/edit`}
+            to={`/agents/${agent.id}/settings`}
           >
             Edit agent
           </Link>
