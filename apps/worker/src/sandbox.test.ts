@@ -280,6 +280,33 @@ describe("Daytona sandbox cleanup", () => {
     expect(creator.create).toHaveBeenCalledOnce();
   });
 
+  it("does not create a replacement after the caller aborts", async () => {
+    const harness = cleanupHarness();
+    const controller = new AbortController();
+    const startFailure = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start (status: 400)",
+    );
+    const creator = { create: vi.fn().mockRejectedValue(startFailure) };
+    harness.sleep.mockImplementation(async () => {
+      controller.abort();
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+        controller.signal,
+      ),
+    ).rejects.toBe(startFailure);
+
+    expect(creator.create).toHaveBeenCalledOnce();
+    expect(sandboxDeletedAfterFailedCreation(startFailure)).toBe(true);
+    consoleError.mockRestore();
+  });
+
   it("does not repeat other creation failures", async () => {
     const harness = cleanupHarness();
     const quotaError = new Error("Sandbox quota exceeded");

@@ -86,6 +86,8 @@ describe("fresh automation sandbox", () => {
       client,
       input.config,
       "responder-automation-run-1",
+      undefined,
+      undefined,
     );
     expect(input.run).toHaveBeenCalledWith(
       session,
@@ -151,6 +153,24 @@ describe("fresh automation sandbox", () => {
       session,
       input.config,
       { jobId: "run-1", organizationId: "organization-1" },
+    );
+  });
+
+  it("passes the run's abort signal to sandbox creation", async () => {
+    const { client, dependencies } = harness();
+    const controller = new AbortController();
+
+    await runInFreshAutomationSandbox(
+      { ...input, signal: controller.signal },
+      dependencies,
+    );
+
+    expect(dependencies.createSession).toHaveBeenCalledWith(
+      client,
+      input.config,
+      "responder-automation-run-1",
+      undefined,
+      controller.signal,
     );
   });
 

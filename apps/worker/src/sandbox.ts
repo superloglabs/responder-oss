@@ -183,6 +183,8 @@ export async function createDaytonaSandboxSession(
   config: DaytonaCleanupConfig,
   sandboxName: string,
   dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+  // Stops a retry from creating a sandbox after the caller has given up.
+  signal?: AbortSignal,
 ): Promise<DaytonaSandboxSession> {
   await deleteDaytonaSandboxByReference(
     sandboxName,
@@ -207,13 +209,14 @@ export async function createDaytonaSandboxSession(
           `Unable to create or clean up Daytona sandbox ${sandboxName}`,
         );
       }
+      if (typeof createError === "object" && createError !== null) {
+        creationErrorsWithDeletedSandbox.add(createError);
+      }
       if (
         attempt >= daytonaStartAttempts ||
-        !isDaytonaStartFailure(createError)
+        !isDaytonaStartFailure(createError) ||
+        signal?.aborted
       ) {
-        if (typeof createError === "object" && createError !== null) {
-          creationErrorsWithDeletedSandbox.add(createError);
-        }
         throw createError;
       }
       console.error(JSON.stringify({
@@ -221,6 +224,7 @@ export async function createDaytonaSandboxSession(
         sandboxId: sandboxName,
       }));
       await dependencies.sleep(daytonaStartRetryDelayMs);
+      if (signal?.aborted) throw createError;
     }
   }
 }

@@ -264,6 +264,8 @@ export async function runInFreshAutomationSandbox<T>(
         client,
         input.config,
         sandboxName,
+        undefined,
+        input.signal,
       );
       // Skip the cleanup below only when the failed creation confirmed that
       // its sandbox is gone. This handler runs before the rejection reaches it.
