@@ -8,28 +8,17 @@ export type SettingsSection =
   | "tag-mode"
   | "workspace";
 
-export function SettingsTabs({ active }: { active: SettingsSection }) {
+export function SettingsTabs({
+  active,
+  capabilities,
+}: {
+  active: SettingsSection;
+  capabilities: string[];
+}) {
   const [billingEnabled, setBillingEnabled] = useState(false);
-  const [automationsEnabled, setAutomationsEnabled] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    void fetch("/api/context")
-      .then(async (response) => response.ok
-        ? response.json() as Promise<{ capabilities?: string[] }>
-        : null)
-      .catch(() => null)
-      .then((context) => {
-        if (mounted) {
-          setAutomationsEnabled(
-            context?.capabilities?.includes("automations") ?? false,
-          );
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const automationsEnabled = capabilities.includes("automations");
+  // Simplified navigation lists integrations and tag mode in the sidebar.
+  const sidebarSections = capabilities.includes("simplified_navigation");
 
   useEffect(() => {
     let mounted = true;
@@ -50,20 +39,24 @@ export function SettingsTabs({ active }: { active: SettingsSection }) {
 
   return (
     <nav aria-label="Settings sections" className="settingsTabs">
-      <Link
-        aria-current={active === "integrations" ? "page" : undefined}
-        className={active === "integrations" ? "isActive" : undefined}
-        to="/settings"
-      >
-        Integrations
-      </Link>
-      <Link
-        aria-current={active === "tag-mode" ? "page" : undefined}
-        className={active === "tag-mode" ? "isActive" : undefined}
-        to="/settings/tag-mode"
-      >
-        Tag mode
-      </Link>
+      {sidebarSections ? null : (
+        <>
+          <Link
+            aria-current={active === "integrations" ? "page" : undefined}
+            className={active === "integrations" ? "isActive" : undefined}
+            to="/settings"
+          >
+            Integrations
+          </Link>
+          <Link
+            aria-current={active === "tag-mode" ? "page" : undefined}
+            className={active === "tag-mode" ? "isActive" : undefined}
+            to="/settings/tag-mode"
+          >
+            Tag mode
+          </Link>
+        </>
+      )}
       <Link
         aria-current={active === "workspace" ? "page" : undefined}
         className={active === "workspace" ? "isActive" : undefined}

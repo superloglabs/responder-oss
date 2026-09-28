@@ -409,7 +409,7 @@ export function TagModeSettingsPage() {
   }
 
   return (
-    <AppShell active="settings" density="settings" redesigned>
+    <AppShell active="tag-mode" density="settings" redesigned>
       <DatadogConnectionDialog
         connectUrl={integrations.find((item) => item.id === "datadog")?.connectUrl ?? ""}
         onCancel={() => setChoosingDatadogSite(false)}

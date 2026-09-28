@@ -1,0 +1,53 @@
+export type NavigationSection =
+  | "agents"
+  | "automations"
+  | "integrations"
+  | "issues"
+  | "scans"
+  | "settings"
+  | "suggestions"
+  | "tag-mode";
+
+export interface NavigationItem {
+  label: string;
+  section: NavigationSection;
+  to: string;
+}
+
+// Organizations with simplified navigation see automations and the pages
+// automations depend on. The other product areas stay reachable by URL.
+export function primaryNavigation(options: {
+  automations: boolean;
+  simplified: boolean;
+}): NavigationItem[] {
+  const automations: NavigationItem[] = options.automations
+    ? [{ label: "Automations", section: "automations", to: "/automations" }]
+    : [];
+  if (options.simplified) {
+    return [
+      ...automations,
+      { label: "Integrations", section: "integrations", to: "/settings" },
+      { label: "Tag mode", section: "tag-mode", to: "/settings/tag-mode" },
+      { label: "Settings", section: "settings", to: "/settings/workspace" },
+    ];
+  }
+  return [
+    { label: "Agents", section: "agents", to: "/agents" },
+    ...automations,
+    { label: "Issues", section: "issues", to: "/issues" },
+    { label: "Scans", section: "scans", to: "/scans" },
+    { label: "Suggestions", section: "suggestions", to: "/suggestions" },
+    { label: "Settings", section: "settings", to: "/settings" },
+  ];
+}
+
+// Integrations and tag mode are settings tabs unless simplified navigation
+// gives them their own sidebar entries.
+export function activeNavigationSection(
+  active: NavigationSection,
+  simplified: boolean,
+): NavigationSection {
+  return !simplified && (active === "integrations" || active === "tag-mode")
+    ? "settings"
+    : active;
+}

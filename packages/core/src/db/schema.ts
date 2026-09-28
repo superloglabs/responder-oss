@@ -516,7 +516,7 @@ export const agentVersionSecrets = pgTable(
   ],
 );
 
-export type OrganizationCapability = "automations";
+export type OrganizationCapability = "automations" | "simplified_navigation";
 
 export const organizationCapabilities = pgTable(
   "organization_capabilities",
