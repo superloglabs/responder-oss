@@ -64,8 +64,14 @@ function isDaytonaStartFailure(error: unknown): boolean {
     error.message.includes("Sandbox failed to start");
 }
 
-// Creation failed and the sandbox it may have left could not be deleted.
-export class DaytonaSandboxCleanupError extends AggregateError {}
+// Creation errors thrown after the failed sandbox was confirmed deleted.
+const creationErrorsWithDeletedSandbox = new WeakSet<object>();
+
+export function sandboxDeletedAfterFailedCreation(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    creationErrorsWithDeletedSandbox.has(error);
+}
 
 function isTransientDaytonaError(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "statusCode" in error) {
@@ -196,7 +202,7 @@ export async function createDaytonaSandboxSession(
           dependencies,
         );
       } catch (cleanupError) {
-        throw new DaytonaSandboxCleanupError(
+        throw new AggregateError(
           [createError, cleanupError],
           `Unable to create or clean up Daytona sandbox ${sandboxName}`,
         );
@@ -205,6 +211,9 @@ export async function createDaytonaSandboxSession(
         attempt >= daytonaStartAttempts ||
         !isDaytonaStartFailure(createError)
       ) {
+        if (typeof createError === "object" && createError !== null) {
+          creationErrorsWithDeletedSandbox.add(createError);
+        }
         throw createError;
       }
       console.error(JSON.stringify({

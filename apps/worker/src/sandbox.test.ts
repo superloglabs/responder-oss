@@ -4,11 +4,11 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
-  DaytonaSandboxCleanupError,
   deleteDaytonaSandboxByName,
   type DaytonaCleanupDependencies,
   prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
+  sandboxDeletedAfterFailedCreation,
 } from "./sandbox.js";
 
 function cleanupHarness(options?: {
@@ -238,35 +238,46 @@ describe("Daytona sandbox cleanup", () => {
     consoleError.mockRestore();
   });
 
-  it("reports a failed deletion of the sandbox left by a failed creation", async () => {
-    const harness = cleanupHarness({ deleteError: new Error("delete failed") });
+  it("marks a creation failure once its sandbox is deleted", async () => {
+    const harness = cleanupHarness();
     const createError = new Error("sandbox creation timed out");
     const creator = { create: vi.fn().mockRejectedValue(createError) };
 
-    const failure = await createDaytonaSandboxSession(
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).rejects.toBe(createError);
+
+    expect(sandboxDeletedAfterFailedCreation(createError)).toBe(true);
+  });
+
+  it("does not mark failures whose sandbox deletion was not confirmed", async () => {
+    const creator = {
+      create: vi.fn().mockRejectedValue(new Error("sandbox creation timed out")),
+    };
+    const initialDeleteError = new Error("delete failed before creation");
+    const failedBeforeCreation = await createDaytonaSandboxSession(
       creator,
       { daytonaApiKey: "daytona-test" },
       "responder-investigation-1",
-      {
-        ...harness.dependencies,
-        createClient: vi.fn()
-          .mockReturnValueOnce({
-            delete: vi.fn(),
-            get: vi.fn().mockRejectedValue(
-              Object.assign(new Error("missing"), { statusCode: 404 }),
-            ),
-            [Symbol.asyncDispose]: harness.dispose,
-          })
-          .mockImplementation(() => ({
-            delete: harness.deleteSandbox,
-            get: harness.get,
-            [Symbol.asyncDispose]: harness.dispose,
-          })),
-      },
+      cleanupHarness({ deleteError: initialDeleteError }).dependencies,
+    ).catch((error: unknown) => error);
+    const failedCleanup = await createDaytonaSandboxSession(
+      creator,
+      { daytonaApiKey: "daytona-test" },
+      "responder-investigation-1",
+      cleanupHarness({ missing: true }).dependencies,
     ).catch((error: unknown) => error);
 
-    expect(failure).toBeInstanceOf(DaytonaSandboxCleanupError);
-    expect((failure as AggregateError).errors[0]).toBe(createError);
+    expect(failedBeforeCreation).toBe(initialDeleteError);
+    expect(sandboxDeletedAfterFailedCreation(failedBeforeCreation)).toBe(false);
+    expect(failedCleanup).toBeInstanceOf(AggregateError);
+    expect(sandboxDeletedAfterFailedCreation(failedCleanup)).toBe(false);
+    expect(creator.create).toHaveBeenCalledOnce();
   });
 
   it("does not repeat other creation failures", async () => {

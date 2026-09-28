@@ -4,7 +4,7 @@ import type {
 } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
 import { runInFreshAutomationSandbox } from "./automation-sandbox.js";
-import { DaytonaSandboxCleanupError } from "./sandbox.js";
+import { createDaytonaSandboxSession } from "./sandbox.js";
 
 function harness() {
   const session = {
@@ -20,6 +20,30 @@ function harness() {
     prepare: vi.fn().mockResolvedValue(undefined),
   };
   return { client, dependencies, session };
+}
+
+// A creation error from the real helper after it deleted the failed sandbox.
+async function creationFailureWithDeletedSandbox(error: Error): Promise<Error> {
+  const dependencies = {
+    createClient: () => ({
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ id: "sandbox-1" }),
+      [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+    }),
+    reportException: vi.fn(),
+    sleep: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Parameters<typeof createDaytonaSandboxSession>[3];
+  return createDaytonaSandboxSession(
+    { create: vi.fn().mockRejectedValue(error) },
+    { daytonaApiKey: "daytona-test" },
+    "responder-automation-run-1",
+    dependencies,
+  ).then(
+    () => {
+      throw new Error("Expected sandbox creation to fail");
+    },
+    (failure: Error) => failure,
+  );
 }
 
 const input = {
@@ -152,25 +176,28 @@ describe("fresh automation sandbox", () => {
     expect(dependencies.configure).not.toHaveBeenCalled();
   });
 
-  it("does not clean up again after sandbox creation fails", async () => {
+  it("does not clean up again after creation deleted its sandbox", async () => {
     const { dependencies } = harness();
-    const setupError = new Error("sandbox creation failed");
+    const onCleanupConfirmed = vi.fn();
+    const setupError = await creationFailureWithDeletedSandbox(
+      new Error("sandbox creation failed"),
+    );
     dependencies.createSession.mockRejectedValue(setupError);
 
     await expect(
-      runInFreshAutomationSandbox(input, dependencies),
+      runInFreshAutomationSandbox({ ...input, onCleanupConfirmed }, dependencies),
     ).rejects.toBe(setupError);
 
     expect(dependencies.closePending).not.toHaveBeenCalled();
     expect(dependencies.close).not.toHaveBeenCalled();
+    expect(onCleanupConfirmed).toHaveBeenCalledOnce();
   });
 
-  it("deletes the sandbox again when creation could not delete it", async () => {
+  it("deletes the sandbox when creation did not confirm its deletion", async () => {
     const { dependencies } = harness();
     const onCleanupConfirmed = vi.fn();
-    const createError = new Error("sandbox failed to start");
-    const setupError = new DaytonaSandboxCleanupError(
-      [createError, new Error("delete timed out")],
+    const setupError = new AggregateError(
+      [new Error("sandbox failed to start"), new Error("delete timed out")],
       "Unable to create or clean up Daytona sandbox responder-automation-run-1",
     );
     dependencies.createSession.mockRejectedValue(setupError);
@@ -189,10 +216,7 @@ describe("fresh automation sandbox", () => {
   it("does not confirm cleanup when neither deletion succeeds", async () => {
     const { dependencies } = harness();
     const onCleanupConfirmed = vi.fn();
-    const setupError = new DaytonaSandboxCleanupError(
-      [new Error("sandbox failed to start"), new Error("delete timed out")],
-      "Unable to create or clean up Daytona sandbox responder-automation-run-1",
-    );
+    const setupError = new Error("delete failed before creation");
     dependencies.createSession.mockRejectedValue(setupError);
     dependencies.closePending.mockRejectedValue(new Error("delete timed out"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -201,6 +225,7 @@ describe("fresh automation sandbox", () => {
       runInFreshAutomationSandbox({ ...input, onCleanupConfirmed }, dependencies),
     ).rejects.toBe(setupError);
 
+    expect(dependencies.closePending).toHaveBeenCalledOnce();
     expect(onCleanupConfirmed).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
