@@ -15,6 +15,7 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
+  DaytonaSandboxCleanupError,
   deleteDaytonaSandboxByName,
   prepareDaytonaSandbox,
   type DaytonaSandboxSecretMount,
@@ -264,10 +265,13 @@ export async function runInFreshAutomationSandbox<T>(
         input.config,
         sandboxName,
       );
-      // A failed creation already cleaned up its own sandbox. This handler
-      // runs before the rejection reaches the cleanup below.
-      creation.catch(() => {
-        pendingSandbox = false;
+      // A failed creation deletes its own sandbox unless it reports that the
+      // deletion failed. This handler runs before the rejection reaches the
+      // cleanup below.
+      creation.catch((error: unknown) => {
+        if (!(error instanceof DaytonaSandboxCleanupError)) {
+          pendingSandbox = false;
+        }
       });
       session = await abortable(creation, input.signal);
     }
