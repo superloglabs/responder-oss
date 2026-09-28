@@ -1,6 +1,10 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import type { RuntimeRepository } from "@responder/core/db/investigations";
 import type { IssueRemediationSubmission } from "@responder/core/investigations/report";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   applyProposedDiff,
@@ -168,7 +172,11 @@ describe("proposed diff remediation", () => {
       path: "/home/daytona/workspace/.responder/proposed.patch",
     });
     expect(session.execCommand).toHaveBeenCalledWith({
-      cmd: "git apply --whitespace=nowarn /home/daytona/workspace/.responder/proposed.patch",
+      cmd: [
+        "git apply --whitespace=nowarn /home/daytona/workspace/.responder/proposed.patch",
+        "git apply --whitespace=nowarn --recount /home/daytona/workspace/.responder/proposed.patch",
+        "git apply --whitespace=nowarn --recount --unidiff-zero /home/daytona/workspace/.responder/proposed.patch",
+      ].join(" || "),
       maxOutputTokens: 2_000,
       workdir: "/workspace/acme/api",
     });
@@ -205,5 +213,133 @@ describe("proposed diff remediation", () => {
     ).rejects.toThrow("Proposed diff cannot contain a workspace secret placeholder");
     expect(session.materializeEntry).not.toHaveBeenCalled();
     expect(session.execCommand).not.toHaveBeenCalled();
+  });
+});
+
+// Runs the sandbox command with real git in a temporary repository.
+function applyInRepository(
+  files: Record<string, string>,
+  diff: string,
+  createdPaths: string[] = [],
+) {
+  const directory = mkdtempSync(join(tmpdir(), "proposed-diff-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: directory });
+    for (const [path, content] of Object.entries(files)) {
+      writeFileSync(join(directory, path), content);
+    }
+    let patch = "";
+    const session = {
+      execCommand: vi.fn(async ({ cmd }: { cmd: string }) => {
+        const patchPath = join(directory, "proposed.patch");
+        writeFileSync(patchPath, patch);
+        const result = spawnSync(
+          "sh",
+          ["-c", cmd.replaceAll("/home/daytona/workspace/.responder/proposed.patch", patchPath)],
+          { cwd: directory, encoding: "utf8" },
+        );
+        return `Process exited with code ${result.status}\nOutput:\n${result.stderr}`;
+      }),
+      materializeEntry: vi.fn(async ({ entry }: { entry: { content: string } }) => {
+        patch = entry.content;
+      }),
+    } as unknown as DaytonaSandboxSession;
+    return applyProposedDiff(session, directory, diff).then(
+      () =>
+        Object.fromEntries(
+          [...Object.keys(files), ...createdPaths].map((path) => [
+            path,
+            readFileSync(join(directory, path), "utf8"),
+          ]),
+        ),
+    ).finally(() => rmSync(directory, { force: true, recursive: true }));
+  } catch (error) {
+    rmSync(directory, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+describe("proposed diff application with git", () => {
+  const lines = (count: number, prefix: string) =>
+    Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`);
+
+  it("applies a diff whose hunk header miscounts its lines", async () => {
+    const files = {
+      "app.py": [...lines(4, "# line"), "value = 1", ...lines(3, "# tail")].join("\n") + "\n",
+    };
+    const diff = [
+      "diff --git a/app.py b/app.py",
+      "--- a/app.py",
+      "+++ b/app.py",
+      "@@ -5,4 +5,4 @@",
+      "-value = 1",
+      "+value = 2",
+      " # tail 1",
+      " # tail 2",
+      " # tail 3",
+      "diff --git a/test_app.py b/test_app.py",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/test_app.py",
+      "@@ -0,0 +1,5 @@",
+      "+def test_value():",
+      "+    assert True",
+    ].join("\n");
+
+    await expect(applyInRepository(files, diff, ["test_app.py"])).resolves.toEqual({
+      "app.py": [...lines(4, "# line"), "value = 2", ...lines(3, "# tail")].join("\n") + "\n",
+      "test_app.py": "def test_value():\n    assert True\n",
+    });
+  });
+
+  it("applies hunks that end without trailing context", async () => {
+    const files = {
+      "judge.ts": [
+        ...lines(34, "// line"),
+        "import { z } from 'zod';",
+        "import { callLLM } from '@/lib/ai';",
+        "import { other } from 'x';",
+        ...lines(41, "// middle"),
+        "const MODEL = 'primary';",
+        ...lines(10, "// tail"),
+      ].join("\n") + "\n",
+    };
+    const diff = [
+      "diff --git a/judge.ts b/judge.ts",
+      "--- a/judge.ts",
+      "+++ b/judge.ts",
+      "@@ -35,6 +35,7 @@",
+      " import { z } from 'zod';",
+      " import { callLLM } from '@/lib/ai';",
+      "+import { fallback } from '@/lib/ai/fallback';",
+      "@@ -79 +80,2 @@",
+      "-const MODEL = 'primary';",
+      "+const MODELS = { primary: 'primary', fallback: 'fallback' };",
+      "+export { MODELS };",
+    ].join("\n");
+
+    const applied = await applyInRepository(files, diff);
+    expect(applied["judge.ts"]).toContain(
+      "import { callLLM } from '@/lib/ai';\nimport { fallback } from '@/lib/ai/fallback';\nimport { other } from 'x';",
+    );
+    expect(applied["judge.ts"]).toContain(
+      "// middle 41\nconst MODELS = { primary: 'primary', fallback: 'fallback' };\nexport { MODELS };\n// tail 1",
+    );
+  });
+
+  it("still rejects a diff whose context does not match the code", async () => {
+    const files = { "app.py": "value = 1\n" };
+    const diff = [
+      "diff --git a/app.py b/app.py",
+      "--- a/app.py",
+      "+++ b/app.py",
+      "@@ -1 +1 @@",
+      "-value = 3",
+      "+value = 2",
+    ].join("\n");
+
+    await expect(applyInRepository(files, diff)).rejects.toThrow(
+      "The proposed diff no longer applies cleanly",
+    );
   });
 });

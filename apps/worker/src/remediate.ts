@@ -104,6 +104,16 @@ export function proposedPullRequestContent(
   };
 }
 
+// Proposed diffs are written by the model, which often miscounts the lines in
+// a hunk header or ends a hunk without trailing context. `--recount` and
+// `--unidiff-zero` relax only those header checks; every context and removed
+// line must still match the checked-out code.
+const gitApplyCommands = [
+  "git apply --whitespace=nowarn",
+  "git apply --whitespace=nowarn --recount",
+  "git apply --whitespace=nowarn --recount --unidiff-zero",
+] as const;
+
 function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
@@ -120,7 +130,10 @@ export async function applyProposedDiff(
     path: patchPath,
   });
   const output = await session.execCommand({
-    cmd: `git apply --whitespace=nowarn ${patchPath}`,
+    // `git apply` changes nothing when it fails, so each attempt starts clean.
+    cmd: gitApplyCommands
+      .map((command) => `${command} ${patchPath}`)
+      .join(" || "),
     maxOutputTokens: 2_000,
     workdir: repositoryPath,
   });
