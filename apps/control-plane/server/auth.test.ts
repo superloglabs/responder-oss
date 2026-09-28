@@ -1,10 +1,62 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setOrganizationCapability } from "../../../packages/core/src/db/organization-capabilities.js";
 import {
   canImpersonateSupportUser,
   configuredAuthTrustedOrigins,
   configuredSuperuserEmails,
+  grantNewOrganizationCapabilities,
   platformRoleForIdentity,
 } from "./auth.js";
+
+vi.mock(
+  "../../../packages/core/src/db/organization-capabilities.js",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../packages/core/src/db/organization-capabilities.js")
+    >()),
+    setOrganizationCapability: vi.fn(),
+  }),
+);
+
+describe("grantNewOrganizationCapabilities", () => {
+  beforeEach(() => {
+    vi.mocked(setOrganizationCapability).mockReset();
+  });
+
+  it("enables each configured capability for the new organization", async () => {
+    await grantNewOrganizationCapabilities(
+      "organization-id",
+      "user-id",
+      "automations,simplified_navigation",
+    );
+
+    expect(vi.mocked(setOrganizationCapability).mock.calls).toEqual([
+      [{ capability: "automations", enabled: true, organizationId: "organization-id", updatedBy: "user-id" }],
+      [{ capability: "simplified_navigation", enabled: true, organizationId: "organization-id", updatedBy: "user-id" }],
+    ]);
+  });
+
+  it("grants nothing without configuration", async () => {
+    await grantNewOrganizationCapabilities("organization-id", "user-id", undefined);
+
+    expect(setOrganizationCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps granting after one capability fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(setOrganizationCapability).mockRejectedValueOnce(new Error("database unavailable"));
+
+    await grantNewOrganizationCapabilities(
+      "organization-id",
+      "user-id",
+      "automations,simplified_navigation",
+    );
+
+    expect(setOrganizationCapability).toHaveBeenCalledTimes(2);
+    expect(consoleError).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+});
 
 describe("configuredAuthTrustedOrigins", () => {
   it("trusts the configured auth and public callback origins", () => {

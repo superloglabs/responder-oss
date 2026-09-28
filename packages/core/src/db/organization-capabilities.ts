@@ -2,8 +2,21 @@ import { and, eq } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   organizationCapabilities,
+  organizationCapabilityValues,
   type OrganizationCapability,
 } from "./schema.js";
+
+// Operators choose the capabilities every new organization starts with, as a
+// comma-separated list. Unknown names are ignored.
+export function newOrganizationCapabilities(
+  configured: string | undefined,
+): OrganizationCapability[] {
+  const known = new Set<string>(organizationCapabilityValues);
+  const names = (configured ?? "").split(",").map((name) => name.trim());
+  return [...new Set(names)].filter((name): name is OrganizationCapability =>
+    known.has(name)
+  );
+}
 
 export async function organizationHasCapability(
   organizationId: string,
@@ -29,9 +42,10 @@ export async function setOrganizationCapability(input: {
   organizationId: string;
   updatedBy: string;
 }): Promise<void> {
-  // The hosted private control room owns the initial allowlist UI and writes
-  // this shared table. The public application intentionally has no route that
-  // can grant its own organization a private capability.
+  // The hosted private control room owns the allowlist UI and writes this
+  // shared table. The public application grants capabilities only to new
+  // organizations, from operator configuration, and has no route that lets
+  // an organization grant itself one.
   await getDatabase()
     .insert(organizationCapabilities)
     .values({

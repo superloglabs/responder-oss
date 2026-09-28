@@ -10,6 +10,10 @@ import {
   type PlatformRole,
 } from "../../../packages/core/src/db/superusers.js";
 import {
+  newOrganizationCapabilities,
+  setOrganizationCapability,
+} from "../../../packages/core/src/db/organization-capabilities.js";
+import {
   rememberedOrganizationId,
   rememberOrganization,
 } from "../../../packages/core/src/db/workspace-preferences.js";
@@ -304,6 +308,7 @@ export function createResponderAuth() {
         },
         organizationHooks: {
           afterCreateOrganization: async ({ organization, user }) => {
+            await grantNewOrganizationCapabilities(organization.id, user.id);
             await captureAnalyticsEvent({
               distinctId: user.id,
               event: "organization created",
@@ -329,6 +334,35 @@ export function createResponderAuth() {
       },
     },
   });
+}
+
+// A failed grant leaves the organization usable without the capability, and
+// the control room can still enable it.
+export async function grantNewOrganizationCapabilities(
+  organizationId: string,
+  userId: string,
+  configured = process.env.RESPONDER_NEW_ORGANIZATION_CAPABILITIES,
+): Promise<void> {
+  for (const capability of newOrganizationCapabilities(configured)) {
+    try {
+      await setOrganizationCapability({
+        capability,
+        enabled: true,
+        organizationId,
+        updatedBy: userId,
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          capability,
+          errorCode:
+            error instanceof Error ? error.constructor.name : "unknown",
+          event: "organization_capability_grant_failed",
+          organizationId,
+        }),
+      );
+    }
+  }
 }
 
 export type ResponderAuth = ReturnType<typeof createResponderAuth>;

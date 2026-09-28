@@ -1,7 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
-import { OrganizationCapabilitiesProvider } from "../organization-capabilities";
 import { resetBrowserAnalytics } from "../browser-analytics";
 import { trackRedditSignupPixel } from "../reddit-pixel";
 import { socialAuthErrorMessage, socialAuthUrls } from "../social-auth-url";
@@ -15,6 +14,7 @@ import {
 import { workspaceSlug } from "./workspace";
 import { sharedTemplateSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ImpersonationBanner } from "./impersonation-banner";
+import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 
