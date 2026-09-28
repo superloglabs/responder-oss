@@ -40,6 +40,8 @@ import { ModelAccessSettingsPage } from "./pages/model-access-settings";
 import { TagModeSettingsPage } from "./pages/tag-mode-settings";
 import { blogArticlePath } from "./public-routes";
 import { usePageMetadata } from "./use-page-metadata";
+import { useOrganizationCapabilities } from "./organization-capabilities";
+import { homePath } from "./primary-navigation";
 
 function ProtectedApp() {
   return (
@@ -47,6 +49,11 @@ function ProtectedApp() {
       <Outlet />
     </AuthGate>
   );
+}
+
+function HomeRedirect() {
+  const capabilities = useOrganizationCapabilities();
+  return <Navigate replace to={homePath(capabilities)} />;
 }
 
 function LegacyBillingRedirect() {
@@ -95,7 +102,7 @@ export function App() {
         </>
       ) : null}
       <Route element={<ProtectedApp />}>
-        <Route element={<Navigate replace to="/agents" />} path="/app" />
+        <Route element={<HomeRedirect />} path="/app" />
         <Route
           element={<Navigate replace to="/" />}
           path="/invite/:invitationId"

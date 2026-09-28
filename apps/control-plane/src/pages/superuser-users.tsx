@@ -103,7 +103,7 @@ export function SuperuserUsersPage() {
       setError(result.error.message ?? "Could not view Responder as this user.");
       return;
     }
-    window.location.assign("/agents");
+    window.location.assign("/app");
   }
 
   return (

@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
+import { OrganizationCapabilitiesProvider } from "../organization-capabilities";
 import { resetBrowserAnalytics } from "../browser-analytics";
 import { trackRedditSignupPixel } from "../reddit-pixel";
 import { socialAuthErrorMessage, socialAuthUrls } from "../social-auth-url";
@@ -514,7 +515,7 @@ function InvitationGate({
       }),
     );
     await onReady();
-    window.location.replace("/agents");
+    window.location.replace("/app");
   }
 
   return (
@@ -736,7 +737,15 @@ export function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       <ImpersonationBanner />
-      {children}
+      <OrganizationCapabilitiesProvider
+        fallback={
+          <AuthFrame>
+            <p className="authMuted">Loading Superlog…</p>
+          </AuthFrame>
+        }
+      >
+        {children}
+      </OrganizationCapabilitiesProvider>
     </>
   );
 }

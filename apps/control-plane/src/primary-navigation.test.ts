@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeNavigationSection, primaryNavigation } from "./primary-navigation";
+import { activeNavigationSection, homePath, primaryNavigation } from "./primary-navigation";
 
 describe("primaryNavigation", () => {
   it("lists every product area by default", () => {
@@ -39,5 +39,20 @@ describe("activeNavigationSection", () => {
   it("highlights the promoted entries in simplified navigation", () => {
     expect(activeNavigationSection("integrations", true)).toBe("integrations");
     expect(activeNavigationSection("tag-mode", true)).toBe("tag-mode");
+  });
+});
+
+describe("homePath", () => {
+  it("opens agents by default", () => {
+    expect(homePath([])).toBe("/agents");
+    expect(homePath(["automations"])).toBe("/agents");
+  });
+
+  it("opens automations in simplified navigation", () => {
+    expect(homePath(["automations", "simplified_navigation"])).toBe("/automations");
+  });
+
+  it("opens integrations in simplified navigation without automations", () => {
+    expect(homePath(["simplified_navigation"])).toBe("/settings");
   });
 });

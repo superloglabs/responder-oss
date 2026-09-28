@@ -182,7 +182,7 @@ export function AppShell({ active, children, density = "default", guest, redesig
         organizationId,
       }),
     );
-    window.location.assign("/agents");
+    window.location.assign("/app");
   }
 
   async function signOut() {

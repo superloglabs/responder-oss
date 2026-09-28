@@ -51,3 +51,11 @@ export function activeNavigationSection(
     ? "settings"
     : active;
 }
+
+// Where the application opens for a signed-in member: the first sidebar entry.
+export function homePath(capabilities: readonly string[]): string {
+  return primaryNavigation({
+    automations: capabilities.includes("automations"),
+    simplified: capabilities.includes("simplified_navigation"),
+  })[0].to;
+}

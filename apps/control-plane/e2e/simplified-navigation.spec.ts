@@ -9,7 +9,11 @@ const organization = {
   metadata: null,
 };
 
-async function mockWorkspace(page: Page, capabilities: string[]) {
+async function mockWorkspace(
+  page: Page,
+  capabilities: string[],
+  contextDelayMs = 0,
+) {
   await page.route("**/api/auth/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/get-session")) {
@@ -43,11 +47,16 @@ async function mockWorkspace(page: Page, capabilities: string[]) {
       await route.fulfill({ json: null });
     }
   });
-  await page.route("**/api/context", (route) => route.fulfill({ json: { capabilities } }));
+  await page.route("**/api/context", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, contextDelayMs));
+    await route.fulfill({ json: { capabilities } });
+  });
   await page.route("**/api/legacy-account-redirect", (route) =>
     route.fulfill({ json: { redirect: false } }),
   );
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [] } }));
+  await page.route("**/api/automations", (route) => route.fulfill({ json: { automations: [] } }));
+  await page.route("**/api/agents", (route) => route.fulfill({ json: { agents: [] } }));
   await page.route("**/api/billing", (route) => route.fulfill({ json: { configured: false, enabled: false } }));
 }
 
@@ -91,4 +100,32 @@ test("moves integrations and tag mode into the sidebar", async ({ page }) => {
   await expect(settingsTabs.getByRole("link", { name: "Workspace" })).toBeVisible();
   await expect(settingsTabs.getByRole("link", { name: "Integrations" })).toHaveCount(0);
   await expect(settingsTabs.getByRole("link", { name: "Tag mode" })).toHaveCount(0);
+});
+
+test("waits for capabilities before showing the sidebar", async ({ page }) => {
+  await mockWorkspace(page, ["automations", "simplified_navigation"], 500);
+  await page.goto("/settings");
+
+  await expect(page.getByText("Loading Superlog…")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toHaveCount(0);
+  await expect(primaryLinks(page)).toHaveText([
+    "Automations",
+    "Integrations",
+    "Tag mode",
+    "Settings",
+  ]);
+});
+
+test("opens automations for simplified navigation", async ({ page }) => {
+  await mockWorkspace(page, ["automations", "simplified_navigation"]);
+  await page.goto("/app");
+
+  await expect(page).toHaveURL(/\/automations$/u);
+});
+
+test("opens agents without simplified navigation", async ({ page }) => {
+  await mockWorkspace(page, ["automations"]);
+  await page.goto("/app");
+
+  await expect(page).toHaveURL(/\/agents$/u);
 });
