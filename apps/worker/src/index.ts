@@ -79,6 +79,7 @@ import {
 import {
   flushWorkerMonitoring,
   initializeErrorMonitoring,
+  monitoringErrorMessage,
   reportWorkerException,
 } from "./monitoring.js";
 import { processRemediationJob } from "./remediation-job.js";
@@ -348,14 +349,27 @@ async function reportIncompleteSlackDelivery(input: {
   );
 }
 
-boss.on("error", (error) => {
+boss.on("error", (error: unknown) => {
+  const queue =
+    typeof error === "object" &&
+    error !== null &&
+    "queue" in error &&
+    typeof error.queue === "string"
+      ? error.queue
+      : undefined;
   console.error(
     JSON.stringify({
-      error: error instanceof Error ? error.message : String(error),
+      error: monitoringErrorMessage(error),
       event: "worker_error",
+      ...(queue ? { queue } : {}),
     }),
   );
-  void reportWorkerException(error, { operation: "worker" });
+  // Jobs cut off by shutdown are retried by the next worker.
+  if (stopping) return;
+  void reportWorkerException(error, {
+    operation: "worker",
+    ...(queue ? { diagnostics: { queue } } : {}),
+  });
 });
 
 async function shutdown(signal: string): Promise<void> {

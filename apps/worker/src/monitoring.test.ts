@@ -391,4 +391,49 @@ describe("worker error monitoring", () => {
       maxTurns: 40,
     });
   });
+
+  it("keeps the message and stack of errors that pg-boss copies into objects", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      DAYTONA_API_KEY: "daytona-secret",
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+    const original = new TypeError("Connection terminated for daytona-secret");
+    original.stack =
+      "TypeError: Connection terminated for daytona-secret\n" +
+      "    at Worker.run (/app/node_modules/pg-boss/dist/worker.js:10:2)";
+    const emitted = {
+      ...original,
+      message: original.message,
+      queue: "investigation",
+      stack: original.stack,
+      worker: "worker-1",
+    };
+
+    expect(monitoring.monitoringErrorMessage(emitted)).toBe(
+      "Connection terminated for daytona-secret",
+    );
+    await monitoring.reportWorkerException(emitted, { operation: "worker" });
+
+    const captured = sentryMocks.captureException.mock.calls[0]![0] as Error;
+    expect(captured).toBeInstanceOf(Error);
+    expect(captured.name).toBe("TypeError");
+    expect(captured.message).toBe("Connection terminated for [redacted]");
+    expect(captured.stack).toContain(
+      "at Worker.run (/app/node_modules/pg-boss/dist/worker.js:10:2)",
+    );
+  });
+
+  it("uses a generic message for values without an error message", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+
+    await monitoring.reportWorkerException({ code: 42 }, { operation: "worker" });
+
+    expect(
+      (sentryMocks.captureException.mock.calls[0]![0] as Error).message,
+    ).toBe("Worker operation failed with a non-Error exception");
+  });
 });

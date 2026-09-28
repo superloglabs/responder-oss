@@ -53,6 +53,25 @@ const daytonaAppearanceRetryDelaysMs = [
   10_000,
   10_000,
 ] as const;
+const daytonaStartAttempts = 2;
+const daytonaStartRetryDelayMs = 5_000;
+
+// Daytona returns this when the runner it picked cannot start the container,
+// for example when the runner's container runtime is broken. A new attempt
+// can be placed on a healthy runner.
+function isDaytonaStartFailure(error: unknown): boolean {
+  return error instanceof Error &&
+    error.message.includes("Sandbox failed to start");
+}
+
+// Creation errors thrown after the failed sandbox was confirmed deleted.
+const creationErrorsWithDeletedSandbox = new WeakSet<object>();
+
+export function sandboxDeletedAfterFailedCreation(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    creationErrorsWithDeletedSandbox.has(error);
+}
 
 function isTransientDaytonaError(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "statusCode" in error) {
@@ -164,6 +183,8 @@ export async function createDaytonaSandboxSession(
   config: DaytonaCleanupConfig,
   sandboxName: string,
   dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+  // Stops a retry from creating a sandbox after the caller has given up.
+  signal?: AbortSignal,
 ): Promise<DaytonaSandboxSession> {
   await deleteDaytonaSandboxByReference(
     sandboxName,
@@ -171,23 +192,40 @@ export async function createDaytonaSandboxSession(
     false,
     dependencies,
   );
-  try {
-    return await creator.create();
-  } catch (createError) {
+  for (let attempt = 1; ; attempt += 1) {
     try {
-      await deleteDaytonaSandboxByReference(
-        sandboxName,
-        config,
-        true,
-        dependencies,
-      );
-    } catch (cleanupError) {
-      throw new AggregateError(
-        [createError, cleanupError],
-        `Unable to create or clean up Daytona sandbox ${sandboxName}`,
-      );
+      return await creator.create();
+    } catch (createError) {
+      try {
+        await deleteDaytonaSandboxByReference(
+          sandboxName,
+          config,
+          true,
+          dependencies,
+        );
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [createError, cleanupError],
+          `Unable to create or clean up Daytona sandbox ${sandboxName}`,
+        );
+      }
+      if (typeof createError === "object" && createError !== null) {
+        creationErrorsWithDeletedSandbox.add(createError);
+      }
+      if (
+        attempt >= daytonaStartAttempts ||
+        !isDaytonaStartFailure(createError) ||
+        signal?.aborted
+      ) {
+        throw createError;
+      }
+      console.error(JSON.stringify({
+        event: "daytona_sandbox_start_retry",
+        sandboxId: sandboxName,
+      }));
+      await dependencies.sleep(daytonaStartRetryDelayMs);
+      if (signal?.aborted) throw createError;
     }
-    throw createError;
   }
 }
 

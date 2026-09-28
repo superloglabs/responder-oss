@@ -4,6 +4,7 @@ import type {
 } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
 import { runInFreshAutomationSandbox } from "./automation-sandbox.js";
+import { createDaytonaSandboxSession } from "./sandbox.js";
 
 function harness() {
   const session = {
@@ -19,6 +20,30 @@ function harness() {
     prepare: vi.fn().mockResolvedValue(undefined),
   };
   return { client, dependencies, session };
+}
+
+// A creation error from the real helper after it deleted the failed sandbox.
+async function creationFailureWithDeletedSandbox(error: Error): Promise<Error> {
+  const dependencies = {
+    createClient: () => ({
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ id: "sandbox-1" }),
+      [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+    }),
+    reportException: vi.fn(),
+    sleep: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Parameters<typeof createDaytonaSandboxSession>[3];
+  return createDaytonaSandboxSession(
+    { create: vi.fn().mockRejectedValue(error) },
+    { daytonaApiKey: "daytona-test" },
+    "responder-automation-run-1",
+    dependencies,
+  ).then(
+    () => {
+      throw new Error("Expected sandbox creation to fail");
+    },
+    (failure: Error) => failure,
+  );
 }
 
 const input = {
@@ -61,6 +86,8 @@ describe("fresh automation sandbox", () => {
       client,
       input.config,
       "responder-automation-run-1",
+      undefined,
+      undefined,
     );
     expect(input.run).toHaveBeenCalledWith(
       session,
@@ -129,6 +156,24 @@ describe("fresh automation sandbox", () => {
     );
   });
 
+  it("passes the run's abort signal to sandbox creation", async () => {
+    const { client, dependencies } = harness();
+    const controller = new AbortController();
+
+    await runInFreshAutomationSandbox(
+      { ...input, signal: controller.signal },
+      dependencies,
+    );
+
+    expect(dependencies.createSession).toHaveBeenCalledWith(
+      client,
+      input.config,
+      "responder-automation-run-1",
+      undefined,
+      controller.signal,
+    );
+  });
+
   it("cancels setup and deletes a sandbox that has not returned a session", async () => {
     const { dependencies } = harness();
     const controller = new AbortController();
@@ -151,19 +196,79 @@ describe("fresh automation sandbox", () => {
     expect(dependencies.configure).not.toHaveBeenCalled();
   });
 
+  it("does not clean up again after creation deleted its sandbox", async () => {
+    const { dependencies } = harness();
+    const onCleanupConfirmed = vi.fn();
+    const setupError = await creationFailureWithDeletedSandbox(
+      new Error("sandbox creation failed"),
+    );
+    dependencies.createSession.mockRejectedValue(setupError);
+
+    await expect(
+      runInFreshAutomationSandbox({ ...input, onCleanupConfirmed }, dependencies),
+    ).rejects.toBe(setupError);
+
+    expect(dependencies.closePending).not.toHaveBeenCalled();
+    expect(dependencies.close).not.toHaveBeenCalled();
+    expect(onCleanupConfirmed).toHaveBeenCalledOnce();
+  });
+
+  it("deletes the sandbox when creation did not confirm its deletion", async () => {
+    const { dependencies } = harness();
+    const onCleanupConfirmed = vi.fn();
+    const setupError = new AggregateError(
+      [new Error("sandbox failed to start"), new Error("delete timed out")],
+      "Unable to create or clean up Daytona sandbox responder-automation-run-1",
+    );
+    dependencies.createSession.mockRejectedValue(setupError);
+
+    await expect(
+      runInFreshAutomationSandbox({ ...input, onCleanupConfirmed }, dependencies),
+    ).rejects.toBe(setupError);
+
+    expect(dependencies.closePending).toHaveBeenCalledWith(
+      "responder-automation-run-1",
+      input.config,
+    );
+    expect(onCleanupConfirmed).toHaveBeenCalledOnce();
+  });
+
+  it("does not confirm cleanup when neither deletion succeeds", async () => {
+    const { dependencies } = harness();
+    const onCleanupConfirmed = vi.fn();
+    const setupError = new Error("delete failed before creation");
+    dependencies.createSession.mockRejectedValue(setupError);
+    dependencies.closePending.mockRejectedValue(new Error("delete timed out"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      runInFreshAutomationSandbox({ ...input, onCleanupConfirmed }, dependencies),
+    ).rejects.toBe(setupError);
+
+    expect(dependencies.closePending).toHaveBeenCalledOnce();
+    expect(onCleanupConfirmed).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("preserves the setup failure when pending sandbox cleanup also fails", async () => {
     const { dependencies } = harness();
-    const setupError = new Error("sandbox creation failed");
-    dependencies.createSession.mockRejectedValue(setupError);
+    const controller = new AbortController();
+    const timeout = new Error("runtime limit reached during setup");
+    dependencies.createSession.mockImplementation(
+      () => new Promise(() => undefined),
+    );
     dependencies.closePending.mockRejectedValue(
       new Error("pending sandbox cleanup failed"),
     );
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = runInFreshAutomationSandbox(
+      { ...input, signal: controller.signal },
+      dependencies,
+    );
 
-    await expect(
-      runInFreshAutomationSandbox(input, dependencies),
-    ).rejects.toBe(setupError);
+    controller.abort(timeout);
 
+    await expect(run).rejects.toBe(timeout);
     expect(dependencies.closePending).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("automation_pending_sandbox_cleanup_failed"),

@@ -94,11 +94,44 @@ function redactEventValue(
   return record;
 }
 
+// pg-boss emits worker failures as plain objects that copy an error's name,
+// message, and stack.
+function errorLike(
+  value: unknown,
+): { message: string; name?: string; stack?: string } | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { message, name, stack } = value as Record<string, unknown>;
+  if (typeof message !== "string") return null;
+  return {
+    message,
+    ...(typeof name === "string" ? { name } : {}),
+    ...(typeof stack === "string" ? { stack } : {}),
+  };
+}
+
+export function monitoringErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return errorLike(error)?.message ?? String(error);
+}
+
+function asError(value: unknown): Error | null {
+  if (value instanceof Error) return value;
+  const fields = errorLike(value);
+  if (!fields) return null;
+  const error = new Error(fields.message);
+  // Spreading an error drops its inherited name; the stack still starts with it.
+  error.name =
+    fields.name ?? fields.stack?.match(/^([A-Za-z]\w*):/u)?.[1] ?? "Error";
+  error.stack = fields.stack;
+  return error;
+}
+
 function errorForMonitoring(
-  error: unknown,
+  value: unknown,
   secrets: readonly string[],
 ): Error {
-  if (!(error instanceof Error)) {
+  const error = asError(value);
+  if (!error) {
     return new Error("Worker operation failed with a non-Error exception");
   }
 

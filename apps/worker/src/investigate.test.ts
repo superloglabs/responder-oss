@@ -1,6 +1,7 @@
 import { SentryConnectionUnavailableError } from "@responder/core/db/investigations";
 import { describe, expect, it, vi } from "vitest";
 import {
+  connectContextServer,
   contextServerConnectFailureEvent,
   initialInvestigationMessage,
   investigationCapabilities,
@@ -779,5 +780,48 @@ describe("profile-specific investigation guidance", () => {
 
   it.each([{ scanMode: true }, { threadMode: true }])("keeps observation-only modes free of code-remediation instructions (%j)", (mode) => {
     expect(investigationInstructions({ ...base, ...mode })).not.toContain("Always try to create a code change remediation.");
+  });
+});
+
+describe("context server connection", () => {
+  it("retries a network failure before giving up on the server", async () => {
+    const networkFailure = new TypeError("fetch failed");
+    const server = {
+      connect: vi.fn()
+        .mockRejectedValueOnce(networkFailure)
+        .mockResolvedValueOnce(undefined),
+    };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await connectContextServer(server, sleep);
+
+    expect(server.connect).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1_000);
+  });
+
+  it("stops after three network failures", async () => {
+    const networkFailure = new TypeError("fetch failed");
+    const server = { connect: vi.fn().mockRejectedValue(networkFailure) };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(connectContextServer(server, sleep)).rejects.toBe(
+      networkFailure,
+    );
+
+    expect(server.connect).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenLastCalledWith(3_000);
+  });
+
+  it("does not retry a rejected connection", async () => {
+    const unauthorized = new Error("HTTP 401: invalid API key");
+    const server = { connect: vi.fn().mockRejectedValue(unauthorized) };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(connectContextServer(server, sleep)).rejects.toBe(
+      unauthorized,
+    );
+
+    expect(server.connect).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
   });
 });

@@ -482,6 +482,7 @@ describe("remediation request state transitions", () => {
 
 function automaticTransactionDouble(options: {
   activeIndexAvailable: boolean;
+  attached?: Array<{ fullName: string }>;
   existing?: Array<{ issueId: string }>;
   inserted: Array<{ id: string; issueId: string }>;
 }) {
@@ -489,6 +490,7 @@ function automaticTransactionDouble(options: {
   const onConflictDoNothing = vi.fn(() => ({ returning }));
   const values = vi.fn(() => ({ onConflictDoNothing, returning }));
   const existingWhere = vi.fn().mockResolvedValue(options.existing ?? []);
+  const attachedWhere = vi.fn().mockResolvedValue(options.attached ?? []);
   const execute = vi
     .fn()
     .mockResolvedValueOnce({
@@ -499,10 +501,14 @@ function automaticTransactionDouble(options: {
     execute,
     insert: vi.fn(() => ({ values })),
     select: vi.fn(() => ({
-      from: vi.fn(() => ({ where: existingWhere })),
+      from: vi.fn(() => ({
+        innerJoin: vi.fn(() => ({ where: attachedWhere })),
+        where: existingWhere,
+      })),
     })),
   };
   return {
+    attachedWhere,
     execute,
     existingWhere,
     onConflictDoNothing,
@@ -596,5 +602,74 @@ describe("automatic pull request uniqueness", () => {
       { agentConfigVersionId, investigationId, issueId: secondIssueId, remediationId },
     ]);
     expect(onConflictDoNothing).not.toHaveBeenCalled();
+  });
+  it("skips stored changes for repositories this agent does not attach", async () => {
+    const secondIssueId = "20202020-2020-4020-8020-202020202020";
+    const inserted = [{
+      id: "05050505-0505-4505-8505-050505050505",
+      issueId: secondIssueId,
+    }];
+    const { attachedWhere, existingWhere, tx, values } =
+      automaticTransactionDouble({
+        activeIndexAvailable: true,
+        attached: [{ fullName: "acme/storefront" }],
+        inserted,
+      });
+
+    await expect(
+      queueAutomaticIssuePullRequests(tx as never, {
+        agentConfigVersionId,
+        investigationId,
+        remediations: [
+          { issueId, remediationId, repositoryFullName: "acme/fernwood" },
+          {
+            issueId: secondIssueId,
+            remediationId,
+            repositoryFullName: "acme/storefront",
+          },
+        ],
+      }),
+    ).resolves.toEqual(inserted);
+
+    const attachedQuery = compiledSql(attachedWhere.mock.calls[0]![0]);
+    expect(attachedQuery.params).toEqual([
+      agentConfigVersionId,
+      true,
+      "acme/fernwood",
+      "acme/storefront",
+    ]);
+    expect(compiledSql(existingWhere.mock.calls[0]![0]).params).toEqual([
+      secondIssueId,
+      "queued",
+      "creating",
+      "created",
+    ]);
+    expect(values).toHaveBeenCalledWith([{
+      agentConfigVersionId,
+      investigationId,
+      issueId: secondIssueId,
+      remediationId,
+      repositoryFullName: "acme/storefront",
+    }]);
+  });
+
+  it("queues nothing when no stored change targets an attached repository", async () => {
+    const { execute, tx, values } = automaticTransactionDouble({
+      activeIndexAvailable: true,
+      inserted: [],
+    });
+
+    await expect(
+      queueAutomaticIssuePullRequests(tx as never, {
+        agentConfigVersionId,
+        investigationId,
+        remediations: [
+          { issueId, remediationId, repositoryFullName: "acme/fernwood" },
+        ],
+      }),
+    ).resolves.toEqual([]);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(values).not.toHaveBeenCalled();
   });
 });
