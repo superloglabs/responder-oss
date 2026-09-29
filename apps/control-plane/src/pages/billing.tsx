@@ -70,11 +70,14 @@ function usageSegments(
 
 function AutomationBilling({
   onChangePlan,
+  onManageBilling,
   redirecting,
   summary,
   usageBased,
 }: {
   onChangePlan: (planId: AutomationPlanId | "free" | "resume") => void;
+  // Opens the billing portal; absent when the workspace has not paid yet.
+  onManageBilling?: () => void;
   redirecting: boolean;
   summary: AutomationBillingSummary;
   usageBased: boolean;
@@ -191,6 +194,16 @@ function AutomationBilling({
                 type="button"
               >
                 Switch to free
+              </button>
+            ) : null}
+            {onManageBilling ? (
+              <button
+                className="button button--secondary"
+                disabled={redirecting}
+                onClick={onManageBilling}
+                type="button"
+              >
+                Manage billing
               </button>
             ) : null}
             {paid && summary.cancelsAtPeriodEnd ? (
@@ -391,6 +404,14 @@ export function BillingPage() {
       {summary?.enabled && summary.automations ? (
         <AutomationBilling
           onChangePlan={(planId) => void changeAutomationPlan(planId)}
+          // Usage-billed workspaces have no investigation card, so invoices
+          // and payment methods are reached from here.
+          onManageBilling={
+            summary.usageBased &&
+            (summary.payAsYouGo || summary.automations.planId !== "responder_automations_free")
+              ? () => void openBilling("portal")
+              : undefined
+          }
           redirecting={isRedirecting}
           summary={summary.automations}
           usageBased={summary.usageBased ?? false}

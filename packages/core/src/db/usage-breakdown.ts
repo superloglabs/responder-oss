@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, sql, type AnyColumn } from "drizzle-orm";
+import { and, eq, gte, sql, type AnyColumn } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { agentModelUsage, automationModelUsage, sandboxUsage } from "./schema.js";
 
@@ -8,8 +8,8 @@ export interface UsageBreakdown {
 }
 
 // What an organization has been charged since `since`, split into model usage
-// and sandbox time. Pending model reservations and running sandboxes are not
-// counted until they finish.
+// and sandbox time. Only settled charges count, by when they were settled, so
+// the split matches the billing balance for the period.
 export async function getUsageBreakdown(
   organizationId: string,
   since: Date,
@@ -25,8 +25,7 @@ export async function getUsageBreakdown(
         and(
           eq(automationModelUsage.organizationId, organizationId),
           eq(automationModelUsage.inferenceSource, "responder"),
-          isNotNull(automationModelUsage.completedAt),
-          gte(automationModelUsage.createdAt, since),
+          gte(automationModelUsage.billedAt, since),
         ),
       ),
     database
@@ -36,7 +35,7 @@ export async function getUsageBreakdown(
         and(
           eq(agentModelUsage.organizationId, organizationId),
           eq(agentModelUsage.billable, true),
-          gte(agentModelUsage.createdAt, since),
+          gte(agentModelUsage.billedAt, since),
         ),
       ),
     database
@@ -46,7 +45,7 @@ export async function getUsageBreakdown(
         and(
           eq(sandboxUsage.organizationId, organizationId),
           eq(sandboxUsage.billable, true),
-          gte(sandboxUsage.stoppedAt, since),
+          gte(sandboxUsage.billedAt, since),
         ),
       ),
   ]);

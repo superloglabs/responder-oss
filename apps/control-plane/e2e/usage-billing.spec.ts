@@ -14,7 +14,11 @@ const plans = [
   { id: "responder_automations_200", included: 200, price: 200 },
 ];
 
-function billing(overrides: { remaining?: number; usageBased: boolean }) {
+function billing(overrides: {
+  payAsYouGo?: boolean;
+  remaining?: number;
+  usageBased: boolean;
+}) {
   const remaining = overrides.remaining ?? 12.5;
   return {
     automations: {
@@ -36,7 +40,7 @@ function billing(overrides: { remaining?: number; usageBased: boolean }) {
     included: 50,
     nextResetAt: null,
     overagePrice: 1.5,
-    payAsYouGo: false,
+    payAsYouGo: overrides.payAsYouGo ?? false,
     remaining: 50,
     usage: 0,
     usageBased: overrides.usageBased,
@@ -123,6 +127,27 @@ test("splits used allowance into inference and sandbox compute", async ({ page }
   );
   expect(Number.parseFloat(inference)).toBeCloseTo(26.25);
   expect(Number.parseFloat(sandbox)).toBeCloseTo(11.25);
+});
+
+test("keeps billing management for a usage-billed workspace with a payment method", async ({ page }) => {
+  await mockWorkspace(page, billing({ payAsYouGo: true, usageBased: true }));
+  let portalOpened = false;
+  await page.route("**/api/billing/portal", async (route) => {
+    portalOpened = true;
+    await route.fulfill({ json: { url: "/settings/billing?status=portal" } });
+  });
+  await page.goto("/settings/billing");
+
+  await page.getByRole("button", { name: "Manage billing" }).click();
+  await expect.poll(() => portalOpened).toBe(true);
+});
+
+test("offers no billing management before a usage-billed workspace pays", async ({ page }) => {
+  await mockWorkspace(page, billing({ usageBased: true }));
+  await page.goto("/settings/billing");
+
+  await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage billing" })).toHaveCount(0);
 });
 
 test("keeps investigation credits for other workspaces", async ({ page }) => {
