@@ -23,11 +23,7 @@ import {
   revokeAutomationModelBrokerGrant,
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
-import {
-  checkUsageAllowance,
-  SUBSCRIPTION_PLAN_REQUIRED_MESSAGE,
-  subscriptionInferenceAllowed,
-} from "@responder/core/billing/autumn";
+import { checkUsageAllowance } from "@responder/core/billing/autumn";
 import { sandboxTimeIsBilled } from "@responder/core/billing/usage-charges";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
@@ -124,7 +120,6 @@ export interface AutomationRunDependencies {
   runOpenCode: typeof runOpenCodeAutomation;
   runInSandbox: typeof runInFreshAutomationSandbox;
   sandboxTimeIsBilled: typeof sandboxTimeIsBilled;
-  subscriptionAllowed: typeof subscriptionInferenceAllowed;
   saveSandbox: typeof saveAutomationRunSandbox;
   setStatus: typeof setAutomationRunStatus;
   slackCard: AutomationSlackCardDependencies;
@@ -166,7 +161,6 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   runOpenCode: runOpenCodeAutomation,
   runInSandbox: runInFreshAutomationSandbox,
   sandboxTimeIsBilled,
-  subscriptionAllowed: subscriptionInferenceAllowed,
   saveSandbox: saveAutomationRunSandbox,
   setStatus: setAutomationRunStatus,
   slackCard: defaultAutomationSlackCardDependencies,
@@ -556,9 +550,6 @@ export async function processAutomationRun(
       if (!credential) throw new Error("The configured model credential is unavailable");
 
       if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
-      if (credential.subscription && !(await dependencies.subscriptionAllowed(run.organizationId))) {
-        throw new AutomationPlanRequiredError();
-      }
       if (credential.subscription) {
         // Leaves time for sandbox setup before the runtime limit starts to matter.
         const validUntil = new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 1_800) * 1_000);
@@ -794,12 +785,11 @@ export async function processAutomationRun(
     const timedOut = error instanceof AutomationRunTimeoutError ||
       stopped instanceof AutomationRunTimeoutError;
     const allowanceExhausted = error instanceof AutomationAllowanceExhaustedError;
-    const planRequired = error instanceof AutomationPlanRequiredError;
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
-      : allowanceExhausted || planRequired
+      : allowanceExhausted
         ? error.message
       : safeInvestigationError(error, environment);
     if (!leaseLost) {
@@ -811,9 +801,7 @@ export async function processAutomationRun(
                 ? "runtime_limit_exceeded"
                 : allowanceExhausted
                   ? "usage_limit_reached"
-                  : planRequired
-                    ? "plan_required"
-                    : "execution_failed",
+                  : "execution_failed",
               failureMessage: message,
             }),
         leaseId: run.leaseId,
@@ -830,7 +818,7 @@ export async function processAutomationRun(
     turnEnded = !cancelled && !leaseLost;
     if (turnEnded) outcome = { message, status: "failed" };
     await slackCard?.finish("error", message);
-    if (!cancelled && !leaseLost && !allowanceExhausted && !planRequired) {
+    if (!cancelled && !leaseLost && !allowanceExhausted) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",
@@ -953,13 +941,6 @@ class AutomationAllowanceExhaustedError extends Error {
         : "The automation usage allowance for this billing period is used up. Upgrade the plan in billing settings or connect your own model key.",
     );
     this.name = "AutomationAllowanceExhaustedError";
-  }
-}
-
-class AutomationPlanRequiredError extends Error {
-  constructor() {
-    super(SUBSCRIPTION_PLAN_REQUIRED_MESSAGE);
-    this.name = "AutomationPlanRequiredError";
   }
 }
 

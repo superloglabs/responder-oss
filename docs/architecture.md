@@ -127,9 +127,6 @@ spending investigation credits.
 - `packages/core/src/billing/usage-pricing.ts` turns provider cost and sandbox
   time into the charged amount. The default charges model usage at cost and
   does not charge for sandbox time. A hosted edition may replace the file.
-- ChatGPT subscription inference needs a paid automation plan while billing
-  is on. Connecting a subscription and starting a subscription run both
-  check the plan.
 - Work checks the allowance before it starts. Work already running finishes and
   is charged even if it goes past the allowance. Operator replays are not
   charged.

@@ -1,5 +1,4 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   createAutomationCredential,
   deleteAutomationCredential,
@@ -24,24 +23,6 @@ function CredentialStatus({ credential }: { credential: AutomationCredential }) 
       </span>;
 }
 
-interface BillingPlanSummary {
-  automations?: {
-    configured: boolean;
-    planId: string;
-    plans: Array<{ price: number }>;
-  } | null;
-  enabled?: boolean;
-}
-
-// The lowest paid plan price when ChatGPT subscriptions need an upgrade, or
-// null when they are available.
-function subscriptionUpgradePrice(summary: BillingPlanSummary): number | null {
-  const automations = summary.automations;
-  if (!summary.enabled || !automations?.configured) return null;
-  if (automations.planId !== "responder_automations_free") return null;
-  return Math.min(...automations.plans.map((plan) => plan.price));
-}
-
 export function ModelAccessSettingsPage() {
   useDocumentTitle("Model access");
   const [credentials, setCredentials] = useState<AutomationCredential[] | null>(null);
@@ -54,24 +35,8 @@ export function ModelAccessSettingsPage() {
   const [replacing, setReplacing] = useState<string | null>(null);
   const [replacementKey, setReplacementKey] = useState("");
   const [connectingSubscription, setConnectingSubscription] = useState(false);
-  const [upgradePrice, setUpgradePrice] = useState<number | null>(null);
   // Only the newest credential list may be shown; older responses are dropped.
   const loadGeneration = useRef(0);
-
-  useEffect(() => {
-    let active = true;
-    // Without a plan summary the server still refuses a subscription sign-in
-    // that needs an upgrade.
-    void fetch("/api/billing")
-      .then((response) => (response.ok ? response.json() as Promise<BillingPlanSummary> : null))
-      .then((summary) => {
-        if (active && summary) setUpgradePrice(subscriptionUpgradePrice(summary));
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -277,11 +242,6 @@ export function ModelAccessSettingsPage() {
                 <button className="button button--secondary" onClick={() => setConnectingSubscription(false)} type="button">Cancel</button>
               </div>
             </div>
-          ) : upgradePrice !== null ? (
-            <p className="memberAccessNote">
-              {`ChatGPT subscriptions need the $${upgradePrice} / month plan or higher. `}
-              <Link to="/settings/billing">Upgrade plan</Link>
-            </p>
           ) : (
             <div>
               <button className="button button--secondary" onClick={() => setConnectingSubscription(true)} type="button">
