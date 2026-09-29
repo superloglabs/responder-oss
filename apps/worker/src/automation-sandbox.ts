@@ -20,6 +20,7 @@ import {
   sandboxDeletedAfterFailedCreation,
   type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
+import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 
 interface AutomationSandboxDependencies {
   close: typeof closeDaytonaSandbox;
@@ -27,6 +28,7 @@ interface AutomationSandboxDependencies {
   configure: typeof configureDaytonaSandboxLifecycle;
   createClient(options: DaytonaSandboxClientOptions): DaytonaSandboxClient;
   createSession: typeof createDaytonaSandboxSession;
+  meter: typeof startSandboxMeter;
   prepare: typeof prepareDaytonaSandbox;
 }
 
@@ -36,6 +38,7 @@ const defaultDependencies: AutomationSandboxDependencies = {
   configure: configureDaytonaSandboxLifecycle,
   createClient: (options) => new DaytonaSandboxClient(options),
   createSession: createDaytonaSandboxSession,
+  meter: startSandboxMeter,
   prepare: prepareDaytonaSandbox,
 };
 
@@ -232,6 +235,7 @@ export async function runInFreshAutomationSandbox<T>(
     pauseOnExit: Boolean(input.keepPaused),
   });
   let session: DaytonaSandboxSession | null = null;
+  let meter: SandboxMeter | null = null;
   // Set while a sandbox may exist that `session` does not hold yet.
   let pendingSandbox = false;
   let resumed = false;
@@ -274,6 +278,15 @@ export async function runInFreshAutomationSandbox<T>(
       });
       session = await abortable(creation, input.signal);
     }
+    // Automation sandbox time is always Responder-funded, whoever pays for
+    // the model.
+    meter = dependencies.meter({
+      billable: true,
+      organizationId: input.organizationId,
+      snapshot: Boolean(input.config.sandboxSnapshotName),
+      workload: "automation",
+      workloadId: input.runId,
+    });
     if (!resumed) {
       await abortable(
         dependencies.configure(
@@ -320,6 +333,7 @@ export async function runInFreshAutomationSandbox<T>(
   }
 
   if (session && input.keepPaused && await pauseSandbox(client, session, input)) {
+    await meter?.stop();
     if (!executionOutcome.succeeded) throw executionOutcome.error;
     return executionOutcome.value;
   }
@@ -337,6 +351,7 @@ export async function runInFreshAutomationSandbox<T>(
   } catch (error) {
     cleanupFailure = error;
   }
+  await meter?.stop();
 
   if (cleanupFailure === undefined) input.onCleanupConfirmed?.();
   if (!executionOutcome.succeeded) {

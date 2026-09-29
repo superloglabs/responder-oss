@@ -5,6 +5,10 @@ import { getOrganizationModelCredential } from "../../../../packages/core/src/db
 import type { AutomationModelProvider } from "../../../../packages/core/src/automations/config.js";
 import { SubscriptionLoginError, subscriptionLoginTransport } from "./subscription-login.js";
 import { startModelSubscription, pollModelSubscription, cancelModelSubscription } from "../../../../packages/core/src/db/model-subscriptions.js";
+import {
+  SUBSCRIPTION_PLAN_REQUIRED_MESSAGE,
+  subscriptionInferenceAllowed,
+} from "../../../../packages/core/src/billing/autumn.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -173,8 +177,12 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     context.header("Cache-Control", "no-store");
-    try { return context.json(await startModelSubscription({ organizationId: access.tenant.organizationId, userId: access.tenant.user.id }, subscriptionLoginTransport)); }
-    catch { return context.json({ error: "Unable to start ChatGPT sign-in. Try again." }, 502); }
+    try {
+      if (!(await subscriptionInferenceAllowed(access.tenant.organizationId))) {
+        return context.json({ code: "plan_required", error: SUBSCRIPTION_PLAN_REQUIRED_MESSAGE }, 402);
+      }
+      return context.json(await startModelSubscription({ organizationId: access.tenant.organizationId, userId: access.tenant.user.id }, subscriptionLoginTransport));
+    } catch { return context.json({ error: "Unable to start ChatGPT sign-in. Try again." }, 502); }
   })
   .post("/subscriptions/openai/:connectionId/poll", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

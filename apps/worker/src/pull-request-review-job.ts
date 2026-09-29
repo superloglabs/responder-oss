@@ -7,6 +7,7 @@ import type { PullRequestReviewJob } from "@responder/core/jobs";
 import { safeInvestigationError } from "./investigate.js";
 import { reportWorkerException } from "./monitoring.js";
 import { runPullRequestReviewAgent } from "./review-pull-request.js";
+import { UsageAllowanceExhaustedError } from "./agent-usage.js";
 
 export async function processPullRequestReviewJob(
   jobId: string,
@@ -116,7 +117,8 @@ export async function processPullRequestReviewJob(
         requestId: payload.requestId,
       }),
     );
-    await reportWorkerException(error, {
+    // A used-up allowance is an expected outcome, not a fault.
+    if (!(error instanceof UsageAllowanceExhaustedError)) await reportWorkerException(error, {
       investigationId: payload.investigationId,
       jobId,
       operation: "pull_request_review",

@@ -92,6 +92,7 @@ import {
 } from "./automation-run.js";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
+import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -167,6 +168,25 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.abandoned > 0) {
       await reportWorkerException(
         new Error(`${result.abandoned} automation usage reservations were never completed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  try {
+    const result = await settleUnbilledUsage();
+    if (result.failed > 0 || result.settled > 0 || result.staleSandboxes > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "usage_billing_settled",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} sandbox or agent usage records could not be billed`),
         { operation: "worker" },
       ).catch(() => undefined);
     }

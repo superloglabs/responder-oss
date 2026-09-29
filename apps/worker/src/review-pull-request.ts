@@ -2,6 +2,7 @@ import {
   run,
   setDefaultOpenAIKey,
   setTracingDisabled,
+  type Usage,
 } from "@openai/agents";
 import { Capabilities, SandboxAgent, skills } from "@openai/agents/sandbox";
 import {
@@ -33,6 +34,12 @@ import {
 } from "./sandbox.js";
 import { workspaceSecretUsageInstructions } from "./secret-safety.js";
 import { investigationTraceEventFromStream } from "./trace.js";
+import {
+  agentUsageIsBillable,
+  recordAgentRunUsage,
+  requireUsageAllowance,
+} from "./agent-usage.js";
+import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 
 export const pullRequestReviewMaxTurns = 40;
 
@@ -93,9 +100,20 @@ export async function runPullRequestReviewAgent(
     pauseOnExit: false,
   });
   let session: DaytonaSandboxSession | null = null;
+  let meter: SandboxMeter | null = null;
+  let modelUsage: Usage | undefined;
+  const usageBillable = await agentUsageIsBillable(job.config.organizationId);
+  if (usageBillable) await requireUsageAllowance(job.config.organizationId);
 
   try {
     session = await createDaytonaSandboxSession(client, config, sandboxName);
+    meter = startSandboxMeter({
+      billable: usageBillable,
+      organizationId: job.config.organizationId,
+      snapshot: Boolean(config.sandboxSnapshotName),
+      workload: "pull_request_review",
+      workloadId: job.requestId,
+    });
     await configureDaytonaSandboxLifecycle(session, config, workspaceSecrets);
     if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
     const repositories = await checkoutRuntimeRepositoriesAtRefs(
@@ -168,6 +186,7 @@ export async function runPullRequestReviewAgent(
         stream: true,
       },
     );
+    modelUsage = runResult.state.usage;
     for await (const streamEvent of runResult) {
       const event = investigationTraceEventFromStream(
         streamEvent,
@@ -196,5 +215,14 @@ export async function runPullRequestReviewAgent(
         requestId: job.requestId,
       });
     }
+    await meter?.stop();
+    await recordAgentRunUsage({
+      billable: usageBillable,
+      model: config.model,
+      organizationId: job.config.organizationId,
+      usage: modelUsage,
+      workload: "pull_request_review",
+      workloadId: job.requestId,
+    });
   }
 }

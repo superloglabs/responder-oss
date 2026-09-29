@@ -15,7 +15,8 @@ vi.mock("autumn-js", () => ({
 }));
 
 const {
-  checkAutomationInferenceAllowance,
+  checkUsageAllowance,
+  subscriptionInferenceAllowed,
   summarizeAutomationBillingCustomer,
   trackAutomationInferenceUsage,
 } = await import("./autumn.js");
@@ -45,6 +46,30 @@ describe("automation billing", () => {
     vi.unstubAllEnvs();
   });
 
+  it("allows ChatGPT subscriptions only on a paid automation plan", async () => {
+    client.customers.getOrCreate.mockResolvedValueOnce(customer([
+      { planId: "responder_automations_free", status: "active" },
+    ]));
+    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(false);
+
+    client.customers.getOrCreate.mockResolvedValueOnce(customer([
+      { planId: "responder_automations_100", status: "active" },
+    ]));
+    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(true);
+
+    client.customers.getOrCreate.mockResolvedValueOnce(customer([
+      { planId: "responder_automations_200", status: "active" },
+    ]));
+    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(true);
+  });
+
+  it("does not gate ChatGPT subscriptions while billing is off", async () => {
+    vi.stubEnv("BILLING_ENABLED", "false");
+
+    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(true);
+    expect(client.customers.getOrCreate).not.toHaveBeenCalled();
+  });
+
   it("attaches the free automation plan before the first allowance check", async () => {
     client.check
       .mockResolvedValueOnce({ allowed: false, balance: null })
@@ -56,7 +81,7 @@ describe("automation billing", () => {
         { planId: "responder_automations_free", status: "active" },
       ]));
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: 5,
     });
@@ -80,7 +105,7 @@ describe("automation billing", () => {
       .mockResolvedValueOnce(customer([{ planId: "responder_free", status: "active" }]))
       .mockResolvedValueOnce(customer([{ planId: "responder_automations_free", status: "active" }]));
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: 3,
     });
@@ -96,7 +121,7 @@ describe("automation billing", () => {
       .mockResolvedValueOnce(customer([{ planId: "responder_automations_free", status: "active" }]));
     client.billing.attach.mockRejectedValueOnce(new Error("Plan already attached"));
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: 4,
     });
@@ -108,7 +133,7 @@ describe("automation billing", () => {
       balance: { nextResetAt: 9, remaining: 0 },
     });
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: false,
       nextResetAt: 9,
     });
@@ -118,7 +143,7 @@ describe("automation billing", () => {
   it("allows inference without metering when billing is disabled", async () => {
     vi.stubEnv("BILLING_ENABLED", "false");
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: null,
     });

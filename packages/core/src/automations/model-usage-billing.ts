@@ -1,8 +1,9 @@
 import {
   billingIsEnabled,
-  checkAutomationInferenceAllowance,
+  checkUsageAllowance,
   trackAutomationInferenceUsage,
 } from "../billing/autumn.js";
+import { inferenceCharge } from "../billing/usage-charges.js";
 import {
   completeResponderModelUsage,
   listUnbilledAutomationModelUsage,
@@ -42,14 +43,19 @@ const defaultDependencies: SettlementDependencies = {
   track: trackAutomationInferenceUsage,
 };
 
+// Responder-funded rows hold the amount charged; organization-funded rows
+// hold the provider cost the organization pays directly.
 async function usageCostMicros(
+  inferenceSource: AutomationInferenceSource,
   provider: AutomationModelProvider,
   model: string,
   usage: AutomationModelUsage,
   dependencies: SettlementDependencies,
 ): Promise<number | null> {
   const pricing = await dependencies.getPricing(aiGatewayModelId(provider, model));
-  return pricing ? automationModelCostMicros(pricing, usage) : null;
+  const costMicros = pricing ? automationModelCostMicros(pricing, usage) : null;
+  if (costMicros === null || inferenceSource !== "responder") return costMicros;
+  return inferenceCharge(costMicros);
 }
 
 // Prices a stored request if needed and reports Responder-funded usage to
@@ -61,7 +67,13 @@ export async function settleAutomationModelUsage(
 ): Promise<void> {
   let costMicros = row.costMicros;
   if (costMicros === null) {
-    costMicros = await usageCostMicros(row.provider, row.model, row, dependencies);
+    costMicros = await usageCostMicros(
+      row.inferenceSource,
+      row.provider,
+      row.model,
+      row,
+      dependencies,
+    );
     if (costMicros === null) {
       throw new Error(`No AI Gateway pricing is available for ${row.model}`);
     }
@@ -95,6 +107,7 @@ export async function recordBrokeredModelUsage(
   dependencies: SettlementDependencies = defaultDependencies,
 ): Promise<void> {
   const costMicros = await usageCostMicros(
+    input.inferenceSource,
     input.provider,
     input.model,
     input.usage,
@@ -114,12 +127,12 @@ export async function recordBrokeredModelUsage(
 }
 
 interface ReservationDependencies {
-  checkAllowance: typeof checkAutomationInferenceAllowance;
+  checkAllowance: typeof checkUsageAllowance;
   reserve: typeof reserveResponderModelUsage;
 }
 
 const defaultReservationDependencies: ReservationDependencies = {
-  checkAllowance: checkAutomationInferenceAllowance,
+  checkAllowance: checkUsageAllowance,
   reserve: reserveResponderModelUsage,
 };
 
@@ -178,6 +191,7 @@ export async function completeResponderInference(
   } = { ...defaultDependencies, complete: completeResponderModelUsage },
 ): Promise<void> {
   const costMicros = await usageCostMicros(
+    "responder",
     input.provider,
     input.model,
     input.usage,

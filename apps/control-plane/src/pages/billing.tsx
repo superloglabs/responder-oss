@@ -11,6 +11,8 @@ type AutomationPlanId =
 
 interface AutomationBillingSummary {
   allowance: number;
+  // Charged this period, in dollars. Null when it could not be loaded.
+  breakdown?: { inference: number; sandbox: number } | null;
   cancelsAtPeriodEnd: boolean;
   configured: boolean;
   enabled: boolean;
@@ -18,6 +20,7 @@ interface AutomationBillingSummary {
   planId: AutomationPlanId;
   plans: Array<{ id: Exclude<AutomationPlanId, "responder_automations_free">; included: number; price: number }>;
   remaining: number;
+  sandboxTimeBilled: boolean;
   scheduledPlanId: AutomationPlanId | null;
   usage: number;
 }
@@ -32,6 +35,9 @@ interface BillingSummary {
   payAsYouGo: boolean;
   remaining: number;
   usage: number;
+  // The organization pays for all work from the usage allowance instead of
+  // investigation credits.
+  usageBased?: boolean;
 }
 
 function billingNotice(): string | null {
@@ -50,25 +56,45 @@ function automationPlanName(summary: AutomationBillingSummary, planId: Automatio
   return plan ? `$${plan.price} / month` : "Free";
 }
 
+// Splits the used share of the bar between model usage and sandbox time in
+// proportion to what each was charged.
+function usageSegments(
+  breakdown: { inference: number; sandbox: number },
+  percent: number,
+): { inference: number; sandbox: number } | null {
+  const total = breakdown.inference + breakdown.sandbox;
+  if (total <= 0) return null;
+  const inference = (breakdown.inference / total) * percent;
+  return { inference, sandbox: percent - inference };
+}
+
 function AutomationBilling({
   onChangePlan,
+  onManageBilling,
   redirecting,
   summary,
+  usageBased,
 }: {
   onChangePlan: (planId: AutomationPlanId | "free" | "resume") => void;
+  // Opens the billing portal; absent when the workspace has not paid yet.
+  onManageBilling?: () => void;
   redirecting: boolean;
   summary: AutomationBillingSummary;
+  usageBased: boolean;
 }) {
   const used = Math.min(summary.usage, summary.allowance);
   const percent = summary.allowance > 0 ? Math.min(100, (used / summary.allowance) * 100) : 0;
   const paid = summary.planId !== "responder_automations_free";
+  const usageKind = summary.sandboxTimeBilled ? "usage" : "model usage";
+  const breakdown = summary.sandboxTimeBilled ? summary.breakdown ?? null : null;
+  const segments = breakdown ? usageSegments(breakdown, percent) : null;
   return (
     <>
-      <h2 className="billingSectionTitle">Automations</h2>
+      <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
       <section className="billingGrid">
         <article className="billingUsageCard">
           <header>
-            <span>Included model usage this month</span>
+            <span>{`Included ${usageKind} this month`}</span>
             <strong>{dollars(summary.usage)}</strong>
           </header>
           <div
@@ -79,23 +105,63 @@ function AutomationBilling({
             aria-valuemin={0}
             aria-valuenow={used}
           >
-            <span style={{ width: `${percent}%` }} />
+            {segments ? (
+              <>
+                <span
+                  className="billingProgress__segment billingProgress__segment--inference"
+                  style={{ width: `${segments.inference}%` }}
+                />
+                <span
+                  className="billingProgress__segment billingProgress__segment--sandbox"
+                  style={{ width: `${segments.sandbox}%` }}
+                />
+              </>
+            ) : (
+              <span style={{ width: `${percent}%` }} />
+            )}
           </div>
-          <p>
-            {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.
-            Resets {resetLabel(summary.nextResetAt)}. Runs that use included
-            usage stop when it runs out. Runs with your own API key or ChatGPT
-            subscription keep working.
-          </p>
+          {breakdown ? (
+            <dl className="billingBreakdown">
+              <div>
+                <dt>
+                  <span aria-hidden="true" className="billingBreakdown__swatch billingBreakdown__swatch--inference" />
+                  AI inference
+                </dt>
+                <dd>{dollars(breakdown.inference)}</dd>
+              </div>
+              <div>
+                <dt>
+                  <span aria-hidden="true" className="billingBreakdown__swatch billingBreakdown__swatch--sandbox" />
+                  Sandbox compute
+                </dt>
+                <dd>{dollars(breakdown.sandbox)}</dd>
+              </div>
+            </dl>
+          ) : null}
+          {summary.sandboxTimeBilled ? (
+            <p>
+              {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.
+              Resets {resetLabel(summary.nextResetAt)}. Covers model usage and
+              sandbox time. When it runs out, runs in progress finish and new
+              runs wait until it resets or the plan is upgraded.
+            </p>
+          ) : (
+            <p>
+              {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.
+              Resets {resetLabel(summary.nextResetAt)}. Runs that use included
+              usage stop when it runs out. Runs with your own API key or ChatGPT
+              subscription keep working.
+            </p>
+          )}
         </article>
 
         <article className="billingPlanCard">
-          <span className="billingPlanCard__eyebrow">Automation plan</span>
+          <span className="billingPlanCard__eyebrow">
+            {usageBased ? "Current plan" : "Automation plan"}
+          </span>
           <h2>{automationPlanName(summary, summary.planId)}</h2>
           <p>
-            {paid
-              ? `Includes ${dollars(summary.allowance)} of model usage each month.`
-              : "Includes $20.00 of model usage each month."}
+            {`Includes ${paid ? dollars(summary.allowance) : "$20.00"} of ${usageKind} each month.`}
             {summary.cancelsAtPeriodEnd ? " Returns to the free plan at the end of this billing period." : ""}
             {summary.scheduledPlanId
               ? ` Changes to ${automationPlanName(summary, summary.scheduledPlanId)} at the end of this billing period.`
@@ -128,6 +194,16 @@ function AutomationBilling({
                 type="button"
               >
                 Switch to free
+              </button>
+            ) : null}
+            {onManageBilling ? (
+              <button
+                className="button button--secondary"
+                disabled={redirecting}
+                onClick={onManageBilling}
+                type="button"
+              >
+                Manage billing
               </button>
             ) : null}
             {paid && summary.cancelsAtPeriodEnd ? (
@@ -256,7 +332,7 @@ export function BillingPage() {
 
       {!summary && !error ? <BillingSkeleton /> : null}
 
-      {summary ? (
+      {summary && !(summary.enabled && summary.usageBased) ? (
         !summary.enabled ? (
           <section className="billingDisabled">
             <h2>Billing is disabled</h2>
@@ -328,8 +404,17 @@ export function BillingPage() {
       {summary?.enabled && summary.automations ? (
         <AutomationBilling
           onChangePlan={(planId) => void changeAutomationPlan(planId)}
+          // Usage-billed workspaces have no investigation card, so invoices
+          // and payment methods are reached from here.
+          onManageBilling={
+            summary.usageBased &&
+            (summary.payAsYouGo || summary.automations.planId !== "responder_automations_free")
+              ? () => void openBilling("portal")
+              : undefined
+          }
           redirecting={isRedirecting}
           summary={summary.automations}
+          usageBased={summary.usageBased ?? false}
         />
       ) : null}
     </AppShell>

@@ -287,8 +287,9 @@ export async function createBillingPortal(
   return result.url;
 }
 
-// Automation inference is metered in US dollars against a separate plan group,
-// so automation plans change independently of investigation billing.
+// Usage is metered in US dollars against a separate plan group, so these
+// plans change independently of investigation billing. The balance covers
+// Responder-funded model usage and, where the edition prices it, sandbox time.
 export const AUTOMATION_INFERENCE_FEATURE_ID = "responder_automation_inference";
 export const AUTOMATION_FREE_PLAN_ID = "responder_automations_free";
 export const AUTOMATION_PAID_PLANS = [
@@ -297,7 +298,7 @@ export const AUTOMATION_PAID_PLANS = [
 ] as const;
 export const AUTOMATION_FREE_ALLOWANCE_DOLLARS = 20;
 
-const automationTrackTimeoutMs = 30_000;
+const usageTrackTimeoutMs = 30_000;
 
 // A run may start while at least one cent of the allowance remains.
 const automationMinimumBalanceDollars = 0.01;
@@ -320,6 +321,8 @@ export interface AutomationBillingSummary {
   configured: boolean;
   enabled: boolean;
   nextResetAt: number | null;
+  // Start of the current billing period, when Autumn reports one.
+  periodStart: number | null;
   planId: AutomationPlanId;
   plans: Array<{ id: AutomationPaidPlanId; included: number; price: number }>;
   remaining: number;
@@ -335,6 +338,7 @@ export interface AutomationInferenceAccess {
 function automationPlanFromCustomer(customer: Customer): {
   active: AutomationPlanId | null;
   cancelsAtPeriodEnd: boolean;
+  periodStart: number | null;
   scheduled: AutomationPlanId | null;
 } {
   const find = (status: "active" | "scheduled") =>
@@ -347,6 +351,7 @@ function automationPlanFromCustomer(customer: Customer): {
   return {
     active: (active?.planId as AutomationPlanId | undefined) ?? null,
     cancelsAtPeriodEnd: active?.canceledAt != null,
+    periodStart: active?.currentPeriodStart ?? null,
     scheduled: (find("scheduled")?.planId as AutomationPlanId | undefined) ?? null,
   };
 }
@@ -384,6 +389,7 @@ function disabledAutomationSummary(configured: boolean, enabled: boolean): Autom
     configured,
     enabled,
     nextResetAt: null,
+    periodStart: null,
     planId: AUTOMATION_FREE_PLAN_ID,
     plans: AUTOMATION_PAID_PLANS.map((plan) => ({ ...plan })),
     remaining: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
@@ -407,6 +413,7 @@ export function summarizeAutomationBillingCustomer(
     configured: true,
     enabled: true,
     nextResetAt: balance?.nextResetAt ?? null,
+    periodStart: plan.periodStart,
     planId,
     plans: AUTOMATION_PAID_PLANS.map((candidate) => ({ ...candidate })),
     remaining: Math.max(0, balance?.remaining ?? allowance),
@@ -435,9 +442,9 @@ function getAutomationClientOrNull(): Autumn | null {
   return client;
 }
 
-// Read-only check that Responder-funded inference may continue. It does not
-// deduct anything; usage is reported after each model response.
-export async function checkAutomationInferenceAllowance(
+// Read-only check that metered work may start or continue. It does not
+// deduct anything; usage is reported as it is measured.
+export async function checkUsageAllowance(
   organizationId: string,
   requiredDollars = automationMinimumBalanceDollars,
 ): Promise<AutomationInferenceAccess> {
@@ -477,8 +484,37 @@ function hasStatus(error: unknown, status: number): boolean {
   );
 }
 
-// Reports one model request. The usage row ID is the idempotency key, so a
-// retry after an uncertain response cannot charge twice.
+// Reports one charge against the usage balance. The idempotency key must be
+// stable for the charged record, so a retry after an uncertain response
+// cannot charge twice.
+export async function trackUsageCharge(input: {
+  chargeMicros: number;
+  idempotencyKey: string;
+  organizationId: string;
+  properties: Record<string, string>;
+}): Promise<void> {
+  if (!billingIsEnabled()) return;
+  const client = requireAutumnClient();
+  if (input.chargeMicros <= 0) return;
+  try {
+    await client.track(
+      {
+        customerId: input.organizationId,
+        featureId: AUTOMATION_INFERENCE_FEATURE_ID,
+        properties: input.properties,
+        value: input.chargeMicros / 1_000_000,
+      },
+      {
+        headers: { "Idempotency-Key": input.idempotencyKey },
+        timeoutMs: usageTrackTimeoutMs,
+      },
+    );
+  } catch (error) {
+    if (!hasStatus(error, 409)) throw error;
+  }
+}
+
+// Reports one model request. The usage row ID is the idempotency key.
 export async function trackAutomationInferenceUsage(input: {
   costMicros: number;
   model: string;
@@ -486,25 +522,12 @@ export async function trackAutomationInferenceUsage(input: {
   runId: string;
   usageId: string;
 }): Promise<void> {
-  if (!billingIsEnabled()) return;
-  const client = requireAutumnClient();
-  if (input.costMicros <= 0) return;
-  try {
-    await client.track(
-      {
-        customerId: input.organizationId,
-        featureId: AUTOMATION_INFERENCE_FEATURE_ID,
-        properties: { model: input.model, runId: input.runId },
-        value: input.costMicros / 1_000_000,
-      },
-      {
-        headers: { "Idempotency-Key": `automation-usage:${input.usageId}` },
-        timeoutMs: automationTrackTimeoutMs,
-      },
-    );
-  } catch (error) {
-    if (!hasStatus(error, 409)) throw error;
-  }
+  await trackUsageCharge({
+    chargeMicros: input.costMicros,
+    idempotencyKey: `automation-usage:${input.usageId}`,
+    organizationId: input.organizationId,
+    properties: { model: input.model, runId: input.runId },
+  });
 }
 
 export async function changeAutomationPlan(
@@ -547,4 +570,18 @@ async function updateAutomationPlanCancellation(
   if (!isAutomationPaidPlanId(planId)) return false;
   await client.billing.update({ cancelAction, customerId: organizationId, planId });
   return true;
+}
+
+export const SUBSCRIPTION_PLAN_REQUIRED_MESSAGE =
+  `ChatGPT subscriptions need the $${AUTOMATION_PAID_PLANS[0].price} / month plan or higher. Upgrade the plan in billing settings.`;
+
+// ChatGPT subscription inference needs a paid automation plan while billing
+// is on. Like the allowance check, it fails open during an Autumn outage.
+export async function subscriptionInferenceAllowed(organizationId: string): Promise<boolean> {
+  if (!billingIsEnabled()) return true;
+  const client = getAutomationClientOrNull();
+  if (!client) return true;
+  const customer = await ensureAutomationPlan(client, organizationId);
+  if (customer.id === null) return true;
+  return isAutomationPaidPlanId(automationPlanFromCustomer(customer).active);
 }

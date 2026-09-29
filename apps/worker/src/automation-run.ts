@@ -23,7 +23,12 @@ import {
   revokeAutomationModelBrokerGrant,
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
-import { checkAutomationInferenceAllowance } from "@responder/core/billing/autumn";
+import {
+  checkUsageAllowance,
+  SUBSCRIPTION_PLAN_REQUIRED_MESSAGE,
+  subscriptionInferenceAllowed,
+} from "@responder/core/billing/autumn";
+import { sandboxTimeIsBilled } from "@responder/core/billing/usage-charges";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
@@ -82,7 +87,7 @@ import {
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
 export interface AutomationRunDependencies {
-  checkAllowance: typeof checkAutomationInferenceAllowance;
+  checkAllowance: typeof checkUsageAllowance;
   appendEvent: typeof appendAutomationRunEvent;
   cancellationRequested: typeof automationRunCancellationRequested;
   checkoutRepositories: typeof checkoutAutomationRuntimeRepositories;
@@ -111,6 +116,8 @@ export interface AutomationRunDependencies {
   runClaude: typeof runClaudeAutomation;
   runOpenCode: typeof runOpenCodeAutomation;
   runInSandbox: typeof runInFreshAutomationSandbox;
+  sandboxTimeIsBilled: typeof sandboxTimeIsBilled;
+  subscriptionAllowed: typeof subscriptionInferenceAllowed;
   saveSandbox: typeof saveAutomationRunSandbox;
   setStatus: typeof setAutomationRunStatus;
   slackCard: AutomationSlackCardDependencies;
@@ -119,7 +126,7 @@ export interface AutomationRunDependencies {
 }
 
 export const defaultAutomationRunDependencies: AutomationRunDependencies = {
-  checkAllowance: checkAutomationInferenceAllowance,
+  checkAllowance: checkUsageAllowance,
   appendEvent: appendAutomationRunEvent,
   cancellationRequested: automationRunCancellationRequested,
   checkoutRepositories: checkoutAutomationRuntimeRepositories,
@@ -149,6 +156,8 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   runClaude: runClaudeAutomation,
   runOpenCode: runOpenCodeAutomation,
   runInSandbox: runInFreshAutomationSandbox,
+  sandboxTimeIsBilled,
+  subscriptionAllowed: subscriptionInferenceAllowed,
   saveSandbox: saveAutomationRunSandbox,
   setStatus: setAutomationRunStatus,
   slackCard: defaultAutomationSlackCardDependencies,
@@ -516,11 +525,15 @@ export async function processAutomationRun(
       organizationId: run.organizationId,
       provider: run.modelProvider,
     });
-    if (!credentialId) {
-      // Responder-funded runs stop here, before a sandbox starts, when the
-      // organization's allowance is used up.
+    // Runs stop here, before a sandbox starts, when the organization's
+    // allowance is used up. Responder-funded model usage and billed sandbox
+    // time draw on it. A turn that has started finishes.
+    const sandboxBilled = dependencies.sandboxTimeIsBilled();
+    if (!credentialId || sandboxBilled) {
       const access = await dependencies.checkAllowance(run.organizationId);
-      if (!access.allowed) throw new AutomationAllowanceExhaustedError();
+      if (!access.allowed) throw new AutomationAllowanceExhaustedError(sandboxBilled);
+    }
+    if (!credentialId) {
       grantCredential = { inferenceSource: "responder" };
     } else {
       const credential = await dependencies.getCredential({
@@ -531,6 +544,9 @@ export async function processAutomationRun(
       if (!credential) throw new Error("The configured model credential is unavailable");
 
       if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
+      if (credential.subscription && !(await dependencies.subscriptionAllowed(run.organizationId))) {
+        throw new AutomationPlanRequiredError();
+      }
       if (credential.subscription) {
         // Leaves time for sandbox setup before the runtime limit starts to matter.
         const validUntil = new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 1_800) * 1_000);
@@ -760,11 +776,12 @@ export async function processAutomationRun(
     const timedOut = error instanceof AutomationRunTimeoutError ||
       stopped instanceof AutomationRunTimeoutError;
     const allowanceExhausted = error instanceof AutomationAllowanceExhaustedError;
+    const planRequired = error instanceof AutomationPlanRequiredError;
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
-      : allowanceExhausted
+      : allowanceExhausted || planRequired
         ? error.message
       : safeInvestigationError(error, environment);
     if (!leaseLost) {
@@ -776,7 +793,9 @@ export async function processAutomationRun(
                 ? "runtime_limit_exceeded"
                 : allowanceExhausted
                   ? "usage_limit_reached"
-                  : "execution_failed",
+                  : planRequired
+                    ? "plan_required"
+                    : "execution_failed",
               failureMessage: message,
             }),
         leaseId: run.leaseId,
@@ -793,7 +812,7 @@ export async function processAutomationRun(
     turnEnded = !cancelled && !leaseLost;
     if (turnEnded) outcome = { message, status: "failed" };
     await slackCard?.finish("error", message);
-    if (!cancelled && !leaseLost && !allowanceExhausted) {
+    if (!cancelled && !leaseLost && !allowanceExhausted && !planRequired) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",
@@ -900,11 +919,20 @@ async function answerNewMessages(
 }
 
 class AutomationAllowanceExhaustedError extends Error {
-  constructor() {
+  constructor(sandboxBilled: boolean) {
     super(
-      "The automation usage allowance for this billing period is used up. Upgrade the plan in billing settings or connect your own model key.",
+      sandboxBilled
+        ? "The usage allowance for this billing period is used up. Upgrade the plan in billing settings to keep running automations."
+        : "The automation usage allowance for this billing period is used up. Upgrade the plan in billing settings or connect your own model key.",
     );
     this.name = "AutomationAllowanceExhaustedError";
+  }
+}
+
+class AutomationPlanRequiredError extends Error {
+  constructor() {
+    super(SUBSCRIPTION_PLAN_REQUIRED_MESSAGE);
+    this.name = "AutomationPlanRequiredError";
   }
 }
 

@@ -10,6 +10,12 @@ describe("billing limit notifications", () => {
     );
   });
 
+  it("tells a usage-billed workspace to upgrade its plan", () => {
+    expect(billingLimitMessage("https://responder.example/settings/billing", true)).toBe(
+      "Responder has paused new investigations because this workspace used its included usage for this billing period. Work already in progress finishes, and new investigations resume when the allowance resets. Upgrade the plan to resume now: https://responder.example/settings/billing",
+    );
+  });
+
   it("links to billing inside workspace settings", () => {
     vi.stubEnv("CONTROL_PLANE_URL", "https://responder.example");
 

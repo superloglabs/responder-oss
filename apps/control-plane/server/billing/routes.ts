@@ -8,6 +8,12 @@ import {
   getBillingSummary,
   isAutomationPaidPlanId,
 } from "../../../../packages/core/src/billing/autumn.js";
+import {
+  organizationUsesUsageBilling,
+  usagePeriodStart,
+} from "../../../../packages/core/src/billing/usage-billing.js";
+import { getUsageBreakdown } from "../../../../packages/core/src/db/usage-breakdown.js";
+import { sandboxTimeIsBilled } from "../../../../packages/core/src/billing/usage-charges.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
 import { getActiveTenant } from "../tenant.js";
@@ -33,18 +39,43 @@ export const billingRoutes = new Hono()
 
     try {
       const data = customerData(tenant.user);
+      const [usageBased, automationsEnabled] = await Promise.all([
+        organizationUsesUsageBilling(tenant.organizationId),
+        organizationHasCapability(tenant.organizationId, "automations"),
+      ]);
       const [summary, automations] = await Promise.all([
         getBillingSummary(tenant.organizationId, data),
-        // Investigation billing stays available if automation billing fails.
-        organizationHasCapability(tenant.organizationId, "automations")
-          .then((enabled) =>
-            enabled ? getAutomationBillingSummary(tenant.organizationId, data) : null)
-          .catch((error: unknown) => {
-            console.error("Unable to load automation billing summary", error);
-            return null;
-          }),
+        usageBased
+          ? getAutomationBillingSummary(tenant.organizationId, data)
+          : automationsEnabled
+            // Investigation billing stays available if automation billing fails.
+            ? getAutomationBillingSummary(tenant.organizationId, data)
+              .catch((error: unknown) => {
+                console.error("Unable to load automation billing summary", error);
+                return null;
+              })
+            : null,
       ]);
-      return context.json({ ...summary, automations });
+      // The page still shows the allowance if the breakdown cannot load.
+      const breakdown = automations
+        ? await getUsageBreakdown(tenant.organizationId, usagePeriodStart(automations))
+          .catch((error: unknown) => {
+            console.error("Unable to load usage breakdown", error);
+            return null;
+          })
+        : null;
+      return context.json({
+        ...summary,
+        automations: automations && {
+          ...automations,
+          breakdown: breakdown && {
+            inference: breakdown.inferenceMicros / 1_000_000,
+            sandbox: breakdown.sandboxMicros / 1_000_000,
+          },
+          sandboxTimeBilled: sandboxTimeIsBilled(),
+        },
+        usageBased,
+      });
     } catch (error) {
       console.error("Unable to load billing summary", error);
       return context.json({ error: "Unable to load billing" }, 502);
@@ -73,7 +104,11 @@ export const billingRoutes = new Hono()
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
     }
-    if (!(await organizationHasCapability(tenant.organizationId, "automations"))) {
+    const [automationsEnabled, usageBased] = await Promise.all([
+      organizationHasCapability(tenant.organizationId, "automations"),
+      organizationUsesUsageBilling(tenant.organizationId),
+    ]);
+    if (!automationsEnabled && !usageBased) {
       return context.json({ error: "Not found" }, 404);
     }
     const body = (await context.req.json().catch(() => null)) as

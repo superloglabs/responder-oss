@@ -1,4 +1,5 @@
 import { failIssuePullRequest } from "@responder/core/db/pull-requests";
+import { UsageAllowanceExhaustedError } from "./agent-usage.js";
 import { failSuggestionPullRequest } from "@responder/core/db/suggestion-pull-requests";
 import type { RemediationJob } from "@responder/core/jobs";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
@@ -47,7 +48,8 @@ export async function processRemediationJob(
           : dependencies.failRequest)(payload.remediationRequestId, message)
       ),
       Promise.resolve().then(() =>
-        dependencies.reportException(error, {
+        // A used-up allowance is an expected outcome, not a fault.
+        error instanceof UsageAllowanceExhaustedError ? undefined : dependencies.reportException(error, {
           investigationId: payload.investigationId,
           jobId,
           operation: "remediation",
