@@ -163,6 +163,16 @@ describe("sandbox agent configuration", () => {
     ).toBe("request used [secret placeholder redacted]");
   });
 
+  it("removes connection secrets that cross the length limit", () => {
+    const secret = "connection-access-token-value";
+    const message = `${"x".repeat(1_990)}${secret}`;
+
+    const saved = safeInvestigationError(new Error(message), {}, [secret]);
+
+    expect(saved).not.toContain(secret.slice(0, 10));
+    expect(saved.endsWith("[redacted]")).toBe(true);
+  });
+
   it("gives investigations and replays the same sandbox capabilities", () => {
     expect(investigationCapabilities(true).map(({ type }) => type)).toEqual([
       "filesystem",

@@ -114,6 +114,7 @@ export interface SandboxAgentConfig extends DaytonaClientConfig {
 export function safeInvestigationError(
   error: unknown,
   environment: NodeJS.ProcessEnv = process.env,
+  secrets: readonly string[] = [],
 ): string {
   let message =
     error instanceof Error
@@ -129,7 +130,9 @@ export function safeInvestigationError(
     const value = environment[name];
     if (value) message = message.replaceAll(value, "[redacted]");
   }
-  return redactDaytonaSecretPlaceholders(message).slice(0, 2_000);
+  // Redact before truncating so a secret cut at the limit cannot leak a prefix.
+  return redactDaytonaSecretPlaceholders(redactSecrets(message, secrets))
+    .slice(0, 2_000);
 }
 
 export function investigationTraceWriteFailure(
@@ -782,7 +785,7 @@ export async function runInvestigationAgent(
   // Provider errors reach both the agent and the logs in full, minus the
   // credentials this investigation holds.
   const describeConnectError = (error: unknown) =>
-    redactSecrets(safeInvestigationError(error, environment), secrets);
+    safeInvestigationError(error, environment, secrets);
   const connectFailureEvent = (serverName: string, error: unknown) =>
     contextServerConnectFailureEvent({
       awsConnections,
