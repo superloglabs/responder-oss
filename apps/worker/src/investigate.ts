@@ -402,6 +402,7 @@ export function investigationInstructions(input: {
   sentryConnected: boolean;
   sentryUnavailable?: boolean;
   linearConnected?: boolean;
+  linearUnavailable?: boolean;
   langfuseProjectNames?: string[];
   supabaseConnections?: Array<{
     accessMode: "logs" | "read_only" | "read_write";
@@ -517,6 +518,9 @@ export function investigationInstructions(input: {
       : null,
     input.linearConnected
       ? prompt("linear")
+      : null,
+    input.linearUnavailable
+      ? prompt("linearUnavailable")
       : null,
     vercelAccountIds.length > 0
       ? prompt("vercel", { value1: vercelAccountIds.join(", ") })
@@ -639,6 +643,7 @@ export async function runInvestigationAgent(
   const investigationInput = toInvestigationInput(job.request);
   const scanMode = investigationInput.provider === "scan";
   let sentryConnectionDegraded = false;
+  let linearUnavailable = false;
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
     investigationInput.attributes?.slackAlertProvider === "aws";
@@ -830,6 +835,12 @@ export async function runInvestigationAgent(
               }),
             ),
           );
+          // Linear only adds ticket history, so an outage there should not
+          // stop the investigation.
+          if (server === linearServer) {
+            linearUnavailable = true;
+            return;
+          }
           if (server.name.startsWith("upstash-")) {
             throw new Error("Unable to connect to Upstash context");
           }
@@ -1003,7 +1014,8 @@ export async function runInvestigationAgent(
       runtimePromptParts: runtimeProfile?.promptParts,
       sentryConnected: sentryServer !== null,
       sentryUnavailable: sentryConnectionDegraded,
-      linearConnected: linearServer !== null,
+      linearConnected: linearServer !== null && !linearUnavailable,
+      linearUnavailable,
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,
       ),
@@ -1038,7 +1050,9 @@ export async function runInvestigationAgent(
       // with its server name so one connection cannot prevent an entire
       // investigation from starting.
       mcpConfig: { includeServerInToolNames: true },
-      mcpServers: contextServers,
+      mcpServers: linearUnavailable
+        ? contextServers.filter((server) => server !== linearServer)
+        : contextServers,
       tools: [
         ...(threadMode
           ? []

@@ -22,6 +22,7 @@ export const defaultInvestigationPromptParts: Record<string, string> = {
   "supabaseReadOnly": "- {{value1}}: inspect project logs, schema metadata, and data with read-only SQL. Never attempt to modify data or schema.",
   "supabaseReadWrite": "- {{value1}}: project logs and database SQL are available. Only modify data or schema when the investigation explicitly requires it and the change is necessary; never modify platform configuration.",
   "linear": "Use the connected Linear tools to inspect relevant project and issue context. Never use a Linear connection tool to write. If the saved report creates new issues, Responder queues a separate job to create the requested Linear tickets and record their identifiers and links.",
+  "linearUnavailable": "Linear context is temporarily unavailable. Continue with the alert payload, repositories, and other connected evidence sources. Clearly state that existing Linear tickets could not be checked.",
   "vercel": "Use the connected read-only Vercel tools to inspect selected projects, deployments, build and runtime logs, and project domains. Search the Vercel API catalog before calling an operation. Never attempt to retrieve environment-variable values or other secrets. Connected Vercel account IDs: {{value1}}.",
   "customMcp": "Use the connected custom MCP tools when they can provide relevant evidence. Connected MCPs: {{value1}}.",
   "slack": "Use the read-only Slack tools to inspect relevant conversation history in these selected channels only: {{value1}}.",
