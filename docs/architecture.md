@@ -192,10 +192,19 @@ that boundary.
 ### Automation provider catalogs
 
 The automation model picker lists providers: OpenAI, Anthropic, Google Gemini,
-xAI, Mistral, and DeepSeek. Each provider opens a submenu of its included-usage
-models from the AI Gateway catalog, and choosing one bills the automation
-through Responder. API keys and subscriptions are managed in model access
-settings. For a saved connection, the server fetches the provider's current
+xAI, Mistral, and DeepSeek. Each provider opens a submenu of models from the AI
+Gateway catalog. API keys and subscriptions are managed in model access
+settings.
+
+Automations do not store a model credential. The worker picks the inference
+source when each run starts from the organization's model access settings: a
+ChatGPT subscription for the Codex harness, then the newest active API key for
+the provider. Only without either is inference billed through Responder. An
+API-key run looks the model up in the key's catalog and uses the provider's ID
+for it, since AI Gateway names can differ (`claude-sonnet-4.5` is
+`claude-sonnet-4-5-20250929` at Anthropic). If the provider rejects the key or
+does not list the model, the run fails; it never falls back to Responder
+inference. For a saved connection, the server fetches the provider's current
 model catalog using that credential. New keys are checked against the catalog
 before storage. Catalog calls
 are tenant-scoped and use fixed provider URLs, bounded timeouts, and no redirects.

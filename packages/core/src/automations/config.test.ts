@@ -8,7 +8,6 @@ const baseConfiguration = {
   maxOutputTokensPerRequest: 4_096,
   maxRuntimeSeconds: 900,
   model: "gpt-5.1-codex",
-  modelCredentialId: "21212121-2121-4121-8121-212121212121",
   modelProvider: "openai",
   prompt: "Investigate the alert and make the smallest safe fix.",
   repositoryIds: ["31313131-3131-4131-8131-313131313131"],
@@ -102,18 +101,13 @@ describe("automation configuration", () => {
     ).toThrow("requires an Anthropic model");
   });
 
-  it("uses Responder-funded inference when no model credential is selected", () => {
-    const withoutCredential: Record<string, unknown> = { ...baseConfiguration };
-    delete withoutCredential.modelCredentialId;
-    expect(
-      automationConfigurationSchema.parse(withoutCredential).modelCredentialId,
-    ).toBeNull();
+  it("does not keep a model credential on the automation", () => {
     expect(
       automationConfigurationSchema.parse({
         ...baseConfiguration,
-        modelCredentialId: null,
-      }).modelCredentialId,
-    ).toBeNull();
+        modelCredentialId: "21212121-2121-4121-8121-212121212121",
+      }),
+    ).not.toHaveProperty("modelCredentialId");
   });
 
   it("requires at least one repository and bounded unattended limits", () => {

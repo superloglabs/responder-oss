@@ -51,3 +51,15 @@ export async function listProviderModels(provider: ModelProviderId, apiKey: stri
   }
   throw new ModelCatalogError(false);
 }
+
+// Editor models use AI Gateway slugs, which can differ from the provider's own
+// IDs: `claude-sonnet-4.5` is `claude-sonnet-4-5-20250929` at Anthropic.
+// Returns the provider's ID for the model, or null when the key cannot run it.
+export function matchProviderModel(model: string, available: AvailableAutomationModel[]): string | null {
+  if (available.some(item => item.id === model)) return model;
+  const key = (id: string) => id.toLowerCase().replaceAll(".", "-").replace(/-(\d{8}|\d{4}-\d{2}-\d{2}|latest)$/u, "");
+  const target = key(model);
+  const matches = available.map(item => item.id).filter(id => key(id) === target).sort();
+  // Prefer the undated alias, then the newest snapshot.
+  return matches.find(id => id.toLowerCase().replaceAll(".", "-") === target) ?? matches.at(-1) ?? null;
+}

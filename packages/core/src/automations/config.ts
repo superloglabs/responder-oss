@@ -75,7 +75,6 @@ export const automationConfigurationSchema = z
       .min(1)
       .max(255)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u),
-    modelCredentialId: z.uuid().nullable().default(null),
     modelProvider: automationModelProviderSchema,
     notifications: z.array(automationNotificationSchema).max(10).default([])
       .refine(

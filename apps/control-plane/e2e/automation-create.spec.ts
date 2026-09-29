@@ -68,7 +68,7 @@ test("creates an automation using the compact editor and selected resources", as
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ name: "Fix incoming issues", configuration: {
-    repositoryIds: [repositoryId], modelCredentialId: null, contextAccountIds: [],
+    repositoryIds: [repositoryId], contextAccountIds: [],
     triggers: [{ integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" }],
   } });
   await expect(page.getByRole("alert")).toBeVisible();

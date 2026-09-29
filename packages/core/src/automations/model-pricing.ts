@@ -91,11 +91,6 @@ export async function getAIGatewayModelPricing(
   return (await loadCatalog(dependencies)).pricing.get(gatewayModelId) ?? null;
 }
 
-// AI Gateway lists models under their creator. A provider without a creator
-// entry has no included-usage models.
-export function supportsIncludedUsage(provider: AutomationModelProvider): boolean {
-  return aiGatewayCreators[provider] !== null;
-}
 
 const aiGatewayCreators: Record<AutomationModelProvider, string | null> = {
   anthropic: "anthropic",

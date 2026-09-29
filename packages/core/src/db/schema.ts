@@ -641,6 +641,9 @@ export const automationVersions = pgTable(
       .$type<AutomationModelProvider>()
       .notNull(),
     model: text("model").notNull(),
+    // No longer read or written: each run picks its model access from the
+    // organization's settings. Kept for services still writing them during a
+    // rolling deploy; drop in a later release.
     inferenceSource: text("inference_source")
       .$type<AutomationInferenceSource>()
       .notNull()
