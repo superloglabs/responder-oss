@@ -226,6 +226,14 @@ export async function deleteOrganizationModelCredential(input: {
   return rows.length > 0;
 }
 
+// Another operation holds the refresh token, or the subscription is no longer active.
+export class SubscriptionCredentialUnavailableError extends Error {
+  constructor() {
+    super("This ChatGPT subscription is refreshing or needs reconnecting. Try again shortly.");
+    this.name = "SubscriptionCredentialUnavailableError";
+  }
+}
+
 export async function acquireSubscriptionCredential(input: {
   credentialId: string;
   organizationId: string;
@@ -253,10 +261,7 @@ export async function acquireSubscriptionCredential(input: {
       .returning({
         encryptedCredentials: organizationModelCredentials.encryptedCredentials,
       });
-    if (!rows[0])
-      throw new Error(
-        "This ChatGPT subscription is already running an automation or needs reconnecting. Try again when the current run finishes.",
-      );
+    if (!rows[0]) throw new SubscriptionCredentialUnavailableError();
     const { authJson } = decryptCredentials<{ authJson: string }>(
       rows[0].encryptedCredentials,
     );

@@ -12,7 +12,8 @@ export type AutomationHarnessKind =
   | "opencode";
 
 export interface AutomationModelRoute {
-  subscription?: { authJson: string; persist: (authJson: string) => Promise<void> };
+  // A run-only credential cache: no refresh token, never written back.
+  subscription?: { authJson: string };
   brokerBaseUrl: string;
   // The broker refuses requests that ask for more output than the grant allows.
   maxOutputTokensPerRequest?: number;
