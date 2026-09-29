@@ -32,6 +32,7 @@ import { sandboxTimeIsBilled } from "@responder/core/billing/usage-charges";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
+import { parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
@@ -56,7 +57,13 @@ import { runClaudeAutomation } from "./claude-automation-harness.js";
 import { runOpenCodeAutomation } from "./opencode-automation-harness.js";
 import { safeInvestigationError } from "./investigate.js";
 import { reportWorkerException } from "./monitoring.js";
-import { subscriptionAuthCoveringRun } from "./subscription-access.js";
+import {
+  createSubscriptionRunSecret,
+  deleteSubscriptionRunSecret,
+  subscriptionAuthCoveringRun,
+  subscriptionSecretEnvironmentVariable,
+  type SubscriptionRunSecret,
+} from "./subscription-access.js";
 import {
   checkoutAutomationRuntimeRepositories,
   loadCheckedOutRepositories,
@@ -122,6 +129,8 @@ export interface AutomationRunDependencies {
   setStatus: typeof setAutomationRunStatus;
   slackCard: AutomationSlackCardDependencies;
   subscriptionAuth: (owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>;
+  createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
+  deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
 }
 
@@ -162,6 +171,8 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   setStatus: setAutomationRunStatus,
   slackCard: defaultAutomationSlackCardDependencies,
   subscriptionAuth: (owner, validUntil) => subscriptionAuthCoveringRun(owner, validUntil),
+  createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
+  deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
 };
 
@@ -446,6 +457,7 @@ export async function processAutomationRun(
   });
 
   let grantId: string | undefined;
+  let subscriptionSecret: SubscriptionRunSecret | undefined;
   let slackCard: AutomationSlackCard | null = null;
   // The newest event this turn's prompt includes, once it is read. A reply
   // stored after it arrived while the turn ran.
@@ -551,7 +563,11 @@ export async function processAutomationRun(
         // Leaves time for sandbox setup before the runtime limit starts to matter.
         const validUntil = new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 1_800) * 1_000);
         const authJson = await dependencies.subscriptionAuth({ credentialId, organizationId: run.organizationId }, validUntil);
-        nativeSubscription = { authJson };
+        subscriptionSecret = await dependencies.createSubscriptionSecret({
+          accessToken: parseSubscriptionAuth(authJson).tokens.access_token,
+          runId: run.runId,
+        });
+        nativeSubscription = { authJson: subscriptionAuthForSandbox(authJson, subscriptionSecret.placeholder) };
         grantCredential = { inferenceSource: "byos" };
       } else {
         model = await providerModelForKey(dependencies, run, credential.apiKey);
@@ -717,7 +733,9 @@ export async function processAutomationRun(
         return { actions, harnessResult, transcript };
       },
       runId: run.runId,
-      secrets: workspaceSecrets,
+      secrets: subscriptionSecret
+        ? [...workspaceSecrets, { daytonaSecretName: subscriptionSecret.name, environmentVariable: subscriptionSecretEnvironmentVariable }]
+        : workspaceSecrets,
       signal: runAbort.signal,
     });
     let result: Awaited<ReturnType<typeof runTurn>>;
@@ -824,6 +842,15 @@ export async function processAutomationRun(
     clearInterval(cancellationPoll);
     clearInterval(heartbeat);
     clearTimeout(runtimeTimeout);
+    if (subscriptionSecret) {
+      await dependencies.deleteSubscriptionSecret(subscriptionSecret.id).catch((error) =>
+        dependencies.reportException(error, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
+    }
     if (grantId) {
       let revocationError: unknown;
       for (const delayMs of [0, 100, 500]) {

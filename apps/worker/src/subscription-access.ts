@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { Daytona, type Sandbox } from "@daytona/sdk";
 import {
   parseSubscriptionAuth,
   subscriptionAccessTokenExpiresAt,
-  subscriptionAuthForRun,
   subscriptionCliVersion,
+  subscriptionSecretHosts,
 } from "@responder/core/automations/chatgpt-subscription";
 import {
   acquireSubscriptionCredential,
@@ -12,7 +13,7 @@ import {
   releaseSubscriptionCredential,
   SubscriptionCredentialUnavailableError,
 } from "@responder/core/db/automation-model-credentials";
-import { daytonaClientOptions, requireDaytonaClientConfig } from "@responder/core/daytona-config";
+import { daytonaClientOptions, isDaytonaNotFound, requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import { prebuiltHarnessRoot } from "./automation-harness.js";
 
 interface SubscriptionOwner {
@@ -111,8 +112,8 @@ export const defaultSubscriptionAccessDependencies: SubscriptionAccessDependenci
 const refreshRetryMs = 5_000;
 const refreshWaitLimitMs = 240_000;
 
-// Returns a run-only cache whose access token outlives the run. Runs share the
-// login and never write it back, so any number can use it at once.
+// Returns the stored login once its access token outlives the run. Runs share
+// the login and never write it back, so any number can use it at once.
 export async function subscriptionAuthCoveringRun(
   owner: SubscriptionOwner,
   validUntil: Date,
@@ -124,7 +125,7 @@ export async function subscriptionAuthCoveringRun(
     const authJson = await dependencies.getAuthJson(owner);
     if (!authJson) throw new Error("The ChatGPT subscription is unavailable. Reconnect it in model settings.");
     const expiresAt = subscriptionAccessTokenExpiresAt(authJson);
-    if (expiresAt && expiresAt > validUntil) return subscriptionAuthForRun(authJson);
+    if (expiresAt && expiresAt > validUntil) return authJson;
     if (refreshed) throw new Error("ChatGPT did not renew the subscription login. Reconnect it in model settings.");
     try {
       await dependencies.refresh(owner);
@@ -134,5 +135,57 @@ export async function subscriptionAuthCoveringRun(
       if (!(error instanceof SubscriptionCredentialUnavailableError) || dependencies.now().getTime() >= deadline) throw error;
       await dependencies.sleep(refreshRetryMs);
     }
+  }
+}
+
+export const subscriptionSecretEnvironmentVariable = "RESPONDER_CHATGPT_ACCESS_TOKEN";
+
+export interface SubscriptionRunSecret {
+  id: string;
+  name: string;
+  placeholder: string;
+}
+
+// Keeps the access token out of the run sandbox. The sandbox sees only the
+// placeholder; Daytona puts the token on HTTPS requests to ChatGPT. Each run
+// gets its own secret and deletes it when it ends.
+export async function createSubscriptionRunSecret(
+  input: { accessToken: string; runId: string },
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<SubscriptionRunSecret> {
+  const client = new Daytona(daytonaClientOptions(requireDaytonaClientConfig(environment)));
+  try {
+    const secret = await client.secret.create({
+      description: "Responder ChatGPT subscription run",
+      hosts: subscriptionSecretHosts,
+      name: `responder_chatgpt_${input.runId.replaceAll("-", "")}_${randomUUID().slice(0, 8)}`,
+      value: input.accessToken,
+    });
+    return { id: secret.id, name: secret.name, placeholder: secret.placeholder };
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
+export async function deleteSubscriptionRunSecret(
+  secretId: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const client = new Daytona(daytonaClientOptions(requireDaytonaClientConfig(environment)));
+  try {
+    let lastError: unknown;
+    for (const delayMs of [0, 250, 1_000]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      try {
+        await client.secret.delete(secretId);
+        return;
+      } catch (error) {
+        if (isDaytonaNotFound(error)) return;
+        lastError = error;
+      }
+    }
+    throw lastError;
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
   }
 }

@@ -130,6 +130,8 @@ function dependencies() {
     saveSandbox: vi.fn().mockResolvedValue(undefined),
     setStatus: vi.fn().mockResolvedValue(true),
     subscriptionAuth: vi.fn<(owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>>(),
+    createSubscriptionSecret: vi.fn<AutomationRunDependencies["createSubscriptionSecret"]>().mockResolvedValue({ id: "secret-1", name: "responder_chatgpt_run", placeholder: "dtn_secret_run" }),
+    deleteSubscriptionSecret: vi.fn<AutomationRunDependencies["deleteSubscriptionSecret"]>().mockResolvedValue(undefined),
     slackCard: {
       now: () => Date.parse("2026-09-22T19:00:00.000Z"),
       post: vi.fn().mockResolvedValue("1790000001.000200"),
@@ -682,25 +684,49 @@ describe("automation run processor", () => {
       status: "failed",
     }));
   });
-  it("runs a subscription natively with a context-only broker grant and a run-only login", async () => {
+  it("runs a subscription natively while the access token stays in a Daytona secret", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "native-refresh", account_id: "account" } });
-    const runAuthJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "responder-run-only", account_id: "account" } });
+    const idToken = `header.${Buffer.from(JSON.stringify({ email: "person@example.com" })).toString("base64url")}.native-id-signature`;
+    const authJson = JSON.stringify({ tokens: { id_token: idToken, access_token: "native-access", refresh_token: "native-refresh", account_id: "account" } });
     deps.claimRun.mockResolvedValue(claimedRun());
     deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: credentialId, authJson } });
-    deps.subscriptionAuth.mockResolvedValue(runAuthJson);
+    deps.subscriptionAuth.mockResolvedValue(authJson);
     deps.runCodex.mockResolvedValue({ eventStream: "" });
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.subscriptionAuth).toHaveBeenCalledWith(
       { credentialId: credentialId, organizationId },
       new Date(deps.now().getTime() + (claimedRun().maxRuntimeSeconds + 1_800) * 1_000),
     );
+    expect(deps.createSubscriptionSecret).toHaveBeenCalledWith({ accessToken: "native-access", runId });
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
-    expect(JSON.stringify(deps.createGrant.mock.calls)).not.toContain("native-refresh");
-    expect(deps.runCodex).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ model: expect.objectContaining({ subscription: { authJson: runAuthJson } }) }));
-    expect(JSON.stringify(deps.runCodex.mock.calls)).not.toContain("native-refresh");
+    expect(deps.runInSandbox).toHaveBeenCalledWith(expect.objectContaining({
+      secrets: [{ daytonaSecretName: "responder_chatgpt_run", environmentVariable: "RESPONDER_CHATGPT_ACCESS_TOKEN" }],
+    }));
+    const sandboxAuth = JSON.parse(deps.runCodex.mock.calls[0]![1].model.subscription!.authJson);
+    expect(sandboxAuth.tokens.access_token).toBe("dtn_secret_run");
+    expect(sandboxAuth.tokens.refresh_token).toBe("responder-run-only");
+    for (const secret of ["native-access", "native-refresh", "native-id-signature"]) {
+      expect(JSON.stringify(deps.runCodex.mock.calls)).not.toContain(secret);
+      expect(JSON.stringify(deps.runInSandbox.mock.calls)).not.toContain(secret);
+      expect(JSON.stringify(deps.createGrant.mock.calls)).not.toContain(secret);
+    }
+    expect(deps.deleteSubscriptionSecret).toHaveBeenCalledWith("secret-1");
+  });
+
+  it("deletes the run's subscription secret when the run fails", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId, authJson } });
+    deps.subscriptionAuth.mockResolvedValue(authJson);
+    deps.runInSandbox.mockRejectedValue(new Error("sandbox failed"));
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(deps.deleteSubscriptionSecret).toHaveBeenCalledWith("secret-1");
   });
 
   it("fails a subscription run before starting a sandbox when the login cannot cover it", async () => {
@@ -807,6 +833,7 @@ describe("automation run processor", () => {
     expect(deps.checkAllowance).not.toHaveBeenCalled();
     expect(deps.subscriptionAuth).toHaveBeenCalledWith({ credentialId: "91919191-9191-4191-8191-919191919191", organizationId }, expect.any(Date));
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
+    expect(deps.createSubscriptionSecret).toHaveBeenCalledWith({ accessToken: "access", runId });
   });
 
   it("fails instead of using Responder inference when the organization's key cannot run the model", async () => {

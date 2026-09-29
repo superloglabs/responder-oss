@@ -1,4 +1,5 @@
 import {
+  daytonaSecretPlaceholderPrefix,
   parseSubscriptionAuth,
   runOnlyRefreshToken,
   subscriptionCliVersion,
@@ -206,7 +207,8 @@ export async function runCodexAutomation(
   let output = "";
   try {
     if (input.model.subscription) {
-      if (parseSubscriptionAuth(input.model.subscription.authJson).tokens.refresh_token !== runOnlyRefreshToken)
+      const { tokens } = parseSubscriptionAuth(input.model.subscription.authJson);
+      if (tokens.refresh_token !== runOnlyRefreshToken || !tokens.access_token.startsWith(daytonaSecretPlaceholderPrefix))
         throw new Error("Subscription runs require a run-only credential cache");
       const prepared = await session.execCommand({
         // The trusted launcher needs host root to create the nested user namespace.

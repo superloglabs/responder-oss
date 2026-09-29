@@ -2,14 +2,22 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSubscriptionAuth, runOnlyRefreshToken } from "@responder/core/automations/chatgpt-subscription";
 import { SubscriptionCredentialUnavailableError } from "@responder/core/db/automation-model-credentials";
 import { describe, expect, it, vi } from "vitest";
 import {
+  createSubscriptionRunSecret,
+  deleteSubscriptionRunSecret,
   subscriptionAuthCoveringRun,
   subscriptionRefreshRunner,
   type SubscriptionAccessDependencies,
 } from "./subscription-access.js";
+
+const daytonaSecrets = vi.hoisted(() => ({ create: vi.fn(), delete: vi.fn() }));
+vi.mock("@daytona/sdk", () => ({
+  Daytona: vi.fn(function Daytona() {
+    return { secret: daytonaSecrets, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) };
+  }),
+}));
 
 const owner = { credentialId: "credential", organizationId: "organization" };
 const now = new Date("2026-09-29T12:00:00.000Z");
@@ -33,19 +41,19 @@ function dependencies() {
 describe("subscriptionAuthCoveringRun", () => {
   it("shares a login that outlives the run without refreshing it", async () => {
     const deps = dependencies();
-    deps.getAuthJson.mockResolvedValue(authExpiringAt(new Date(now.getTime() + 24 * 3_600_000)));
-    const authJson = await subscriptionAuthCoveringRun(owner, validUntil, deps);
-    expect(parseSubscriptionAuth(authJson).tokens.refresh_token).toBe(runOnlyRefreshToken);
-    expect(authJson).not.toContain("stored-refresh");
+    const stored = authExpiringAt(new Date(now.getTime() + 24 * 3_600_000));
+    deps.getAuthJson.mockResolvedValue(stored);
+    await expect(subscriptionAuthCoveringRun(owner, validUntil, deps)).resolves.toBe(stored);
     expect(deps.refresh).not.toHaveBeenCalled();
   });
 
   it("refreshes a login that would expire during the run", async () => {
     const deps = dependencies();
+    const renewed = authExpiringAt(new Date(now.getTime() + 240 * 3_600_000));
     deps.getAuthJson
       .mockResolvedValueOnce(authExpiringAt(new Date(now.getTime() + 30 * 60_000)))
-      .mockResolvedValueOnce(authExpiringAt(new Date(now.getTime() + 240 * 3_600_000)));
-    await expect(subscriptionAuthCoveringRun(owner, validUntil, deps)).resolves.toContain(runOnlyRefreshToken);
+      .mockResolvedValueOnce(renewed);
+    await expect(subscriptionAuthCoveringRun(owner, validUntil, deps)).resolves.toBe(renewed);
     expect(deps.refresh).toHaveBeenCalledOnce();
     expect(deps.refresh).toHaveBeenCalledWith(owner);
   });
@@ -59,11 +67,12 @@ describe("subscriptionAuthCoveringRun", () => {
 
   it("waits for another refresh and uses its result", async () => {
     const deps = dependencies();
+    const renewed = authExpiringAt(new Date(now.getTime() + 240 * 3_600_000));
     deps.getAuthJson
       .mockResolvedValueOnce(authExpiringAt(new Date(now.getTime() + 30 * 60_000)))
-      .mockResolvedValueOnce(authExpiringAt(new Date(now.getTime() + 240 * 3_600_000)));
+      .mockResolvedValueOnce(renewed);
     deps.refresh.mockRejectedValueOnce(new SubscriptionCredentialUnavailableError());
-    await expect(subscriptionAuthCoveringRun(owner, validUntil, deps)).resolves.toContain(runOnlyRefreshToken);
+    await expect(subscriptionAuthCoveringRun(owner, validUntil, deps)).resolves.toBe(renewed);
     expect(deps.refresh).toHaveBeenCalledOnce();
     expect(deps.sleep).toHaveBeenCalledOnce();
   });
@@ -128,5 +137,28 @@ describe("subscriptionRefreshRunner", () => {
   it("fails for other accounts and app-server errors", async () => {
     await expect(runRefreshRunner("apiKey")).resolves.toBe(1);
     await expect(runRefreshRunner("chatgpt", true)).resolves.toBe(1);
+  });
+});
+
+describe("subscription run secrets", () => {
+  const environment = { DAYTONA_API_KEY: "daytona-key" };
+
+  it("keeps the access token in a Daytona secret limited to ChatGPT", async () => {
+    daytonaSecrets.create.mockResolvedValue({ id: "secret-1", name: "responder_chatgpt_run", placeholder: "dtn_secret_abc" });
+    await expect(createSubscriptionRunSecret({ accessToken: "access", runId: "21212121-2121-4121-8121-212121212121" }, environment))
+      .resolves.toEqual({ id: "secret-1", name: "responder_chatgpt_run", placeholder: "dtn_secret_abc" });
+    expect(daytonaSecrets.create).toHaveBeenCalledWith(expect.objectContaining({
+      hosts: ["chatgpt.com"],
+      name: expect.stringMatching(/^responder_chatgpt_21212121212141218121212121212121_[a-f0-9]{8}$/u),
+      value: "access",
+    }));
+  });
+
+  it("deletes the secret, treating a missing one as deleted", async () => {
+    daytonaSecrets.delete.mockResolvedValueOnce(undefined);
+    await deleteSubscriptionRunSecret("secret-1", environment);
+    expect(daytonaSecrets.delete).toHaveBeenCalledWith("secret-1");
+    daytonaSecrets.delete.mockRejectedValueOnce(Object.assign(new Error("Not found"), { statusCode: 404 }));
+    await expect(deleteSubscriptionRunSecret("secret-2", environment)).resolves.toBeUndefined();
   });
 });

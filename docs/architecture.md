@@ -179,16 +179,28 @@ bound abandoned sessions. The connection is shared by automations in its workspa
 Subscription runs require the Codex harness, enforced by the API and worker.
 A fresh sandbox receives a run-only copy of the native auth cache in a private
 directory outside the repository checkout, with directory mode 0700 and file mode
-0600. The CLI uses managed ChatGPT authentication and makes inference requests
-directly. It receives no custom model-provider override or API key. The existing
-temporary broker token is context-only for these runs and cannot authorize model
-inference.
+0600. The sandbox file API writes only inside the workspace, so the harness
+stages the copy there as root and moves it before Codex starts. The CLI uses
+managed ChatGPT authentication and makes inference requests directly. It
+receives no custom model-provider override or API key. The existing temporary
+broker token is context-only for these runs and cannot authorize model inference.
 
-Refresh tokens rotate on every use, so the run-only copy replaces the refresh
-token with a placeholder and keeps the access token. Any number of runs can share
-one subscription at once. The copy is never written back, and a refresh attempt
-inside a run fails that run without affecting the stored login. The harness
-refuses a cache that still holds a real refresh token.
+The run sandbox holds no real token:
+
+- The access token goes into a Daytona secret created for the run and limited
+  to `chatgpt.com`. The cache and the mounted environment variable hold only
+  the secret's placeholder, which Daytona replaces in HTTPS request headers.
+  The worker deletes the secret when the run ends.
+- Refresh tokens rotate on every use, so the copy has a placeholder refresh
+  token. A refresh attempt inside a run fails that run without affecting the
+  stored login.
+- Codex reads claims from the ID token but never sends it, so the copy holds an
+  unsigned token with only those claims.
+
+Any number of runs can share one subscription at once, and the copy is never
+written back. The harness refuses a cache whose refresh token is real or whose
+access token is not a Daytona placeholder. Daytona's proxy rejects Codex's
+WebSocket transport, so Codex falls back to HTTPS after a few seconds.
 
 Before a run, the worker checks that the stored access token outlives the maximum
 runtime plus 30 minutes. If it does not, the worker refreshes the login once in a

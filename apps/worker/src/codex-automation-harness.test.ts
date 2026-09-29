@@ -237,7 +237,7 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
   const authJson = JSON.stringify({
     tokens: {
       id_token: "id-token",
-      access_token: "access-token",
+      access_token: "dtn_secret_access",
       refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
@@ -254,7 +254,7 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
     '"/home/daytona/.responder-subscription-auth"="deny"',
   );
   expect(command).not.toContain("model_providers.responder");
-  expect(command).not.toContain("access-token");
+  expect(command).not.toContain("dtn_secret_access");
   expect(command).toContain(
     "unset OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN",
   );
@@ -301,7 +301,7 @@ it("redacts native subscription tokens from persisted harness output", async () 
   const authJson = JSON.stringify({
     tokens: {
       id_token: "secret-id",
-      access_token: "secret-access",
+      access_token: "dtn_secret_access",
       refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
@@ -310,7 +310,7 @@ it("redacts native subscription tokens from persisted harness output", async () 
     execCommand: vi
       .fn()
       .mockResolvedValue(
-        "Process exited with code 0\nsecret-access secret-id",
+        "Process exited with code 0\ndtn_secret_access secret-id",
       ),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
   } as unknown as DaytonaSandboxSession;
@@ -318,7 +318,8 @@ it("redacts native subscription tokens from persisted harness output", async () 
     ...input,
     model: { ...input.model, subscription: { authJson } },
   });
-  expect(result.eventStream).not.toContain("secret-");
+  expect(result.eventStream).not.toContain("secret-id");
+  expect(result.eventStream).not.toContain("dtn_secret_access");
   expect(result.eventStream).toContain("[redacted]");
 });
 
@@ -326,7 +327,7 @@ it("removes native credentials when materialization fails", async () => {
   const authJson = JSON.stringify({
     tokens: {
       id_token: "id",
-      access_token: "access",
+      access_token: "dtn_secret_access",
       refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
@@ -375,4 +376,26 @@ it("refuses a credential cache that still holds the refresh token", async () => 
   expect(session.materializeEntry).not.toHaveBeenCalledWith(
     expect.objectContaining({ entry: { type: "file", content: authJson } }),
   );
+});
+
+it("refuses a credential cache that holds a real access token", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id",
+      access_token: "real-access-token",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0\n"),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+  await expect(
+    runCodexAutomation(session, {
+      ...input,
+      model: { ...input.model, subscription: { authJson } },
+    }),
+  ).rejects.toThrow("run-only");
+  expect(JSON.stringify(vi.mocked(session.materializeEntry).mock.calls)).not.toContain("real-access-token");
 });
