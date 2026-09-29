@@ -71,6 +71,7 @@ function dependencies() {
     appendEvent: vi.fn().mockResolvedValue(undefined),
     cancellationRequested: vi.fn().mockResolvedValue(false),
     checkAllowance: vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
+    sandboxTimeIsBilled: vi.fn(() => false),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -840,6 +841,29 @@ describe("automation run processor", () => {
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       failureCategory: "usage_limit_reached",
       failureMessage: expect.stringContaining("allowance"),
+      status: "failed",
+    }));
+  });
+
+  it("stops an organization-funded run before the sandbox when sandbox time is billed", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.sandboxTimeIsBilled.mockReturnValue(true);
+    deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId);
+    expect(deps.createGrant).not.toHaveBeenCalled();
+    expect(deps.runInSandbox).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "usage_limit_reached",
+      failureMessage: expect.not.stringContaining("own model key"),
       status: "failed",
     }));
   });

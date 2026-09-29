@@ -972,6 +972,125 @@ export const automationModelUsage = pgTable(
   ],
 );
 
+export const sandboxUsageWorkloadValues = [
+  "automation",
+  "investigation",
+  "pull_request_review",
+  "remediation",
+] as const;
+
+export type SandboxUsageWorkload = (typeof sandboxUsageWorkloadValues)[number];
+
+// One row per period a sandbox runs, from start or resume until it is paused
+// or deleted. The worker renews `heartbeat_at` while the sandbox runs, so a
+// period left open by a worker exit is closed at its last heartbeat. Rows
+// that are not `billable` are recorded for cost visibility only.
+export const sandboxUsage = pgTable(
+  "sandbox_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    workload: text("workload").$type<SandboxUsageWorkload>().notNull(),
+    workloadId: uuid("workload_id").notNull(),
+    billable: boolean("billable").notNull(),
+    cpu: integer("cpu").notNull(),
+    memoryGiB: integer("memory_gib").notNull(),
+    diskGiB: integer("disk_gib").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }).notNull(),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
+    chargeMicros: bigint("charge_micros", { mode: "number" }),
+    billedAt: timestamp("billed_at", { withTimezone: true }),
+    billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("sandbox_usage_workload_idx").on(table.workload, table.workloadId),
+    index("sandbox_usage_organization_started_idx").on(
+      table.organizationId,
+      table.startedAt,
+    ),
+    index("sandbox_usage_open_idx")
+      .on(table.heartbeatAt)
+      .where(sql`${table.stoppedAt} is null`),
+    index("sandbox_usage_unbilled_idx")
+      .on(table.stoppedAt)
+      .where(sql`${table.billedAt} is null`),
+    check(
+      "sandbox_usage_workload_check",
+      sql`${table.workload} in ('automation', 'investigation', 'pull_request_review', 'remediation')`,
+    ),
+    check(
+      "sandbox_usage_resources_check",
+      sql`${table.cpu} > 0 and ${table.memoryGiB} > 0 and ${table.diskGiB} > 0`,
+    ),
+    check(
+      "sandbox_usage_charge_check",
+      sql`${table.chargeMicros} is null or ${table.chargeMicros} >= 0`,
+    ),
+  ],
+);
+
+export const agentModelUsageWorkloadValues = [
+  "investigation",
+  "pull_request_review",
+] as const;
+
+export type AgentModelUsageWorkload = (typeof agentModelUsageWorkloadValues)[number];
+
+// Model usage of one investigation or pull request review run, which always
+// uses Responder's model key. Rows that are not `billable` are recorded for
+// cost visibility only.
+export const agentModelUsage = pgTable(
+  "agent_model_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    workload: text("workload").$type<AgentModelUsageWorkload>().notNull(),
+    workloadId: uuid("workload_id").notNull(),
+    billable: boolean("billable").notNull(),
+    model: text("model").notNull(),
+    requests: integer("requests").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    chargeMicros: bigint("charge_micros", { mode: "number" }),
+    billedAt: timestamp("billed_at", { withTimezone: true }),
+    billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("agent_model_usage_workload_idx").on(table.workload, table.workloadId),
+    index("agent_model_usage_organization_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    index("agent_model_usage_unbilled_idx")
+      .on(table.createdAt)
+      .where(sql`${table.billedAt} is null`),
+    check(
+      "agent_model_usage_workload_check",
+      sql`${table.workload} in ('investigation', 'pull_request_review')`,
+    ),
+    check(
+      "agent_model_usage_tokens_check",
+      sql`${table.requests} >= 0 and ${table.inputTokens} >= 0 and ${table.cachedInputTokens} >= 0 and ${table.outputTokens} >= 0`,
+    ),
+    check(
+      "agent_model_usage_charge_check",
+      sql`${table.chargeMicros} is null or ${table.chargeMicros} >= 0`,
+    ),
+  ],
+);
+
 export type AutomationActionKind =
   | "add_slack_reaction"
   | "open_github_pull_request"

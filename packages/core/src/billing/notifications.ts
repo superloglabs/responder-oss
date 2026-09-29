@@ -34,7 +34,13 @@ function billingUrl(): string | null {
   }
 }
 
-export function billingLimitMessage(url = billingUrl()): string {
+export function billingLimitMessage(url = billingUrl(), usageBased = false): string {
+  if (usageBased) {
+    const action = url
+      ? ` Upgrade the plan to resume now: ${url}`
+      : " Upgrade the plan in Responder Billing to resume now.";
+    return `Responder has paused new investigations because this workspace used its included usage for this billing period. Work already in progress finishes, and new investigations resume when the allowance resets.${action}`;
+  }
   const action = url
     ? ` Enable pay as you go ($1.50 per investigation) to resume: ${url}`
     : " Enable pay as you go ($1.50 per investigation) in Responder Billing to resume.";
@@ -269,6 +275,7 @@ async function deliverNotification(
   organizationId: string,
   periodKey: string,
   destination: SlackDestination,
+  usageBased: boolean,
 ): Promise<void> {
   const deliveryId = await claimDelivery(organizationId, periodKey, destination);
   if (!deliveryId) return;
@@ -277,7 +284,7 @@ async function deliverNotification(
     await postSlackMessage(
       destination.account.accessToken,
       destination.channel,
-      billingLimitMessage(),
+      billingLimitMessage(undefined, usageBased),
     );
     await getDatabase()
       .update(billingNotificationDeliveries)
@@ -323,6 +330,7 @@ export async function notifyBillingLimitReached(
   nextResetAt: number | null,
   options: {
     refreshSlackChannels?: (organizationId: string) => Promise<void>;
+    usageBased?: boolean;
   } = {},
 ): Promise<void> {
   const periodKey = nextResetAt
@@ -345,7 +353,12 @@ export async function notifyBillingLimitReached(
   const destinations = await notificationDestinations(organizationId);
   await Promise.all(
     destinations.map((destination) =>
-      deliverNotification(organizationId, periodKey, destination),
+      deliverNotification(
+        organizationId,
+        periodKey,
+        destination,
+        options.usageBased ?? false,
+      ),
     ),
   );
 }

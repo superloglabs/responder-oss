@@ -1,8 +1,8 @@
+import { finalizeInvestigationReservation } from "../../../../packages/core/src/billing/autumn.js";
 import {
-  consumeInvestigation,
-  finalizeInvestigationReservation,
-  reserveInvestigation,
-} from "../../../../packages/core/src/billing/autumn.js";
+  admitInvestigation,
+  admitInvestigationRetry,
+} from "../../../../packages/core/src/billing/investigation-access.js";
 import { notifyBillingLimitReached } from "../../../../packages/core/src/billing/notifications.js";
 import { refreshSlackChannelResources } from "../integrations/slack-resources.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
@@ -97,7 +97,7 @@ export async function queueInvestigation(
   }
 
   try {
-    const access = await consumeInvestigation(
+    const access = await admitInvestigation(
       result.config.organizationId,
       result.investigationId,
     );
@@ -106,7 +106,10 @@ export async function queueInvestigation(
       await notifyBillingLimitReached(
         result.config.organizationId,
         access.nextResetAt,
-        { refreshSlackChannels: refreshSlackChannelResources },
+        {
+          refreshSlackChannels: refreshSlackChannelResources,
+          usageBased: access.usageBased,
+        },
       ).catch((error: unknown) => {
         console.error("Unable to send billing limit notifications", error);
       });
@@ -181,7 +184,7 @@ export async function queueSlackThreadInvestigation(
   }
 
   try {
-    const access = await consumeInvestigation(
+    const access = await admitInvestigation(
       result.config.organizationId,
       result.investigationId,
     );
@@ -190,7 +193,10 @@ export async function queueSlackThreadInvestigation(
       await notifyBillingLimitReached(
         result.config.organizationId,
         access.nextResetAt,
-        { refreshSlackChannels: refreshSlackChannelResources },
+        {
+          refreshSlackChannels: refreshSlackChannelResources,
+          usageBased: access.usageBased,
+        },
       ).catch(() => undefined);
       return { kind: "blocked" };
     }
@@ -275,9 +281,9 @@ export async function queueInvestigationRetry(input: {
   investigationId: string;
   organizationId: string;
 }): Promise<RetryQueueResult> {
-  let reservation: Awaited<ReturnType<typeof reserveInvestigation>>;
+  let reservation: Awaited<ReturnType<typeof admitInvestigationRetry>>;
   try {
-    reservation = await reserveInvestigation(
+    reservation = await admitInvestigationRetry(
       input.organizationId,
       input.investigationId,
     );
@@ -285,7 +291,10 @@ export async function queueInvestigationRetry(input: {
       await notifyBillingLimitReached(
         input.organizationId,
         reservation.nextResetAt,
-        { refreshSlackChannels: refreshSlackChannelResources },
+        {
+          refreshSlackChannels: refreshSlackChannelResources,
+          usageBased: reservation.usageBased,
+        },
       ).catch((error: unknown) => {
         console.error("Unable to send billing limit notifications", error);
       });

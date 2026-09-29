@@ -111,6 +111,28 @@ issue records remain available after their investigation links are replaced.
 Reruns consume the normal investigation allowance and use normal delivery and
 external-action behavior.
 
+## Usage metering
+
+Autumn holds a monthly dollar allowance per organization. Automations always
+draw on it; organizations with simplified navigation also pay for
+investigations, pull request reviews, and remediations from it instead of
+spending investigation credits.
+
+- Responder-funded model requests are reserved before they run and recorded
+  after. Investigation and pull request review runs record their model usage
+  when they finish.
+- The worker records each period a sandbox runs, from start or resume until it
+  is paused or deleted, and renews the period every minute. A period whose
+  worker exited is closed at its last heartbeat.
+- `packages/core/src/billing/usage-pricing.ts` turns provider cost and sandbox
+  time into the charged amount. The default charges model usage at cost and
+  does not charge for sandbox time. A hosted edition may replace the file.
+- Work checks the allowance before it starts. Work already running finishes and
+  is charged even if it goes past the allowance. Operator replays are not
+  charged.
+- Usage rows are reported with their row ID as the idempotency key. Rows that
+  fail are retried for up to a day.
+
 Postgres and pg-boss hold investigation, remediation, and follow-up work.
 Delivery may be at least once, so handlers use idempotency keys and state
 transitions rather than assuming a job runs exactly once.

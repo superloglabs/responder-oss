@@ -1,5 +1,10 @@
 import { renderInvestigationPromptPart, type InvestigationPromptParts } from "@responder/core/investigations/prompt-parts";
-import { run, setDefaultOpenAIKey, setTracingDisabled } from "@openai/agents";
+import {
+  run,
+  setDefaultOpenAIKey,
+  setTracingDisabled,
+  type Usage,
+} from "@openai/agents";
 import { Capabilities, SandboxAgent, skills } from "@openai/agents/sandbox";
 import {
   DaytonaSandboxClient,
@@ -82,6 +87,8 @@ import {
   prepareDaytonaSandbox,
   pauseDaytonaSandbox,
 } from "./sandbox.js";
+import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
+import { agentUsageIsBillable, recordAgentRunUsage } from "./agent-usage.js";
 import {
   investigationTraceEventFromStream,
   traceEvent,
@@ -370,6 +377,9 @@ export function investigationCapabilities(replay: boolean) {
 
 export const investigationMaxTurns = 40;
 
+// A paused Slack thread sandbox is deleted by Daytona this long after it stops.
+export const pausedThreadSandboxLifetimeMinutes = 24 * 60;
+
 export function investigationInstructions(input: {
   agentPrompt: string;
   awsAlarmTriggered?: boolean;
@@ -654,6 +664,9 @@ export async function runInvestigationAgent(
   const config = sandboxAgentConfig(environment);
   setDefaultOpenAIKey(config.openAiApiKey);
   setTracingDisabled(true);
+  // Operator replays are not charged to the organization.
+  const usageBillable = !replay &&
+    await agentUsageIsBillable(job.config.organizationId);
 
   const [
     runtimeProfile,
@@ -831,6 +844,8 @@ export async function runInvestigationAgent(
   });
 
   let session: DaytonaSandboxSession | null = null;
+  let meter: SandboxMeter | null = null;
+  let modelUsage: Usage | undefined;
 
   try {
     await Promise.all(
@@ -873,12 +888,28 @@ export async function runInvestigationAgent(
     }
     const persistedState = sessionRuntime?.sandboxSessionState;
     if (threadMode && persistedState) {
-      session = await client.resume(
-        await client.deserializeSessionState(persistedState),
-      );
-    } else {
-      session = await createDaytonaSandboxSession(client, config, sandboxName);
+      try {
+        session = await client.resume(
+          await client.deserializeSessionState(persistedState),
+        );
+      } catch (error) {
+        // Daytona deletes a paused thread sandbox after a day; the thread
+        // continues in a fresh one.
+        console.error(JSON.stringify({
+          errorCode: error instanceof Error ? error.name : typeof error,
+          event: "investigation_sandbox_resume_failed",
+          investigationId: job.investigationId,
+        }));
+      }
     }
+    session ??= await createDaytonaSandboxSession(client, config, sandboxName);
+    meter = startSandboxMeter({
+      billable: usageBillable,
+      organizationId: job.config.organizationId,
+      snapshot: Boolean(config.sandboxSnapshotName),
+      workload: "investigation",
+      workloadId: job.investigationId,
+    });
     const sessionMarker = "/home/daytona/workspace/.responder/thread-session-ready";
     const sessionReady = Boolean(
       persistedState && await session.pathExists(sessionMarker),
@@ -888,9 +919,18 @@ export async function runInvestigationAgent(
         session,
         config,
         workspaceSecrets,
-        threadMode ? -1 : 0,
+        threadMode ? pausedThreadSandboxLifetimeMinutes : 0,
       );
       if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
+    } else {
+      // Thread sandboxes set up before the deletion interval existed never
+      // expire; give them the same interval.
+      await configureDaytonaSandboxLifecycle(
+        session,
+        config,
+        [],
+        pausedThreadSandboxLifetimeMinutes,
+      );
     }
     const repositories = sessionReady
       ? threadMode && job.refreshWorkspace
@@ -1057,6 +1097,7 @@ export async function runInvestigationAgent(
           : {}),
       },
     );
+    modelUsage = result.state.usage;
     for await (const streamEvent of result) {
       const event = investigationTraceEventFromStream(
         streamEvent,
@@ -1099,15 +1140,27 @@ export async function runInvestigationAgent(
     );
     throw error;
   } finally {
-    if (session) {
-      if (threadMode) {
-        await pauseDaytonaSandbox(session);
-      } else {
-        await closeDaytonaSandbox(session, config, {
-          investigationId: job.investigationId,
-          organizationId: job.config.organizationId,
-        });
+    try {
+      if (session) {
+        if (threadMode) {
+          await pauseDaytonaSandbox(session);
+        } else {
+          await closeDaytonaSandbox(session, config, {
+            investigationId: job.investigationId,
+            organizationId: job.config.organizationId,
+          });
+        }
       }
+    } finally {
+      await meter?.stop();
+      await recordAgentRunUsage({
+        billable: usageBillable,
+        model: config.model,
+        organizationId: job.config.organizationId,
+        usage: modelUsage,
+        workload: "investigation",
+        workloadId: job.investigationId,
+      });
     }
     await Promise.all(
       contextServers.map((server) =>

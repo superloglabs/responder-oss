@@ -11,7 +11,7 @@ import type {
   setAutomationModelUsageCost,
 } from "../db/automation-model-usage.js";
 import type {
-  checkAutomationInferenceAllowance,
+  checkUsageAllowance,
   trackAutomationInferenceUsage,
 } from "../billing/autumn.js";
 import type { getAIGatewayModelPricing } from "./model-pricing.js";
@@ -21,6 +21,12 @@ import {
   reserveResponderInference,
   settleUnbilledAutomationModelUsage,
 } from "./model-usage-billing.js";
+
+// Model usage at provider cost, whichever edition's prices are composed in.
+vi.mock("../billing/usage-pricing.js", () => ({
+  inferenceChargeMicros: (costMicros: number) => costMicros,
+  sandboxChargeMicros: () => 0,
+}));
 
 const usage = {
   cacheWriteTokens: 0,
@@ -82,7 +88,7 @@ describe("automation model usage billing", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("reserves against the allowance in dollars and refuses what it cannot cover", async () => {
-    const checkAllowance = vi.fn<typeof checkAutomationInferenceAllowance>()
+    const checkAllowance = vi.fn<typeof checkUsageAllowance>()
       .mockResolvedValueOnce({ allowed: true, nextResetAt: null })
       .mockResolvedValueOnce({ allowed: false, nextResetAt: null });
     const reserve = vi.fn<typeof reserveResponderModelUsage>(

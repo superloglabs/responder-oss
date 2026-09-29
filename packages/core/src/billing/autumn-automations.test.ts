@@ -15,7 +15,7 @@ vi.mock("autumn-js", () => ({
 }));
 
 const {
-  checkAutomationInferenceAllowance,
+  checkUsageAllowance,
   summarizeAutomationBillingCustomer,
   trackAutomationInferenceUsage,
 } = await import("./autumn.js");
@@ -56,7 +56,7 @@ describe("automation billing", () => {
         { planId: "responder_automations_free", status: "active" },
       ]));
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: 5,
     });
@@ -80,7 +80,7 @@ describe("automation billing", () => {
       .mockResolvedValueOnce(customer([{ planId: "responder_free", status: "active" }]))
       .mockResolvedValueOnce(customer([{ planId: "responder_automations_free", status: "active" }]));
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: 3,
     });
@@ -96,7 +96,7 @@ describe("automation billing", () => {
       .mockResolvedValueOnce(customer([{ planId: "responder_automations_free", status: "active" }]));
     client.billing.attach.mockRejectedValueOnce(new Error("Plan already attached"));
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: 4,
     });
@@ -108,7 +108,7 @@ describe("automation billing", () => {
       balance: { nextResetAt: 9, remaining: 0 },
     });
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: false,
       nextResetAt: 9,
     });
@@ -118,7 +118,7 @@ describe("automation billing", () => {
   it("allows inference without metering when billing is disabled", async () => {
     vi.stubEnv("BILLING_ENABLED", "false");
 
-    await expect(checkAutomationInferenceAllowance("organization-1")).resolves.toEqual({
+    await expect(checkUsageAllowance("organization-1")).resolves.toEqual({
       allowed: true,
       nextResetAt: null,
     });

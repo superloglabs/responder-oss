@@ -22,6 +22,7 @@ import {
   type AutomationModelUsage,
   type AutomationModelWireFormat,
 } from "../../../../packages/core/src/automations/model-usage.js";
+import { inferenceCharge } from "../../../../packages/core/src/billing/usage-charges.js";
 import {
   claimAutomationModelBrokerGrant,
   type AutomationModelBrokerClaim,
@@ -318,7 +319,7 @@ async function reserveResponderRequest(
   ).catch(() => {
     throw new BrokerRequestError("Model pricing is unavailable", 503);
   });
-  const estimateMicros = pricing
+  const costMicros = pricing
     ? automationModelCostMicros(pricing, {
         cacheWriteTokens: 0,
         cachedInputTokens: 0,
@@ -326,7 +327,7 @@ async function reserveResponderRequest(
         outputTokens: grant.maxOutputTokens,
       })
     : null;
-  if (estimateMicros === null) {
+  if (costMicros === null) {
     throw new BrokerRequestError(
       `${grant.model} is not available with included usage`,
       409,
@@ -335,7 +336,7 @@ async function reserveResponderRequest(
   let reservationId: string | null;
   try {
     reservationId = await dependencies.reserveInference({
-      estimateMicros,
+      estimateMicros: inferenceCharge(costMicros),
       model: grant.model,
       organizationId: grant.organizationId,
       provider: grant.provider,
@@ -347,7 +348,7 @@ async function reserveResponderRequest(
   }
   if (!reservationId) {
     throw new BrokerRequestError(
-      "The automation usage allowance for this billing period is used up",
+      "The usage allowance for this billing period is used up",
       402,
     );
   }

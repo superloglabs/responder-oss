@@ -11,15 +11,17 @@ function harness() {
     state: { environment: {}, sandboxId: "sandbox-1" },
   } as unknown as DaytonaSandboxSession;
   const client = { create: vi.fn() } as unknown as DaytonaSandboxClient;
+  const meter = { stop: vi.fn().mockResolvedValue(undefined) };
   const dependencies = {
     close: vi.fn().mockResolvedValue(undefined),
     closePending: vi.fn().mockResolvedValue(undefined),
     configure: vi.fn().mockResolvedValue(undefined),
     createClient: vi.fn(() => client),
     createSession: vi.fn().mockResolvedValue(session),
+    meter: vi.fn(() => meter),
     prepare: vi.fn().mockResolvedValue(undefined),
   };
-  return { client, dependencies, session };
+  return { client, dependencies, meter, session };
 }
 
 // A creation error from the real helper after it deleted the failed sandbox.
@@ -532,5 +534,43 @@ describe("fresh automation sandbox", () => {
 
     expect(onPaused).not.toHaveBeenCalled();
     expect(dependencies.close).toHaveBeenCalledOnce();
+  });
+
+  it("meters sandbox time from start until the sandbox is deleted", async () => {
+    const { dependencies, meter } = harness();
+    dependencies.close.mockImplementation(async () => {
+      expect(meter.stop).not.toHaveBeenCalled();
+    });
+
+    await runInFreshAutomationSandbox(input, dependencies);
+
+    expect(dependencies.meter).toHaveBeenCalledWith({
+      billable: true,
+      organizationId: "organization-1",
+      snapshot: false,
+      workload: "automation",
+      workloadId: "run-1",
+    });
+    expect(meter.stop).toHaveBeenCalledOnce();
+  });
+
+  it("stops metering when the sandbox is paused", async () => {
+    const { client, dependencies, meter, session } = harness();
+    Object.assign(session, { close: vi.fn().mockResolvedValue(undefined) });
+    Object.assign(client, { serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }) });
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true }, dependencies);
+
+    expect(meter.stop).toHaveBeenCalledOnce();
+    expect(dependencies.close).not.toHaveBeenCalled();
+  });
+
+  it("does not meter a sandbox that was never created", async () => {
+    const { dependencies } = harness();
+    dependencies.createSession.mockRejectedValue(new Error("create failed"));
+
+    await expect(runInFreshAutomationSandbox(input, dependencies)).rejects.toThrow("create failed");
+
+    expect(dependencies.meter).not.toHaveBeenCalled();
   });
 });

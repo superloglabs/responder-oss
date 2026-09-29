@@ -18,6 +18,7 @@ interface AutomationBillingSummary {
   planId: AutomationPlanId;
   plans: Array<{ id: Exclude<AutomationPlanId, "responder_automations_free">; included: number; price: number }>;
   remaining: number;
+  sandboxTimeBilled: boolean;
   scheduledPlanId: AutomationPlanId | null;
   usage: number;
 }
@@ -32,6 +33,9 @@ interface BillingSummary {
   payAsYouGo: boolean;
   remaining: number;
   usage: number;
+  // The organization pays for all work from the usage allowance instead of
+  // investigation credits.
+  usageBased?: boolean;
 }
 
 function billingNotice(): string | null {
@@ -54,21 +58,24 @@ function AutomationBilling({
   onChangePlan,
   redirecting,
   summary,
+  usageBased,
 }: {
   onChangePlan: (planId: AutomationPlanId | "free" | "resume") => void;
   redirecting: boolean;
   summary: AutomationBillingSummary;
+  usageBased: boolean;
 }) {
   const used = Math.min(summary.usage, summary.allowance);
   const percent = summary.allowance > 0 ? Math.min(100, (used / summary.allowance) * 100) : 0;
   const paid = summary.planId !== "responder_automations_free";
+  const usageKind = summary.sandboxTimeBilled ? "usage" : "model usage";
   return (
     <>
-      <h2 className="billingSectionTitle">Automations</h2>
+      <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
       <section className="billingGrid">
         <article className="billingUsageCard">
           <header>
-            <span>Included model usage this month</span>
+            <span>{`Included ${usageKind} this month`}</span>
             <strong>{dollars(summary.usage)}</strong>
           </header>
           <div
@@ -81,21 +88,30 @@ function AutomationBilling({
           >
             <span style={{ width: `${percent}%` }} />
           </div>
-          <p>
-            {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.
-            Resets {resetLabel(summary.nextResetAt)}. Runs that use included
-            usage stop when it runs out. Runs with your own API key or ChatGPT
-            subscription keep working.
-          </p>
+          {summary.sandboxTimeBilled ? (
+            <p>
+              {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.
+              Resets {resetLabel(summary.nextResetAt)}. Covers model usage and
+              sandbox time. When it runs out, runs in progress finish and new
+              runs wait until it resets or the plan is upgraded.
+            </p>
+          ) : (
+            <p>
+              {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.
+              Resets {resetLabel(summary.nextResetAt)}. Runs that use included
+              usage stop when it runs out. Runs with your own API key or ChatGPT
+              subscription keep working.
+            </p>
+          )}
         </article>
 
         <article className="billingPlanCard">
-          <span className="billingPlanCard__eyebrow">Automation plan</span>
+          <span className="billingPlanCard__eyebrow">
+            {usageBased ? "Current plan" : "Automation plan"}
+          </span>
           <h2>{automationPlanName(summary, summary.planId)}</h2>
           <p>
-            {paid
-              ? `Includes ${dollars(summary.allowance)} of model usage each month.`
-              : "Includes $20.00 of model usage each month."}
+            {`Includes ${paid ? dollars(summary.allowance) : "$20.00"} of ${usageKind} each month.`}
             {summary.cancelsAtPeriodEnd ? " Returns to the free plan at the end of this billing period." : ""}
             {summary.scheduledPlanId
               ? ` Changes to ${automationPlanName(summary, summary.scheduledPlanId)} at the end of this billing period.`
@@ -256,7 +272,7 @@ export function BillingPage() {
 
       {!summary && !error ? <BillingSkeleton /> : null}
 
-      {summary ? (
+      {summary && !(summary.enabled && summary.usageBased) ? (
         !summary.enabled ? (
           <section className="billingDisabled">
             <h2>Billing is disabled</h2>
@@ -330,6 +346,7 @@ export function BillingPage() {
           onChangePlan={(planId) => void changeAutomationPlan(planId)}
           redirecting={isRedirecting}
           summary={summary.automations}
+          usageBased={summary.usageBased ?? false}
         />
       ) : null}
     </AppShell>

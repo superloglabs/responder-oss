@@ -36,6 +36,8 @@ import {
   prepareDaytonaPatchSandbox,
 } from "./sandbox.js";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
+import { agentUsageIsBillable, requireUsageAllowance } from "./agent-usage.js";
+import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 
 type CodeChangeRemediation = Extract<
   IssueRemediationSubmission,
@@ -173,6 +175,9 @@ export async function runProposedRemediation(
     repositories,
   );
 
+  const usageBillable = await agentUsageIsBillable(job.config.organizationId);
+  if (usageBillable) await requireUsageAllowance(job.config.organizationId);
+
   if (suggestionJob) {
     await markSuggestionPullRequestStarted(request.requestId);
   } else {
@@ -188,9 +193,17 @@ export async function runProposedRemediation(
     pauseOnExit: false,
   });
   let session: DaytonaSandboxSession | null = null;
+  let meter: SandboxMeter | null = null;
 
   try {
     session = await createDaytonaSandboxSession(client, config, sandboxName);
+    meter = startSandboxMeter({
+      billable: usageBillable,
+      organizationId: job.config.organizationId,
+      snapshot: Boolean(config.sandboxSnapshotName),
+      workload: "remediation",
+      workloadId: job.remediationRequestId,
+    });
     await configureDaytonaSandboxLifecycle(session, config);
     await prepareDaytonaPatchSandbox(session);
     const checkout = selected.base
@@ -270,5 +283,6 @@ export async function runProposedRemediation(
         requestId: job.remediationRequestId,
       });
     }
+    await meter?.stop();
   }
 }
