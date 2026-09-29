@@ -15,8 +15,9 @@ const harnesses = [
 ];
 type Catalog = { status: "loading" } | { status: "error"; error: string } | { status: "ready"; models: AvailableAutomationModel[] };
 function errorMessage(cause: unknown) { return cause instanceof Error ? cause.message : "Unable to load models."; }
-// Models run on included usage billed through Responder, so choosing one needs
-// no connection. Each provider's models open in a submenu beside it.
+// Choosing a model needs no connection: runs use the organization's own key or
+// subscription for the provider when one is connected, and included usage
+// otherwise. Each provider's models open in a submenu beside it.
 export function AutomationModelPicker({ configuration, options, onChange, requestedOpen }: {
   configuration: AutomationConfiguration;
   options: AutomationOptions | null;

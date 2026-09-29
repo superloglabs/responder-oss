@@ -2,7 +2,8 @@ import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/da
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { createAutomationToolHandler } from "./automation-actions.js";
 import { AutomationHarnessError } from "./automation-harness.js";
-import { processAutomationRun } from "./automation-run.js";
+import { processAutomationRun, type AutomationRunDependencies } from "./automation-run.js";
+import { ModelCatalogError } from "@responder/core/automations/model-catalog";
 import type { runCodexAutomation } from "./codex-automation-harness.js";
 
 vi.mock("@responder/core/credentials/encryption", () => ({
@@ -93,6 +94,8 @@ function dependencies() {
       apiKey: "customer-provider-secret",
       provider: "openai",
     }),
+    listProviderModels: vi.fn<AutomationRunDependencies["listProviderModels"]>().mockResolvedValue([{ id: "gpt-5.4", name: "GPT-5.4" }]),
+    selectCredential: vi.fn<AutomationRunDependencies["selectCredential"]>().mockResolvedValue(null),
     getConnections: vi.fn().mockResolvedValue([]),
     getConversation: vi.fn().mockResolvedValue([]),
     getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
@@ -455,7 +458,7 @@ describe("automation run processor", () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
       const deps = dependencies();
-      deps.claimRun.mockResolvedValue({ ...scheduledRun(), inferenceSource: "responder" });
+      deps.claimRun.mockResolvedValue({ ...scheduledRun(), inferenceSource: "responder", modelCredentialId: null });
       deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
 
       await processAutomationRun("job-1", job, process.env, deps);
@@ -727,6 +730,7 @@ describe("automation run processor", () => {
       runId,
     }, process.env, deps);
 
+    expect(deps.selectCredential).toHaveBeenCalledWith({ harness: "codex", organizationId, provider: "openai" });
     expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId);
     expect(deps.getCredential).not.toHaveBeenCalled();
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
@@ -734,6 +738,90 @@ describe("automation run processor", () => {
     }));
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       status: "succeeded",
+    }));
+  });
+
+  it("uses the organization's key instead of Responder inference when one is connected", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({
+      ...claimedRun(),
+      harness: "claude_agent_sdk",
+      inferenceSource: "responder",
+      model: "claude-sonnet-4.5",
+      modelCredentialId: null,
+      modelProvider: "anthropic",
+    } as never);
+    deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
+    deps.getCredential.mockResolvedValue({ apiKey: "customer-anthropic-secret", provider: "anthropic" });
+    deps.listProviderModels.mockResolvedValue([{ id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5" }]);
+    deps.runClaude.mockResolvedValue({ eventStream: "" });
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    expect(deps.getCredential).toHaveBeenCalledWith({ credentialId: "81818181-8181-4181-8181-818181818181", organizationId, provider: "anthropic" });
+    expect(deps.listProviderModels).toHaveBeenCalledWith("anthropic", "customer-anthropic-secret");
+    expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
+      credential: { apiKey: "customer-anthropic-secret", inferenceSource: "byok" },
+      model: "claude-sonnet-4-5-20250929",
+    }));
+    expect(deps.runClaude).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      model: expect.objectContaining({ model: "claude-sonnet-4-5-20250929" }),
+    }));
+  });
+
+  it("uses a connected ChatGPT subscription for a Codex automation", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "responder-run-only", account_id: "account" } });
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "responder", modelCredentialId: null });
+    deps.selectCredential.mockResolvedValue("91919191-9191-4191-8191-919191919191");
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: "91919191-9191-4191-8191-919191919191", authJson } });
+    deps.subscriptionAuth.mockResolvedValue(authJson);
+    deps.runCodex.mockResolvedValue({ eventStream: "" });
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    expect(deps.subscriptionAuth).toHaveBeenCalledWith({ credentialId: "91919191-9191-4191-8191-919191919191", organizationId }, expect.any(Date));
+    expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
+  });
+
+  it("fails instead of using Responder inference when the organization's key cannot run the model", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "responder", modelCredentialId: null });
+    deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
+    deps.listProviderModels.mockResolvedValue([{ id: "gpt-4.1", name: "GPT-4.1" }]);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    expect(deps.createGrant).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureMessage: "gpt-5.4 is not available with the organization's OpenAI API key. Choose another model or remove the key in model settings.",
+      status: "failed",
+    }));
+  });
+
+  it("fails when the provider rejects the organization's key", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "responder", modelCredentialId: null });
+    deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
+    deps.listProviderModels.mockRejectedValue(new ModelCatalogError(true));
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.createGrant).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureMessage: "OpenAI rejected the organization's API key. Replace it in model settings.",
+      status: "failed",
     }));
   });
 

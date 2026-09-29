@@ -144,6 +144,42 @@ export async function getOrganizationModelCredential(input: {
   return { apiKey: decrypted.apiKey, provider: credential.provider };
 }
 
+// An automation uses the organization's own model access whenever it has some
+// for the provider: a ChatGPT subscription for Codex, otherwise the newest
+// active API key. Without either, Responder funds inference.
+export function chooseOrganizationModelCredential(
+  credentials: { id: string; authType: "api_key" | "chatgpt_subscription"; createdAt: Date }[],
+  harness: string,
+): string | null {
+  const newest = [...credentials].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const subscription = harness === "codex"
+    ? newest.find((item) => item.authType === "chatgpt_subscription")
+    : undefined;
+  return (subscription ?? newest.find((item) => item.authType === "api_key"))?.id ?? null;
+}
+
+export async function selectOrganizationModelCredential(input: {
+  harness: string;
+  organizationId: string;
+  provider: AutomationModelProvider;
+}): Promise<string | null> {
+  const rows = await getDatabase()
+    .select({
+      authType: organizationModelCredentials.authType,
+      createdAt: organizationModelCredentials.createdAt,
+      id: organizationModelCredentials.id,
+    })
+    .from(organizationModelCredentials)
+    .where(
+      and(
+        eq(organizationModelCredentials.organizationId, input.organizationId),
+        eq(organizationModelCredentials.provider, input.provider),
+        eq(organizationModelCredentials.status, "active"),
+      ),
+    );
+  return chooseOrganizationModelCredential(rows, input.harness);
+}
+
 export async function getOrganizationModelCredentialForValidation(input: {
   credentialId: string;
   organizationId: string;

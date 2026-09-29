@@ -24,7 +24,9 @@ import {
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkAutomationInferenceAllowance } from "@responder/core/billing/autumn";
-import { getOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
+import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
+import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
+import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
 import { getAutomationRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
@@ -79,7 +81,7 @@ import {
 
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
-interface AutomationRunDependencies {
+export interface AutomationRunDependencies {
   checkAllowance: typeof checkAutomationInferenceAllowance;
   appendEvent: typeof appendAutomationRunEvent;
   cancellationRequested: typeof automationRunCancellationRequested;
@@ -88,6 +90,8 @@ interface AutomationRunDependencies {
   createGrant: typeof createAutomationModelBrokerGrant;
   createToolHandler: typeof createAutomationToolHandler;
   getCredential: typeof getOrganizationModelCredential;
+  listProviderModels: typeof listProviderModels;
+  selectCredential: typeof selectOrganizationModelCredential;
   getConnections: typeof getAutomationRuntimeConnections;
   getConversation: typeof listAutomationRunConversation;
   getNotificationChannelNames: typeof getAutomationNotificationChannelNames;
@@ -123,6 +127,8 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   createGrant: createAutomationModelBrokerGrant,
   createToolHandler: createAutomationToolHandler,
   getCredential: getOrganizationModelCredential,
+  listProviderModels,
+  selectCredential: selectOrganizationModelCredential,
   getConnections: getAutomationRuntimeConnections,
   getConversation: listAutomationRunConversation,
   getNotificationChannelNames: getAutomationNotificationChannelNames,
@@ -390,6 +396,31 @@ async function recordEvent(
   });
 }
 
+// Editor models may use AI Gateway names. An organization key runs the
+// provider's own ID for the same model, and never falls back to Responder.
+async function providerModelForKey(
+  dependencies: AutomationRunDependencies,
+  run: { model: string; modelProvider: ModelProviderId },
+  apiKey: string,
+): Promise<string> {
+  const providerName = modelProvider(run.modelProvider).name;
+  let available;
+  try {
+    available = await dependencies.listProviderModels(run.modelProvider, apiKey);
+  } catch (error) {
+    if (error instanceof ModelCatalogError && error.authenticationFailed) {
+      throw new Error(`${providerName} rejected the organization's API key. Replace it in model settings.`);
+    }
+    // The provider still decides at request time.
+    return run.model;
+  }
+  const model = matchProviderModel(run.model, available);
+  if (!model) {
+    throw new Error(`${run.model} is not available with the organization's ${providerName} API key. Choose another model or remove the key in model settings.`);
+  }
+  return model;
+}
+
 export async function processAutomationRun(
   jobId: string,
   payload: AutomationRunJob,
@@ -401,7 +432,6 @@ export async function processAutomationRun(
 
   await recordEvent(dependencies, run.runId, "run_started", {
     harness: run.harness,
-    inferenceSource: run.inferenceSource,
     model: run.model,
     provider: run.modelProvider,
   });
@@ -478,18 +508,23 @@ export async function processAutomationRun(
 
     let grantCredential: AutomationModelBrokerGrantCredential;
     let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
-    if (run.inferenceSource === "responder") {
+    let model = run.model;
+    // A credential pinned on the version wins. Otherwise the organization's
+    // own access for the provider replaces Responder-funded inference.
+    const credentialId = run.modelCredentialId ?? await dependencies.selectCredential({
+      harness: run.harness,
+      organizationId: run.organizationId,
+      provider: run.modelProvider,
+    });
+    if (!credentialId) {
       // Responder-funded runs stop here, before a sandbox starts, when the
       // organization's allowance is used up.
       const access = await dependencies.checkAllowance(run.organizationId);
       if (!access.allowed) throw new AutomationAllowanceExhaustedError();
       grantCredential = { inferenceSource: "responder" };
     } else {
-      if (!run.modelCredentialId) {
-        throw new Error("The configured model credential is unavailable");
-      }
       const credential = await dependencies.getCredential({
-        credentialId: run.modelCredentialId,
+        credentialId,
         organizationId: run.organizationId,
         provider: run.modelProvider,
       });
@@ -499,10 +534,11 @@ export async function processAutomationRun(
       if (credential.subscription) {
         // Leaves time for sandbox setup before the runtime limit starts to matter.
         const validUntil = new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 1_800) * 1_000);
-        const authJson = await dependencies.subscriptionAuth({ credentialId: run.modelCredentialId, organizationId: run.organizationId }, validUntil);
+        const authJson = await dependencies.subscriptionAuth({ credentialId, organizationId: run.organizationId }, validUntil);
         nativeSubscription = { authJson };
         grantCredential = { inferenceSource: "byos" };
       } else {
+        model = await providerModelForKey(dependencies, run, credential.apiKey);
         grantCredential = { apiKey: credential.apiKey, inferenceSource: "byok" };
       }
     }
@@ -513,7 +549,7 @@ export async function processAutomationRun(
       ),
       maxOutputTokensPerRequest: run.maxOutputTokensPerRequest,
       maxRequests: run.maxModelRequests,
-      model: run.model,
+      model,
       leaseId: run.leaseId,
       organizationId: run.organizationId,
       provider: run.modelProvider,
@@ -636,7 +672,7 @@ export async function processAutomationRun(
                 model: {
                   brokerBaseUrl: automationBrokerBaseUrl(environment),
                   maxOutputTokensPerRequest: run.maxOutputTokensPerRequest,
-                  model: run.model,
+                  model,
                   provider: run.modelProvider,
                   ...(nativeSubscription ? { subscription: nativeSubscription } : {}),
                 },

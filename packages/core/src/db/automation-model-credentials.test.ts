@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
   acquireSubscriptionCredential,
+  chooseOrganizationModelCredential,
+  selectOrganizationModelCredential,
   persistSubscriptionCredential,
   releaseSubscriptionCredential,
   SubscriptionCredentialUnavailableError,
@@ -120,4 +122,23 @@ it("rolls back the lease claim when the stored credential is invalid", async () 
   await expect(acquireSubscriptionCredential({ ...owner, expiresAt: new Date() })).rejects.toThrow();
   expect(transaction).toHaveBeenCalledOnce();
   expect(committed).toBe(false);
+});
+
+it("prefers a ChatGPT subscription for Codex and otherwise the newest API key", () => {
+  const older = { id: "older-key", authType: "api_key" as const, createdAt: new Date("2026-09-01") };
+  const newer = { id: "newer-key", authType: "api_key" as const, createdAt: new Date("2026-09-20") };
+  const subscription = { id: "subscription", authType: "chatgpt_subscription" as const, createdAt: new Date("2026-08-01") };
+  expect(chooseOrganizationModelCredential([older, subscription, newer], "codex")).toBe("subscription");
+  expect(chooseOrganizationModelCredential([older, subscription, newer], "opencode")).toBe("newer-key");
+  expect(chooseOrganizationModelCredential([subscription], "opencode")).toBeNull();
+  expect(chooseOrganizationModelCredential([], "codex")).toBeNull();
+});
+
+it("selects among the organization's active credentials for the provider", async () => {
+  const where = vi.fn().mockResolvedValue([
+    { id: "key", authType: "api_key", createdAt: new Date() },
+  ]);
+  vi.mocked(getDatabase).mockReturnValue({ select: () => ({ from: () => ({ where }) }) } as never);
+  await expect(selectOrganizationModelCredential({ harness: "claude_agent_sdk", organizationId: "organization", provider: "anthropic" })).resolves.toBe("key");
+  expect(new PgDialect().sqlToQuery(where.mock.calls[0][0]).params).toEqual(["organization", "anthropic", "active"]);
 });

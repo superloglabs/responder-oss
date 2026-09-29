@@ -122,10 +122,10 @@ export function ModelAccessSettingsPage() {
 
       <section className="workspaceSettings">
         <p className="memberAccessNote">
-          Automations use included usage by default, billed against your
-          monthly allowance. Runs that use your own API key or ChatGPT
-          subscription do not use the allowance. Choose the connection for
-          each automation in its model picker.
+          When you connect an API key, every automation that uses that
+          provider runs on your key. With several keys for one provider, the
+          newest is used. Automations without a key for their provider use
+          included usage, billed against your monthly allowance.
         </p>
 
         {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
@@ -215,8 +215,9 @@ export function ModelAccessSettingsPage() {
             <span>{subscriptions.length}</span>
           </div>
           <p className="memberAccessNote">
-            Runs with the Codex harness can use a ChatGPT plan instead of an
-            API key. Usage counts against that plan&apos;s Codex limits.
+            When connected, automations with the Codex harness run on this
+            ChatGPT plan, ahead of any OpenAI API key. Usage counts against
+            that plan&apos;s Codex limits.
           </p>
           {subscriptions.length > 0 ? (
             <div className="memberList">

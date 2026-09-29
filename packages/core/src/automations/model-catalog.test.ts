@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { listProviderModels, normalizeProviderModels } from "./model-catalog.js";
+import { listProviderModels, matchProviderModel, normalizeProviderModels } from "./model-catalog.js";
 import { automationModelProviders } from "./model-providers.js";
 
 describe("live provider model catalogs", () => {
@@ -25,5 +25,28 @@ describe("live provider model catalogs", () => {
   it("does not expose provider error bodies or credentials", async () => {
     const request = vi.fn().mockResolvedValue(new Response('private-key secret', { status: 401 }));
     await expect(listProviderModels("deepseek", "private-key", request)).rejects.toThrow(/^The provider rejected this API key\. Reconnect with a valid key\.$/);
+  });
+});
+
+describe("matchProviderModel", () => {
+  const models = (...ids: string[]) => ids.map(id => ({ id, name: id }));
+
+  it("keeps IDs the provider lists", () => {
+    expect(matchProviderModel("gpt-5.4", models("gpt-5.4", "gpt-5.4-mini"))).toBe("gpt-5.4");
+  });
+
+  it("maps gateway slugs to the provider's snapshot IDs", () => {
+    expect(matchProviderModel("claude-sonnet-4.5", models("claude-sonnet-4-5-20250929", "claude-opus-4-5-20251101"))).toBe("claude-sonnet-4-5-20250929");
+    expect(matchProviderModel("claude-opus-4.5", models("claude-opus-4-5-20251001", "claude-opus-4-5-20251101"))).toBe("claude-opus-4-5-20251101");
+    expect(matchProviderModel("grok-4.1-fast-reasoning", models("grok-4-1-fast-reasoning"))).toBe("grok-4-1-fast-reasoning");
+  });
+
+  it("prefers an undated alias", () => {
+    expect(matchProviderModel("claude-opus-5.5", models("claude-opus-5-5", "claude-opus-5-5-20260801"))).toBe("claude-opus-5-5");
+  });
+
+  it("returns null when the key cannot run the model", () => {
+    expect(matchProviderModel("mistral-large-3", models("mistral-large-latest", "mistral-small-latest"))).toBeNull();
+    expect(matchProviderModel("gpt-4.1-fast", models("gpt-4.1"))).toBeNull();
   });
 });
