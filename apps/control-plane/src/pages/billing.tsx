@@ -11,6 +11,8 @@ type AutomationPlanId =
 
 interface AutomationBillingSummary {
   allowance: number;
+  // Charged this period, in dollars. Null when it could not be loaded.
+  breakdown?: { inference: number; sandbox: number } | null;
   cancelsAtPeriodEnd: boolean;
   configured: boolean;
   enabled: boolean;
@@ -54,6 +56,18 @@ function automationPlanName(summary: AutomationBillingSummary, planId: Automatio
   return plan ? `$${plan.price} / month` : "Free";
 }
 
+// Splits the used share of the bar between model usage and sandbox time in
+// proportion to what each was charged.
+function usageSegments(
+  breakdown: { inference: number; sandbox: number },
+  percent: number,
+): { inference: number; sandbox: number } | null {
+  const total = breakdown.inference + breakdown.sandbox;
+  if (total <= 0) return null;
+  const inference = (breakdown.inference / total) * percent;
+  return { inference, sandbox: percent - inference };
+}
+
 function AutomationBilling({
   onChangePlan,
   redirecting,
@@ -69,6 +83,8 @@ function AutomationBilling({
   const percent = summary.allowance > 0 ? Math.min(100, (used / summary.allowance) * 100) : 0;
   const paid = summary.planId !== "responder_automations_free";
   const usageKind = summary.sandboxTimeBilled ? "usage" : "model usage";
+  const breakdown = summary.sandboxTimeBilled ? summary.breakdown ?? null : null;
+  const segments = breakdown ? usageSegments(breakdown, percent) : null;
   return (
     <>
       <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
@@ -86,8 +102,39 @@ function AutomationBilling({
             aria-valuemin={0}
             aria-valuenow={used}
           >
-            <span style={{ width: `${percent}%` }} />
+            {segments ? (
+              <>
+                <span
+                  className="billingProgress__segment billingProgress__segment--inference"
+                  style={{ width: `${segments.inference}%` }}
+                />
+                <span
+                  className="billingProgress__segment billingProgress__segment--sandbox"
+                  style={{ width: `${segments.sandbox}%` }}
+                />
+              </>
+            ) : (
+              <span style={{ width: `${percent}%` }} />
+            )}
           </div>
+          {breakdown ? (
+            <dl className="billingBreakdown">
+              <div>
+                <dt>
+                  <span aria-hidden="true" className="billingBreakdown__swatch billingBreakdown__swatch--inference" />
+                  AI inference
+                </dt>
+                <dd>{dollars(breakdown.inference)}</dd>
+              </div>
+              <div>
+                <dt>
+                  <span aria-hidden="true" className="billingBreakdown__swatch billingBreakdown__swatch--sandbox" />
+                  Sandbox compute
+                </dt>
+                <dd>{dollars(breakdown.sandbox)}</dd>
+              </div>
+            </dl>
+          ) : null}
           {summary.sandboxTimeBilled ? (
             <p>
               {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.

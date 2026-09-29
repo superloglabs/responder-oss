@@ -19,6 +19,7 @@ function billing(overrides: { remaining?: number; usageBased: boolean }) {
   return {
     automations: {
       allowance: 20,
+      breakdown: { inference: 5.25, sandbox: 2.25 },
       cancelsAtPeriodEnd: false,
       configured: true,
       enabled: true,
@@ -102,6 +103,26 @@ test("shows only the usage allowance to a usage-billed workspace", async ({ page
   await expect(page.getByText("Monthly investigations")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Enable pay as you go" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Switch to $100 / month" })).toBeVisible();
+});
+
+test("splits used allowance into inference and sandbox compute", async ({ page }) => {
+  await mockWorkspace(page, billing({ usageBased: true }));
+  await page.goto("/settings/billing");
+
+  const breakdown = page.locator(".billingBreakdown");
+  await expect(breakdown.getByText("AI inference")).toBeVisible();
+  await expect(breakdown.getByText("$5.25")).toBeVisible();
+  await expect(breakdown.getByText("Sandbox compute")).toBeVisible();
+  await expect(breakdown.getByText("$2.25")).toBeVisible();
+  // $7.50 of $20 is 37.5% of the bar, split 70/30.
+  const inference = await page.locator(".billingProgress__segment--inference").evaluate(
+    (element) => (element as HTMLElement).style.width,
+  );
+  const sandbox = await page.locator(".billingProgress__segment--sandbox").evaluate(
+    (element) => (element as HTMLElement).style.width,
+  );
+  expect(Number.parseFloat(inference)).toBeCloseTo(26.25);
+  expect(Number.parseFloat(sandbox)).toBeCloseTo(11.25);
 });
 
 test("keeps investigation credits for other workspaces", async ({ page }) => {

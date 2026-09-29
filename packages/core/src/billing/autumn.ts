@@ -321,6 +321,8 @@ export interface AutomationBillingSummary {
   configured: boolean;
   enabled: boolean;
   nextResetAt: number | null;
+  // Start of the current billing period, when Autumn reports one.
+  periodStart: number | null;
   planId: AutomationPlanId;
   plans: Array<{ id: AutomationPaidPlanId; included: number; price: number }>;
   remaining: number;
@@ -336,6 +338,7 @@ export interface AutomationInferenceAccess {
 function automationPlanFromCustomer(customer: Customer): {
   active: AutomationPlanId | null;
   cancelsAtPeriodEnd: boolean;
+  periodStart: number | null;
   scheduled: AutomationPlanId | null;
 } {
   const find = (status: "active" | "scheduled") =>
@@ -348,6 +351,7 @@ function automationPlanFromCustomer(customer: Customer): {
   return {
     active: (active?.planId as AutomationPlanId | undefined) ?? null,
     cancelsAtPeriodEnd: active?.canceledAt != null,
+    periodStart: active?.currentPeriodStart ?? null,
     scheduled: (find("scheduled")?.planId as AutomationPlanId | undefined) ?? null,
   };
 }
@@ -385,6 +389,7 @@ function disabledAutomationSummary(configured: boolean, enabled: boolean): Autom
     configured,
     enabled,
     nextResetAt: null,
+    periodStart: null,
     planId: AUTOMATION_FREE_PLAN_ID,
     plans: AUTOMATION_PAID_PLANS.map((plan) => ({ ...plan })),
     remaining: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
@@ -408,6 +413,7 @@ export function summarizeAutomationBillingCustomer(
     configured: true,
     enabled: true,
     nextResetAt: balance?.nextResetAt ?? null,
+    periodStart: plan.periodStart,
     planId,
     plans: AUTOMATION_PAID_PLANS.map((candidate) => ({ ...candidate })),
     remaining: Math.max(0, balance?.remaining ?? allowance),

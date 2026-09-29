@@ -260,3 +260,19 @@ export async function settleUnbilledUsage(
     staleSandboxes,
   };
 }
+
+// The start of the usage period a summary describes. Free plans may have no
+// billing period, so the period is taken to be the month before the next
+// reset, or the calendar month when there is no reset date.
+export function usagePeriodStart(
+  summary: { nextResetAt: number | null; periodStart: number | null },
+  now = new Date(),
+): Date {
+  if (summary.periodStart !== null) return new Date(summary.periodStart);
+  if (summary.nextResetAt !== null) {
+    const start = new Date(summary.nextResetAt);
+    start.setUTCMonth(start.getUTCMonth() - 1);
+    return start;
+  }
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}

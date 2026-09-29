@@ -743,6 +743,58 @@ body:has(.appShell--investigation) {
   background: var(--ds-text-primary);
 }
 
+.appShell--settings .billingProgress:has(.billingProgress__segment) {
+  display: flex;
+}
+
+.appShell--settings .billingProgress .billingProgress__segment {
+  border-radius: 0;
+}
+
+.appShell--settings .billingProgress .billingProgress__segment--inference,
+.appShell--settings .billingBreakdown__swatch--inference {
+  background: var(--ds-text-primary);
+}
+
+.appShell--settings .billingProgress .billingProgress__segment--sandbox,
+.appShell--settings .billingBreakdown__swatch--sandbox {
+  background: var(--ds-info);
+}
+
+.appShell--settings .billingBreakdown {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.appShell--settings .billingBreakdown div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.appShell--settings .billingBreakdown dt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ds-text-secondary);
+}
+
+.appShell--settings .billingBreakdown dd {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.appShell--settings .billingBreakdown__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
 .appShell--settings .billingUsageCard p,
 .appShell--settings .billingPlanCard p {
   color: var(--ds-text-muted);

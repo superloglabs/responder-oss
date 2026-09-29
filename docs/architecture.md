@@ -130,6 +130,8 @@ spending investigation credits.
 - Work checks the allowance before it starts. Work already running finishes and
   is charged even if it goes past the allowance. Operator replays are not
   charged.
+- The billing page splits the period's charges into model usage and sandbox
+  time from these rows. Autumn's balance remains the total.
 - Usage rows are reported with their row ID as the idempotency key. Rows that
   fail are retried for up to a day.
 

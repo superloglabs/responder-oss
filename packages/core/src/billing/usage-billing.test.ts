@@ -9,6 +9,7 @@ import {
   settleAgentModelUsage,
   settleSandboxUsage,
   settleUnbilledUsage,
+  usagePeriodStart,
 } from "./usage-billing.js";
 
 // An edition that prices sandbox time and adds half to model costs.
@@ -255,5 +256,19 @@ describe("usage billing", () => {
 
     await expect(settleUnbilledUsage(deps)).resolves.toMatchObject({ failed: 0, settled: 2 });
     expect(deps.settleAgentUsage).not.toHaveBeenCalled();
+  });
+
+  it("finds the start of the usage period", () => {
+    const now = new Date("2026-09-29T12:00:00.000Z");
+    expect(usagePeriodStart({
+      nextResetAt: Date.parse("2026-10-14T00:00:00.000Z"),
+      periodStart: Date.parse("2026-09-14T00:00:00.000Z"),
+    }, now)).toEqual(new Date("2026-09-14T00:00:00.000Z"));
+    expect(usagePeriodStart({
+      nextResetAt: Date.parse("2026-10-03T00:00:00.000Z"),
+      periodStart: null,
+    }, now)).toEqual(new Date("2026-09-03T00:00:00.000Z"));
+    expect(usagePeriodStart({ nextResetAt: null, periodStart: null }, now))
+      .toEqual(new Date("2026-09-01T00:00:00.000Z"));
   });
 });

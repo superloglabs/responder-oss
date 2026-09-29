@@ -8,7 +8,11 @@ import {
   getBillingSummary,
   isAutomationPaidPlanId,
 } from "../../../../packages/core/src/billing/autumn.js";
-import { organizationUsesUsageBilling } from "../../../../packages/core/src/billing/usage-billing.js";
+import {
+  organizationUsesUsageBilling,
+  usagePeriodStart,
+} from "../../../../packages/core/src/billing/usage-billing.js";
+import { getUsageBreakdown } from "../../../../packages/core/src/db/usage-breakdown.js";
 import { sandboxTimeIsBilled } from "../../../../packages/core/src/billing/usage-charges.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
@@ -52,10 +56,22 @@ export const billingRoutes = new Hono()
               })
             : null,
       ]);
+      // The page still shows the allowance if the breakdown cannot load.
+      const breakdown = automations
+        ? await getUsageBreakdown(tenant.organizationId, usagePeriodStart(automations))
+          .catch((error: unknown) => {
+            console.error("Unable to load usage breakdown", error);
+            return null;
+          })
+        : null;
       return context.json({
         ...summary,
         automations: automations && {
           ...automations,
+          breakdown: breakdown && {
+            inference: breakdown.inferenceMicros / 1_000_000,
+            sandbox: breakdown.sandboxMicros / 1_000_000,
+          },
           sandboxTimeBilled: sandboxTimeIsBilled(),
         },
         usageBased,
