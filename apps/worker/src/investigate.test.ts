@@ -28,7 +28,7 @@ describe("sandbox agent configuration", () => {
             accountId: "account-1",
           },
         ],
-        error: new Error("Connection refused"),
+        error: "Connection refused",
         investigationId: "investigation-123",
         serverName: "custom-mcp-account-1",
       }),
@@ -41,90 +41,90 @@ describe("sandbox agent configuration", () => {
     });
   });
 
-  it("identifies Upstash connection failures without exposing provider errors", () => {
+  it("identifies Upstash connection failures", () => {
     expect(
       contextServerConnectFailureEvent({
         customMcpConnections: [],
-        error: new Error("request failed with developer-api-key"),
+        error: "HTTP 503: Service Unavailable",
         investigationId: "investigation-123",
         serverName: "upstash-account-1",
         upstashConnection: { accountId: "account-1" },
       }),
     ).toEqual({
       accountId: "account-1",
-      error: "Unable to connect to Upstash context",
+      error: "HTTP 503: Service Unavailable",
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "upstash-account-1",
     });
   });
 
-  it("identifies AWS connection failures without exposing provider errors", () => {
+  it("identifies AWS connection failures", () => {
     expect(
       contextServerConnectFailureEvent({
         awsConnections: [{ accountId: "account-aws" }],
         customMcpConnections: [],
-        error: new Error("request failed with temporary credentials"),
+        error: "HTTP 503: Service Unavailable",
         investigationId: "investigation-123",
         serverName: "aws-account-aws",
       }),
     ).toEqual({
       accountId: "account-aws",
-      error: "Unable to connect to AWS context",
+      error: "HTTP 503: Service Unavailable",
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "aws-account-aws",
     });
   });
 
-  it("identifies GCP connection failures without exposing federated credentials", () => {
+  it("identifies GCP connection failures", () => {
     expect(
       contextServerConnectFailureEvent({
         customMcpConnections: [],
-        error: new Error("request failed with federated access token"),
+        error: "HTTP 503: Service Unavailable",
         gcpConnections: [{ accountId: "account-gcp" }],
         investigationId: "investigation-123",
         serverName: "gcp-account-gcp-logging",
       }),
     ).toEqual({
       accountId: "account-gcp",
-      error: "Unable to connect to GCP context",
+      error: "HTTP 503: Service Unavailable",
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "gcp-account-gcp-logging",
     });
   });
 
-  it("identifies Langfuse connection failures without exposing project keys", () => {
+  it("identifies Langfuse connection failures", () => {
     expect(
       contextServerConnectFailureEvent({
         customMcpConnections: [],
-        error: new Error("request failed with sk-lf-secret"),
+        error: "HTTP 503: Service Unavailable",
         investigationId: "investigation-123",
         langfuseConnections: [{ accountId: "account-langfuse" }],
         serverName: "langfuse-account-langfuse",
       }),
     ).toEqual({
       accountId: "account-langfuse",
-      error: "Unable to connect to Langfuse context",
+      error: "HTTP 503: Service Unavailable",
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "langfuse-account-langfuse",
     });
   });
 
-  it("identifies Supabase connection failures without exposing OAuth details", () => {
+  it("identifies Supabase connection failures", () => {
     expect(
       contextServerConnectFailureEvent({
         customMcpConnections: [],
-        error: new Error("request failed with bearer-token"),
+        error: "HTTP 503: Service Unavailable",
         investigationId: "investigation-123",
         serverName: "supabase-account-supabase",
         supabaseConnections: [{ accountId: "account-supabase" }],
       }),
     ).toEqual({
       accountId: "account-supabase",
-      error: "Unable to connect to Supabase context",
+      error: "HTTP 503: Service Unavailable",
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "supabase-account-supabase",
@@ -161,6 +161,16 @@ describe("sandbox agent configuration", () => {
     expect(
       safeInvestigationError(new Error("request used dtn_secret_1234-abcd"), {}),
     ).toBe("request used [secret placeholder redacted]");
+  });
+
+  it("removes connection secrets that cross the length limit", () => {
+    const secret = "connection-access-token-value";
+    const message = `${"x".repeat(1_990)}${secret}`;
+
+    const saved = safeInvestigationError(new Error(message), {}, [secret]);
+
+    expect(saved).not.toContain(secret.slice(0, 10));
+    expect(saved.endsWith("[redacted]")).toBe(true);
   });
 
   it("gives investigations and replays the same sandbox capabilities", () => {
@@ -330,18 +340,18 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("No observability data source is connected");
   });
 
-  it("identifies Grafana connection failures without exposing provider errors", () => {
+  it("identifies Grafana connection failures", () => {
     expect(
       contextServerConnectFailureEvent({
         customMcpConnections: [],
-        error: new Error("spawn failed with glsa_token"),
+        error: "HTTP 503: Service Unavailable",
         grafanaConnections: [{ accountId: "account-1" }],
         investigationId: "investigation-123",
         serverName: "grafana-account-1",
       }),
     ).toEqual({
       accountId: "account-1",
-      error: "Unable to connect to Grafana context",
+      error: "HTTP 503: Service Unavailable",
       event: "context_server_connect_failed",
       investigationId: "investigation-123",
       server: "grafana-account-1",

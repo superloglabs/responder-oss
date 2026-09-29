@@ -56,6 +56,7 @@ import { createDash0McpServer } from "./dash0.js";
 import { createPostHogMcpServer } from "./posthog.js";
 import { createGrafanaMcpServer } from "./grafana.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
+import { RecoverableMcpServer } from "./recoverable-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
@@ -93,7 +94,9 @@ import {
   createUpstashMcpServer,
 } from "./upstash.js";
 import {
+  connectionSecrets,
   redactDaytonaSecretPlaceholders,
+  redactSecrets,
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
@@ -111,6 +114,7 @@ export interface SandboxAgentConfig extends DaytonaClientConfig {
 export function safeInvestigationError(
   error: unknown,
   environment: NodeJS.ProcessEnv = process.env,
+  secrets: readonly string[] = [],
 ): string {
   let message =
     error instanceof Error
@@ -126,7 +130,9 @@ export function safeInvestigationError(
     const value = environment[name];
     if (value) message = message.replaceAll(value, "[redacted]");
   }
-  return redactDaytonaSecretPlaceholders(message).slice(0, 2_000);
+  // Redact before truncating so a secret cut at the limit cannot leak a prefix.
+  return redactDaytonaSecretPlaceholders(redactSecrets(message, secrets))
+    .slice(0, 2_000);
 }
 
 export function investigationTraceWriteFailure(
@@ -186,26 +192,12 @@ export function contextServerConnectFailureEvent(input: {
   grafanaConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   supabaseConnections?: ReadonlyArray<{ accountId: string }>;
-  error: unknown;
+  /** Already redacted with {@link redactSecrets}. */
+  error: string;
   investigationId: string;
   serverName: string;
   upstashConnection?: { accountId: string } | null;
 }) {
-  const protectedProvider = input.serverName.startsWith("aws-")
-    ? "AWS"
-    : input.serverName.startsWith("gcp-")
-      ? "GCP"
-      : input.serverName.startsWith("dash0-")
-        ? "Dash0"
-        : input.serverName.startsWith("grafana-")
-          ? "Grafana"
-        : input.serverName.startsWith("langfuse-")
-          ? "Langfuse"
-          : input.serverName.startsWith("supabase-")
-            ? "Supabase"
-          : input.serverName.startsWith("upstash-")
-            ? "Upstash"
-            : null;
   const accountId = input.serverName.startsWith("upstash-")
     ? input.upstashConnection?.accountId
     : input.serverName.startsWith("aws-")
@@ -247,11 +239,7 @@ export function contextServerConnectFailureEvent(input: {
               )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
-    error: protectedProvider
-      ? `Unable to connect to ${protectedProvider} context`
-      : input.error instanceof Error
-        ? input.error.message
-        : String(input.error),
+    error: input.error,
     event: "context_server_connect_failed",
     investigationId: input.investigationId,
     server: input.serverName,
@@ -777,6 +765,42 @@ export async function runInvestigationAgent(
       )
     : supabaseConnections;
   const supabaseServers = effectiveSupabaseConnections.map(createSupabaseMcpServer);
+  const secrets = connectionSecrets([
+    ...awsConnections,
+    axiomConnection,
+    datadogConnection,
+    ...dash0Connections,
+    ...postHogConnections,
+    ...grafanaConnections,
+    sentryConnection,
+    ...customMcpConnections,
+    clickStackConnection,
+    linearConnection,
+    ...vercelConnections,
+    slackConnection,
+    upstashConnection,
+    ...langfuseConnections,
+    ...supabaseConnections,
+  ]);
+  // Provider errors reach both the agent and the logs in full, minus the
+  // credentials this investigation holds.
+  const describeConnectError = (error: unknown) =>
+    safeInvestigationError(error, environment, secrets);
+  const connectFailureEvent = (serverName: string, error: unknown) =>
+    contextServerConnectFailureEvent({
+      awsConnections,
+      gcpConnections,
+      customMcpConnections,
+      dash0Connections,
+      postHogConnections,
+      grafanaConnections,
+      error: describeConnectError(error),
+      investigationId: job.investigationId,
+      langfuseConnections,
+      serverName,
+      supabaseConnections,
+      upstashConnection,
+    });
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -793,9 +817,11 @@ export async function runInvestigationAgent(
     ...awsServers,
     ...gcpServers,
     ...customMcpServers,
-  ].filter(
-    (server): server is NonNullable<typeof server> => server !== null,
-  );
+  ]
+    .filter((server): server is NonNullable<typeof server> => server !== null)
+    // A provider outage should not stop the investigation. The agent sees the
+    // error and decides whether to reconnect.
+    .map((server) => new RecoverableMcpServer(server, describeConnectError));
 
   const sandboxName = `responder-investigation-${job.investigationId}`;
   const client = new DaytonaSandboxClient({
@@ -813,51 +839,18 @@ export async function runInvestigationAgent(
           await connectContextServer(server);
         } catch (error) {
           console.error(
-            JSON.stringify(
-              contextServerConnectFailureEvent({
-                awsConnections,
-                gcpConnections,
-                customMcpConnections,
-                dash0Connections,
-                postHogConnections,
-                grafanaConnections,
-                error,
-                investigationId: job.investigationId,
-                langfuseConnections,
-                serverName: server.name,
-                supabaseConnections,
-                upstashConnection,
-              }),
-            ),
+            JSON.stringify(connectFailureEvent(server.name, error)),
           );
-          if (server.name.startsWith("upstash-")) {
-            throw new Error("Unable to connect to Upstash context");
-          }
-          if (server.name.startsWith("aws-")) {
-            throw new Error("Unable to connect to AWS context");
-          }
-          if (server.name.startsWith("gcp-")) {
-            throw new Error("Unable to connect to GCP context");
-          }
-          if (server.name.startsWith("dash0-")) {
-            throw new Error("Unable to connect to Dash0 context");
-          }
-          if (server.name.startsWith("grafana-")) {
-            throw new Error("Unable to connect to Grafana context");
-          }
-          if (server.name.startsWith("langfuse-")) {
-            throw new Error("Unable to connect to Langfuse context");
-          }
-          if (server.name.startsWith("supabase-")) {
-            throw new Error("Unable to connect to Supabase context");
-          }
-          throw error;
+          server.markUnavailable(error);
         }
       }),
     );
     let awsSkillContext = "";
-    if (awsAlarmTriggered && awsServers[0]) {
-      const loadedSkills = await loadAwsAlarmSkillContext(awsServers[0]);
+    const awsSkillServer = contextServers.find(
+      (server) => server.available && server.name === awsServers[0]?.name,
+    );
+    if (awsAlarmTriggered && awsSkillServer) {
+      const loadedSkills = await loadAwsAlarmSkillContext(awsSkillServer);
       awsSkillContext = loadedSkills.content;
       for (const failure of loadedSkills.failures) {
         console.error(
