@@ -56,6 +56,7 @@ import { createDash0McpServer } from "./dash0.js";
 import { createPostHogMcpServer } from "./posthog.js";
 import { createGrafanaMcpServer } from "./grafana.js";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
+import { RecoverableMcpServer } from "./recoverable-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
 import { createSearchExistingIssuesTool } from "./issue-search.js";
@@ -402,7 +403,6 @@ export function investigationInstructions(input: {
   sentryConnected: boolean;
   sentryUnavailable?: boolean;
   linearConnected?: boolean;
-  linearUnavailable?: boolean;
   langfuseProjectNames?: string[];
   supabaseConnections?: Array<{
     accessMode: "logs" | "read_only" | "read_write";
@@ -518,9 +518,6 @@ export function investigationInstructions(input: {
       : null,
     input.linearConnected
       ? prompt("linear")
-      : null,
-    input.linearUnavailable
-      ? prompt("linearUnavailable")
       : null,
     vercelAccountIds.length > 0
       ? prompt("vercel", { value1: vercelAccountIds.join(", ") })
@@ -643,7 +640,6 @@ export async function runInvestigationAgent(
   const investigationInput = toInvestigationInput(job.request);
   const scanMode = investigationInput.provider === "scan";
   let sentryConnectionDegraded = false;
-  let linearUnavailable = false;
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
     investigationInput.attributes?.slackAlertProvider === "aws";
@@ -755,7 +751,11 @@ export async function runInvestigationAgent(
     ? createClickStackMcpServer(clickStackConnection)
     : null;
   const linearServer = linearConnection
-    ? createLinearMcpServer(linearConnection)
+    ? new RecoverableMcpServer(
+        createLinearMcpServer(linearConnection),
+        "Linear",
+        (error) => safeInvestigationError(error, environment),
+      )
     : null;
   const slackServer = slackConnection
     ? createSlackSearchServer(slackConnection)
@@ -835,10 +835,10 @@ export async function runInvestigationAgent(
               }),
             ),
           );
-          // Linear only adds ticket history, so an outage there should not
-          // stop the investigation.
+          // Linear only adds ticket history. Let the agent see the outage
+          // and decide whether to reconnect.
           if (server === linearServer) {
-            linearUnavailable = true;
+            linearServer.markUnavailable(error);
             return;
           }
           if (server.name.startsWith("upstash-")) {
@@ -1014,8 +1014,7 @@ export async function runInvestigationAgent(
       runtimePromptParts: runtimeProfile?.promptParts,
       sentryConnected: sentryServer !== null,
       sentryUnavailable: sentryConnectionDegraded,
-      linearConnected: linearServer !== null && !linearUnavailable,
-      linearUnavailable,
+      linearConnected: linearServer !== null,
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,
       ),
@@ -1050,9 +1049,7 @@ export async function runInvestigationAgent(
       // with its server name so one connection cannot prevent an entire
       // investigation from starting.
       mcpConfig: { includeServerInToolNames: true },
-      mcpServers: linearUnavailable
-        ? contextServers.filter((server) => server !== linearServer)
-        : contextServers,
+      mcpServers: contextServers,
       tools: [
         ...(threadMode
           ? []

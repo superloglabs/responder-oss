@@ -436,22 +436,6 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("create_linear_ticket");
   });
 
-  it("tells the agent to continue when Linear context is unavailable", () => {
-    const instructions = investigationInstructions({
-      agentPrompt: "Inspect the reported failure.",
-      clickStackConnected: false,
-      datadogConnected: false,
-      linearConnected: false,
-      linearUnavailable: true,
-      repositories: [],
-      sentryConnected: false,
-    });
-
-    expect(instructions).toContain("Linear context is temporarily unavailable");
-    expect(instructions).toContain("existing Linear tickets could not be checked");
-    expect(instructions).not.toContain("Use the connected Linear tools");
-  });
-
   it("requires catalog discovery and secret avoidance for Vercel context", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",
