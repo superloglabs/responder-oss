@@ -50,7 +50,7 @@ const conversation = query({
   options: {
     allowDangerouslySkipPermissions: true,
     cwd: process.env.RESPONDER_AUTOMATION_WORKSPACE,
-    maxTurns: 40,
+    maxTurns: 400,
     mcpServers: {
       ...Object.fromEntries(contextServers.map((server) => [server.name, {
         type: "http",

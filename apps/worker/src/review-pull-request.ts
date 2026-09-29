@@ -41,7 +41,7 @@ import {
 } from "./agent-usage.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 
-export const pullRequestReviewMaxTurns = 40;
+export const pullRequestReviewMaxTurns = 400;
 
 function renderReviewThreads(threads: BotReviewThread[]): string {
   return threads

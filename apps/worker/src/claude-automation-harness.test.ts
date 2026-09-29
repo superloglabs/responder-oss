@@ -36,6 +36,21 @@ describe("Claude automation harness", () => {
     expect(command).toContain("unset RESPONDER_MODEL_BROKER_TOKEN");
   });
 
+  it("lets the agent take four hundred turns", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(
+        "Chunk ID: install\nProcess exited with code 0\nOutput:\n",
+      ),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await prepareClaudeAutomationHarness(session);
+
+    const runner = vi.mocked(session.materializeEntry).mock.calls[0]![0].entry;
+    expect(runner).toMatchObject({ type: "file" });
+    expect((runner as { content: string }).content).toContain("maxTurns: 400,");
+  });
+
   it("runs unattended through only the scoped broker", () => {
     const command = buildClaudeAutomationCommand(input);
 
