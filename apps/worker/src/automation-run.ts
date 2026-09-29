@@ -509,9 +509,9 @@ export async function processAutomationRun(
     let grantCredential: AutomationModelBrokerGrantCredential;
     let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
     let model = run.model;
-    // A credential pinned on the version wins. Otherwise the organization's
-    // own access for the provider replaces Responder-funded inference.
-    const credentialId = run.modelCredentialId ?? await dependencies.selectCredential({
+    // The organization's own key or subscription for the provider, when it
+    // has one, replaces Responder-funded inference.
+    const credentialId = await dependencies.selectCredential({
       harness: run.harness,
       organizationId: run.organizationId,
       provider: run.modelProvider,

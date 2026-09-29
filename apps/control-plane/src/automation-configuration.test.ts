@@ -20,7 +20,6 @@ const configuration = {
   maxOutputTokensPerRequest: 16_000,
   maxRuntimeSeconds: 1_800,
   model: "gpt-5.4",
-  modelCredentialId: null,
   modelProvider: "openai",
   notifications: [],
   prompt: "Investigate",

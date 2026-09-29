@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
-import { fetchIncludedAutomationModels, type AvailableAutomationModel, type AutomationConfiguration, type AutomationOptions, type AutomationModelProvider } from "../automations-api";
+import { fetchIncludedAutomationModels, type AvailableAutomationModel, type AutomationConfiguration, type AutomationModelProvider } from "../automations-api";
 import { automationModelProviders, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
 import { cn } from "@/lib/utils";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
@@ -18,9 +18,8 @@ function errorMessage(cause: unknown) { return cause instanceof Error ? cause.me
 // Choosing a model needs no connection: runs use the organization's own key or
 // subscription for the provider when one is connected, and included usage
 // otherwise. Each provider's models open in a submenu beside it.
-export function AutomationModelPicker({ configuration, options, onChange, requestedOpen }: {
+export function AutomationModelPicker({ configuration, onChange, requestedOpen }: {
   configuration: AutomationConfiguration;
-  options: AutomationOptions | null;
   onChange: (patch: Partial<AutomationConfiguration>) => void;
   requestedOpen: number;
 }) {
@@ -51,9 +50,8 @@ export function AutomationModelPicker({ configuration, options, onChange, reques
   function chooseModel(provider: AutomationModelProvider, model: AvailableAutomationModel) {
     const harness = supportsAutomationHarness(provider, configuration.harness) ? configuration.harness
       : provider === "openai" ? "codex" : provider === "anthropic" ? "claude_agent_sdk" : "opencode";
-    onChange({ modelProvider: provider, model: model.id, modelCredentialId: null, harness });
+    onChange({ modelProvider: provider, model: model.id, harness });
   }
-  const subscriptionSelected = options?.credentials.some(item => item.id === configuration.modelCredentialId && item.authType === "chatgpt_subscription") ?? false;
   const selectedModel = configuration.model ? `${configuration.modelProvider}/${configuration.model}` : "";
   return <div className="automationModel">
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -101,7 +99,7 @@ export function AutomationModelPicker({ configuration, options, onChange, reques
         <DropdownMenuLabel className="font-normal text-muted-foreground">Harnesses for {configuration.model}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup value={configuration.harness} onValueChange={value => onChange({ harness: value as AutomationConfiguration["harness"] })}>
-          {harnesses.filter(item => supportsAutomationHarness(configuration.modelProvider, item.id, subscriptionSelected)).map(item => <DropdownMenuRadioItem key={item.id} value={item.id}>
+          {harnesses.filter(item => supportsAutomationHarness(configuration.modelProvider, item.id)).map(item => <DropdownMenuRadioItem key={item.id} value={item.id}>
             <div className="flex flex-col"><span>{item.name}</span><span className="text-xs text-muted-foreground">{item.description}</span></div>
           </DropdownMenuRadioItem>)}
         </DropdownMenuRadioGroup>

@@ -4,7 +4,6 @@ export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode";
 export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
-export type AutomationInferenceSource = "responder" | "byok" | "byos";
 export type AutomationRunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type AutomationTrigger =
@@ -54,7 +53,6 @@ export interface AutomationConfiguration {
   maxOutputTokensPerRequest: number;
   maxRuntimeSeconds: number;
   model: string;
-  modelCredentialId: string | null;
   modelProvider: AutomationModelProvider;
   notifications: AutomationNotification[];
   prompt: string;
@@ -73,7 +71,6 @@ export interface AutomationInput {
 
 export interface AutomationListItem {
   connectors: string[];
-  inferenceSource: AutomationInferenceSource;
   createdAt: string;
   description: string;
   enabled: boolean;
@@ -146,7 +143,6 @@ export interface AutomationRunDetail {
 }
 
 export interface AutomationDetail {
-  inferenceSource: AutomationInferenceSource;
   configuration: AutomationConfiguration;
   createdAt: string;
   description: string;

@@ -11,6 +11,7 @@ vi.mock("@responder/core/credentials/encryption", () => ({
 }));
 
 const runId = "21212121-2121-4121-8121-212121212121";
+const credentialId = "51515151-5151-4151-8151-515151515151";
 const organizationId = "15151515-1515-4515-8515-151515151515";
 
 function claimedRun() {
@@ -20,13 +21,11 @@ function claimedRun() {
     automationVersionId: "41414141-4141-4141-8141-414141414141",
     cancelRequestedAt: null,
     harness: "codex" as const,
-    inferenceSource: "byok" as "byok" | "byos" | "responder",
     leaseId: "71717171-7171-4171-8171-717171717170",
     maxModelRequests: 8,
     maxOutputTokensPerRequest: 4_096,
     maxRuntimeSeconds: 600,
     model: "gpt-5.4",
-    modelCredentialId: "51515151-5151-4151-8151-515151515151" as string | null,
     modelProvider: "openai" as const,
     notifications: [] as Array<{ channelId: string; integrationAccountId: string; kind: "slack" }>,
     organizationId,
@@ -95,7 +94,7 @@ function dependencies() {
       provider: "openai",
     }),
     listProviderModels: vi.fn<AutomationRunDependencies["listProviderModels"]>().mockResolvedValue([{ id: "gpt-5.4", name: "GPT-5.4" }]),
-    selectCredential: vi.fn<AutomationRunDependencies["selectCredential"]>().mockResolvedValue(null),
+    selectCredential: vi.fn<AutomationRunDependencies["selectCredential"]>().mockResolvedValue(credentialId),
     getConnections: vi.fn().mockResolvedValue([]),
     getConversation: vi.fn().mockResolvedValue([]),
     getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
@@ -458,7 +457,8 @@ describe("automation run processor", () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
       const deps = dependencies();
-      deps.claimRun.mockResolvedValue({ ...scheduledRun(), inferenceSource: "responder", modelCredentialId: null });
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.selectCredential.mockResolvedValue(null);
       deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
 
       await processAutomationRun("job-1", job, process.env, deps);
@@ -686,13 +686,13 @@ describe("automation run processor", () => {
     const deps = dependencies();
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "native-refresh", account_id: "account" } });
     const runAuthJson = JSON.stringify({ tokens: { id_token: "id", access_token: "native-access", refresh_token: "responder-run-only", account_id: "account" } });
-    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "byos" });
-    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: credentialId, authJson } });
     deps.subscriptionAuth.mockResolvedValue(runAuthJson);
     deps.runCodex.mockResolvedValue({ eventStream: "" });
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.subscriptionAuth).toHaveBeenCalledWith(
-      { credentialId: claimedRun().modelCredentialId, organizationId },
+      { credentialId: credentialId, organizationId },
       new Date(deps.now().getTime() + (claimedRun().maxRuntimeSeconds + 1_800) * 1_000),
     );
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
@@ -706,8 +706,8 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
-    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "byos" });
-    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: credentialId, authJson } });
     deps.subscriptionAuth.mockRejectedValue(new Error("ChatGPT did not renew the subscription login. Reconnect it in model settings."));
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.runInSandbox).not.toHaveBeenCalled();
@@ -718,11 +718,8 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    deps.claimRun.mockResolvedValue({
-      ...claimedRun(),
-      inferenceSource: "responder",
-      modelCredentialId: null,
-    });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.selectCredential.mockResolvedValue(null);
 
     await processAutomationRun("job-1", {
       kind: "automation_run",
@@ -748,9 +745,7 @@ describe("automation run processor", () => {
     deps.claimRun.mockResolvedValue({
       ...claimedRun(),
       harness: "claude_agent_sdk",
-      inferenceSource: "responder",
       model: "claude-sonnet-4.5",
-      modelCredentialId: null,
       modelProvider: "anthropic",
     } as never);
     deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
@@ -777,7 +772,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "responder-run-only", account_id: "account" } });
-    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "responder", modelCredentialId: null });
+    deps.claimRun.mockResolvedValue(claimedRun());
     deps.selectCredential.mockResolvedValue("91919191-9191-4191-8191-919191919191");
     deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: "91919191-9191-4191-8191-919191919191", authJson } });
     deps.subscriptionAuth.mockResolvedValue(authJson);
@@ -794,7 +789,7 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "responder", modelCredentialId: null });
+    deps.claimRun.mockResolvedValue(claimedRun());
     deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
     deps.listProviderModels.mockResolvedValue([{ id: "gpt-4.1", name: "GPT-4.1" }]);
 
@@ -812,7 +807,7 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "responder", modelCredentialId: null });
+    deps.claimRun.mockResolvedValue(claimedRun());
     deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
     deps.listProviderModels.mockRejectedValue(new ModelCatalogError(true));
 
@@ -829,11 +824,8 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    deps.claimRun.mockResolvedValue({
-      ...claimedRun(),
-      inferenceSource: "responder",
-      modelCredentialId: null,
-    });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.selectCredential.mockResolvedValue(null);
     deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
 
     await processAutomationRun("job-1", {
@@ -1045,8 +1037,8 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
-    deps.claimRun.mockResolvedValue({ ...claimedRun(), inferenceSource: "byos", sandboxSessionState: { sandboxId: "sandbox-1" } });
-    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: claimedRun().modelCredentialId, authJson } });
+    deps.claimRun.mockResolvedValue({ ...claimedRun(), sandboxSessionState: { sandboxId: "sandbox-1" } });
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId: credentialId, authJson } });
     deps.subscriptionAuth.mockResolvedValue(authJson);
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);

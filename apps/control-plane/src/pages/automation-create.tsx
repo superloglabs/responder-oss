@@ -42,7 +42,6 @@ const defaultConfiguration: AutomationConfiguration = {
   maxOutputTokensPerRequest: 16_000,
   maxRuntimeSeconds: 1_800,
   model: "gpt-5.4",
-  modelCredentialId: null,
   modelProvider: "openai",
   notifications: [],
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
@@ -193,7 +192,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         setError("This shared template is no longer available. Set up the automation below or pick a template from Automations.");
       }
       updateConfiguration((current) => {
-        const blank = { ...current, model: "", modelCredentialId: null, repositoryIds: [] };
+        const blank = { ...current, model: "", repositoryIds: [] };
         return starting ? applyAutomationTemplate(blank, starting, loadedOptions) : blank;
       }, false);
       return;
@@ -427,7 +426,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             <div className="automationCreate__instructions">
               <textarea aria-labelledby="automation-instructions" maxLength={50_000} onBlur={() => persist()} onChange={(event) => { const prompt = event.target.value; updateConfiguration((current) => ({ ...current, prompt }), false); }} placeholder="Describe what the agent should do." required value={configuration.prompt} />
               <div className="automationCreate__toolbar">
-                <AutomationModelPicker configuration={configuration} options={options} onChange={(patch) => updateConfiguration((current) => ({ ...current, ...patch }))} requestedOpen={modelRequestedOpen} />
+                <AutomationModelPicker configuration={configuration} onChange={(patch) => updateConfiguration((current) => ({ ...current, ...patch }))} requestedOpen={modelRequestedOpen} />
               </div>
             </div>
           </section>
