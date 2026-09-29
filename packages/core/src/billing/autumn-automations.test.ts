@@ -16,7 +16,6 @@ vi.mock("autumn-js", () => ({
 
 const {
   checkUsageAllowance,
-  subscriptionInferenceAllowed,
   summarizeAutomationBillingCustomer,
   trackAutomationInferenceUsage,
 } = await import("./autumn.js");
@@ -44,30 +43,6 @@ describe("automation billing", () => {
       mock.mockReset();
     }
     vi.unstubAllEnvs();
-  });
-
-  it("allows ChatGPT subscriptions only on a paid automation plan", async () => {
-    client.customers.getOrCreate.mockResolvedValueOnce(customer([
-      { planId: "responder_automations_free", status: "active" },
-    ]));
-    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(false);
-
-    client.customers.getOrCreate.mockResolvedValueOnce(customer([
-      { planId: "responder_automations_100", status: "active" },
-    ]));
-    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(true);
-
-    client.customers.getOrCreate.mockResolvedValueOnce(customer([
-      { planId: "responder_automations_200", status: "active" },
-    ]));
-    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(true);
-  });
-
-  it("does not gate ChatGPT subscriptions while billing is off", async () => {
-    vi.stubEnv("BILLING_ENABLED", "false");
-
-    await expect(subscriptionInferenceAllowed("organization-1")).resolves.toBe(true);
-    expect(client.customers.getOrCreate).not.toHaveBeenCalled();
   });
 
   it("attaches the free automation plan before the first allowance check", async () => {

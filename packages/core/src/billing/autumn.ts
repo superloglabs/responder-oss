@@ -571,17 +571,3 @@ async function updateAutomationPlanCancellation(
   await client.billing.update({ cancelAction, customerId: organizationId, planId });
   return true;
 }
-
-export const SUBSCRIPTION_PLAN_REQUIRED_MESSAGE =
-  `ChatGPT subscriptions need the $${AUTOMATION_PAID_PLANS[0].price} / month plan or higher. Upgrade the plan in billing settings.`;
-
-// ChatGPT subscription inference needs a paid automation plan while billing
-// is on. Like the allowance check, it fails open during an Autumn outage.
-export async function subscriptionInferenceAllowed(organizationId: string): Promise<boolean> {
-  if (!billingIsEnabled()) return true;
-  const client = getAutomationClientOrNull();
-  if (!client) return true;
-  const customer = await ensureAutomationPlan(client, organizationId);
-  if (customer.id === null) return true;
-  return isAutomationPaidPlanId(automationPlanFromCustomer(customer).active);
-}
