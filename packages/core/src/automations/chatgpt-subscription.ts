@@ -31,13 +31,30 @@ export function subscriptionAccessTokenExpiresAt(authJson: string): Date | null 
   }
 }
 
-// Refresh tokens rotate on every use, so only one holder may keep one. Runs get
-// a copy without it: they share the access token, and a refresh attempt inside
-// a run fails that run instead of invalidating the stored login.
+// A run sandbox holds no real token. The access token is a Daytona secret
+// placeholder that Daytona replaces on HTTPS requests to ChatGPT. Refresh tokens
+// rotate on every use, so runs get none: a refresh attempt fails that run
+// instead of invalidating the stored login. Codex never sends the ID token and
+// only reads its claims, so the copy keeps those claims and no signature.
 export const runOnlyRefreshToken = "responder-run-only";
-export function subscriptionAuthForRun(authJson: string): string {
+export const subscriptionSecretHosts = ["chatgpt.com"];
+export const daytonaSecretPlaceholderPrefix = "dtn_secret_";
+export function subscriptionAuthForSandbox(authJson: string, accessTokenPlaceholder: string): string {
+  if (!accessTokenPlaceholder.startsWith(daytonaSecretPlaceholderPrefix))
+    throw new Error("Subscription runs require a Daytona secret placeholder");
   const auth = parseSubscriptionAuth(authJson);
-  return JSON.stringify({ ...auth, tokens: { ...auth.tokens, refresh_token: runOnlyRefreshToken } });
+  const payload = auth.tokens.id_token.split(".")[1];
+  const claims = payload ? JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown> : {};
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const idToken = `${encode({ alg: "none", typ: "JWT" })}.${encode({
+    email: claims.email,
+    "https://api.openai.com/auth": claims["https://api.openai.com/auth"],
+    "https://api.openai.com/profile": claims["https://api.openai.com/profile"],
+  })}.unsigned`;
+  return JSON.stringify({
+    ...auth,
+    tokens: { ...auth.tokens, access_token: accessTokenPlaceholder, id_token: idToken, refresh_token: runOnlyRefreshToken },
+  });
 }
 export interface ManagedSubscriptionLogin extends Record<string, unknown> {
   sandboxId: string;

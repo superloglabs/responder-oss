@@ -1,4 +1,5 @@
 import {
+  daytonaSecretPlaceholderPrefix,
   parseSubscriptionAuth,
   runOnlyRefreshToken,
   subscriptionCliVersion,
@@ -41,6 +42,9 @@ const subscriptionExecutable = `${subscriptionInstallRoot}/node_modules/.bin/cod
 const codexExecutable = `${codexInstallRoot}/node_modules/.bin/codex`;
 const codexHome = `${automationWorkspaceRoot}/.responder/codex-home`;
 const promptPath = `${automationWorkspaceRoot}/.responder/automation-prompt.txt`;
+// The sandbox API writes only inside the workspace, so the cache is staged
+// here as root and moved into its private directory before any tool runs.
+const stagedSubscriptionAuthPath = `${automationWorkspaceRoot}/.responder/subscription-auth.json`;
 
 function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
@@ -203,7 +207,8 @@ export async function runCodexAutomation(
   let output = "";
   try {
     if (input.model.subscription) {
-      if (parseSubscriptionAuth(input.model.subscription.authJson).tokens.refresh_token !== runOnlyRefreshToken)
+      const { tokens } = parseSubscriptionAuth(input.model.subscription.authJson);
+      if (tokens.refresh_token !== runOnlyRefreshToken || !tokens.access_token.startsWith(daytonaSecretPlaceholderPrefix))
         throw new Error("Subscription runs require a run-only credential cache");
       const prepared = await session.execCommand({
         // The trusted launcher needs host root to create the nested user namespace.
@@ -218,15 +223,22 @@ export async function runCodexAutomation(
         throw new Error("Unable to prepare subscription credentials");
       await session.materializeEntry({
         entry: { type: "file", content: input.model.subscription.authJson },
-        path: `${subscriptionHome}/auth.json`,
+        path: stagedSubscriptionAuthPath,
         runAs: "root",
       });
+      const moved = await session.execCommand({
+        cmd: subscriptionRootCommand(
+          `set -eu; umask 077; test ! -L ${stagedSubscriptionAuthPath}; mv -f ${stagedSubscriptionAuthPath} ${subscriptionHome}/auth.json; chmod 600 ${subscriptionHome}/auth.json`,
+        ),
+        maxOutputTokens: 1000,
+        workdir: automationWorkspaceRoot,
+      });
+      if (!commandSucceeded(moved))
+        throw new Error("Unable to prepare subscription credentials");
     }
     output = await session.execCommand({
       cmd: input.model.subscription
-        ? subscriptionRootCommand(
-            `chmod 600 ${subscriptionHome}/auth.json\n${buildCodexAutomationCommand(input, executable)}`,
-          )
+        ? subscriptionRootCommand(buildCodexAutomationCommand(input, executable))
         : buildCodexAutomationCommand(input, executable),
       maxOutputTokens: automationHarnessMaxOutputTokens,
       workdir: automationWorkspaceRoot,
@@ -234,7 +246,7 @@ export async function runCodexAutomation(
   } finally {
     if (input.model.subscription) {
       await session.execCommand({
-        cmd: `if [ "$(id -u)" -eq 0 ]; then rm -rf ${subscriptionHome}; else sudo -n rm -rf ${subscriptionHome} && sudo -n chown -R "$(id -u):$(id -g)" ${automationWorkspaceRoot}; fi`,
+        cmd: `if [ "$(id -u)" -eq 0 ]; then rm -rf ${subscriptionHome} ${stagedSubscriptionAuthPath}; else sudo -n rm -rf ${subscriptionHome} ${stagedSubscriptionAuthPath} && sudo -n chown -R "$(id -u):$(id -g)" ${automationWorkspaceRoot}; fi`,
         maxOutputTokens: 1000,
         workdir: automationWorkspaceRoot,
       });

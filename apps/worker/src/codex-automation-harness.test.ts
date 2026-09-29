@@ -1,7 +1,7 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { runOnlyRefreshToken } from "@responder/core/automations/chatgpt-subscription";
 import { describe, expect, it, vi } from "vitest";
-import { AutomationHarnessError } from "./automation-harness.js";
+import { AutomationHarnessError, automationWorkspaceRoot } from "./automation-harness.js";
 import {
   buildCodexAutomationCommand,
   codexCliVersion,
@@ -237,7 +237,7 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
   const authJson = JSON.stringify({
     tokens: {
       id_token: "id-token",
-      access_token: "access-token",
+      access_token: "dtn_secret_access",
       refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
@@ -254,7 +254,7 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
     '"/home/daytona/.responder-subscription-auth"="deny"',
   );
   expect(command).not.toContain("model_providers.responder");
-  expect(command).not.toContain("access-token");
+  expect(command).not.toContain("dtn_secret_access");
   expect(command).toContain(
     "unset OPENAI_API_KEY CODEX_API_KEY CODEX_ACCESS_TOKEN",
   );
@@ -262,6 +262,7 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
     execCommand: vi
       .fn()
       .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 0\n")
@@ -273,11 +274,20 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
     "harness failed",
   );
   expect(session.readFile).not.toHaveBeenCalled();
+  // The sandbox API rejects writes outside the workspace root.
+  for (const [entry] of vi.mocked(session.materializeEntry).mock.calls)
+    expect(entry.path.startsWith(`${automationWorkspaceRoot}/`)).toBe(true);
   expect(session.materializeEntry).toHaveBeenCalledWith({
     entry: { type: "file", content: authJson },
-    path: "/home/daytona/.responder-subscription-auth/auth.json",
+    path: `${automationWorkspaceRoot}/.responder/subscription-auth.json`,
     runAs: "root",
   });
+  const commands = vi.mocked(session.execCommand).mock.calls.map(([args]) => args.cmd);
+  const moveIndex = commands.findIndex((cmd) =>
+    cmd.includes(`mv -f ${automationWorkspaceRoot}/.responder/subscription-auth.json /home/daytona/.responder-subscription-auth/auth.json`));
+  const codexIndex = commands.findIndex((cmd) => cmd.includes("exec"));
+  expect(moveIndex).toBeGreaterThan(-1);
+  expect(codexIndex).toBeGreaterThan(moveIndex);
   expect(session.execCommand).toHaveBeenLastCalledWith(
     expect.objectContaining({
       cmd: expect.stringContaining(
@@ -291,7 +301,7 @@ it("redacts native subscription tokens from persisted harness output", async () 
   const authJson = JSON.stringify({
     tokens: {
       id_token: "secret-id",
-      access_token: "secret-access",
+      access_token: "dtn_secret_access",
       refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
@@ -300,7 +310,7 @@ it("redacts native subscription tokens from persisted harness output", async () 
     execCommand: vi
       .fn()
       .mockResolvedValue(
-        "Process exited with code 0\nsecret-access secret-id",
+        "Process exited with code 0\ndtn_secret_access secret-id",
       ),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
   } as unknown as DaytonaSandboxSession;
@@ -308,7 +318,8 @@ it("redacts native subscription tokens from persisted harness output", async () 
     ...input,
     model: { ...input.model, subscription: { authJson } },
   });
-  expect(result.eventStream).not.toContain("secret-");
+  expect(result.eventStream).not.toContain("secret-id");
+  expect(result.eventStream).not.toContain("dtn_secret_access");
   expect(result.eventStream).toContain("[redacted]");
 });
 
@@ -316,7 +327,7 @@ it("removes native credentials when materialization fails", async () => {
   const authJson = JSON.stringify({
     tokens: {
       id_token: "id",
-      access_token: "access",
+      access_token: "dtn_secret_access",
       refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
@@ -365,4 +376,26 @@ it("refuses a credential cache that still holds the refresh token", async () => 
   expect(session.materializeEntry).not.toHaveBeenCalledWith(
     expect.objectContaining({ entry: { type: "file", content: authJson } }),
   );
+});
+
+it("refuses a credential cache that holds a real access token", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id",
+      access_token: "real-access-token",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0\n"),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+  await expect(
+    runCodexAutomation(session, {
+      ...input,
+      model: { ...input.model, subscription: { authJson } },
+    }),
+  ).rejects.toThrow("run-only");
+  expect(JSON.stringify(vi.mocked(session.materializeEntry).mock.calls)).not.toContain("real-access-token");
 });
