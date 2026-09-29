@@ -18,6 +18,27 @@ export function parseSubscriptionAuth(authJson: string) {
   if (authJson.length > 131_072) throw new Error("Invalid subscription credential cache");
   return nativeAuthSchema.parse(JSON.parse(authJson));
 }
+
+/** When the cached access token expires, or null when it carries no expiry. */
+export function subscriptionAccessTokenExpiresAt(authJson: string): Date | null {
+  const payload = parseSubscriptionAuth(authJson).tokens.access_token.split(".")[1];
+  if (!payload) return null;
+  try {
+    const { exp } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown };
+    return typeof exp === "number" && Number.isFinite(exp) ? new Date(exp * 1_000) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Refresh tokens rotate on every use, so only one holder may keep one. Runs get
+// a copy without it: they share the access token, and a refresh attempt inside
+// a run fails that run instead of invalidating the stored login.
+export const runOnlyRefreshToken = "responder-run-only";
+export function subscriptionAuthForRun(authJson: string): string {
+  const auth = parseSubscriptionAuth(authJson);
+  return JSON.stringify({ ...auth, tokens: { ...auth.tokens, refresh_token: runOnlyRefreshToken } });
+}
 export interface ManagedSubscriptionLogin extends Record<string, unknown> {
   sandboxId: string;
   userCode: string;

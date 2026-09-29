@@ -1,5 +1,6 @@
 import {
   parseSubscriptionAuth,
+  runOnlyRefreshToken,
   subscriptionCliVersion,
 } from "@responder/core/automations/chatgpt-subscription";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
@@ -200,13 +201,10 @@ export async function runCodexAutomation(
     path: promptPath,
   });
   let output = "";
-  const authCaches = input.model.subscription
-    ? [input.model.subscription.authJson]
-    : [];
-  let materialized = false;
   try {
     if (input.model.subscription) {
-      parseSubscriptionAuth(input.model.subscription.authJson);
+      if (parseSubscriptionAuth(input.model.subscription.authJson).tokens.refresh_token !== runOnlyRefreshToken)
+        throw new Error("Subscription runs require a run-only credential cache");
       const prepared = await session.execCommand({
         // The trusted launcher needs host root to create the nested user namespace.
         // Tools run with dropped capabilities and the native filesystem policy.
@@ -223,7 +221,6 @@ export async function runCodexAutomation(
         path: `${subscriptionHome}/auth.json`,
         runAs: "root",
       });
-      materialized = true;
     }
     output = await session.execCommand({
       cmd: input.model.subscription
@@ -236,33 +233,16 @@ export async function runCodexAutomation(
     });
   } finally {
     if (input.model.subscription) {
-      try {
-        if (materialized) {
-          const bytes = await session.readFile({
-            path: `${subscriptionHome}/auth.json`,
-            maxBytes: 131_072,
-            runAs: "root",
-          });
-          const refreshed = new TextDecoder().decode(bytes);
-          authCaches.push(refreshed);
-          await input.model.subscription.persist(refreshed);
-        }
-      } finally {
-        await session.execCommand({
-          cmd: `if [ "$(id -u)" -eq 0 ]; then rm -rf ${subscriptionHome}; else sudo -n rm -rf ${subscriptionHome} && sudo -n chown -R "$(id -u):$(id -g)" ${automationWorkspaceRoot}; fi`,
-          maxOutputTokens: 1000,
-          workdir: automationWorkspaceRoot,
-        });
-      }
+      await session.execCommand({
+        cmd: `if [ "$(id -u)" -eq 0 ]; then rm -rf ${subscriptionHome}; else sudo -n rm -rf ${subscriptionHome} && sudo -n chown -R "$(id -u):$(id -g)" ${automationWorkspaceRoot}; fi`,
+        maxOutputTokens: 1000,
+        workdir: automationWorkspaceRoot,
+      });
     }
   }
-  for (const cache of authCaches) {
-    const tokens = parseSubscriptionAuth(cache).tokens;
-    for (const secret of [
-      tokens.access_token,
-      tokens.refresh_token,
-      tokens.id_token,
-    ])
+  if (input.model.subscription) {
+    const tokens = parseSubscriptionAuth(input.model.subscription.authJson).tokens;
+    for (const secret of [tokens.access_token, tokens.id_token])
       output = output.replaceAll(secret, "[redacted]");
   }
   // Checked after redaction so a failed run can keep its transcript.

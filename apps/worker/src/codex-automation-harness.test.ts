@@ -1,4 +1,5 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { runOnlyRefreshToken } from "@responder/core/automations/chatgpt-subscription";
 import { describe, expect, it, vi } from "vitest";
 import { AutomationHarnessError } from "./automation-harness.js";
 import {
@@ -232,19 +233,18 @@ describe("Codex automation harness", () => {
   });
 });
 
-it("uses managed ChatGPT inference, persists refreshed auth, and removes the cache on failure", async () => {
+it("uses managed ChatGPT inference without writing the login back, and removes the cache on failure", async () => {
   const authJson = JSON.stringify({
     tokens: {
       id_token: "id-token",
       access_token: "access-token",
-      refresh_token: "refresh-token",
+      refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
   });
-  const persist = vi.fn().mockResolvedValue(undefined);
   const nativeInput = {
     ...input,
-    model: { ...input.model, subscription: { authJson, persist } },
+    model: { ...input.model, subscription: { authJson } },
   };
   const command = buildCodexAutomationCommand(nativeInput);
   expect(command).toContain('forced_login_method="chatgpt"');
@@ -267,12 +267,12 @@ it("uses managed ChatGPT inference, persists refreshed auth, and removes the cac
       .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 1\n"),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(new TextEncoder().encode(authJson)),
+    readFile: vi.fn(),
   } as unknown as DaytonaSandboxSession;
   await expect(runCodexAutomation(session, nativeInput)).rejects.toThrow(
     "harness failed",
   );
-  expect(persist).toHaveBeenCalledWith(authJson);
+  expect(session.readFile).not.toHaveBeenCalled();
   expect(session.materializeEntry).toHaveBeenCalledWith({
     entry: { type: "file", content: authJson },
     path: "/home/daytona/.responder-subscription-auth/auth.json",
@@ -292,7 +292,7 @@ it("redacts native subscription tokens from persisted harness output", async () 
     tokens: {
       id_token: "secret-id",
       access_token: "secret-access",
-      refresh_token: "secret-refresh",
+      refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
   });
@@ -300,17 +300,13 @@ it("redacts native subscription tokens from persisted harness output", async () 
     execCommand: vi
       .fn()
       .mockResolvedValue(
-        "Process exited with code 0\nsecret-access secret-refresh secret-id",
+        "Process exited with code 0\nsecret-access secret-id",
       ),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(new TextEncoder().encode(authJson)),
   } as unknown as DaytonaSandboxSession;
   const result = await runCodexAutomation(session, {
     ...input,
-    model: {
-      ...input.model,
-      subscription: { authJson, persist: vi.fn().mockResolvedValue(undefined) },
-    },
+    model: { ...input.model, subscription: { authJson } },
   });
   expect(result.eventStream).not.toContain("secret-");
   expect(result.eventStream).toContain("[redacted]");
@@ -321,7 +317,7 @@ it("removes native credentials when materialization fails", async () => {
     tokens: {
       id_token: "id",
       access_token: "access",
-      refresh_token: "refresh",
+      refresh_token: runOnlyRefreshToken,
       account_id: "account",
     },
   });
@@ -331,19 +327,42 @@ it("removes native credentials when materialization fails", async () => {
       .fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("upload failed")),
-    readFile: vi.fn().mockRejectedValue(new Error("missing")),
   } as unknown as DaytonaSandboxSession;
   await expect(
     runCodexAutomation(session, {
       ...input,
-      model: { ...input.model, subscription: { authJson, persist: vi.fn() } },
+      model: { ...input.model, subscription: { authJson } },
     }),
-  ).rejects.toThrow();
+  ).rejects.toThrow("upload failed");
   expect(session.execCommand).toHaveBeenLastCalledWith(
     expect.objectContaining({
       cmd: expect.stringContaining(
         "sudo -n rm -rf /home/daytona/.responder-subscription-auth",
       ),
     }),
+  );
+});
+
+it("refuses a credential cache that still holds the refresh token", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id",
+      access_token: "access",
+      refresh_token: "real-refresh",
+      account_id: "account",
+    },
+  });
+  const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0\n"),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+  await expect(
+    runCodexAutomation(session, {
+      ...input,
+      model: { ...input.model, subscription: { authJson } },
+    }),
+  ).rejects.toThrow("run-only");
+  expect(session.materializeEntry).not.toHaveBeenCalledWith(
+    expect.objectContaining({ entry: { type: "file", content: authJson } }),
   );
 });

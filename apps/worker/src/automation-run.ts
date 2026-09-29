@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { parseSubscriptionAuth } from "@responder/core/automations/chatgpt-subscription";
 import {
   appendAutomationRunEvent,
   automationRunCancellationRequested,
@@ -25,7 +24,7 @@ import {
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkAutomationInferenceAllowance } from "@responder/core/billing/autumn";
-import { getOrganizationModelCredential, acquireSubscriptionCredential, persistSubscriptionCredential, releaseSubscriptionCredential } from "@responder/core/db/automation-model-credentials";
+import { getOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { getAutomationRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
@@ -50,6 +49,7 @@ import { runClaudeAutomation } from "./claude-automation-harness.js";
 import { runOpenCodeAutomation } from "./opencode-automation-harness.js";
 import { safeInvestigationError } from "./investigate.js";
 import { reportWorkerException } from "./monitoring.js";
+import { subscriptionAuthCoveringRun } from "./subscription-access.js";
 import {
   checkoutAutomationRuntimeRepositories,
   loadCheckedOutRepositories,
@@ -88,9 +88,6 @@ interface AutomationRunDependencies {
   createGrant: typeof createAutomationModelBrokerGrant;
   createToolHandler: typeof createAutomationToolHandler;
   getCredential: typeof getOrganizationModelCredential;
-  acquireSubscription: typeof acquireSubscriptionCredential;
-  persistSubscription: typeof persistSubscriptionCredential;
-  releaseSubscription: typeof releaseSubscriptionCredential;
   getConnections: typeof getAutomationRuntimeConnections;
   getConversation: typeof listAutomationRunConversation;
   getNotificationChannelNames: typeof getAutomationNotificationChannelNames;
@@ -113,6 +110,7 @@ interface AutomationRunDependencies {
   saveSandbox: typeof saveAutomationRunSandbox;
   setStatus: typeof setAutomationRunStatus;
   slackCard: AutomationSlackCardDependencies;
+  subscriptionAuth: (owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>;
   updateEvent: typeof updateAutomationRunEvent;
 }
 
@@ -125,9 +123,6 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   createGrant: createAutomationModelBrokerGrant,
   createToolHandler: createAutomationToolHandler,
   getCredential: getOrganizationModelCredential,
-  acquireSubscription: acquireSubscriptionCredential,
-  persistSubscription: persistSubscriptionCredential,
-  releaseSubscription: releaseSubscriptionCredential,
   getConnections: getAutomationRuntimeConnections,
   getConversation: listAutomationRunConversation,
   getNotificationChannelNames: getAutomationNotificationChannelNames,
@@ -151,6 +146,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   saveSandbox: saveAutomationRunSandbox,
   setStatus: setAutomationRunStatus,
   slackCard: defaultAutomationSlackCardDependencies,
+  subscriptionAuth: (owner, validUntil) => subscriptionAuthCoveringRun(owner, validUntil),
   updateEvent: updateAutomationRunEvent,
 };
 
@@ -410,8 +406,6 @@ export async function processAutomationRun(
     provider: run.modelProvider,
   });
 
-  let subscriptionCleanupConfirmed = true;
-  let subscriptionLease: { credentialId: string; organizationId: string; leaseId: string } | undefined;
   let grantId: string | undefined;
   let slackCard: AutomationSlackCard | null = null;
   // The newest event this turn's prompt includes, once it is read. A reply
@@ -503,10 +497,10 @@ export async function processAutomationRun(
 
       if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
       if (credential.subscription) {
-        const owner = { credentialId: run.modelCredentialId, organizationId: run.organizationId, leaseId: run.leaseId };
-        subscriptionLease = owner;
-        const authJson = await dependencies.acquireSubscription({ ...owner, expiresAt: new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 300) * 1000) });
-        nativeSubscription = { authJson, persist: (updated) => dependencies.persistSubscription({ ...owner, authJson: updated, previousAccountId: parseSubscriptionAuth(authJson).tokens.account_id }) };
+        // Leaves time for sandbox setup before the runtime limit starts to matter.
+        const validUntil = new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 1_800) * 1_000);
+        const authJson = await dependencies.subscriptionAuth({ credentialId: run.modelCredentialId, organizationId: run.organizationId }, validUntil);
+        nativeSubscription = { authJson };
         grantCredential = { inferenceSource: "byos" };
       } else {
         grantCredential = { apiKey: credential.apiKey, inferenceSource: "byok" };
@@ -541,13 +535,11 @@ export async function processAutomationRun(
       `#${channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`);
     slackCard = await startSlackCard(dependencies, run, connections, conversation, firstTurn);
 
-    subscriptionCleanupConfirmed = false;
-    // Subscription runs always delete their sandbox, so cleanup confirms the
-    // native credentials are gone. Other runs pause it for a follow-up.
+    // Subscription runs always delete their sandbox so the access token does
+    // not outlive the turn. Other runs pause it for a follow-up.
     const keepPaused = !nativeSubscription;
     let pausedSandbox: PausedAutomationSandbox | null = null;
     const runTurn = () => dependencies.runInSandbox({
-      onCleanupConfirmed: () => { subscriptionCleanupConfirmed = true; },
       brokerToken: grant.token,
       config: daytonaConfig,
       keepPaused,
@@ -774,7 +766,6 @@ export async function processAutomationRun(
       }).catch(() => undefined);
     }
   } finally {
-    if (subscriptionLease && subscriptionCleanupConfirmed) await dependencies.releaseSubscription(subscriptionLease).catch((error) => dependencies.reportException(error, { jobId, operation: "automation", organizationId: run.organizationId, requestId: run.runId }).catch(() => undefined));
     clearInterval(cancellationPoll);
     clearInterval(heartbeat);
     clearTimeout(runtimeTimeout);

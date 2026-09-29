@@ -4,6 +4,7 @@ import {
   acquireSubscriptionCredential,
   persistSubscriptionCredential,
   releaseSubscriptionCredential,
+  SubscriptionCredentialUnavailableError,
 } from "./automation-model-credentials.js";
 import { getDatabase } from "./client.js";
 import {
@@ -68,7 +69,7 @@ it("acquires an exclusive scoped lease before exposing the native credential", a
       ...owner,
       expiresAt: new Date(Date.now() + 60000),
     }),
-  ).rejects.toThrow("already running");
+  ).rejects.toBeInstanceOf(SubscriptionCredentialUnavailableError);
 });
 it("persists only under the owning lease and rejects account switches", async () => {
   vi.stubEnv(

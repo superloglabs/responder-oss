@@ -144,20 +144,29 @@ credential ID. Cancellation deletes the login sandbox; ephemeral lifecycle limit
 bound abandoned sessions. The connection is shared by automations in its workspace.
 
 Subscription runs require the Codex harness, enforced by the API and worker.
-A fresh sandbox receives the native auth cache in a private directory outside the
-repository checkout, with directory mode 0700 and file mode 0600. The CLI uses
-managed ChatGPT authentication and makes inference requests directly. It receives
-no custom model-provider override or API key. The existing temporary broker token
-is context-only for these runs and cannot authorize model inference.
+A fresh sandbox receives a run-only copy of the native auth cache in a private
+directory outside the repository checkout, with directory mode 0700 and file mode
+0600. The CLI uses managed ChatGPT authentication and makes inference requests
+directly. It receives no custom model-provider override or API key. The existing
+temporary broker token is context-only for these runs and cannot authorize model
+inference.
 
-The worker acquires an exclusive credential lease for each subscription run to
-prevent concurrent refresh-token rotations. A concurrent run fails with an explicit
-subscription-in-use message. After execution (including failures), the native cache
-is read back and encrypted under the owning lease, and its sandbox copy is removed.
-Lease deadlines record the maximum runtime plus cleanup time, but do not permit
-automatic takeover: only the owning operation releases the credential after cleanup.
-An interrupted owner that cannot finish cleanup requires reconnecting the subscription. The sandbox
-is destroyed using the existing run lifecycle. Known original and refreshed tokens
+Refresh tokens rotate on every use, so the run-only copy replaces the refresh
+token with a placeholder and keeps the access token. Any number of runs can share
+one subscription at once. The copy is never written back, and a refresh attempt
+inside a run fails that run without affecting the stored login. The harness
+refuses a cache that still holds a real refresh token.
+
+Before a run, the worker checks that the stored access token outlives the maximum
+runtime plus 30 minutes. If it does not, the worker refreshes the login once in a
+separate short-lived sandbox: the official client's `account/read` with
+`refreshToken: true` rotates the token, and the result is encrypted and stored.
+Only this refresh and model discovery hold the exclusive credential lease. A run
+that finds the lease held waits up to four minutes for the other operation, then
+uses its result. Leases do not permit automatic takeover: only the owning
+operation releases the credential after its sandbox is deleted. An interrupted
+owner that cannot finish cleanup requires reconnecting the subscription. The run
+sandbox is destroyed using the existing run lifecycle. The access and ID tokens
 are redacted from persisted harness output. Subscription execution uses the client's
 native filesystem permission profile: model tools may edit the workspace, but cannot
 read the auth home (including through symlinks). The trusted launcher runs as root
