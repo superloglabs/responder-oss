@@ -72,6 +72,7 @@ function dependencies() {
     cancellationRequested: vi.fn().mockResolvedValue(false),
     checkAllowance: vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
     sandboxTimeIsBilled: vi.fn(() => false),
+    subscriptionAllowed: vi.fn().mockResolvedValue(true),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -713,6 +714,28 @@ describe("automation run processor", () => {
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.runInSandbox).not.toHaveBeenCalled();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  it("fails a subscription run without a paid plan before starting a sandbox", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId, authJson } });
+    deps.subscriptionAllowed.mockResolvedValue(false);
+
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+    expect(deps.subscriptionAllowed).toHaveBeenCalledWith(organizationId);
+    expect(deps.subscriptionAuth).not.toHaveBeenCalled();
+    expect(deps.runInSandbox).not.toHaveBeenCalled();
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "plan_required",
+      failureMessage: expect.stringContaining("ChatGPT subscriptions need the $100 / month plan"),
+      status: "failed",
+    }));
   });
 
   it("uses Responder-funded inference without reading an organization key", async () => {

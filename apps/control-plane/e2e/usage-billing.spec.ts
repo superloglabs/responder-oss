@@ -16,6 +16,7 @@ const plans = [
 
 function billing(overrides: {
   payAsYouGo?: boolean;
+  planId?: string;
   remaining?: number;
   usageBased: boolean;
 }) {
@@ -28,7 +29,7 @@ function billing(overrides: {
       configured: true,
       enabled: true,
       nextResetAt: null,
-      planId: "responder_automations_free",
+      planId: overrides.planId ?? "responder_automations_free",
       plans,
       remaining,
       sandboxTimeBilled: true,
@@ -94,6 +95,7 @@ async function mockWorkspace(page: Page, summary: ReturnType<typeof billing>) {
   );
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [] } }));
   await page.route("**/api/automations", (route) => route.fulfill({ json: { automations: [] } }));
+  await page.route("**/api/automations/credentials", (route) => route.fulfill({ json: { credentials: [] } }));
   await page.route("**/api/billing", (route) => route.fulfill({ json: summary }));
 }
 
@@ -167,4 +169,21 @@ test("warns a usage-billed workspace when its allowance is used", async ({ page 
     "href",
     "/settings/billing",
   );
+});
+
+test("asks a free workspace to upgrade before connecting ChatGPT", async ({ page }) => {
+  await mockWorkspace(page, billing({ usageBased: true }));
+  await page.goto("/settings/models");
+
+  await expect(page.getByText("ChatGPT subscriptions need the $100 / month plan or higher.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Upgrade plan" })).toHaveAttribute("href", "/settings/billing");
+  await expect(page.getByRole("button", { name: "Connect ChatGPT" })).toHaveCount(0);
+});
+
+test("lets a paid workspace connect ChatGPT", async ({ page }) => {
+  await mockWorkspace(page, billing({ planId: "responder_automations_100", usageBased: true }));
+  await page.goto("/settings/models");
+
+  await expect(page.getByRole("button", { name: "Connect ChatGPT" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Upgrade plan" })).toHaveCount(0);
 });

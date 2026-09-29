@@ -9,6 +9,7 @@ const userId = "21212121-2121-4121-8121-212121212121";
 const mocks = vi.hoisted(() => ({
   gatewayModels: vi.fn(),
   startSubscription: vi.fn(),
+  subscriptionAllowed: vi.fn().mockResolvedValue(true),
   pollSubscription: vi.fn(),
   cancelSubscription: vi.fn(),
   capability: vi.fn().mockResolvedValue(true),
@@ -76,6 +77,10 @@ vi.mock(
     rotateOrganizationModelCredential: vi.fn(),
   }),
 );
+vi.mock("../../../../packages/core/src/billing/autumn.js", async (original) => ({
+  ...(await original<typeof import("../../../../packages/core/src/billing/autumn.js")>()),
+  subscriptionInferenceAllowed: mocks.subscriptionAllowed,
+}));
 vi.mock("../../../../packages/core/src/db/model-subscriptions.js", () => ({
   startModelSubscription: mocks.startSubscription,
   pollModelSubscription: mocks.pollSubscription,
@@ -302,6 +307,23 @@ describe("automation control-plane routes", () => {
       expect.any(Object),
     );
   });
+  it("does not start a subscription login without a paid plan", async () => {
+    mocks.startSubscription.mockClear();
+    mocks.subscriptionAllowed.mockResolvedValueOnce(false);
+
+    const response = await app.request("/api/automations/subscriptions/openai", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toEqual({
+      code: "plan_required",
+      error: "ChatGPT subscriptions need the $100 / month plan or higher. Upgrade the plan in billing settings.",
+    });
+    expect(mocks.subscriptionAllowed).toHaveBeenCalledWith(organizationId);
+    expect(mocks.startSubscription).not.toHaveBeenCalled();
+  });
+
   it("does not start a subscription login for a disabled workspace", async () => {
     mocks.startSubscription.mockClear();
     mocks.capability.mockResolvedValue(false);
