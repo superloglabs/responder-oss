@@ -3,6 +3,9 @@ import type {
   CallToolResultContent,
   MCPCallToolOptions,
   MCPServer,
+  MCPToolFilterCallable,
+  MCPToolFilterContext,
+  MCPToolFilterStatic,
 } from "@openai/agents";
 
 type McpTool = Awaited<ReturnType<MCPServer["listTools"]>>[number];
@@ -11,8 +14,22 @@ export const RECONNECT_TOOL = "reconnect";
 
 const MAX_ERROR_LENGTH = 500;
 
+async function allowedByFilter(
+  filter: MCPToolFilterCallable | MCPToolFilterStatic,
+  context: MCPToolFilterContext,
+  tool: McpTool,
+): Promise<boolean> {
+  if (typeof filter === "function") return filter(context, tool);
+  const allowed = filter.allowedToolNames ?? [];
+  const blocked = filter.blockedToolNames ?? [];
+  return (
+    (allowed.length === 0 || allowed.includes(tool.name)) &&
+    !blocked.includes(tool.name)
+  );
+}
+
 /**
- * Keeps an optional context server from failing the investigation when it is
+ * Keeps a context server from failing the investigation when it is
  * unreachable. While it is down, the agent sees the error and a single
  * reconnect tool, and decides whether retrying is worth it.
  */
@@ -22,16 +39,33 @@ export class RecoverableMcpServer implements MCPServer {
   readonly cacheToolsList = false;
   readonly name: string;
   readonly useStructuredContent: boolean | undefined;
+  readonly toolFilter: MCPToolFilterCallable | undefined;
+  readonly toolMetaResolver: MCPServer["toolMetaResolver"];
+  readonly customDataExtractor: MCPServer["customDataExtractor"];
+  readonly errorFunction: MCPServer["errorFunction"];
+  private placeholder: McpTool | null = null;
   private tools: McpTool[] | null = null;
   private unavailableReason: string | null = null;
 
   constructor(
     private readonly server: MCPServer,
-    private readonly label: string,
     private readonly describeError: (error: unknown) => string,
   ) {
     this.name = server.name;
     this.useStructuredContent = server.useStructuredContent;
+    this.toolMetaResolver = server.toolMetaResolver;
+    this.customDataExtractor = server.customDataExtractor;
+    this.errorFunction = server.errorFunction;
+    // The server's own filter still decides which real tools are exposed.
+    const filter = server.toolFilter;
+    this.toolFilter = filter
+      ? async (context, tool) =>
+          tool === this.placeholder || allowedByFilter(filter, context, tool)
+      : undefined;
+  }
+
+  get available(): boolean {
+    return this.unavailableReason === null;
   }
 
   connect(): Promise<void> {
@@ -55,7 +89,10 @@ export class RecoverableMcpServer implements MCPServer {
         this.markUnavailable(error);
       }
     }
-    if (this.unavailableReason !== null) return [this.reconnectTool()];
+    if (this.unavailableReason !== null) {
+      this.placeholder = this.reconnectTool();
+      return [this.placeholder];
+    }
     return this.tools ?? [];
   }
 
@@ -93,10 +130,10 @@ export class RecoverableMcpServer implements MCPServer {
     return {
       name: RECONNECT_TOOL,
       description:
-        `${this.label} could not be reached: ${this.unavailableReason} ` +
-        `Call this tool to try connecting again if ${this.label} context would help. ` +
-        `On success, the ${this.label} tools are available on your next step. ` +
-        `If ${this.label} stays unavailable, say in the report that it could not be checked.`,
+        `The ${this.name} context server could not be reached: ${this.unavailableReason} ` +
+        "Call this tool to try connecting again if its context would help. " +
+        "On success, its tools are available on your next step. " +
+        "If it stays unavailable, say in the report which evidence could not be checked.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -108,7 +145,7 @@ export class RecoverableMcpServer implements MCPServer {
 
   private async reconnect(toolName: string): Promise<CallToolResult> {
     if (toolName !== RECONNECT_TOOL) {
-      throw new Error(`${this.label} is unavailable; call ${RECONNECT_TOOL} first`);
+      throw new Error(`${this.name} is unavailable; call ${RECONNECT_TOOL} first`);
     }
     await this.server.close().catch(() => undefined);
     try {
@@ -116,11 +153,11 @@ export class RecoverableMcpServer implements MCPServer {
       await this.server.invalidateToolsCache();
       this.tools = await this.server.listTools();
       this.unavailableReason = null;
-      return text(`${this.label} is connected. Its tools are available on your next step.`);
+      return text(`${this.name} is connected. Its tools are available on your next step.`);
     } catch (error) {
       this.markUnavailable(error);
       return text(
-        `${this.label} is still unavailable: ${this.unavailableReason}`,
+        `${this.name} is still unavailable: ${this.unavailableReason}`,
         true,
       );
     }

@@ -751,11 +751,7 @@ export async function runInvestigationAgent(
     ? createClickStackMcpServer(clickStackConnection)
     : null;
   const linearServer = linearConnection
-    ? new RecoverableMcpServer(
-        createLinearMcpServer(linearConnection),
-        "Linear",
-        (error) => safeInvestigationError(error, environment),
-      )
+    ? createLinearMcpServer(linearConnection)
     : null;
   const slackServer = slackConnection
     ? createSlackSearchServer(slackConnection)
@@ -782,6 +778,21 @@ export async function runInvestigationAgent(
       )
     : supabaseConnections;
   const supabaseServers = effectiveSupabaseConnections.map(createSupabaseMcpServer);
+  const connectFailureEvent = (serverName: string, error: unknown) =>
+    contextServerConnectFailureEvent({
+      awsConnections,
+      gcpConnections,
+      customMcpConnections,
+      dash0Connections,
+      postHogConnections,
+      grafanaConnections,
+      error,
+      investigationId: job.investigationId,
+      langfuseConnections,
+      serverName,
+      supabaseConnections,
+      upstashConnection,
+    });
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -798,9 +809,18 @@ export async function runInvestigationAgent(
     ...awsServers,
     ...gcpServers,
     ...customMcpServers,
-  ].filter(
-    (server): server is NonNullable<typeof server> => server !== null,
-  );
+  ]
+    .filter((server): server is NonNullable<typeof server> => server !== null)
+    // A provider outage should not stop the investigation. The agent sees the
+    // error and decides whether to reconnect.
+    .map((server) =>
+      new RecoverableMcpServer(server, (error) =>
+        safeInvestigationError(
+          connectFailureEvent(server.name, error).error,
+          environment,
+        ),
+      ),
+    );
 
   const sandboxName = `responder-investigation-${job.investigationId}`;
   const client = new DaytonaSandboxClient({
@@ -818,57 +838,18 @@ export async function runInvestigationAgent(
           await connectContextServer(server);
         } catch (error) {
           console.error(
-            JSON.stringify(
-              contextServerConnectFailureEvent({
-                awsConnections,
-                gcpConnections,
-                customMcpConnections,
-                dash0Connections,
-                postHogConnections,
-                grafanaConnections,
-                error,
-                investigationId: job.investigationId,
-                langfuseConnections,
-                serverName: server.name,
-                supabaseConnections,
-                upstashConnection,
-              }),
-            ),
+            JSON.stringify(connectFailureEvent(server.name, error)),
           );
-          // Linear only adds ticket history. Let the agent see the outage
-          // and decide whether to reconnect.
-          if (server === linearServer) {
-            linearServer.markUnavailable(error);
-            return;
-          }
-          if (server.name.startsWith("upstash-")) {
-            throw new Error("Unable to connect to Upstash context");
-          }
-          if (server.name.startsWith("aws-")) {
-            throw new Error("Unable to connect to AWS context");
-          }
-          if (server.name.startsWith("gcp-")) {
-            throw new Error("Unable to connect to GCP context");
-          }
-          if (server.name.startsWith("dash0-")) {
-            throw new Error("Unable to connect to Dash0 context");
-          }
-          if (server.name.startsWith("grafana-")) {
-            throw new Error("Unable to connect to Grafana context");
-          }
-          if (server.name.startsWith("langfuse-")) {
-            throw new Error("Unable to connect to Langfuse context");
-          }
-          if (server.name.startsWith("supabase-")) {
-            throw new Error("Unable to connect to Supabase context");
-          }
-          throw error;
+          server.markUnavailable(error);
         }
       }),
     );
     let awsSkillContext = "";
-    if (awsAlarmTriggered && awsServers[0]) {
-      const loadedSkills = await loadAwsAlarmSkillContext(awsServers[0]);
+    const awsSkillServer = contextServers.find(
+      (server) => server.available && server.name === awsServers[0]?.name,
+    );
+    if (awsAlarmTriggered && awsSkillServer) {
+      const loadedSkills = await loadAwsAlarmSkillContext(awsSkillServer);
       awsSkillContext = loadedSkills.content;
       for (const failure of loadedSkills.failures) {
         console.error(

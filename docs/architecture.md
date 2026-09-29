@@ -72,6 +72,11 @@ types. `drizzle/` contains the ordered schema history.
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link.
 - Langfuse context uses encrypted project-scoped API keys outside the sandbox.
+- A context server that cannot be reached does not fail the investigation.
+  Its tools are replaced by a single reconnect tool that shows the connection
+  error, and the agent decides whether to retry. Each server's read-only tool
+  filter still applies to the tools it exposes after reconnecting. Errors from
+  providers that can reveal account details are replaced by a generic message.
 - Supabase context uses encrypted OAuth sessions and a temporary read-only
   account scope to discover projects after authorization. Responder then pins
   agent access to the selected project and permission preset with

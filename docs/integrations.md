@@ -19,8 +19,6 @@ Add the connected Linear workspace to an agent's context to let investigations
 inspect teams, projects, and existing issues. Agent context uses Linear's
 read-only MCP endpoint. The only write path is Responder's controlled
 `create_linear_ticket` tool.
-If that endpoint cannot be reached, the investigation continues. The agent
-sees the connection error and a reconnect tool, and decides whether to retry.
 
 When **Create Linear tickets for issues** is enabled, report submission creates
 a pending ticket request only for issues first found by that investigation.
