@@ -94,7 +94,9 @@ import {
   createUpstashMcpServer,
 } from "./upstash.js";
 import {
+  connectionSecrets,
   redactDaytonaSecretPlaceholders,
+  redactSecrets,
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
@@ -187,26 +189,12 @@ export function contextServerConnectFailureEvent(input: {
   grafanaConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   supabaseConnections?: ReadonlyArray<{ accountId: string }>;
-  error: unknown;
+  /** Already redacted with {@link redactSecrets}. */
+  error: string;
   investigationId: string;
   serverName: string;
   upstashConnection?: { accountId: string } | null;
 }) {
-  const protectedProvider = input.serverName.startsWith("aws-")
-    ? "AWS"
-    : input.serverName.startsWith("gcp-")
-      ? "GCP"
-      : input.serverName.startsWith("dash0-")
-        ? "Dash0"
-        : input.serverName.startsWith("grafana-")
-          ? "Grafana"
-        : input.serverName.startsWith("langfuse-")
-          ? "Langfuse"
-          : input.serverName.startsWith("supabase-")
-            ? "Supabase"
-          : input.serverName.startsWith("upstash-")
-            ? "Upstash"
-            : null;
   const accountId = input.serverName.startsWith("upstash-")
     ? input.upstashConnection?.accountId
     : input.serverName.startsWith("aws-")
@@ -248,11 +236,7 @@ export function contextServerConnectFailureEvent(input: {
               )?.accountId;
   return {
     ...(accountId ? { accountId } : {}),
-    error: protectedProvider
-      ? `Unable to connect to ${protectedProvider} context`
-      : input.error instanceof Error
-        ? input.error.message
-        : String(input.error),
+    error: input.error,
     event: "context_server_connect_failed",
     investigationId: input.investigationId,
     server: input.serverName,
@@ -778,6 +762,27 @@ export async function runInvestigationAgent(
       )
     : supabaseConnections;
   const supabaseServers = effectiveSupabaseConnections.map(createSupabaseMcpServer);
+  const secrets = connectionSecrets([
+    ...awsConnections,
+    axiomConnection,
+    datadogConnection,
+    ...dash0Connections,
+    ...postHogConnections,
+    ...grafanaConnections,
+    sentryConnection,
+    ...customMcpConnections,
+    clickStackConnection,
+    linearConnection,
+    ...vercelConnections,
+    slackConnection,
+    upstashConnection,
+    ...langfuseConnections,
+    ...supabaseConnections,
+  ]);
+  // Provider errors reach both the agent and the logs in full, minus the
+  // credentials this investigation holds.
+  const describeConnectError = (error: unknown) =>
+    redactSecrets(safeInvestigationError(error, environment), secrets);
   const connectFailureEvent = (serverName: string, error: unknown) =>
     contextServerConnectFailureEvent({
       awsConnections,
@@ -786,7 +791,7 @@ export async function runInvestigationAgent(
       dash0Connections,
       postHogConnections,
       grafanaConnections,
-      error,
+      error: describeConnectError(error),
       investigationId: job.investigationId,
       langfuseConnections,
       serverName,
@@ -813,14 +818,7 @@ export async function runInvestigationAgent(
     .filter((server): server is NonNullable<typeof server> => server !== null)
     // A provider outage should not stop the investigation. The agent sees the
     // error and decides whether to reconnect.
-    .map((server) =>
-      new RecoverableMcpServer(server, (error) =>
-        safeInvestigationError(
-          connectFailureEvent(server.name, error).error,
-          environment,
-        ),
-      ),
-    );
+    .map((server) => new RecoverableMcpServer(server, describeConnectError));
 
   const sandboxName = `responder-investigation-${job.investigationId}`;
   const client = new DaytonaSandboxClient({

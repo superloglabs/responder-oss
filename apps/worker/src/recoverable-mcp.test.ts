@@ -133,17 +133,18 @@ describe("recoverable MCP server", () => {
     expect(tools[0]?.description).toContain("HTTP 502");
   });
 
-  it("uses the describer to hide provider error details", async () => {
+  it("shows the agent the error as returned by the describer", async () => {
     const wrapped = new RecoverableMcpServer(
-      fakeServer({ name: "aws-account-1" }),
-      () => "Unable to connect to AWS context",
+      fakeServer({ name: "upstash-account-1" }),
+      (error) => String(error instanceof Error ? error.message : error)
+        .replaceAll("upstash-api-key", "[redacted]"),
     );
 
-    wrapped.markUnavailable(new Error("AccessDenied for arn:aws:iam::123:role/x"));
+    wrapped.markUnavailable(new Error("HTTP 401: invalid key upstash-api-key"));
 
     const [tool] = await wrapped.listTools();
-    expect(tool?.description).toContain("Unable to connect to AWS context");
-    expect(tool?.description).not.toContain("arn:aws");
+    expect(tool?.description).toContain("HTTP 401: invalid key [redacted]");
+    expect(tool?.description).not.toContain("upstash-api-key");
   });
 
   it("lets the SDK swap the reconnect tool for the real tools between turns", async () => {

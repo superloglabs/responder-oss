@@ -53,3 +53,49 @@ export function workspaceSecretUsageInstructions(
     prompt("secretSafety"),
   ].filter(Boolean).join("\n");
 }
+
+const connectionSecretFields = new Set([
+  "accessKey",
+  "accessToken",
+  "apiKey",
+  "applicationKey",
+  "externalId",
+  "publicKey",
+  "secretKey",
+  "serviceAccountToken",
+  "userAccessToken",
+]);
+
+// Shorter values are too likely to match ordinary text.
+const minimumSecretLength = 8;
+
+/**
+ * Collects the credentials held by runtime connections, including query
+ * parameter values in configured MCP URLs, so provider errors can be shown
+ * and logged without them.
+ */
+export function connectionSecrets(
+  connections: ReadonlyArray<object | null | undefined>,
+): string[] {
+  const secrets = new Set<string>();
+  for (const connection of connections) {
+    if (!connection) continue;
+    for (const [field, value] of Object.entries(connection)) {
+      if (typeof value !== "string") continue;
+      if (connectionSecretFields.has(field)) secrets.add(value);
+      if (field === "mcpUrl" && URL.canParse(value)) {
+        for (const parameter of new URL(value).searchParams.values()) {
+          secrets.add(parameter);
+        }
+      }
+    }
+  }
+  return [...secrets].filter((secret) => secret.length >= minimumSecretLength);
+}
+
+export function redactSecrets(value: string, secrets: readonly string[]): string {
+  // Replace longer values first so one secret containing another is fully removed.
+  return [...secrets]
+    .sort((left, right) => right.length - left.length)
+    .reduce((text, secret) => text.replaceAll(secret, "[redacted]"), value);
+}
