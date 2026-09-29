@@ -1,6 +1,10 @@
 import { and, asc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
-import { agentModelUsage, type AgentModelUsageWorkload } from "./schema.js";
+import {
+  agentModelUsage,
+  type AgentModelUsageWorkload,
+  type AgentRequestUsage,
+} from "./schema.js";
 
 export interface AgentModelUsageRecord {
   billable: boolean;
@@ -11,6 +15,7 @@ export interface AgentModelUsageRecord {
   model: string;
   organizationId: string;
   outputTokens: number;
+  requestUsage: AgentRequestUsage[] | null;
   requests: number;
   workload: AgentModelUsageWorkload;
   workloadId: string;
@@ -25,6 +30,7 @@ const usageSelection = {
   model: agentModelUsage.model,
   organizationId: agentModelUsage.organizationId,
   outputTokens: agentModelUsage.outputTokens,
+  requestUsage: agentModelUsage.requestUsage,
   requests: agentModelUsage.requests,
   workload: agentModelUsage.workload,
   workloadId: agentModelUsage.workloadId,

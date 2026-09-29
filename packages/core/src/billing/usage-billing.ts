@@ -12,6 +12,7 @@ import {
   type AgentModelUsageRecord,
 } from "../db/agent-model-usage.js";
 import { organizationHasCapability } from "../db/organization-capabilities.js";
+import type { AgentRequestUsage } from "../db/schema.js";
 import {
   closeStaleSandboxUsage,
   listUnbilledSandboxUsage,
@@ -83,13 +84,6 @@ export async function finishSandboxUsage(
   if (row) await settleSandboxUsage(row, dependencies);
 }
 
-export interface AgentModelUsage {
-  cachedInputTokens: number;
-  inputTokens: number;
-  outputTokens: number;
-  requests: number;
-}
-
 interface AgentSettlementDependencies {
   getPricing: typeof getAIGatewayModelPricing;
   markBilled: typeof markAgentModelUsageBilled;
@@ -105,23 +99,24 @@ const defaultAgentDependencies: AgentSettlementDependencies = {
 };
 
 // Prices each request separately so long-context price tiers apply per
-// request. Without per-request usage, as when a stored row is retried, the
-// combined usage is priced as that many equal requests.
+// request. A row without per-request usage is priced as that many equal
+// requests.
 async function agentUsageChargeMicros(
-  model: string,
-  usage: AgentModelUsage,
+  usage: Pick<
+    AgentModelUsageRecord,
+    "cachedInputTokens" | "inputTokens" | "model" | "outputTokens" | "requestUsage" | "requests"
+  >,
   dependencies: AgentSettlementDependencies,
-  requestUsage: AgentModelUsage[] = [],
 ): Promise<number | null> {
-  const pricing = await dependencies.getPricing(aiGatewayModelId("openai", model));
+  const pricing = await dependencies.getPricing(aiGatewayModelId("openai", usage.model));
   if (!pricing) return null;
-  const requests = requestUsage.length > 0
-    ? requestUsage
-    : Array.from({ length: Math.max(1, usage.requests) }, () => ({
-        cachedInputTokens: usage.cachedInputTokens / Math.max(1, usage.requests),
-        inputTokens: usage.inputTokens / Math.max(1, usage.requests),
-        outputTokens: usage.outputTokens / Math.max(1, usage.requests),
-        requests: 1,
+  const count = Math.max(1, usage.requests);
+  const requests: AgentRequestUsage[] = usage.requestUsage?.length
+    ? usage.requestUsage
+    : Array.from({ length: count }, () => ({
+        cachedInputTokens: usage.cachedInputTokens / count,
+        inputTokens: usage.inputTokens / count,
+        outputTokens: usage.outputTokens / count,
       }));
   let costMicros = 0;
   for (const request of requests) {
@@ -138,7 +133,7 @@ export async function settleAgentModelUsage(
 ): Promise<void> {
   let chargeMicros = row.chargeMicros;
   if (chargeMicros === null) {
-    chargeMicros = await agentUsageChargeMicros(row.model, row, dependencies);
+    chargeMicros = await agentUsageChargeMicros(row, dependencies);
     if (chargeMicros === null) {
       // Usage that is not billed only loses its displayed price.
       if (!row.billable) return dependencies.markBilled(row.id);
@@ -166,19 +161,13 @@ export async function settleAgentModelUsage(
 // and reports it when billable. A failed report is retried by the worker.
 export async function recordAgentModelUsage(
   input: Omit<AgentModelUsageRecord, "chargeMicros" | "id">,
-  requestUsage: AgentModelUsage[] = [],
   dependencies: AgentSettlementDependencies & { insert: typeof insertAgentModelUsage } = {
     ...defaultAgentDependencies,
     insert: insertAgentModelUsage,
   },
 ): Promise<void> {
   if (input.requests === 0) return;
-  const chargeMicros = await agentUsageChargeMicros(
-    input.model,
-    input,
-    dependencies,
-    requestUsage,
-  ).catch(() => null);
+  const chargeMicros = await agentUsageChargeMicros(input, dependencies).catch(() => null);
   const row = await dependencies.insert({ ...input, chargeMicros });
   await settleAgentModelUsage(row, dependencies).catch(() => undefined);
 }
@@ -270,8 +259,17 @@ export function usagePeriodStart(
 ): Date {
   if (summary.periodStart !== null) return new Date(summary.periodStart);
   if (summary.nextResetAt !== null) {
-    const start = new Date(summary.nextResetAt);
-    start.setUTCMonth(start.getUTCMonth() - 1);
+    const reset = new Date(summary.nextResetAt);
+    // The same day of the previous month, or its last day when shorter.
+    const lastDayOfPreviousMonth = new Date(Date.UTC(
+      reset.getUTCFullYear(),
+      reset.getUTCMonth(),
+      0,
+    )).getUTCDate();
+    const start = new Date(reset);
+    start.setUTCDate(1);
+    start.setUTCMonth(reset.getUTCMonth() - 1);
+    start.setUTCDate(Math.min(reset.getUTCDate(), lastDayOfPreviousMonth));
     return start;
   }
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));

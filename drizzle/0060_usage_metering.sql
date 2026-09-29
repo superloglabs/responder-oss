@@ -9,6 +9,7 @@ CREATE TABLE "agent_model_usage" (
 	"input_tokens" integer DEFAULT 0 NOT NULL,
 	"cached_input_tokens" integer DEFAULT 0 NOT NULL,
 	"output_tokens" integer DEFAULT 0 NOT NULL,
+	"request_usage" jsonb,
 	"charge_micros" bigint,
 	"billed_at" timestamp with time zone,
 	"billing_attempted_at" timestamp with time zone,

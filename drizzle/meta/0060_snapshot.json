@@ -1,5 +1,5 @@
 {
-  "id": "469e83e4-5d27-4508-9c14-631b47ab9108",
+  "id": "6723e205-8d53-494f-8d0a-9758d01a13a4",
   "prevId": "c0564234-b7bc-46a2-9bbd-c0b3164bee24",
   "version": "7",
   "dialect": "postgresql",
@@ -947,6 +947,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "request_usage": {
+          "name": "request_usage",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "charge_micros": {
           "name": "charge_micros",

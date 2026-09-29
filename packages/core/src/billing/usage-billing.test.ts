@@ -48,6 +48,7 @@ function agentRow(overrides: Partial<AgentModelUsageRecord> = {}): AgentModelUsa
     model: "gpt-5.4",
     organizationId: "organization-1",
     outputTokens: 200,
+    requestUsage: null,
     requests: 2,
     workload: "investigation",
     workloadId: "investigation-1",
@@ -156,15 +157,17 @@ describe("usage billing", () => {
       cachedInputTokens: 0,
       inputTokens,
       outputTokens: 0,
-      requests: 1,
     });
 
     await recordAgentModelUsage(
       {
-        ...agentRow({ inputTokens: 310_000, outputTokens: 0 }),
+        ...agentRow({
+          inputTokens: 310_000,
+          outputTokens: 0,
+          requestUsage: [request(300_000), request(10_000)],
+        }),
         chargeMicros: undefined,
       } as never,
-      [request(300_000), request(10_000)],
       deps,
     );
 
@@ -176,7 +179,7 @@ describe("usage billing", () => {
     const deps = dependencies();
     deps.getPricing.mockResolvedValue(null);
 
-    await recordAgentModelUsage({ ...agentRow(), chargeMicros: undefined } as never, [], deps);
+    await recordAgentModelUsage({ ...agentRow(), chargeMicros: undefined } as never, deps);
 
     expect(deps.insert).toHaveBeenCalledWith(expect.objectContaining({ chargeMicros: null }));
     expect(deps.markBilled).not.toHaveBeenCalled();
@@ -195,7 +198,7 @@ describe("usage billing", () => {
   it("does not record a run that made no model requests", async () => {
     const deps = dependencies();
 
-    await recordAgentModelUsage({ ...agentRow({ requests: 0 }), chargeMicros: undefined } as never, [], deps);
+    await recordAgentModelUsage({ ...agentRow({ requests: 0 }), chargeMicros: undefined } as never, deps);
 
     expect(deps.insert).not.toHaveBeenCalled();
   });
@@ -270,5 +273,37 @@ describe("usage billing", () => {
     }, now)).toEqual(new Date("2026-09-03T00:00:00.000Z"));
     expect(usagePeriodStart({ nextResetAt: null, periodStart: null }, now))
       .toEqual(new Date("2026-09-01T00:00:00.000Z"));
+  });
+
+  it("clamps the period start to the end of a shorter month", () => {
+    expect(usagePeriodStart({
+      nextResetAt: Date.parse("2027-03-31T00:00:00.000Z"),
+      periodStart: null,
+    })).toEqual(new Date("2027-02-28T00:00:00.000Z"));
+  });
+
+  it("retries pricing with the stored per-request usage", async () => {
+    const deps = dependencies();
+    deps.getPricing.mockResolvedValue({
+      input: "0.000001",
+      input_tiers: [
+        { cost: "0.000001", max: 200_000, min: 0 },
+        { cost: "0.000002", min: 200_000 },
+      ],
+      output: "0",
+    });
+    const request = (inputTokens: number) => ({
+      cachedInputTokens: 0,
+      inputTokens,
+      outputTokens: 0,
+    });
+
+    await settleAgentModelUsage(agentRow({
+      inputTokens: 310_000,
+      outputTokens: 0,
+      requestUsage: [request(300_000), request(10_000)],
+    }), deps);
+
+    expect(deps.setCharge).toHaveBeenCalledWith("agent-usage-1", 915_000);
   });
 });

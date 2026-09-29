@@ -1042,6 +1042,13 @@ export const agentModelUsageWorkloadValues = [
 
 export type AgentModelUsageWorkload = (typeof agentModelUsageWorkloadValues)[number];
 
+// Token counts of one model request. `inputTokens` excludes cached reads.
+export interface AgentRequestUsage {
+  cachedInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 // Model usage of one investigation or pull request review run, which always
 // uses Responder's model key. Rows that are not `billable` are recorded for
 // cost visibility only.
@@ -1060,6 +1067,8 @@ export const agentModelUsage = pgTable(
     inputTokens: integer("input_tokens").notNull().default(0),
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    // Each request's tokens, so a retried price matches the first attempt.
+    requestUsage: jsonb("request_usage").$type<AgentRequestUsage[]>(),
     chargeMicros: bigint("charge_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),

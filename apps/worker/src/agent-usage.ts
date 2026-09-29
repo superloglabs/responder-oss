@@ -3,9 +3,11 @@ import { checkUsageAllowance } from "@responder/core/billing/autumn";
 import {
   organizationUsesUsageBilling,
   recordAgentModelUsage,
-  type AgentModelUsage,
 } from "@responder/core/billing/usage-billing";
-import type { AgentModelUsageWorkload } from "@responder/core/db/schema";
+import type {
+  AgentModelUsageWorkload,
+  AgentRequestUsage,
+} from "@responder/core/db/schema";
 
 // Whether an investigation or pull request run of this organization is billed
 // from the usage allowance. It was admitted before it was queued, so a failed
@@ -49,7 +51,7 @@ function splitInputTokens(
   return { cachedInputTokens: cached, inputTokens: inputTokens - cached };
 }
 
-function combinedUsage(usage: Usage): AgentModelUsage {
+function combinedUsage(usage: Usage) {
   const cached = usage.inputTokensDetails.reduce(
     (total, details) => total + (details.cached_tokens ?? 0),
     0,
@@ -61,12 +63,12 @@ function combinedUsage(usage: Usage): AgentModelUsage {
   };
 }
 
-function requestUsage(usage: Usage): AgentModelUsage[] {
-  return (usage.requestUsageEntries ?? []).map((request) => ({
+function requestUsage(usage: Usage): AgentRequestUsage[] | null {
+  const requests = (usage.requestUsageEntries ?? []).map((request) => ({
     ...splitInputTokens(request.inputTokens, request.inputTokensDetails),
     outputTokens: request.outputTokens,
-    requests: 1,
   }));
+  return requests.length > 0 ? requests : null;
 }
 
 // Records the model usage of one agent run. Failures are logged and never
@@ -86,9 +88,10 @@ export async function recordAgentRunUsage(input: {
       billable: input.billable,
       model: input.model,
       organizationId: input.organizationId,
+      requestUsage: requestUsage(input.usage),
       workload: input.workload,
       workloadId: input.workloadId,
-    }, requestUsage(input.usage));
+    });
   } catch (error) {
     console.error(JSON.stringify({
       error: error instanceof Error ? error.message : String(error),

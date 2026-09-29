@@ -32,10 +32,11 @@ describe("agent run usage", () => {
       model: "gpt-5.4",
       organizationId: "organization-1",
       outputTokens: 400,
+      requestUsage: null,
       requests: 3,
       workload: "investigation",
       workloadId: "investigation-1",
-    }, expect.any(Array));
+    });
   });
 
   it("never fails the run when recording fails", async () => {
