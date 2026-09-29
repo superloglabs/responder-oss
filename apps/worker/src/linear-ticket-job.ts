@@ -60,7 +60,7 @@ export async function runLinearTicketJob(
           requestId: job.requestId,
         })],
       });
-      await run(agent, "Create the required Linear ticket now.", { maxTurns: 10 });
+      await run(agent, "Create the required Linear ticket now.", { maxTurns: 100 });
       const remaining = await listPendingLinearTicketRequests({
         investigationId: job.investigationId,
         organizationId: job.config.organizationId,

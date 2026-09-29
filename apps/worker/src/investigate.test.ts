@@ -16,8 +16,8 @@ import {
 } from "./investigate.js";
 
 describe("sandbox agent configuration", () => {
-  it("allows forty model turns for investigations", () => {
-    expect(investigationMaxTurns).toBe(40);
+  it("allows four hundred model turns for investigations", () => {
+    expect(investigationMaxTurns).toBe(400);
   });
 
   it("identifies the custom MCP account when its server cannot connect", () => {

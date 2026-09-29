@@ -375,7 +375,7 @@ export function investigationCapabilities(replay: boolean) {
   return Capabilities.default();
 }
 
-export const investigationMaxTurns = 40;
+export const investigationMaxTurns = 400;
 
 // A paused Slack thread sandbox is deleted by Daytona this long after it stops.
 export const pausedThreadSandboxLifetimeMinutes = 24 * 60;
