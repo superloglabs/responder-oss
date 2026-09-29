@@ -1,7 +1,7 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { runOnlyRefreshToken } from "@responder/core/automations/chatgpt-subscription";
 import { describe, expect, it, vi } from "vitest";
-import { AutomationHarnessError } from "./automation-harness.js";
+import { AutomationHarnessError, automationWorkspaceRoot } from "./automation-harness.js";
 import {
   buildCodexAutomationCommand,
   codexCliVersion,
@@ -265,6 +265,7 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
       .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
       .mockResolvedValueOnce("Process exited with code 1\n"),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn(),
@@ -273,11 +274,20 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
     "harness failed",
   );
   expect(session.readFile).not.toHaveBeenCalled();
+  // The sandbox API rejects writes outside the workspace root.
+  for (const [entry] of vi.mocked(session.materializeEntry).mock.calls)
+    expect(entry.path.startsWith(`${automationWorkspaceRoot}/`)).toBe(true);
   expect(session.materializeEntry).toHaveBeenCalledWith({
     entry: { type: "file", content: authJson },
-    path: "/home/daytona/.responder-subscription-auth/auth.json",
+    path: `${automationWorkspaceRoot}/.responder/subscription-auth.json`,
     runAs: "root",
   });
+  const commands = vi.mocked(session.execCommand).mock.calls.map(([args]) => args.cmd);
+  const moveIndex = commands.findIndex((cmd) =>
+    cmd.includes(`mv -f ${automationWorkspaceRoot}/.responder/subscription-auth.json /home/daytona/.responder-subscription-auth/auth.json`));
+  const codexIndex = commands.findIndex((cmd) => cmd.includes("exec"));
+  expect(moveIndex).toBeGreaterThan(-1);
+  expect(codexIndex).toBeGreaterThan(moveIndex);
   expect(session.execCommand).toHaveBeenLastCalledWith(
     expect.objectContaining({
       cmd: expect.stringContaining(
