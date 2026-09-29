@@ -25,6 +25,9 @@ import {
 
 export const codexCliVersion = subscriptionCliVersion;
 const subscriptionHome = "/home/daytona/.responder-subscription-auth";
+// The sandbox SDK only writes files inside the workspace, so the credential
+// cache is staged here and moved out by root before any model tool starts.
+const subscriptionAuthStagingPath = `${automationWorkspaceRoot}/.responder/subscription-auth.json`;
 // Native authentication stays in the trusted parent; all model tools use this
 // OS-enforced profile. Never fall back to an unsandboxed subscription run.
 export const subscriptionPermissionConfig = [
@@ -209,7 +212,7 @@ export async function runCodexAutomation(
         // The trusted launcher needs host root to create the nested user namespace.
         // Tools run with dropped capabilities and the native filesystem policy.
         cmd: subscriptionRootCommand(
-          `set -eu; chmod 755 /home/daytona; chown -R 0:0 ${automationWorkspaceRoot}; umask 077; test ! -L ${subscriptionHome}; mkdir -p ${subscriptionHome}; chmod 700 ${subscriptionHome}`,
+          `set -eu; chmod 755 /home/daytona; chown -R 0:0 ${automationWorkspaceRoot}; umask 077; test ! -L ${subscriptionHome}; mkdir -p ${subscriptionHome}; chmod 700 ${subscriptionHome}; rm -f ${subscriptionAuthStagingPath}`,
         ),
         maxOutputTokens: 1000,
         workdir: automationWorkspaceRoot,
@@ -218,14 +221,14 @@ export async function runCodexAutomation(
         throw new Error("Unable to prepare subscription credentials");
       await session.materializeEntry({
         entry: { type: "file", content: input.model.subscription.authJson },
-        path: `${subscriptionHome}/auth.json`,
+        path: subscriptionAuthStagingPath,
         runAs: "root",
       });
     }
     output = await session.execCommand({
       cmd: input.model.subscription
         ? subscriptionRootCommand(
-            `chmod 600 ${subscriptionHome}/auth.json\n${buildCodexAutomationCommand(input, executable)}`,
+            `set -eu\ntest ! -L ${subscriptionAuthStagingPath}\nmv -f ${subscriptionAuthStagingPath} ${subscriptionHome}/auth.json\nchmod 600 ${subscriptionHome}/auth.json\n${buildCodexAutomationCommand(input, executable)}`,
           )
         : buildCodexAutomationCommand(input, executable),
       maxOutputTokens: automationHarnessMaxOutputTokens,
@@ -234,7 +237,7 @@ export async function runCodexAutomation(
   } finally {
     if (input.model.subscription) {
       await session.execCommand({
-        cmd: `if [ "$(id -u)" -eq 0 ]; then rm -rf ${subscriptionHome}; else sudo -n rm -rf ${subscriptionHome} && sudo -n chown -R "$(id -u):$(id -g)" ${automationWorkspaceRoot}; fi`,
+        cmd: `if [ "$(id -u)" -eq 0 ]; then rm -rf ${subscriptionHome} ${subscriptionAuthStagingPath}; else sudo -n rm -rf ${subscriptionHome} ${subscriptionAuthStagingPath} && sudo -n chown -R "$(id -u):$(id -g)" ${automationWorkspaceRoot}; fi`,
         maxOutputTokens: 1000,
         workdir: automationWorkspaceRoot,
       });

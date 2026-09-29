@@ -275,13 +275,20 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
   expect(session.readFile).not.toHaveBeenCalled();
   expect(session.materializeEntry).toHaveBeenCalledWith({
     entry: { type: "file", content: authJson },
-    path: "/home/daytona/.responder-subscription-auth/auth.json",
+    path: "/home/daytona/workspace/.responder/subscription-auth.json",
     runAs: "root",
   });
+  expect(session.execCommand).toHaveBeenCalledWith(
+    expect.objectContaining({
+      cmd: expect.stringContaining(
+        "mv -f /home/daytona/workspace/.responder/subscription-auth.json /home/daytona/.responder-subscription-auth/auth.json",
+      ),
+    }),
+  );
   expect(session.execCommand).toHaveBeenLastCalledWith(
     expect.objectContaining({
       cmd: expect.stringContaining(
-        "sudo -n rm -rf /home/daytona/.responder-subscription-auth",
+        "sudo -n rm -rf /home/daytona/.responder-subscription-auth /home/daytona/workspace/.responder/subscription-auth.json",
       ),
     }),
   );
@@ -337,7 +344,7 @@ it("removes native credentials when materialization fails", async () => {
   expect(session.execCommand).toHaveBeenLastCalledWith(
     expect.objectContaining({
       cmd: expect.stringContaining(
-        "sudo -n rm -rf /home/daytona/.responder-subscription-auth",
+        "sudo -n rm -rf /home/daytona/.responder-subscription-auth /home/daytona/workspace/.responder/subscription-auth.json",
       ),
     }),
   );
