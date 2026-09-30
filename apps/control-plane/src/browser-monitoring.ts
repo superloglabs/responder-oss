@@ -15,6 +15,11 @@ const defaultConfig: BrowserMonitoringConfig = {
   tracesSampleRate: import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE,
 };
 
+// posthog-js cancels its own slow analytics requests (for example the 3s
+// feature-flag lookup) and retries them. Visitors are unaffected, so these
+// cancellations are not application errors.
+export const ignoredBrowserErrors = [/PostHog request timed out/];
+
 export function initializeBrowserMonitoring(
   config: BrowserMonitoringConfig = defaultConfig,
 ): boolean {
@@ -26,6 +31,7 @@ export function initializeBrowserMonitoring(
   Sentry.init({
     dsn,
     environment: config.environment?.trim() || undefined,
+    ignoreErrors: ignoredBrowserErrors,
     integrations:
       tracesSampleRate > 0 ? [Sentry.browserTracingIntegration()] : [],
     release: config.release?.trim() || undefined,

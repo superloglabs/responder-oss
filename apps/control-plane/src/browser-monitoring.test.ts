@@ -11,6 +11,7 @@ const sentryMocks = vi.hoisted(() => ({
 vi.mock("@sentry/react", () => sentryMocks);
 
 import {
+  ignoredBrowserErrors,
   initializeBrowserMonitoring,
   setBrowserMonitoringIdentity,
 } from "./browser-monitoring";
@@ -41,11 +42,22 @@ describe("browser error monitoring", () => {
     expect(sentryMocks.init).toHaveBeenCalledWith({
       dsn: "https://public@example.invalid/1",
       environment: "production",
+      ignoreErrors: ignoredBrowserErrors,
       integrations: [],
       release: "abc123",
       sendDefaultPii: false,
       tracesSampleRate: 0,
     });
+  });
+
+  it("ignores PostHog's own request timeouts but not other aborts", () => {
+    const ignored = (message: string) =>
+      ignoredBrowserErrors.some((pattern) => pattern.test(message));
+
+    expect(ignored("PostHog request timed out after 3000ms")).toBe(true);
+    expect(ignored("AbortError: PostHog request timed out after 10000ms")).toBe(true);
+    expect(ignored("signal is aborted without reason")).toBe(false);
+    expect(ignored("Request timed out after 3000ms")).toBe(false);
   });
 
   it("sets names and clears the old name while a new organization loads", () => {
