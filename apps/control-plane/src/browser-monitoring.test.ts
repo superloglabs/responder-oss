@@ -39,6 +39,7 @@ describe("browser error monitoring", () => {
     ).toBe(true);
 
     expect(sentryMocks.init).toHaveBeenCalledWith({
+      beforeSend: expect.any(Function),
       dsn: "https://public@example.invalid/1",
       environment: "production",
       integrations: [],
@@ -46,6 +47,21 @@ describe("browser error monitoring", () => {
       sendDefaultPii: false,
       tracesSampleRate: 0,
     });
+  });
+
+  it("drops events with no frame from our scripts before sending", () => {
+    initializeBrowserMonitoring({
+      appOrigin: "https://superlog.sh",
+      dsn: "https://public@example.invalid/1",
+    });
+    const { beforeSend } = sentryMocks.init.mock.calls[0]![0];
+    const event = (filename: string) => ({
+      exception: { values: [{ stacktrace: { frames: [{ filename }] } }] },
+    });
+
+    expect(beforeSend(event("<anonymous>"))).toBeNull();
+    const ours = event("https://superlog.sh/assets/index-LSAnZpwu.js");
+    expect(beforeSend(ours)).toBe(ours);
   });
 
   it("sets names and clears the old name while a new organization loads", () => {
