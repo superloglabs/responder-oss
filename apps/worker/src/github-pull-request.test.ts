@@ -66,6 +66,124 @@ describe("GitHub pull requests from Daytona", () => {
     );
   });
 
+  it("requests reviewers and assignees on the new pull request", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(commandResult(0, "src/route.ts\0"))
+        .mockResolvedValueOnce(commandResult(0, "present"))
+        .mockResolvedValueOnce(commandResult(1)),
+      readFile: vi.fn().mockResolvedValue(new TextEncoder().encode("fixed\n")),
+    } as unknown as DaytonaSandboxSession;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
+      .mockResolvedValueOnce(Response.json({ ref: "refs/heads/fix" }))
+      .mockResolvedValueOnce(
+        Response.json({ number: 42, html_url: "https://github.com/acme/app/pull/42" }),
+      )
+      .mockResolvedValueOnce(Response.json({ requested_reviewers: [{ login: "alice" }] }))
+      .mockResolvedValueOnce(Response.json({ assignees: [{ login: "Bob" }] }));
+
+    await expect(
+      createPullRequestFromSandbox(
+        {
+          assignees: ["bob", "outsider"],
+          baseBranch: "main",
+          baseSha: "a".repeat(40),
+          body: "Pull request body",
+          installationId: 123,
+          repository: "acme/app",
+          repositoryPath: "/home/daytona/workspace/repositories/acme/app",
+          requestId: "12345678-1234-1234-1234-123456789012",
+          reviewers: ["alice"],
+          title: "Fix: Broken route",
+          workspaceBaseSha: "b".repeat(40),
+        },
+        session,
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+        },
+      ),
+    ).resolves.toMatchObject({
+      assignees: ["Bob"],
+      number: 42,
+      peopleErrors: [
+        "GitHub did not assign outsider. Assignees need access to the repository.",
+      ],
+      reviewers: ["alice"],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/acme/app/pulls/42/requested_reviewers",
+      expect.objectContaining({ body: '{"reviewers":["alice"]}', method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/acme/app/issues/42/assignees",
+      expect.objectContaining({ body: '{"assignees":["bob","outsider"]}', method: "POST" }),
+    );
+  });
+
+  it("keeps the pull request when GitHub refuses a reviewer", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce(commandResult(0, "src/route.ts\0"))
+        .mockResolvedValueOnce(commandResult(0, "present"))
+        .mockResolvedValueOnce(commandResult(1)),
+      readFile: vi.fn().mockResolvedValue(new TextEncoder().encode("fixed\n")),
+    } as unknown as DaytonaSandboxSession;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
+      .mockResolvedValueOnce(Response.json({ ref: "refs/heads/fix" }))
+      .mockResolvedValueOnce(
+        Response.json({ number: 42, html_url: "https://github.com/acme/app/pull/42" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { message: "Reviews may only be requested from collaborators." },
+          { status: 422 },
+        ),
+      );
+
+    await expect(
+      createPullRequestFromSandbox(
+        {
+          baseBranch: "main",
+          baseSha: "a".repeat(40),
+          body: "Pull request body",
+          installationId: 123,
+          repository: "acme/app",
+          repositoryPath: "/home/daytona/workspace/repositories/acme/app",
+          requestId: "12345678-1234-1234-1234-123456789012",
+          reviewers: ["outsider"],
+          title: "Fix: Broken route",
+          workspaceBaseSha: "b".repeat(40),
+        },
+        session,
+        {
+          createInstallationToken: vi.fn().mockResolvedValue("github-secret"),
+          fetch: fetchMock,
+        },
+      ),
+    ).resolves.toEqual({
+      branch: "fix/fix-broken-route-12345678",
+      changedFiles: ["src/route.ts"],
+      number: 42,
+      peopleErrors: [
+        "Unable to request reviewers: Reviews may only be requested from collaborators.",
+      ],
+      url: "https://github.com/acme/app/pull/42",
+    });
+  });
+
   it("rejects a changed file containing a workspace secret placeholder", async () => {
     const session = {
       execCommand: vi

@@ -112,7 +112,9 @@ Configure a public GitHub App with:
 - Repository permissions: Contents read/write, Pull requests read/write,
   Metadata read, and read-only Actions, Checks, Commit statuses, and Issues.
   Automation agents read pull request CI state and issues on private
-  repositories through the worker's `github_api` tool.
+  repositories through the worker's `github_api` tool. Pull requests
+  read/write also lets `open_pull_request` request reviewers and assign people
+  on the pull requests it opens.
 - Account permission: Email addresses read-only
 - Webhook URL: `<public>/api/webhooks/github`
 - Subscribe to: Pull request and Pull request review comment

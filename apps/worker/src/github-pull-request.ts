@@ -16,6 +16,11 @@ const githubPullRequestSchema = z.object({
   number: z.number().int().positive(),
   html_url: z.string().url(),
 });
+const githubUsersSchema = z.array(z.object({ login: z.string() }));
+const githubRequestedReviewersSchema = z.object({
+  requested_reviewers: githubUsersSchema,
+});
+const githubAssigneesSchema = z.object({ assignees: githubUsersSchema });
 
 interface PullRequestDependencies {
   createInstallationToken: (installationId: number) => Promise<string>;
@@ -57,6 +62,57 @@ function execResult(output: string): { exitCode: number; stdout: string } {
     exitCode: match ? Number(match[1]) : -1,
     stdout: output.split("\nOutput:\n", 2)[1] ?? "",
   };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.slice(0, 500) : "GitHub request failed";
+}
+
+// The pull request is already open, so people GitHub refuses are reported
+// instead of failing the call.
+async function requestPullRequestPeople(
+  fetchImpl: typeof fetch,
+  token: string,
+  apiBase: string,
+  number: number,
+  people: { assignees?: string[]; reviewers?: string[] },
+): Promise<{ assignees?: string[]; peopleErrors?: string[]; reviewers?: string[] }> {
+  const result: { assignees?: string[]; peopleErrors?: string[]; reviewers?: string[] } = {};
+  const errors: string[] = [];
+  if (people.reviewers?.length) {
+    try {
+      const pullRequest = githubRequestedReviewersSchema.parse(
+        await githubJson(fetchImpl, token, `${apiBase}/pulls/${number}/requested_reviewers`, {
+          method: "POST",
+          body: JSON.stringify({ reviewers: people.reviewers }),
+        }),
+      );
+      result.reviewers = pullRequest.requested_reviewers.map((user) => user.login);
+    } catch (error) {
+      errors.push(`Unable to request reviewers: ${errorMessage(error)}`);
+    }
+  }
+  if (people.assignees?.length) {
+    try {
+      // GitHub skips people who cannot be assigned instead of failing.
+      const issue = githubAssigneesSchema.parse(
+        await githubJson(fetchImpl, token, `${apiBase}/issues/${number}/assignees`, {
+          method: "POST",
+          body: JSON.stringify({ assignees: people.assignees }),
+        }),
+      );
+      result.assignees = issue.assignees.map((user) => user.login);
+      const assigned = new Set(result.assignees.map((login) => login.toLowerCase()));
+      const skipped = people.assignees.filter((login) => !assigned.has(login.toLowerCase()));
+      if (skipped.length > 0) {
+        errors.push(`GitHub did not assign ${skipped.join(", ")}. Assignees need access to the repository.`);
+      }
+    } catch (error) {
+      errors.push(`Unable to assign people: ${errorMessage(error)}`);
+    }
+  }
+  if (errors.length > 0) result.peopleErrors = errors;
+  return result;
 }
 
 async function runCommand(
@@ -183,6 +239,7 @@ export async function changedFiles(
 
 export async function createPullRequestFromSandbox(
   input: {
+    assignees?: string[];
     baseBranch: string;
     baseSha: string;
     body: string;
@@ -190,6 +247,7 @@ export async function createPullRequestFromSandbox(
     repository: string;
     repositoryPath: string;
     requestId: string;
+    reviewers?: string[];
     scanChangedFileContents?: boolean;
     title: string;
     workspaceBaseSha: string;
@@ -280,10 +338,18 @@ export async function createPullRequestFromSandbox(
       }),
     }),
   );
+  const people = await requestPullRequestPeople(
+    dependencies.fetch,
+    token,
+    apiBase,
+    pullRequest.number,
+    input,
+  );
   return {
     branch,
     changedFiles: files.map((file) => file.path),
     number: pullRequest.number,
     url: pullRequest.html_url,
+    ...people,
   };
 }
