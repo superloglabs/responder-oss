@@ -110,7 +110,8 @@ describe("Linear ticket requests", () => {
   });
 
   it("recovers a retry by looking up the stable request ID", async () => {
-    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://callbacks.responder.example");
     const { claimWhere } = databaseDouble([request]);
     vi.mocked(getRuntimeLinearConnection).mockResolvedValue({
       accessToken: "linear-token",

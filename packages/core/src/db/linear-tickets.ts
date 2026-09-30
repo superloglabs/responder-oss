@@ -242,7 +242,7 @@ export async function fulfillLinearTicketRequest(input: {
             evidence: request.evidence,
           },
           issueBaseUrl: input.issueBaseUrl ??
-            process.env.RESPONDER_PUBLIC_URL ??
+            process.env.RESPONDER_APP_URL ??
             process.env.BETTER_AUTH_URL ??
             "http://localhost:3000",
           template: request.linearIssueTemplate,
