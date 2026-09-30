@@ -61,6 +61,7 @@ import {
 import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
+  recoverSubmittedInvestigationReport,
 } from "./investigation-completion.js";
 import {
   legacyHeartbeatHandoffWaitMs,
@@ -807,14 +808,20 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
         );
       },
     );
+    let report = result.report;
+    if (!report.trim() && !payload.replay && !payload.slackIssueFollowup) {
+      report = await recoverSubmittedInvestigationReport(
+        await getInvestigationReportMarkdown(payload.investigationId),
+      );
+    }
     let deliveryWarnings: string[] = [];
     if (payload.slackIssueFollowup?.issueIds.length) {
-      await completeInvestigation(payload.investigationId, result.report);
+      await completeInvestigation(payload.investigationId, report);
       await deliverSlackIssueFollowupResponse({
         channelId: payload.slackIssueFollowup.channelId,
         deliveryRunId: job.id,
         originalInvestigationId: payload.slackIssueFollowup.originalInvestigationId,
-        response: result.report,
+        response: report,
         threadTimestamp: payload.slackIssueFollowup.threadTimestamp,
         updatedIssueIds: result.updatedIssueIds ?? [],
       });
@@ -823,7 +830,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
         deliveryRunId: job.id,
         investigationId: payload.investigationId,
         replay: payload.replay,
-        report: result.report,
+        report,
       });
     }
     await reportIncompleteSlackDelivery({
