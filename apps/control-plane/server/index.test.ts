@@ -39,6 +39,7 @@ const slackWebhookMocks = vi.hoisted(() => ({
   findAutomationsForSlackEvent: vi.fn().mockResolvedValue([]),
   findAgentsForSlackEvent: vi.fn(),
   getSlackChannelConnection: vi.fn(),
+  findSlackIssueThread: vi.fn(() => Promise.resolve(null)),
   recordInvestigationSlackSource: vi.fn(),
 }));
 
@@ -69,6 +70,7 @@ vi.mock(
   "../../../packages/core/src/db/investigations.js",
   async (importOriginal) => ({
     ...(await importOriginal()),
+    findSlackIssueThread: slackWebhookMocks.findSlackIssueThread,
     recordInvestigationSlackSource:
       slackWebhookMocks.recordInvestigationSlackSource,
   }),
@@ -904,6 +906,175 @@ describe("control-plane API", () => {
       },
     );
     expect(queueInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges Slack alerts when the monthly allowance is used up", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    slackWebhookMocks.findAgentsForSlackEvent.mockResolvedValueOnce([
+      {
+        agentId: "17171717-1717-4717-8717-171717171717",
+        integrationAccountId: "04040404-0404-4404-8404-040404040404",
+        organizationId: "03030303-0303-4303-8303-030303030303",
+        trigger: "slack_channel",
+      },
+    ]);
+    vi.mocked(queueInvestigation).mockResolvedValueOnce({ kind: "blocked" });
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvBlocked",
+      event: {
+        type: "message",
+        subtype: "bot_message",
+        bot_id: "B-DATADOG",
+        bot_profile: { app_id: "A-DATADOG", name: "Datadog" },
+        channel: "C123",
+        ts: "1700000007.000001",
+        text: "Triggered: checkout error rate is above 5%",
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      blocked: true,
+      matchedAgents: 1,
+      ok: true,
+    });
+    expect(queueInvestigation).toHaveBeenCalledTimes(1);
+    expect(slackWebhookMocks.recordInvestigationSlackSource).not.toHaveBeenCalled();
+    expect(slackWebhookMocks.getSlackChannelConnection).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      JSON.stringify({
+        agentId: "17171717-1717-4717-8717-171717171717",
+        channelId: "C123",
+        eventId: "EvBlocked",
+        teamId: "T123",
+        event: "slack_investigation_blocked",
+        reason: "allowance_exhausted",
+      }),
+    );
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges Slack thread turns when the monthly allowance is used up", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    slackWebhookMocks.findAgentsForSlackEvent.mockResolvedValueOnce([
+      {
+        agentId: "17171717-1717-4717-8717-171717171717",
+        integrationAccountId: "04040404-0404-4404-8404-040404040404",
+        organizationId: "03030303-0303-4303-8303-030303030303",
+        trigger: "slack_thread",
+      },
+    ]);
+    vi.mocked(queueSlackThreadInvestigation).mockResolvedValueOnce({
+      kind: "blocked",
+    });
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvBlockedMention",
+      event: {
+        type: "app_mention",
+        channel: "C123",
+        ts: "1700000008.000001",
+        user: "U123",
+        text: "<@U-RESPONDER> investigate checkout latency",
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      blocked: true,
+      matchedAgents: 1,
+      ok: true,
+    });
+    expect(slackWebhookMocks.recordInvestigationSlackSource).not.toHaveBeenCalled();
+    expect(slackWebhookMocks.getSlackChannelConnection).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges Slack issue follow-ups when the monthly allowance is used up", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    slackWebhookMocks.findSlackIssueThread.mockResolvedValueOnce({
+      agentId: "17171717-1717-4717-8717-171717171717",
+      id: "01010101-0101-4101-8101-010101010101",
+      integrationAccountId: "04040404-0404-4404-8404-040404040404",
+      issueIds: [],
+      issueTitle: "Checkout latency",
+      issues: [],
+      reportMarkdown: null,
+    } as never);
+    vi.mocked(queueInvestigation).mockResolvedValueOnce({ kind: "blocked" });
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvBlockedFollowup",
+      event: {
+        type: "app_mention",
+        channel: "C123",
+        ts: "1700000009.000002",
+        thread_ts: "1700000009.000001",
+        user: "U123",
+        text: "<@U-RESPONDER> can you check again?",
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      blocked: true,
+      followup: true,
+      matchedAgents: 1,
+      ok: true,
+    });
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"slack_investigation_blocked"'),
+    );
+    expect(slackWebhookMocks.findAgentsForSlackEvent).not.toHaveBeenCalled();
   });
 
   it("ignores resolved app alerts that start with a white check mark", async () => {

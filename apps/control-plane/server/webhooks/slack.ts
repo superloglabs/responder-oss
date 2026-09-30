@@ -476,6 +476,24 @@ export function slackAlertIgnoreReason(input: {
   return null;
 }
 
+// Running out of the monthly allowance is an expected state, and the
+// organization is already notified when it happens. Acknowledge the event so
+// Slack does not retry it, and log it instead of failing the request.
+function logBlockedSlackInvestigation(input: {
+  agentId: string;
+  channelId: string;
+  eventId: string;
+  teamId: string;
+}): void {
+  console.info(
+    JSON.stringify({
+      ...input,
+      event: "slack_investigation_blocked",
+      reason: "allowance_exhausted",
+    }),
+  );
+}
+
 function parseJson(value: string): unknown {
   try {
     return JSON.parse(value);
@@ -541,9 +559,7 @@ async function forwardSlackEvent(input: {
         threadTimestamp: input.threadTimestamp,
       })
     : await queueInvestigation(request);
-  if (result.kind === "blocked") {
-    throw new Error("Monthly investigation allowance exhausted");
-  }
+  if (result.kind === "blocked") return null;
   return investigationStartResponseSchema.parse({
     duplicate: result.kind === "duplicate",
     investigationId: result.investigationId,
@@ -1017,7 +1033,18 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         },
       );
       if (result.kind === "blocked") {
-        throw new Error("Monthly investigation allowance exhausted");
+        logBlockedSlackInvestigation({
+          agentId: linked.agentId,
+          channelId: event.channel,
+          eventId: callback.data.event_id,
+          teamId: callback.data.team_id,
+        });
+        return context.json({
+          ok: true,
+          matchedAgents: 1,
+          followup: true,
+          blocked: true,
+        });
       }
       return context.json({
         ok: true,
@@ -1072,6 +1099,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     userId: event.user,
     senderAppId: event.app_id ?? event.bot_profile?.app_id,
   }) ?? [];
+  let blocked = false;
   await Promise.all(
     matches.map(async (match) => {
       const result = await forwardSlackEvent({
@@ -1089,6 +1117,16 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         userId: event.user,
         userName: event.username?.trim() || undefined,
       });
+      if (!result) {
+        blocked = true;
+        logBlockedSlackInvestigation({
+          agentId: match.agentId,
+          channelId: event.channel,
+          eventId: callback.data.event_id,
+          teamId: callback.data.team_id,
+        });
+        return;
+      }
       await recordInvestigationSlackSource(result.investigationId, {
         attachments: event.attachments ?? [],
         authorName: slackMessageAuthor(event),
@@ -1124,6 +1162,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   return context.json({
     ok: true,
     matchedAgents: matches.length,
+    ...(blocked ? { blocked: true } : {}),
     ...(automationMatches.length > 0
       ? { matchedAutomations: automationMatches.length }
       : {}),
