@@ -37,6 +37,17 @@ export interface AutomationToolResult {
 
 export const openPullRequestToolName = "open_pull_request";
 
+// GitHub usernames, with or without a leading @.
+export const githubLoginPattern = "^@?[A-Za-z0-9][A-Za-z0-9-]{0,38}$";
+export const maxPullRequestPeople = 10;
+
+const githubLoginsProperty = (description: string) => ({
+  description,
+  items: { pattern: githubLoginPattern, type: "string" },
+  maxItems: maxPullRequestPeople,
+  type: "array",
+});
+
 const repositoryToolDefinitions = [
   {
     annotations: {
@@ -46,10 +57,11 @@ const repositoryToolDefinitions = [
       readOnlyHint: false,
     },
     description:
-      "Open a GitHub pull request with the current changes in a checked-out repository's working tree, against the branch it was checked out from. Make and test the changes first. Returns the pull request URL so it can be linked in messages. Calling again with the same repository and title returns the same pull request.",
+      "Open a GitHub pull request with the current changes in a checked-out repository's working tree, against the branch it was checked out from. Make and test the changes first. Can request reviewers and assign people by GitHub username. Returns the pull request URL so it can be linked in messages. Calling again with the same repository and title returns the same pull request.",
     inputSchema: {
       additionalProperties: false,
       properties: {
+        assignees: githubLoginsProperty("GitHub usernames to assign to the pull request."),
         body: { maxLength: 12_000, minLength: 1, type: "string" },
         repository: {
           description: "The checked-out repository, as owner/name.",
@@ -57,6 +69,7 @@ const repositoryToolDefinitions = [
           minLength: 1,
           type: "string",
         },
+        reviewers: githubLoginsProperty("GitHub usernames to request a review from. They need access to the repository."),
         title: { maxLength: 240, minLength: 1, type: "string" },
       },
       required: ["repository", "title", "body"],

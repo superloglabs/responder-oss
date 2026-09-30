@@ -17,7 +17,9 @@ import {
   postAutomationNotification,
 } from "./automation-notifications.js";
 import {
+  githubLoginPattern,
   maxNotificationLength,
+  maxPullRequestPeople,
   openPullRequestToolName,
   type AutomationToolRequest,
   type AutomationToolResult,
@@ -33,9 +35,16 @@ const notificationSchema = z.object({
   text: z.string().trim().min(1).max(maxNotificationLength),
 });
 
+const githubLoginsSchema = z
+  .array(z.string().trim().regex(new RegExp(githubLoginPattern, "u")).transform((login) => login.replace(/^@/u, "")))
+  .max(maxPullRequestPeople)
+  .optional();
+
 const pullRequestSchema = z.object({
+  assignees: githubLoginsSchema,
   body: z.string().trim().min(1).max(12_000),
   repository: z.string().trim().min(1).max(255),
+  reviewers: githubLoginsSchema,
   title: z.string().trim().min(1).max(240),
 });
 
@@ -79,7 +88,7 @@ export function automationActionInstructions(notificationChannels: string[] = []
     `The ${automationToolServerName} tool server works with the selected repositories as the Responder GitHub App; the sandbox has no GitHub credentials of its own.`,
     "- github_api reads the GitHub REST API: pull requests, commits, compares, issues, and files. Use it instead of unauthenticated requests to api.github.com.",
     "- fetch_ref brings another branch, tag, pull request head, or commit into the checkout as github/<ref> for git diff. The checkouts have no history.",
-    `- ${openPullRequestToolName} opens a pull request after you make and test the repository changes. It publishes the working tree changes on a new branch and returns the pull request URL, so you can link the pull request in messages you post.`,
+    `- ${openPullRequestToolName} opens a pull request after you make and test the repository changes. It publishes the working tree changes on a new branch and returns the pull request URL, so you can link the pull request in messages you post. When the instructions name people to review or own the pull request, pass their GitHub usernames as reviewers or assignees.`,
     "Do not include secrets in pull request titles or bodies.",
   ].join("\n");
 }
@@ -234,6 +243,7 @@ export function createAutomationToolHandler(input: {
         throw new Error("Pull request repository is not selected for this automation");
       }
       pullRequest = await dependencies.createPullRequest({
+        assignees: action.assignees,
         baseBranch: checkout.branch,
         baseSha: checkout.sha,
         body: action.body,
@@ -241,6 +251,7 @@ export function createAutomationToolHandler(input: {
         repository: checkout.repository,
         repositoryPath: checkout.path,
         requestId: attempt.id,
+        reviewers: action.reviewers,
         title: action.title,
         workspaceBaseSha: checkout.workspaceBaseSha,
       }, input.session);
@@ -257,9 +268,12 @@ export function createAutomationToolHandler(input: {
     await input.onAction({ externalReference: pullRequest.url, kind, ...details });
     return toolText({
       ...details,
+      assignees: pullRequest.assignees,
       branch: pullRequest.branch,
       changedFiles: pullRequest.changedFiles,
       number: pullRequest.number,
+      peopleErrors: pullRequest.peopleErrors,
+      reviewers: pullRequest.reviewers,
       url: pullRequest.url,
     });
   };

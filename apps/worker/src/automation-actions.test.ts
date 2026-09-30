@@ -101,6 +101,46 @@ describe("automation pull request tool", () => {
     });
   });
 
+  it("passes reviewers and assignees to GitHub and reports what it could not do", async () => {
+    const deps = dependencies();
+    deps.createPullRequest.mockResolvedValue({
+      assignees: ["bob"],
+      branch: "fix/example-attempt",
+      changedFiles: ["src/index.ts"],
+      number: 1,
+      peopleErrors: ["Unable to request reviewers: Reviews may only be requested from collaborators."],
+      url: "https://github.com/acme/app/pull/1",
+    });
+    const { handle } = handler(deps);
+
+    const result = await handle({
+      ...openPullRequest,
+      arguments: { ...openPullRequest.arguments, assignees: ["@bob"], reviewers: ["outsider"] },
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ["bob"], reviewers: ["outsider"] }),
+      session,
+    );
+    expect(resultText(result)).toMatchObject({
+      assignees: ["bob"],
+      peopleErrors: ["Unable to request reviewers: Reviews may only be requested from collaborators."],
+      url: "https://github.com/acme/app/pull/1",
+    });
+  });
+
+  it("rejects a reviewer that is not a GitHub username", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps);
+
+    await expect(handle({
+      ...openPullRequest,
+      arguments: { ...openPullRequest.arguments, reviewers: ["acme/platform"] },
+    })).resolves.toMatchObject({ isError: true });
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
+  });
+
   it("returns the earlier pull request when the same one is requested again", async () => {
     const deps = dependencies();
     deps.beginAttempt.mockResolvedValue({
