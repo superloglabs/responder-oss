@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS mcp-grafana
+FROM node:25-bookworm-slim AS mcp-grafana
 
 # Self-hosted Grafana context runs grafana/mcp-grafana. Keep the version and
 # checksums in sync with scripts/install-mcp-grafana.mjs.
@@ -14,7 +14,7 @@ RUN mkdir -p /opt/mcp-grafana \
     mcp-grafana LICENSE \
   && chmod 0555 /opt/mcp-grafana/mcp-grafana
 
-FROM node:24-bookworm-slim
+FROM node:25-bookworm-slim
 
 ENV NODE_ENV=production
 ENV TSX_DISABLE_CACHE=1
