@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import {
   automationNotificationMessage,
+  postAutomationNotification,
   sendAutomationRunNotifications,
 } from "./automation-notifications.js";
 
@@ -100,6 +101,23 @@ describe("sending automation notifications", () => {
     });
     const ids = vi.mocked(dependencies.post).mock.calls.map(([input]) => input.clientMessageId);
     expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it("replies in a thread", async () => {
+    const post = vi.fn().mockResolvedValue("1790000000.000200");
+    await postAutomationNotification({
+      markdown: "Details.",
+      notifications: [notification],
+      organizationId,
+      seed: "attempt-1:1",
+      text: "Details.",
+      threadTimestamp: "1790000000.000100",
+    }, { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), post });
+
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      channelId: "C999",
+      threadTimestamp: "1790000000.000100",
+    }));
   });
 
   it("keeps posting to other channels when one fails", async () => {

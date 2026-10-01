@@ -93,6 +93,7 @@ describe("tool definitions", () => {
     expect(automationToolDefinitions().map((tool) => tool.name)).not.toContain("post_notification");
     const notify = automationToolDefinitions(["#ops"]).find((tool) => tool.name === "post_notification");
     expect(notify?.description).toContain("(#ops)");
+    expect(notify?.inputSchema.properties).toHaveProperty("details");
   });
 });
 
