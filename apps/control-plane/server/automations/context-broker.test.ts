@@ -41,6 +41,13 @@ function claim(provider: string, credentials: Record<string, unknown>) {
 
 function appFor(activeClaim: ReturnType<typeof claim> | null) {
   const dependencies = {
+    gcp: {
+      authHeaders: vi.fn(async () => new Headers({
+        authorization: "Bearer google-federated-token",
+        "x-goog-user-project": "konex-prod",
+      })),
+      now: () => Date.now(),
+    },
     freshSentryCredentials: vi.fn().mockResolvedValue({
       accessToken: "fresh-sentry-token",
       expiresAt: null,
@@ -99,6 +106,45 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
     createAutomationContextBrokerRoutes(dependencies),
   );
   return { app, dependencies };
+}
+
+function gcpClaim(sessionSuffix: string) {
+  return claim("gcp", {
+    projectId: "konex-prod",
+    projectNumber: "123456789012",
+    sessionName: `responder-gcp-${sessionSuffix.padEnd(32, "x")}`,
+  });
+}
+
+// A Google MCP server that answers with server-sent events, the way
+// Streamable HTTP servers may.
+function fakeGoogleMcp() {
+  return vi.fn(async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+    if (body.method === "notifications/initialized") {
+      return new Response(null, { status: 202 });
+    }
+    const result = body.method === "initialize"
+      ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+      : body.method === "tools/list"
+        ? {
+            tools: [
+              { annotations: { readOnlyHint: true }, name: "list_log_entries" },
+              { annotations: { readOnlyHint: false }, name: "delete_log" },
+              { name: "create_sink" },
+            ],
+          }
+        : { content: [{ text: "entries", type: "text" }] };
+    return new Response(
+      `event: message\ndata: ${JSON.stringify({ id: body.id, jsonrpc: "2.0", result })}\n\n`,
+      {
+        headers: {
+          "content-type": "text/event-stream",
+          ...(body.method === "initialize" ? { "mcp-session-id": "google-session" } : {}),
+        },
+      },
+    );
+  });
 }
 
 function rpcRequest(body: unknown) {
@@ -178,6 +224,120 @@ describe("automation context broker", () => {
       signal: expect.any(AbortSignal),
     }));
     expect(await call.text()).not.toContain("xoxp-worker-only");
+  });
+
+  describe("Google Cloud", () => {
+    it("lists only the tools Google marks read-only", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(gcpClaim("list"));
+      dependencies.providerFetch.mockImplementation(fakeGoogleMcp());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}/logging`,
+        rpcRequest({ id: 7, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { id: number; result: { tools: Array<{ name: string }> } };
+      expect(body.id).toBe(7);
+      expect(body.result.tools.map((tool) => tool.name)).toEqual(["list_log_entries"]);
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.every(([url]) => url === "https://logging.googleapis.com/mcp")).toBe(true);
+      const listHeaders = new Headers(calls.at(-1)![1].headers);
+      expect(listHeaders.get("authorization")).toBe("Bearer google-federated-token");
+      expect(listHeaders.get("mcp-session-id")).toBe("google-session");
+      expect(listHeaders.get("mcp-protocol-version")).toBe("2025-06-18");
+      expect(JSON.stringify(body)).not.toContain("google-federated-token");
+    });
+
+    it("refuses tools that are not read-only without calling Google", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(gcpClaim("refuse"));
+      dependencies.providerFetch.mockImplementation(fakeGoogleMcp());
+
+      for (const name of ["delete_log", "create_sink", "not_a_tool"]) {
+        const response = await app.request(
+          `/api/automation-context-broker/v1/${accountId}/logging`,
+          rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name } }),
+        );
+        expect(response.status).toBe(400);
+      }
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.some(([, init]) => String(init.body).includes("tools/call"))).toBe(false);
+    });
+
+    it("forwards read-only tool calls with the federated Google credential", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(gcpClaim("forward"));
+      dependencies.providerFetch.mockImplementation(fakeGoogleMcp());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}/logging`,
+        {
+          ...rpcRequest({
+            id: 3,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { arguments: { filter: "severity>=ERROR" }, name: "list_log_entries" },
+          }),
+          headers: {
+            ...rpcRequest({}).headers,
+            accept: "application/json, text/event-stream",
+            "mcp-session-id": "run-session",
+          },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("entries");
+      const [url, init] = (dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>).at(-1)!;
+      expect(url).toBe("https://logging.googleapis.com/mcp");
+      const headers = new Headers(init.headers);
+      expect(headers.get("authorization")).toBe("Bearer google-federated-token");
+      expect(headers.get("x-goog-user-project")).toBe("konex-prod");
+      expect(headers.get("mcp-session-id")).toBe("run-session");
+    });
+
+    it("rejects unknown services and methods outside the tool surface", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(gcpClaim("reject"));
+      dependencies.providerFetch.mockImplementation(fakeGoogleMcp());
+
+      const unknownService = await app.request(
+        `/api/automation-context-broker/v1/${accountId}/storage`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const noService = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const resources = await app.request(
+        `/api/automation-context-broker/v1/${accountId}/logging`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "resources/list" }),
+      );
+
+      expect(unknownService.status).toBe(404);
+      expect(noService.status).toBe(404);
+      expect(resources.status).toBe(404);
+      expect(dependencies.providerFetch).not.toHaveBeenCalled();
+    });
+
+    it("does not accept a service path for other providers", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(claim("datadog", {
+        apiKey: "dd-api-secret",
+        applicationKey: "dd-app-secret",
+        authType: "api_keys",
+      }));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}/logging`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(404);
+      expect(dependencies.providerFetch).not.toHaveBeenCalled();
+    });
   });
 
   it("injects Datadog credentials only into the upstream request", async () => {

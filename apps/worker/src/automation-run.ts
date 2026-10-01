@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { isAutomationContextProvider } from "@responder/core/automations/context-providers";
+import { gcpMcpServices } from "@responder/core/integrations/gcp";
 import {
   appendAutomationRunEvent,
   automationRunCancellationRequested,
@@ -202,15 +204,26 @@ function automationContextServers(
   );
   const slackTriggered = triggerInput.provider === "slack";
   const served = connections.filter((connection) =>
-    (connection.role === "context" &&
-      ["custom_mcp", "datadog", "linear", "sentry", "slack"].includes(connection.provider)) ||
+    (connection.role === "context" && isAutomationContextProvider(connection.provider)) ||
     (connection.role === "trigger" && connection.provider === "slack" && slackTriggered)
   );
   return [...new Map(served.map((connection) => [connection.id, connection])).values()]
-    .map((connection) => ({
-      name: `${connection.provider}_${connection.id.replaceAll("-", "")}`,
-      url: new URL(encodeURIComponent(connection.id), broker).toString(),
-    }));
+    .flatMap((connection) => {
+      const name = `${connection.provider}_${connection.id.replaceAll("-", "")}`;
+      const url = new URL(`${encodeURIComponent(connection.id)}/`, broker);
+      // A Google Cloud project is served as one broker endpoint per managed
+      // Google MCP server.
+      if (connection.provider === "gcp") {
+        return gcpMcpServices.map((service) => ({
+          name: `${name}_${service}`,
+          url: new URL(service, url).toString(),
+        }));
+      }
+      return [{
+        name,
+        url: new URL(encodeURIComponent(connection.id), broker).toString(),
+      }];
+    });
 }
 
 type AutomationConversation = Awaited<ReturnType<typeof listAutomationRunConversation>>;

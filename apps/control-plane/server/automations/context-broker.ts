@@ -22,11 +22,21 @@ import {
   type CustomMcpCredentials,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import {
+  GCP_MCP_SERVICES,
+  gcpConnectionCredentialsSchema,
+} from "../../../../packages/core/src/integrations/gcp.js";
+import {
   linearAccessTokenNeedsRefresh,
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
 } from "../../../../packages/core/src/integrations/linear.js";
 import { integrationCallbackUrl } from "../integrations/urls.js";
+import {
+  gcpAuthHeaders,
+  gcpContextDecision,
+  type GcpContextDependencies,
+  isGcpMcpService,
+} from "./gcp-context.js";
 import {
   callLinearTool,
   defaultLinearToolDependencies,
@@ -54,6 +64,7 @@ type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
   freshSentryCredentials: typeof freshSentryCredentials;
+  gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
   linear: LinearToolDependencies;
   providerFetch: typeof safeCustomMcpFetch;
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
@@ -65,6 +76,7 @@ interface ContextBrokerDependencies {
 
 const defaultDependencies: ContextBrokerDependencies = {
   freshSentryCredentials,
+  gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
   linear: defaultLinearToolDependencies,
   providerFetch: safeCustomMcpFetch,
   refreshCustomMcp: refreshCustomMcpOAuth,
@@ -306,6 +318,45 @@ async function slackResponse(
   }
 }
 
+// Forwards one MCP request with the provider credential added on the server.
+async function proxyMcpRequest(input: {
+  dependencies: ContextBrokerDependencies;
+  rawBody: string;
+  request: Request;
+  target: { headers: Headers; url: string };
+}): Promise<Response> {
+  for (const header of [
+    "accept",
+    "content-type",
+    "mcp-protocol-version",
+    "mcp-session-id",
+  ]) {
+    const value = input.request.headers.get(header);
+    if (value) input.target.headers.set(header, value);
+  }
+  const response = await input.dependencies.providerFetch(input.target.url, {
+    body: input.rawBody,
+    headers: input.target.headers,
+    method: "POST",
+    signal: input.request.signal,
+  });
+  const headers = new Headers({ "cache-control": "no-store" });
+  for (const name of [
+    "content-type",
+    "mcp-protocol-version",
+    "mcp-session-id",
+    "retry-after",
+  ]) {
+    const value = response.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
 export function createAutomationContextBrokerRoutes(
   overrides: Partial<ContextBrokerDependencies> = {},
 ) {
@@ -313,7 +364,8 @@ export function createAutomationContextBrokerRoutes(
     ...defaultDependencies,
     ...overrides,
   };
-  return new Hono().post("/v1/:integrationAccountId", async (context) => {
+  return new Hono().post("/v1/:integrationAccountId/:service?", async (context) => {
+    const service = context.req.param("service");
     const token = readAutomationModelBrokerBearerToken(
       context.req.header("authorization") ?? null,
     );
@@ -341,6 +393,10 @@ export function createAutomationContextBrokerRoutes(
     if (!parsed.success) {
       return context.json(rpcError(undefined, -32700, "Invalid MCP request"), 400);
     }
+    // Only Google Cloud splits a connection into one endpoint per service.
+    if (service && claim.account.provider !== "gcp") {
+      return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+    }
     try {
       if (claim.account.provider === "slack") {
         return await slackResponse(
@@ -353,39 +409,53 @@ export function createAutomationContextBrokerRoutes(
       if (claim.account.provider === "linear") {
         return await linearResponse(claim, parsed.data, dependencies);
       }
+      if (claim.account.provider === "gcp") {
+        if (!isGcpMcpService(service)) {
+          return context.json(rpcError(parsed.data.id, -32601, "Unknown Google Cloud service"), 404);
+        }
+        if (!claim.account.encryptedCredentials) {
+          return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+        }
+        const connection = gcpConnectionCredentialsSchema.parse(
+          decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+        );
+        const decision = await gcpContextDecision({
+          accountId: claim.account.id,
+          connection,
+          dependencies: { ...dependencies.gcp, fetch: dependencies.providerFetch },
+          method: parsed.data.method,
+          params: parsed.data.params,
+          service,
+          signal: context.req.raw.signal,
+        });
+        if (decision.kind === "list") {
+          return context.json(rpcResult(parsed.data.id, { tools: decision.tools }));
+        }
+        if (decision.kind === "reject") {
+          return context.json(
+            rpcError(parsed.data.id, decision.code, decision.message),
+            decision.status,
+          );
+        }
+        return await proxyMcpRequest({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          target: {
+            headers: await dependencies.gcp.authHeaders(connection),
+            url: GCP_MCP_SERVICES[service],
+          },
+        });
+      }
       const target = await providerTarget(claim, dependencies);
       if (!target) {
         return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
       }
-      for (const header of [
-        "accept",
-        "content-type",
-        "mcp-protocol-version",
-        "mcp-session-id",
-      ]) {
-        const value = context.req.header(header);
-        if (value) target.headers.set(header, value);
-      }
-      const response = await dependencies.providerFetch(target.url, {
-        body: rawBody,
-        headers: target.headers,
-        method: "POST",
-        signal: context.req.raw.signal,
-      });
-      const headers = new Headers({ "cache-control": "no-store" });
-      for (const name of [
-        "content-type",
-        "mcp-protocol-version",
-        "mcp-session-id",
-        "retry-after",
-      ]) {
-        const value = response.headers.get(name);
-        if (value) headers.set(name, value);
-      }
-      return new Response(response.body, {
-        headers,
-        status: response.status,
-        statusText: response.statusText,
+      return await proxyMcpRequest({
+        dependencies,
+        rawBody,
+        request: context.req.raw,
+        target,
       });
     } catch (error) {
       console.error(JSON.stringify({

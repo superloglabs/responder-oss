@@ -17,6 +17,7 @@ import type {
   AutomationNotification,
   AutomationTrigger,
 } from "../automations/config.js";
+import { isAutomationContextProvider } from "../automations/context-providers.js";
 import { dueScheduleSlot } from "../automations/schedule.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { getDatabase } from "./client.js";
@@ -419,17 +420,10 @@ async function validateConfigurationResources(
       );
     }
   }
-  const supportedContextProviders = new Set([
-    "custom_mcp",
-    "datadog",
-    "linear",
-    "sentry",
-    "slack",
-  ]);
   if (
     configuration.contextAccountIds.some((accountId) => {
       const account = accountRows.find((row) => row.id === accountId);
-      return !account || !supportedContextProviders.has(account.provider);
+      return !account || !isAutomationContextProvider(account.provider);
     })
   ) {
     throw new AutomationConfigurationError(

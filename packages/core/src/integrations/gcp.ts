@@ -14,6 +14,14 @@ import {
 export const GCP_WORKLOAD_IDENTITY_POOL_ID = "responder";
 export const GCP_WORKLOAD_IDENTITY_PROVIDER_ID = "responder-aws";
 export const GCP_INVESTIGATION_SERVICE_ACCOUNT_ID = "responder-investigation";
+// Google's managed remote MCP servers that serve investigation context.
+export const GCP_MCP_SERVICES = {
+  assets: "https://cloudasset.googleapis.com/mcp",
+  logging: "https://logging.googleapis.com/mcp",
+  monitoring: "https://monitoring.googleapis.com/mcp",
+} as const;
+export type GcpMcpService = keyof typeof GCP_MCP_SERVICES;
+export const gcpMcpServices = Object.keys(GCP_MCP_SERVICES) as GcpMcpService[];
 export const GCP_ACCESS_SCOPES = [
   "https://www.googleapis.com/auth/cloud-platform",
 ] as const;

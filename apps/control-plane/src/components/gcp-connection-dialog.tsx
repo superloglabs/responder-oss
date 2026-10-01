@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { type GcpSetupStatus, useGcpSetupStatus } from "../gcp-setup-status";
 import { GcpSetupStepper } from "./gcp-setup-progress";
 
@@ -26,12 +26,18 @@ export function GcpConnectionDialog({
   connectUrl,
   open,
   onCancel,
+  onCloseWhileRunning,
+  onConnected,
   returnTo,
   selectionState,
 }: {
   connectUrl: string;
   open: boolean;
   onCancel: () => void;
+  // Without these, closing during setup reloads returnTo so its tile shows the
+  // progress, and a finished setup returns there with the new account.
+  onCloseWhileRunning?: () => void;
+  onConnected?: (accountId: string) => void;
   returnTo: string;
   selectionState?: string | null;
 }) {
@@ -51,8 +57,9 @@ export function GcpConnectionDialog({
 
   const cancel = useCallback(() => {
     if (started) {
-      // Setup continues in the background; reload so the tile shows it.
-      window.location.assign(new URL(returnTo, window.location.origin).pathname);
+      // Setup continues in the background.
+      if (onCloseWhileRunning) onCloseWhileRunning();
+      else window.location.assign(new URL(returnTo, window.location.origin).pathname);
       return;
     }
     if (selectingProject) {
@@ -67,13 +74,16 @@ export function GcpConnectionDialog({
     setError(null);
     setIsSubmitting(false);
     onCancel();
-  }, [onCancel, returnTo, selectingProject, started]);
+  }, [onCancel, onCloseWhileRunning, returnTo, selectingProject, started]);
 
+  const reportedAccountId = useRef<string | null>(null);
   useEffect(() => {
-    if (started && setup?.status === "succeeded") {
-      window.location.assign(connectedRedirect(returnTo, started.accountId));
-    }
-  }, [returnTo, setup?.status, started]);
+    if (!started || setup?.status !== "succeeded") return;
+    if (reportedAccountId.current === started.accountId) return;
+    reportedAccountId.current = started.accountId;
+    if (onConnected) onConnected(started.accountId);
+    else window.location.assign(connectedRedirect(returnTo, started.accountId));
+  }, [onConnected, returnTo, setup?.status, started]);
 
   useEffect(() => {
     if (!open || !selectionState || !connectUrl) return;

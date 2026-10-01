@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AutomationTrigger } from "./config.js";
+import { automationContextProviders } from "./context-providers.js";
 
 // Slugs are 16 URL-safe characters from 12 random bytes.
 export const sharedAutomationTemplateSlugSchema = z
@@ -8,13 +9,7 @@ export const sharedAutomationTemplateSlugSchema = z
 
 // Context providers a recipient can connect for an automation. GitHub is
 // listed separately because it comes from repositories, not context accounts.
-const shareableContextProviders = new Set([
-  "custom_mcp",
-  "datadog",
-  "linear",
-  "sentry",
-  "slack",
-]);
+const shareableContextProviders = new Set<string>(automationContextProviders);
 
 // Removes everything that identifies the owner's workspace from triggers: the
 // connection, the channels, and the projects. Schedules keep their timing and

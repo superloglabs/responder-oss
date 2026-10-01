@@ -444,6 +444,13 @@ through Google's managed remote MCP servers. Responder exposes only tools that
 the servers explicitly annotate read-only; the customer IAM roles remain the
 authorization boundary.
 
+Automations can use a Google Cloud connection as context. The worker gives
+each run one server per Google service, served by the run-scoped context
+broker at `/api/automation-context-broker/v1/<connection>/<service>` (`assets`,
+`logging`, or `monitoring`). The broker gets federated Google credentials the
+same way investigations do, lists tools itself, and exposes and accepts calls
+only to tools that Google annotates read-only.
+
 This integration requires `AWS_INTEGRATION_PRINCIPAL_ARN`, the same stable
 broker role used by AWS context, plus a Google OAuth web client in
 `GCP_OAUTH_CLIENT_ID` and `GCP_OAUTH_CLIENT_SECRET`. The client's Google Cloud

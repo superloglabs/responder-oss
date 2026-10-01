@@ -1,12 +1,9 @@
 import { MCPServerStreamableHttp } from "@openai/agents";
 import type { RuntimeGcpConnection } from "@responder/core/db/investigations";
-import { createGcpAuthClient } from "@responder/core/integrations/gcp";
-
-const GCP_MCP_SERVERS = [
-  { id: "assets", url: "https://cloudasset.googleapis.com/mcp" },
-  { id: "logging", url: "https://logging.googleapis.com/mcp" },
-  { id: "monitoring", url: "https://monitoring.googleapis.com/mcp" },
-] as const;
+import {
+  createGcpAuthClient,
+  GCP_MCP_SERVICES,
+} from "@responder/core/integrations/gcp";
 
 export function gcpReadOnlyToolFilter(
   _context: unknown,
@@ -30,8 +27,8 @@ export function createGcpMcpServers(
     return fetch(request, { headers });
   };
 
-  return GCP_MCP_SERVERS.map(
-    ({ id, url }) =>
+  return Object.entries(GCP_MCP_SERVICES).map(
+    ([id, url]) =>
       new MCPServerStreamableHttp({
         cacheToolsList: true,
         clientSessionTimeoutSeconds: 300,
