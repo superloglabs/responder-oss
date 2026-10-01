@@ -453,6 +453,44 @@ describe("automation run processor", () => {
       expect(deps.notify).not.toHaveBeenCalled();
     });
 
+    it("posts nothing when the agent skips the notification", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.runCodex.mockImplementation(async () => {
+        const notifications = deps.createToolHandler.mock.calls.at(-1)![0].notifications!;
+        await notifications.onSkipped("Duplicate of a known issue.");
+        await notifications.onSkipped("Called again.");
+        return { eventStream: "completed" };
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("skip_notification");
+      expect(deps.notify).not.toHaveBeenCalled();
+      const skipped = deps.appendEvent.mock.calls.filter(([event]) => event.type === "notification_skipped");
+      expect(skipped).toEqual([[{ data: { reason: "Duplicate of a known issue." }, runId, type: "notification_skipped" }]]);
+    });
+
+    it("still reports a failed run the agent chose not to report", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.runCodex.mockImplementation(async () => {
+        await deps.createToolHandler.mock.calls.at(-1)![0].notifications!.onSkipped("Nothing new.");
+        throw new AutomationHarnessError("Codex automation harness failed", "");
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+        notifications: [notification],
+        outcome: { message: "Codex automation harness failed", status: "failed" },
+      }));
+    });
+
     it("posts the final reply only to channels the agent did not reach", async () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");

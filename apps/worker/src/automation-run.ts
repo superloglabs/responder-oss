@@ -497,6 +497,8 @@ export async function processAutomationRun(
   let outcome: AutomationRunOutcome | undefined;
   // The notification channels the agent posted to itself.
   const agentNotified = new Set<string>();
+  // The agent found nothing worth reporting on a successful run.
+  let notificationSkipped = false;
   const notificationKey = (notification: { channelId: string; integrationAccountId: string }) =>
     `${notification.integrationAccountId}:${notification.channelId}`;
   const runAbort = new AbortController();
@@ -677,6 +679,11 @@ export async function processAutomationRun(
                     channelNames,
                     notifications: run.notifications,
                     onPosted: (notification) => { agentNotified.add(notificationKey(notification)); },
+                    onSkipped: async (reason) => {
+                      if (notificationSkipped) return;
+                      notificationSkipped = true;
+                      await recordEvent(dependencies, run.runId, "notification_skipped", { reason });
+                    },
                     organizationId: run.organizationId,
                     runUrl: automationRunUrl({ ...run, environment }),
                   },
@@ -902,10 +909,10 @@ export async function processAutomationRun(
       }
     }
   }
-  // The agent reports its own result; channels it did not reach get its final
-  // reply, and a failed run is reported to every channel.
+  // The agent reports its own result or skips it; channels it did not reach
+  // get its final reply, and a failed run is reported to every channel.
   const unreported = outcome?.status === "succeeded"
-    ? run.notifications.filter((notification) => !agentNotified.has(notificationKey(notification)))
+    ? notificationSkipped ? [] : run.notifications.filter((notification) => !agentNotified.has(notificationKey(notification)))
     : run.notifications;
   if (outcome && firstTurn && unreported.length > 0) {
     await dependencies.notify({

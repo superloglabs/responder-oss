@@ -55,6 +55,14 @@ describe("automationRunTimeline", () => {
     expect(lastAgentMessage(entries)).toBe("Fixed it.");
   });
 
+  it("shows why the agent skipped its Slack notification", () => {
+    const entries = automationRunTimeline(run([
+      { data: { reason: "Duplicate of OPS-42." }, type: "notification_skipped" },
+    ]));
+
+    expect(entries.at(-1)).toMatchObject({ kind: "notice", text: "Skipped the Slack notification: Duplicate of OPS-42." });
+  });
+
   it("opens a test chat with the member's message and keeps turns in order", () => {
     const entries = automationRunTimeline(run([
       { data: { authorId: "user-1", authorName: "Ash", text: "Try the checkout flow." }, type: "user_message" },

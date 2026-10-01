@@ -11,6 +11,7 @@ import type { AutomationNotification } from "@responder/core/automations/config"
 import {
   automationToolServerName,
   postNotificationToolName,
+  skipNotificationToolName,
 } from "./automation-harness.js";
 import {
   agentNotificationMessage,
@@ -19,6 +20,7 @@ import {
 import {
   maxNotificationDetails,
   maxNotificationLength,
+  maxSkipReasonLength,
   openPullRequestToolName,
   type AutomationToolRequest,
   type AutomationToolResult,
@@ -33,6 +35,10 @@ import type { CheckedOutRepository } from "./repositories.js";
 const notificationSchema = z.object({
   details: z.array(z.string().trim().min(1).max(maxNotificationLength)).max(maxNotificationDetails).default([]),
   text: z.string().trim().min(1).max(maxNotificationLength),
+});
+
+const skipNotificationSchema = z.object({
+  reason: z.string().trim().min(1).max(maxSkipReasonLength),
 });
 
 const pullRequestSchema = z.object({
@@ -76,7 +82,7 @@ function idempotencyKey(runId: string, kind: string, identity: unknown): string 
 export function automationActionInstructions(notificationChannels: string[] = []): string {
   return [
     ...(notificationChannels.length > 0
-      ? [`This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. Keep its text short and put longer findings in details, which are posted as replies in its thread. If you do not post, your final reply is posted for you.`]
+      ? [`This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. Keep its text short and put longer findings in details, which are posted as replies in its thread. If you do not post, your final reply is posted for you. When there is nothing worth reporting, call ${skipNotificationToolName} with a short reason instead, and nothing is posted. Follow the automation's instructions on what is worth reporting.`]
       : []),
     `The ${automationToolServerName} tool server works with the selected repositories as the Responder GitHub App; the sandbox has no GitHub credentials of its own.`,
     "- github_api reads the GitHub REST API: pull requests, commits, compares, issues, files, and user profiles. Use it instead of unauthenticated requests to api.github.com.",
@@ -105,6 +111,7 @@ export function createAutomationToolHandler(input: {
     channelNames: Map<string, string>;
     notifications: AutomationNotification[];
     onPosted(notification: AutomationNotification): void;
+    onSkipped(reason: string): Promise<void>;
     organizationId: string;
     runUrl: string | null;
   };
@@ -200,6 +207,15 @@ export function createAutomationToolHandler(input: {
     });
   }
 
+  async function skipNotification(args: unknown): Promise<AutomationToolResult> {
+    const target = input.notifications;
+    if (!target?.notifications.length) return toolError("This automation has no notification channels.");
+    const parsed = skipNotificationSchema.safeParse(args);
+    if (!parsed.success) return toolError("Invalid tool arguments");
+    await target.onSkipped(parsed.data.reason);
+    return toolText({ skipped: target.notifications.map(channelName) });
+  }
+
   let repositories: ReturnType<typeof dependencies.getRepositories> | undefined;
   const selectedRepositories = () => {
     if (!repositories) {
@@ -216,6 +232,7 @@ export function createAutomationToolHandler(input: {
     }, dependencies.readTools);
   return async (request: AutomationToolRequest): Promise<AutomationToolResult> => {
     if (request.name === postNotificationToolName) return postNotification(request.arguments);
+    if (request.name === skipNotificationToolName) return skipNotification(request.arguments);
     const readTool = readTools[request.name];
     if (readTool) return readTool(request.arguments);
     if (request.name !== openPullRequestToolName) return toolError("Unknown tool");

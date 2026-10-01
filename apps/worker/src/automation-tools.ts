@@ -4,6 +4,7 @@ import {
   automationToolServerName,
   automationWorkspaceRoot,
   postNotificationToolName,
+  skipNotificationToolName,
   type AutomationToolServer,
 } from "./automation-harness.js";
 import { watchHarnessEvents } from "./automation-live-transcript.js";
@@ -71,6 +72,7 @@ const repositoryToolDefinitions = [
 export const maxNotificationLength = 11_000;
 // Thread replies that may follow one notification message.
 export const maxNotificationDetails = 10;
+export const maxSkipReasonLength = 500;
 
 // A run with notification channels can post to them itself, so the agent
 // knows where its results go.
@@ -100,6 +102,24 @@ export function automationToolDefinitions(notificationChannels: string[] = []) {
         type: "object",
       },
       name: postNotificationToolName,
+    },
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      description: `Post nothing to this automation's Slack notification channels (${notificationChannels.join(", ")}) for this run, because there is nothing worth reporting. Without this call, your final reply is posted. The reason is shown in the run history. A failed run is still reported.`,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          reason: { maxLength: maxSkipReasonLength, minLength: 1, type: "string" },
+        },
+        required: ["reason"],
+        type: "object",
+      },
+      name: skipNotificationToolName,
     },
   ];
 }

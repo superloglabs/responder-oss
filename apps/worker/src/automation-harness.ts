@@ -30,10 +30,11 @@ export const automationToolCallTimeoutMs = 150_000;
 export const automationToolServerName = "responder";
 
 export const postNotificationToolName = "post_notification";
+export const skipNotificationToolName = "skip_notification";
 
 // The service each worker tool acts on, shown on the run page.
 export function automationToolProvider(tool: string): string {
-  return tool === postNotificationToolName ? "slack" : "github";
+  return tool === postNotificationToolName || tool === skipNotificationToolName ? "slack" : "github";
 }
 
 // A local MCP server the harness starts in the sandbox.

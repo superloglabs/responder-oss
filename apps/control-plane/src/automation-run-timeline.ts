@@ -109,6 +109,9 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
       } else if (kind === "send_slack_message") {
         entries.push({ key, kind: "notice", text: "Sent a Slack message." });
       }
+    } else if (event.type === "notification_skipped") {
+      const reason = stringField(event.data, "reason");
+      entries.push({ key, kind: "notice", text: reason ? `Skipped the Slack notification: ${reason}` : "Skipped the Slack notification." });
     } else if (event.type === "run_failed") {
       entries.push({ key, kind: "failure", text: stringField(event.data, "message") ?? "The run failed." });
     } else if (event.type === "run_cancelled") {
