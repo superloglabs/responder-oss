@@ -11384,39 +11384,40 @@ body:has(.appShell--scans) {
   height: 22px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--ds-border-strong, var(--border-strong));
   border-radius: 999px;
+  background: var(--ds-surface-base, var(--surface));
   font-size: 11px;
   font-weight: 500;
 }
 
 .gcpSetupSteps__step.isCurrent {
-  color: var(--foreground);
+  color: var(--ds-text-primary, var(--foreground));
 }
 
 .gcpSetupSteps__step.isCurrent .gcpSetupSteps__marker {
-  border-color: var(--foreground);
-  background: var(--foreground);
-  color: var(--background);
+  border-color: var(--ds-text-primary, var(--foreground));
+  color: var(--ds-text-primary, var(--foreground));
 }
 
 .gcpSetupSteps__step.isComplete {
-  color: var(--secondary);
+  color: var(--ds-text-secondary, var(--secondary));
 }
 
 .gcpSetupSteps__step.isComplete .gcpSetupSteps__marker {
-  border-color: #36513e;
-  background: #173225;
-  color: var(--live);
+  border-color: var(--ds-positive-border, var(--border-strong));
+  background: var(--ds-positive-surface, var(--surface));
+  color: var(--ds-positive, var(--live));
 }
 
 .gcpSetupSteps__step.isFailed {
-  color: var(--foreground);
+  color: var(--ds-text-primary, var(--foreground));
 }
 
 .gcpSetupSteps__step.isFailed .gcpSetupSteps__marker {
-  border-color: #66542d;
-  color: var(--ds-warning);
+  border-color: var(--ds-warning-border, var(--border-strong));
+  background: var(--ds-warning-surface, var(--surface));
+  color: var(--ds-warning, var(--foreground));
 }
 
 .gcpSetupTile {
