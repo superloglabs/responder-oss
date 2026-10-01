@@ -36,11 +36,17 @@ function AuthFrame({ children }: AuthGateProps) {
   );
 }
 
+// Visitors who follow a sign-up link or open an automation template are
+// usually new, so they start on account creation.
+function startsWithAccountCreation(location: Pick<Location, "pathname" | "search">) {
+  const params = new URLSearchParams(location.search);
+  if (params.has("signup")) return true;
+  return location.pathname === "/automations/new" && (params.has("shared") || params.has("template"));
+}
+
 function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
-  // Most visitors setting up a shared template are new, so they start on
-  // account creation.
   const [settingUpTemplate] = useState(() => sharedTemplateSetupReturnPath(window.location) !== null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(settingUpTemplate);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(() => startsWithAccountCreation(window.location));
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [socialProvider, setSocialProvider] = useState<
