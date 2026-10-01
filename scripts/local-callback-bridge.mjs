@@ -15,6 +15,7 @@ const browserOAuthCallbackPaths = new Set([
   "/api/integrations/axiom/callback",
   "/api/integrations/clickstack/callback",
   "/api/integrations/custom_mcp/callback",
+  "/api/integrations/gcp/callback",
   "/api/integrations/github/callback",
   "/api/integrations/grafana/callback",
   "/api/integrations/linear/callback",
