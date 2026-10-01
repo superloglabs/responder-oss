@@ -10,6 +10,7 @@ export function integrationCallbackUrl(
     | "dash0"
     | "datadog"
     | "discord"
+    | "gcp"
     | "github"
     | "grafana"
     | "linear"

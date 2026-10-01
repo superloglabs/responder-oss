@@ -11359,3 +11359,68 @@ body:has(.appShell--scans) {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.gcpSetupSteps {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.gcpSetupSteps__step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.gcpSetupSteps__marker {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ds-border-strong, var(--border-strong));
+  border-radius: 999px;
+  background: var(--ds-surface-base, var(--surface));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.gcpSetupSteps__step.isCurrent {
+  color: var(--ds-text-primary, var(--foreground));
+}
+
+.gcpSetupSteps__step.isCurrent .gcpSetupSteps__marker {
+  border-color: var(--ds-text-primary, var(--foreground));
+  color: var(--ds-text-primary, var(--foreground));
+}
+
+.gcpSetupSteps__step.isComplete {
+  color: var(--ds-text-secondary, var(--secondary));
+}
+
+.gcpSetupSteps__step.isComplete .gcpSetupSteps__marker {
+  border-color: var(--ds-positive-border, var(--border-strong));
+  background: var(--ds-positive-surface, var(--surface));
+  color: var(--ds-positive, var(--live));
+}
+
+.gcpSetupSteps__step.isFailed {
+  color: var(--ds-text-primary, var(--foreground));
+}
+
+.gcpSetupSteps__step.isFailed .gcpSetupSteps__marker {
+  border-color: var(--ds-warning-border, var(--border-strong));
+  background: var(--ds-warning-surface, var(--surface));
+  color: var(--ds-warning, var(--foreground));
+}
+
+.gcpSetupTile {
+  grid-column: 1 / -1;
+  padding: 4px 0 2px;
+}

@@ -1,12 +1,13 @@
-import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   createGcpAuthClient,
   createGcpSessionName,
   GCP_ACCESS_SCOPES,
   gcpConnectionCredentialsSchema,
+  gcpBrokerIdentity,
+  gcpConnectionPrincipalSet,
   gcpInvestigationServiceAccountEmail,
-  gcpSetupScript,
+  gcpWorkloadIdentityAttributes,
   gcpWorkloadIdentityAudience,
 } from "./gcp.js";
 
@@ -39,21 +40,26 @@ describe("GCP integration", () => {
     );
   });
 
-  it("builds a keyless, read-only setup script scoped to one broker session", () => {
-    const script = gcpSetupScript(connection, {
+  it("trusts only one broker role and one connection session", () => {
+    expect(gcpBrokerIdentity({
       AWS_INTEGRATION_PRINCIPAL_ARN:
-        "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+        "arn:aws:iam::111122223333:role/path/ResponderAwsIntegrationBroker",
+    })).toEqual({
+      accountId: "111122223333",
+      roleName: "ResponderAwsIntegrationBroker",
     });
-    expect(script).toContain("--account-id=\"$RESPONDER_AWS_ACCOUNT\"");
-    expect(script).toContain("attribute.responder_connection");
-    expect(script).toContain(connection.sessionName);
-    expect(script).toContain("roles/cloudasset.viewer");
-    expect(script).toContain("roles/logging.viewer");
-    expect(script).toContain("roles/monitoring.viewer");
-    expect(script).toContain("roles/mcp.toolUser");
-    expect(script).not.toContain("roles/editor");
-    expect(script).not.toContain("roles/owner");
-    expect(spawnSync("bash", ["-n"], { input: script }).status).toBe(0);
+    expect(gcpWorkloadIdentityAttributes("ResponderAwsIntegrationBroker")).toEqual({
+      attributeCondition: "attribute.aws_role == 'ResponderAwsIntegrationBroker'",
+      attributeMapping: {
+        "attribute.aws_role": "assertion.arn.extract('assumed-role/{role}/')",
+        "attribute.responder_connection":
+          "assertion.arn.extract('assumed-role/ResponderAwsIntegrationBroker/{session}')",
+        "google.subject": "assertion.arn",
+      },
+    });
+    expect(gcpConnectionPrincipalSet(connection)).toBe(
+      `principalSet://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/responder/attribute.responder_connection/${connection.sessionName}`,
+    );
   });
 
   it("supplies freshly assumed broker credentials to Google auth", async () => {

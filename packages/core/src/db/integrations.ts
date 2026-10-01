@@ -235,6 +235,57 @@ export async function setIntegrationAccountStatus(
     .where(eq(integrationAccounts.id, integrationAccountId));
 }
 
+// Replaces the setup progress stored in an account's metadata. With an owner,
+// the write applies only while that run's round still owns a running setup, so
+// a superseded or duplicate background round cannot overwrite newer progress
+// or a finished result.
+export async function updateIntegrationAccountSetup(input: {
+  integrationAccountId: string;
+  owner?: { round: number; runId: string };
+  setup: Record<string, unknown>;
+  status?: "connected" | "error" | "pending";
+}): Promise<boolean> {
+  const updated = await getDatabase()
+    .update(integrationAccounts)
+    .set({
+      metadata: sql`jsonb_set(${integrationAccounts.metadata}, '{setup}', ${JSON.stringify(input.setup)}::jsonb)`,
+      ...(input.status ? { status: input.status } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        input.owner
+          ? sql`${integrationAccounts.metadata} -> 'setup' ->> 'runId' = ${input.owner.runId}
+            and ${integrationAccounts.metadata} -> 'setup' ->> 'round' = ${String(input.owner.round)}
+            and ${integrationAccounts.metadata} -> 'setup' ->> 'status' = 'running'`
+          : undefined,
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return updated.length > 0;
+}
+
+export async function listRunningIntegrationAccountSetups(input: {
+  organizationId: string;
+  provider: IntegrationProvider;
+}): Promise<Array<{ id: string; setup: Record<string, unknown> }>> {
+  const rows = await getDatabase()
+    .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        sql`${integrationAccounts.metadata} -> 'setup' ->> 'status' = 'running'`,
+      ),
+    );
+  return rows.map((row) => ({
+    id: row.id,
+    setup: row.metadata.setup as Record<string, unknown>,
+  }));
+}
+
 export async function deleteIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;

@@ -9,11 +9,13 @@ import { ClickStackConnectionDialog } from "../components/clickstack-connection-
 import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
+import { GcpSetupStepper } from "../components/gcp-setup-progress";
+import { gcpSetupProgressLabel, type GcpSetupStatus } from "../gcp-setup-status";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
-import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
+import { currentProjectSelectionState } from "../project-selection";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -65,6 +67,7 @@ interface IntegrationSummary {
     updatedAt: string;
     projectId?: string;
     projectNumber?: string;
+    setup?: GcpSetupStatus | null;
   }>;
   connectUrl: string | null;
   configurationUrl: string | null;
@@ -96,7 +99,10 @@ function connectionNotice(): {
   const provider = search.get("integration");
   const status = search.get("status");
   if (!provider || !status) return null;
-  if (provider === "supabase" && status === "select_project") return null;
+  if (
+    (provider === "supabase" || provider === "gcp") &&
+    status === "select_project"
+  ) return null;
 
   const name = providerDisplayName(provider);
   if (status === "connected") {
@@ -127,7 +133,9 @@ function connectionNotice(): {
       ? "That account is already connected to another workspace."
       : reason === "cancelled"
         ? "The connection was cancelled."
-        : "The connection could not be completed.";
+        : reason === "no_projects"
+          ? "That Google account cannot see any active projects."
+          : "The connection could not be completed.";
   return { tone: "error", message: `${name}: ${detail}` };
 }
 
@@ -370,7 +378,7 @@ function DefaultIntegrationCard({
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     integration.id === "supabase" && Boolean(supabaseSelectionState),
   );
@@ -540,16 +548,51 @@ function GcpIntegrationCard({
 }: {
   integration: IntegrationSummary;
 }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const selectionState = currentProjectSelectionState("gcp");
+  const [dialogOpen, setDialogOpen] = useState(Boolean(selectionState));
   const [showAccounts, setShowAccounts] = useState(false);
-  const [reconnectProject, setReconnectProject] = useState<{
-    displayName: string;
-    projectId: string;
-    projectNumber: string;
-  } | undefined>();
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const canConnect = Boolean(integration.connectUrl);
+  const [polledSetups, setPolledSetups] = useState<Record<string, GcpSetupStatus>>({});
+  const accounts = integration.accounts.map((account) => {
+    const setup = polledSetups[account.id] ?? account.setup ?? null;
+    return {
+      ...account,
+      setup,
+      status: setup?.status === "succeeded" ? "connected" as const : account.status,
+    };
+  });
+  const runningAccountIds = accounts
+    .filter((account) => account.setup?.status === "running")
+    .map((account) => account.id)
+    .join(",");
+  const settingUp = accounts.filter((account) => account.setup?.status === "running");
+
+  // Setup runs in the background, so the tile keeps showing its progress
+  // after the connection dialog closes.
+  useEffect(() => {
+    if (!runningAccountIds) return;
+    let cancelled = false;
+    const poll = () => {
+      for (const accountId of runningAccountIds.split(",")) {
+        void fetch(`/api/integrations/gcp/${accountId}/setup`)
+          .then(async (response) => {
+            if (!response.ok) return;
+            const setup = (await response.json().catch(() => null)) as GcpSetupStatus | null;
+            if (!cancelled && setup?.status) {
+              setPolledSetups((current) => ({ ...current, [accountId]: setup }));
+            }
+          })
+          .catch(() => undefined);
+      }
+    };
+    const timer = setInterval(poll, 2_500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [runningAccountIds]);
 
   return (
     <article
@@ -563,13 +606,19 @@ function GcpIntegrationCard({
         />
       <div className="integrationCard__body">
         <strong>Google Cloud</strong>
-        <small>
-          {integration.accountCount > 0
-            ? `${integration.accountCount} connected project${integration.accountCount === 1 ? "" : "s"}`
-            : "Read-only infrastructure, logs, metrics, and alert context."}
+        <small aria-live="polite">
+          {settingUp[0]
+            ? `Setting up ${settingUp[0].projectId ?? settingUp[0].displayName.replace(/^GCP · /u, "")} · ${gcpSetupProgressLabel(settingUp[0].setup!)}`
+            : integration.accountCount > 0
+              ? `${integration.accountCount} connected project${integration.accountCount === 1 ? "" : "s"}`
+              : "Read-only infrastructure, logs, metrics, and alert context."}
         </small>
       </div>
-        {integration.accounts.some((account) => account.status === "error") ? (
+        {settingUp.length > 0 ? (
+          <span className="connectedBadge connectedBadge--muted">Setting up</span>
+        ) : accounts.some((account) =>
+            account.status === "error" || account.setup?.status === "failed"
+          ) ? (
           <span className="connectedBadge connectedBadge--warning">Action needed</span>
         ) : integration.accountCount > 0 ? (
           <span className="connectedBadge">Connected</span>
@@ -579,41 +628,43 @@ function GcpIntegrationCard({
         {integration.accountCount === 0 && canConnect ? <button className="button button--secondary button--small" type="button" onClick={() => setDialogOpen(true)}>Add</button> : null}
         {!canConnect && integration.accountCount === 0 ? <small>Unavailable</small> : null}
       </div>
-      {showAccounts && integration.accounts.length > 0 ? (
+      {settingUp.length > 0 && !showAccounts ? (
+        <div className="gcpSetupTile">
+          <GcpSetupStepper setup={settingUp[0]!.setup!} />
+        </div>
+      ) : null}
+      {showAccounts && accounts.length > 0 ? (
           <ul className="integrationCard__accounts" aria-label="Connected Google Cloud projects">
-            {integration.accounts.map((account) => (
+            {accounts.map((account) => (
               <li key={account.id}>
                 <span>
                   <strong>{account.displayName.replace(/^GCP · /u, "")}</strong>
                   <small>
-                    {account.projectNumber
-                      ? `Project number ${account.projectNumber}`
-                      : account.status === "pending"
-                        ? "Setup pending"
-                        : account.status === "error"
-                          ? "Needs attention"
-                          : "Read-only access"}
+                    {account.setup && account.setup.status !== "succeeded"
+                      ? gcpSetupProgressLabel(account.setup)
+                      : account.projectNumber
+                        ? `Project number ${account.projectNumber}`
+                        : account.status === "pending"
+                          ? "Setup pending"
+                          : account.status === "error"
+                            ? "Needs attention"
+                            : "Read-only access"}
                   </small>
                 </span>
                 <span className="integrationCard__accountStatus">
-                  {account.status === "connected"
-                    ? "Connected"
-                    : account.status === "pending"
-                      ? "Pending"
-                      : "Error"}
+                  {account.setup?.status === "running"
+                    ? "Setting up"
+                    : account.status === "connected"
+                      ? "Connected"
+                      : account.status === "pending"
+                        ? "Pending"
+                        : "Error"}
                 </span>
                 <span className="integrationCard__accountActions">
-                  {account.projectNumber ? (
+                  {canConnect ? (
                     <button
                       className="button button--secondary button--small"
-                      onClick={() => {
-                        setReconnectProject({
-                          displayName: account.displayName.replace(/^GCP · /u, ""),
-                          projectId: account.projectId ?? account.displayName.replace(/^GCP · /u, ""),
-                          projectNumber: account.projectNumber!,
-                        });
-                        setDialogOpen(true);
-                      }}
+                      onClick={() => setDialogOpen(true)}
                       type="button"
                     >
                       Reconnect
@@ -658,22 +709,18 @@ function GcpIntegrationCard({
             onClick={() => setDialogOpen(true)}
             type="button"
           >
-            Add project manually
+            Add project
           </button>
         ) : (
           <small>Provider configuration required</small>
         )}
       </div> : null}
       <GcpConnectionDialog
-        connectUrl={integration.connectUrl ?? "/api/integrations/gcp/connect"}
-        initialProject={reconnectProject}
-        key={reconnectProject?.projectId ?? "manual"}
-        onCancel={() => {
-          setDialogOpen(false);
-          setReconnectProject(undefined);
-        }}
-        open={dialogOpen}
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setDialogOpen(false)}
+        open={dialogOpen && canConnect}
         returnTo="/settings"
+        selectionState={selectionState}
       />
     </article>
   );

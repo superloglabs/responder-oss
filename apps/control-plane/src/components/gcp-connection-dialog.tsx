@@ -1,34 +1,25 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { type GcpSetupStatus, useGcpSetupStatus } from "../gcp-setup-status";
+import { GcpSetupStepper } from "./gcp-setup-progress";
 
-export interface GcpProjectOption {
-  displayName: string;
+interface GcpProject {
+  name: string;
   projectId: string;
   projectNumber: string;
 }
 
-interface GcpSetup {
-  accountId: string;
-  projectId: string;
-  script: string;
+function gcpEndpoint(connectUrl: string, endpoint: string): string {
+  const parts = connectUrl.split("?")[0]!.split("/");
+  parts.pop();
+  return `${parts.join("/")}/${endpoint}`;
 }
 
-async function prepareProject(
-  connectUrl: string,
-  project: GcpProjectOption,
-  returnTo: string,
-): Promise<GcpSetup> {
-  const response = await fetch(connectUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...project, returnTo }),
-  });
-  const body = (await response.json().catch(() => null)) as
-    | (Partial<GcpSetup> & { error?: string })
-    | null;
-  if (!response.ok || !body?.accountId || !body.projectId || !body.script) {
-    throw new Error(body?.error ?? `Unable to prepare ${project.projectId}`);
-  }
-  return body as GcpSetup;
+function connectedRedirect(returnTo: string, accountId: string): string {
+  const url = new URL(returnTo, window.location.origin);
+  url.searchParams.set("integration", "gcp");
+  url.searchParams.set("status", "connected");
+  url.searchParams.set("integration_account_id", accountId);
+  return `${url.pathname}${url.search}`;
 }
 
 export function GcpConnectionDialog({
@@ -36,121 +27,144 @@ export function GcpConnectionDialog({
   open,
   onCancel,
   returnTo,
-  initialProject,
+  selectionState,
 }: {
   connectUrl: string;
   open: boolean;
   onCancel: () => void;
   returnTo: string;
-  initialProject?: GcpProjectOption;
+  selectionState?: string | null;
 }) {
-  const [projectId, setProjectId] = useState(initialProject?.projectId ?? "");
-  const [projectNumber, setProjectNumber] = useState(initialProject?.projectNumber ?? "");
-  const [setups, setSetups] = useState<GcpSetup[]>([]);
+  const selectingProject = Boolean(selectionState);
+  const [projects, setProjects] = useState<GcpProject[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [started, setStarted] = useState<{
+    accountId: string;
+    setup: GcpSetupStatus;
+  } | null>(null);
+  const setup = useGcpSetupStatus(
+    started?.accountId ?? null,
+    started?.setup ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const cancel = useCallback(() => {
-    if (isSubmitting) return;
+    if (started) {
+      // Setup continues in the background; reload so the tile shows it.
+      window.location.assign(new URL(returnTo, window.location.origin).pathname);
+      return;
+    }
+    if (selectingProject) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("integration");
+      url.searchParams.delete("status");
+      url.searchParams.delete("selection_state");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    setProjects([]);
     setProjectId("");
-    setProjectNumber("");
-    setSetups([]);
     setError(null);
+    setIsSubmitting(false);
     onCancel();
-  }, [isSubmitting, onCancel]);
+  }, [onCancel, returnTo, selectingProject, started]);
+
+  useEffect(() => {
+    if (started && setup?.status === "succeeded") {
+      window.location.assign(connectedRedirect(returnTo, started.accountId));
+    }
+  }, [returnTo, setup?.status, started]);
+
+  useEffect(() => {
+    if (!open || !selectionState || !connectUrl) return;
+    let ignore = false;
+    const projectsUrl = new URL(
+      gcpEndpoint(connectUrl, "projects"),
+      window.location.origin,
+    );
+    projectsUrl.searchParams.set("state", selectionState);
+    void fetch(`${projectsUrl.pathname}${projectsUrl.search}`)
+      .then(async (response) => {
+        const body = (await response.json().catch(() => null)) as
+          | { error?: string; projects?: GcpProject[] }
+          | null;
+        if (!response.ok || !body?.projects) {
+          throw new Error(body?.error ?? "Unable to load Google Cloud projects");
+        }
+        if (ignore) return;
+        setProjects(body.projects);
+        setProjectId(body.projects[0]?.projectId ?? "");
+      })
+      .catch((caught) => {
+        if (!ignore) {
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Unable to load Google Cloud projects",
+          );
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [connectUrl, open, selectionState]);
 
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") cancel();
+      if (event.key === "Escape" && !isSubmitting) cancel();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [cancel, open]);
+  }, [cancel, isSubmitting, open]);
 
-  async function prepareProjectConnection(project: GcpProjectOption) {
+  async function connect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (isSubmitting) return;
     setError(null);
+    if (!selectingProject) {
+      setIsSubmitting(true);
+      const url = new URL(connectUrl, window.location.origin);
+      url.searchParams.set("returnTo", returnTo);
+      window.location.assign(`${url.pathname}${url.search}`);
+      return;
+    }
+    if (!projectId || started) return;
     setIsSubmitting(true);
     try {
-      setSetups([await prepareProject(connectUrl, project, returnTo)]);
+      const response = await fetch(gcpEndpoint(connectUrl, "select-project"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId, selectionState }),
+      });
+      const body = (await response.json().catch(() => null)) as
+        | { accountId?: string; error?: string; setup?: GcpSetupStatus }
+        | null;
+      if (!response.ok || !body?.accountId || !body.setup) {
+        throw new Error(body?.error ?? "Unable to start Google Cloud setup");
+      }
+      setStarted({ accountId: body.accountId, setup: body.setup });
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Unable to prepare Google Cloud access",
+          : "Unable to start Google Cloud setup",
       );
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function prepareManual(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await prepareProjectConnection({ displayName: projectId, projectId, projectNumber });
-  }
-
-  async function verify() {
-    if (setups.length === 0 || isSubmitting) return;
-    setError(null);
-    setIsSubmitting(true);
-    try {
-      const redirects = await Promise.all(
-        setups.map(async (setup) => {
-          const response = await fetch(connectUrl.replace(/\/connect$/u, "/verify"), {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              integrationAccountId: setup.accountId,
-              returnTo,
-            }),
-          });
-          const body = (await response.json().catch(() => null)) as
-            | { error?: string; redirectUrl?: string }
-            | null;
-          if (!response.ok || !body?.redirectUrl) {
-            throw new Error(
-              body?.error ?? `Unable to verify ${setup.projectId}`,
-            );
-          }
-          return body.redirectUrl;
-        }),
-      );
-      window.location.assign(redirects.at(-1)!);
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Unable to verify Google Cloud access",
-      );
-      setIsSubmitting(false);
-    }
-  }
-
-  function downloadScript() {
-    if (setups.length === 0) return;
-    const script = setups
-      .map(({ projectId: selectedProjectId, script }) =>
-        `\n# Responder access for ${selectedProjectId}\n${script}`,
-      )
-      .join("\n");
-    const url = URL.createObjectURL(
-      new Blob([script], { type: "text/x-shellscript" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "responder-gcp-access.sh";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
-
   if (!open) return null;
+
+  const loadingProjects = selectingProject && projects.length === 0 && !error;
+  const selectedProject = projects.find((project) => project.projectId === projectId);
 
   return (
     <div
       className="siteDialogBackdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) cancel();
+        if (event.target === event.currentTarget && !isSubmitting) cancel();
       }}
     >
       <section
@@ -162,9 +176,9 @@ export function GcpConnectionDialog({
         <header className="siteDialog__header">
           <span>Connect Google Cloud</span>
           <h2 id="gcp-connection-title">
-            {setups.length > 0
-              ? "Create the investigation identities"
-              : "Add a GCP project"}
+            {setup
+              ? `Setting up ${selectedProject?.projectId ?? "the project"}`
+              : selectingProject ? "Choose a project" : "Add a GCP project"}
           </h2>
           <p>
             Responder receives short-lived, read-only tokens. No service-account
@@ -172,108 +186,93 @@ export function GcpConnectionDialog({
           </p>
         </header>
 
-        {setups.length > 0 ? (
-          <div className="siteDialog__form">
+        <form className="siteDialog__form" onSubmit={connect}>
+          {setup ? (
+            <>
+              <GcpSetupStepper setup={setup} />
+              <p className="siteDialog__oauthNote" aria-live="polite">
+                {setup.status === "failed"
+                  ? null
+                  : setup.status === "succeeded"
+                    ? "Connected. Returning to Responder…"
+                    : "You can close this window. Setup continues, and the Google Cloud tile in Settings shows its progress."}
+              </p>
+              {setup.status === "failed" && setup.message ? (
+                <p className="siteDialog__error" role="alert">{setup.message}</p>
+              ) : null}
+            </>
+          ) : selectingProject ? (
+            <>
+              <label className="siteDialog__field">
+                <span>Google Cloud project</span>
+                <select
+                  autoFocus
+                  disabled={loadingProjects || isSubmitting}
+                  onChange={(event) => {
+                    setProjectId(event.target.value);
+                    setError(null);
+                  }}
+                  value={projectId}
+                >
+                  {projects.map((project) => (
+                    <option key={project.projectId} value={project.projectId}>
+                      {project.name === project.projectId
+                        ? project.projectId
+                        : `${project.name} — ${project.projectId}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="siteDialog__oauthNote">
+                {loadingProjects
+                  ? "Loading projects from your Google account…"
+                  : `Responder will create a responder-investigation service account in ${selectedProject?.projectId ?? "this project"} with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.`}
+              </p>
+            </>
+          ) : (
             <ol className="siteDialog__instructions">
-              <li>Download the setup script.</li>
               <li>
-                Open Cloud Shell and run <code>bash responder-gcp-access.sh</code>.
-                It will configure {setups.length} project
-                {setups.length === 1 ? "" : "s"}.
+                Sign in with a Google account that is an Owner of the project.
               </li>
-              <li>Return here after the script reports that access is ready.</li>
+              <li>
+                Choose the project. Responder creates a read-only{" "}
+                <code>responder-investigation</code> service account and a
+                keyless link to Responder.
+              </li>
+              <li>
+                Responder revokes your Google sign-in when setup finishes. To
+                remove access later, delete that service account.
+              </li>
             </ol>
-            {error ? <p className="siteDialog__error" role="alert">{error}</p> : null}
-            <footer className="siteDialog__footer siteDialog__footer--wrap">
-              <button
-                className="button button--secondary button--small"
-                onClick={downloadScript}
-                type="button"
-              >
-                Download script
-              </button>
-              <button
-                className="button button--secondary button--small"
-                onClick={() => window.open(
-                  `https://console.cloud.google.com/cloudshell/editor?project=${encodeURIComponent(setups[0]!.projectId)}`,
-                  "_blank",
-                  "noopener,noreferrer",
-                )}
-                type="button"
-              >
-                Open Cloud Shell
-              </button>
+          )}
+
+          {error ? <p className="siteDialog__error" role="alert">{error}</p> : null}
+
+          <footer className="siteDialog__footer">
+            <button
+              className="button button--secondary button--small"
+              onClick={cancel}
+              type="button"
+            >
+              {setup ? "Close" : "Cancel"}
+            </button>
+            {setup ? null : (
               <button
                 className="button button--primary button--small"
-                disabled={isSubmitting}
-                onClick={() => void verify()}
-                type="button"
-              >
-                {isSubmitting ? "Verifying…" : "Verify connections"}
-              </button>
-            </footer>
-          </div>
-        ) : (
-          <form className="siteDialog__form" onSubmit={prepareManual}>
-            <label className="siteDialog__field">
-              <span>Project ID</span>
-              <input
-                autoFocus
-                disabled={isSubmitting}
-                maxLength={30}
-                minLength={6}
-                onChange={(event) => setProjectId(event.target.value.toLowerCase())}
-                placeholder="my-production-project"
-                required
-                value={projectId}
-              />
-            </label>
-            <label className="siteDialog__field">
-              <span>Project number</span>
-              <input
-                disabled={isSubmitting}
-                inputMode="numeric"
-                maxLength={20}
-                minLength={1}
-                onChange={(event) =>
-                  setProjectNumber(event.target.value.replace(/\D/gu, ""))
-                }
-                placeholder="123456789012"
-                required
-                value={projectNumber}
-              />
-            </label>
-            <p className="siteDialog__oauthNote">
-              Find both values in the{" "}
-              <a
-                href="https://console.cloud.google.com/cloud-resource-manager"
-                rel="noreferrer"
-                target="_blank"
-              >
-                Google Cloud project selector
-              </a>
-              . Access is limited to asset metadata, logs, metrics, and alerting
-              state.
-            </p>
-            {error ? <p className="siteDialog__error" role="alert">{error}</p> : null}
-            <footer className="siteDialog__footer">
-              <button
-                className="button button--secondary button--small"
-                onClick={cancel}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="button button--primary button--small"
-                disabled={isSubmitting || projectId.length < 6 || projectNumber.length < 1}
+                disabled={isSubmitting || loadingProjects || (selectingProject && !projectId)}
                 type="submit"
               >
-                {isSubmitting ? "Preparing…" : "Continue"}
+                {isSubmitting ? (
+                  <><span aria-hidden="true" className="buttonSpinner" />{selectingProject ? "Starting…" : "Redirecting…"}</>
+                ) : selectingProject ? (
+                  "Grant read-only access"
+                ) : (
+                  "Continue with Google"
+                )}
               </button>
-            </footer>
-          </form>
-        )}
+            )}
+          </footer>
+        </form>
       </section>
     </div>
   );
