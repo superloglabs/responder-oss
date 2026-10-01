@@ -13,6 +13,7 @@ import {
   encryptCredentials,
 } from "../../../../packages/core/src/credentials/encryption.js";
 import { withIntegrationAccountCredentialLease } from "../../../../packages/core/src/db/integrations.js";
+import { freshSentryCredentials } from "../../../../packages/core/src/db/investigations.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
   parseCustomMcpCredentials,
@@ -41,6 +42,7 @@ const requestSchema = z.object({
 type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
+  freshSentryCredentials: typeof freshSentryCredentials;
   providerFetch: typeof safeCustomMcpFetch;
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
   resolveGrant: ResolveGrant;
@@ -49,6 +51,7 @@ interface ContextBrokerDependencies {
 }
 
 const defaultDependencies: ContextBrokerDependencies = {
+  freshSentryCredentials,
   providerFetch: safeCustomMcpFetch,
   refreshCustomMcp: refreshCustomMcpOAuth,
   resolveGrant: resolveAutomationContextBrokerGrant,
@@ -103,7 +106,12 @@ async function providerTarget(
     return { headers, url: getDatadogSite(parsed.site).mcpUrl };
   }
   if (claim.account.provider === "sentry") {
-    const parsed = z.object({ accessToken: z.string().min(1) }).parse(credentials);
+    const sentry = await dependencies.freshSentryCredentials({
+      encryptedCredentials: claim.account.encryptedCredentials,
+      integrationAccountId: claim.account.id,
+      organizationId: claim.organizationId,
+    });
+    if (!sentry) return null;
     const organizationSlug = z.string().min(1).parse(
       claim.account.metadata.organizationSlug,
     );
@@ -113,7 +121,7 @@ async function providerTarget(
     );
     url.searchParams.set("skills", "inspect");
     return {
-      headers: new Headers({ authorization: `Sentry-Bearer ${parsed.accessToken}` }),
+      headers: new Headers({ authorization: `Sentry-Bearer ${sentry.accessToken}` }),
       url: url.toString(),
     };
   }

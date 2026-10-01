@@ -2302,6 +2302,131 @@ const sentryTriggerConfigSchema = z.object({
   projectIds: z.array(z.string().min(1)),
 });
 
+export type SentryCredentials = z.infer<typeof sentryCredentialsSchema>;
+
+// Sentry App access tokens expire after a few hours. Returns the stored
+// credentials, refreshed first when they are close to expiry, or null when
+// the account stopped being connected.
+export async function freshSentryCredentials(input: {
+  encryptedCredentials: string;
+  integrationAccountId: string;
+  organizationId: string;
+}): Promise<SentryCredentials | null> {
+  const credentials = sentryCredentialsSchema.parse(
+    decryptCredentials<Record<string, unknown>>(input.encryptedCredentials),
+  );
+  const expiresAt = credentials.expiresAt
+    ? Date.parse(credentials.expiresAt)
+    : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+    return credentials;
+  }
+  const clientId = process.env.SENTRY_CLIENT_ID;
+  const clientSecret = process.env.SENTRY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("Sentry App credentials are not configured");
+  }
+  try {
+    return await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: input.integrationAccountId,
+      operation: async (encryptedCredentials) => {
+        const current = sentryCredentialsSchema.parse(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const currentExpiresAt = current.expiresAt
+          ? Date.parse(current.expiresAt)
+          : Number.POSITIVE_INFINITY;
+        if (
+          Number.isFinite(currentExpiresAt) &&
+          currentExpiresAt > Date.now() + 60_000
+        ) {
+          return { value: current };
+        }
+
+        const requestStartedAt = Date.now();
+        let refreshed: z.infer<typeof sentryAuthorizationSchema>;
+        try {
+          const response = await fetch(
+            `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(current.installationId)}/authorizations/`,
+            {
+              method: "POST",
+              headers: {
+                accept: "application/json",
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                grant_type: "refresh_token",
+                refresh_token: current.refreshToken,
+                client_id: clientId,
+                client_secret: clientSecret,
+              }),
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          if (!response.ok) {
+            throw new SentryRefreshHttpError(response.status);
+          }
+          refreshed = sentryAuthorizationSchema.parse(await response.json());
+        } catch (error) {
+          throw new SentryConnectionUnavailableError(
+            sentryConnectionFailureDiagnostics(
+              error,
+              Date.now() - requestStartedAt,
+            ),
+            error,
+          );
+        }
+        const nextCredentials = {
+          accessToken: refreshed.token,
+          refreshToken: refreshed.refreshToken,
+          expiresAt: refreshed.expiresAt ?? null,
+          installationId: current.installationId,
+        };
+        return {
+          encryptedCredentials: encryptCredentials(nextCredentials),
+          status: "connected" as const,
+          value: nextCredentials,
+        };
+      },
+      organizationId: input.organizationId,
+      provider: "sentry",
+      statusOnError: (error) =>
+        error instanceof SentryConnectionUnavailableError &&
+          error.httpStatus !== undefined &&
+          [400, 401, 403].includes(error.httpStatus)
+          ? "error"
+          : undefined,
+    });
+  } catch (error) {
+    const diagnostics =
+      error instanceof SentryConnectionUnavailableError
+        ? {
+            errorCode: error.errorCode,
+            failureKind: error.failureKind,
+            ...(error.httpStatus === undefined
+              ? {}
+              : { httpStatus: error.httpStatus }),
+            requestDurationMs: error.requestDurationMs,
+            retryable: error.retryable,
+          }
+        : {
+            errorCode: error instanceof Error ? error.name : typeof error,
+            failureKind: "internal",
+            retryable: false,
+          };
+    console.error(
+      JSON.stringify({
+        event: "sentry_token_refresh_failed",
+        ...diagnostics,
+        integrationAccountId: input.integrationAccountId,
+      }),
+    );
+    if (error instanceof SentryConnectionUnavailableError) throw error;
+    throw new Error("Unable to refresh Sentry access", { cause: error });
+  }
+}
+
 export async function getRuntimeSentryConnection(
   versionId: string,
   investigationInput?: InvestigationInput,
@@ -2355,121 +2480,12 @@ export async function getRuntimeSentryConnection(
     .string()
     .min(1)
     .parse(account.metadata.organizationSlug);
-  let credentials = sentryCredentialsSchema.parse(
-    decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
-  );
-  const expiresAt = credentials.expiresAt
-    ? Date.parse(credentials.expiresAt)
-    : Number.POSITIVE_INFINITY;
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() + 60_000) {
-    const clientId = process.env.SENTRY_CLIENT_ID;
-    const clientSecret = process.env.SENTRY_CLIENT_SECRET;
-    if (!clientId || !clientSecret) {
-      throw new Error("Sentry App credentials are not configured");
-    }
-    try {
-      const refreshedCredentials =
-        await withIntegrationAccountCredentialLease({
-          allowedStatuses: ["connected"],
-          integrationAccountId: account.id,
-          operation: async (encryptedCredentials) => {
-            const current = sentryCredentialsSchema.parse(
-              decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-            );
-            const currentExpiresAt = current.expiresAt
-              ? Date.parse(current.expiresAt)
-              : Number.POSITIVE_INFINITY;
-            if (
-              Number.isFinite(currentExpiresAt) &&
-              currentExpiresAt > Date.now() + 60_000
-            ) {
-              return { value: current };
-            }
-
-            const requestStartedAt = Date.now();
-            let refreshed: z.infer<typeof sentryAuthorizationSchema>;
-            try {
-              const response = await fetch(
-                `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(current.installationId)}/authorizations/`,
-                {
-                  method: "POST",
-                  headers: {
-                    accept: "application/json",
-                    "content-type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    grant_type: "refresh_token",
-                    refresh_token: current.refreshToken,
-                    client_id: clientId,
-                    client_secret: clientSecret,
-                  }),
-                  signal: AbortSignal.timeout(10_000),
-                },
-              );
-              if (!response.ok) {
-                throw new SentryRefreshHttpError(response.status);
-              }
-              refreshed = sentryAuthorizationSchema.parse(await response.json());
-            } catch (error) {
-              throw new SentryConnectionUnavailableError(
-                sentryConnectionFailureDiagnostics(
-                  error,
-                  Date.now() - requestStartedAt,
-                ),
-                error,
-              );
-            }
-            const nextCredentials = {
-              accessToken: refreshed.token,
-              refreshToken: refreshed.refreshToken,
-              expiresAt: refreshed.expiresAt ?? null,
-              installationId: current.installationId,
-            };
-            return {
-              encryptedCredentials: encryptCredentials(nextCredentials),
-              status: "connected" as const,
-              value: nextCredentials,
-            };
-          },
-          organizationId: config.organizationId,
-          provider: "sentry",
-          statusOnError: (error) =>
-            error instanceof SentryConnectionUnavailableError &&
-              error.httpStatus !== undefined &&
-              [400, 401, 403].includes(error.httpStatus)
-              ? "error"
-              : undefined,
-        });
-      if (!refreshedCredentials) return null;
-      credentials = refreshedCredentials;
-    } catch (error) {
-      const diagnostics =
-        error instanceof SentryConnectionUnavailableError
-          ? {
-              errorCode: error.errorCode,
-              failureKind: error.failureKind,
-              ...(error.httpStatus === undefined
-                ? {}
-                : { httpStatus: error.httpStatus }),
-              requestDurationMs: error.requestDurationMs,
-              retryable: error.retryable,
-            }
-          : {
-              errorCode: error instanceof Error ? error.name : typeof error,
-              failureKind: "internal",
-              retryable: false,
-            };
-      console.error(
-        JSON.stringify({
-          event: "sentry_token_refresh_failed",
-          ...diagnostics,
-          integrationAccountId: account.id,
-        }),
-      );
-      if (error instanceof SentryConnectionUnavailableError) throw error;
-      throw new Error("Unable to refresh Sentry access", { cause: error });
-    }
-  }
+  const credentials = await freshSentryCredentials({
+    encryptedCredentials: account.encryptedCredentials,
+    integrationAccountId: account.id,
+    organizationId: config.organizationId,
+  });
+  if (!credentials) return null;
 
   let projectSlug: string | undefined;
   const projectId = investigationInput?.attributes?.projectId;
