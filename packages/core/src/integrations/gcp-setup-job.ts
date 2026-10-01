@@ -7,6 +7,7 @@ import {
 } from "../credentials/encryption.js";
 import {
   getOrganizationIntegrationAccount,
+  listRunningIntegrationAccountSetups,
   updateIntegrationAccountSetup,
 } from "../db/integrations.js";
 import type { GcpProjectSetupJob } from "../jobs.js";
@@ -37,6 +38,7 @@ export const gcpSetupStateSchema = z.object({
   round: z.number().int().nonnegative().default(0),
   runId: z.uuid(),
   startedAt: z.iso.datetime(),
+  startedBy: z.string().optional(),
   status: z.enum(["running", "succeeded", "failed"]),
   step: z.enum(gcpSetupSteps),
   updatedAt: z.iso.datetime(),
@@ -70,6 +72,7 @@ export function startGcpProjectSetup(input: {
       round: 0,
       runId,
       startedAt: now.toISOString(),
+      startedBy: input.userId,
       status: "running",
       step: "starting",
       updatedAt: now.toISOString(),
@@ -127,6 +130,20 @@ export async function processGcpProjectSetupJob(
     provider: "gcp",
   });
   const current = gcpSetupStateSchema.safeParse(account?.metadata.setup);
+  // A retried round whose successor was recorded but never queued recreates
+  // it. A duplicate successor is harmless: only one matches the stored round.
+  if (
+    account && current.success &&
+    current.data.runId === job.runId &&
+    current.data.status === "running" &&
+    current.data.round === job.round + 1
+  ) {
+    await dependencies.enqueue(
+      { ...job, queuedAt: now().toISOString(), round: job.round + 1 },
+      GCP_SETUP_ROUND_DELAY_SECONDS,
+    );
+    return "running";
+  }
   // Revoking a token can revoke the user's whole grant, so only the run that
   // still owns the setup revokes. A superseded token expires within an hour.
   if (
@@ -155,6 +172,24 @@ export async function processGcpProjectSetupJob(
       },
       status,
     });
+  // Another running setup started by the same user may hold a token from the
+  // same Google grant. Leave this token to expire instead of revoking the grant
+  // under it; the last setup to finish revokes.
+  const releaseToken = async () => {
+    const siblings = await listRunningIntegrationAccountSetups({
+      organizationId: job.organizationId,
+      provider: "gcp",
+    });
+    const shared = siblings.some((sibling) =>
+      sibling.id !== job.integrationAccountId &&
+      sibling.setup.startedBy === job.userId
+    );
+    if (shared) {
+      logSetupEvent("gcp_setup_revocation_deferred", job);
+      return;
+    }
+    await revoke(accessToken);
+  };
   const queueNextRound = (failures: number) =>
     dependencies.enqueue(
       { ...job, failures, queuedAt: now().toISOString(), round: job.round + 1 },
@@ -167,7 +202,7 @@ export async function processGcpProjectSetupJob(
       account.status === "connected" ? undefined : "error",
     );
     if (!owned) return "superseded" as const;
-    await revoke(accessToken);
+    await releaseToken();
     logSetupEvent("gcp_setup_failed", job, { message });
     return "failed" as const;
   };
@@ -214,7 +249,7 @@ export async function processGcpProjectSetupJob(
 
   if (!step) {
     if (!(await record({ status: "succeeded" }, "connected"))) return "superseded";
-    await revoke(accessToken);
+    await releaseToken();
     await captureAnalyticsEvent({
       distinctId: job.userId,
       event: "integration connected",

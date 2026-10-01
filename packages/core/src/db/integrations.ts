@@ -266,6 +266,26 @@ export async function updateIntegrationAccountSetup(input: {
   return updated.length > 0;
 }
 
+export async function listRunningIntegrationAccountSetups(input: {
+  organizationId: string;
+  provider: IntegrationProvider;
+}): Promise<Array<{ id: string; setup: Record<string, unknown> }>> {
+  const rows = await getDatabase()
+    .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        sql`${integrationAccounts.metadata} -> 'setup' ->> 'status' = 'running'`,
+      ),
+    );
+  return rows.map((row) => ({
+    id: row.id,
+    setup: row.metadata.setup as Record<string, unknown>,
+  }));
+}
+
 export async function deleteIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;

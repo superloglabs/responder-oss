@@ -1678,6 +1678,33 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("reports a GCP setup whose worker stopped as failed", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-connection",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {
+        setup: {
+          round: 4,
+          runId: "40000000-0000-4000-8000-000000000000",
+          startedAt: new Date(Date.now() - 25 * 60 * 1_000).toISOString(),
+          status: "running",
+          step: "granting_access",
+          updatedAt: new Date(Date.now() - 24 * 60 * 1_000).toISOString(),
+        },
+      },
+      status: "pending",
+    });
+
+    const response = await app.request(
+      "/api/integrations/gcp/30000000-0000-4000-8000-000000000000/setup",
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      message: expect.stringMatching(/stopped before it finished/u),
+      status: "failed",
+    });
+  });
+
   it("reports background GCP setup progress for the organization's account", async () => {
     vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
       encryptedCredentials: "encrypted-connection",
@@ -1686,7 +1713,7 @@ describe("integration callback routing", () => {
         projectNumber: "123456789012",
         setup: {
           runId: "40000000-0000-4000-8000-000000000000",
-          startedAt: "2026-10-01T16:00:00.000Z",
+          startedAt: new Date(Date.now() - 60_000).toISOString(),
           status: "running",
           step: "granting_access",
           updatedAt: "2026-10-01T16:01:00.000Z",

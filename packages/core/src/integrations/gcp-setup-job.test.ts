@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getOrganizationIntegrationAccount,
+  listRunningIntegrationAccountSetups,
   updateIntegrationAccountSetup,
 } from "../db/integrations.js";
 import type { GcpProjectSetupJob } from "../jobs.js";
@@ -25,6 +26,7 @@ vi.mock("../credentials/encryption.js", () => ({
 
 vi.mock("../db/integrations.js", () => ({
   getOrganizationIntegrationAccount: vi.fn(),
+  listRunningIntegrationAccountSetups: vi.fn(),
   updateIntegrationAccountSetup: vi.fn(),
 }));
 
@@ -58,6 +60,7 @@ function runningSetup(): GcpSetupState {
     round: 0,
     runId,
     startedAt: "2026-10-01T16:00:00.000Z",
+    startedBy: job.userId,
     status: "running",
     step: "starting",
     updatedAt: "2026-10-01T16:00:00.000Z",
@@ -86,6 +89,11 @@ describe("Google Cloud setup job", () => {
     };
     vi.mocked(getOrganizationIntegrationAccount).mockImplementation(
       async () => structuredClone(account),
+    );
+    vi.mocked(listRunningIntegrationAccountSetups).mockImplementation(async () =>
+      account.metadata.setup.status === "running"
+        ? [{ id: account.id, setup: structuredClone(account.metadata.setup) }]
+        : []
     );
     vi.mocked(updateIntegrationAccountSetup).mockImplementation(async (input) => {
       const owner = input.owner;
@@ -212,17 +220,28 @@ describe("Google Cloud setup job", () => {
     expect(account.metadata.setup.message).toMatch(/did not finish/u);
   });
 
-  it("ignores a second delivery of a round that already ran", async () => {
+  it("does not repeat a round that already ran when it is delivered again", async () => {
     const deps = dependencies();
     await processGcpProjectSetupJob(job, deps);
     deps.advance.mockClear();
     deps.enqueue.mockClear();
 
+    await expect(processGcpProjectSetupJob(job, deps)).resolves.toBe("running");
+
+    expect(deps.advance).not.toHaveBeenCalled();
+    // Only the successor round can run; a duplicate copy finds no work.
+    expect(deps.enqueue).toHaveBeenCalledWith(expect.objectContaining({ round: 1 }), 3);
+    expect(account.metadata.setup.round).toBe(1);
+  });
+
+  it("ignores a stale delivery from two or more rounds earlier", async () => {
+    account.metadata.setup = { ...runningSetup(), round: 2 };
+    const deps = dependencies();
+
     await expect(processGcpProjectSetupJob(job, deps)).resolves.toBe("superseded");
 
     expect(deps.advance).not.toHaveBeenCalled();
     expect(deps.enqueue).not.toHaveBeenCalled();
-    expect(account.metadata.setup.round).toBe(1);
   });
 
   it("keeps a finished setup when an overlapping delivery completes later", async () => {
@@ -243,6 +262,49 @@ describe("Google Cloud setup job", () => {
     expect(account.metadata.setup.status).toBe("succeeded");
     expect(account.status).toBe("connected");
     expect(slow.revoke).not.toHaveBeenCalled();
+  });
+
+  it("requeues the next round when a retried round finds it missing", async () => {
+    const deps = dependencies({
+      enqueue: vi.fn()
+        .mockRejectedValueOnce(new Error("queue unavailable"))
+        .mockResolvedValue(undefined),
+    });
+    await expect(processGcpProjectSetupJob(job, deps)).rejects.toThrow("queue unavailable");
+    deps.advance.mockClear();
+
+    await expect(processGcpProjectSetupJob(job, deps)).resolves.toBe("running");
+
+    expect(deps.advance).not.toHaveBeenCalled();
+    expect(deps.enqueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ round: 1 }),
+      3,
+    );
+    expect(account.metadata.setup.round).toBe(1);
+  });
+
+  it("keeps the Google grant while the same user has another setup running", async () => {
+    vi.mocked(listRunningIntegrationAccountSetups).mockResolvedValue([
+      {
+        id: "60000000-0000-4000-8000-000000000000",
+        setup: {
+          ...runningSetup(),
+          runId: "70000000-0000-4000-8000-000000000000",
+        },
+      },
+    ]);
+    const deps = dependencies({
+      advance: vi.fn().mockResolvedValue({ status: "configured" }),
+    });
+
+    await expect(processGcpProjectSetupJob(job, deps)).resolves.toBe("succeeded");
+
+    expect(account.status).toBe("connected");
+    expect(deps.revoke).not.toHaveBeenCalled();
+    expect(listRunningIntegrationAccountSetups).toHaveBeenCalledWith({
+      organizationId: job.organizationId,
+      provider: "gcp",
+    });
   });
 
   it("stops a superseded run without touching Google or the newer token", async () => {

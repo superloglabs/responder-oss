@@ -616,7 +616,9 @@ function GcpIntegrationCard({
       </div>
         {settingUp.length > 0 ? (
           <span className="connectedBadge connectedBadge--muted">Setting up</span>
-        ) : accounts.some((account) => account.status === "error") ? (
+        ) : accounts.some((account) =>
+            account.status === "error" || account.setup?.status === "failed"
+          ) ? (
           <span className="connectedBadge connectedBadge--warning">Action needed</span>
         ) : integration.accountCount > 0 ? (
           <span className="connectedBadge">Connected</span>

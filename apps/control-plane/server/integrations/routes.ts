@@ -206,10 +206,25 @@ const gcpSelectionCredentialsSchema = z.object({
   projects: z.array(gcpProjectSchema).min(1).max(1_000),
 });
 
-function publicGcpSetupState(metadata: Record<string, unknown>) {
+// Setup fails itself after 15 minutes. A run still marked running well past
+// that lost its worker job, so report it as failed instead of in progress.
+const STALLED_GCP_SETUP_MS = 20 * 60 * 1_000;
+
+function publicGcpSetupState(
+  metadata: Record<string, unknown>,
+  now = Date.now(),
+) {
   const setup = gcpSetupStateSchema.safeParse(metadata.setup);
   if (!setup.success) return null;
-  const { message, status, step, updatedAt } = setup.data;
+  const { message, startedAt, status, step, updatedAt } = setup.data;
+  if (status === "running" && now - Date.parse(startedAt) > STALLED_GCP_SETUP_MS) {
+    return {
+      message: "Setup stopped before it finished. Reconnect the project to try again.",
+      status: "failed" as const,
+      step,
+      updatedAt,
+    };
+  }
   return { message, status, step, updatedAt };
 }
 const pendingConnectionCredentialsSchema = z.object({
