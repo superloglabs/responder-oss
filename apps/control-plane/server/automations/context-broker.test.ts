@@ -28,6 +28,12 @@ function claim(provider: string, credentials: Record<string, unknown>) {
 
 function appFor(activeClaim: ReturnType<typeof claim> | null) {
   const dependencies = {
+    freshSentryCredentials: vi.fn().mockResolvedValue({
+      accessToken: "fresh-sentry-token",
+      expiresAt: null,
+      installationId: "71717171-7171-4171-8171-717171717171",
+      refreshToken: "sentry-refresh-token",
+    }),
     providerFetch: vi.fn(),
     refreshCustomMcp: vi.fn().mockResolvedValue({
       tokens: { access_token: "fresh-oauth-token", refresh_token: "refresh-token" },
@@ -167,6 +173,42 @@ describe("automation context broker", () => {
     expect(headers.get("dd-application-key")).toBe("dd-app-secret");
     expect(headers.get("authorization")).toBeNull();
     expect(await response.text()).not.toContain("dd-api-secret");
+  });
+
+  it("refreshes Sentry credentials before proxying", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const activeClaim = claim("sentry", {
+      accessToken: "expired-sentry-token",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+      installationId: "71717171-7171-4171-8171-717171717171",
+      refreshToken: "sentry-refresh-token",
+    });
+    const { app, dependencies } = appFor(activeClaim);
+    dependencies.providerFetch.mockResolvedValue(new Response(
+      JSON.stringify({ id: 1, jsonrpc: "2.0", result: { tools: [] } }),
+      { headers: { "content-type": "application/json" } },
+    ));
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(dependencies.freshSentryCredentials).toHaveBeenCalledWith({
+      encryptedCredentials: activeClaim.account.encryptedCredentials,
+      integrationAccountId: accountId,
+      organizationId: activeClaim.organizationId,
+    });
+    expect(dependencies.providerFetch).toHaveBeenCalledWith(
+      "https://mcp.sentry.dev/mcp/acme?skills=inspect",
+      expect.anything(),
+    );
+    const request = dependencies.providerFetch.mock.calls[0]![1] as RequestInit;
+    expect(new Headers(request.headers).get("authorization")).toBe(
+      "Sentry-Bearer fresh-sentry-token",
+    );
+    expect(await response.text()).not.toContain("sentry-token");
   });
 
   it("refreshes custom MCP OAuth credentials before proxying", async () => {
