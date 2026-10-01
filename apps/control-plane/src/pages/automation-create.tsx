@@ -265,7 +265,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const scheduled = configuration.triggers.some((trigger) => trigger.kind === "schedule");
   const contextAccounts = options?.accounts.filter((account) =>
     !selectedTriggerAccountIds.includes(account.id) &&
-    ["custom_mcp", "datadog", "sentry", "slack"].includes(account.provider)
+    ["custom_mcp", "datadog", "linear", "sentry", "slack"].includes(account.provider)
   ) ?? [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {

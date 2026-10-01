@@ -197,6 +197,47 @@ describe("Linear issue API", () => {
     });
   });
 
+  it("sends the assignee, labels, priority, state, and parent when given", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        issueCreate: {
+          success: true,
+          issue: {
+            id: "81e37ee3-e8cf-4806-82f1-ad81fcd24dbd",
+            identifier: "OPS-42",
+            url: "https://linear.app/example/issue/OPS-42/checkout-returns-503",
+          },
+        },
+      },
+    }), { status: 200 }));
+    await createLinearIssue({
+      accessToken: "linear-token",
+      assigneeId: "user-id",
+      description: "Rendered description",
+      fetchImpl,
+      id: "81e37ee3-e8cf-4806-82f1-ad81fcd24dbd",
+      labelIds: ["label-id"],
+      parentId: "parent-id",
+      priority: 0,
+      stateId: "state-id",
+      teamId: "team-id",
+      title: issue.title,
+    });
+
+    const [, request] = fetchImpl.mock.calls[0]!;
+    expect(JSON.parse(request.body).variables.input).toEqual({
+      assigneeId: "user-id",
+      description: "Rendered description",
+      id: "81e37ee3-e8cf-4806-82f1-ad81fcd24dbd",
+      labelIds: ["label-id"],
+      parentId: "parent-id",
+      priority: 0,
+      stateId: "state-id",
+      teamId: "team-id",
+      title: issue.title,
+    });
+  });
+
   it("finds an existing issue by the stable request ID before a retry", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       data: {

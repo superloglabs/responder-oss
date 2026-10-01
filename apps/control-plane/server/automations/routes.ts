@@ -222,6 +222,7 @@ export const automationRoutes = new Hono()
           "datadog",
           "posthog",
           "custom_mcp",
+          "linear",
         ].includes(account.provider)
       ),
       credentials,

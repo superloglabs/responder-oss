@@ -31,6 +31,17 @@ The editable Markdown description template supports `{{issue_id}}`,
 `{{evidence}}`, and `{{remediation}}`. Responder renders the template before
 the controlled creation tool writes to Linear.
 
+Automations can add a Linear connection as a connector. The automation context
+broker serves one MCP server for it: Linear's read-only tools (issues,
+projects, teams, users, labels, and workflow states) and a `create_issue`
+tool. `create_issue` takes the team, title, and Markdown description, and
+optionally an assignee, labels, priority, project, workflow state, and parent
+issue. The broker makes the write itself, records it as an action of the run,
+and uses the action attempt ID as the Linear issue ID, so a retry does not
+create a second issue. The agent picks the assignee itself, for example by
+reading a commit's author through `github_api` and matching them to a Linear
+user.
+
 ## Slack
 
 Configure a distributed Slack app with:
@@ -112,7 +123,8 @@ Configure a public GitHub App with:
 - Repository permissions: Contents read/write, Pull requests read/write,
   Metadata read, and read-only Actions, Checks, Commit statuses, and Issues.
   Automation agents read pull request CI state and issues on private
-  repositories through the worker's `github_api` tool.
+  repositories, and public user profiles, through the worker's `github_api`
+  tool.
 - Account permission: Email addresses read-only
 - Webhook URL: `<public>/api/webhooks/github`
 - Subscribe to: Pull request and Pull request review comment

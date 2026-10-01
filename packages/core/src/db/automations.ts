@@ -422,6 +422,7 @@ async function validateConfigurationResources(
   const supportedContextProviders = new Set([
     "custom_mcp",
     "datadog",
+    "linear",
     "sentry",
     "slack",
   ]);

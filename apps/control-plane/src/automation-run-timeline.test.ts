@@ -44,10 +44,12 @@ describe("automationRunTimeline", () => {
         { kind: "message", text: "Fixed it." },
       ], truncated: false }, type: "transcript" },
       { data: { externalReference: "https://github.com/acme/app/pull/248", kind: "open_github_pull_request", repository: "acme/app", title: "Fix payment webhook timeouts" }, type: "action_succeeded" },
+      { data: { externalReference: "https://linear.app/acme/issue/OPS-42/payment-webhook-timeouts", kind: "create_linear_issue", title: "Payment webhook timeouts" }, type: "action_succeeded" },
       { data: null, type: "run_succeeded" },
     ]));
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["trigger", "message", "activity", "message", "pullRequest"]);
+    expect(entries.map((entry) => entry.kind)).toEqual(["trigger", "message", "activity", "message", "pullRequest", "linearIssue"]);
+    expect(entries[5]).toMatchObject({ identifier: "OPS-42", title: "Payment webhook timeouts", url: "https://linear.app/acme/issue/OPS-42/payment-webhook-timeouts" });
     expect(entries[2]).toMatchObject({ steps: [{ action: "read" }, { action: "query" }] });
     expect(entries[4]).toMatchObject({ number: "248", repository: "acme/app", title: "Fix payment webhook timeouts" });
     expect(lastAgentMessage(entries)).toBe("Fixed it.");

@@ -11,6 +11,7 @@ export const sharedAutomationTemplateSlugSchema = z
 const shareableContextProviders = new Set([
   "custom_mcp",
   "datadog",
+  "linear",
   "sentry",
   "slack",
 ]);

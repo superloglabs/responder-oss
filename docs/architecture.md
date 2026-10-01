@@ -70,7 +70,9 @@ types. `drizzle/` contains the ordered schema history.
   loopback hosts. Both modes expose only tools annotated read-only.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
-  stores the resulting Linear identifier and link.
+  stores the resulting Linear identifier and link. Automations reach Linear
+  through the context broker, which lists the read-only tools and adds its own
+  `create_issue` tool that records each write as a run action.
 - Langfuse context uses encrypted project-scoped API keys outside the sandbox.
 - A context server that cannot be reached does not fail the investigation.
   Its tools are replaced by a single reconnect tool that shows the connection

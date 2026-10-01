@@ -167,6 +167,25 @@ describe("automation run processor", () => {
     }]);
   });
 
+  it("serves a Linear context connection through the broker", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const linearId = "63636363-6363-4363-8363-636363636363";
+    deps.getConnections.mockResolvedValue([{ id: linearId, provider: "linear", role: "context" }]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].contextServers).toEqual([{
+      name: "linear_63636363636343638363636363636363",
+      url: `https://responder.example/api/automation-context-broker/v1/${linearId}`,
+    }]);
+  });
+
   describe("Slack plan card", () => {
     const slackStartedRun = () => ({
       ...claimedRun(),
