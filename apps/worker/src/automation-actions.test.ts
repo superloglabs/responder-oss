@@ -229,6 +229,56 @@ describe("automation notification tool", () => {
     expect(onPosted).toHaveBeenCalledWith(notification);
   });
 
+  it("posts details as replies in the new message's thread", async () => {
+    const deps = dependencies();
+    deps.postNotification.mockResolvedValue([{ notification, timestamp: "1790000000.000100" }]);
+    const { handle } = handler(deps, { notifications: target() });
+
+    const result = await handle({
+      arguments: { details: ["## Root cause\nA null check.", "## Fix\nOpened a pull request."], text: "New issue triaged." },
+      name: "post_notification",
+    });
+
+    expect(resultText(result)).toEqual({ posted: ["#ops"] });
+    expect(deps.postNotification).toHaveBeenCalledTimes(3);
+    expect(deps.postNotification.mock.calls[1]![0]).toEqual({
+      markdown: "## Root cause\nA null check.",
+      notifications: [notification],
+      organizationId: "15151515-1515-4515-8515-151515151515",
+      seed: "attempt-1:1",
+      text: "Root cause",
+      threadTimestamp: "1790000000.000100",
+    });
+    expect(deps.postNotification.mock.calls[2]![0]).toMatchObject({
+      markdown: "## Fix\nOpened a pull request.",
+      seed: "attempt-1:2",
+      threadTimestamp: "1790000000.000100",
+    });
+  });
+
+  it("keeps the posted message and reports a reply that failed", async () => {
+    const deps = dependencies();
+    deps.postNotification
+      .mockResolvedValueOnce([{ notification, timestamp: "1790000000.000100" }])
+      .mockResolvedValueOnce([{ error: new Error("rate_limited"), notification }]);
+    const onPosted = vi.fn();
+    const { handle } = handler(deps, { notifications: target(onPosted) });
+
+    const result = await handle({
+      arguments: { details: ["First.", "Second."], text: "New issue triaged." },
+      name: "post_notification",
+    });
+
+    // The second reply is not posted out of order.
+    expect(deps.postNotification).toHaveBeenCalledTimes(2);
+    expect(resultText(result)).toEqual({
+      failed: [{ channel: "#ops thread reply 1", error: "rate_limited" }],
+      posted: ["#ops"],
+    });
+    expect(deps.completeAttempt).toHaveBeenCalled();
+    expect(onPosted).toHaveBeenCalledWith(notification);
+  });
+
   it("does not post the same report twice", async () => {
     const deps = dependencies();
     deps.beginAttempt.mockResolvedValue({ externalReference: "C100:1", id: "attempt-1", status: "existing_succeeded" });

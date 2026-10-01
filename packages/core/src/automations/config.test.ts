@@ -33,7 +33,7 @@ describe("automation configuration", () => {
     expect(automationConfigurationSchema.safeParse({ ...baseConfiguration, maxModelRequests: 1_001 }).success).toBe(false);
   });
 
-  it("posts notifications only for scheduled automations", () => {
+  it("posts notifications only for scheduled and Sentry automations", () => {
     const notification = {
       channelId: "C999",
       integrationAccountId: "41414141-4141-4141-8141-414141414141",
@@ -47,6 +47,16 @@ describe("automation configuration", () => {
       ...baseConfiguration,
       notifications: [notification],
       triggers: [schedule],
+    }).notifications).toEqual([notification]);
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [{
+        eventTypes: ["new_issue"],
+        integrationAccountId: "41414141-4141-4141-8141-414141414141",
+        kind: "sentry",
+        projectIds: ["project-1"],
+      }],
     }).notifications).toEqual([notification]);
     expect(automationConfigurationSchema.safeParse({
       ...baseConfiguration,

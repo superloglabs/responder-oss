@@ -361,9 +361,25 @@ test("adds a Slack notification to a scheduled automation", async ({ page }, tes
   ]);
 });
 
-test("hides notifications for event-triggered automations", async ({ page }) => {
+test("shows notifications for a Sentry-triggered automation", async ({ page }) => {
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto(`/automations/${automationId}/settings`);
   await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+});
+
+test("hides notifications for a Slack-triggered automation", async ({ page }) => {
+  const slackTriggered = {
+    ...automation,
+    configuration: {
+      ...automation.configuration,
+      triggers: [{ channelIds: ["C100"], eventMode: "mentions", integrationAccountId: "88888888-8888-4888-8888-888888888888", kind: "slack" }],
+    },
+    name: "Answer questions",
+  };
+  await page.route(`**/api/automations/${automationId}`, (route) => route.fulfill({ json: { automation: slackTriggered } }));
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}/settings`);
+  await expect(page.getByRole("heading", { name: "Answer questions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Notifications" })).toHaveCount(0);
 });

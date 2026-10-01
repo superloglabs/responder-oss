@@ -69,6 +69,8 @@ const repositoryToolDefinitions = [
 
 // The Slack message limit, less room for the link to the run.
 export const maxNotificationLength = 11_000;
+// Thread replies that may follow one notification message.
+export const maxNotificationDetails = 10;
 
 // A run with notification channels can post to them itself, so the agent
 // knows where its results go.
@@ -83,10 +85,15 @@ export function automationToolDefinitions(notificationChannels: string[] = []) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Post a message to this automation's Slack notification channels (${notificationChannels.join(", ")}). People read the automation's results there, so post the complete report, not a pointer to it. Uses Markdown. Returns where the message was posted. Posting the same text again does not post it twice.`,
+      description: `Post a message to this automation's Slack notification channels (${notificationChannels.join(", ")}). People read the automation's results there, so post the complete report, not a pointer to it. Put the short result in text and longer findings in details: each details entry is posted, in order, as a reply in the new message's thread. Uses Markdown. Returns where the message was posted. Posting the same text and details again does not post them twice.`,
       inputSchema: {
         additionalProperties: false,
         properties: {
+          details: {
+            items: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
+            maxItems: maxNotificationDetails,
+            type: "array",
+          },
           text: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
         },
         required: ["text"],

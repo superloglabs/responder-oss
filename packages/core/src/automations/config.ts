@@ -53,7 +53,8 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-// Where a scheduled automation reports each finished run. Slack only for now.
+// Where a scheduled or Sentry-triggered automation reports each finished run.
+// Slack only for now.
 export const automationNotificationSchema = z.discriminatedUnion("kind", [
   z.object({
     channelId: externalResourceIdSchema,
@@ -61,6 +62,12 @@ export const automationNotificationSchema = z.discriminatedUnion("kind", [
     kind: z.literal("slack"),
   }),
 ]);
+
+// Slack and Discord runs answer where their event came from. Scheduled and
+// Sentry runs have no reply thread, so they report to notification channels.
+export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigger["kind"] }>): boolean {
+  return triggers.some((trigger) => trigger.kind === "schedule" || trigger.kind === "sentry");
+}
 
 export const automationConfigurationSchema = z
   .object({
@@ -101,14 +108,13 @@ export const automationConfigurationSchema = z
         path: ["modelProvider"],
       });
     }
-    // Event-triggered runs answer where their event came from.
     if (
       configuration.notifications.length > 0 &&
-      !configuration.triggers.some((trigger) => trigger.kind === "schedule")
+      !automationTriggersNotify(configuration.triggers)
     ) {
       context.addIssue({
         code: "custom",
-        message: "Notifications are only available for scheduled automations",
+        message: "Notifications are only available for scheduled and Sentry automations",
         path: ["notifications"],
       });
     }

@@ -82,6 +82,8 @@ export async function postAutomationNotification(input: {
   organizationId: string;
   seed: string;
   text: string;
+  // Posts a reply in this thread instead of a new message.
+  threadTimestamp?: string;
 }, dependencies: AutomationNotificationDependencies = defaultDependencies): Promise<AutomationNotificationDelivery[]> {
   const deliveries: AutomationNotificationDelivery[] = [];
   for (const notification of input.notifications) {
@@ -100,6 +102,7 @@ export async function postAutomationNotification(input: {
         channelId: notification.channelId,
         clientMessageId: notificationMessageId(input.seed, notification.channelId),
         text: input.text,
+        ...(input.threadTimestamp ? { threadTimestamp: input.threadTimestamp } : {}),
       });
       deliveries.push({ notification, timestamp });
     } catch (error) {
@@ -109,7 +112,8 @@ export async function postAutomationNotification(input: {
   return deliveries;
 }
 
-// A message the agent posts itself, with a link back to the run.
+// A message the agent posts itself. The top-level message links back to the
+// run; thread replies pass no link.
 export function agentNotificationMessage(text: string, runUrl: string | null): { markdown: string; text: string } {
   const link = runUrl ? `\n\n[View run](${runUrl})` : "";
   let body = text.trim();

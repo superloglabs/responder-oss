@@ -17,6 +17,7 @@ import {
   postAutomationNotification,
 } from "./automation-notifications.js";
 import {
+  maxNotificationDetails,
   maxNotificationLength,
   openPullRequestToolName,
   type AutomationToolRequest,
@@ -30,6 +31,7 @@ import type { CheckedOutRepository } from "./repositories.js";
 // are live tools served by the worker, which reads the changes from the
 // sandbox.
 const notificationSchema = z.object({
+  details: z.array(z.string().trim().min(1).max(maxNotificationLength)).max(maxNotificationDetails).default([]),
   text: z.string().trim().min(1).max(maxNotificationLength),
 });
 
@@ -74,7 +76,7 @@ function idempotencyKey(runId: string, kind: string, identity: unknown): string 
 export function automationActionInstructions(notificationChannels: string[] = []): string {
   return [
     ...(notificationChannels.length > 0
-      ? [`This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. If you do not post, your final reply is posted for you.`]
+      ? [`This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. Keep its text short and put longer findings in details, which are posted as replies in its thread. If you do not post, your final reply is posted for you.`]
       : []),
     `The ${automationToolServerName} tool server works with the selected repositories as the Responder GitHub App; the sandbox has no GitHub credentials of its own.`,
     "- github_api reads the GitHub REST API: pull requests, commits, compares, issues, files, and user profiles. Use it instead of unauthenticated requests to api.github.com.",
@@ -115,7 +117,8 @@ export function createAutomationToolHandler(input: {
     `#${input.notifications?.channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`;
 
   // Each channel is its own attempt, so posting the same text again reaches
-  // only the channels that did not get it.
+  // only the channels that did not get it. Its details follow as replies in
+  // the new message's thread.
   async function postNotification(args: unknown): Promise<AutomationToolResult> {
     const target = input.notifications;
     if (!target?.notifications.length) return toolError("This automation has no notification channels.");
@@ -136,6 +139,7 @@ export function createAutomationToolHandler(input: {
           notification.integrationAccountId,
           notification.channelId,
           parsed.data.text,
+          parsed.data.details,
         ]),
         kind,
         redactedInput: { channel },
@@ -165,6 +169,26 @@ export function createAutomationToolHandler(input: {
       await input.onAction({ externalReference, kind });
       target.onPosted(notification);
       posted.push(channel);
+      // The message is posted, so a failed reply is reported without failing
+      // the post. Later replies stop there to keep the thread in order.
+      for (const [index, detail] of parsed.data.details.entries()) {
+        const reply = `${channel} thread reply ${index + 1}`;
+        if (!delivery.timestamp) {
+          failed.push({ channel: reply, error: "Slack did not return the message to reply to" });
+          break;
+        }
+        const [replyDelivery] = await dependencies.postNotification({
+          ...agentNotificationMessage(detail, null),
+          notifications: [notification],
+          organizationId: target.organizationId,
+          seed: `${attempt.id}:${index + 1}`,
+          threadTimestamp: delivery.timestamp,
+        });
+        if (!replyDelivery || "error" in replyDelivery) {
+          failed.push({ channel: reply, error: replyDelivery?.error instanceof Error ? replyDelivery.error.message.slice(0, 200) : "Failed" });
+          break;
+        }
+      }
     }
     if (posted.length === 0 && alreadyPosted.length === 0) {
       return toolError(`Unable to post the notification: ${failed.map((item) => `${item.channel}: ${item.error}`).join("; ")}`);
