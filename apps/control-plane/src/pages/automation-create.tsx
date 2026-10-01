@@ -12,6 +12,7 @@ import {
   type SharedAutomationTemplate,
   triggerAccountIds,
 } from "../automations-api";
+import { automationTriggersNotify } from "../../../../packages/core/src/automations/config";
 import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import { automationConnectorProviders, type AutomationConnectorProvider } from "../components/automation-connectors";
@@ -275,6 +276,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   // Scheduled automations can run now from any tab; event-triggered ones run
   // from their history.
   const scheduled = configuration.triggers.some((trigger) => trigger.kind === "schedule");
+  const notifies = automationTriggersNotify(configuration.triggers);
   const contextAccounts = options?.accounts.filter((account) =>
     !selectedTriggerAccountIds.includes(account.id) &&
     account.provider !== "github" &&
@@ -424,12 +426,11 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             }} onChange={(triggers) => {
               setError(null);
               const accountIds = triggerAccountIds(triggers);
-              // Only scheduled automations post notifications.
-              const stillScheduled = triggers.some((trigger) => trigger.kind === "schedule");
+              const stillNotifies = automationTriggersNotify(triggers);
               updateConfiguration((current) => ({
                 ...current,
                 contextAccountIds: current.contextAccountIds.filter((id) => !accountIds.includes(id)),
-                notifications: stillScheduled ? current.notifications : [],
+                notifications: stillNotifies ? current.notifications : [],
                 triggers,
               }));
             }} />
@@ -465,7 +466,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
                 onConnect={(provider) => void connectConnector(provider)} />
             </div>
           </section>
-          {scheduled ? <AutomationNotificationEditor notifications={configuration.notifications} onChange={(notifications) => updateConfiguration((current) => ({ ...current, notifications }))} onRefresh={async () => {
+          {notifies ? <AutomationNotificationEditor notifications={configuration.notifications} onChange={(notifications) => updateConfiguration((current) => ({ ...current, notifications }))} onRefresh={async () => {
             const response = await fetch("/api/agents/options/refresh/slack", { method: "POST" });
             if (!response.ok) throw new Error("Could not refresh Slack channels");
             setOptions(await fetchAutomationOptions());

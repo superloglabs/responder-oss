@@ -18,7 +18,8 @@ function channelKey(notification: Pick<AutomationNotification, "channelId" | "in
   return `${notification.integrationAccountId}:${notification.channelId}`;
 }
 
-// Where a scheduled automation posts each finished run. Slack only for now.
+// Where a scheduled or Sentry-triggered automation posts each finished run.
+// Slack only for now.
 export function AutomationNotificationEditor({ notifications, onChange, onRefresh, options }: {
   notifications: AutomationNotification[];
   onChange: (notifications: AutomationNotification[]) => void;

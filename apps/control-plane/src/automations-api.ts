@@ -39,7 +39,7 @@ export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
-// Where a scheduled automation posts each finished run.
+// Where a scheduled or Sentry-triggered automation posts each finished run.
 export interface AutomationNotification {
   channelId: string;
   integrationAccountId: string;
