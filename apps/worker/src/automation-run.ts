@@ -203,7 +203,7 @@ function automationContextServers(
   const slackTriggered = triggerInput.provider === "slack";
   const served = connections.filter((connection) =>
     (connection.role === "context" &&
-      ["custom_mcp", "datadog", "sentry", "slack"].includes(connection.provider)) ||
+      ["custom_mcp", "datadog", "linear", "sentry", "slack"].includes(connection.provider)) ||
     (connection.role === "trigger" && connection.provider === "slack" && slackTriggered)
   );
   return [...new Map(served.map((connection) => [connection.id, connection])).values()]

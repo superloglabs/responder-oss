@@ -1102,6 +1102,7 @@ export const agentModelUsage = pgTable(
 
 export type AutomationActionKind =
   | "add_slack_reaction"
+  | "create_linear_issue"
   | "open_github_pull_request"
   | "remove_slack_reaction"
   | "send_slack_message";

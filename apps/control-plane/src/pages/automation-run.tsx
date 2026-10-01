@@ -254,6 +254,17 @@ function PullRequestCard({ entry }: { entry: Extract<AutomationRunEntry, { kind:
   </article>;
 }
 
+function LinearIssueCard({ entry }: { entry: Extract<AutomationRunEntry, { kind: "linearIssue" }> }) {
+  return <article className="automationRun__card automationRun__pullRequest">
+    <ProviderGlyph decorative provider="linear" />
+    <div>
+      <strong>{entry.title ?? "Linear issue created"}</strong>
+      <small>{entry.identifier ? `Linear · ${entry.identifier}` : "Linear"}</small>
+    </div>
+    <a className="automationRun__button" href={entry.url} rel="noreferrer" target="_blank">View issue<ArrowUpRightIcon size={12} /></a>
+  </article>;
+}
+
 function Entry({ animate, entry, live, run }: { animate: boolean; entry: AutomationRunEntry; live: boolean; run: AutomationRunDetail }) {
   switch (entry.kind) {
     case "trigger":
@@ -269,6 +280,8 @@ function Entry({ animate, entry, live, run }: { animate: boolean; entry: Automat
       return <ActivityGroup active={isActive(run.status)} entry={entry} live={live} />;
     case "pullRequest":
       return <PullRequestCard entry={entry} />;
+    case "linearIssue":
+      return <LinearIssueCard entry={entry} />;
     case "notice":
       return <p className="automationRun__notice">{entry.text}</p>;
     case "failure":

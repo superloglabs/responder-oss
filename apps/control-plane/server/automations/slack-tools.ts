@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AutomationContextBrokerClaim } from "../../../../packages/core/src/db/automation-model-broker.js";
 import {
@@ -7,7 +7,6 @@ import {
   completeAutomationActionAttempt,
   failAutomationActionAttempt,
 } from "../../../../packages/core/src/db/automations.js";
-import type { AutomationActionKind } from "../../../../packages/core/src/db/schema.js";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
   addSlackReaction,
@@ -21,6 +20,7 @@ import {
   slackTimestampPattern,
 } from "../../../../packages/core/src/integrations/slack-history.js";
 import { searchSlackChannel } from "../../../../packages/core/src/integrations/slack-search.js";
+import { recordedWrite } from "./recorded-write.js";
 
 // Slack tools for automation runs. A context link grants every tool on the
 // connection's available channels. A trigger link, or any link when Slack
@@ -294,50 +294,6 @@ function tokenFrom(
 }
 
 const notAllowed = failure("This Slack channel or thread is not available to this automation.");
-
-// Records a Slack write as an action attempt. A repeated call with the same
-// arguments in one run returns the earlier result instead of writing again.
-async function recordedWrite(input: {
-  claim: AutomationContextBrokerClaim;
-  dependencies: SlackToolDependencies;
-  identity: unknown;
-  kind: AutomationActionKind;
-  redactedInput: Record<string, unknown>;
-  toolName: string;
-  write: (attemptId: string) => Promise<string>;
-}): Promise<{ externalReference: string | null; repeated: boolean }> {
-  const idempotencyKey = createHash("sha256")
-    .update(`${input.claim.runId}\0${input.kind}\0${JSON.stringify(input.identity)}`, "utf8")
-    .digest("hex");
-  const attempt = await input.dependencies.beginAttempt({
-    idempotencyKey,
-    kind: input.kind,
-    redactedInput: input.redactedInput,
-    retryFailed: true,
-    runId: input.claim.runId,
-    toolCallId: input.toolName,
-  });
-  if (attempt.status === "existing_succeeded") {
-    return { externalReference: attempt.externalReference, repeated: true };
-  }
-  let externalReference: string;
-  try {
-    externalReference = await input.write(attempt.id);
-  } catch (error) {
-    await input.dependencies.failAttempt({
-      attemptId: attempt.id,
-      failureMessage: error instanceof Error ? error.message.slice(0, 2_000) : "Action failed",
-    });
-    throw error;
-  }
-  await input.dependencies.completeAttempt({ attemptId: attempt.id, externalReference });
-  await input.dependencies.appendEvent({
-    data: { externalReference, kind: input.kind },
-    runId: input.claim.runId,
-    type: "action_succeeded",
-  }).catch(() => undefined);
-  return { externalReference, repeated: false };
-}
 
 async function runTool(
   claim: AutomationContextBrokerClaim,

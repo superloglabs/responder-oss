@@ -26,6 +26,7 @@ export type AutomationRunEntry =
   | { key: string; kind: "message"; text: string }
   | { durationMs: number | null; key: string; kind: "activity"; steps: AutomationActivityStep[] }
   | { key: string; kind: "pullRequest"; number: string | null; repository: string | null; title: string | null; url: string }
+  | { identifier: string | null; key: string; kind: "linearIssue"; title: string | null; url: string }
   | { key: string; kind: "notice"; text: string }
   | { key: string; kind: "failure"; text: string };
 
@@ -94,6 +95,14 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
           kind: "pullRequest",
           number: /\/pull\/(\d+)/u.exec(url)?.[1] ?? null,
           repository: stringField(event.data, "repository"),
+          title: stringField(event.data, "title"),
+          url,
+        });
+      } else if (kind === "create_linear_issue" && url) {
+        entries.push({
+          identifier: /\/issue\/([A-Za-z0-9]+-\d+)(?:\/|$)/u.exec(url)?.[1] ?? null,
+          key,
+          kind: "linearIssue",
           title: stringField(event.data, "title"),
           url,
         });

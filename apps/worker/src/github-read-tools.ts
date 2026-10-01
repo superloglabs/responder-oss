@@ -26,7 +26,7 @@ export const githubReadToolDefinitions = [
   {
     annotations: { openWorldHint: true, readOnlyHint: true },
     description:
-      "Read the GitHub REST API for a repository this automation can use, as the Responder GitHub App. Only GET requests under /repos/{owner}/{name} are allowed. Examples: /repos/acme/app/pulls?state=open, /repos/acme/app/commits?sha=main&per_page=20, /repos/acme/app/compare/main...feature. Follow the Link header for more pages.",
+      "Read the GitHub REST API for a repository this automation can use, as the Responder GitHub App. Only GET requests under /repos/{owner}/{name}, and public user profiles at /users/{username}, are allowed. Examples: /repos/acme/app/pulls?state=open, /repos/acme/app/commits?sha=main&per_page=20, /repos/acme/app/compare/main...feature, /users/octocat. Follow the Link header for more pages.",
     inputSchema: {
       additionalProperties: false,
       properties: {
@@ -36,7 +36,7 @@ export const githubReadToolDefinitions = [
           type: "string",
         },
         path: {
-          description: "The API path with its query string, starting with /repos/.",
+          description: "The API path with its query string, starting with /repos/ or /users/.",
           maxLength: 2_000,
           minLength: 1,
           type: "string",
@@ -82,6 +82,8 @@ const fetchRefInput = z.object({
 // option or a range.
 const refPattern = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)(?!.*\/$)[A-Za-z0-9._/-]+$/u;
 const commitPattern = /^[a-f0-9]{40}$/iu;
+// A GitHub username, or an app's bot account such as dependabot[bot].
+const userPathPattern = /^\/users\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\]|%5Bbot%5D)?$/iu;
 
 export interface GitHubReadToolDependencies {
   createInstallationToken: typeof createGitHubInstallationToken;
@@ -172,12 +174,23 @@ export function createGitHubReadTools(input: {
       return failure("The path must be a GitHub API path such as /repos/owner/name/pulls.");
     }
     const [, scope, owner, name] = url.pathname.split("/");
-    if (url.origin !== githubApiOrigin || scope !== "repos" || !owner || !name) {
-      return failure("Only paths under /repos/{owner}/{name} are allowed.");
+    let repository: RuntimeRepository | undefined;
+    if (url.origin === githubApiOrigin && scope === "users") {
+      // A profile is public, so any selected repository's installation can
+      // read it.
+      if (!userPathPattern.test(url.pathname) || url.search) {
+        return failure("Only a user profile at /users/{username} is allowed.");
+      }
+      repository = (await input.repositories())[0];
+      if (!repository) return failure("This automation has no repositories selected.");
+    } else {
+      if (url.origin !== githubApiOrigin || scope !== "repos" || !owner || !name) {
+        return failure("Only paths under /repos/{owner}/{name} or /users/{username} are allowed.");
+      }
+      if (owner.includes("%") || name.includes("%")) return notSelected;
+      repository = await selected(`${owner}/${name}`);
+      if (!repository) return notSelected;
     }
-    if (owner.includes("%") || name.includes("%")) return notSelected;
-    const repository = await selected(`${owner}/${name}`);
-    if (!repository) return notSelected;
 
     let response: Response;
     let body: string;

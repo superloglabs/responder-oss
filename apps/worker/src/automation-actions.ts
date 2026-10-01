@@ -77,7 +77,7 @@ export function automationActionInstructions(notificationChannels: string[] = []
       ? [`This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. If you do not post, your final reply is posted for you.`]
       : []),
     `The ${automationToolServerName} tool server works with the selected repositories as the Responder GitHub App; the sandbox has no GitHub credentials of its own.`,
-    "- github_api reads the GitHub REST API: pull requests, commits, compares, issues, and files. Use it instead of unauthenticated requests to api.github.com.",
+    "- github_api reads the GitHub REST API: pull requests, commits, compares, issues, files, and user profiles. Use it instead of unauthenticated requests to api.github.com.",
     "- fetch_ref brings another branch, tag, pull request head, or commit into the checkout as github/<ref> for git diff. The checkouts have no history.",
     `- ${openPullRequestToolName} opens a pull request after you make and test the repository changes. It publishes the working tree changes on a new branch and returns the pull request URL, so you can link the pull request in messages you post.`,
     "Do not include secrets in pull request titles or bodies.",

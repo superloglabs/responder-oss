@@ -87,6 +87,30 @@ describe("github_api tool", () => {
     expect(dependencies.fetch).not.toHaveBeenCalled();
   });
 
+  it("reads a public user profile with a selected repository's app token", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ login: "octocat", name: "The Octocat" }));
+    const { github_api: githubApi, dependencies } = tools(fetchImpl);
+
+    const result = await githubApi!({ path: "/users/octocat" });
+
+    expect(result.isError).toBeUndefined();
+    expect(resultText(result)).toContain('"name":"The Octocat"');
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://api.github.com/users/octocat");
+    expect(dependencies.createInstallationToken).toHaveBeenCalledWith(123);
+    await githubApi!({ path: "/users/dependabot[bot]" });
+    expect(String(fetchImpl.mock.calls[1]![0])).toBe("https://api.github.com/users/dependabot[bot]");
+
+    for (const path of [
+      "/users/octocat/repos",
+      "/users/octocat?per_page=100",
+      "/users/-octocat",
+      "/users",
+    ]) {
+      await expect(githubApi!({ path })).resolves.toMatchObject({ isError: true });
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("stops reading a large download instead of buffering it", async () => {
     let pulled = 0;
     const body = new ReadableStream<Uint8Array>({

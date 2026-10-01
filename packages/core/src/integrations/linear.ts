@@ -1,4 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { IssueEvidence } from "../investigations/report.js";
 import { z } from "zod";
 
@@ -292,10 +295,15 @@ export async function findLinearIssueById(input: {
 
 export async function createLinearIssue(input: {
   accessToken: string;
+  assigneeId?: string;
   description: string;
   fetchImpl?: typeof fetch;
   id: string;
+  labelIds?: string[];
+  parentId?: string;
+  priority?: number;
   projectId?: string;
+  stateId?: string;
   teamId: string;
   title: string;
 }): Promise<CreatedLinearIssue> {
@@ -311,7 +319,12 @@ export async function createLinearIssue(input: {
       input: {
         description: input.description,
         id: input.id,
+        ...(input.assigneeId ? { assigneeId: input.assigneeId } : {}),
+        ...(input.labelIds?.length ? { labelIds: input.labelIds } : {}),
+        ...(input.parentId ? { parentId: input.parentId } : {}),
+        ...(input.priority === undefined ? {} : { priority: input.priority }),
         ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.stateId ? { stateId: input.stateId } : {}),
         teamId: input.teamId,
         title: input.title,
       },
@@ -322,4 +335,44 @@ export async function createLinearIssue(input: {
     issue: linearIssueSchema,
   }).parse(data.issueCreate);
   return payload.issue;
+}
+
+// Each call opens its own session with Linear's read-only MCP endpoint, so a
+// caller does not hold Linear session state between requests.
+async function withLinearReadOnlyMcp<T>(
+  accessToken: string,
+  operation: (client: Client) => Promise<T>,
+): Promise<T> {
+  const transport = new StreamableHTTPClientTransport(
+    new URL(LINEAR_READONLY_MCP_URL),
+    { requestInit: { headers: { authorization: `Bearer ${accessToken}` } } },
+  );
+  const client = new Client({ name: "responder-linear", version: "1" });
+  try {
+    await client.connect(transport);
+    return await operation(client);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+export function listLinearReadOnlyTools(input: {
+  accessToken: string;
+}): Promise<Tool[]> {
+  return withLinearReadOnlyMcp(input.accessToken, async (client) =>
+    (await client.listTools()).tools
+  );
+}
+
+export function callLinearReadOnlyTool(input: {
+  accessToken: string;
+  arguments?: Record<string, unknown>;
+  name: string;
+}): Promise<CallToolResult> {
+  return withLinearReadOnlyMcp(input.accessToken, async (client) =>
+    await client.callTool({
+      arguments: input.arguments ?? {},
+      name: input.name,
+    }) as CallToolResult
+  );
 }

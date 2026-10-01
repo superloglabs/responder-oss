@@ -21,7 +21,18 @@ import {
   safeCustomMcpFetch,
   type CustomMcpCredentials,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import {
+  linearAccessTokenNeedsRefresh,
+  parseLinearOAuthCredentials,
+  refreshLinearOAuthCredentials,
+} from "../../../../packages/core/src/integrations/linear.js";
 import { integrationCallbackUrl } from "../integrations/urls.js";
+import {
+  callLinearTool,
+  defaultLinearToolDependencies,
+  linearToolDefinitions,
+  type LinearToolDependencies,
+} from "./linear-tools.js";
 import {
   callSlackTool,
   defaultSlackToolDependencies,
@@ -43,8 +54,10 @@ type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
   freshSentryCredentials: typeof freshSentryCredentials;
+  linear: LinearToolDependencies;
   providerFetch: typeof safeCustomMcpFetch;
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
+  refreshLinear: typeof refreshLinearOAuthCredentials;
   resolveGrant: ResolveGrant;
   slack: SlackToolDependencies;
   withCredentialLease: typeof withIntegrationAccountCredentialLease;
@@ -52,8 +65,10 @@ interface ContextBrokerDependencies {
 
 const defaultDependencies: ContextBrokerDependencies = {
   freshSentryCredentials,
+  linear: defaultLinearToolDependencies,
   providerFetch: safeCustomMcpFetch,
   refreshCustomMcp: refreshCustomMcpOAuth,
+  refreshLinear: refreshLinearOAuthCredentials,
   resolveGrant: resolveAutomationContextBrokerGrant,
   slack: defaultSlackToolDependencies,
   withCredentialLease: withIntegrationAccountCredentialLease,
@@ -161,6 +176,82 @@ async function providerTarget(
   return null;
 }
 
+async function linearAccessToken(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<string | null> {
+  const credentials = await dependencies.withCredentialLease({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parseLinearOAuthCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      if (!linearAccessTokenNeedsRefresh(current)) return { value: current };
+      const updated = await dependencies.refreshLinear({ credentials: current });
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "linear",
+  });
+  return credentials?.accessToken ?? null;
+}
+
+// Linear is served here rather than proxied, so the run gets Linear's
+// read-only tools plus create_issue under one server.
+async function linearResponse(
+  claim: AutomationContextBrokerClaim,
+  request: z.infer<typeof requestSchema>,
+  dependencies: ContextBrokerDependencies,
+): Promise<Response> {
+  if (request.method.startsWith("notifications/")) {
+    return new Response(null, { status: 202 });
+  }
+  if (request.method === "initialize") {
+    const requestedVersion = z.string().safeParse(request.params?.protocolVersion);
+    return Response.json(rpcResult(request.id, {
+      capabilities: { tools: {} },
+      protocolVersion: requestedVersion.success
+        ? requestedVersion.data
+        : "2025-03-26",
+      serverInfo: { name: "responder-linear", version: "1" },
+    }));
+  }
+  if (request.method === "ping") return Response.json(rpcResult(request.id, {}));
+  if (request.method !== "tools/list" && request.method !== "tools/call") {
+    return Response.json(rpcError(request.id, -32601, "Method not found"), {
+      status: 404,
+    });
+  }
+  const accessToken = await linearAccessToken(claim, dependencies);
+  if (!accessToken) {
+    return Response.json(rpcError(request.id, -32601, "Connection does not expose context tools"), {
+      status: 404,
+    });
+  }
+  if (request.method === "tools/list") {
+    return Response.json(rpcResult(request.id, {
+      tools: await linearToolDefinitions(accessToken, dependencies.linear),
+    }));
+  }
+  const toolName = z.string().safeParse(request.params?.name);
+  if (!toolName.success) {
+    return Response.json(rpcError(request.id, -32602, "Invalid tool arguments"), {
+      status: 400,
+    });
+  }
+  return Response.json(rpcResult(request.id, await callLinearTool({
+    accessToken,
+    args: request.params?.arguments,
+    claim,
+    dependencies: dependencies.linear,
+    name: toolName.data,
+  })));
+}
+
 async function slackResponse(
   claim: AutomationContextBrokerClaim,
   request: z.infer<typeof requestSchema>,
@@ -258,6 +349,9 @@ export function createAutomationContextBrokerRoutes(
           context.req.raw.signal,
           dependencies,
         );
+      }
+      if (claim.account.provider === "linear") {
+        return await linearResponse(claim, parsed.data, dependencies);
       }
       const target = await providerTarget(claim, dependencies);
       if (!target) {

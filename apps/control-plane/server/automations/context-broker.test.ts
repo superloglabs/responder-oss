@@ -5,6 +5,19 @@ import { createAutomationContextBrokerRoutes } from "./context-broker.js";
 
 const accountId = "61616161-6161-4161-8161-616161616161";
 
+function linearCredentials(overrides: Record<string, unknown> = {}) {
+  return {
+    accessToken: "linear-token",
+    authType: "linear_oauth" as const,
+    expiresAt: Date.now() + 3_600_000,
+    mcpUrl: "https://mcp.linear.app/mcp" as const,
+    refreshToken: "linear-refresh-token",
+    scope: "read,write",
+    tokenType: "Bearer",
+    ...overrides,
+  };
+}
+
 function claim(provider: string, credentials: Record<string, unknown>) {
   return {
     account: {
@@ -34,10 +47,29 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
       installationId: "71717171-7171-4171-8171-717171717171",
       refreshToken: "sentry-refresh-token",
     }),
+    linear: {
+      appendEvent: vi.fn().mockResolvedValue(1),
+      beginAttempt: vi.fn().mockResolvedValue({ id: "31313131-3131-4131-8131-313131313131", status: "started" }),
+      callTool: vi.fn(),
+      completeAttempt: vi.fn().mockResolvedValue(undefined),
+      createIssue: vi.fn().mockResolvedValue({
+        id: "31313131-3131-4131-8131-313131313131",
+        identifier: "OPS-42",
+        url: "https://linear.app/acme/issue/OPS-42/checkout-returns-503",
+      }),
+      failAttempt: vi.fn().mockResolvedValue(undefined),
+      findIssue: vi.fn(),
+      listTools: vi.fn().mockResolvedValue([
+        { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "list_users" },
+      ]),
+    },
     providerFetch: vi.fn(),
     refreshCustomMcp: vi.fn().mockResolvedValue({
       tokens: { access_token: "fresh-oauth-token", refresh_token: "refresh-token" },
     }),
+    refreshLinear: vi.fn().mockResolvedValue(linearCredentials({
+      accessToken: "fresh-linear-token",
+    })),
     resolveGrant: vi.fn().mockResolvedValue(activeClaim),
     slack: {
       addReaction: vi.fn(),
@@ -239,5 +271,46 @@ describe("automation context broker", () => {
     expect(new Headers(request.headers).get("authorization")).toBe(
       "Bearer fresh-oauth-token",
     );
+  });
+
+  it("serves Linear's read tools and create_issue with a refreshed token", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app, dependencies } = appFor(claim("linear", linearCredentials({ expiresAt: Date.now() - 1 })));
+
+    const initialize = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "initialize", params: { protocolVersion: "2025-06-18" } }),
+    );
+    expect(await initialize.json()).toMatchObject({ result: { protocolVersion: "2025-06-18" } });
+
+    const list = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 2, jsonrpc: "2.0", method: "tools/list" }),
+    );
+    const listBody = await list.json() as { result: { tools: Array<{ name: string }> } };
+    expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["list_users", "create_issue"]);
+    expect(dependencies.refreshLinear).toHaveBeenCalled();
+    expect(dependencies.linear.listTools).toHaveBeenCalledWith({ accessToken: "fresh-linear-token" });
+
+    const create = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 3,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: { assignee_id: "user-1", description: "Details", team_id: "team-ops", title: "Checkout returns 503" },
+          name: "create_issue",
+        },
+      }),
+    );
+    const createBody = await create.text();
+    expect(createBody).toContain("OPS-42");
+    expect(createBody).not.toContain("fresh-linear-token");
+    expect(dependencies.linear.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "fresh-linear-token",
+      assigneeId: "user-1",
+    }));
+    expect(dependencies.providerFetch).not.toHaveBeenCalled();
   });
 });
