@@ -91,6 +91,8 @@ describe("automation tool bridge", () => {
 describe("tool definitions", () => {
   it("offers post_notification only to a run with notification channels", () => {
     expect(automationToolDefinitions().map((tool) => tool.name)).not.toContain("post_notification");
+    expect(automationToolDefinitions().map((tool) => tool.name)).not.toContain("skip_notification");
+    expect(automationToolDefinitions(["#ops"]).map((tool) => tool.name)).toContain("skip_notification");
     const notify = automationToolDefinitions(["#ops"]).find((tool) => tool.name === "post_notification");
     expect(notify?.description).toContain("(#ops)");
     expect(notify?.inputSchema.properties).toHaveProperty("details");

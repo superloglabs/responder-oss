@@ -196,10 +196,11 @@ describe("automation notification tool", () => {
     integrationAccountId: "61616161-6161-4161-8161-616161616161",
     kind: "slack" as const,
   };
-  const target = (onPosted = vi.fn()) => ({
+  const target = (onPosted = vi.fn(), onSkipped = vi.fn().mockResolvedValue(undefined)) => ({
     channelNames: new Map([[`${notification.integrationAccountId}:C100`, "ops"]]),
     notifications: [notification],
     onPosted,
+    onSkipped,
     organizationId: "15151515-1515-4515-8515-151515151515",
     runUrl: "https://responder.example/automations/a/runs/r",
   });
@@ -340,11 +341,25 @@ describe("automation notification tool", () => {
     expect(onPosted).toHaveBeenLastCalledWith(second);
   });
 
+  it("lets the agent skip the notification with a reason", async () => {
+    const deps = dependencies();
+    const onSkipped = vi.fn().mockResolvedValue(undefined);
+    const { handle } = handler(deps, { notifications: target(vi.fn(), onSkipped) });
+
+    const result = await handle({ arguments: { reason: "  Duplicate of a known issue.  " }, name: "skip_notification" });
+
+    expect(resultText(result)).toEqual({ skipped: ["#ops"] });
+    expect(onSkipped).toHaveBeenCalledWith("Duplicate of a known issue.");
+    expect(deps.postNotification).not.toHaveBeenCalled();
+    await expect(handle({ arguments: { reason: " " }, name: "skip_notification" })).resolves.toMatchObject({ isError: true });
+  });
+
   it("is unavailable without notification channels", async () => {
     const deps = dependencies();
     const { handle } = handler(deps);
 
     await expect(handle({ arguments: { text: "All clear." }, name: "post_notification" })).resolves.toMatchObject({ isError: true });
+    await expect(handle({ arguments: { reason: "Nothing new." }, name: "skip_notification" })).resolves.toMatchObject({ isError: true });
     expect(deps.beginAttempt).not.toHaveBeenCalled();
   });
 });
