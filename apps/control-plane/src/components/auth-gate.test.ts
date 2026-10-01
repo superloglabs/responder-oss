@@ -33,6 +33,25 @@ describe("signed-out authentication", () => {
     }
   });
 
+  it("starts on account creation for sign-up links and automation templates", () => {
+    for (const path of [
+      "/app?signup=1",
+      "/automations/new?signup=1",
+      "/automations/new?template=triage-sentry-issues",
+      "/automations/new?shared=aB3_-xYz09aB3_-x",
+    ]) {
+      const html = renderSignIn(path);
+      expect(html).toContain("Create account");
+      expect(html).toContain('autoComplete="new-password"');
+    }
+  });
+
+  it("starts on sign-in for a plain visit", () => {
+    for (const path of ["/app", "/automations/new", "/agents/new?template=triage-sentry-issues"]) {
+      expect(renderSignIn(path)).toContain("Welcome back");
+    }
+  });
+
   it("preserves invitation guidance while exposing sign-up and policy links", () => {
     const html = renderSignIn("/invite/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     expect(html).toContain("Workspace invitation");

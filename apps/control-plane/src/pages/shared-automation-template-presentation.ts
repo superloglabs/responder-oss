@@ -23,10 +23,13 @@ export function sharedTemplateSetupPath(slug: string): string {
   return `/automations/new?shared=${encodeURIComponent(slug)}`;
 }
 
-// The create page a visitor opens from a shared template, or null elsewhere.
-// Sign-up and workspace creation return the visitor to it.
-export function sharedTemplateSetupReturnPath(location: Pick<Location, "pathname" | "search">): string | null {
+// The create page a visitor opens from a shared or built-in template, or null
+// elsewhere. Sign-up and workspace creation return the visitor to it.
+export function automationSetupReturnPath(location: Pick<Location, "pathname" | "search">): string | null {
   if (location.pathname !== "/automations/new") return null;
-  const slug = new URLSearchParams(location.search).get("shared");
-  return slug ? sharedTemplateSetupPath(slug) : null;
+  const params = new URLSearchParams(location.search);
+  const slug = params.get("shared");
+  if (slug) return sharedTemplateSetupPath(slug);
+  const templateId = params.get("template");
+  return templateId ? `/automations/new?template=${encodeURIComponent(templateId)}` : null;
 }

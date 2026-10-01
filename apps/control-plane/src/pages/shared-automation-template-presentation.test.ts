@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sharedTemplateSetupPath, sharedTemplateSetupReturnPath, sharedTriggerDescription } from "./shared-automation-template-presentation";
+import { automationSetupReturnPath, sharedTemplateSetupPath, sharedTriggerDescription } from "./shared-automation-template-presentation";
 
 describe("shared automation template presentation", () => {
   it("describes each trigger without the owner's resources", () => {
@@ -20,8 +20,9 @@ describe("shared automation template presentation", () => {
   });
 
   it("returns to the template setup only from its create page", () => {
-    expect(sharedTemplateSetupReturnPath({ pathname: "/automations/new", search: "?shared=aB3_-xYz09aB3_-x&signed_up=1" })).toBe("/automations/new?shared=aB3_-xYz09aB3_-x");
-    expect(sharedTemplateSetupReturnPath({ pathname: "/automations/new", search: "?template=triage-sentry-issues" })).toBeNull();
-    expect(sharedTemplateSetupReturnPath({ pathname: "/agents", search: "?shared=aB3_-xYz09aB3_-x" })).toBeNull();
+    expect(automationSetupReturnPath({ pathname: "/automations/new", search: "?shared=aB3_-xYz09aB3_-x&signed_up=1" })).toBe("/automations/new?shared=aB3_-xYz09aB3_-x");
+    expect(automationSetupReturnPath({ pathname: "/automations/new", search: "?template=triage-sentry-issues&signup=1&signed_up=1" })).toBe("/automations/new?template=triage-sentry-issues");
+    expect(automationSetupReturnPath({ pathname: "/automations/new", search: "?signup=1" })).toBeNull();
+    expect(automationSetupReturnPath({ pathname: "/agents", search: "?shared=aB3_-xYz09aB3_-x" })).toBeNull();
   });
 });

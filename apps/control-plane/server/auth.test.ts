@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setOrganizationCapability } from "../../../packages/core/src/db/organization-capabilities.js";
 import {
+  authSignupMethod,
   canImpersonateSupportUser,
   configuredAuthTrustedOrigins,
   configuredSuperuserEmails,
@@ -141,5 +142,21 @@ describe("platformRoleForIdentity", () => {
         superuserEmails,
       ),
     ).toBe("superuser");
+  });
+});
+
+describe("authSignupMethod", () => {
+  it("reads the social provider from the OAuth callback route", () => {
+    expect(authSignupMethod({ path: "/callback/:id", params: { id: "google" } })).toBe("google");
+    expect(authSignupMethod({ path: "/callback/:id", params: { id: "github" } })).toBe("github");
+  });
+
+  it("recognizes email sign-up", () => {
+    expect(authSignupMethod({ path: "/sign-up/email" })).toBe("email");
+  });
+
+  it("reports other user creation as unknown", () => {
+    expect(authSignupMethod({ path: "/admin/create-user" })).toBe("unknown");
+    expect(authSignupMethod(undefined)).toBe("unknown");
   });
 });

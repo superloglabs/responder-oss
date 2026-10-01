@@ -122,6 +122,18 @@ async function synchronizeSuperuserRole(
   }
 }
 
+// Social sign-ups arrive on Better Auth's "/callback/:id" route, so the
+// provider is the route parameter rather than part of the path.
+export function authSignupMethod(
+  context: { path?: string; params?: Record<string, unknown> } | null | undefined,
+): "email" | "github" | "google" | "unknown" {
+  const path = context?.path ?? "";
+  const provider = path.startsWith("/callback/") ? context?.params?.id : undefined;
+  if (provider === "google" || provider === "github") return provider;
+  if (path === "/sign-up/email") return "email";
+  return "unknown";
+}
+
 export function createResponderAuth() {
   const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
   const secret = process.env.BETTER_AUTH_SECRET;
@@ -181,14 +193,7 @@ export function createResponderAuth() {
               user.emailVerified,
               "user_create_after",
             );
-            const path = context?.path ?? "";
-            const signupMethod = path.includes("google")
-              ? "google"
-              : path.includes("github")
-                ? "github"
-                : path.includes("email")
-                  ? "email"
-                  : "unknown";
+            const signupMethod = authSignupMethod(context);
             await captureAnalyticsEvent({
               distinctId: user.id,
               event: "user signed up",
