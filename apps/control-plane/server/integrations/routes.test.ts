@@ -33,6 +33,15 @@ import {
   verifyGcpProject,
 } from "../../../../packages/core/src/integrations/gcp.js";
 import {
+  advanceGcpProjectSetup,
+  createGcpPkce,
+  exchangeGcpOAuthCode,
+  gcpAuthorizeUrl,
+  GcpSetupError,
+  listGcpProjects,
+  revokeGcpOAuthToken,
+} from "../../../../packages/core/src/integrations/gcp-setup.js";
+import {
   beginCustomMcpOAuth,
   callCustomMcpTool,
   finishCustomMcpOAuth,
@@ -107,6 +116,21 @@ vi.mock("../../../../packages/core/src/integrations/gcp.js", async (importOrigin
     ...actual,
     createGcpSessionName: vi.fn(),
     verifyGcpProject: vi.fn(),
+  };
+});
+
+vi.mock("../../../../packages/core/src/integrations/gcp-setup.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/gcp-setup.js")
+  >();
+  return {
+    ...actual,
+    advanceGcpProjectSetup: vi.fn(),
+    createGcpPkce: vi.fn(),
+    exchangeGcpOAuthCode: vi.fn(),
+    gcpAuthorizeUrl: vi.fn(),
+    listGcpProjects: vi.fn(),
+    revokeGcpOAuthToken: vi.fn(),
   };
 });
 
@@ -1458,52 +1482,271 @@ describe("integration callback routing", () => {
     });
   });
 
-  it("prepares a keyless read-only GCP setup script", async () => {
+  it("starts Google OAuth for a one-time GCP project setup", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.stubEnv(
       "AWS_INTEGRATION_PRINCIPAL_ARN",
       "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
     );
+    vi.stubEnv("GCP_OAUTH_CLIENT_ID", "gcp-client");
+    vi.stubEnv("GCP_OAUTH_CLIENT_SECRET", "gcp-secret");
+    vi.mocked(createGcpPkce).mockReturnValue({
+      codeChallenge: "pkce-challenge",
+      codeVerifier: "pkce-verifier",
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("gcp-state");
+    vi.mocked(gcpAuthorizeUrl).mockReturnValue(
+      "https://accounts.google.com/o/oauth2/v2/auth?state=gcp-state",
+    );
+
+    const response = await app.request(
+      "/api/integrations/gcp/start?returnTo=%2Fagents%2Fnew",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://accounts.google.com/o/oauth2/v2/auth?state=gcp-state",
+    );
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      provider: "gcp",
+      codeVerifier: "pkce-verifier",
+      returnTo: "/agents/new",
+      routingUrl: "https://responder.example/api/integrations/gcp/callback",
+    });
+    expect(gcpAuthorizeUrl).toHaveBeenCalledWith({
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://responder.example/api/integrations/gcp/callback",
+      state: "gcp-state",
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("offers the projects visible to the Google account after OAuth", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    const projects = [
+      { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+    ];
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: "pkce-verifier",
+      metadata: {},
+    });
+    vi.mocked(exchangeGcpOAuthCode).mockResolvedValue({
+      accessToken: "google-token",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    vi.mocked(listGcpProjects).mockResolvedValue(projects);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-selection");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("selection-state");
+
+    const response = await app.request(
+      "/api/integrations/gcp/callback?code=auth-code&state=gcp-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings?integration=gcp&status=select_project&selection_state=selection-state",
+    );
+    expect(exchangeGcpOAuthCode).toHaveBeenCalledWith({
+      authorizationCode: "auth-code",
+      codeVerifier: "pkce-verifier",
+      redirectUri: "https://responder.example/api/integrations/gcp/callback",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      accessToken: "google-token",
+      projects,
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("binds the Google token to the chosen project before setup", async () => {
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "encrypted-selection" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "google-token",
+      projects: [
+        { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+      ],
+    });
     vi.mocked(createGcpSessionName).mockReturnValue(
       "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
     );
-    vi.mocked(encryptCredentials).mockReturnValue("encrypted-gcp-credentials");
+    vi.mocked(encryptCredentials).mockImplementation((value) =>
+      "accessToken" in (value as object) ? "encrypted-setup" : "encrypted-connection"
+    );
     vi.mocked(upsertIntegrationAccount).mockResolvedValue(
       "30000000-0000-4000-8000-000000000000",
     );
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("setup-state");
 
-    const response = await app.request("/api/integrations/gcp/connect", {
-      body: JSON.stringify({
-        projectId: "responder-production",
-        projectNumber: "123456789012",
-      }),
+    const unauthorized = await app.request("/api/integrations/gcp/select-project", {
+      body: JSON.stringify({ projectId: "someone-else", selectionState: "selection-state" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(unauthorized.status).toBe(403);
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+
+    const response = await app.request("/api/integrations/gcp/select-project", {
+      body: JSON.stringify({ projectId: "konex-prod", selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
 
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body).toMatchObject({
-      accountId: "30000000-0000-4000-8000-000000000000",
-      projectId: "responder-production",
-      script: expect.stringContaining("roles/cloudasset.viewer"),
-    });
-    expect(body.script).toContain("roles/mcp.toolUser");
-    expect(body.script).toContain(
-      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
-    );
+    await expect(response.json()).resolves.toEqual({ setupState: "setup-state" });
     expect(encryptCredentials).toHaveBeenCalledWith({
-      projectId: "responder-production",
+      projectId: "konex-prod",
       projectNumber: "123456789012",
       sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
     });
     expect(upsertIntegrationAccount).toHaveBeenCalledWith(
       expect.objectContaining({
-        displayName: "GCP · responder-production",
-        externalAccountId: "responder-production",
+        displayName: "GCP · konex-prod",
+        externalAccountId: "konex-prod",
         provider: "gcp",
         status: "pending",
       }),
     );
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      accessToken: "google-token",
+      accountId: "30000000-0000-4000-8000-000000000000",
+    });
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { encryptedCredentials: "encrypted-setup" },
+        provider: "gcp",
+      }),
+    );
+  });
+
+  function mockGcpSetupSession() {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "encrypted-setup" },
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-connection",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockImplementation((value) =>
+      value === "encrypted-setup"
+        ? {
+            accessToken: "google-token",
+            accountId: "30000000-0000-4000-8000-000000000000",
+          }
+        : {
+            projectId: "konex-prod",
+            projectNumber: "123456789012",
+            sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+          }
+    );
+  }
+
+  async function requestGcpSetup() {
+    return app.request("/api/integrations/gcp/setup", {
+      body: JSON.stringify({ setupState: "setup-state" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  it("reports GCP setup progress without connecting the project", async () => {
+    mockGcpSetupSession();
+    vi.mocked(advanceGcpProjectSetup).mockResolvedValue({
+      status: "pending",
+      step: "enabling_apis",
+    });
+
+    const response = await requestGcpSetup();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "pending",
+      step: "enabling_apis",
+    });
+    expect(advanceGcpProjectSetup).toHaveBeenCalledWith({
+      accessToken: "google-token",
+      connection: expect.objectContaining({ projectId: "konex-prod" }),
+    });
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+    expect(consumeIntegrationConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("waits for Google before connecting a configured project", async () => {
+    mockGcpSetupSession();
+    vi.mocked(advanceGcpProjectSetup).mockResolvedValue({ status: "configured" });
+    vi.mocked(verifyGcpProject).mockRejectedValue(new Error("Permission denied"));
+
+    const response = await requestGcpSetup();
+
+    await expect(response.json()).resolves.toEqual({
+      status: "pending",
+      step: "waiting_for_google",
+    });
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+    expect(revokeGcpOAuthToken).not.toHaveBeenCalled();
+  });
+
+  it("connects a verified project and revokes the Google token", async () => {
+    mockGcpSetupSession();
+    vi.mocked(advanceGcpProjectSetup).mockResolvedValue({ status: "configured" });
+    vi.mocked(verifyGcpProject).mockResolvedValue(undefined);
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(null);
+
+    const response = await requestGcpSetup();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "connected",
+      redirectUrl:
+        "https://responder.example/agents/new?integration=gcp&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
+    });
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "connected",
+    );
+    expect(consumeIntegrationConnectionState).toHaveBeenCalledWith(
+      "gcp",
+      "setup-state",
+      { organizationId: tenant.organizationId, userId: tenant.user.id },
+    );
+    expect(revokeGcpOAuthToken).toHaveBeenCalledWith("google-token");
+  });
+
+  it("ends GCP setup when the Google account cannot grant access", async () => {
+    mockGcpSetupSession();
+    vi.mocked(advanceGcpProjectSetup).mockRejectedValue(
+      new GcpSetupError("Ask a project Owner to connect it.", "permission_denied"),
+    );
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(null);
+
+    const response = await requestGcpSetup();
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Ask a project Owner to connect it.",
+    });
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000000",
+      "error",
+    );
+    expect(revokeGcpOAuthToken).toHaveBeenCalledWith("google-token");
   });
 
   it("removes one GCP project account without touching other providers", async () => {
@@ -1520,45 +1763,6 @@ describe("integration callback routing", () => {
       integrationAccountId: "30000000-0000-4000-8000-000000000000",
       organizationId: tenant.organizationId,
       provider: "gcp",
-    });
-  });
-
-  it("verifies federated GCP access before connecting the project", async () => {
-    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
-    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
-      encryptedCredentials: "encrypted-gcp-credentials",
-      id: "30000000-0000-4000-8000-000000000000",
-      metadata: {},
-      status: "pending",
-    });
-    vi.mocked(decryptCredentials).mockReturnValue({
-      projectId: "responder-production",
-      projectNumber: "123456789012",
-      sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
-    });
-    vi.mocked(verifyGcpProject).mockResolvedValue(undefined);
-    vi.mocked(setIntegrationAccountStatus).mockResolvedValue(undefined);
-
-    const response = await app.request("/api/integrations/gcp/verify", {
-      body: JSON.stringify({
-        integrationAccountId: "30000000-0000-4000-8000-000000000000",
-        returnTo: "/agents/new",
-      }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-
-    expect(response.status).toBe(200);
-    expect(verifyGcpProject).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: "responder-production" }),
-    );
-    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(
-      "30000000-0000-4000-8000-000000000000",
-      "connected",
-    );
-    await expect(response.json()).resolves.toMatchObject({
-      redirectUrl:
-        "https://responder.example/agents/new?integration=gcp&status=connected&integration_account_id=30000000-0000-4000-8000-000000000000",
     });
   });
 

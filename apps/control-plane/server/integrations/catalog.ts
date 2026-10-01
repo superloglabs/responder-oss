@@ -42,7 +42,11 @@ export const integrationCatalog: IntegrationDefinition[] = [
     name: "Google Cloud",
     description: "Read-only infrastructure, logs, metrics, and alert context.",
     implemented: true,
-    requiredEnvironment: ["AWS_INTEGRATION_PRINCIPAL_ARN"],
+    requiredEnvironment: [
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "GCP_OAUTH_CLIENT_ID",
+      "GCP_OAUTH_CLIENT_SECRET",
+    ],
   },
   {
     id: "github",

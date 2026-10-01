@@ -60,7 +60,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
-import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
+import { currentProjectSelectionState } from "../project-selection";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -401,7 +401,10 @@ function connectionNotice(): {
   const provider = search.get("integration");
   const status = search.get("status");
   if (!provider || !status) return null;
-  if (provider === "supabase" && status === "select_project") return null;
+  if (
+    (provider === "supabase" || provider === "gcp") &&
+    status === "select_project"
+  ) return null;
 
   const name = providerDisplayName(provider);
   if (status === "connected") {
@@ -492,14 +495,15 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     Boolean(supabaseSelectionState),
   );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingGrafana, setConnectingGrafana] = useState(false);
   const [connectingAws, setConnectingAws] = useState(false);
-  const [connectingGcp, setConnectingGcp] = useState(false);
+  const gcpSelectionState = currentProjectSelectionState("gcp");
+  const [connectingGcp, setConnectingGcp] = useState(Boolean(gcpSelectionState));
   const [connectingDash0, setConnectingDash0] = useState(false);
   const [dash0WebhookAccountId, setDash0WebhookAccountId] = useState(
     dash0JustConnected ? returnedIntegrationAccountId ?? "" : "",
@@ -1660,6 +1664,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
         onCancel={() => setConnectingGcp(false)}
         open={connectingGcp}
         returnTo={returnTo}
+        selectionState={gcpSelectionState}
       />
       <header className="agentEditorHeading">
         <h1 className="srOnly">{isEditing ? agentDetail?.name ?? "Agent" : "Create agent"}</h1>

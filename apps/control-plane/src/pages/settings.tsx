@@ -13,7 +13,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
-import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
+import { currentProjectSelectionState } from "../project-selection";
 import {
   Dash0ConnectionDialog,
   Dash0WebhookSetupDialog,
@@ -96,7 +96,10 @@ function connectionNotice(): {
   const provider = search.get("integration");
   const status = search.get("status");
   if (!provider || !status) return null;
-  if (provider === "supabase" && status === "select_project") return null;
+  if (
+    (provider === "supabase" || provider === "gcp") &&
+    status === "select_project"
+  ) return null;
 
   const name = providerDisplayName(provider);
   if (status === "connected") {
@@ -127,7 +130,9 @@ function connectionNotice(): {
       ? "That account is already connected to another workspace."
       : reason === "cancelled"
         ? "The connection was cancelled."
-        : "The connection could not be completed.";
+        : reason === "no_projects"
+          ? "That Google account cannot see any active projects."
+          : "The connection could not be completed.";
   return { tone: "error", message: `${name}: ${detail}` };
 }
 
@@ -370,7 +375,7 @@ function DefaultIntegrationCard({
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     integration.id === "supabase" && Boolean(supabaseSelectionState),
   );
@@ -540,13 +545,9 @@ function GcpIntegrationCard({
 }: {
   integration: IntegrationSummary;
 }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const selectionState = currentProjectSelectionState("gcp");
+  const [dialogOpen, setDialogOpen] = useState(Boolean(selectionState));
   const [showAccounts, setShowAccounts] = useState(false);
-  const [reconnectProject, setReconnectProject] = useState<{
-    displayName: string;
-    projectId: string;
-    projectNumber: string;
-  } | undefined>();
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const canConnect = Boolean(integration.connectUrl);
@@ -603,17 +604,10 @@ function GcpIntegrationCard({
                       : "Error"}
                 </span>
                 <span className="integrationCard__accountActions">
-                  {account.projectNumber ? (
+                  {canConnect ? (
                     <button
                       className="button button--secondary button--small"
-                      onClick={() => {
-                        setReconnectProject({
-                          displayName: account.displayName.replace(/^GCP · /u, ""),
-                          projectId: account.projectId ?? account.displayName.replace(/^GCP · /u, ""),
-                          projectNumber: account.projectNumber!,
-                        });
-                        setDialogOpen(true);
-                      }}
+                      onClick={() => setDialogOpen(true)}
                       type="button"
                     >
                       Reconnect
@@ -658,22 +652,18 @@ function GcpIntegrationCard({
             onClick={() => setDialogOpen(true)}
             type="button"
           >
-            Add project manually
+            Add project
           </button>
         ) : (
           <small>Provider configuration required</small>
         )}
       </div> : null}
       <GcpConnectionDialog
-        connectUrl={integration.connectUrl ?? "/api/integrations/gcp/connect"}
-        initialProject={reconnectProject}
-        key={reconnectProject?.projectId ?? "manual"}
-        onCancel={() => {
-          setDialogOpen(false);
-          setReconnectProject(undefined);
-        }}
-        open={dialogOpen}
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setDialogOpen(false)}
+        open={dialogOpen && canConnect}
         returnTo="/settings"
+        selectionState={selectionState}
       />
     </article>
   );

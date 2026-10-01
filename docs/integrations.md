@@ -398,21 +398,28 @@ stable broker role that the runtime can assume. The broker must allow
 ## Google Cloud
 
 Google Cloud is optional read-only context for investigations. A workspace
-owner enters a project ID and numeric project number, which they can find in
-the [Google Cloud project selector](https://console.cloud.google.com/cloud-resource-manager),
-then downloads a generated setup script. No Google OAuth project-listing
-session is required.
+owner selects **Connect** and signs in with Google. Responder lists the projects
+that account can see, and the owner chooses one. The OAuth callback is:
 
-Each project is a separate integration account. The setup script verifies that
-its project ID and number match before changing IAM.
+```text
+<public>/api/integrations/gcp/callback
+```
 
-The script enables the IAM, Security Token Service, Service Account
-Credentials, Cloud Asset Inventory, Logging, and Monitoring APIs. It creates a
-fixed `responder-investigation` service account and a customer-owned Workload
-Identity Federation pool/provider that trusts the configured Responder AWS
-broker. The service-account binding is restricted to one encrypted, randomly
-generated broker session name. It grants only MCP Tool User, Cloud Asset
-Viewer, Logs Viewer, Monitoring Viewer, and Service Usage Consumer.
+The Google sign-in requests the Cloud Platform scope with online access only.
+Responder uses that token to set up the project, then revokes it. It does not
+store a refresh token.
+
+Each project is a separate integration account. Setup first checks that the
+signed-in account can enable services, create service accounts and identity
+pools, and change project IAM. It then enables the IAM, Security Token Service,
+Service Account Credentials, Cloud Asset Inventory, Logging, and Monitoring
+APIs. It creates a fixed `responder-investigation` service account and a
+customer-owned Workload Identity Federation pool/provider that trusts the
+configured Responder AWS broker. The service-account binding is restricted to
+one encrypted, randomly generated broker session name. It grants only MCP Tool
+User, Cloud Asset Viewer, Logs Viewer, Monitoring Viewer, and Service Usage
+Consumer. The browser repeats the setup request until Google finishes each
+step and Responder can use the new identity.
 
 During an investigation, Responder assumes the broker with that connection's
 stable session name, exchanges the AWS identity for a short-lived Google token,
@@ -423,7 +430,11 @@ the servers explicitly annotate read-only; the customer IAM roles remain the
 authorization boundary.
 
 This integration requires `AWS_INTEGRATION_PRINCIPAL_ARN`, the same stable
-broker role used by AWS context. Self-hosted deployments must run on AWS with
+broker role used by AWS context, plus a Google OAuth web client in
+`GCP_OAUTH_CLIENT_ID` and `GCP_OAUTH_CLIENT_SECRET`. The client's Google Cloud
+project must enable the Cloud Resource Manager, Service Usage, and IAM APIs,
+because Google charges the quota for setup requests made with user tokens to
+that project. Self-hosted deployments must run on AWS with
 permission to assume that role. Native Google Cloud alert ingestion is a
 separate integration boundary.
 

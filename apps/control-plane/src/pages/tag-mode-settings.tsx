@@ -25,7 +25,7 @@ import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { availableTagModeConfiguration } from "../tag-mode-configuration";
-import { currentSupabaseProjectSelectionState } from "../supabase-project-selection";
+import { currentProjectSelectionState } from "../project-selection";
 import { BookBookmarkIcon as RepositoryIcon, MagnifyingGlassIcon as SearchIcon, XIcon } from "@phosphor-icons/react";
 import {
   contextCategoryDescriptions,
@@ -139,12 +139,13 @@ export function TagModeSettingsPage() {
   const [connectingProvider, setConnectingProvider] =
     useState<IntegrationSummary["id"] | null>(null);
   const [connectingAws, setConnectingAws] = useState(false);
-  const [connectingGcp, setConnectingGcp] = useState(false);
+  const gcpSelectionState = currentProjectSelectionState("gcp");
+  const [connectingGcp, setConnectingGcp] = useState(Boolean(gcpSelectionState));
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
-  const supabaseSelectionState = currentSupabaseProjectSelectionState();
+  const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     Boolean(supabaseSelectionState),
   );
@@ -464,6 +465,7 @@ export function TagModeSettingsPage() {
         onCancel={() => setConnectingGcp(false)}
         open={connectingGcp}
         returnTo="/settings/tag-mode"
+        selectionState={gcpSelectionState}
       />
       <SettingsHeading active="tag-mode" />
 

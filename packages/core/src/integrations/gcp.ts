@@ -58,11 +58,27 @@ export function gcpInvestigationServiceAccountEmail(
   return `${GCP_INVESTIGATION_SERVICE_ACCOUNT_ID}@${parsed.projectId}.iam.gserviceaccount.com`;
 }
 
-function brokerIdentity(principalArn: string): {
-  accountId: string;
-  roleName: string;
-} {
-  const match = principalArn.match(
+export const GCP_REQUIRED_SERVICES = [
+  "iam.googleapis.com",
+  "iamcredentials.googleapis.com",
+  "sts.googleapis.com",
+  "cloudasset.googleapis.com",
+  "logging.googleapis.com",
+  "monitoring.googleapis.com",
+] as const;
+
+export const GCP_INVESTIGATION_ROLES = [
+  "roles/mcp.toolUser",
+  "roles/cloudasset.viewer",
+  "roles/logging.viewer",
+  "roles/monitoring.viewer",
+  "roles/serviceusage.serviceUsageConsumer",
+] as const;
+
+export function gcpBrokerIdentity(
+  environment: NodeJS.ProcessEnv = process.env,
+): { accountId: string; roleName: string } {
+  const match = awsIntegrationPrincipalArn(environment).match(
     /^arn:aws:iam::(\d{12}):role\/([A-Za-z0-9+=,.@_/-]+)$/u,
   );
   if (!match?.[1] || !match[2]) {
@@ -71,104 +87,28 @@ function brokerIdentity(principalArn: string): {
   return { accountId: match[1], roleName: match[2].split("/").at(-1)! };
 }
 
-export function gcpSetupScript(
+// Only the broker role may federate, and each connection may impersonate the
+// service account only through its own broker session name.
+export function gcpWorkloadIdentityAttributes(roleName: string): {
+  attributeCondition: string;
+  attributeMapping: Record<string, string>;
+} {
+  return {
+    attributeCondition: `attribute.aws_role == '${roleName}'`,
+    attributeMapping: {
+      "google.subject": "assertion.arn",
+      "attribute.aws_role": "assertion.arn.extract('assumed-role/{role}/')",
+      "attribute.responder_connection":
+        `assertion.arn.extract('assumed-role/${roleName}/{session}')`,
+    },
+  };
+}
+
+export function gcpConnectionPrincipalSet(
   connection: GcpConnectionCredentials,
-  environment: NodeJS.ProcessEnv = process.env,
 ): string {
   const parsed = gcpConnectionCredentialsSchema.parse(connection);
-  const { accountId, roleName } = brokerIdentity(
-    awsIntegrationPrincipalArn(environment),
-  );
-  const serviceAccountEmail = gcpInvestigationServiceAccountEmail(parsed);
-  const principalSet = `principalSet://iam.googleapis.com/projects/${parsed.projectNumber}/locations/global/workloadIdentityPools/${GCP_WORKLOAD_IDENTITY_POOL_ID}/attribute.responder_connection/${parsed.sessionName}`;
-
-  return `#!/usr/bin/env bash
-set -euo pipefail
-
-PROJECT_ID='${parsed.projectId}'
-PROJECT_NUMBER='${parsed.projectNumber}'
-POOL_ID='${GCP_WORKLOAD_IDENTITY_POOL_ID}'
-PROVIDER_ID='${GCP_WORKLOAD_IDENTITY_PROVIDER_ID}'
-SERVICE_ACCOUNT_ID='${GCP_INVESTIGATION_SERVICE_ACCOUNT_ID}'
-SERVICE_ACCOUNT_EMAIL='${serviceAccountEmail}'
-RESPONDER_AWS_ACCOUNT='${accountId}'
-
-actual_project_number="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-if [[ "$actual_project_number" != "$PROJECT_NUMBER" ]]; then
-  echo "Project number does not match $PROJECT_ID" >&2
-  exit 1
-fi
-
-gcloud services enable \
-  iam.googleapis.com \
-  iamcredentials.googleapis.com \
-  sts.googleapis.com \
-  cloudasset.googleapis.com \
-  logging.googleapis.com \
-  monitoring.googleapis.com \
-  --project="$PROJECT_ID"
-
-if ! gcloud iam service-accounts describe "$SERVICE_ACCOUNT_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
-  gcloud iam service-accounts create "$SERVICE_ACCOUNT_ID" \
-    --display-name='Responder investigations' \
-    --description='Keyless read-only identity for Responder incident investigations' \
-    --project="$PROJECT_ID"
-fi
-
-if ! gcloud iam workload-identity-pools describe "$POOL_ID" --location=global --project="$PROJECT_ID" >/dev/null 2>&1; then
-  gcloud iam workload-identity-pools create "$POOL_ID" \
-    --location=global \
-    --display-name='Responder' \
-    --description='Keyless identities used by Responder investigations' \
-    --project="$PROJECT_ID"
-fi
-
-attribute_mapping="google.subject=assertion.arn,attribute.aws_role=assertion.arn.extract('assumed-role/{role}/'),attribute.responder_connection=assertion.arn.extract('assumed-role/${roleName}/{session}')"
-attribute_condition="attribute.aws_role == '${roleName}'"
-if gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" --location=global --workload-identity-pool="$POOL_ID" --project="$PROJECT_ID" >/dev/null 2>&1; then
-  existing_aws_account="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" --location=global --workload-identity-pool="$POOL_ID" --project="$PROJECT_ID" --format='value(aws.accountId)')"
-  if [[ "$existing_aws_account" != "$RESPONDER_AWS_ACCOUNT" ]]; then
-    echo "Existing $PROVIDER_ID provider trusts a different AWS account" >&2
-    exit 1
-  fi
-  gcloud iam workload-identity-pools providers update-aws "$PROVIDER_ID" \
-    --location=global \
-    --workload-identity-pool="$POOL_ID" \
-    --attribute-mapping="$attribute_mapping" \
-    --attribute-condition="$attribute_condition" \
-    --project="$PROJECT_ID"
-else
-  gcloud iam workload-identity-pools providers create-aws "$PROVIDER_ID" \
-    --location=global \
-    --workload-identity-pool="$POOL_ID" \
-    --account-id="$RESPONDER_AWS_ACCOUNT" \
-    --attribute-mapping="$attribute_mapping" \
-    --attribute-condition="$attribute_condition" \
-    --display-name='Responder AWS broker' \
-    --project="$PROJECT_ID"
-fi
-
-gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT_EMAIL" \
-  --member='${principalSet}' \
-  --role='roles/iam.workloadIdentityUser' \
-  --project="$PROJECT_ID"
-
-for role in \
-  roles/mcp.toolUser \
-  roles/cloudasset.viewer \
-  roles/logging.viewer \
-  roles/monitoring.viewer \
-  roles/serviceusage.serviceUsageConsumer
-do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
-    --role="$role" \
-    --condition=None \
-    --quiet
-done
-
-echo "Responder read-only access is ready for $PROJECT_ID."
-`;
+  return `principalSet://iam.googleapis.com/projects/${parsed.projectNumber}/locations/global/workloadIdentityPools/${GCP_WORKLOAD_IDENTITY_POOL_ID}/attribute.responder_connection/${parsed.sessionName}`;
 }
 
 class BrokerCredentialsSupplier implements AwsSecurityCredentialsSupplier {
