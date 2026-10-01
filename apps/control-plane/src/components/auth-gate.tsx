@@ -12,7 +12,7 @@ import {
   tryLegacyEmailSignIn,
 } from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
-import { sharedTemplateSetupReturnPath } from "../pages/shared-automation-template-presentation";
+import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
 import { ProviderGlyph } from "./icons";
@@ -36,17 +36,13 @@ function AuthFrame({ children }: AuthGateProps) {
   );
 }
 
-// Visitors who follow a sign-up link or open an automation template are
-// usually new, so they start on account creation.
-function startsWithAccountCreation(location: Pick<Location, "pathname" | "search">) {
-  const params = new URLSearchParams(location.search);
-  if (params.has("signup")) return true;
-  return location.pathname === "/automations/new" && (params.has("shared") || params.has("template"));
-}
-
 function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
-  const [settingUpTemplate] = useState(() => sharedTemplateSetupReturnPath(window.location) !== null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(() => startsWithAccountCreation(window.location));
+  // Visitors who follow a sign-up link or open an automation template are
+  // usually new, so they start on account creation.
+  const [settingUpTemplate] = useState(() => automationSetupReturnPath(window.location) !== null);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(
+    () => settingUpTemplate || new URLSearchParams(window.location.search).has("signup"),
+  );
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [socialProvider, setSocialProvider] = useState<
@@ -381,7 +377,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
         organizationId: result.data.id,
       }),
     );
-    await activate(result.data.id, sharedTemplateSetupReturnPath(window.location) ?? "/agents/new");
+    await activate(result.data.id, automationSetupReturnPath(window.location) ?? "/agents/new");
   }
 
   return (
