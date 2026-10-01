@@ -30,10 +30,10 @@ describe("shared automation templates", () => {
 
   it("lists GitHub first, then other providers once, without trigger providers", () => {
     expect(shareableAutomationConnectors({
-      contextProviders: ["slack", "datadog", "sentry", "datadog", "posthog"],
+      contextProviders: ["slack", "datadog", "gcp", "sentry", "datadog", "posthog"],
       hasRepositories: true,
       triggers: [{ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: [] }],
-    })).toEqual(["github", "datadog", "slack"]);
+    })).toEqual(["github", "datadog", "gcp", "slack"]);
     expect(shareableAutomationConnectors({ contextProviders: [], hasRepositories: false, triggers: [] })).toEqual([]);
   });
 

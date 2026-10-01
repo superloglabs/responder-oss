@@ -220,6 +220,7 @@ export const automationRoutes = new Hono()
           "slack",
           "sentry",
           "datadog",
+          "gcp",
           "posthog",
           "custom_mcp",
           "linear",

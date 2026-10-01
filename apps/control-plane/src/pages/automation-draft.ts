@@ -86,12 +86,14 @@ export function restoreAutomationDraft(options: AutomationOptions, location: Loc
   if (!draft || provider !== draft.connecting || draft.automationId !== automationId) return null;
   const status = search.get("status");
   const connected = status === "connected" || status === "finishing";
+  // Google Cloud returns to pick a project; the editor finishes the connection.
+  const selectingProject = status === "select_project";
   const returnedAccountId = search.get("integration_account_id");
   const added = connected ? connectedAccountIds(draft, options, returnedAccountId) : [];
   const name = providerDisplayName(provider);
   return {
     draft: withConnectedAccounts(draft, added),
-    error: connected ? null : search.get("reason") === "cancelled" ? `${name} connection was cancelled.` : `${name} could not be connected.`,
+    error: connected || selectingProject ? null : search.get("reason") === "cancelled" ? `${name} connection was cancelled.` : `${name} could not be connected.`,
     finishing: status === "finishing" && !added.length,
     returnedAccountId,
   };

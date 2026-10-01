@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "../automations-api";
-import { connectedAccountIds, isCurrentAutomationDraft, storedAutomationDraft, withConnectedAccounts, type AutomationDraft } from "./automation-draft";
+import { connectedAccountIds, isCurrentAutomationDraft, restoreAutomationDraft, saveAutomationDraft, storedAutomationDraft, withConnectedAccounts, type AutomationDraft } from "./automation-draft";
 
 const configuration = { contextAccountIds: ["existing"], workspaceSecretIds: ["secret"] } as unknown as AutomationConfiguration;
 const draft = (connecting: string): AutomationDraft => ({ name: "Draft", configuration, githubIncluded: false, connecting, knownAccountIds: ["old"], savedAt: 0 });
@@ -21,6 +21,29 @@ describe("automation draft", () => {
   it("adds new connections to the draft", () => {
     expect(withConnectedAccounts(draft("sentry"), ["new"]).configuration.contextAccountIds).toEqual(["existing", "new"]);
     expect(withConnectedAccounts(draft("github"), ["new"])).toMatchObject({ githubIncluded: true, configuration: { contextAccountIds: ["existing"] } });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("restores the draft without an error while a Google Cloud project is picked", () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("window", {
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => storage.delete(key),
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+    });
+    const triggers = { ...configuration, triggers: [] } as unknown as AutomationConfiguration;
+    saveAutomationDraft({ ...draft("gcp"), configuration: triggers, savedAt: Date.now() });
+
+    const restored = restoreAutomationDraft(
+      options([]),
+      { search: "?integration=gcp&status=select_project&selection_state=state" } as Location,
+    );
+
+    expect(restored).toMatchObject({ error: null, finishing: false });
+    expect(restored?.draft.name).toBe("Draft");
   });
 
   it("ignores drafts older than a connection flow", () => {

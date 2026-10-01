@@ -186,6 +186,29 @@ describe("automation run processor", () => {
     }]);
   });
 
+  it("serves each Google Cloud context connection as one server per Google service", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const gcpId = "63636363-6363-4363-8363-636363636363";
+    deps.getConnections.mockResolvedValue([
+      { id: gcpId, provider: "gcp", role: "context" },
+    ]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    const broker = `https://responder.example/api/automation-context-broker/v1/${gcpId}`;
+    expect(deps.runCodex.mock.calls[0]![1].contextServers).toEqual([
+      { name: "gcp_63636363636343638363636363636363_assets", url: `${broker}/assets` },
+      { name: "gcp_63636363636343638363636363636363_logging", url: `${broker}/logging` },
+      { name: "gcp_63636363636343638363636363636363_monitoring", url: `${broker}/monitoring` },
+    ]);
+  });
+
   describe("Slack plan card", () => {
     const slackStartedRun = () => ({
       ...claimedRun(),

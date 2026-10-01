@@ -14,9 +14,11 @@ import {
 } from "../automations-api";
 import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
-import type { AutomationConnectorProvider } from "../components/automation-connectors";
+import { automationConnectorProviders, type AutomationConnectorProvider } from "../components/automation-connectors";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
+import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
+import { currentProjectSelectionState } from "../project-selection";
 import { ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft, waitForConnectedAccounts } from "./automation-draft";
@@ -91,7 +93,17 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const description = initialAutomation?.description ?? template?.description ?? "";
   const [enabled, setEnabled] = useState(initialAutomation?.enabled ?? true);
   const [configuration, setConfiguration] = useState<AutomationConfiguration>(initialAutomation?.configuration ?? { ...defaultConfiguration, prompt: "" });
-  const [connectDialog, setConnectDialog] = useState<{ provider: "datadog" | "custom_mcp"; connectUrl: string } | null>(null);
+  const [connectDialog, setConnectDialog] = useState<{ provider: "datadog" | "custom_mcp" | "gcp"; connectUrl: string } | null>(null);
+  // Google Cloud returns here to pick a project and finishes the connection in
+  // its dialog. Read before the restored draft cleans the URL.
+  const [gcpSelectionState, setGcpSelectionState] = useState(() => currentProjectSelectionState("gcp"));
+  // Remounting starts the dialog over after it closes.
+  const [gcpDialogKey, setGcpDialogKey] = useState(0);
+  function closeGcpDialog() {
+    setConnectDialog(null);
+    setGcpSelectionState(null);
+    setGcpDialogKey((key) => key + 1);
+  }
   const [triggerMenuOpen, setTriggerMenuOpen] = useState(false);
   const triggerSectionRef = useRef<HTMLElement>(null);
   const [githubIncluded, setGithubIncluded] = useState(initialAutomation ? initialAutomation.configuration.repositoryIds.length > 0 : true);
@@ -247,7 +259,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
       saveAutomationDraft({ automationId, name, configuration, ...(isSharedTemplate(template) ? { sharedTemplate: template } : { templateId: template?.id }), githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
-      if (provider === "datadog" || provider === "custom_mcp") {
+      if (provider === "datadog" || provider === "custom_mcp" || provider === "gcp") {
         setConnectDialog({ provider, connectUrl });
         return;
       }
@@ -265,7 +277,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const scheduled = configuration.triggers.some((trigger) => trigger.kind === "schedule");
   const contextAccounts = options?.accounts.filter((account) =>
     !selectedTriggerAccountIds.includes(account.id) &&
-    ["custom_mcp", "datadog", "linear", "sentry", "slack"].includes(account.provider)
+    account.provider !== "github" &&
+    (automationConnectorProviders as readonly string[]).includes(account.provider)
   ) ?? [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -462,6 +475,22 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       {automationId && sharing ? <AutomationShareDialog automationId={automationId} onClose={() => setSharing(false)} /> : null}
       <DatadogConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "datadog"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <CustomMcpConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "custom_mcp"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
+      <GcpConnectionDialog
+        connectUrl={connectDialog?.provider === "gcp" ? connectDialog.connectUrl : "/api/integrations/gcp/start"}
+        open={connectDialog?.provider === "gcp" || Boolean(gcpSelectionState)}
+        key={gcpDialogKey}
+        onCancel={() => { takeAutomationDraft(); closeGcpDialog(); }}
+        onCloseWhileRunning={closeGcpDialog}
+        onConnected={(accountId) => {
+          closeGcpDialog();
+          void fetchAutomationOptions().then((loaded) => {
+            setOptions(loaded);
+            updateConfiguration((current) => ({ ...current, contextAccountIds: [...new Set([...current.contextAccountIds, accountId])] }));
+          }).catch(() => setError("Google Cloud connected. Add it from Add connector."));
+        }}
+        returnTo={editorPath}
+        selectionState={gcpSelectionState}
+      />
     </AppShell>
   );
 }
