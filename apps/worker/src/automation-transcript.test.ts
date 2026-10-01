@@ -118,6 +118,32 @@ describe("parseAutomationTranscript", () => {
     ]);
   });
 
+  it("labels Google Cloud tools, which are served one server per Google service", () => {
+    const gcpLogging = `gcp_${"b".repeat(32)}_logging`;
+    const claude = parseAutomationTranscript("claude_agent_sdk", stream(
+      { type: "assistant", message: { content: [
+        { type: "tool_use", id: "tool-1", name: `mcp__${gcpLogging}__list_log_names`, input: {} },
+      ] } },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tool-1", is_error: true }] } },
+    ));
+    const codex = parseAutomationTranscript("codex", stream(
+      { type: "item.completed", item: { id: "1", type: "mcp_tool_call", server: gcpLogging, tool: "list_log_names", status: "completed" } },
+    ));
+    const openCode = parseAutomationTranscript("opencode", stream(
+      { type: "tool_use", part: { id: "1", type: "tool", tool: `${gcpLogging}_list_log_names`, state: { input: {}, status: "completed" } } },
+    ));
+
+    expect(claude.items).toEqual([
+      { action: "query", kind: "tool", provider: "gcp", status: "failed", target: "list_log_names" },
+    ]);
+    expect(codex.items).toEqual([
+      { action: "query", kind: "tool", provider: "gcp", status: "succeeded", target: "list_log_names" },
+    ]);
+    expect(openCode.items).toMatchObject([
+      { action: "query", kind: "tool", provider: "gcp", target: "list_log_names" },
+    ]);
+  });
+
   it("groups Claude sub-agent work under the Agent tool call that started it", () => {
     const transcript = parseAutomationTranscript("claude_agent_sdk", stream(...claudeSubagentEvents));
 
