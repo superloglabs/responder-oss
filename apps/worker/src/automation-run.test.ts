@@ -209,6 +209,33 @@ describe("automation run processor", () => {
     ]);
   });
 
+  it("tells the agent which Google Cloud projects its context servers reach", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getConnections.mockResolvedValue([
+      {
+        encryptedCredentials: "encrypted-gcp",
+        externalAccountId: "superlog-494218",
+        id: "64646464-6464-4464-8464-646464646464",
+        metadata: { projectNumber: "297477702017" },
+        provider: "gcp",
+        role: "context",
+      },
+    ]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(prompt).toContain("superlog-494218");
+    expect(prompt).toContain("projects/superlog-494218");
+    expect(prompt).toContain("297477702017");
+  });
+
   describe("Slack plan card", () => {
     const slackStartedRun = () => ({
       ...claimedRun(),

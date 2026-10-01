@@ -67,10 +67,12 @@ function oneLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }
 
-// Context servers are named `<provider>_<connection id>`.
-const contextServerPattern = /^(custom_mcp|[a-z]+)_[0-9a-f]{32}$/u;
+// Context servers are named `<provider>_<connection id>`. A Google Cloud
+// connection has one server per Google service, named with that suffix.
+const gcpServiceSuffix = "(?:_(?:assets|logging|monitoring))?";
+const contextServerPattern = new RegExp(`^(custom_mcp|[a-z]+)_[0-9a-f]{32}${gcpServiceSuffix}$`, "u");
 const openCodeMcpToolPattern = new RegExp(
-  `^(?:(custom_mcp|[a-z]+)_[0-9a-f]{32}|(${automationToolServerName}))_(.+)$`,
+  `^(?:(custom_mcp|[a-z]+)_[0-9a-f]{32}${gcpServiceSuffix}|(${automationToolServerName}))_(.+)$`,
   "u",
 );
 
