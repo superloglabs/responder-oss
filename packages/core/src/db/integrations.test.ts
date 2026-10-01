@@ -8,6 +8,7 @@ import {
   consumeIntegrationConnectionState,
   getIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
+  updateIntegrationAccountSetup,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
@@ -255,6 +256,42 @@ describe("integration account tenancy", () => {
       account.organizationId,
       "20000000-0000-4000-8000-000000000000",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
+  });
+
+  it("writes setup progress only while the run still owns the setup", async () => {
+    const returning = vi.fn().mockResolvedValue([]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { returning };
+    });
+    const set = vi.fn((values: unknown) => {
+      void values;
+      return { where };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      update: vi.fn(() => ({ set })),
+    } as never);
+
+    await expect(
+      updateIntegrationAccountSetup({
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+        runId: "40000000-0000-4000-8000-000000000000",
+        setup: { status: "failed" },
+        status: "error",
+      }),
+    ).resolves.toBe(false);
+
+    const values = set.mock.calls[0]![0] as { metadata: never; status: string };
+    expect(values.status).toBe("error");
+    const metadata = new PgDialect().sqlToQuery(values.metadata);
+    expect(metadata.sql).toContain("jsonb_set(");
+    expect(metadata.params).toEqual(['{"status":"failed"}']);
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.sql).toContain("-> 'setup' ->> 'runId' =");
+    expect(query.params).toEqual([
+      "30000000-0000-4000-8000-000000000000",
+      "40000000-0000-4000-8000-000000000000",
     ]);
   });
 

@@ -407,7 +407,8 @@ that account can see, and the owner chooses one. The OAuth callback is:
 
 The Google sign-in requests the Cloud Platform scope with online access only.
 Responder uses that token to set up the project, then revokes it. It does not
-store a refresh token.
+store a refresh token. While setup runs, the token is kept encrypted in the
+setup job.
 
 Each project is a separate integration account. Setup first checks that the
 signed-in account can enable services, create service accounts and identity
@@ -418,8 +419,10 @@ customer-owned Workload Identity Federation pool/provider that trusts the
 configured Responder AWS broker. The service-account binding is restricted to
 one encrypted, randomly generated broker session name. It grants only MCP Tool
 User, Cloud Asset Viewer, Logs Viewer, Monitoring Viewer, and Service Usage
-Consumer. The browser repeats the setup request until Google finishes each
-step and Responder can use the new identity.
+Consumer. Setup runs as a background worker job, one bounded round at a time,
+until Google finishes each step and Responder can use the new identity. The
+connection dialog and the Google Cloud tile in Settings show its progress, so
+closing the browser does not stop it. Setup gives up after 15 minutes.
 
 During an investigation, Responder assumes the broker with that connection's
 stable session name, exchanges the AWS identity for a short-lived Google token,

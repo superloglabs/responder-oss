@@ -2,6 +2,8 @@ import {
   automationRunJobSchema,
   automationRunQueue,
   createJobBoss,
+  gcpProjectSetupJobSchema,
+  gcpProjectSetupQueue,
   investigationLocalConcurrency,
   investigationQueue,
   legacyAutomationRunQueue,
@@ -90,6 +92,7 @@ import {
   defaultAutomationRunDependencies,
   processAutomationRun,
 } from "./automation-run.js";
+import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setup-job";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
@@ -492,6 +495,18 @@ await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
     });
     throw error;
   }
+});
+await boss.work(gcpProjectSetupQueue, { localConcurrency: 2 }, async ([job]) => {
+  const payload = gcpProjectSetupJobSchema.parse(job.data);
+  const status = await processGcpProjectSetupJob(payload, {
+    enqueue: async (next, delaySeconds) => {
+      const queued = await boss.send(gcpProjectSetupQueue, next, {
+        startAfter: delaySeconds,
+      });
+      if (!queued) throw new Error("The next Google Cloud setup round was not queued");
+    },
+  });
+  return { status };
 });
 await boss.work(remediationQueueName, { localConcurrency: 1 }, async ([job]) => {
   const payload = remediationJobSchema.parse(job.data);

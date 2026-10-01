@@ -22,6 +22,7 @@ import {
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
+  updateIntegrationAccountSetup,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
@@ -157,19 +158,21 @@ import {
   createGcpSessionName,
   gcpConnectionCredentialsSchema,
   gcpProjectIdSchema,
-  verifyGcpProject,
 } from "../../../../packages/core/src/integrations/gcp.js";
 import {
-  advanceGcpProjectSetup,
   createGcpPkce,
   exchangeGcpOAuthCode,
   gcpAuthorizeUrl,
   type GcpProject,
   gcpProjectSchema,
-  GcpSetupError,
   listGcpProjects,
   revokeGcpOAuthToken,
 } from "../../../../packages/core/src/integrations/gcp-setup.js";
+import {
+  gcpSetupStateSchema,
+  startGcpProjectSetup,
+} from "../../../../packages/core/src/integrations/gcp-setup-job.js";
+import { queueGcpProjectSetup } from "../investigations/queue.js";
 import {
   hasRequiredSupabaseTools,
   parseSupabaseProjects,
@@ -198,17 +201,17 @@ const gcpProjectSelectionSchema = z.object({
   projectId: gcpProjectIdSchema,
   selectionState: z.string().min(1).max(512),
 });
-const gcpSetupRequestSchema = z.object({
-  setupState: z.string().min(1).max(512),
-});
 const gcpSelectionCredentialsSchema = z.object({
   accessToken: z.string().min(1),
   projects: z.array(gcpProjectSchema).min(1).max(1_000),
 });
-const gcpSetupCredentialsSchema = z.object({
-  accessToken: z.string().min(1),
-  accountId: z.uuid(),
-});
+
+function publicGcpSetupState(metadata: Record<string, unknown>) {
+  const setup = gcpSetupStateSchema.safeParse(metadata.setup);
+  if (!setup.success) return null;
+  const { message, status, step, updatedAt } = setup.data;
+  return { message, status, step, updatedAt };
+}
 const pendingConnectionCredentialsSchema = z.object({
   encryptedCredentials: z.string().min(1),
 });
@@ -842,6 +845,7 @@ export const integrationRoutes = new Hono()
             ...(definition.id === "gcp"
               ? {
                   projectId: account.externalAccountId,
+                  setup: publicGcpSetupState(account.metadata),
                   ...(typeof account.metadata.projectNumber === "string"
                     ? { projectNumber: account.metadata.projectNumber }
                     : {}),
@@ -1559,21 +1563,30 @@ export const integrationRoutes = new Hono()
         organizationId: tenant.organizationId,
         project,
       });
-      // A fresh state gives the setup its own expiry window and binds the
-      // Google token to the chosen project's integration account.
-      const setupState = await createIntegrationConnectionState({
+      const { job, setup } = startGcpProjectSetup({
+        accessToken: selection.accessToken,
+        integrationAccountId: accountId,
         organizationId: tenant.organizationId,
-        provider: "gcp",
         userId: tenant.user.id,
-        metadata: {
-          encryptedCredentials: encryptCredentials({
-            accessToken: selection.accessToken,
-            accountId,
-          }),
-        },
-        returnTo: connectionState.returnTo,
       });
-      return context.json({ setupState });
+      // Setup continues in the worker, so it finishes even if the browser
+      // window closes. Progress is read back from the account's metadata.
+      await updateIntegrationAccountSetup({ integrationAccountId: accountId, setup });
+      try {
+        await queueGcpProjectSetup(job);
+      } catch (error) {
+        await updateIntegrationAccountSetup({
+          integrationAccountId: accountId,
+          runId: setup.runId,
+          setup: {
+            ...setup,
+            message: "Responder could not start the setup. Try again.",
+            status: "failed",
+          },
+        });
+        throw error;
+      }
+      return context.json({ accountId, setup: publicGcpSetupState({ setup }) });
     } catch (error) {
       logCallbackError("GCP", error, {
         organizationId: tenant.organizationId,
@@ -1582,112 +1595,25 @@ export const integrationRoutes = new Hono()
       return context.json({ error: "Unable to prepare the Google Cloud project" }, 502);
     }
   })
-  .post("/gcp/setup", async (context) => {
+  .get("/gcp/:integrationAccountId/setup", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
     }
-    const parsed = gcpSetupRequestSchema.safeParse(
-      await context.req.json().catch(() => null),
-    );
-    if (!parsed.success) {
-      return context.json({ error: "The Google Cloud setup session is invalid" }, 400);
+    const accountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
+    if (!accountId.success) {
+      return context.json({ error: "The Google Cloud account is invalid" }, 400);
     }
-    const owner = { organizationId: tenant.organizationId, userId: tenant.user.id };
-    const connectionState = await getIntegrationConnectionState(
-      "gcp",
-      parsed.data.setupState,
-      owner,
-    );
-    if (!connectionState) {
-      return context.json(
-        { error: "The Google Cloud setup expired. Connect the project again." },
-        410,
-      );
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "gcp",
+    });
+    const setup = account ? publicGcpSetupState(account.metadata) : null;
+    if (!setup) {
+      return context.json({ error: "Google Cloud setup not found" }, 404);
     }
-    let setup: z.infer<typeof gcpSetupCredentialsSchema> | undefined;
-    try {
-      setup = gcpSetupCredentialsSchema.parse(
-        decryptCredentials<Record<string, unknown>>(
-          pendingConnectionCredentialsSchema.parse(connectionState.metadata)
-            .encryptedCredentials,
-        ),
-      );
-      const account = await getOrganizationIntegrationAccount({
-        integrationAccountId: setup.accountId,
-        organizationId: tenant.organizationId,
-        provider: "gcp",
-      });
-      if (!account?.encryptedCredentials) {
-        return context.json({ error: "Connect the Google Cloud project again" }, 404);
-      }
-      const connection = gcpConnectionCredentialsSchema.parse(
-        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
-      );
-      const progress = await advanceGcpProjectSetup({
-        accessToken: setup.accessToken,
-        connection,
-      });
-      if (progress.status === "pending") {
-        return context.json(progress);
-      }
-      try {
-        await verifyGcpProject(connection);
-      } catch (error) {
-        // Google applies new IAM bindings and federation settings gradually.
-        logCallbackError("GCP", error, {
-          accountId: account.id,
-          organizationId: tenant.organizationId,
-          stage: "verify",
-        });
-        return context.json({ status: "pending", step: "waiting_for_google" });
-      }
-      await consumeIntegrationConnectionState("gcp", parsed.data.setupState, owner);
-      await revokeGcpOAuthToken(setup.accessToken);
-      if (account.status !== "connected") {
-        await setIntegrationAccountStatus(account.id, "connected");
-      }
-      await captureAnalyticsEvent({
-        distinctId: tenant.user.id,
-        event: "integration connected",
-        organizationId: tenant.organizationId,
-        properties: {
-          integration_account_id: account.id,
-          provider: "gcp",
-        },
-      });
-      return context.json({
-        status: "connected",
-        redirectUrl: withIntegrationAccountId(
-          settingsRedirect(connectionState.returnTo, "gcp", "connected"),
-          account.id,
-        ),
-      });
-    } catch (error) {
-      logCallbackError("GCP", error, {
-        organizationId: tenant.organizationId,
-        stage: "setup",
-      });
-      if (!(error instanceof GcpSetupError)) {
-        return context.json(
-          { error: "Google Cloud setup failed. Try again." },
-          502,
-        );
-      }
-      await consumeIntegrationConnectionState("gcp", parsed.data.setupState, owner);
-      if (setup) {
-        await revokeGcpOAuthToken(setup.accessToken);
-        const account = await getOrganizationIntegrationAccount({
-          integrationAccountId: setup.accountId,
-          organizationId: tenant.organizationId,
-          provider: "gcp",
-        });
-        if (account && account.status !== "connected") {
-          await setIntegrationAccountStatus(account.id, "error");
-        }
-      }
-      return context.json({ error: error.message }, 403);
-    }
+    return context.json(setup);
   })
   .post("/datadog/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

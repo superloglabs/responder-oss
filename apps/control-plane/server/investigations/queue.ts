@@ -25,6 +25,8 @@ import {
 } from "../../../../packages/core/src/investigations/input.js";
 import {
   createJobBoss,
+  gcpProjectSetupQueue,
+  type GcpProjectSetupJob,
   investigationQueue,
   prepareWorkerQueues,
   slackThreadInvestigationQueue,
@@ -394,6 +396,12 @@ export async function queueInvestigationRetry(input: {
     );
     throw error;
   }
+}
+
+export async function queueGcpProjectSetup(job: GcpProjectSetupJob) {
+  const jobId = await (await getBoss()).send(gcpProjectSetupQueue, job);
+  if (!jobId) throw new Error("The Google Cloud setup job was not created");
+  return jobId;
 }
 
 export async function queueIssueRemediation(requestId: string) {

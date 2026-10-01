@@ -235,6 +235,34 @@ export async function setIntegrationAccountStatus(
     .where(eq(integrationAccounts.id, integrationAccountId));
 }
 
+// Replaces the setup progress stored in an account's metadata. When runId is
+// set, the write applies only while that run still owns the setup, so a
+// superseded background run cannot overwrite a newer attempt.
+export async function updateIntegrationAccountSetup(input: {
+  integrationAccountId: string;
+  runId?: string;
+  setup: Record<string, unknown>;
+  status?: "connected" | "error" | "pending";
+}): Promise<boolean> {
+  const updated = await getDatabase()
+    .update(integrationAccounts)
+    .set({
+      metadata: sql`jsonb_set(${integrationAccounts.metadata}, '{setup}', ${JSON.stringify(input.setup)}::jsonb)`,
+      ...(input.status ? { status: input.status } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        input.runId
+          ? sql`${integrationAccounts.metadata} -> 'setup' ->> 'runId' = ${input.runId}`
+          : undefined,
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return updated.length > 0;
+}
+
 export async function deleteIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;

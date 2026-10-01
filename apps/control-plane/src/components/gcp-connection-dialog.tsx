@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { type GcpSetupStatus, useGcpSetupStatus } from "../gcp-setup-status";
+import { GcpSetupStepper } from "./gcp-setup-progress";
 
 interface GcpProject {
   name: string;
@@ -6,45 +8,18 @@ interface GcpProject {
   projectNumber: string;
 }
 
-type GcpSetupStep =
-  | "enabling_apis"
-  | "creating_identity_pool"
-  | "creating_identity_provider"
-  | "granting_access"
-  | "waiting_for_google";
-
-const SETUP_STEP_LABELS: Record<GcpSetupStep, string> = {
-  enabling_apis: "Enabling the required Google Cloud APIs…",
-  creating_identity_pool: "Creating the Responder identity pool…",
-  creating_identity_provider: "Linking the identity pool to Responder…",
-  granting_access: "Granting the read-only roles…",
-  waiting_for_google: "Waiting for Google to apply the new access…",
-};
-
-const SETUP_POLL_INTERVAL_MS = 3_000;
-// Google documents that IAM changes usually apply within two minutes and can
-// take up to seven.
-const SETUP_TIMEOUT_MS = 8 * 60 * 1_000;
-
 function gcpEndpoint(connectUrl: string, endpoint: string): string {
   const parts = connectUrl.split("?")[0]!.split("/");
   parts.pop();
   return `${parts.join("/")}/${endpoint}`;
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json().catch(() => null)) as
-    | (T & { error?: string })
-    | null;
-  if (!response.ok || !payload) {
-    throw new Error(payload?.error ?? "Google Cloud setup failed. Try again.");
-  }
-  return payload;
+function connectedRedirect(returnTo: string, accountId: string): string {
+  const url = new URL(returnTo, window.location.origin);
+  url.searchParams.set("integration", "gcp");
+  url.searchParams.set("status", "connected");
+  url.searchParams.set("integration_account_id", accountId);
+  return `${url.pathname}${url.search}`;
 }
 
 export function GcpConnectionDialog({
@@ -63,14 +38,23 @@ export function GcpConnectionDialog({
   const selectingProject = Boolean(selectionState);
   const [projects, setProjects] = useState<GcpProject[]>([]);
   const [projectId, setProjectId] = useState("");
-  const [step, setStep] = useState<GcpSetupStep | null>(null);
-  const [setupState, setSetupState] = useState<string | null>(null);
+  const [started, setStarted] = useState<{
+    accountId: string;
+    setup: GcpSetupStatus;
+  } | null>(null);
+  const setup = useGcpSetupStatus(
+    started?.accountId ?? null,
+    started?.setup ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const cancelled = useRef(false);
 
   const cancel = useCallback(() => {
-    cancelled.current = true;
+    if (started) {
+      // Setup continues in the background; reload so the tile shows it.
+      window.location.assign(new URL(returnTo, window.location.origin).pathname);
+      return;
+    }
     if (selectingProject) {
       const url = new URL(window.location.href);
       url.searchParams.delete("integration");
@@ -80,12 +64,16 @@ export function GcpConnectionDialog({
     }
     setProjects([]);
     setProjectId("");
-    setStep(null);
-    setSetupState(null);
     setError(null);
     setIsSubmitting(false);
     onCancel();
-  }, [onCancel, selectingProject]);
+  }, [onCancel, returnTo, selectingProject, started]);
+
+  useEffect(() => {
+    if (started && setup?.status === "succeeded") {
+      window.location.assign(connectedRedirect(returnTo, started.accountId));
+    }
+  }, [returnTo, setup?.status, started]);
 
   useEffect(() => {
     if (!open || !selectionState || !connectUrl) return;
@@ -130,27 +118,6 @@ export function GcpConnectionDialog({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [cancel, isSubmitting, open]);
 
-  async function runSetup(state: string) {
-    const deadline = Date.now() + SETUP_TIMEOUT_MS;
-    while (!cancelled.current) {
-      const progress = await postJson<
-        | { status: "connected"; redirectUrl: string }
-        | { status: "pending"; step: GcpSetupStep }
-      >(gcpEndpoint(connectUrl, "setup"), { setupState: state });
-      if (progress.status === "connected") {
-        window.location.assign(progress.redirectUrl);
-        return;
-      }
-      setStep(progress.step);
-      if (Date.now() > deadline) {
-        throw new Error(
-          "Google is still applying the new access. Wait a few minutes, then connect the project again.",
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, SETUP_POLL_INTERVAL_MS));
-    }
-  }
-
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSubmitting) return;
@@ -162,25 +129,28 @@ export function GcpConnectionDialog({
       window.location.assign(`${url.pathname}${url.search}`);
       return;
     }
-    if (!projectId) return;
-    cancelled.current = false;
+    if (!projectId || started) return;
     setIsSubmitting(true);
     try {
-      let state = setupState;
-      if (!state) {
-        state = (await postJson<{ setupState: string }>(
-          gcpEndpoint(connectUrl, "select-project"),
-          { projectId, selectionState },
-        )).setupState;
-        setSetupState(state);
+      const response = await fetch(gcpEndpoint(connectUrl, "select-project"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId, selectionState }),
+      });
+      const body = (await response.json().catch(() => null)) as
+        | { accountId?: string; error?: string; setup?: GcpSetupStatus }
+        | null;
+      if (!response.ok || !body?.accountId || !body.setup) {
+        throw new Error(body?.error ?? "Unable to start Google Cloud setup");
       }
-      await runSetup(state);
+      setStarted({ accountId: body.accountId, setup: body.setup });
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Google Cloud setup failed. Try again.",
+          : "Unable to start Google Cloud setup",
       );
+    } finally {
       setIsSubmitting(false);
     }
   }
@@ -206,7 +176,9 @@ export function GcpConnectionDialog({
         <header className="siteDialog__header">
           <span>Connect Google Cloud</span>
           <h2 id="gcp-connection-title">
-            {selectingProject ? "Choose a project" : "Add a GCP project"}
+            {setup
+              ? `Setting up ${selectedProject?.projectId ?? "the project"}`
+              : selectingProject ? "Choose a project" : "Add a GCP project"}
           </h2>
           <p>
             Responder receives short-lived, read-only tokens. No service-account
@@ -215,13 +187,27 @@ export function GcpConnectionDialog({
         </header>
 
         <form className="siteDialog__form" onSubmit={connect}>
-          {selectingProject ? (
+          {setup ? (
+            <>
+              <GcpSetupStepper setup={setup} />
+              <p className="siteDialog__oauthNote" aria-live="polite">
+                {setup.status === "failed"
+                  ? null
+                  : setup.status === "succeeded"
+                    ? "Connected. Returning to Responder…"
+                    : "You can close this window. Setup continues, and the Google Cloud tile in Settings shows its progress."}
+              </p>
+              {setup.status === "failed" && setup.message ? (
+                <p className="siteDialog__error" role="alert">{setup.message}</p>
+              ) : null}
+            </>
+          ) : selectingProject ? (
             <>
               <label className="siteDialog__field">
                 <span>Google Cloud project</span>
                 <select
                   autoFocus
-                  disabled={loadingProjects || isSubmitting || Boolean(setupState)}
+                  disabled={loadingProjects || isSubmitting}
                   onChange={(event) => {
                     setProjectId(event.target.value);
                     setError(null);
@@ -237,12 +223,10 @@ export function GcpConnectionDialog({
                   ))}
                 </select>
               </label>
-              <p className="siteDialog__oauthNote" aria-live="polite">
+              <p className="siteDialog__oauthNote">
                 {loadingProjects
                   ? "Loading projects from your Google account…"
-                  : step
-                    ? SETUP_STEP_LABELS[step]
-                    : `Responder will create a responder-investigation service account in ${selectedProject?.projectId ?? "this project"} with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.`}
+                  : `Responder will create a responder-investigation service account in ${selectedProject?.projectId ?? "this project"} with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.`}
               </p>
             </>
           ) : (
@@ -270,21 +254,23 @@ export function GcpConnectionDialog({
               onClick={cancel}
               type="button"
             >
-              Cancel
+              {setup ? "Close" : "Cancel"}
             </button>
-            <button
-              className="button button--primary button--small"
-              disabled={isSubmitting || loadingProjects || (selectingProject && !projectId)}
-              type="submit"
-            >
-              {isSubmitting ? (
-                <><span aria-hidden="true" className="buttonSpinner" />{selectingProject ? "Setting up…" : "Redirecting…"}</>
-              ) : selectingProject ? (
-                error && setupState ? "Try again" : "Grant read-only access"
-              ) : (
-                "Continue with Google"
-              )}
-            </button>
+            {setup ? null : (
+              <button
+                className="button button--primary button--small"
+                disabled={isSubmitting || loadingProjects || (selectingProject && !projectId)}
+                type="submit"
+              >
+                {isSubmitting ? (
+                  <><span aria-hidden="true" className="buttonSpinner" />{selectingProject ? "Starting…" : "Redirecting…"}</>
+                ) : selectingProject ? (
+                  "Grant read-only access"
+                ) : (
+                  "Continue with Google"
+                )}
+              </button>
+            )}
           </footer>
         </form>
       </section>

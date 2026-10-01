@@ -27,6 +27,9 @@ export const automationRunQueue = "responder-automation-runs-v2";
 // Per-automation strict FIFO queue. Remove it and its drain after 2026-10-03,
 // when pg-boss's seven-day retention guarantees no job can remain.
 export const legacyAutomationRunQueue = "responder-automation-runs-v1";
+// Each job advances one Google Cloud project setup by one bounded round and
+// queues the next round until setup finishes, fails, or passes its deadline.
+export const gcpProjectSetupQueue = "responder-gcp-project-setup-v1";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -148,6 +151,19 @@ export const automationRunJobSchema = z.object({
   runId: z.uuid(),
 });
 export type AutomationRunJob = z.infer<typeof automationRunJobSchema>;
+export const gcpProjectSetupJobSchema = z.object({
+  kind: z.literal("gcp_project_setup"),
+  deadline: z.iso.datetime(),
+  // The customer's Google access token, encrypted with the credential key.
+  encryptedAccessToken: z.string().min(1),
+  failures: z.number().int().nonnegative().default(0),
+  integrationAccountId: z.uuid(),
+  organizationId: z.uuid(),
+  queuedAt: z.iso.datetime(),
+  runId: z.uuid(),
+  userId: z.string().min(1),
+});
+export type GcpProjectSetupJob = z.infer<typeof gcpProjectSetupJobSchema>;
 export const responderJobSchema = z.union([
   investigationJobSchema,
   remediationJobSchema,
@@ -315,6 +331,15 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryBackoff: true,
       retryDelay: 30,
       retryLimit: 2,
+    }),
+    boss.createQueue(gcpProjectSetupQueue, {
+      // Completed jobs keep only an encrypted token that setup has revoked.
+      deleteAfterSeconds: 86_400,
+      expireInSeconds: 120,
+      notify: true,
+      retryBackoff: true,
+      retryDelay: 5,
+      retryLimit: 3,
     }),
     boss.createQueue(legacyAutomationRunQueue, {
       deleteAfterSeconds: 604_800,
