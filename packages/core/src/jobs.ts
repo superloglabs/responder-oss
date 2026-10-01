@@ -160,6 +160,9 @@ export const gcpProjectSetupJobSchema = z.object({
   integrationAccountId: z.uuid(),
   organizationId: z.uuid(),
   queuedAt: z.iso.datetime(),
+  // Only the job for the setup's current round may run, so a redelivered or
+  // overlapping round cannot repeat work or overwrite a later result.
+  round: z.number().int().nonnegative().default(0),
   runId: z.uuid(),
   userId: z.string().min(1),
 });
@@ -335,7 +338,9 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
     boss.createQueue(gcpProjectSetupQueue, {
       // Completed jobs keep only an encrypted token that setup has revoked.
       deleteAfterSeconds: 86_400,
-      expireInSeconds: 120,
+      // A round makes up to ten Google requests with 15-second timeouts plus
+      // federation verification.
+      expireInSeconds: 600,
       notify: true,
       retryBackoff: true,
       retryDelay: 5,

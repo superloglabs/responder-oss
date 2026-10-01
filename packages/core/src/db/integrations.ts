@@ -235,12 +235,13 @@ export async function setIntegrationAccountStatus(
     .where(eq(integrationAccounts.id, integrationAccountId));
 }
 
-// Replaces the setup progress stored in an account's metadata. When runId is
-// set, the write applies only while that run still owns the setup, so a
-// superseded background run cannot overwrite a newer attempt.
+// Replaces the setup progress stored in an account's metadata. With an owner,
+// the write applies only while that run's round still owns a running setup, so
+// a superseded or duplicate background round cannot overwrite newer progress
+// or a finished result.
 export async function updateIntegrationAccountSetup(input: {
   integrationAccountId: string;
-  runId?: string;
+  owner?: { round: number; runId: string };
   setup: Record<string, unknown>;
   status?: "connected" | "error" | "pending";
 }): Promise<boolean> {
@@ -254,8 +255,10 @@ export async function updateIntegrationAccountSetup(input: {
     .where(
       and(
         eq(integrationAccounts.id, input.integrationAccountId),
-        input.runId
-          ? sql`${integrationAccounts.metadata} -> 'setup' ->> 'runId' = ${input.runId}`
+        input.owner
+          ? sql`${integrationAccounts.metadata} -> 'setup' ->> 'runId' = ${input.owner.runId}
+            and ${integrationAccounts.metadata} -> 'setup' ->> 'round' = ${String(input.owner.round)}
+            and ${integrationAccounts.metadata} -> 'setup' ->> 'status' = 'running'`
           : undefined,
       ),
     )

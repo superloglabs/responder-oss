@@ -239,7 +239,7 @@ function recoverGcpConnectionCredentials(encryptedCredentials: string) {
 async function prepareGcpAccount(input: {
   organizationId: string;
   project: GcpProject;
-}): Promise<string> {
+}): Promise<{ accountId: string; connected: boolean }> {
   const existing = await getOrganizationIntegrationAccountByExternalId({
     externalAccountId: input.project.projectId,
     organizationId: input.organizationId,
@@ -254,9 +254,9 @@ async function prepareGcpAccount(input: {
     existing?.status === "connected" && existingCredentials?.success &&
     existingCredentials.data.projectNumber === input.project.projectNumber
   ) {
-    return existing.id;
+    return { accountId: existing.id, connected: true };
   }
-  return upsertIntegrationAccount({
+  const accountId = await upsertIntegrationAccount({
     organizationId: input.organizationId,
     provider: "gcp",
     externalAccountId: input.project.projectId,
@@ -281,6 +281,7 @@ async function prepareGcpAccount(input: {
     },
     status: "pending",
   });
+  return { accountId, connected: false };
 }
 const sentryCredentialsSchema = z.object({
   accessToken: z.string().min(1),
@@ -1559,7 +1560,7 @@ export const integrationRoutes = new Hono()
       if (!project) {
         return context.json({ error: "Choose an authorized Google Cloud project" }, 403);
       }
-      const accountId = await prepareGcpAccount({
+      const { accountId, connected } = await prepareGcpAccount({
         organizationId: tenant.organizationId,
         project,
       });
@@ -1577,12 +1578,14 @@ export const integrationRoutes = new Hono()
       } catch (error) {
         await updateIntegrationAccountSetup({
           integrationAccountId: accountId,
-          runId: setup.runId,
+          owner: { round: setup.round, runId: setup.runId },
           setup: {
             ...setup,
             message: "Responder could not start the setup. Try again.",
             status: "failed",
           },
+          // A failed reconnect leaves a working connection untouched.
+          status: connected ? undefined : "error",
         });
         throw error;
       }

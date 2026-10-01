@@ -1638,6 +1638,46 @@ describe("integration callback routing", () => {
     }));
   });
 
+  it("marks a new GCP account as failed when its setup cannot be queued", async () => {
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "encrypted-selection" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "google-token",
+      projects: [
+        { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+      ],
+    });
+    vi.mocked(createGcpSessionName).mockReturnValue(
+      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(updateIntegrationAccountSetup).mockResolvedValue(true);
+    vi.mocked(queueGcpProjectSetup).mockRejectedValue(new Error("queue down"));
+
+    const response = await app.request("/api/integrations/gcp/select-project", {
+      body: JSON.stringify({ projectId: "konex-prod", selectionState: "selection-state" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(502);
+    expect(updateIntegrationAccountSetup).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        integrationAccountId: "30000000-0000-4000-8000-000000000000",
+        setup: expect.objectContaining({ status: "failed" }),
+        status: "error",
+      }),
+    );
+  });
+
   it("reports background GCP setup progress for the organization's account", async () => {
     vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
       encryptedCredentials: "encrypted-connection",

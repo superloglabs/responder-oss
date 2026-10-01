@@ -259,7 +259,7 @@ describe("integration account tenancy", () => {
     ]);
   });
 
-  it("writes setup progress only while the run still owns the setup", async () => {
+  it("writes setup progress only while that run round still owns a running setup", async () => {
     const returning = vi.fn().mockResolvedValue([]);
     const where = vi.fn((condition: unknown) => {
       void condition;
@@ -276,7 +276,7 @@ describe("integration account tenancy", () => {
     await expect(
       updateIntegrationAccountSetup({
         integrationAccountId: "30000000-0000-4000-8000-000000000000",
-        runId: "40000000-0000-4000-8000-000000000000",
+        owner: { round: 2, runId: "40000000-0000-4000-8000-000000000000" },
         setup: { status: "failed" },
         status: "error",
       }),
@@ -289,9 +289,12 @@ describe("integration account tenancy", () => {
     expect(metadata.params).toEqual(['{"status":"failed"}']);
     const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
     expect(query.sql).toContain("-> 'setup' ->> 'runId' =");
+    expect(query.sql).toContain("-> 'setup' ->> 'round' =");
+    expect(query.sql).toContain("-> 'setup' ->> 'status' = 'running'");
     expect(query.params).toEqual([
       "30000000-0000-4000-8000-000000000000",
       "40000000-0000-4000-8000-000000000000",
+      "2",
     ]);
   });
 

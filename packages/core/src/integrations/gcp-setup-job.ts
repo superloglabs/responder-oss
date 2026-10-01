@@ -34,6 +34,7 @@ export const gcpSetupSteps = [
 
 export const gcpSetupStateSchema = z.object({
   message: z.string().optional(),
+  round: z.number().int().nonnegative().default(0),
   runId: z.uuid(),
   startedAt: z.iso.datetime(),
   status: z.enum(["running", "succeeded", "failed"]),
@@ -61,10 +62,12 @@ export function startGcpProjectSetup(input: {
       integrationAccountId: input.integrationAccountId,
       organizationId: input.organizationId,
       queuedAt: now.toISOString(),
+      round: 0,
       runId,
       userId: input.userId,
     },
     setup: {
+      round: 0,
       runId,
       startedAt: now.toISOString(),
       status: "running",
@@ -130,6 +133,7 @@ export async function processGcpProjectSetupJob(
     !account?.encryptedCredentials ||
     !current.success ||
     current.data.runId !== job.runId ||
+    current.data.round !== job.round ||
     current.data.status !== "running"
   ) {
     logSetupEvent("gcp_setup_superseded", job);
@@ -142,10 +146,20 @@ export async function processGcpProjectSetupJob(
   ) =>
     updateIntegrationAccountSetup({
       integrationAccountId: job.integrationAccountId,
-      runId: job.runId,
-      setup: { ...current.data, ...update, updatedAt: now().toISOString() },
+      owner: { round: job.round, runId: job.runId },
+      setup: {
+        ...current.data,
+        ...update,
+        round: job.round + 1,
+        updatedAt: now().toISOString(),
+      },
       status,
     });
+  const queueNextRound = (failures: number) =>
+    dependencies.enqueue(
+      { ...job, failures, queuedAt: now().toISOString(), round: job.round + 1 },
+      GCP_SETUP_ROUND_DELAY_SECONDS,
+    );
   const fail = async (message: string) => {
     const owned = await record(
       { message, status: "failed" },
@@ -193,10 +207,8 @@ export async function processGcpProjectSetupJob(
     if (failures >= MAX_CONSECUTIVE_ROUND_FAILURES) {
       return fail("Google Cloud setup failed. Reconnect the project to try again.");
     }
-    await dependencies.enqueue(
-      { ...job, failures, queuedAt: now().toISOString() },
-      GCP_SETUP_ROUND_DELAY_SECONDS,
-    );
+    if (!(await record({}))) return "superseded";
+    await queueNextRound(failures);
     return "running";
   }
 
@@ -220,9 +232,6 @@ export async function processGcpProjectSetupJob(
     logSetupEvent("gcp_setup_superseded", job);
     return "superseded";
   }
-  await dependencies.enqueue(
-    { ...job, failures: 0, queuedAt: now().toISOString() },
-    GCP_SETUP_ROUND_DELAY_SECONDS,
-  );
+  await queueNextRound(0);
   return "running";
 }

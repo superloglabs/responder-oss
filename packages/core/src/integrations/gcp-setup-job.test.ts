@@ -41,6 +41,7 @@ const job: GcpProjectSetupJob = {
   integrationAccountId: "30000000-0000-4000-8000-000000000000",
   organizationId: "10000000-0000-4000-8000-000000000000",
   queuedAt: "2026-10-01T16:00:00.000Z",
+  round: 0,
   runId,
   userId: "20000000-0000-4000-8000-000000000000",
 };
@@ -54,6 +55,7 @@ let account: {
 
 function runningSetup(): GcpSetupState {
   return {
+    round: 0,
     runId,
     startedAt: "2026-10-01T16:00:00.000Z",
     status: "running",
@@ -86,7 +88,14 @@ describe("Google Cloud setup job", () => {
       async () => structuredClone(account),
     );
     vi.mocked(updateIntegrationAccountSetup).mockImplementation(async (input) => {
-      if (input.runId && account.metadata.setup.runId !== input.runId) return false;
+      const owner = input.owner;
+      if (
+        owner && (
+          account.metadata.setup.runId !== owner.runId ||
+          account.metadata.setup.round !== owner.round ||
+          account.metadata.setup.status !== "running"
+        )
+      ) return false;
       account.metadata.setup = input.setup as GcpSetupState;
       if (input.status) account.status = input.status;
       return true;
@@ -103,12 +112,13 @@ describe("Google Cloud setup job", () => {
       connection: expect.objectContaining({ projectId: "konex-prod" }),
     });
     expect(account.metadata.setup).toMatchObject({
+      round: 1,
       status: "running",
       step: "enabling_apis",
       updatedAt: now.toISOString(),
     });
     expect(deps.enqueue).toHaveBeenCalledWith(
-      { ...job, failures: 0, queuedAt: now.toISOString() },
+      { ...job, failures: 0, queuedAt: now.toISOString(), round: 1 },
       3,
     );
     expect(deps.revoke).not.toHaveBeenCalled();
@@ -180,12 +190,12 @@ describe("Google Cloud setup job", () => {
 
     await expect(processGcpProjectSetupJob(job, deps)).resolves.toBe("running");
     expect(deps.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ failures: 1 }),
+      expect.objectContaining({ failures: 1, round: 1 }),
       3,
     );
 
     await expect(
-      processGcpProjectSetupJob({ ...job, failures: 4 }, deps),
+      processGcpProjectSetupJob({ ...job, failures: 4, round: 1 }, deps),
     ).resolves.toBe("failed");
     expect(account.metadata.setup.status).toBe("failed");
     expect(deps.revoke).toHaveBeenCalledOnce();
@@ -200,6 +210,39 @@ describe("Google Cloud setup job", () => {
 
     expect(deps.advance).not.toHaveBeenCalled();
     expect(account.metadata.setup.message).toMatch(/did not finish/u);
+  });
+
+  it("ignores a second delivery of a round that already ran", async () => {
+    const deps = dependencies();
+    await processGcpProjectSetupJob(job, deps);
+    deps.advance.mockClear();
+    deps.enqueue.mockClear();
+
+    await expect(processGcpProjectSetupJob(job, deps)).resolves.toBe("superseded");
+
+    expect(deps.advance).not.toHaveBeenCalled();
+    expect(deps.enqueue).not.toHaveBeenCalled();
+    expect(account.metadata.setup.round).toBe(1);
+  });
+
+  it("keeps a finished setup when an overlapping delivery completes later", async () => {
+    let finishSlowRound: (value: { status: "configured" }) => void = () => undefined;
+    const slow = dependencies({
+      advance: vi.fn(() => new Promise((resolve) => { finishSlowRound = resolve; })),
+    });
+    const fast = dependencies({
+      advance: vi.fn().mockResolvedValue({ status: "configured" }),
+    });
+
+    const original = processGcpProjectSetupJob(job, slow);
+    await vi.waitFor(() => expect(slow.advance).toHaveBeenCalled());
+    await expect(processGcpProjectSetupJob(job, fast)).resolves.toBe("succeeded");
+    finishSlowRound({ status: "configured" });
+
+    await expect(original).resolves.toBe("superseded");
+    expect(account.metadata.setup.status).toBe("succeeded");
+    expect(account.status).toBe("connected");
+    expect(slow.revoke).not.toHaveBeenCalled();
   });
 
   it("stops a superseded run without touching Google or the newer token", async () => {
