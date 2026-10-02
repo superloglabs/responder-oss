@@ -2,6 +2,9 @@ import { createHash, createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { findAgentsForSentryIssue } from "../../../../packages/core/src/db/agents.js";
+import { findAutomationsForSentryIssue } from "../../../../packages/core/src/db/automations.js";
+import { queueAutomationRun } from "../automations/queue.js";
+import { getSentryIssueEventEnvironment } from "../integrations/sentry.js";
 import { queueInvestigation } from "../investigations/queue.js";
 import { sentryWebhookRoutes, verifySentrySignature } from "./sentry.js";
 
@@ -19,6 +22,24 @@ vi.mock("../automations/queue.js", () => ({
 
 vi.mock("../investigations/queue.js", () => ({
   queueInvestigation: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
+  getOrganizationIntegrationAccount: vi.fn().mockResolvedValue({
+    metadata: { organizationSlug: "example" },
+  }),
+}));
+
+vi.mock("../integrations/sentry-credentials.js", () => ({
+  getFreshSentryCredentials: vi.fn().mockResolvedValue({
+    credentials: { accessToken: "sentry-token" },
+  }),
+  getSentryOrganizationSlug: (metadata: { organizationSlug: string }) =>
+    metadata.organizationSlug,
+}));
+
+vi.mock("../integrations/sentry.js", () => ({
+  getSentryIssueEventEnvironment: vi.fn(),
 }));
 
 const app = new Hono().route("/api/webhooks/sentry", sentryWebhookRoutes);
@@ -252,6 +273,84 @@ describe("Sentry issue webhooks", () => {
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({
       error: "Unable to start Sentry investigation",
+    });
+  });
+
+  describe("environment filters", () => {
+    const automation = (automationId: string, excludedEnvironments: string[]) => ({
+      automationId,
+      excludedEnvironments,
+      integrationAccountId: "40000000-0000-4000-8000-000000000000",
+      organizationId: "10000000-0000-4000-8000-000000000000",
+    });
+
+    async function deliver(issueId: string, action: "created" | "unresolved" = "created") {
+      vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+      vi.mocked(findAgentsForSentryIssue).mockResolvedValue([]);
+      vi.mocked(queueAutomationRun).mockResolvedValue({ duplicate: false, runId: "run" });
+      const request = signedIssueRequest(issueId, { action });
+      const response = await app.request("/api/webhooks/sentry", {
+        method: "POST",
+        body: request.body,
+        headers: {
+          "sentry-hook-resource": "issue",
+          "sentry-hook-signature": request.signature,
+        },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    it("starts unfiltered automations without reading the environment", async () => {
+      vi.mocked(findAutomationsForSentryIssue).mockResolvedValueOnce([automation("all", [])]);
+
+      await deliver("2000000001");
+
+      expect(queueAutomationRun).toHaveBeenCalledWith(expect.objectContaining({ automationId: "all" }));
+      expect(getSentryIssueEventEnvironment).not.toHaveBeenCalled();
+    });
+
+    it("skips an issue whose first event comes from an excluded environment", async () => {
+      vi.mocked(findAutomationsForSentryIssue).mockResolvedValueOnce([
+        automation("prod-only", ["dev", "staging"]),
+        automation("no-dev", ["dev"]),
+      ]);
+      vi.mocked(getSentryIssueEventEnvironment).mockResolvedValueOnce("staging");
+
+      await deliver("2000000002");
+
+      await vi.waitFor(() => expect(queueAutomationRun).toHaveBeenCalledTimes(1));
+      expect(getSentryIssueEventEnvironment).toHaveBeenCalledTimes(1);
+      expect(getSentryIssueEventEnvironment).toHaveBeenCalledWith({
+        accessToken: "sentry-token",
+        event: "oldest",
+        issueId: "2000000002",
+        organizationSlug: "example",
+      });
+      const [run] = vi.mocked(queueAutomationRun).mock.calls[0]!;
+      expect(run.automationId).toBe("no-dev");
+      expect(run.trigger.attributes).toMatchObject({ environment: "staging" });
+      expect(JSON.parse(run.trigger.body)).toMatchObject({ environment: "staging" });
+    });
+
+    it("reads a regression's environment from the latest event", async () => {
+      vi.mocked(findAutomationsForSentryIssue).mockResolvedValueOnce([automation("prod-only", ["dev"])]);
+      vi.mocked(getSentryIssueEventEnvironment).mockResolvedValueOnce("production");
+
+      await deliver("2000000003", "unresolved");
+
+      await vi.waitFor(() => expect(queueAutomationRun).toHaveBeenCalledTimes(1));
+      expect(getSentryIssueEventEnvironment).toHaveBeenCalledWith(expect.objectContaining({ event: "latest" }));
+    });
+
+    it("starts the run when the environment cannot be read", async () => {
+      vi.mocked(findAutomationsForSentryIssue).mockResolvedValueOnce([automation("prod-only", ["dev"])]);
+      vi.mocked(getSentryIssueEventEnvironment).mockRejectedValueOnce(new Error("Sentry is unavailable"));
+
+      await deliver("2000000004");
+
+      await vi.waitFor(() => expect(queueAutomationRun).toHaveBeenCalledTimes(1));
+      const [run] = vi.mocked(queueAutomationRun).mock.calls[0]!;
+      expect(run.trigger.attributes).not.toHaveProperty("environment");
     });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, isTriggerComplete, moveItem } from "./automation-configuration";
+import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, sentryEnvironmentChoices } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -60,6 +60,18 @@ describe("isTriggerComplete", () => {
     expect(isTriggerComplete({ channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(true);
     expect(isTriggerComplete({ channelIds: [], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(false);
     expect(isTriggerComplete({ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: ["web"] })).toBe(false);
+  });
+});
+
+describe("Sentry environment choices", () => {
+  it("keeps excluded environments that Sentry no longer lists", () => {
+    expect(sentryEnvironmentChoices(["dev", "production"], ["old-staging", "dev"])).toEqual(["dev", "production", "old-staging"]);
+  });
+
+  it("stores the unchecked environments", () => {
+    const choices = ["dev", "production", "staging"];
+    expect(excludedSentryEnvironments(choices, ["production"])).toEqual(["dev", "staging"]);
+    expect(excludedSentryEnvironments(choices, choices)).toBeUndefined();
   });
 });
 

@@ -5,6 +5,12 @@ import { findAgentsForSentryIssue } from "../../../../packages/core/src/db/agent
 import { findAutomationsForSentryIssue } from "../../../../packages/core/src/db/automations.js";
 import { queueInvestigation } from "../investigations/queue.js";
 import { queueAutomationRun } from "../automations/queue.js";
+import { getSentryIssueEventEnvironment } from "../integrations/sentry.js";
+import {
+  getFreshSentryCredentials,
+  getSentryOrganizationSlug,
+} from "../integrations/sentry-credentials.js";
+import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
 
 const sentryIssueSchema = z
   .object({
@@ -73,10 +79,14 @@ export function verifySentrySignature(input: {
 type SentryIssue = z.infer<typeof sentryIssueSchema>;
 type SentryIssueAction = z.infer<typeof sentryIssueWebhookSchema>["action"];
 
-export function sentryIssueBody(issue: SentryIssue): string {
+export function sentryIssueBody(
+  issue: SentryIssue,
+  environment?: string | null,
+): string {
   return JSON.stringify(
     {
       shortId: issue.shortId ?? null,
+      ...(environment === undefined ? {} : { environment }),
       title: issue.title,
       culprit: issue.culprit ?? null,
       level: issue.level ?? null,
@@ -154,6 +164,89 @@ function parseJson(value: string): unknown {
   }
 }
 
+// The environment of the event that fired the webhook: an issue's first
+// event when it is created, and its latest event when it regresses. Returns
+// null when the event has no environment and undefined when the lookup fails.
+async function sentryIssueEnvironment(input: {
+  action: SentryIssueAction;
+  integrationAccountId: string;
+  issueId: string;
+  organizationId: string;
+}): Promise<string | null | undefined> {
+  try {
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: input.integrationAccountId,
+      organizationId: input.organizationId,
+      provider: "sentry",
+    });
+    if (!account) return undefined;
+    const { credentials } = await getFreshSentryCredentials({
+      accountId: input.integrationAccountId,
+      organizationId: input.organizationId,
+    });
+    return await getSentryIssueEventEnvironment({
+      accessToken: credentials.accessToken,
+      event: input.action === "created" ? "oldest" : "latest",
+      issueId: input.issueId,
+      organizationSlug: getSentryOrganizationSlug(account.metadata),
+    });
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Unknown error",
+        event: "sentry_issue_environment_unavailable",
+        integrationAccountId: input.integrationAccountId,
+        issueId: input.issueId,
+      }),
+    );
+    return undefined;
+  }
+}
+
+// Starts each automation unless every matching trigger excludes the issue's
+// environment. When the environment cannot be read, the automation runs, so
+// a Sentry outage does not hide a production issue.
+async function queueEnvironmentFilteredAutomations(input: {
+  action: SentryIssueAction;
+  automations: Awaited<ReturnType<typeof findAutomationsForSentryIssue>>;
+  issueId: string;
+  queueAutomation: (
+    automationId: string,
+    environment?: string | null,
+  ) => Promise<unknown>;
+}): Promise<void> {
+  const environments = new Map<string, Promise<string | null | undefined>>();
+  await Promise.all(input.automations.map(async (match) => {
+    let environment = environments.get(match.integrationAccountId);
+    if (!environment) {
+      environment = sentryIssueEnvironment({
+        action: input.action,
+        integrationAccountId: match.integrationAccountId,
+        issueId: input.issueId,
+        organizationId: match.organizationId,
+      });
+      environments.set(match.integrationAccountId, environment);
+    }
+    const resolved = await environment;
+    if (resolved && match.excludedEnvironments.includes(resolved)) {
+      console.info(
+        JSON.stringify({
+          automationId: match.automationId,
+          environment: resolved,
+          event: "sentry_automation_environment_skipped",
+          issueId: input.issueId,
+        }),
+      );
+      return;
+    }
+    try {
+      await input.queueAutomation(match.automationId, resolved);
+    } catch (error) {
+      console.error("Unable to start environment-filtered Sentry automation", error);
+    }
+  }));
+}
+
 export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
   const rawBody = await context.req.text();
   if (
@@ -209,6 +302,31 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
   const automationOccurrence = issue.lastSeen
     ? createHash("sha256").update(issue.lastSeen, "utf8").digest("hex")
     : payloadHash;
+  const queueAutomation = (automationId: string, environment?: string | null) =>
+    queueAutomationRun({
+      automationId,
+      trigger: {
+        attributes: {
+          action,
+          installationId,
+          issueId: issue.id,
+          projectId: issue.project.id,
+          projectName: issue.project.name ?? null,
+          projectSlug: issue.project.slug ?? null,
+          ...(environment === undefined ? {} : { environment }),
+        },
+        body: sentryIssueBody(issue, environment),
+        externalEventId: action === "created"
+          ? `${installationId}:${issue.id}:${automationId}`
+          : `${installationId}:${issue.id}:${action}:${automationOccurrence}:${automationId}`,
+        provider: "sentry",
+        sourceUrl: issue.web_url ?? issue.permalink,
+        title: `${issue.shortId ?? issue.id}: ${issue.title}`.slice(0, 500),
+      },
+    });
+  const filteredAutomations = automationMatches.filter((match) =>
+    match.excludedEnvironments.length > 0
+  );
   try {
     await Promise.all(
       [
@@ -221,33 +339,24 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
           payloadHash,
           requestId: context.req.header("request-id"),
         })),
-        ...automationMatches.map((match) =>
-          queueAutomationRun({
-            automationId: match.automationId,
-            trigger: {
-              attributes: {
-                action,
-                installationId,
-                issueId: issue.id,
-                projectId: issue.project.id,
-                projectName: issue.project.name ?? null,
-                projectSlug: issue.project.slug ?? null,
-              },
-              body: sentryIssueBody(issue),
-              externalEventId: action === "created"
-                ? `${installationId}:${issue.id}:${match.automationId}`
-                : `${installationId}:${issue.id}:${action}:${automationOccurrence}:${match.automationId}`,
-              provider: "sentry",
-              sourceUrl: issue.web_url ?? issue.permalink,
-              title: `${issue.shortId ?? issue.id}: ${issue.title}`.slice(0, 500),
-            },
-          })
-        ),
+        ...automationMatches
+          .filter((match) => match.excludedEnvironments.length === 0)
+          .map((match) => queueAutomation(match.automationId)),
       ],
     );
   } catch (error) {
     console.error("Unable to fan out Sentry issue", error);
     return context.json({ error: "Unable to start Sentry investigation" }, 502);
+  }
+  // Sentry gives a webhook one second to respond, so environment-filtered
+  // automations look up the environment after the response.
+  if (filteredAutomations.length > 0) {
+    void queueEnvironmentFilteredAutomations({
+      action,
+      automations: filteredAutomations,
+      issueId: issue.id,
+      queueAutomation,
+    });
   }
 
   return context.json({

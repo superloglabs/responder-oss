@@ -15,6 +15,7 @@ export type AutomationTrigger =
     }
   | {
       eventTypes: Array<"new_issue" | "regression">;
+      excludedEnvironments?: string[];
       integrationAccountId: string;
       kind: "sentry";
       projectIds: string[];
@@ -207,6 +208,10 @@ export function fetchAutomationRuns(id: string, page: number): Promise<Automatio
   return automationJson<AutomationRunPage>(
     `/api/automations/${encodeURIComponent(id)}/runs?page=${page}`,
   );
+}
+
+export async function fetchSentryEnvironments(accountId: string, signal?: AbortSignal): Promise<string[]> {
+  return (await automationJson<{ environments: string[] }>(`/api/automations/sentry/${encodeURIComponent(accountId)}/environments`, { signal })).environments;
 }
 
 export function fetchAutomationOptions(): Promise<AutomationOptions> {

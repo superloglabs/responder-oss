@@ -109,6 +109,14 @@ Create a public Sentry integration with:
 Responder validates `Sentry-Hook-Signature`, synchronizes visible projects,
 and triggers only agents whose installation and project match.
 
+An automation's Sentry trigger can leave out environments. The webhook
+payload has no environment, so Responder reads it from the issue's first event
+for a new issue and from its latest event for a regression, after replying to
+Sentry. An issue whose environment every matching trigger leaves out does not
+start a run. When the environment cannot be read, the run starts. Sentry sends
+`issue.created` once per issue, so an issue first seen in a left-out
+environment does not start a run when it later reaches another environment.
+
 ## GitHub
 
 Configure a public GitHub App with:

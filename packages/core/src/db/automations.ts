@@ -134,15 +134,24 @@ export async function findAutomationsForSlackEvent(input: {
   });
 }
 
+// Every enabled automation with a Sentry trigger on the project and event
+// type. `excludedEnvironments` lists the environments that every matching
+// trigger excludes; an issue from any other environment starts a run.
 export async function findAutomationsForSentryIssue(input: {
   action: "created" | "unresolved";
   installationId: string;
   projectId: string;
-}): Promise<Array<{ automationId: string }>> {
+}): Promise<Array<{
+  automationId: string;
+  excludedEnvironments: string[];
+  integrationAccountId: string;
+  organizationId: string;
+}>> {
   const rows = await getDatabase()
     .select({
       accountId: integrationAccounts.id,
       automationId: automations.id,
+      organizationId: automations.organizationId,
       triggers: automationVersions.triggers,
     })
     .from(automations)
@@ -178,16 +187,26 @@ export async function findAutomationsForSentryIssue(input: {
     )
     .where(eq(automations.enabled, true));
   const eventType = input.action === "created" ? "new_issue" : "regression";
-  return rows.flatMap((row) =>
-    row.triggers.some((trigger) =>
+  return rows.flatMap((row) => {
+    const watching = row.triggers.flatMap((trigger) =>
       trigger.kind === "sentry" &&
       trigger.integrationAccountId === row.accountId &&
       trigger.projectIds.includes(input.projectId) &&
       trigger.eventTypes.includes(eventType)
-    )
-      ? [{ automationId: row.automationId }]
-      : []
-  );
+        ? [trigger.excludedEnvironments ?? []]
+        : []
+    );
+    const [first, ...rest] = watching;
+    if (!first) return [];
+    return [{
+      automationId: row.automationId,
+      excludedEnvironments: first.filter((environment) =>
+        rest.every((excluded) => excluded.includes(environment))
+      ),
+      integrationAccountId: row.accountId,
+      organizationId: row.organizationId,
+    }];
+  });
 }
 
 export async function findAutomationsForDiscordCommand(input: {

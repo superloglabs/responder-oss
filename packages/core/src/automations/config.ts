@@ -33,6 +33,10 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   z.object({
     eventTypes: z.array(z.enum(["new_issue", "regression"])).min(1).max(2)
       .refine(uniqueIds, "Event types must be unique"),
+    // Issues whose triggering event comes from one of these environments do
+    // not start a run. Environments added later in Sentry are included.
+    excludedEnvironments: z.array(z.string().trim().min(1).max(64)).max(100)
+      .refine(uniqueIds, "Environments must be unique").optional(),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("sentry"),
     projectIds: z.array(externalResourceIdSchema).min(1).max(100)
