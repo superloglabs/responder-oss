@@ -129,3 +129,32 @@ test("opens agents without simplified navigation", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/agents$/u);
 });
+
+test("shows the tag mode custom prompt as a Slack assistant prompt", async ({ page }) => {
+  await mockWorkspace(page, ["automations", "simplified_navigation"]);
+  await page.route("**/api/agents/options", (route) =>
+    route.fulfill({ json: { accounts: [], repositories: [], resources: [], secrets: [] } }),
+  );
+  await page.route("**/api/agents/thread-mode", (route) =>
+    route.fulfill({
+      json: {
+        configuration: {
+          contextAccountIds: [],
+          contextResourceIds: [],
+          enabled: true,
+          instructions: "Investigate the request using connected context and attached repositories. Report what you found, the supporting evidence, and the recommended next step.",
+          model: "instance/default",
+          repositoryIds: [],
+          secretIds: [],
+        },
+      },
+    }),
+  );
+  await page.goto("/settings/tag-mode");
+
+  await expect(page.getByRole("heading", { level: 2, name: "Custom prompt" })).toBeVisible();
+  await expect(page.getByLabel("Custom prompt")).toHaveValue(
+    "Answer the request using the connected integrations and attached repositories. Keep replies short, and say what you changed.",
+  );
+  await expect(page.getByText("Let people mention Superlog in Slack to ask questions, open pull requests, and change automations and settings.")).toBeVisible();
+});

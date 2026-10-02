@@ -525,7 +525,8 @@ export async function deliverSlackThreadInvestigationResponse(input: {
 
   const card = slackInvestigationCard({
     agentId: context.agentId,
-    detail: "Completed the investigation plan.",
+    assistant: context.assistant,
+    detail: context.assistant ? "Done." : "Completed the investigation plan.",
     investigationId: context.investigationId,
     organizationId: context.organizationId,
     showInvestigationLink: false,

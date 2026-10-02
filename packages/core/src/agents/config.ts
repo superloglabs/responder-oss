@@ -138,6 +138,17 @@ export const agentConfigurationSchema = z
     }
   });
 
+// Tag mode's starting prompt. Workspaces with simplified navigation use the
+// assistant prompt and treat the earlier investigation prompt as unchanged.
+export const tagModeInvestigationInstructions =
+  "Investigate the request using connected context and attached repositories. Report what you found, the supporting evidence, and the recommended next step.";
+export const tagModeAssistantInstructions =
+  "Answer the request using the connected integrations and attached repositories. Keep replies short, and say what you changed.";
+
+export function customTagModeInstructions(instructions: string): string | null {
+  return instructions.trim() === tagModeInvestigationInstructions ? null : instructions;
+}
+
 export const slackThreadModeConfigurationSchema = z.object({
   enabled: z.boolean().default(false),
   model: z.string().trim().min(1, "Model is required").max(160),

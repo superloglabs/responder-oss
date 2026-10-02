@@ -773,6 +773,8 @@ function traceTask(
 
 export function slackInvestigationCard(input: {
   agentId: string;
+  // Words the card for a Slack assistant request instead of an investigation.
+  assistant?: boolean;
   detail: string;
   investigationId: string;
   organizationId?: string;
@@ -781,7 +783,7 @@ export function slackInvestigationCard(input: {
   title: string;
   traceItems?: SlackInvestigationTraceItem[];
 }): { blocks: unknown[]; text: string } {
-  const rawTitle = input.title.trim() || "Investigation";
+  const rawTitle = input.title.trim() || (input.assistant ? "Request" : "Investigation");
   const title = truncate(
     rawTitle
       .replace(/^\*([^\n]+)\*$/u, "$1")
@@ -792,10 +794,14 @@ export function slackInvestigationCard(input: {
     task_id: `${input.investigationId}:current`.slice(0, 255),
     title:
       input.status === "complete"
-        ? "Investigation complete"
+        ? input.assistant ? "Done" : "Investigation complete"
         : input.status === "error"
-          ? "Investigation stopped"
-          : nonEmptyText(input.detail, 180, "Investigation in progress"),
+          ? input.assistant ? "Stopped" : "Investigation stopped"
+          : nonEmptyText(
+              input.detail,
+              180,
+              input.assistant ? "Working on it" : "Investigation in progress",
+            ),
     status: input.status,
     ...(input.status === "error" ? { output: richText(input.detail) } : {}),
     ...(input.showInvestigationLink === false
@@ -818,7 +824,7 @@ export function slackInvestigationCard(input: {
   return {
     text:
       input.status === "complete"
-        ? `${title} — Investigation complete`
+        ? `${title} — ${input.assistant ? "Done" : "Investigation complete"}`
         : `${title} — ${input.detail}`,
     blocks: [
       {
@@ -955,6 +961,13 @@ const loadingMessages = [
   "Connecting the dots…",
 ];
 
+const assistantLoadingMessages = [
+  "Thinking…",
+  "Reading the code…",
+  "Checking connected tools…",
+  "Working on it…",
+];
+
 export type SlackCardFailureOutcome =
   | "progress_failed"
   | "failure_update_failed";
@@ -1062,6 +1075,7 @@ async function performInvestigationSlackProgressUpdate(
   if (context.source.messageTimestamp) {
     const card = slackInvestigationCard({
       agentId: context.agentId,
+      assistant: context.assistant,
       detail,
       investigationId: context.investigationId,
       organizationId: context.organizationId,
@@ -1095,8 +1109,8 @@ async function performInvestigationSlackProgressUpdate(
     await setSlackThreadStatus({
       accessToken: token,
       channelId: context.source.channelId,
-      loadingMessages,
-      status: "is investigating this alert…",
+      loadingMessages: context.assistant ? assistantLoadingMessages : loadingMessages,
+      status: context.assistant ? "is working on this…" : "is investigating this alert…",
       threadTimestamp: context.source.threadTimestamp,
     });
   } catch (error) {
@@ -1140,8 +1154,9 @@ async function performInvestigationSlackCardFailure(
   if (!context) return false;
   const token = accessToken(context.source.encryptedCredentials);
   const failures: unknown[] = [];
-  const failureMessage =
-    "I couldn't complete this investigation. Please try again or add more context.";
+  const failureMessage = context.assistant
+    ? "I couldn't finish this request. Please try again or add more context."
+    : "I couldn't complete this investigation. Please try again or add more context.";
 
   if (traceItems) {
     try {
@@ -1178,7 +1193,10 @@ async function performInvestigationSlackCardFailure(
   if (context.source.messageTimestamp) {
     const card = slackInvestigationCard({
       agentId: context.agentId,
-      detail: "The investigation stopped before it could finish.",
+      assistant: context.assistant,
+      detail: context.assistant
+        ? "Stopped before finishing."
+        : "The investigation stopped before it could finish.",
       investigationId: context.investigationId,
       organizationId: context.organizationId,
       showInvestigationLink: context.executionMode !== "slack_thread",

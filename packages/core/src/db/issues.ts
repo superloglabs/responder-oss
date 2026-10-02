@@ -21,6 +21,7 @@ import {
   remediationSummary,
   renderInvestigationReportMarkdown,
 } from "../investigations/report.js";
+import { isSlackAssistantRequest } from "../integrations/slack-assistant.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -790,6 +791,7 @@ export interface SlackInvestigationDeliveryContext {
 
 export interface SlackInvestigationLiveContext {
   agentId: string;
+  assistant?: boolean;
   executionMode: "standard" | "slack_thread";
   initialTriageEnabled?: boolean;
   investigationId: string;
@@ -884,6 +886,7 @@ export async function getSlackInvestigationLiveContext(
 
   return {
     agentId: investigation.agentId,
+    assistant: isSlackAssistantRequest(investigation.input),
     executionMode: investigation.executionMode,
     initialTriageEnabled: investigation.initialTriageEnabled,
     investigationId: investigation.id,

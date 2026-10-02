@@ -4,6 +4,7 @@ import type {
   SlackThreadModeConfiguration,
 } from "../agents/config.js";
 import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
+import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -1123,6 +1124,45 @@ export async function getSlackThreadModeConfiguration(
     contextResourceIds: configuration.contextResourceIds,
     secretIds: secretRows.map((row) => row.id),
   };
+}
+
+// The workspace member a Slack thread acts for when it changes the workspace:
+// whoever last saved tag mode, or else the oldest owner.
+export async function getSlackThreadModeActor(
+  organizationId: string,
+): Promise<string | null> {
+  const db = getDatabase();
+  const versions = await db
+    .select({ createdBy: agentConfigVersions.createdBy })
+    .from(agents)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, agents.activeVersionId),
+    )
+    .innerJoin(
+      member,
+      and(
+        eq(member.userId, agentConfigVersions.createdBy),
+        eq(member.organizationId, organizationId),
+      ),
+    )
+    .where(
+      and(
+        eq(agents.organizationId, organizationId),
+        eq(agents.purpose, "slack_thread"),
+      ),
+    )
+    .limit(1);
+  if (versions[0]?.createdBy) return versions[0].createdBy;
+  const owners = await db
+    .select({ userId: member.userId })
+    .from(member)
+    .where(
+      and(eq(member.organizationId, organizationId), eq(member.role, "owner")),
+    )
+    .orderBy(member.createdAt)
+    .limit(1);
+  return owners[0]?.userId ?? null;
 }
 
 export async function saveSlackThreadModeConfiguration(input: {

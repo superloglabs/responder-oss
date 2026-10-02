@@ -56,6 +56,7 @@ import {
   slackProgressFromTrace,
   type SlackInvestigationTraceItem,
 } from "@responder/core/integrations/slack-live-progress";
+import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
 import {
   deliverSlackIssueFollowupResponse,
   deliverSlackThreadInvestigationResponse,
@@ -541,13 +542,14 @@ await boss.work(
 
     let lastSlackProgressAt = 0;
     let slackTraceItems: SlackInvestigationTraceItem[] = [];
+    const assistant = isSlackAssistantRequest(payload.request);
     try {
       const result = await runInvestigationAgent(
         payload,
         process.env,
         async (event) => {
           await appendInvestigationTraceEvent(payload.investigationId, event);
-          const progress = slackProgressFromTrace(event);
+          const progress = slackProgressFromTrace(event, { assistant });
           if (!progress) return;
           slackTraceItems = applySlackTraceUpdate(slackTraceItems, progress);
           const now = Date.now();

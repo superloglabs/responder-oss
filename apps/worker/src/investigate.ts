@@ -49,6 +49,10 @@ import type {
 } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
 import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
+import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
+import { customTagModeInstructions } from "@responder/core/agents/config";
+import { getSlackThreadModeActor } from "@responder/core/db/agents";
+import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
 import {
   createAwsMcpServer,
   loadAwsAlarmSkillContext,
@@ -107,6 +111,8 @@ import {
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
+import { createThreadPullRequestTool } from "./thread-pull-request.js";
+import { createWorkspaceTools } from "./workspace-tools.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
   createSearchSuggestionsTool,
@@ -377,6 +383,19 @@ export function investigationCapabilities(replay: boolean) {
 
 export const investigationMaxTurns = 400;
 
+// Where a Slack assistant sends people to connect integrations.
+export function responderIntegrationsUrl(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const origin = environment.RESPONDER_APP_URL ?? environment.BETTER_AUTH_URL;
+  if (!origin) return "the Integrations page in Responder";
+  try {
+    return new URL("/settings", origin).toString();
+  } catch {
+    return "the Integrations page in Responder";
+  }
+}
+
 // A paused Slack thread sandbox is deleted by Daytona this long after it stops.
 export const pausedThreadSandboxLifetimeMinutes = 24 * 60;
 
@@ -413,6 +432,10 @@ export function investigationInstructions(input: {
   }>;
   vercelAccountIds?: string[];
   threadMode?: boolean;
+  // A Slack thread in an organization with simplified navigation. It works
+  // as a general assistant and is told about its pull request and workspace
+  // tools.
+  assistant?: { integrationsUrl: string; pullRequests: boolean };
   issueFollowupIssueCount?: number;
   scanMode?: boolean;
   replay?: boolean;
@@ -431,6 +454,7 @@ export function investigationInstructions(input: {
   const workspaceSecrets = input.workspaceSecrets ?? [];
   const vercelAccountIds = input.vercelAccountIds ?? [];
   const repositoryInstructions = input.repositoryInstructions ?? [];
+  const assistant = input.threadMode ? input.assistant : undefined;
   const issueUpdateFollowup = (input.issueFollowupIssueCount ?? 0) > 0;
   const noIssueFollowup = input.issueFollowupIssueCount === 0;
   const observabilityConnected =
@@ -449,11 +473,14 @@ export function investigationInstructions(input: {
     gcpProjectNames.length > 0 ||
     customMcpNames.length > 0;
   return [
-    input.runtimeSystemPrompt,
+    // The runtime system prompt describes incident investigations.
+    assistant ? prompt("assistantScope") : input.runtimeSystemPrompt,
     input.agentPrompt,
     input.scanMode
       ? prompt("scanScope")
-      : prompt("investigationScope"),
+      : assistant
+        ? null
+        : prompt("investigationScope"),
     awsAccountNames.length > 0
       ? prompt("aws", { value1: awsAccountNames.join(", ") })
       : null,
@@ -535,9 +562,11 @@ export function investigationInstructions(input: {
             (repository) =>
               prompt("repositoryEntry", { value1: repository.repository, value2: repository.path, value3: repository.branch, value4: repository.sha }),
           ),
-          prompt("repositoryEvidence"),
+          ...(assistant ? [] : [prompt("repositoryEvidence")]),
         ].join("\n")
-      : prompt("noRepositories"),
+      : assistant
+        ? prompt("assistantNoRepositories")
+        : prompt("noRepositories"),
     repositoryInstructions.length > 0
       ? [
           prompt("repositoryInstructions"),
@@ -545,7 +574,7 @@ export function investigationInstructions(input: {
         ].join("\n")
       : null,
     input.threadMode
-      ? prompt("threadSandbox")
+      ? prompt(assistant ? "assistantSandbox" : "threadSandbox")
       : input.scanMode
         ? prompt("scanSandbox")
         : prompt("sandbox"),
@@ -556,11 +585,18 @@ export function investigationInstructions(input: {
         : prompt("codePermissions"),
     prompt("credentialSafety"),
     workspaceSecretUsageInstructions(workspaceSecrets, input.runtimePromptParts),
-    input.threadMode
-      ? prompt("threadMode")
-      : issueUpdateFollowup
-        ? null
-        : prompt("existingIssues"),
+    assistant
+      ? assistant.pullRequests
+        ? prompt("assistantPullRequests")
+        : null
+      : input.threadMode
+        ? prompt("threadMode")
+        : issueUpdateFollowup
+          ? null
+          : prompt("existingIssues"),
+    assistant
+      ? prompt("assistantWorkspace", { integrationsUrl: assistant.integrationsUrl })
+      : null,
     !input.threadMode && !input.scanMode ? prompt("remediationChoice") : null,
     input.threadMode || input.replay || issueUpdateFollowup
       ? null
@@ -579,14 +615,14 @@ export function investigationInstructions(input: {
       ? null
       : prompt("timeline"),
     input.threadMode
-      ? prompt("threadResponse")
+      ? prompt(assistant ? "assistantResponse" : "threadResponse")
       : issueUpdateFollowup
         ? prompt("followupResponse")
         : prompt("submitReport"),
     input.threadMode || issueUpdateFollowup
       ? null
       : prompt("reportResponse"),
-    prompt("insufficientEvidence"),
+    prompt(assistant ? "assistantUnverified" : "insufficientEvidence"),
   ]
     .filter((instruction): instruction is string => Boolean(instruction))
     .join("\n\n");
@@ -636,6 +672,9 @@ export async function runInvestigationAgent(
   const updatedIssueIds = new Set<string>();
   const investigationInput = toInvestigationInput(job.request);
   const scanMode = investigationInput.provider === "scan";
+  const assistant = threadMode &&
+    isSlackAssistantRequest(investigationInput) &&
+    await organizationHasCapability(job.config.organizationId, "simplified_navigation");
   let sentryConnectionDegraded = false;
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
@@ -1005,8 +1044,33 @@ export async function runInvestigationAgent(
     const awsInspectionTools = createAwsInspectionTools(awsConnections, {
       environment,
     });
+    const integrationsUrl = responderIntegrationsUrl(environment);
+    const assistantTools = assistant
+      ? [
+          ...(repositories.length > 0
+            ? [createThreadPullRequestTool({
+                agentConfigVersionId: job.config.id,
+                investigationId: job.investigationId,
+                organizationId: job.config.organizationId,
+                repositories,
+                session,
+              })]
+            : []),
+          ...createWorkspaceTools({
+            actorUserId: await getSlackThreadModeActor(job.config.organizationId),
+            automationsEnabled: await organizationHasCapability(
+              job.config.organizationId,
+              "automations",
+            ),
+            integrationsUrl,
+            organizationId: job.config.organizationId,
+          }),
+        ]
+      : [];
     const instructions = investigationInstructions({
-      agentPrompt: job.config.prompt,
+      agentPrompt: assistant
+        ? customTagModeInstructions(job.config.prompt) ?? ""
+        : job.config.prompt,
       awsAlarmTriggered,
       awsAccountNames: awsConnections.map(
         (connection) =>
@@ -1050,6 +1114,9 @@ export async function runInvestigationAgent(
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
+      ...(assistant
+        ? { assistant: { integrationsUrl, pullRequests: repositories.length > 0 } }
+        : {}),
       scanMode,
       replay,
       ...(issueFollowup
@@ -1079,6 +1146,7 @@ export async function runInvestigationAgent(
             ? [issueUpdateTool!]
             : [issueSearchTool, reportTool!]),
         ...suggestionTools,
+        ...assistantTools,
         ...awsInspectionTools,
         ...repositoryInspectionTools,
         ...upstashTools,

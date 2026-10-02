@@ -32,6 +32,36 @@ describe("Slack investigation progress", () => {
     });
   });
 
+  it("describes Slack assistant steps without investigation wording", () => {
+    const steps = [
+      { type: "session.started" },
+      { type: "instructions.configured" },
+      { type: "reasoning.completed" },
+      { type: "message.completed", data: { message: "Opened the pull request." } },
+      ...["read_repository_file", "open_pull_request", "update_automation", "get_workspace", "sentry_search", "shell"]
+        .map((toolName) => ({
+          type: "actions.requested",
+          data: { actions: [{ callId: `call-${toolName}`, toolName }] },
+        })),
+      { type: "action.result", data: { result: { callId: "call-shell" }, status: "failed" } },
+    ].map((event) => slackProgressFromTrace(event, { assistant: true }));
+
+    expect(steps.map((step) => step?.detail)).toEqual([
+      "Starting and loading the workspace context.",
+      "Reading the request.",
+      "Thinking.",
+      "Writing the reply.",
+      "Reading the code.",
+      "Opening a pull request.",
+      "Updating the workspace.",
+      "Reading the workspace settings.",
+      "Checking connected tools.",
+      "Working on the request.",
+      "A tool call failed; continuing.",
+    ]);
+    expect(JSON.stringify(steps)).not.toMatch(/investigat|evidence|findings/i);
+  });
+
   it("marks report submission as the final live update", () => {
     expect(
       slackProgressFromTrace({

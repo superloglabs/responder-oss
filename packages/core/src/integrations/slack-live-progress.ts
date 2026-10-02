@@ -138,6 +138,27 @@ function eventId(event: SlackProgressTraceEvent, prefix: string): string {
   return `${prefix}:${at}`;
 }
 
+// A Slack assistant request describes its steps as work on the request, not
+// as an investigation.
+function assistantPhaseForTool(tool: string): string {
+  if (tool === "open_pull_request") return "Opening a pull request.";
+  if (/^(create|update)_automation$|^update_tag_mode$/.test(tool)) {
+    return "Updating the workspace.";
+  }
+  if (/^get_(workspace|automation)/.test(tool)) return "Reading the workspace settings.";
+  if (
+    tool === "list_repository_files" ||
+    tool === "search_repository" ||
+    tool === "read_repository_file"
+  ) {
+    return "Reading the code.";
+  }
+  if (/axiom|datadog|grafana|sentry|clickstack|upstash|langfuse|vercel|mcp/i.test(tool)) {
+    return "Checking connected tools.";
+  }
+  return "Working on the request.";
+}
+
 function phaseForTool(tool: string): string {
   if (tool === "search_existing_issues") {
     return "Checking for related issues and earlier incidents.";
@@ -157,33 +178,39 @@ function phaseForTool(tool: string): string {
 
 export function slackProgressFromTrace(
   event: SlackProgressTraceEvent,
+  options: { assistant?: boolean } = {},
 ): SlackProgressUpdate | null {
+  const assistant = options.assistant === true;
   switch (event.type) {
     case "session.started":
       return {
-        detail: "Starting the investigation and loading its context.",
+        detail: assistant
+          ? "Starting and loading the workspace context."
+          : "Starting the investigation and loading its context.",
         traceItems: [
           {
             id: eventId(event, "session"),
             status: "complete",
-            title: "Loaded the investigation context",
+            title: assistant
+              ? "Loaded the workspace context"
+              : "Loaded the investigation context",
           },
         ],
       };
     case "instructions.configured":
       return {
-        detail: "Preparing the investigation plan.",
+        detail: assistant ? "Reading the request." : "Preparing the investigation plan.",
         traceItems: [
           {
             id: eventId(event, "instructions"),
             status: "complete",
-            title: "Prepared the investigation plan",
+            title: assistant ? "Read the request" : "Prepared the investigation plan",
           },
         ],
       };
     case "reasoning.completed":
       return {
-        detail: "Analyzing the evidence collected so far.",
+        detail: assistant ? "Thinking." : "Analyzing the evidence collected so far.",
         traceItems: [
           {
             id: eventId(event, "reasoning"),
@@ -195,7 +222,7 @@ export function slackProgressFromTrace(
     case "message.completed": {
       const message = traceText(eventData(event).message);
       return {
-        detail: "Summarizing the investigation findings.",
+        detail: assistant ? "Writing the reply." : "Summarizing the investigation findings.",
         traceItems: [
           {
             id: eventId(event, "message"),
@@ -232,8 +259,9 @@ export function slackProgressFromTrace(
           traceItems,
         };
       }
+      const tool = traceItems[0]?.title ?? "tool";
       return {
-        detail: phaseForTool(traceItems[0]?.title ?? "tool"),
+        detail: assistant ? assistantPhaseForTool(tool) : phaseForTool(tool),
         traceItems,
       };
     }
@@ -246,7 +274,9 @@ export function slackProgressFromTrace(
       return {
         detail:
           data.status === "failed"
-            ? "A tool call failed; continuing with the available evidence."
+            ? assistant
+              ? "A tool call failed; continuing."
+              : "A tool call failed; continuing with the available evidence."
             : "Reviewing the latest tool result.",
         traceResult: {
           id,

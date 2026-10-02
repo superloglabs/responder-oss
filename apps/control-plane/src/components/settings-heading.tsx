@@ -11,7 +11,7 @@ const standaloneSections = {
     title: "Integrations",
   },
   "tag-mode": {
-    description: "Choose what Superlog can inspect when someone mentions it in Slack.",
+    description: "Choose what Superlog can use and change when someone mentions it in Slack.",
     icon: TagIcon,
     title: "Tag mode",
   },
