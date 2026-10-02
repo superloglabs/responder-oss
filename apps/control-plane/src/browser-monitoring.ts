@@ -8,6 +8,16 @@ export interface BrowserMonitoringConfig {
   tracesSampleRate?: string;
 }
 
+// A request the browser cancelled on purpose (for example, the sign-in library
+// dropping an older session check when a newer one starts) is not a failure.
+// Timeouts raise TimeoutError instead, so they are still reported.
+export function isCancelledRequest(event: Sentry.ErrorEvent): boolean {
+  return (
+    event.exception?.values?.some((exception) => exception.type === "AbortError") ??
+    false
+  );
+}
+
 const defaultConfig: BrowserMonitoringConfig = {
   dsn: import.meta.env.VITE_SENTRY_DSN,
   environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
@@ -24,6 +34,7 @@ export function initializeBrowserMonitoring(
 
   const tracesSampleRate = sentrySampleRate(config.tracesSampleRate);
   Sentry.init({
+    beforeSend: (event) => (isCancelledRequest(event) ? null : event),
     dsn,
     environment: config.environment?.trim() || undefined,
     integrations:

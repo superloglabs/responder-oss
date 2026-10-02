@@ -12,6 +12,7 @@ vi.mock("@sentry/react", () => sentryMocks);
 
 import {
   initializeBrowserMonitoring,
+  isCancelledRequest,
   setBrowserMonitoringIdentity,
 } from "./browser-monitoring";
 
@@ -39,6 +40,7 @@ describe("browser error monitoring", () => {
     ).toBe(true);
 
     expect(sentryMocks.init).toHaveBeenCalledWith({
+      beforeSend: expect.any(Function),
       dsn: "https://public@example.invalid/1",
       environment: "production",
       integrations: [],
@@ -46,6 +48,20 @@ describe("browser error monitoring", () => {
       sendDefaultPii: false,
       tracesSampleRate: 0,
     });
+  });
+
+  it("drops cancelled requests but keeps timeouts and other errors", () => {
+    initializeBrowserMonitoring({ dsn: "https://public@example.invalid/1" });
+    const { beforeSend } = sentryMocks.init.mock.calls[0][0];
+    const event = (type: string) => ({
+      exception: { values: [{ type, value: "details" }] },
+    });
+
+    expect(isCancelledRequest(event("AbortError") as never)).toBe(true);
+    expect(beforeSend(event("AbortError"))).toBeNull();
+    expect(beforeSend(event("TimeoutError"))).toEqual(event("TimeoutError"));
+    expect(beforeSend(event("TypeError"))).toEqual(event("TypeError"));
+    expect(beforeSend({ message: "plain" })).toEqual({ message: "plain" });
   });
 
   it("sets names and clears the old name while a new organization loads", () => {
