@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 export type SettingsSection =
+  | "api-keys"
   | "billing"
   | "integrations"
   | "models"
@@ -73,6 +74,13 @@ export function SettingsTabs({
           Models
         </Link>
       ) : null}
+      <Link
+        aria-current={active === "api-keys" ? "page" : undefined}
+        className={active === "api-keys" ? "isActive" : undefined}
+        to="/settings/api-keys"
+      >
+        API keys
+      </Link>
       {billingEnabled || active === "billing" ? (
         <Link
           aria-current={active === "billing" ? "page" : undefined}

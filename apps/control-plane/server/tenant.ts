@@ -5,6 +5,7 @@ export type ActiveTenantResult =
   | {
       ok: true;
       organizationId: string;
+      role: string;
       user: {
         email: string;
         id: string;
@@ -47,6 +48,7 @@ export async function getActiveTenant(headers: Headers): Promise<ActiveTenantRes
   return {
     ok: true,
     organizationId,
+    role: activeMember.role,
     user: {
       email: authSession.user.email,
       id: authSession.user.id,

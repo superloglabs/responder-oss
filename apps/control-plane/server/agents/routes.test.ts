@@ -32,7 +32,8 @@ import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
 } from "./daytona-secrets.js";
-import { agentRoutes, workspaceSecretInputSchema } from "./routes.js";
+import { agentRoutes } from "./routes.js";
+import { workspaceSecretInputSchema } from "./workspace-secrets.js";
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
   decryptCredentials: vi.fn(),
@@ -117,6 +118,7 @@ const options: Awaited<ReturnType<typeof listAgentOptions>> = {
 const tenant = {
   ok: true as const,
   organizationId: "10000000-0000-4000-8000-000000000000",
+  role: "member",
   user: {
     id: "20000000-0000-4000-8000-000000000000",
     name: "Test User",
@@ -575,6 +577,7 @@ describe("Slack channel option refresh", () => {
   it("fetches live channels for every connected Slack account", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue({
       ok: true,
+      role: "member",
       organizationId: "10000000-0000-4000-8000-000000000000",
       user: {
         id: "20000000-0000-4000-8000-000000000000",
@@ -623,6 +626,7 @@ describe("Slack channel option refresh", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(getActiveTenant).mockResolvedValue({
       ok: true,
+      role: "member",
       organizationId: "10000000-0000-4000-8000-000000000000",
       user: {
         id: "20000000-0000-4000-8000-000000000000",
@@ -737,6 +741,7 @@ describe("agent status updates", () => {
   it("updates an agent in the active organization", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue({
       ok: true,
+      role: "member",
       organizationId: "10000000-0000-4000-8000-000000000000",
       user: {
         id: "20000000-0000-4000-8000-000000000000",
@@ -770,6 +775,7 @@ describe("agent status updates", () => {
   it("does not reveal agents outside the active organization", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue({
       ok: true,
+      role: "member",
       organizationId: "10000000-0000-4000-8000-000000000000",
       user: {
         id: "20000000-0000-4000-8000-000000000000",
@@ -795,6 +801,7 @@ describe("agent status updates", () => {
   it("rejects invalid status updates", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue({
       ok: true,
+      role: "member",
       organizationId: "10000000-0000-4000-8000-000000000000",
       user: {
         id: "20000000-0000-4000-8000-000000000000",
@@ -828,6 +835,7 @@ describe("AWS investigation traces", () => {
   it("loads saved events for the existing investigation page", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue({
       ok: true,
+      role: "member",
       organizationId: "10000000-0000-4000-8000-000000000000",
       user: {
         id: "20000000-0000-4000-8000-000000000000",

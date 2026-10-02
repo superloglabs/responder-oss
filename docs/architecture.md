@@ -98,6 +98,23 @@ types. `drizzle/` contains the ordered schema history.
   branch, reply to the supplied thread IDs, and resolve those threads.
 - Tenant trace responses omit the initial composed runtime instructions. The
   raw stored trace retains them for an operator's private diagnostics.
+- The management API (`/api/v1`) and MCP server (`/api/mcp`) accept only
+  workspace API keys sent as bearer tokens; session cookies do not
+  authenticate them. Only a SHA-256 digest of each key is stored. A key acts
+  as the member who created it, so changes record that member, and the key
+  stops working when they leave the workspace or the key is revoked.
+  Responses are parsed with their documented schemas, so undocumented fields
+  are dropped. Operations that take a secret value, such as storing a
+  workspace secret or a model API key, are not offered as MCP tools.
+
+## Management API and MCP server
+
+`apps/control-plane/server/management/operations.ts` defines each management
+operation once: its path, input and output schemas, and handler. The REST
+routes under `/api/v1`, the stateless Streamable HTTP MCP server at `/api/mcp`,
+and the OpenAPI document at `/api/v1/openapi.json` are generated from those
+definitions. `pnpm api:openapi <file>` writes the document for the hosted
+docs. Members create and revoke keys under Settings → API keys.
 
 ## Versioning and jobs
 

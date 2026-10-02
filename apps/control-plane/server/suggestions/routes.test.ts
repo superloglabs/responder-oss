@@ -18,7 +18,7 @@ const app = new Hono().route("/suggestions", suggestionRoutes);
 const suggestionId = "11111111-1111-4111-a111-111111111111";
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(getActiveTenant).mockResolvedValue({ ok: true, organizationId: "workspace-a", user: { id: "user", email: "test@example.com", name: "Test" } });
+  vi.mocked(getActiveTenant).mockResolvedValue({ ok: true, organizationId: "workspace-a", role: "member", user: { id: "user", email: "test@example.com", name: "Test" } });
 });
 describe("suggestion filters and dismissal", () => {
   it("passes filters and cursor through with the authenticated workspace", async () => {
