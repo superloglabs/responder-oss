@@ -18,6 +18,7 @@
   },
   "packageManager": "pnpm@11.15.0",
   "scripts": {
+    "api:openapi": "tsx apps/control-plane/scripts/generate-management-openapi.ts",
     "auth:generate": "pnpm dlx auth@1.6.25 generate --config apps/control-plane/server/auth.cli.ts --output packages/core/src/db/auth-schema.ts --yes",
     "build": "pnpm --filter @responder/control-plane build",
     "build:app": "pnpm --filter @responder/control-plane build",

@@ -37,6 +37,9 @@ import { automationRoutes } from "./automations/routes.js";
 import { sharedAutomationTemplateRoutes } from "./automations/shared-templates.js";
 import { createAutomationContextBrokerRoutes } from "./automations/context-broker.js";
 import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/db/organization-capabilities.js";
+import { apiKeyRoutes } from "./management/api-key-routes.js";
+import { managementMcpRoutes } from "./management/mcp.js";
+import { managementApiRoutes } from "./management/routes.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -411,6 +414,9 @@ export const app = instrumentedApp
       user: tenant.user,
     });
   })
+  .route("/api/v1", managementApiRoutes)
+  .route("/api/mcp", managementMcpRoutes)
+  .route("/api/api-keys", apiKeyRoutes)
   .route("/api/automations", automationRoutes)
   .route("/api/automation-templates", sharedAutomationTemplateRoutes)
   .route("/api/agents", agentRoutes)

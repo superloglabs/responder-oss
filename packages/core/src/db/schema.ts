@@ -1771,3 +1771,32 @@ export const billingNotificationDeliveries = pgTable(
     ),
   ],
 );
+
+// Workspace API keys for the management API and MCP server. A key acts as the
+// member who created it and stops working when they leave the workspace. Only
+// the SHA-256 digest of the key is stored.
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // The first characters of the key, shown so people can tell keys apart.
+    prefix: text("prefix").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("api_keys_token_hash_idx").on(table.tokenHash),
+    index("api_keys_organization_idx").on(table.organizationId),
+  ],
+);

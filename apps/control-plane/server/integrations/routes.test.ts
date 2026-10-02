@@ -189,6 +189,7 @@ const app = new Hono().route("/api/integrations", integrationRoutes);
 const tenant = {
   ok: true as const,
   organizationId: "10000000-0000-4000-8000-000000000000",
+  role: "member",
   user: {
     id: "20000000-0000-4000-8000-000000000000",
     name: "Test User",

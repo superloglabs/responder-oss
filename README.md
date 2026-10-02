@@ -103,6 +103,14 @@ networking, database hosting, TLS, backups, and release automation are left to
 the operator. See [docs/architecture.md](docs/architecture.md) for service and
 security boundaries.
 
+## Management API and MCP
+
+Workspace API keys, created under **Settings → API keys**, authenticate a REST
+API at `/api/v1` and a remote MCP server at `/api/mcp`. Both manage
+automations, runs, tag mode, model access, and workspace secrets. The OpenAPI
+document is served at `/api/v1/openapi.json`; `pnpm -s api:openapi` prints
+it.
+
 ## Development
 
 To populate a running local installation, first create a local account, then run:
