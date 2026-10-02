@@ -74,10 +74,20 @@ export const maxNotificationLength = 11_000;
 export const maxNotificationDetails = 10;
 export const maxSkipReasonLength = 500;
 
+export type AutomationToolDefinition = (typeof repositoryToolDefinitions)[number] | {
+  annotations: Record<string, boolean>;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  name: string;
+};
+
 // A run with notification channels can post to them itself, so the agent
-// knows where its results go.
-export function automationToolDefinitions(notificationChannels: string[] = []) {
-  if (notificationChannels.length === 0) return repositoryToolDefinitions;
+// knows where its results go. Workspace tools follow the run's own tools.
+export function automationToolDefinitions(
+  notificationChannels: string[] = [],
+  workspaceTools: AutomationToolDefinition[] = [],
+): AutomationToolDefinition[] {
+  if (notificationChannels.length === 0) return [...repositoryToolDefinitions, ...workspaceTools];
   return [
     ...repositoryToolDefinitions,
     {
@@ -121,6 +131,7 @@ export function automationToolDefinitions(notificationChannels: string[] = []) {
       },
       name: skipNotificationToolName,
     },
+    ...workspaceTools,
   ];
 }
 
@@ -193,6 +204,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 export async function installAutomationToolServer(
   session: Pick<DaytonaSandboxSession, "materializeEntry">,
   notificationChannels: string[] = [],
+  workspaceTools: AutomationToolDefinition[] = [],
 ): Promise<void> {
   await session.materializeEntry({
     entry: {
@@ -200,7 +212,7 @@ export async function installAutomationToolServer(
       content: automationToolServerSource(
         toolsRoot,
         automationToolServerWaitMs,
-        automationToolDefinitions(notificationChannels),
+        automationToolDefinitions(notificationChannels, workspaceTools),
       ),
     },
     path: serverPath,

@@ -20,7 +20,9 @@ import type {
 import { isAutomationContextProvider } from "../automations/context-providers.js";
 import { dueScheduleSlot } from "../automations/schedule.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
+import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
+import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   automationModelBrokerGrants,
   automationModelUsage,
@@ -1662,6 +1664,28 @@ export async function heartbeatAutomationRun(
     )
     .returning({ id: automationRuns.id });
   return rows.length > 0;
+}
+
+// The workspace member an automation run acts for when it changes the
+// workspace: whoever saved the run's automation version, or else the oldest
+// owner.
+export async function getAutomationRunActor(input: {
+  automationVersionId: string;
+  organizationId: string;
+}): Promise<string | null> {
+  const rows = await getDatabase()
+    .select({ createdBy: automationVersions.createdBy })
+    .from(automationVersions)
+    .innerJoin(
+      member,
+      and(
+        eq(member.userId, automationVersions.createdBy),
+        eq(member.organizationId, input.organizationId),
+      ),
+    )
+    .where(eq(automationVersions.id, input.automationVersionId))
+    .limit(1);
+  return rows[0]?.createdBy ?? getOldestOrganizationOwner(input.organizationId);
 }
 
 export async function getAutomationRuntimeRepositories(versionId: string) {

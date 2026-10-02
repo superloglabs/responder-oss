@@ -180,6 +180,10 @@ system prompt and the investigation sections. They can open pull requests in the
 repositories selected for tag mode. They can also read and change the
 workspace's automations and tag mode settings, saving those changes as the member
 who last saved tag mode, or else the oldest owner.
+Automation runs in these organizations get the same workspace tools through
+their sandbox tool server. They save changes as the member who saved the run's
+automation version, or else the oldest owner, and are told not to change the
+workspace because a trigger payload asks.
 
 Linear mentions and delegated issues run as tag mode turns in a Linear agent
 session. They use the `linear*` prompt sections in place of the Slack wording,

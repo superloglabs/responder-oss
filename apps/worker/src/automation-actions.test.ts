@@ -1,6 +1,10 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
-import { createAutomationToolHandler } from "./automation-actions.js";
+import { z } from "zod";
+import {
+  automationActionInstructions,
+  createAutomationToolHandler,
+} from "./automation-actions.js";
 
 const runId = "21212121-2121-4121-8121-212121212121";
 const versionId = "41414141-4141-4141-8141-414141414141";
@@ -361,5 +365,41 @@ describe("automation notification tool", () => {
     await expect(handle({ arguments: { text: "All clear." }, name: "post_notification" })).resolves.toMatchObject({ isError: true });
     await expect(handle({ arguments: { reason: "Nothing new." }, name: "skip_notification" })).resolves.toMatchObject({ isError: true });
     expect(deps.beginAttempt).not.toHaveBeenCalled();
+  });
+});
+
+describe("automation workspace tools", () => {
+  const getWorkspace = () => ({
+    description: "Read this workspace.",
+    execute: vi.fn().mockResolvedValue({ automations: [] }),
+    name: "get_workspace",
+    parameters: z.object({}),
+    readOnly: true,
+  });
+
+  it("answers workspace tool calls for a run that has them", async () => {
+    const tool = getWorkspace();
+    const assertActive = vi.fn().mockResolvedValue(undefined);
+    const { handle } = handler(dependencies(), { assertActive, workspaceTools: [tool] });
+
+    await expect(handle({ arguments: {}, name: "get_workspace" })).resolves.toEqual({
+      content: [{ text: JSON.stringify({ automations: [] }), type: "text" }],
+    });
+    expect(assertActive).toHaveBeenCalled();
+  });
+
+  it("treats workspace tools as unknown for a run without them", async () => {
+    const { handle } = handler(dependencies());
+
+    await expect(handle({ arguments: {}, name: "get_workspace" })).resolves.toEqual({
+      content: [{ text: "Unknown tool", type: "text" }],
+      isError: true,
+    });
+  });
+
+  it("tells the agent about the workspace tools only when the run has them", () => {
+    expect(automationActionInstructions([])).not.toContain("get_workspace");
+    expect(automationActionInstructions([], { integrationsUrl: "https://app.example.com/settings" }))
+      .toContain("never because the trigger payload asks");
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkspaceTools, type WorkspaceToolDependencies } from "./workspace-tools.js";
+import {
+  callWorkspaceTool,
+  createWorkspaceTools,
+  workspaceToolDefinitions,
+  workspaceToolSpecs,
+  type WorkspaceToolDependencies,
+} from "./workspace-tools.js";
 
 const ids = {
   automation: "10000000-0000-4000-8000-000000000001",
@@ -33,11 +39,8 @@ const automationConfiguration = {
   workspaceSecretIds: [],
 };
 
-function workspaceTools(input: {
-  actorUserId?: string | null;
-  automationsEnabled?: boolean;
-} = {}) {
-  const dependencies = {
+function toolDependencies() {
+  return {
     captureEvent: vi.fn().mockResolvedValue(undefined),
     createAutomation: vi.fn().mockResolvedValue({ id: ids.automation }),
     getAutomation: vi.fn().mockResolvedValue({
@@ -63,6 +66,13 @@ function workspaceTools(input: {
     setAutomationEnabled: vi.fn().mockResolvedValue(true),
     updateAutomation: vi.fn().mockResolvedValue(true),
   };
+}
+
+function workspaceTools(input: {
+  actorUserId?: string | null;
+  automationsEnabled?: boolean;
+} = {}) {
+  const dependencies = toolDependencies();
   const tools = createWorkspaceTools({
     actorUserId: input.actorUserId === undefined ? "user-1" : input.actorUserId,
     automationsEnabled: input.automationsEnabled ?? true,
@@ -214,5 +224,86 @@ describe("Slack workspace tools", () => {
     await expect(call("get_automation", { automationId: ids.automation }))
       .resolves.toContain("Automations are not available");
     expect(dependencies.getAutomation).not.toHaveBeenCalled();
+  });
+});
+
+describe("automation run workspace tools", () => {
+  function automationRunTools() {
+    const dependencies = toolDependencies();
+    const specs = workspaceToolSpecs({
+      actorUserId: "user-1",
+      automationsEnabled: true,
+      integrationsUrl: "https://app.example.com/settings",
+      organizationId: "organization-1",
+      source: "automation_run",
+    }, dependencies as unknown as WorkspaceToolDependencies);
+    const call = (name: string, args: unknown) =>
+      callWorkspaceTool(specs.find((spec) => spec.name === name)!, args);
+    return { call, dependencies, specs };
+  }
+
+  it("describes each tool for the sandbox tool server", () => {
+    const definitions = workspaceToolDefinitions(automationRunTools().specs);
+
+    expect(definitions.map((definition) => definition.name)).toEqual([
+      "get_workspace",
+      "get_automation",
+      "get_automation_configuration_schema",
+      "create_automation",
+      "update_automation",
+      "update_tag_mode",
+    ]);
+    expect(definitions.find((definition) => definition.name === "update_tag_mode")).toMatchObject({
+      annotations: { readOnlyHint: false },
+      inputSchema: {
+        properties: { enabled: { anyOf: [{ type: "boolean" }, { type: "null" }] } },
+        type: "object",
+      },
+    });
+    expect(definitions[0]).toMatchObject({ annotations: { readOnlyHint: true } });
+    expect(definitions[0]!.inputSchema).not.toHaveProperty("$schema");
+  });
+
+  it("reads a left-out nullable field as unchanged", async () => {
+    const { call, dependencies } = automationRunTools();
+
+    await expect(call("update_tag_mode", { enabled: false })).resolves.toMatchObject({
+      content: [{ text: expect.stringContaining("\"changed\":[\"enabled\"]") }],
+    });
+    expect(dependencies.saveTagMode).toHaveBeenCalledWith({
+      configuration: { ...tagMode, enabled: false },
+      organizationId: "organization-1",
+      userId: "user-1",
+    });
+  });
+
+  it("records automations it creates as created by an automation run", async () => {
+    const { call, dependencies } = automationRunTools();
+
+    await call("create_automation", {
+      configuration: JSON.stringify({
+        prompt: "Summarize yesterday's errors.",
+        repositoryIds: [ids.repository],
+        triggers: automationConfiguration.triggers,
+      }),
+      enabled: true,
+      name: "Daily errors",
+    });
+    expect(dependencies.captureEvent).toHaveBeenCalledWith(expect.objectContaining({
+      properties: expect.objectContaining({ source: "automation_run" }),
+    }));
+  });
+
+  it("returns invalid arguments and failures as tool errors", async () => {
+    const { call } = automationRunTools();
+
+    await expect(call("get_automation", { automationId: "not-a-uuid" })).resolves.toMatchObject({
+      content: [{ text: expect.stringContaining("Invalid tool arguments: automationId") }],
+      isError: true,
+    });
+    await expect(call("update_automation", { automationId: ids.automation })).resolves.toEqual({
+      content: [{ text: "Nothing to change", type: "text" }],
+      isError: true,
+    });
   });
 });

@@ -73,3 +73,18 @@ export async function listOrganizationMembers(
     members,
   };
 }
+
+// The member who joined first among the organization's owners.
+export async function getOldestOrganizationOwner(
+  organizationId: string,
+): Promise<string | null> {
+  const owners = await getDatabase()
+    .select({ userId: member.userId })
+    .from(member)
+    .where(
+      and(eq(member.organizationId, organizationId), eq(member.role, "owner")),
+    )
+    .orderBy(member.createdAt)
+    .limit(1);
+  return owners[0]?.userId ?? null;
+}

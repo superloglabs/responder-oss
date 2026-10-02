@@ -22,6 +22,7 @@ import {
   updateAutomation,
 } from "@responder/core/db/automations";
 import { z } from "zod";
+import type { AutomationToolResult } from "./automation-tools.js";
 
 // More resources than this are left out of get_workspace.
 const maxListedResources = 1_000;
@@ -70,6 +71,29 @@ function validationMessage(error: z.ZodError): string {
     .join("; ");
 }
 
+// One workspace tool, served to Slack threads as an agent tool and to
+// automation runs through the sandbox tool server.
+export interface WorkspaceTool {
+  description: string;
+  execute(args: unknown): Promise<unknown>;
+  name: string;
+  parameters: z.ZodObject;
+  readOnly: boolean;
+}
+
+function workspaceTool<T extends z.ZodObject>(spec: {
+  description: string;
+  execute(args: z.infer<T>): unknown;
+  name: string;
+  parameters: T;
+  readOnly: boolean;
+}): WorkspaceTool {
+  return {
+    ...spec,
+    execute: async (args) => spec.execute(spec.parameters.parse(args)),
+  };
+}
+
 // Postgres reports a duplicate automation name on the error's cause.
 function nameConflict(error: unknown): boolean {
   for (let current = error; current && typeof current === "object"; current = (current as { cause?: unknown }).cause) {
@@ -80,19 +104,26 @@ function nameConflict(error: unknown): boolean {
   return false;
 }
 
-// Tools a Slack thread uses to read and change its workspace: automations,
-// tag mode, and the integrations each of them uses. Changes are saved as the
-// member returned by getSlackThreadModeActor.
-export function createWorkspaceTools(input: {
+export interface WorkspaceToolInput {
+  // The member changes are saved as: getSlackThreadModeActor for a Slack
+  // thread, getAutomationRunActor for an automation run.
   actorUserId: string | null;
   automationsEnabled: boolean;
   integrationsUrl: string;
   organizationId: string;
-}, dependencies: WorkspaceToolDependencies = defaultDependencies) {
+  source: "automation_run" | "slack_thread";
+}
+
+// Tools that read and change the workspace: automations, tag mode, and the
+// integrations each of them uses.
+export function workspaceToolSpecs(
+  input: WorkspaceToolInput,
+  dependencies: WorkspaceToolDependencies = defaultDependencies,
+): WorkspaceTool[] {
   const { organizationId } = input;
   const actor = () => {
     if (!input.actorUserId) {
-      throw new Error("No workspace member can be recorded for this change. Ask an owner to save tag mode settings in Responder first.");
+      throw new Error("No workspace member can be recorded for this change. Ask a workspace owner to make it in Responder.");
     }
     return input.actorUserId;
   };
@@ -133,7 +164,7 @@ export function createWorkspaceTools(input: {
         properties: {
           automation_id: created.id,
           model: parsed.data.configuration.model,
-          source: "slack_thread",
+          source: input.source,
           trigger_kinds: [...new Set(parsed.data.configuration.triggers.map((trigger) => trigger.kind))].join(","),
         },
       }).catch(() => undefined);
@@ -146,8 +177,9 @@ export function createWorkspaceTools(input: {
     }
   }
 
-  const getWorkspace = tool({
+  const getWorkspace = workspaceTool({
     name: "get_workspace",
+    readOnly: true,
     description:
       "Read this workspace's automations, tag mode settings, connected integrations, repositories, integration resources (such as Slack channels and Sentry projects), and workspace secret names. Use the returned IDs when changing automations or tag mode.",
     parameters: z.object({}),
@@ -198,8 +230,9 @@ export function createWorkspaceTools(input: {
     },
   });
 
-  const getAutomationTool = tool({
+  const getAutomationTool = workspaceTool({
     name: "get_automation",
+    readOnly: true,
     description: "Read one automation's full configuration.",
     parameters: z.object({ automationId: z.uuid() }),
     async execute({ automationId }) {
@@ -218,8 +251,9 @@ export function createWorkspaceTools(input: {
     },
   });
 
-  const getConfigurationSchema = tool({
+  const getConfigurationSchema = workspaceTool({
     name: "get_automation_configuration_schema",
+    readOnly: true,
     description:
       "Return the JSON schema of an automation configuration and the model settings a new automation starts with. Read it before creating an automation or changing its triggers.",
     parameters: z.object({}),
@@ -235,8 +269,9 @@ export function createWorkspaceTools(input: {
     },
   });
 
-  const createAutomationTool = tool({
+  const createAutomationTool = workspaceTool({
     name: "create_automation",
+    readOnly: false,
     description:
       "Create an automation. configuration is a JSON object matching get_automation_configuration_schema; omitted model settings use its defaults.",
     parameters: z.object({
@@ -260,8 +295,9 @@ export function createWorkspaceTools(input: {
     },
   });
 
-  const updateAutomationTool = tool({
+  const updateAutomationTool = workspaceTool({
     name: "update_automation",
+    readOnly: false,
     description:
       "Change an automation. Pass only what changes; null keeps the current value. configuration is a JSON object whose top-level fields replace the current ones.",
     parameters: z.object({
@@ -304,10 +340,11 @@ export function createWorkspaceTools(input: {
     },
   });
 
-  const updateTagMode = tool({
+  const updateTagMode = workspaceTool({
     name: "update_tag_mode",
+    readOnly: false,
     description:
-      "Change tag mode, which answers Slack mentions like this one. Pass only what changes; null keeps the current value. Lists replace the current selection. Context accounts are integration IDs; context resources are resource IDs, such as Vercel projects.",
+      "Change tag mode, which answers when Responder is mentioned in Slack. Pass only what changes; null keeps the current value. Lists replace the current selection. Context accounts are integration IDs; context resources are resource IDs, such as Vercel projects.",
     parameters: z.object({
       contextAccountIds: z.array(z.uuid()).max(20).nullable(),
       contextResourceIds: z.array(z.uuid()).max(100).nullable(),
@@ -345,4 +382,64 @@ export function createWorkspaceTools(input: {
     updateAutomationTool,
     updateTagMode,
   ];
+}
+
+// The workspace tools as agent tools for a Slack thread.
+export function createWorkspaceTools(
+  input: Omit<WorkspaceToolInput, "source">,
+  dependencies: WorkspaceToolDependencies = defaultDependencies,
+) {
+  return workspaceToolSpecs({ ...input, source: "slack_thread" }, dependencies).map((spec) =>
+    tool({
+      description: spec.description,
+      execute: (args) => spec.execute(args),
+      name: spec.name,
+      parameters: spec.parameters,
+    }));
+}
+
+// The workspace tools as MCP tool definitions for the sandbox tool server.
+export function workspaceToolDefinitions(specs: WorkspaceTool[]) {
+  return specs.map((spec) => {
+    const inputSchema: Record<string, unknown> = z.toJSONSchema(spec.parameters, { io: "input" });
+    delete inputSchema.$schema;
+    return {
+      annotations: {
+        destructiveHint: false,
+        openWorldHint: false,
+        readOnlyHint: spec.readOnly,
+      },
+      description: spec.description,
+      inputSchema,
+      name: spec.name,
+    };
+  });
+}
+
+// Answers an automation run's call to a workspace tool. Harnesses can leave
+// out a field that may be null, so a missing field is read as null.
+export async function callWorkspaceTool(
+  spec: WorkspaceTool,
+  args: unknown,
+): Promise<AutomationToolResult> {
+  const provided = args && typeof args === "object" && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : {};
+  const filled = Object.fromEntries(
+    Object.entries(spec.parameters.shape).map(([key, schema]) => [
+      key,
+      key in provided || !schema.safeParse(null).success ? provided[key] : null,
+    ]),
+  );
+  try {
+    const result = await spec.execute(filled);
+    return { content: [{ text: JSON.stringify(result), type: "text" }] };
+  } catch (error) {
+    const message = error instanceof z.ZodError
+      ? `Invalid tool arguments: ${validationMessage(error)}`
+      : error instanceof Error
+        ? error.message.slice(0, 2_000)
+        : "The tool failed";
+    return { content: [{ text: message, type: "text" }], isError: true };
+  }
 }
