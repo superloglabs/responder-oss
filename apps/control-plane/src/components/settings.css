@@ -37,11 +37,14 @@
 .integrationCard__action { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 28px; padding: 3px 10px; border: 1px solid #e6e8ec; border-radius: 6px; background: #fff; color: #1a1a1a; font-size: 13px; line-height: 20px; }
 .appShell--workspace.appShell--settings .integrationCard--managed { flex-wrap: wrap; cursor: default; }
 .appShell--workspace.appShell--settings .integrationCard__actions { display: flex; flex-shrink: 0; margin: 0; padding: 0; gap: 8px; border: 0; }
-.appShell--workspace.appShell--settings .integrationCard__accounts { width: 100%; padding: 12px 0 0; margin: 0; border-top: 1px solid #e6e8ec; }
-.appShell--workspace.appShell--settings .integrationCard__accounts li { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 8px 0; }
-.appShell--workspace.appShell--settings .integrationCard__accounts li > span:first-child { flex: 1; display: flex; flex-direction: column; min-width: 160px; }
-.appShell--workspace.appShell--settings .integrationCard__accounts strong { font-size: 13px; font-weight: 500; }
-.appShell--workspace.appShell--settings .integrationCard__accounts small { color: #666; font-size: 12px; }
+.appShell--workspace.appShell--settings .integrationCard__accounts { width: 100%; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 0 0; margin: 0; border-top: 1px solid #e6e8ec; }
+.appShell--workspace.appShell--settings .integrationCard__accounts li { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; padding: 10px 12px; border: .5px solid #e6e8ec; border-radius: 8px; background: #fafafa; }
+.appShell--workspace.appShell--settings .integrationCard__accounts li > span:first-child { flex: 1 1 240px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.appShell--workspace.appShell--settings .integrationCard__accounts strong { font-size: 13px; font-weight: 500; line-height: 20px; }
+.appShell--workspace.appShell--settings .integrationCard__accounts small { color: #666; font-size: 12px; line-height: 18px; white-space: normal; overflow-wrap: anywhere; }
+.appShell--workspace.appShell--settings .integrationCard__accountStatus { color: #666; font-size: 12px; line-height: 18px; }
+.appShell--workspace.appShell--settings .integrationCard__accountStatus--error { color: #a3402f; }
+.appShell--workspace.appShell--settings .integrationCard__error { width: 100%; margin: 0; color: #a3402f; font-size: 12px; line-height: 18px; }
 .appShell--workspace.appShell--settings .integrationCard__manageActions { width: 100%; justify-content: flex-end; }
 .settingsEmpty { width: 100%; margin: 0; padding: 20px 16px; border: .5px solid #e6e8ec; border-radius: 12px; background: #fff; color: #666; font-size: 13px; line-height: 20px; }
 .appShell--workspace.appShell--settings .button { min-height: 28px; height: auto; padding: 3px 10px; gap: 6px; border-radius: 6px; font-size: 13px; line-height: 20px; font-weight: 400; }

@@ -1361,13 +1361,22 @@ export const integrationRoutes = new Hono()
     if (!accountId.success) {
       return context.json({ error: "The Google Cloud account is invalid" }, 400);
     }
-    const deleted = await deleteIntegrationAccount({
+    const removal = await deleteIntegrationAccount({
       integrationAccountId: accountId.data,
       organizationId: tenant.organizationId,
       provider: "gcp",
     });
-    if (!deleted) {
+    if (removal.status === "not_found") {
       return context.json({ error: "Google Cloud project connection not found" }, 404);
+    }
+    if (removal.status === "in_use") {
+      const names = removal.automationNames.map((name) => `"${name}"`).join(", ");
+      return context.json(
+        {
+          error: `This project is used by ${removal.automationNames.length === 1 ? "the automation" : "the automations"} ${names}. Remove it from ${removal.automationNames.length === 1 ? "that automation" : "those automations"} first.`,
+        },
+        409,
+      );
     }
     return context.json({ removed: true });
   })

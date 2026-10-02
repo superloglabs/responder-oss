@@ -29,14 +29,18 @@ const IAM_URL = "https://iam.googleapis.com/v1";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_PROJECTS = 1_000;
 
-const SETUP_PERMISSIONS = [
-  "serviceusage.services.enable",
-  "iam.serviceAccounts.create",
-  "iam.serviceAccounts.setIamPolicy",
-  "iam.workloadIdentityPools.create",
-  "iam.workloadIdentityPoolProviders.create",
-  "resourcemanager.projects.setIamPolicy",
-] as const;
+// Each setup permission, with the predefined role that grants it.
+const SETUP_PERMISSION_ROLES = {
+  "serviceusage.services.enable": "Service Usage Admin",
+  "iam.serviceAccounts.create": "Service Account Admin",
+  "iam.serviceAccounts.setIamPolicy": "Service Account Admin",
+  "iam.workloadIdentityPools.create": "Workload Identity Pool Admin",
+  "iam.workloadIdentityPoolProviders.create": "Workload Identity Pool Admin",
+  "resourcemanager.projects.setIamPolicy": "Project IAM Admin",
+} as const;
+const SETUP_PERMISSIONS = Object.keys(SETUP_PERMISSION_ROLES) as Array<
+  keyof typeof SETUP_PERMISSION_ROLES
+>;
 
 export const gcpProjectSchema = z.object({
   name: z.string().min(1).max(200),
@@ -351,8 +355,9 @@ export async function advanceGcpProjectSetup(input: {
       (permission) => !granted.permissions?.includes(permission),
     );
     if (missing.length > 0) {
+      const roles = [...new Set(missing.map((permission) => SETUP_PERMISSION_ROLES[permission]))];
       throw new GcpSetupError(
-        `Your Google account cannot grant access in ${projectId}. Ask a project Owner to connect it. Missing: ${missing.join(", ")}.`,
+        `Your Google account cannot set up access in ${projectId}. Ask a project Owner to connect it, or get the ${roles.join(" and ")} ${roles.length === 1 ? "role" : "roles"} on the project and try again.`,
         "permission_denied",
       );
     }
