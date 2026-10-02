@@ -1211,7 +1211,10 @@ export async function runInvestigationAgent(
     try {
       if (session) {
         if (threadMode) {
-          await pauseDaytonaSandbox(session);
+          await pauseDaytonaSandbox(session, {
+            investigationId: job.investigationId,
+            organizationId: job.config.organizationId,
+          });
         } else {
           await closeDaytonaSandbox(session, config, {
             investigationId: job.investigationId,

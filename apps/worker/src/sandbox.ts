@@ -274,10 +274,33 @@ export async function configureDaytonaSandboxLifecycle(
   }
 }
 
+// A thread sandbox that fails to stop keeps running until Daytona's
+// auto-stop, and the next turn resumes or replaces it. The failure is
+// reported without failing the turn that already has its answer.
 export async function pauseDaytonaSandbox(
   session: DaytonaSandboxSession,
+  context: Omit<WorkerErrorContext, "operation" | "sandboxId">,
+  dependencies: Pick<DaytonaCleanupDependencies, "reportException"> =
+    defaultCleanupDependencies,
 ): Promise<void> {
-  await session.close();
+  const sandboxId = session.state.sandboxId;
+  try {
+    await session.close();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "daytona_sandbox_pause_failed",
+        sandboxId,
+        ...context,
+      }),
+    );
+    await dependencies.reportException(error, {
+      operation: "sandbox_cleanup",
+      sandboxId,
+      ...context,
+    });
+  }
 }
 
 export async function closeDaytonaSandbox(
