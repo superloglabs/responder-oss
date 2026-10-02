@@ -113,8 +113,7 @@ types. `drizzle/` contains the ordered schema history.
 operation once: its path, input and output schemas, and handler. The REST
 routes under `/api/v1`, the stateless Streamable HTTP MCP server at `/api/mcp`,
 and the OpenAPI document at `/api/v1/openapi.json` are generated from those
-definitions. `pnpm api:openapi <file>` writes the document for the hosted
-docs. Members create and revoke keys under Settings → API keys.
+definitions. `pnpm -s api:openapi` prints the document for the hosted docs. Members create and revoke keys under Settings → API keys.
 
 ## Versioning and jobs
 
