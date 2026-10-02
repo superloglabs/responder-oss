@@ -165,3 +165,10 @@ is impossible in code and requires human intervention. PR policy
 controls later publication of the saved diff, not whether the investigation can
 prepare it. Observation-only scans and ad-hoc Slack threads retain their separate
 execution restrictions; configurable wording does not change tool permissions.
+
+In organizations with simplified navigation, Slack threads work as a general
+assistant. They use the `assistant*` prompt sections in place of the runtime
+system prompt and the investigation sections. They can open pull requests in the
+repositories selected for tag mode. They can also read and change the
+workspace's automations and tag mode settings, saving those changes as the member
+who last saved tag mode, or else the oldest owner.

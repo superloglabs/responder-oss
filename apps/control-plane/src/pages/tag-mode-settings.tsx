@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AGENT_PROMPT_MAX_LENGTH } from "@responder/core/agents/config";
+import {
+  AGENT_PROMPT_MAX_LENGTH,
+  customTagModeInstructions,
+  tagModeAssistantInstructions,
+  tagModeInvestigationInstructions,
+} from "@responder/core/agents/config";
 import { useNavigate } from "react-router-dom";
 import {
   fetchAgentOptions,
@@ -24,6 +29,7 @@ import {
 import { AppShell } from "../components/app-shell";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { useOrganizationCapabilities } from "../organization-capabilities";
 import { availableTagModeConfiguration } from "../tag-mode-configuration";
 import { currentProjectSelectionState } from "../project-selection";
 import { BookBookmarkIcon as RepositoryIcon, MagnifyingGlassIcon as SearchIcon, XIcon } from "@phosphor-icons/react";
@@ -41,8 +47,7 @@ import { useDocumentTitle } from "../use-document-title";
 const defaultConfiguration: SlackThreadModeConfiguration = {
   enabled: false,
   model: "instance/default",
-  instructions:
-    "Investigate the request using connected context and attached repositories. Report what you found, the supporting evidence, and the recommended next step.",
+  instructions: tagModeInvestigationInstructions,
   repositoryIds: [],
   contextAccountIds: [],
   contextResourceIds: [],
@@ -133,6 +138,9 @@ function accountLabel(account: ContextAccount, accounts: ContextAccount[]): stri
 export function TagModeSettingsPage() {
   useDocumentTitle("Tag mode settings");
   const navigate = useNavigate();
+  // With simplified navigation, tag mode is a general Slack assistant that
+  // can open pull requests and change the workspace.
+  const assistant = useOrganizationCapabilities().includes("simplified_navigation");
   const [options, setOptions] = useState<AgentOptions | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [integrationQuery, setIntegrationQuery] = useState("");
@@ -175,8 +183,11 @@ export function TagModeSettingsPage() {
         if (cancelled) return;
         setOptions(loadedOptions);
         setIntegrations(loadedIntegrations);
+        const loaded = loadedConfiguration ?? defaultConfiguration;
         const available = availableTagModeConfiguration(
-          loadedConfiguration ?? defaultConfiguration,
+          assistant && customTagModeInstructions(loaded.instructions) === null
+            ? { ...loaded, instructions: tagModeAssistantInstructions }
+            : loaded,
           loadedOptions,
         );
         savedConfiguration.current = available;
@@ -191,7 +202,7 @@ export function TagModeSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [assistant]);
 
   const contextAccounts = useMemo(() => {
     if (!options) return [];
@@ -478,7 +489,11 @@ export function TagModeSettingsPage() {
           <div className="contextToolbar">
             <span className="configurationDialog__copy">
               <strong>Tag mode</strong>
-              <small>Control whether Slack mentions start ad-hoc investigations.</small>
+              <small>
+                {assistant
+                  ? "Let people mention Superlog in Slack to ask questions, open pull requests, and change automations and settings."
+                  : "Control whether Slack mentions start ad-hoc investigations."}
+              </small>
             </span>
             <AgentContextIntegrationControls
               disabled={!options}
@@ -490,12 +505,37 @@ export function TagModeSettingsPage() {
           </div>
         </section>
 
+        <section className="tagModeSettings__prompt">
+          <div className="tagModeSettings__sectionHeading">
+            <h2>Custom prompt</h2>
+            <p>
+              {assistant
+                ? "Added to every Slack request. Tell Superlog how to work and how to reply."
+                : "Tell Responder how to investigate and answer thread requests."}
+            </p>
+          </div>
+          <TextAreaField
+            className="tagModeSettings__promptField"
+            label="Custom prompt"
+            maxLength={AGENT_PROMPT_MAX_LENGTH}
+            onBlur={saveInstructions}
+            onChange={(event) =>
+              setConfiguration((current) => ({
+                ...current,
+                instructions: event.target.value,
+              }))
+            }
+            rows={4}
+            value={configuration.instructions}
+          />
+        </section>
+
         <section className="contextPanel">
           <div className="contextToolbar">
             <span className="configurationDialog__copy">
               <strong>Connected integrations</strong>
               <small>
-                Tag mode can inspect {connectedContextCount}{" "}
+                Tag mode can {assistant ? "use" : "inspect"} {connectedContextCount}{" "}
                 {connectedContextCount === 1 ? "source" : "sources"}.
               </small>
             </span>
@@ -547,7 +587,7 @@ export function TagModeSettingsPage() {
                     toggleAriaLabel={`${selectedRepositories.length > 0 ? "Disable" : "Enable"} GitHub for tag mode`}
                   />
                 }
-                detail={`${selectedRepositories.length} ${selectedRepositories.length === 1 ? "repository" : "repositories"} selected · Read-only code context`}
+                detail={`${selectedRepositories.length} ${selectedRepositories.length === 1 ? "repository" : "repositories"} selected · ${assistant ? "Code context and pull requests" : "Read-only code context"}`}
                 label="GitHub"
                 provider="github"
               />
@@ -709,27 +749,6 @@ export function TagModeSettingsPage() {
 
         </section>
 
-          <section className="tagModeSettings__prompt">
-            <div className="tagModeSettings__sectionHeading">
-              <h2>Prompt</h2>
-              <p>Tell Responder how to investigate and answer thread requests.</p>
-            </div>
-            <TextAreaField
-              className="tagModeSettings__promptField"
-              label="Agent prompt"
-              maxLength={AGENT_PROMPT_MAX_LENGTH}
-              onBlur={saveInstructions}
-              onChange={(event) =>
-                setConfiguration((current) => ({
-                  ...current,
-                  instructions: event.target.value,
-                }))
-              }
-              rows={4}
-              value={configuration.instructions}
-            />
-          </section>
-
         <p aria-live="polite" className="tagModeSettings__status">
           {saving ? "Saving…" : "Changes save automatically."}
         </p>
@@ -751,7 +770,11 @@ export function TagModeSettingsPage() {
                 <AgentContextProviderMark provider="github" />
                 <span className="configurationDialog__copy">
                   <strong id="tag-mode-github-title">Configure GitHub</strong>
-                  <small>Choose the repositories Tag mode may inspect.</small>
+                  <small>
+                    {assistant
+                      ? "Choose the repositories Tag mode may read and open pull requests in."
+                      : "Choose the repositories Tag mode may inspect."}
+                  </small>
                 </span>
                 <IconButton
                   aria-label="Close GitHub configuration"

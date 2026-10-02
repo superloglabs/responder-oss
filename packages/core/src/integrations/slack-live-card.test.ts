@@ -270,6 +270,25 @@ describe("Slack live investigation card", () => {
     ]);
   });
 
+  it("words Slack assistant cards as requests instead of investigations", () => {
+    const message = slackInvestigationCard({
+      agentId: context.agentId,
+      assistant: true,
+      detail: "Done.",
+      investigationId: context.investigationId,
+      showInvestigationLink: false,
+      status: "complete",
+      title: "",
+    });
+
+    expect(message.text).toBe("Request — Done");
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        tasks: [expect.objectContaining({ status: "complete", title: "Done" })],
+      }),
+    ]);
+  });
+
   it("includes the investigation workspace in Slack links", () => {
     vi.stubEnv("RESPONDER_APP_URL", "https://responder.example");
 

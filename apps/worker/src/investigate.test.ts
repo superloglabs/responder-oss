@@ -258,6 +258,54 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("search_observability_suggestions");
   });
 
+  it("words Slack assistant turns as general requests with pull request and workspace tools", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Reply in French.",
+      assistant: {
+        integrationsUrl: "https://app.example.com/settings",
+        pullRequests: true,
+      },
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [{
+        branch: "main",
+        path: "/home/daytona/workspace/repositories/acme/api",
+        repository: "acme/api",
+        sha: "a".repeat(40),
+        workspaceBaseSha: "b".repeat(40),
+      }],
+      runtimeSystemPrompt: "You are Responder, an incident investigation agent.",
+      sentryConnected: false,
+      threadMode: true,
+    });
+
+    expect(instructions).toContain("the Slack assistant for this workspace");
+    expect(instructions).toContain("Reply in French.");
+    expect(instructions).toContain("call open_pull_request");
+    expect(instructions).toContain("Call get_workspace before changing anything");
+    expect(instructions).toContain("share https://app.example.com/settings");
+    expect(instructions).not.toContain("incident investigation agent");
+    expect(instructions).not.toContain("Investigate only the alert");
+    expect(instructions).not.toContain("ad-hoc Slack thread investigation");
+    expect(instructions).not.toContain("root cause");
+    expect(instructions).not.toContain("evidence");
+  });
+
+  it("leaves the pull request section out of Slack assistant turns without repositories", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "",
+      assistant: { integrationsUrl: "https://app.example.com/settings", pullRequests: false },
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+    });
+
+    expect(instructions).toContain("No repositories are attached to tag mode.");
+    expect(instructions).not.toContain("open_pull_request");
+  });
+
   it("restricts issue follow-ups to updating their bound issues", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Reconsider the remediation.",

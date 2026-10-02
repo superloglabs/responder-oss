@@ -9,6 +9,7 @@ import {
   findSlackThreadAutomationRun,
 } from "../../../../packages/core/src/db/automations.js";
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
+import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   getInvestigationForSlackAction,
   findSlackIssueThread,
@@ -36,6 +37,7 @@ import {
   slackInvestigationCard,
 } from "../../../../packages/core/src/integrations/slack-live-card.js";
 import { reconcileCompletedInvestigationSlackCard } from "../../../../packages/core/src/integrations/slack-delivery.js";
+import { slackAssistantAttribute } from "../../../../packages/core/src/integrations/slack-assistant.js";
 import {
   parseSlackRemediationActionValue,
   refreshIssuePullRequestSlackMessages,
@@ -487,6 +489,7 @@ function parseJson(value: string): unknown {
 async function forwardSlackEvent(input: {
   agentId: string;
   alertProvider: SlackAlertProvider | null;
+  assistant?: boolean;
   awsAlarm: SlackAwsAlarm | null;
   body: string;
   channelId: string;
@@ -526,6 +529,7 @@ async function forwardSlackEvent(input: {
             integrationAccountId: input.integrationAccountId,
             ...(input.userId ? { slackUserId: input.userId } : {}),
             ...(input.userName ? { slackUserName: input.userName } : {}),
+            ...(input.assistant ? { [slackAssistantAttribute]: true } : {}),
           }
         : {}),
       slackEventId: input.eventId,
@@ -552,6 +556,7 @@ async function forwardSlackEvent(input: {
 
 export async function acknowledgeSlackAlert(input: {
   agentId: string;
+  assistant?: boolean;
   channelId: string;
   integrationAccountId: string;
   investigationId: string;
@@ -574,6 +579,7 @@ export async function acknowledgeSlackAlert(input: {
   );
   const message = investigatingSlackMessage({
     agentId: input.agentId,
+    assistant: input.assistant,
     investigationId: input.investigationId,
     organizationId: input.organizationId,
     threadMode: input.threadMode,
@@ -735,6 +741,7 @@ export function logSlackAcknowledgementFailure(input: {
 
 export function investigatingSlackMessage(input: {
   agentId: string;
+  assistant?: boolean;
   investigationId: string;
   organizationId?: string;
   threadMode?: boolean;
@@ -742,12 +749,15 @@ export function investigatingSlackMessage(input: {
 }): { blocks: unknown[]; text: string } {
   return slackInvestigationCard({
     agentId: input.agentId,
-    detail: "Responder is gathering evidence and preparing the investigation.",
+    assistant: input.assistant,
+    detail: input.assistant
+      ? "Responder is working on this."
+      : "Responder is gathering evidence and preparing the investigation.",
     investigationId: input.investigationId,
     organizationId: input.organizationId,
     showInvestigationLink: input.threadMode !== true,
     status: "in_progress",
-    title: input.title ?? "Investigating alert",
+    title: input.title ?? (input.assistant ? "Request" : "Investigating alert"),
   });
 }
 
@@ -1074,9 +1084,13 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   }) ?? [];
   await Promise.all(
     matches.map(async (match) => {
+      const threadMode = match.trigger === "slack_thread";
+      const assistant = threadMode &&
+        await organizationHasCapability(match.organizationId, "simplified_navigation");
       const result = await forwardSlackEvent({
         agentId: match.agentId,
         alertProvider,
+        assistant,
         awsAlarm,
         body,
         channelId: event.channel,
@@ -1085,7 +1099,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         teamId: callback.data.team_id,
         threadTimestamp: event.thread_ts ?? event.ts,
         timestamp: event.ts,
-        threadMode: match.trigger === "slack_thread",
+        threadMode,
         userId: event.user,
         userName: event.username?.trim() || undefined,
       });
@@ -1102,6 +1116,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       ) {
         await acknowledgeSlackAlert({
           agentId: match.agentId,
+          assistant,
           channelId: event.channel,
           integrationAccountId: match.integrationAccountId,
           investigationId: result.investigationId,
@@ -1109,7 +1124,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           messageTimestamp: event.ts,
           title: slackMessageTitle(body),
           threadTimestamp: event.thread_ts ?? event.ts,
-          threadMode: match.trigger === "slack_thread",
+          threadMode,
         }).catch((error: unknown) => {
           logSlackAcknowledgementFailure({
             alertProvider,

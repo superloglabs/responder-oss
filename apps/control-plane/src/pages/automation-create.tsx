@@ -12,7 +12,7 @@ import {
   type SharedAutomationTemplate,
   triggerAccountIds,
 } from "../automations-api";
-import { automationTriggersNotify } from "../../../../packages/core/src/automations/config";
+import { automationTriggersNotify, defaultAutomationModelSettings } from "../../../../packages/core/src/automations/config";
 import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import { automationConnectorProviders, type AutomationConnectorProvider } from "../components/automation-connectors";
@@ -39,17 +39,11 @@ import { Switch } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 
 const defaultConfiguration: AutomationConfiguration = {
+  ...defaultAutomationModelSettings,
   contextAccountIds: [],
-  harness: "codex",
-  maxModelRequests: 500,
-  maxOutputTokensPerRequest: 16_000,
-  maxRuntimeSeconds: 1_800,
-  model: "gpt-5.4",
-  modelProvider: "openai",
   notifications: [],
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
   repositoryIds: [],
-  toolPolicy: "full",
   triggers: [],
   workspaceSecretIds: [],
 };

@@ -131,6 +131,17 @@ export const automationInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
 });
 
+// The model and limits a new automation starts with.
+export const defaultAutomationModelSettings = {
+  harness: "codex",
+  maxModelRequests: 500,
+  maxOutputTokensPerRequest: 16_000,
+  maxRuntimeSeconds: 1_800,
+  model: "gpt-5.4",
+  modelProvider: "openai",
+  toolPolicy: "full",
+} as const;
+
 export type AutomationConfiguration = z.infer<
   typeof automationConfigurationSchema
 >;
