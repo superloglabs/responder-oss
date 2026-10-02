@@ -15,7 +15,12 @@ export class SentryApiError extends Error {
   constructor(
     message: string,
     readonly httpStatus: number,
-    readonly operation: "authorization" | "installation" | "projects",
+    readonly operation:
+      | "authorization"
+      | "environments"
+      | "event"
+      | "installation"
+      | "projects",
   ) {
     super(message);
     this.name = "SentryApiError";
@@ -227,6 +232,69 @@ export async function listSentryProjects(
       slug: project.slug,
     },
   }));
+}
+
+const sentryEnvironmentSchema = z.object({ name: z.string() });
+
+// The organization's visible environments, sorted by name. Sentry leaves out
+// events sent without an environment.
+export async function listSentryEnvironments(
+  accessToken: string,
+  organizationSlug: string,
+): Promise<string[]> {
+  const response = await fetch(
+    `https://sentry.io/api/0/organizations/${encodeURIComponent(organizationSlug)}/environments/`,
+    {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new SentryApiError(
+      "Unable to list Sentry environments",
+      response.status,
+      "environments",
+    );
+  }
+  return z.array(sentryEnvironmentSchema).parse(await response.json())
+    .map((environment) => environment.name)
+    .filter(Boolean);
+}
+
+const sentryEventSchema = z.object({
+  tags: z.array(z.object({ key: z.string(), value: z.string().nullable() })).optional(),
+});
+
+// The environment tag of an issue's first or latest event, or null when the
+// event has none.
+export async function getSentryIssueEventEnvironment(input: {
+  accessToken: string;
+  event: "latest" | "oldest";
+  issueId: string;
+  organizationSlug: string;
+}): Promise<string | null> {
+  const response = await fetch(
+    `https://sentry.io/api/0/organizations/${encodeURIComponent(input.organizationSlug)}/issues/${encodeURIComponent(input.issueId)}/events/${input.event}/`,
+    {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${input.accessToken}`,
+      },
+      signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new SentryApiError(
+      "Unable to read Sentry event",
+      response.status,
+      "event",
+    );
+  }
+  const event = sentryEventSchema.parse(await response.json());
+  return event.tags?.find((tag) => tag.key === "environment")?.value || null;
 }
 
 export async function verifySentryInstallation(

@@ -43,6 +43,12 @@ import {
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
+import { listSentryEnvironments } from "../integrations/sentry.js";
+import {
+  getFreshSentryCredentials,
+  getSentryOrganizationSlug,
+} from "../integrations/sentry-credentials.js";
+import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
 
 const automationEnabledSchema = z.object({ enabled: z.boolean() });
 const runMessageSchema = z.object({
@@ -228,6 +234,32 @@ export const automationRoutes = new Hono()
       ),
       credentials,
     });
+  })
+  .get("/sentry/:accountId/environments", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const accountId = context.req.param("accountId");
+    if (!z.uuid().safeParse(accountId).success) return context.json({ error: "Invalid connection" }, 400);
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId,
+      organizationId: access.tenant.organizationId,
+      provider: "sentry",
+    });
+    if (account?.status !== "connected") return context.json({ error: "Sentry connection not found" }, 404);
+    try {
+      const { credentials } = await getFreshSentryCredentials({
+        accountId,
+        organizationId: access.tenant.organizationId,
+      });
+      return context.json({
+        environments: await listSentryEnvironments(
+          credentials.accessToken,
+          getSentryOrganizationSlug(account.metadata),
+        ),
+      });
+    } catch {
+      return context.json({ error: "Unable to load Sentry environments. Try again." }, 502);
+    }
   })
   .get("/credentials", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

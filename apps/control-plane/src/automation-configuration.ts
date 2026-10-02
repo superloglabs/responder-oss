@@ -50,6 +50,19 @@ export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;
 }
 
+// The environments a Sentry trigger offers: those Sentry lists, then any the
+// trigger excludes that Sentry no longer lists.
+export function sentryEnvironmentChoices(environments: string[], excluded: string[]): string[] {
+  return [...environments, ...excluded.filter((environment) => !environments.includes(environment))];
+}
+
+// A trigger stores the environments left unchecked, so environments added in
+// Sentry later start runs. Returns undefined when every environment is checked.
+export function excludedSentryEnvironments(choices: string[], checked: string[]): string[] | undefined {
+  const excluded = choices.filter((environment) => !checked.includes(environment));
+  return excluded.length ? excluded : undefined;
+}
+
 // Moves `value` to `index`, keeping the order of the other items.
 export function moveItem<T>(list: T[], value: T, index: number): T[] {
   const rest = list.filter((item) => item !== value);

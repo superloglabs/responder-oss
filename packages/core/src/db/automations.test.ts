@@ -97,11 +97,28 @@ describe("trigger matching", () => {
 
   it("matches an event against any of an automation's triggers", async () => {
     vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
-      { accountId, automationId: "both", triggers: [slack, sentry] },
-      { accountId, automationId: "slack-only", triggers: [slack] },
+      { accountId, automationId: "both", organizationId: "organization", triggers: [slack, sentry] },
+      { accountId, automationId: "slack-only", organizationId: "organization", triggers: [slack] },
     ]]));
     await expect(findAutomationsForSentryIssue({ action: "unresolved", installationId: "installation", projectId: "web" }))
-      .resolves.toEqual([{ automationId: "both" }]);
+      .resolves.toEqual([{ automationId: "both", excludedEnvironments: [], integrationAccountId: accountId, organizationId: "organization" }]);
+  });
+
+  it("skips an environment only when every matching Sentry trigger excludes it", async () => {
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { accountId, automationId: "one", organizationId: "organization", triggers: [{ ...sentry, excludedEnvironments: ["dev", "staging"] }] },
+      { accountId, automationId: "two", organizationId: "organization", triggers: [
+        { ...sentry, excludedEnvironments: ["dev", "staging"] },
+        { ...sentry, excludedEnvironments: ["staging"] },
+      ] },
+      { accountId, automationId: "open", organizationId: "organization", triggers: [{ ...sentry, excludedEnvironments: ["dev"] }, sentry] },
+    ]]));
+    await expect(findAutomationsForSentryIssue({ action: "unresolved", installationId: "installation", projectId: "web" }))
+      .resolves.toEqual([
+        { automationId: "one", excludedEnvironments: ["dev", "staging"], integrationAccountId: accountId, organizationId: "organization" },
+        { automationId: "two", excludedEnvironments: ["staging"], integrationAccountId: accountId, organizationId: "organization" },
+        { automationId: "open", excludedEnvironments: [], integrationAccountId: accountId, organizationId: "organization" },
+      ]);
   });
 
   it("runs each due schedule slot once per automation", async () => {

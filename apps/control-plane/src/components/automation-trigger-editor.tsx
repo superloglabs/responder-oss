@@ -7,6 +7,7 @@ import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-m
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
+import { SentryEnvironmentPicker } from "./sentry-environment-picker";
 import { movedElsewhereInApp } from "./popover-dismiss";
 import { providerDisplayName } from "./provider-glyphs";
 import { triggerTitle } from "../pages/automation-list-presentation";
@@ -93,7 +94,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     <div className="automationTrigger__heading">
       <AutomationTriggerIcon kind={connected.kind} />
       <span className="automationTrigger__provider">{title}</span>
-      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "sentry" ? { ...connected, integrationAccountId: event.target.value, projectIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
+      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
         <option value="" disabled>Choose a workspace</option>
         {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
       </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}
@@ -101,6 +102,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     </div>
     <div className="automationTrigger__fields" ref={fieldsRef}>
       <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label={connected.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(connected.kind === "sentry" ? { ...connected, projectIds: ids } : { ...connected, channelIds: ids })} onRefresh={connected.kind === "discord" ? undefined : () => onRefresh(connected.kind)} />
+      {connected.kind === "sentry" && account ? <SentryEnvironmentPicker key={connected.integrationAccountId} accountId={connected.integrationAccountId} excluded={connected.excludedEnvironments ?? []} onChange={(excludedEnvironments) => onChange({ ...connected, excludedEnvironments })} /> : null}
       {connected.kind === "discord" ? <AutomationTriggerConnect key={connected.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
     </div>
   </div>;

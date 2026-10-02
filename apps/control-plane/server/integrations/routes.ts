@@ -25,7 +25,6 @@ import {
   updateIntegrationAccountSetup,
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
-  withIntegrationAccountCredentialLease,
 } from "../../../../packages/core/src/db/integrations.js";
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
@@ -112,12 +111,17 @@ import {
 import {
   exchangeSentryGrant,
   listSentryProjects,
-  refreshSentryGrant,
   SentryApiError,
   sentryErrorNeedsReconnect,
   sentryInstallUrl,
   verifySentryInstallation,
 } from "./sentry.js";
+import {
+  getFreshSentryCredentials,
+  getSentryOrganizationSlug,
+  SentryConnectionChangedError,
+  StoredSentryConnectionError,
+} from "./sentry-credentials.js";
 import {
   upstashAccount,
   UpstashCredentialsError,
@@ -297,34 +301,6 @@ async function prepareGcpAccount(input: {
     status: "pending",
   });
   return { accountId, connected: false };
-}
-const sentryCredentialsSchema = z.object({
-  accessToken: z.string().min(1),
-  expiresAt: z.string().nullable().optional(),
-  installationId: z.uuid(),
-  refreshToken: z.string().min(1),
-});
-
-class StoredSentryConnectionError extends Error {
-  constructor() {
-    super("Stored Sentry connection is invalid");
-    this.name = "StoredSentryConnectionError";
-  }
-}
-
-class SentryConnectionChangedError extends Error {
-  constructor() {
-    super("Sentry connection changed during refresh");
-    this.name = "SentryConnectionChangedError";
-  }
-}
-
-function getSentryOrganizationSlug(metadata: Record<string, unknown>): string {
-  try {
-    return z.string().min(1).parse(metadata.organizationSlug);
-  } catch {
-    throw new StoredSentryConnectionError();
-  }
 }
 const datadogConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(512),
@@ -739,69 +715,6 @@ async function retrySentrySetup(organizationId: string): Promise<{
     }
     throw error;
   }
-}
-
-async function getFreshSentryCredentials(input: {
-  accountId: string;
-  allowedStatuses?: Array<"connected" | "error" | "pending">;
-  forceRefresh?: boolean;
-  organizationId: string;
-}) {
-  const fresh = await withIntegrationAccountCredentialLease({
-    allowedStatuses: input.allowedStatuses ?? ["connected"],
-    integrationAccountId: input.accountId,
-    organizationId: input.organizationId,
-    operation: async (encryptedCredentials) => {
-      let current: z.infer<typeof sentryCredentialsSchema>;
-      try {
-        current = sentryCredentialsSchema.parse(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-      } catch {
-        throw new StoredSentryConnectionError();
-      }
-      const expiresAt = current.expiresAt
-        ? Date.parse(current.expiresAt)
-        : Number.POSITIVE_INFINITY;
-      if (
-        !input.forceRefresh &&
-        Number.isFinite(expiresAt) &&
-        expiresAt > Date.now() + 60_000
-      ) {
-        return {
-          value: { credentials: current, encryptedCredentials },
-        };
-      }
-
-      const authorization = await refreshSentryGrant({
-        installationId: current.installationId,
-        refreshToken: current.refreshToken,
-      });
-      const refreshed = {
-        accessToken: authorization.token,
-        expiresAt: authorization.expiresAt ?? null,
-        installationId: current.installationId,
-        refreshToken: authorization.refreshToken,
-      };
-      const refreshedEncryptedCredentials = encryptCredentials(refreshed);
-      return {
-        encryptedCredentials: refreshedEncryptedCredentials,
-        status: "connected" as const,
-        value: {
-          credentials: refreshed,
-          encryptedCredentials: refreshedEncryptedCredentials,
-        },
-      };
-    },
-    provider: "sentry",
-    statusOnError: (error) =>
-      error instanceof StoredSentryConnectionError ||
-        sentryErrorNeedsReconnect(error)
-        ? "error"
-        : undefined,
-  });
-  if (!fresh) throw new SentryConnectionChangedError();
-  return fresh;
 }
 
 export const integrationRoutes = new Hono()
