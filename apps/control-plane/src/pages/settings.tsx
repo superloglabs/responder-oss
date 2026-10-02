@@ -618,7 +618,7 @@ function GcpIntegrationCard({
           {settingUp[0]
             ? `Setting up ${settingUp[0].projectId ?? settingUp[0].displayName.replace(/^GCP · /u, "")} · ${gcpSetupProgressLabel(settingUp[0].setup!)}`
             : integration.accountCount > 0
-              ? `${integration.accountCount} connected project${integration.accountCount === 1 ? "" : "s"}`
+              ? `${integration.accountCount} project${integration.accountCount === 1 ? "" : "s"}`
               : "Read-only infrastructure, logs, metrics, and alert context."}
         </small>
       </div>
@@ -659,7 +659,15 @@ function GcpIntegrationCard({
                             : "Read-only access"}
                   </small>
                 </span>
-                <span className="integrationCard__accountStatus">
+                <span
+                  className={`integrationCard__accountStatus${
+                    account.setup?.status !== "running" &&
+                    account.status !== "connected" &&
+                    account.status !== "pending"
+                      ? " integrationCard__accountStatus--error"
+                      : ""
+                  }`}
+                >
                   {account.setup?.status === "running"
                     ? "Setting up"
                     : account.status === "connected"
@@ -709,7 +717,7 @@ function GcpIntegrationCard({
             ))}
           </ul>
         ) : null}
-      {removeError ? <p className="siteDialog__error">{removeError}</p> : null}
+      {removeError ? <p className="integrationCard__error" role="alert">{removeError}</p> : null}
       {showAccounts ? <div className="integrationCard__actions integrationCard__manageActions">
         {canConnect ? (
           <button

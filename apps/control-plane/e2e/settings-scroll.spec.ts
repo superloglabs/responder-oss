@@ -267,3 +267,79 @@ test("keeps keyboard focus inside the Grafana dialog", async ({ page }) => {
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+
+test("keeps Google Cloud project rows inside the card", async ({ page }) => {
+  await mockSettingsApis(page);
+  await page.route("**/api/integrations", (route) =>
+    route.fulfill({
+      json: {
+        integrations: [
+          {
+            id: "gcp",
+            name: "Google Cloud",
+            description: "Connect Google Cloud to Responder.",
+            state: "connected",
+            accountCount: 2,
+            resourceCount: 0,
+            accounts: [
+              {
+                id: "44444444-4444-4444-8444-444444444444",
+                displayName: "GCP · superlog-494218",
+                projectId: "superlog-494218",
+                projectNumber: "297477702017",
+                resourceCount: 0,
+                setup: null,
+                status: "connected",
+                updatedAt: new Date().toISOString(),
+              },
+              {
+                id: "55555555-5555-4555-8555-555555555555",
+                displayName: "GCP · claude-sheets-497502",
+                projectId: "claude-sheets-497502",
+                resourceCount: 0,
+                setup: {
+                  message:
+                    "Your Google account cannot set up access in claude-sheets-497502. Ask a project Owner to connect it, or get the Service Account Admin and Workload Identity Pool Admin roles on the project and try again.",
+                  status: "failed",
+                  updatedAt: new Date().toISOString(),
+                },
+                status: "error",
+                updatedAt: new Date().toISOString(),
+              },
+            ],
+            connectUrl: "/api/integrations/gcp/start",
+            configurationUrl: null,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/integrations/gcp/44444444-4444-4444-8444-444444444444", (route) =>
+    route.fulfill({
+      json: {
+        error:
+          'This project is used by the automation "Triage errors". Remove it from that automation first.',
+      },
+      status: 409,
+    }),
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/settings");
+
+  const card = page.locator("#integration-gcp");
+  await card.getByRole("button", { name: "Manage" }).click();
+  const rows = card.getByRole("list", { name: "Connected Google Cloud projects" }).locator("li");
+  await expect(rows).toHaveCount(2);
+  const cardBox = (await card.boundingBox())!;
+  for (const row of await rows.all()) {
+    const rowBox = (await row.boundingBox())!;
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+  }
+  await expect(rows.nth(1)).toContainText("Workload Identity Pool Admin roles on the project");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await rows.nth(0).getByRole("button", { name: "Remove" }).click();
+  await expect(card.getByRole("alert")).toHaveText(
+    'This project is used by the automation "Triage errors". Remove it from that automation first.',
+  );
+});

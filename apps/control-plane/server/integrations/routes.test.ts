@@ -1796,7 +1796,7 @@ describe("integration callback routing", () => {
   });
 
   it("removes one GCP project account without touching other providers", async () => {
-    vi.mocked(deleteIntegrationAccount).mockResolvedValue(true);
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({ status: "removed" });
 
     const response = await app.request(
       "/api/integrations/gcp/30000000-0000-4000-8000-000000000000",
@@ -1809,6 +1809,24 @@ describe("integration callback routing", () => {
       integrationAccountId: "30000000-0000-4000-8000-000000000000",
       organizationId: tenant.organizationId,
       provider: "gcp",
+    });
+  });
+
+  it("refuses to remove a GCP project that an automation still uses", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({
+      automationNames: ["Triage Cloud Run errors"],
+      status: "in_use",
+    });
+
+    const response = await app.request(
+      "/api/integrations/gcp/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'This project is used by the automation "Triage Cloud Run errors". Remove it from that automation first.',
     });
   });
 

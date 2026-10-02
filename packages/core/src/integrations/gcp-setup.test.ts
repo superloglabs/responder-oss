@@ -322,9 +322,25 @@ describe("Google Cloud OAuth setup", () => {
     });
     await expect(setup).rejects.toBeInstanceOf(GcpSetupError);
     await expect(setup).rejects.toMatchObject({ reason: "permission_denied" });
+    await expect(setup).rejects.toThrow(
+      "Your Google account cannot set up access in konex-prod. Ask a project Owner to connect it, or get the Project IAM Admin role on the project and try again.",
+    );
     expect(google.writes).toEqual([
       "POST cloudresourcemanager.googleapis.com/v1/projects/konex-prod:testIamPermissions",
     ]);
+  });
+
+  it("names each role that grants the missing permissions once", async () => {
+    const google = fakeGoogle({
+      missingPermissions: [
+        "iam.serviceAccounts.setIamPolicy",
+        "iam.workloadIdentityPools.create",
+        "iam.workloadIdentityPoolProviders.create",
+      ],
+    });
+    await expect(runSetup(google.fetchImpl)).rejects.toThrow(
+      "or get the Service Account Admin and Workload Identity Pool Admin roles on the project",
+    );
   });
 
   it("refuses to repoint a provider that trusts another AWS account", async () => {

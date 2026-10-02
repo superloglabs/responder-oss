@@ -6,6 +6,7 @@ import { getDatabase } from "./client.js";
 import {
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
+  deleteIntegrationAccount,
   getIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
   updateIntegrationAccountSetup,
@@ -14,6 +15,7 @@ import {
   withIntegrationAccountCredentialLease,
 } from "./integrations.js";
 import {
+  automationVersionIntegrationAccounts,
   integrationAccounts,
   integrationConnectionStates,
 } from "./schema.js";
@@ -399,5 +401,78 @@ describe("integration account tenancy", () => {
     );
     expect(migration).toContain('"encrypted_credentials" = NULL');
     expect(migration).toContain('"status" = \'error\'');
+  });
+
+  describe("removing an account", () => {
+    function removalDouble(input: { automationNames: string[]; found?: boolean }) {
+      const deleted: unknown[] = [];
+      const tx = {
+        select: vi
+          .fn()
+          .mockReturnValueOnce({
+            from: () => ({
+              where: () => ({
+                for: vi.fn().mockResolvedValue(
+                  input.found === false ? [] : [{ id: "account-1" }],
+                ),
+              }),
+            }),
+          })
+          .mockReturnValueOnce({
+            from: () => ({
+              innerJoin: () => ({
+                where: vi.fn().mockResolvedValue(
+                  input.automationNames.map((name) => ({ name })),
+                ),
+              }),
+            }),
+          }),
+        delete: vi.fn((table: unknown) => {
+          deleted.push(table);
+          return { where: vi.fn().mockResolvedValue(undefined) };
+        }),
+      };
+      const database = {
+        transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+      };
+      vi.mocked(getDatabase).mockReturnValue(database as never);
+      return { deleted };
+    }
+
+    const removal = {
+      integrationAccountId: "account-1",
+      organizationId: account.organizationId,
+      provider: "gcp" as const,
+    };
+
+    it("keeps an account that an active automation version uses", async () => {
+      const { deleted } = removalDouble({
+        automationNames: ["Watch Cloud Run", "Triage errors", "Watch Cloud Run"],
+      });
+
+      await expect(deleteIntegrationAccount(removal)).resolves.toEqual({
+        automationNames: ["Triage errors", "Watch Cloud Run"],
+        status: "in_use",
+      });
+      expect(deleted).toEqual([]);
+    });
+
+    it("drops superseded version references before deleting the account", async () => {
+      const { deleted } = removalDouble({ automationNames: [] });
+
+      await expect(deleteIntegrationAccount(removal)).resolves.toEqual({
+        status: "removed",
+      });
+      expect(deleted).toEqual([automationVersionIntegrationAccounts, integrationAccounts]);
+    });
+
+    it("reports an account from another organization as missing", async () => {
+      const { deleted } = removalDouble({ automationNames: [], found: false });
+
+      await expect(deleteIntegrationAccount(removal)).resolves.toEqual({
+        status: "not_found",
+      });
+      expect(deleted).toEqual([]);
+    });
   });
 });

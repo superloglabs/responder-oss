@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, count, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
+  automations,
+  automationVersionIntegrationAccounts,
   integrationAccounts,
   integrationConnectionStates,
   integrationProvider,
@@ -286,22 +288,58 @@ export async function listRunningIntegrationAccountSetups(input: {
   }));
 }
 
+export type IntegrationAccountRemoval =
+  | { status: "removed" }
+  | { status: "not_found" }
+  | { status: "in_use"; automationNames: string[] };
+
 export async function deleteIntegrationAccount(input: {
   integrationAccountId: string;
   organizationId: string;
   provider: IntegrationProvider;
-}): Promise<boolean> {
-  const deleted = await getDatabase()
-    .delete(integrationAccounts)
-    .where(
-      and(
-        eq(integrationAccounts.id, input.integrationAccountId),
-        eq(integrationAccounts.organizationId, input.organizationId),
-        eq(integrationAccounts.provider, input.provider),
-      ),
-    )
-    .returning({ id: integrationAccounts.id });
-  return deleted.length > 0;
+}): Promise<IntegrationAccountRemoval> {
+  return getDatabase().transaction(async (tx) => {
+    const [account] = await tx
+      .select({ id: integrationAccounts.id })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.id, input.integrationAccountId),
+          eq(integrationAccounts.organizationId, input.organizationId),
+          eq(integrationAccounts.provider, input.provider),
+        ),
+      )
+      .for("update");
+    if (!account) return { status: "not_found" };
+
+    const users = await tx
+      .select({ name: automations.name })
+      .from(automationVersionIntegrationAccounts)
+      .innerJoin(
+        automations,
+        eq(automations.activeVersionId, automationVersionIntegrationAccounts.automationVersionId),
+      )
+      .where(
+        and(
+          eq(automationVersionIntegrationAccounts.integrationAccountId, account.id),
+          eq(automations.organizationId, input.organizationId),
+        ),
+      );
+    if (users.length > 0) {
+      return {
+        status: "in_use",
+        automationNames: [...new Set(users.map((user) => user.name))].sort(),
+      };
+    }
+
+    // Only superseded automation versions still point at the account. They
+    // no longer run, so their references go with it.
+    await tx
+      .delete(automationVersionIntegrationAccounts)
+      .where(eq(automationVersionIntegrationAccounts.integrationAccountId, account.id));
+    await tx.delete(integrationAccounts).where(eq(integrationAccounts.id, account.id));
+    return { status: "removed" };
+  });
 }
 
 export async function getOrganizationIntegrationAccount(input: {
