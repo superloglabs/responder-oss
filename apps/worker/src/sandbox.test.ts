@@ -6,6 +6,7 @@ import {
   createDaytonaSandboxSession,
   deleteDaytonaSandboxByName,
   type DaytonaCleanupDependencies,
+  pauseDaytonaSandbox,
   prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
   sandboxDeletedAfterFailedCreation,
@@ -509,6 +510,46 @@ describe("Daytona sandbox cleanup", () => {
     );
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("daytona_sandbox_cleanup_failed"),
+    );
+    consoleError.mockRestore();
+  });
+});
+
+describe("Daytona thread sandbox pause", () => {
+  it("stops the sandbox through the session", async () => {
+    const harness = cleanupHarness();
+
+    await pauseDaytonaSandbox(
+      harness.session,
+      { investigationId: "investigation-1" },
+      harness.dependencies,
+    );
+
+    expect(harness.session.close).toHaveBeenCalledOnce();
+    expect(harness.reportException).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed stop without failing the turn", async () => {
+    const stopError = new Error("Sandbox is not in a stoppable state");
+    const harness = cleanupHarness({ closeError: stopError });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      pauseDaytonaSandbox(
+        harness.session,
+        { investigationId: "investigation-1", organizationId: "org-1" },
+        harness.dependencies,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(harness.reportException).toHaveBeenCalledWith(stopError, {
+      investigationId: "investigation-1",
+      operation: "sandbox_cleanup",
+      organizationId: "org-1",
+      sandboxId: "sandbox-1",
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("daytona_sandbox_pause_failed"),
     );
     consoleError.mockRestore();
   });
