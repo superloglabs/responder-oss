@@ -1,5 +1,6 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { createAutomationToolHandler } from "./automation-actions.js";
 import { AutomationHarnessError } from "./automation-harness.js";
 import { processAutomationRun, type AutomationRunDependencies } from "./automation-run.js";
@@ -90,6 +91,7 @@ function dependencies() {
       return vi.fn();
     }),
     openPullRequest,
+    session: session as DaytonaSandboxSession & { materializeEntry: ReturnType<typeof vi.fn> },
     getCredential: vi.fn().mockResolvedValue({
       apiKey: "customer-provider-secret",
       provider: "openai",
@@ -99,6 +101,8 @@ function dependencies() {
     getConnections: vi.fn().mockResolvedValue([]),
     getConversation: vi.fn().mockResolvedValue([]),
     getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
+    getRunActor: vi.fn().mockResolvedValue("user-1"),
+    hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
     hasNewMessages: vi.fn().mockResolvedValue(false),
@@ -137,6 +141,7 @@ function dependencies() {
       update: vi.fn().mockResolvedValue(undefined),
     },
     updateEvent: vi.fn().mockResolvedValue(undefined),
+    workspaceTools: vi.fn<AutomationRunDependencies["workspaceTools"]>(() => []),
   };
 }
 
@@ -234,6 +239,65 @@ describe("automation run processor", () => {
     expect(prompt).toContain("superlog-494218");
     expect(prompt).toContain("projects/superlog-494218");
     expect(prompt).toContain("297477702017");
+  });
+
+  it("gives runs the workspace tools in workspaces with simplified navigation", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_APP_URL", "https://app.responder.example");
+    const deps = dependencies();
+    const workspaceTool = {
+      description: "Read this workspace.",
+      execute: vi.fn(),
+      name: "get_workspace",
+      parameters: z.object({}),
+      readOnly: true,
+    };
+    deps.hasCapability.mockImplementation(async (_organizationId, capability) =>
+      capability === "simplified_navigation");
+    deps.workspaceTools.mockReturnValue([workspaceTool]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.getRunActor).toHaveBeenCalledWith({
+      automationVersionId: claimedRun().automationVersionId,
+      organizationId,
+    });
+    expect(deps.workspaceTools).toHaveBeenCalledWith({
+      actorUserId: "user-1",
+      automationsEnabled: true,
+      integrationsUrl: "https://app.responder.example/settings",
+      organizationId,
+      source: "automation_run",
+    });
+    expect(deps.createToolHandler.mock.calls[0]![0].workspaceTools).toEqual([workspaceTool]);
+    const server = deps.session.materializeEntry.mock.calls
+      .map(([call]) => call as { entry: { content: string }; path: string })
+      .find((call) => call.path.endsWith("/tools/server.mjs"));
+    expect(server?.entry.content).toContain("\"name\":\"get_workspace\"");
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(prompt).toContain("Call get_workspace before changing anything");
+    expect(prompt).toContain("https://app.responder.example/settings");
+  });
+
+  it("leaves out the workspace tools without simplified navigation", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.workspaceTools).not.toHaveBeenCalled();
+    expect(deps.createToolHandler.mock.calls[0]![0].workspaceTools).toEqual([]);
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("get_workspace");
   });
 
   describe("Slack plan card", () => {

@@ -6,6 +6,7 @@ import type {
 import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
+import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agentConfigVersions,
   agents,
@@ -1153,16 +1154,7 @@ export async function getSlackThreadModeActor(
       ),
     )
     .limit(1);
-  if (versions[0]?.createdBy) return versions[0].createdBy;
-  const owners = await db
-    .select({ userId: member.userId })
-    .from(member)
-    .where(
-      and(eq(member.organizationId, organizationId), eq(member.role, "owner")),
-    )
-    .orderBy(member.createdAt)
-    .limit(1);
-  return owners[0]?.userId ?? null;
+  return versions[0]?.createdBy ?? getOldestOrganizationOwner(organizationId);
 }
 
 export async function saveSlackThreadModeConfiguration(input: {
