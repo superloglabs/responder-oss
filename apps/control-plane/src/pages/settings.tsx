@@ -342,7 +342,7 @@ function integrationDetail(
   }
   if (health === "unavailable") return "Could not verify the connection right now";
   if (integrationReconnectRecommended(integration)) {
-    return "Select to reconnect · Linear will show the app as ticket creator";
+    return "Select to reconnect · Lets people mention Responder in Linear";
   }
   if (integration.state === "connected") {
     const accountLabel = integration.accountCount === 1 ? "account" : "accounts";

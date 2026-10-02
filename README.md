@@ -172,3 +172,7 @@ system prompt and the investigation sections. They can open pull requests in the
 repositories selected for tag mode. They can also read and change the
 workspace's automations and tag mode settings, saving those changes as the member
 who last saved tag mode, or else the oldest owner.
+
+Linear mentions and delegated issues run as tag mode turns in a Linear agent
+session. They use the `linear*` prompt sections in place of the Slack wording,
+and the same assistant or investigation sections as Slack threads.

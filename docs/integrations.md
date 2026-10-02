@@ -10,10 +10,14 @@ Postgres and encrypted before storage. Configure the same base64-encoded
 
 ## Linear
 
-Create a Responder-owned Linear OAuth app with `read` and `write` scopes:
+Create a Responder-owned Linear OAuth app. Responder requests the `read`,
+`write`, `app:mentionable`, and `app:assignable` scopes:
 
 - OAuth callback: `<public>/api/integrations/linear/callback`
-- Environment: `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`
+- Webhooks: enabled, with URL `<public>/api/webhooks/linear` and the
+  **Agent session events** category
+- Environment: `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, and
+  `LINEAR_WEBHOOK_SECRET`, the app's webhook signing secret
 - Optional: `LINEAR_ISSUE_LABEL`, the label added to every issue Responder
   creates. It defaults to `Responder`.
 
@@ -23,6 +27,19 @@ connections made before this change to reconnect. Every created issue also
 carries the workspace label from `LINEAR_ISSUE_LABEL`. Responder creates the
 label on first use. If Linear refuses the label, the issue is still created
 without it.
+
+People can mention Responder in a Linear issue or comment, or delegate an
+issue to it. Linear opens an agent session, and Responder runs the request as
+a tag mode turn with tag mode's model, instructions, repositories, and
+integrations. With simplified navigation, it works as an assistant that can
+open pull requests and change the workspace; otherwise it investigates.
+Responder posts progress, the reply, and any failure to the session. Replies in
+the session continue the same turn history and sandbox. Tag mode must be on;
+otherwise the session shows an error. Connections made before mentions existed
+must reconnect to grant the app scopes. When one Linear workspace is connected
+to several Responder workspaces, the most recent connection answers. Responder
+verifies `Linear-Signature` and rejects deliveries signed more than a minute
+earlier.
 
 Add the connected Linear workspace to an agent's context to let investigations
 inspect teams, projects, and existing issues. Agent context uses Linear's

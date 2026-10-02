@@ -93,7 +93,9 @@ describe("Linear OAuth", () => {
 
     expect(url.origin + url.pathname).toBe("https://linear.app/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("linear-client");
-    expect(url.searchParams.get("scope")).toBe("read,write");
+    expect(url.searchParams.get("scope")).toBe(
+      "read,write,app:mentionable,app:assignable",
+    );
     expect(url.searchParams.get("actor")).toBe("app");
     expect(url.searchParams.get("code_challenge")).toBe("challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");

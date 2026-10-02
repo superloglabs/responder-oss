@@ -174,7 +174,7 @@ export interface AgentDetail {
     title: string;
     status: "pending" | "investigating" | "resolved" | "failed";
     input: {
-      provider: "sentry" | "datadog" | "dash0" | "slack" | "scan";
+      provider: "sentry" | "datadog" | "dash0" | "slack" | "linear" | "scan";
       externalEventId: string;
       title: string;
       body: string;
@@ -385,7 +385,7 @@ export interface InvestigationDetail {
   title: string;
   status: "pending" | "investigating" | "resolved" | "failed";
   input: {
-    provider: "sentry" | "datadog" | "dash0" | "slack" | "scan";
+    provider: "sentry" | "datadog" | "dash0" | "slack" | "linear" | "scan";
     externalEventId: string;
     title: string;
     body: string;

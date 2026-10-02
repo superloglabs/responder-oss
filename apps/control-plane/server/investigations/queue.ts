@@ -217,7 +217,7 @@ export async function queueSlackThreadInvestigation(
       agent_id: result.config.agentId,
       investigation_id: result.investigationId,
       is_replay: false,
-      provider: "slack",
+      provider: request.provider,
       slack_thread_mode: true,
     },
   });
@@ -264,7 +264,7 @@ export async function queueSlackThreadInvestigation(
         investigation_id: result.investigationId,
         slack_user_id: slackUserId,
         user_name: slackUserName,
-        surface: "slack",
+        surface: request.provider,
         team_id: thread.teamId,
         thread_timestamp: thread.threadTimestamp,
       },

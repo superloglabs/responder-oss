@@ -772,10 +772,12 @@ export const integrationRoutes = new Hono()
                 : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
-            // Older Linear connections act as the person who connected them.
-            // Reconnecting switches them to the Linear app identity.
+            // Older Linear connections act as the person who connected them,
+            // or lack the scopes that let people mention the app. Reconnecting
+            // switches them to the mentionable Linear app identity.
             ...(definition.id === "linear" &&
-              account.metadata.actor !== LINEAR_APP_ACTOR
+              (account.metadata.actor !== LINEAR_APP_ACTOR ||
+                account.metadata.mentionable !== true)
               ? { reconnectRecommended: true }
               : {}),
             ...(definition.id === "gcp"
@@ -2997,6 +2999,7 @@ export const integrationRoutes = new Hono()
           authType: "linear_oauth",
           authVersion: LINEAR_AUTH_VERSION,
           mcpUrl: LINEAR_MCP_URL,
+          mentionable: true,
           toolCount,
           workspaceId: workspace.id,
         },
