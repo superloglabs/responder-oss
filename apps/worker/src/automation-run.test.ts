@@ -105,6 +105,7 @@ function dependencies() {
     hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
+    grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
     loadRepositories: vi.fn().mockResolvedValue([{
@@ -1062,6 +1063,53 @@ describe("automation run processor", () => {
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       failureCategory: "usage_limit_reached",
       failureMessage: expect.not.stringContaining("own model key"),
+      status: "failed",
+    }));
+  });
+
+  it("reports a used-up allowance when the broker stopped the harness mid-turn", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantAllowanceExhausted.mockResolvedValue(true);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.grantAllowanceExhausted).toHaveBeenCalledWith({
+      grantId: "71717171-7171-4171-8171-717171717171",
+      organizationId,
+      runId,
+    });
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "usage_limit_reached",
+      failureMessage: expect.stringContaining("allowance"),
+      status: "failed",
+    }));
+  });
+
+  it("keeps a harness failure when the broker did not refuse for the allowance", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "execution_failed",
+      failureMessage: "Codex automation harness failed",
       status: "failed",
     }));
   });

@@ -1,0 +1,1 @@
+ALTER TABLE "automation_model_broker_grants" ADD COLUMN "allowance_exhausted_at" timestamp with time zone;

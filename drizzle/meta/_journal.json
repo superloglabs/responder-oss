@@ -449,6 +449,13 @@
       "when": 1790951378879,
       "tag": "0063_api_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1790953358648,
+      "tag": "0064_automation_grant_allowance_exhausted",
+      "breakpoints": true
     }
   ]
 }

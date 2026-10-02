@@ -29,6 +29,7 @@ function brokerRoutes(overrides: Partial<NonNullable<BrokerDependencies>>) {
     completeInference: vi.fn().mockResolvedValue(undefined),
     gatewayApiKey: () => "gateway-secret",
     getPricing: vi.fn().mockResolvedValue({ input: "0.000001", output: "0.000002" }),
+    markAllowanceExhausted: vi.fn().mockResolvedValue(undefined),
     providerFetch: vi.fn(),
     recordUsage: vi.fn().mockResolvedValue(undefined),
     releaseInference: vi.fn().mockResolvedValue(undefined),
@@ -422,8 +423,10 @@ describe("Responder-funded automation inference", () => {
   });
 
   it("stops Responder-funded requests when the allowance is used up", async () => {
+    const markAllowanceExhausted = vi.fn().mockResolvedValue(undefined);
     const providerFetch = vi.fn();
     const routes = brokerRoutes({
+      markAllowanceExhausted,
       reserveInference: vi.fn().mockResolvedValue(null),
       claimGrant: vi.fn().mockResolvedValue({
         ...claim,
@@ -444,6 +447,7 @@ describe("Responder-funded automation inference", () => {
 
     expect(response.status).toBe(402);
     expect(providerFetch).not.toHaveBeenCalled();
+    expect(markAllowanceExhausted).toHaveBeenCalledWith(claim.grantId);
   });
 
   it("fails Responder-funded requests when AI Gateway is not configured", async () => {

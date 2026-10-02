@@ -1,11 +1,14 @@
+import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../credentials/encryption.js";
 import { getDatabase } from "./client.js";
 import {
+  automationModelBrokerGrantAllowanceExhausted,
   claimAutomationModelBrokerGrant,
   createAutomationModelBrokerGrant,
+  markAutomationModelBrokerGrantAllowanceExhausted,
   revokeAutomationModelBrokerGrant,
 } from "./automation-model-broker.js";
 import { automationModelBrokerGrants } from "./schema.js";
@@ -234,6 +237,46 @@ describe("automation model broker grant storage", () => {
 
     expect(deleteGrant).toHaveBeenCalledWith(automationModelBrokerGrants);
     expect(where).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the first time the broker refused a grant for the allowance", async () => {
+    const where = vi.fn<(condition: SQL) => Promise<void>>().mockResolvedValue(undefined);
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    vi.mocked(getDatabase).mockReturnValue({ update } as never);
+    const now = new Date("2026-09-22T16:05:00.000Z");
+
+    await markAutomationModelBrokerGrantAllowanceExhausted(grantId, now);
+
+    expect(update).toHaveBeenCalledWith(automationModelBrokerGrants);
+    expect(set).toHaveBeenCalledWith({ allowanceExhaustedAt: now });
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('"allowance_exhausted_at" is null');
+  });
+
+  it("reports a refused grant only to its own run and organization", async () => {
+    const limit = vi.fn().mockResolvedValue([{ id: grantId }]);
+    const where = vi.fn<(condition: SQL) => { limit: typeof limit }>(() => ({ limit }));
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({ from: vi.fn(() => ({ where })) })),
+    } as never);
+
+    await expect(automationModelBrokerGrantAllowanceExhausted({
+      grantId,
+      organizationId,
+      runId: "run-1",
+    })).resolves.toBe(true);
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('"organization_id" = $');
+    expect(query.sql).toContain('"run_id" = $');
+    expect(query.sql).toContain('"allowance_exhausted_at" is not null');
+
+    limit.mockResolvedValue([]);
+    await expect(automationModelBrokerGrantAllowanceExhausted({
+      grantId,
+      organizationId,
+      runId: "run-1",
+    })).resolves.toBe(false);
   });
 
   it("defines durable expiry, request, and output-token bounds", () => {
