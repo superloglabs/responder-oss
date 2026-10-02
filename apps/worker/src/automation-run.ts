@@ -22,6 +22,7 @@ import type {
   AutomationUserMessageEventData,
 } from "@responder/core/automations/transcript";
 import {
+  automationModelBrokerGrantAllowanceExhausted,
   createAutomationModelBrokerGrant,
   revokeAutomationModelBrokerGrant,
   type AutomationModelBrokerGrantCredential,
@@ -113,6 +114,7 @@ export interface AutomationRunDependencies {
   getNotificationChannelNames: typeof getAutomationNotificationChannelNames;
   getRunActor: typeof getAutomationRunActor;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
+  grantAllowanceExhausted: typeof automationModelBrokerGrantAllowanceExhausted;
   hasCapability: typeof organizationHasCapability;
   hasFinishedTurn: typeof automationRunHasFinishedTurn;
   hasNewMessages: typeof automationRunHasNewMessages;
@@ -156,6 +158,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getNotificationChannelNames: getAutomationNotificationChannelNames,
   getRunActor: getAutomationRunActor,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
+  grantAllowanceExhausted: automationModelBrokerGrantAllowanceExhausted,
   hasCapability: organizationHasCapability,
   hasFinishedTurn: automationRunHasFinishedTurn,
   hasNewMessages: automationRunHasNewMessages,
@@ -794,6 +797,15 @@ export async function processAutomationRun(
           if (error instanceof AutomationHarnessError) {
             const transcript = await recorder.finish(await finalEvents(error.eventStream));
             slackCard?.progress(transcript.items);
+            // The allowance can run out partway through a turn. The broker
+            // then refuses the next model request and the harness exits.
+            const allowanceExhausted = grantCredential.inferenceSource === "responder" &&
+              await dependencies.grantAllowanceExhausted({
+                grantId: grant.id,
+                organizationId: run.organizationId,
+                runId: run.runId,
+              }).catch(() => false);
+            if (allowanceExhausted) throw new AutomationAllowanceExhaustedError(sandboxBilled);
           }
           throw error;
         }

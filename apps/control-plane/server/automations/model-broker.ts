@@ -25,6 +25,7 @@ import {
 import { inferenceCharge } from "../../../../packages/core/src/billing/usage-charges.js";
 import {
   claimAutomationModelBrokerGrant,
+  markAutomationModelBrokerGrantAllowanceExhausted,
   type AutomationModelBrokerClaim,
 } from "../../../../packages/core/src/db/automation-model-broker.js";
 
@@ -54,6 +55,7 @@ interface AutomationModelBrokerDependencies {
   completeInference: typeof completeResponderInference;
   gatewayApiKey(): string | undefined;
   getPricing: typeof getAIGatewayModelPricing;
+  markAllowanceExhausted: typeof markAutomationModelBrokerGrantAllowanceExhausted;
   providerFetch: ProviderFetch;
   recordUsage: typeof recordBrokeredModelUsage;
   releaseInference: typeof releaseResponderInference;
@@ -65,6 +67,7 @@ const defaultDependencies: AutomationModelBrokerDependencies = {
   completeInference: completeResponderInference,
   gatewayApiKey: () => process.env.AI_GATEWAY_API_KEY?.trim() || undefined,
   getPricing: getAIGatewayModelPricing,
+  markAllowanceExhausted: markAutomationModelBrokerGrantAllowanceExhausted,
   providerFetch: fetch,
   recordUsage: recordBrokeredModelUsage,
   releaseInference: releaseResponderInference,
@@ -347,6 +350,11 @@ async function reserveResponderRequest(
     throw new BrokerRequestError("Model broker is unavailable", 503);
   }
   if (!reservationId) {
+    // The harness reports only its own error, so the worker reads this mark
+    // to tell the run's owner the allowance stopped it.
+    await dependencies.markAllowanceExhausted(grant.grantId).catch((error: unknown) => {
+      logBrokerError("automation_model_allowance_mark_failed", error, grant);
+    });
     throw new BrokerRequestError(
       "The usage allowance for this billing period is used up",
       402,
