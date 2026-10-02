@@ -11,6 +11,9 @@ export const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 export const LINEAR_OAUTH_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 export const LINEAR_OAUTH_TOKEN_URL = "https://api.linear.app/oauth/token";
 export const LINEAR_AUTH_VERSION = "linear_oauth_v1";
+// Connections authorized with `actor=app` act as the Linear app, so the issues
+// they create name the app as creator instead of the person who connected it.
+export const LINEAR_APP_ACTOR = "app";
 
 const linearOAuthTokenSchema = z.object({
   access_token: z.string().min(1),
@@ -73,6 +76,7 @@ export function linearAuthorizeUrl(input: {
   url.searchParams.set("redirect_uri", input.redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", "read,write");
+  url.searchParams.set("actor", LINEAR_APP_ACTOR);
   url.searchParams.set("state", input.state);
   url.searchParams.set("code_challenge", input.codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
@@ -293,6 +297,77 @@ export async function findLinearIssueById(input: {
   return data.issue ? linearIssueSchema.parse(data.issue) : null;
 }
 
+// Every issue Responder creates carries this workspace label so teams can
+// filter for them. Deployments rename it with LINEAR_ISSUE_LABEL.
+export function linearIssueLabelName(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return environment.LINEAR_ISSUE_LABEL?.trim() || "Responder";
+}
+
+const linearLabelMatchesSchema = z.object({
+  nodes: z.array(z.object({
+    id: z.string().min(1),
+    isGroup: z.boolean(),
+    team: z.object({ id: z.string().min(1) }).nullable(),
+  })),
+});
+
+async function findLinearIssueLabel(input: {
+  accessToken: string;
+  fetchImpl?: typeof fetch;
+  name: string;
+  teamId: string;
+}): Promise<string | null> {
+  const data = await linearGraphql({
+    ...input,
+    query: `query ResponderLinearIssueLabel($name: String!) {
+      issueLabels(filter: { name: { eqIgnoreCase: $name } }, first: 50) {
+        nodes { id isGroup team { id } }
+      }
+    }`,
+    variables: { name: input.name },
+  });
+  const labels = linearLabelMatchesSchema.parse(data.issueLabels).nodes
+    .filter((label) => !label.isGroup);
+  return (
+    labels.find((label) => label.team === null) ??
+    labels.find((label) => label.team?.id === input.teamId)
+  )?.id ?? null;
+}
+
+// Finds the workspace label, or creates it on first use. A concurrent create
+// can win the race, so a failed create looks the label up again.
+export async function ensureLinearIssueLabel(input: {
+  accessToken: string;
+  fetchImpl?: typeof fetch;
+  name: string;
+  teamId: string;
+}): Promise<string> {
+  const existing = await findLinearIssueLabel(input);
+  if (existing) return existing;
+  try {
+    const data = await linearGraphql({
+      ...input,
+      query: `mutation ResponderCreateLinearIssueLabel($input: IssueLabelCreateInput!) {
+        issueLabelCreate(input: $input) {
+          success
+          issueLabel { id }
+        }
+      }`,
+      variables: { input: { color: "#6B6F76", name: input.name } },
+    });
+    return z.object({
+      success: z.literal(true),
+      issueLabel: z.object({ id: z.string().min(1) }),
+    }).parse(data.issueLabelCreate).issueLabel.id;
+  } catch (error) {
+    const raced = await findLinearIssueLabel(input);
+    if (raced) return raced;
+    throw error;
+  }
+}
+
 export async function createLinearIssue(input: {
   accessToken: string;
   assigneeId?: string;
@@ -307,6 +382,25 @@ export async function createLinearIssue(input: {
   teamId: string;
   title: string;
 }): Promise<CreatedLinearIssue> {
+  // A missing label must not cost the customer the ticket, so the issue is
+  // still created when the label cannot be found or made.
+  const responderLabelId = await ensureLinearIssueLabel({
+    accessToken: input.accessToken,
+    fetchImpl: input.fetchImpl,
+    name: linearIssueLabelName(),
+    teamId: input.teamId,
+  }).catch((error: unknown) => {
+    console.error(
+      `Unable to apply the Linear issue label: ${error instanceof Error ? error.message : "request failed"}`,
+    );
+    return null;
+  });
+  const labelIds = [
+    ...new Set([
+      ...(input.labelIds ?? []),
+      ...(responderLabelId ? [responderLabelId] : []),
+    ]),
+  ];
   const data = await linearGraphql({
     ...input,
     query: `mutation ResponderCreateLinearIssue($input: IssueCreateInput!) {
@@ -320,7 +414,7 @@ export async function createLinearIssue(input: {
         description: input.description,
         id: input.id,
         ...(input.assigneeId ? { assigneeId: input.assigneeId } : {}),
-        ...(input.labelIds?.length ? { labelIds: input.labelIds } : {}),
+        ...(labelIds.length ? { labelIds } : {}),
         ...(input.parentId ? { parentId: input.parentId } : {}),
         ...(input.priority === undefined ? {} : { priority: input.priority }),
         ...(input.projectId ? { projectId: input.projectId } : {}),

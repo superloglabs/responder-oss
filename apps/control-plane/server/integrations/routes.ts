@@ -93,6 +93,7 @@ import {
   createLinearPkce,
   exchangeLinearOAuthCode,
   getLinearWorkspace,
+  LINEAR_APP_ACTOR,
   LINEAR_AUTH_VERSION,
   LINEAR_MCP_URL,
   LINEAR_READONLY_MCP_URL,
@@ -771,6 +772,12 @@ export const integrationRoutes = new Hono()
                 : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
+            // Older Linear connections act as the person who connected them.
+            // Reconnecting switches them to the Linear app identity.
+            ...(definition.id === "linear" &&
+              account.metadata.actor !== LINEAR_APP_ACTOR
+              ? { reconnectRecommended: true }
+              : {}),
             ...(definition.id === "gcp"
               ? {
                   projectId: account.externalAccountId,
@@ -2986,6 +2993,7 @@ export const integrationRoutes = new Hono()
         encryptedCredentials: encryptCredentials(credentials),
         credentialKeyVersion: 1,
         metadata: {
+          actor: LINEAR_APP_ACTOR,
           authType: "linear_oauth",
           authVersion: LINEAR_AUTH_VERSION,
           mcpUrl: LINEAR_MCP_URL,

@@ -14,6 +14,15 @@ Create a Responder-owned Linear OAuth app with `read` and `write` scopes:
 
 - OAuth callback: `<public>/api/integrations/linear/callback`
 - Environment: `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`
+- Optional: `LINEAR_ISSUE_LABEL`, the label added to every issue Responder
+  creates. It defaults to `Responder`.
+
+Responder authorizes the app with `actor=app`, so Linear shows the app, not the
+person who connected it, as the creator of each issue. Settings asks
+connections made before this change to reconnect. Every created issue also
+carries the workspace label from `LINEAR_ISSUE_LABEL`. Responder creates the
+label on first use. If Linear refuses the label, the issue is still created
+without it.
 
 Add the connected Linear workspace to an agent's context to let investigations
 inspect teams, projects, and existing issues. Agent context uses Linear's

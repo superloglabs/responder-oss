@@ -67,6 +67,7 @@ interface IntegrationSummary {
     updatedAt: string;
     projectId?: string;
     projectNumber?: string;
+    reconnectRecommended?: boolean;
     setup?: GcpSetupStatus | null;
   }>;
   connectUrl: string | null;
@@ -316,6 +317,10 @@ function displayedSentryHealth(
   return health ?? (integration.state === "connected" ? "checking" : null);
 }
 
+function integrationReconnectRecommended(integration: IntegrationSummary): boolean {
+  return integration.accounts.some((account) => account.reconnectRecommended);
+}
+
 function integrationDetail(
   integration: IntegrationSummary,
   sentryHealth: SentryHealth | null,
@@ -336,6 +341,9 @@ function integrationDetail(
       : `${failedCount} connections failed · Select to reconnect`;
   }
   if (health === "unavailable") return "Could not verify the connection right now";
+  if (integrationReconnectRecommended(integration)) {
+    return "Select to reconnect · Linear will show the app as ticket creator";
+  }
   if (integration.state === "connected") {
     const accountLabel = integration.accountCount === 1 ? "account" : "accounts";
     const resourceLabel = integration.resourceCount === 1 ? "resource" : "resources";
@@ -460,7 +468,7 @@ function DefaultIntegrationCard({
           <strong>{integration.name}</strong>
           <small>{integrationDetail(integration, sentryHealth)}</small>
         </span>
-          {health === "needs_reconnect" ? (
+          {health === "needs_reconnect" || integrationReconnectRecommended(integration) ? (
             <span className="connectedBadge connectedBadge--warning">Reconnect</span>
           ) : health === "unavailable" ? (
             <span className="connectedBadge connectedBadge--muted">Not verified</span>
