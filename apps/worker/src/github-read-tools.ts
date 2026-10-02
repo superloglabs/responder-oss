@@ -26,7 +26,7 @@ export const githubReadToolDefinitions = [
   {
     annotations: { openWorldHint: true, readOnlyHint: true },
     description:
-      "Read the GitHub REST API for a repository this automation can use, as the Responder GitHub App. Only GET requests under /repos/{owner}/{name}, and public user profiles at /users/{username}, are allowed. Examples: /repos/acme/app/pulls?state=open, /repos/acme/app/commits?sha=main&per_page=20, /repos/acme/app/compare/main...feature, /users/octocat. Follow the Link header for more pages.",
+      "Read the GitHub REST API for a repository this automation can use, as the Superlog GitHub App. Only GET requests under /repos/{owner}/{name}, and public user profiles at /users/{username}, are allowed. Examples: /repos/acme/app/pulls?state=open, /repos/acme/app/commits?sha=main&per_page=20, /repos/acme/app/compare/main...feature, /users/octocat. Follow the Link header for more pages.",
     inputSchema: {
       additionalProperties: false,
       properties: {

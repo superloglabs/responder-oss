@@ -31,9 +31,9 @@ const claudeSubagentEvents = [
   ] }, parent_tool_use_id: null, session_id: session, tool_use_result: { isAsync: true, status: "async_launched", agentId: "a7615f0c864ae038d", description: "Inventory open PRs compactly" } },
   { type: "assistant", message: { id: "gen_02", type: "message", role: "assistant", content: [{ type: "thinking", thinking: "", signature: "c2lnbmF0dXJl" }] }, parent_tool_use_id: inventoryAgent, session_id: session, subagent_type: "general-purpose", task_description: "Inventory open PRs compactly" },
   { type: "assistant", message: { id: "gen_02", type: "message", role: "assistant", content: [
-    { type: "tool_use", id: "toolu_01KfNSWtjkpXnBQhQg5KTvFj", name: "mcp__responder__github_api", input: { path: "/repos/superloglabs/responder-oss/pulls?state=open&per_page=5&page=1" } },
+    { type: "tool_use", id: "toolu_01KfNSWtjkpXnBQhQg5KTvFj", name: "mcp__superlog__github_api", input: { path: "/repos/superloglabs/responder-oss/pulls?state=open&per_page=5&page=1" } },
   ] }, parent_tool_use_id: inventoryAgent, session_id: session, subagent_type: "general-purpose", task_description: "Inventory open PRs compactly", tool_use_meta: [{ id: "toolu_01KfNSWtjkpXnBQhQg5KTvFj", display_name: "Github Api", server_display_name: "responder-github" }] },
-  { type: "system", subtype: "task_progress", task_id: "a7615f0c864ae038d", tool_use_id: inventoryAgent, description: "Inventory open PRs compactly", subagent_type: "general-purpose", usage: { total_tokens: 215, tool_uses: 1, duration_ms: 3455 }, last_tool_name: "mcp__responder__github_api", session_id: session },
+  { type: "system", subtype: "task_progress", task_id: "a7615f0c864ae038d", tool_use_id: inventoryAgent, description: "Inventory open PRs compactly", subagent_type: "general-purpose", usage: { total_tokens: 215, tool_uses: 1, duration_ms: 3455 }, last_tool_name: "mcp__superlog__github_api", session_id: session },
   { type: "user", message: { role: "user", content: [
     { tool_use_id: "toolu_01KfNSWtjkpXnBQhQg5KTvFj", type: "tool_result", content: [{ type: "text", text: "HTTP 200\n\n[]" }] },
   ] }, parent_tool_use_id: inventoryAgent, session_id: session },
@@ -97,7 +97,7 @@ describe("parseAutomationTranscript", () => {
         { type: "tool_use", id: "tool-2", name: "Bash", input: { command: "pnpm test" } },
         { type: "tool_use", id: "tool-3", name: `mcp__${sentryServer}__search_issues`, input: {} },
         { type: "tool_use", id: "tool-4", name: "TodoWrite", input: {} },
-        { type: "tool_use", id: "tool-5", name: "mcp__responder__open_pull_request", input: {} },
+        { type: "tool_use", id: "tool-5", name: "mcp__superlog__open_pull_request", input: {} },
       ] } },
       { type: "user", message: { content: [
         { type: "tool_result", tool_use_id: "tool-1", is_error: false },
@@ -226,7 +226,7 @@ describe("parseAutomationTranscript", () => {
       { type: "tool_use", part: { id: "part-1", type: "tool", tool: "read", state: { status: "completed", input: { filePath: "/home/daytona/workspace/src/app.ts" }, time: { start: 1_000, end: 1_400 } } } },
       { type: "tool_use", part: { id: "part-2", type: "tool", tool: "bash", state: { status: "error", input: { command: "pnpm test" }, time: { start: 2_000, end: 10_200 } } } },
       { type: "tool_use", part: { id: "part-3", type: "tool", tool: `${sentryServer}_get_issue`, state: { status: "completed", input: {} } } },
-      { type: "tool_use", part: { id: "part-5", type: "tool", tool: "responder_open_pull_request", state: { status: "completed", input: {} } } },
+      { type: "tool_use", part: { id: "part-5", type: "tool", tool: "superlog_open_pull_request", state: { status: "completed", input: {} } } },
       { type: "text", part: { id: "part-4", type: "text", text: "All set." } },
     ));
 

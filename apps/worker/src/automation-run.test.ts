@@ -750,7 +750,7 @@ describe("automation run processor", () => {
     expect(deps.runCodex.mock.calls[0]![1].toolServer).toEqual({
       args: ["/home/daytona/workspace/.responder/tools/server.mjs"],
       command: "node",
-      name: "responder",
+      name: "superlog",
     });
     expect(deps.createToolHandler).toHaveBeenCalledWith(expect.objectContaining({
       automationVersionId: "41414141-4141-4141-8141-414141414141",

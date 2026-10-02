@@ -27,7 +27,7 @@ export const automationToolCallTimeoutMs = 150_000;
 
 // The worker's own tools, served to the agent by a local MCP server: GitHub
 // reads and pull requests, and Slack notifications.
-export const automationToolServerName = "responder";
+export const automationToolServerName = "superlog";
 
 export const postNotificationToolName = "post_notification";
 export const skipNotificationToolName = "skip_notification";

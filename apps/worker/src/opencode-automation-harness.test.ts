@@ -24,13 +24,13 @@ const input = {
 const toolServer = {
   args: ["/home/daytona/workspace/.responder/tools/server.mjs"],
   command: "node",
-  name: "responder",
+  name: "superlog",
 };
 
 describe("OpenCode automation harness", () => {
   it("starts the worker's tool server as a local MCP server", () => {
     expect(openCodeAutomationConfig({ ...input, toolServer }).mcp).toMatchObject({
-      responder: {
+      superlog: {
         command: ["node", "/home/daytona/workspace/.responder/tools/server.mjs"],
         enabled: true,
         type: "local",

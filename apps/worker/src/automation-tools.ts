@@ -156,7 +156,7 @@ async function call(name, args) {
     }
   }
   return {
-    content: [{ type: "text", text: "Responder is still working on this request. Call the tool again with the same arguments to get its result." }],
+    content: [{ type: "text", text: "Superlog is still working on this request. Call the tool again with the same arguments to get its result." }],
     isError: true,
   };
 }

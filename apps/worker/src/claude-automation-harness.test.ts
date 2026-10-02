@@ -93,7 +93,7 @@ describe("Claude automation harness", () => {
     const toolServer = {
       args: ["/home/daytona/workspace/.responder/tools/server.mjs"],
       command: "node",
-      name: "responder",
+      name: "superlog",
     };
 
     expect(buildClaudeAutomationCommand({ ...input, toolServer })).toContain(
