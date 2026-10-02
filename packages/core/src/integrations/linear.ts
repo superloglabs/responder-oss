@@ -313,7 +313,7 @@ const linearLabelMatchesSchema = z.object({
   })),
 });
 
-async function findLinearIssueLabel(input: {
+export async function findLinearIssueLabel(input: {
   accessToken: string;
   fetchImpl?: typeof fetch;
   name: string;
@@ -429,6 +429,61 @@ export async function createLinearIssue(input: {
     issue: linearIssueSchema,
   }).parse(data.issueCreate);
   return payload.issue;
+}
+
+const linearIssueLabelsSchema = z.object({
+  id: z.string().min(1),
+  identifier: z.string().min(1),
+  labels: z.object({ nodes: z.array(z.object({ id: z.string().min(1) })) }),
+  team: z.object({ id: z.string().min(1) }),
+});
+
+export async function getLinearIssueLabels(input: {
+  accessToken: string;
+  fetchImpl?: typeof fetch;
+  issueId: string;
+}): Promise<{
+  id: string;
+  identifier: string;
+  labelIds: string[];
+  teamId: string;
+} | null> {
+  const data = await linearGraphql({
+    ...input,
+    query: `query ResponderLinearIssueLabels($id: String!) {
+      issue(id: $id) {
+        id
+        identifier
+        labels(first: 250) { nodes { id } }
+        team { id }
+      }
+    }`,
+    variables: { id: input.issueId },
+  });
+  if (!data.issue) return null;
+  const issue = linearIssueLabelsSchema.parse(data.issue);
+  return {
+    id: issue.id,
+    identifier: issue.identifier,
+    labelIds: issue.labels.nodes.map((label) => label.id),
+    teamId: issue.team.id,
+  };
+}
+
+export async function addLinearIssueLabel(input: {
+  accessToken: string;
+  fetchImpl?: typeof fetch;
+  issueId: string;
+  labelId: string;
+}): Promise<void> {
+  const data = await linearGraphql({
+    ...input,
+    query: `mutation ResponderAddLinearIssueLabel($id: String!, $labelId: String!) {
+      issueAddLabel(id: $id, labelId: $labelId) { success }
+    }`,
+    variables: { id: input.issueId, labelId: input.labelId },
+  });
+  z.object({ success: z.literal(true) }).parse(data.issueAddLabel);
 }
 
 // Each call opens its own session with Linear's read-only MCP endpoint, so a

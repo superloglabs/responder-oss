@@ -8,6 +8,9 @@ import { getDatabase } from "./client.js";
 import { getRuntimeLinearConnection } from "./investigations.js";
 import {
   agentConfigVersions,
+  automationActionAttempts,
+  automationRuns,
+  integrationAccounts,
   investigations,
   issueLinearTickets,
   issues,
@@ -288,4 +291,65 @@ export async function fulfillLinearTicketRequest(input: {
       .where(eq(issueLinearTickets.id, request.id));
     throw error;
   }
+}
+
+// Every Linear issue Responder has created, grouped by the connected Linear
+// account that can reach it. Automation attempts do not record the account,
+// so their issues are listed under each Linear account of the organization.
+export async function listCreatedLinearIssuesByAccount(): Promise<Array<{
+  id: string;
+  issueIds: string[];
+  organizationId: string;
+}>> {
+  const db = getDatabase();
+  const [accounts, tickets, attempts] = await Promise.all([
+    db
+      .select({
+        id: integrationAccounts.id,
+        organizationId: integrationAccounts.organizationId,
+      })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.provider, "linear"),
+          eq(integrationAccounts.status, "connected"),
+        ),
+      ),
+    db
+      .select({
+        accountId: issueLinearTickets.integrationAccountId,
+        issueId: issueLinearTickets.linearIssueId,
+      })
+      .from(issueLinearTickets)
+      .where(eq(issueLinearTickets.status, "created")),
+    // An automation's Linear issue ID is the ID of the attempt that made it.
+    db
+      .select({
+        issueId: automationActionAttempts.id,
+        organizationId: automationRuns.organizationId,
+      })
+      .from(automationActionAttempts)
+      .innerJoin(automationRuns, eq(automationRuns.id, automationActionAttempts.runId))
+      .where(
+        and(
+          eq(automationActionAttempts.kind, "create_linear_issue"),
+          eq(automationActionAttempts.status, "succeeded"),
+        ),
+      ),
+  ]);
+  return accounts
+    .map((account) => ({
+      ...account,
+      issueIds: [
+        ...new Set([
+          ...tickets.flatMap((ticket) =>
+            ticket.accountId === account.id && ticket.issueId ? [ticket.issueId] : []
+          ),
+          ...attempts.flatMap((attempt) =>
+            attempt.organizationId === account.organizationId ? [attempt.issueId] : []
+          ),
+        ]),
+      ],
+    }))
+    .filter((account) => account.issueIds.length > 0);
 }

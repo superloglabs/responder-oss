@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  addLinearIssueLabel,
   exchangeLinearOAuthCode,
   createLinearIssue,
   ensureLinearIssueLabel,
   findLinearIssueById,
+  getLinearIssueLabels,
   linearAuthorizeUrl,
   linearIssueLabelName,
   linearTicketFollowupInstruction,
@@ -444,5 +446,57 @@ describe("Linear issue label", () => {
       name: "Responder",
       teamId: "team-id",
     })).resolves.toBe("responder-label");
+  });
+});
+
+describe("Linear issue label backfill", () => {
+  it("reads an issue's team and labels", async () => {
+    const fetchImpl = linearApi({
+      ResponderLinearIssueLabels: {
+        issue: {
+          id: "issue-id",
+          identifier: "OPS-42",
+          labels: { nodes: [{ id: "bug" }] },
+          team: { id: "team-id" },
+        },
+      },
+    });
+
+    await expect(getLinearIssueLabels({
+      accessToken: "linear-token",
+      fetchImpl,
+      issueId: "issue-id",
+    })).resolves.toEqual({
+      id: "issue-id",
+      identifier: "OPS-42",
+      labelIds: ["bug"],
+      teamId: "team-id",
+    });
+  });
+
+  it("reports an issue the workspace cannot see as missing", async () => {
+    const fetchImpl = linearApi({ ResponderLinearIssueLabels: { issue: null } });
+
+    await expect(getLinearIssueLabels({
+      accessToken: "linear-token",
+      fetchImpl,
+      issueId: "issue-id",
+    })).resolves.toBeNull();
+  });
+
+  it("adds one label without replacing the others", async () => {
+    const fetchImpl = linearApi({
+      ResponderAddLinearIssueLabel: { issueAddLabel: { success: true } },
+    });
+
+    await addLinearIssueLabel({
+      accessToken: "linear-token",
+      fetchImpl,
+      issueId: "issue-id",
+      labelId: "responder-label",
+    });
+
+    expect(JSON.parse(requestFor(fetchImpl, "ResponderAddLinearIssueLabel").body).variables)
+      .toEqual({ id: "issue-id", labelId: "responder-label" });
   });
 });

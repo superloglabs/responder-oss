@@ -9,6 +9,7 @@ import { getDatabase } from "./client.js";
 import { getRuntimeLinearConnection } from "./investigations.js";
 import {
   fulfillLinearTicketRequest,
+  listCreatedLinearIssuesByAccount,
   listPendingLinearTicketRequests,
   LinearTicketError,
 } from "./linear-tickets.js";
@@ -198,5 +199,42 @@ describe("Linear ticket requests", () => {
       6,
     ]);
     expect(pending.params).not.toContain("creating");
+  });
+});
+
+describe("listCreatedLinearIssuesByAccount", () => {
+  it("groups investigation and automation issues under the Linear accounts that can reach them", async () => {
+    const results = [
+      [
+        { id: "account-a", organizationId: "org-1" },
+        { id: "account-b", organizationId: "org-1" },
+        { id: "account-c", organizationId: "org-2" },
+      ],
+      [
+        { accountId: "account-a", issueId: "ticket-1" },
+        { accountId: "account-a", issueId: null },
+        { accountId: "account-b", issueId: "ticket-2" },
+      ],
+      [
+        { issueId: "attempt-1", organizationId: "org-1" },
+      ],
+    ];
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => {
+        const rows = results.shift();
+        const where = vi.fn().mockResolvedValue(rows);
+        return {
+          from: vi.fn(() => ({
+            innerJoin: vi.fn(() => ({ where })),
+            where,
+          })),
+        };
+      }),
+    } as never);
+
+    await expect(listCreatedLinearIssuesByAccount()).resolves.toEqual([
+      { id: "account-a", issueIds: ["ticket-1", "attempt-1"], organizationId: "org-1" },
+      { id: "account-b", issueIds: ["ticket-2", "attempt-1"], organizationId: "org-1" },
+    ]);
   });
 });
