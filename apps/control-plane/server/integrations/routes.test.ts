@@ -157,6 +157,7 @@ vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
   createLinearPkce: vi.fn(),
   exchangeLinearOAuthCode: vi.fn(),
   getLinearWorkspace: vi.fn(),
+  LINEAR_APP_ACTOR: "app",
   LINEAR_AUTH_VERSION: "linear_oauth_v1",
   LINEAR_MCP_URL: "https://mcp.linear.app/mcp",
   LINEAR_READONLY_MCP_URL: "https://mcp.linear.app/mcp/readonly",
@@ -956,6 +957,7 @@ describe("integration callback routing", () => {
       expect.objectContaining({
         displayName: "Example Linear",
         externalAccountId: "linear-workspace-id",
+        metadata: expect.objectContaining({ actor: "app" }),
         provider: "linear",
         status: "connected",
       }),
@@ -1115,6 +1117,47 @@ describe("integration callback routing", () => {
         configurationUrl: "/api/integrations/github/start?mode=install",
       }),
     );
+  });
+
+  it("asks Linear connections made as a person to reconnect as the app", async () => {
+    vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    const linearAccount = {
+      provider: "linear" as const,
+      status: "connected" as const,
+      updatedAt: new Date("2026-10-02T09:00:00Z"),
+      resourceCount: 0,
+    };
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([
+      {
+        ...linearAccount,
+        id: "30000000-0000-4000-8000-000000000001",
+        externalAccountId: "person-workspace",
+        displayName: "Person",
+        metadata: { authVersion: "linear_oauth_v1" },
+      },
+      {
+        ...linearAccount,
+        id: "30000000-0000-4000-8000-000000000002",
+        externalAccountId: "app-workspace",
+        displayName: "App",
+        metadata: { actor: "app", authVersion: "linear_oauth_v1" },
+      },
+    ]);
+
+    const response = await app.request("/api/integrations");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const linear = body.integrations.find(
+      (integration: { id: string }) => integration.id === "linear",
+    );
+    expect(linear.state).toBe("connected");
+    expect(linear.accounts).toEqual([
+      expect.objectContaining({ displayName: "Person", reconnectRecommended: true }),
+      expect.not.objectContaining({ reconnectRecommended: true }),
+    ]);
   });
 
   it("offers automatic Sentry recovery when an account already exists", async () => {
