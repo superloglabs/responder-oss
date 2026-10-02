@@ -22,6 +22,17 @@ describe("live provider model catalogs", () => {
     expect(normalizeProviderModels("openai", [{ id: "gpt-future" }, { id: "gpt-future" }, { id: "text-embedding-3-large" }, { id: "gpt-image-1" }, { id: "gpt-realtime" }, { id: "ft:gpt-4o:org:custom" }]).map(item => item.id)).toEqual(["ft:gpt-4o:org:custom", "gpt-future"]);
     expect(normalizeProviderModels("mistral", [{ id: "model", capabilities: { function_calling: false } }])).toEqual([]);
   });
+  it("lists Gemini models, which Google's OpenAI-compatible endpoint returns under models/", async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({
+      object: "list",
+      data: [
+        { id: "models/gemini-2.5-flash", object: "model", owned_by: "google", display_name: "Gemini 2.5 Flash" },
+        { id: "models/gemini-embedding-001", object: "model", owned_by: "google", display_name: "Gemini Embedding 001" },
+        { id: "models/imagen-4.0-generate-001", object: "model", owned_by: "google", display_name: "Imagen 4" },
+      ],
+    }));
+    expect(await listProviderModels("google", "key", request)).toEqual([{ id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" }]);
+  });
   it("does not expose provider error bodies or credentials", async () => {
     const request = vi.fn().mockResolvedValue(new Response('private-key secret', { status: 401 }));
     await expect(listProviderModels("deepseek", "private-key", request)).rejects.toThrow(/^The provider rejected this API key\. Reconnect with a valid key\.$/);
