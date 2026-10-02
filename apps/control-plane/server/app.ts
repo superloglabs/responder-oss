@@ -29,6 +29,7 @@ import { sentryWebhookRoutes } from "./webhooks/sentry.js";
 import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 import { discordWebhookRoutes } from "./webhooks/discord.js";
+import { linearWebhookRoutes } from "./webhooks/linear.js";
 import { scanRoutes } from "./scans/routes.js";
 import { suggestionRoutes } from "./suggestions/routes.js";
 import { automationModelBrokerRoutes } from "./automations/model-broker.js";
@@ -428,6 +429,7 @@ export const app = instrumentedApp
   .route("/api/webhooks/dash0", dash0WebhookRoutes)
   .route("/api/webhooks/slack", slackWebhookRoutes)
   .route("/api/webhooks/discord", discordWebhookRoutes)
+  .route("/api/webhooks/linear", linearWebhookRoutes)
   .post("/api/investigations", async (context) => {
     const authorization = context.req.header("authorization") ?? null;
     if (!authorization || !verifyBearerToken(authorization)) {

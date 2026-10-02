@@ -61,7 +61,9 @@ export function triggerContext(input: InvestigationDetail["input"]): string {
             attributes.projectSlug,
             attributes.environment,
           ]
-        : [attributes.service, attributes.monitorName, attributes.environment];
+        : input.provider === "linear"
+          ? [attributes.linearIssueIdentifier]
+          : [attributes.service, attributes.monitorName, attributes.environment];
   const context = candidates.find(
     (candidate): candidate is string =>
       typeof candidate === "string" && candidate.trim().length > 0,

@@ -291,6 +291,41 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("evidence");
   });
 
+  it("words Linear assistant turns for the agent session", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "",
+      assistant: { integrationsUrl: "https://app.example.com/settings", pullRequests: true },
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+      threadSurface: "linear",
+    });
+
+    expect(instructions).toContain("the Linear agent for this workspace");
+    expect(instructions).toContain("reply to the Linear agent session");
+    expect(instructions).toContain("Link every pull request you opened.");
+    expect(instructions).not.toContain("Slack assistant");
+    expect(instructions).not.toContain("Slack thread");
+  });
+
+  it("words Linear investigation turns for the agent session", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Investigate the request.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+      threadSurface: "linear",
+    });
+
+    expect(instructions).toContain("investigation in a Linear agent session");
+    expect(instructions).toContain("response to the Linear agent session");
+    expect(instructions).not.toContain("Slack thread");
+  });
+
   it("leaves the pull request section out of Slack assistant turns without repositories", () => {
     const instructions = investigationInstructions({
       agentPrompt: "",

@@ -435,6 +435,13 @@
       "when": 1790944993083,
       "tag": "0061_slack_assistant_prompt_parts",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790951070627,
+      "tag": "0062_linear_agent_prompt_parts",
+      "breakpoints": true
     }
   ]
 }

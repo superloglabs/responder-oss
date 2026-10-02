@@ -957,7 +957,7 @@ describe("integration callback routing", () => {
       expect.objectContaining({
         displayName: "Example Linear",
         externalAccountId: "linear-workspace-id",
-        metadata: expect.objectContaining({ actor: "app" }),
+        metadata: expect.objectContaining({ actor: "app", mentionable: true }),
         provider: "linear",
         status: "connected",
       }),
@@ -1119,7 +1119,7 @@ describe("integration callback routing", () => {
     );
   });
 
-  it("asks Linear connections made as a person to reconnect as the app", async () => {
+  it("asks Linear connections made as a person or without mentions to reconnect", async () => {
     vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
     vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
@@ -1144,6 +1144,17 @@ describe("integration callback routing", () => {
         displayName: "App",
         metadata: { actor: "app", authVersion: "linear_oauth_v1" },
       },
+      {
+        ...linearAccount,
+        id: "30000000-0000-4000-8000-000000000003",
+        externalAccountId: "mentionable-workspace",
+        displayName: "Mentionable",
+        metadata: {
+          actor: "app",
+          authVersion: "linear_oauth_v1",
+          mentionable: true,
+        },
+      },
     ]);
 
     const response = await app.request("/api/integrations");
@@ -1156,6 +1167,7 @@ describe("integration callback routing", () => {
     expect(linear.state).toBe("connected");
     expect(linear.accounts).toEqual([
       expect.objectContaining({ displayName: "Person", reconnectRecommended: true }),
+      expect.objectContaining({ displayName: "App", reconnectRecommended: true }),
       expect.not.objectContaining({ reconnectRecommended: true }),
     ]);
   });

@@ -57,6 +57,7 @@ import {
   type SlackInvestigationTraceItem,
 } from "@responder/core/integrations/slack-live-progress";
 import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
+import { linearAgentDelivery } from "./linear-agent-delivery.js";
 import {
   deliverSlackIssueFollowupResponse,
   deliverSlackThreadInvestigationResponse,
@@ -522,6 +523,11 @@ await boss.work(
   { localConcurrency: 1 },
   async ([job]) => {
     const payload = slackThreadInvestigationJobSchema.parse(job.data);
+    const linear = linearAgentDelivery({
+      investigationId: payload.investigationId,
+      organizationId: payload.config.organizationId,
+      request: payload.request,
+    });
     const investigationState = await markInvestigationStarted(
       payload.investigationId,
       `openai-daytona:${job.id}`,
@@ -530,7 +536,18 @@ await boss.work(
       const response = await getInvestigationReportMarkdown(
         payload.investigationId,
       );
-      if (response) {
+      if (response && linear) {
+        // The reply has a fixed activity ID. If the earlier attempt posted
+        // it, Linear rejects this one as a duplicate.
+        await linear.respond(response).catch((error: unknown) => {
+          console.error(JSON.stringify({
+            error: safeInvestigationError(error),
+            event: "linear_agent_response_redelivery_failed",
+            investigationId: payload.investigationId,
+            jobId: job.id,
+          }));
+        });
+      } else if (response) {
         await deliverSlackThreadInvestigationResponse({
           deliveryRunId: job.id,
           investigationId: payload.investigationId,
@@ -551,6 +568,12 @@ await boss.work(
           await appendInvestigationTraceEvent(payload.investigationId, event);
           const progress = slackProgressFromTrace(event, { assistant });
           if (!progress) return;
+          if (linear) {
+            await linear
+              .progress(progress.detail, { force: progress.finalizing })
+              .catch(() => undefined);
+            return;
+          }
           slackTraceItems = applySlackTraceUpdate(slackTraceItems, progress);
           const now = Date.now();
           if (!progress.finalizing && now - lastSlackProgressAt < 3_000) return;
@@ -573,11 +596,15 @@ await boss.work(
         sandboxSessionState: result.sandboxSessionState,
         previousResponseId: result.previousResponseId,
       });
-      await deliverSlackThreadInvestigationResponse({
-        deliveryRunId: job.id,
-        investigationId: payload.investigationId,
-        response: result.report,
-      });
+      if (linear) {
+        await linear.respond(result.report);
+      } else {
+        await deliverSlackThreadInvestigationResponse({
+          deliveryRunId: job.id,
+          investigationId: payload.investigationId,
+          response: result.report,
+        });
+      }
       return { investigationId: payload.investigationId };
     } catch (error) {
       const message = safeInvestigationError(error);
@@ -591,7 +618,9 @@ await boss.work(
         payload.investigationId,
         message,
       );
-      if (investigationFailed) {
+      if (investigationFailed && linear) {
+        await linear.fail().catch(() => undefined);
+      } else if (investigationFailed) {
         await failInvestigationSlackCard(
           payload.investigationId,
           slackTraceItems.length > 0 ? slackTraceItems : undefined,

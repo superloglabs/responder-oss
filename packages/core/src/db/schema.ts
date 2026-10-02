@@ -1142,7 +1142,7 @@ export const automationActionAttempts = pgTable(
 );
 
 export interface InvestigationInput {
-  provider: "sentry" | "datadog" | "dash0" | "slack" | "scan";
+  provider: "sentry" | "datadog" | "dash0" | "slack" | "linear" | "scan";
   externalEventId: string;
   title: string;
   body: string;

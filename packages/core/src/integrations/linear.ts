@@ -14,6 +14,8 @@ export const LINEAR_AUTH_VERSION = "linear_oauth_v1";
 // Connections authorized with `actor=app` act as the Linear app, so the issues
 // they create name the app as creator instead of the person who connected it.
 export const LINEAR_APP_ACTOR = "app";
+// The app scopes let people mention Responder and delegate issues to it.
+export const LINEAR_OAUTH_SCOPES = "read,write,app:mentionable,app:assignable";
 
 const linearOAuthTokenSchema = z.object({
   access_token: z.string().min(1),
@@ -75,7 +77,7 @@ export function linearAuthorizeUrl(input: {
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", input.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "read,write");
+  url.searchParams.set("scope", LINEAR_OAUTH_SCOPES);
   url.searchParams.set("actor", LINEAR_APP_ACTOR);
   url.searchParams.set("state", input.state);
   url.searchParams.set("code_challenge", input.codeChallenge);
@@ -240,7 +242,7 @@ export interface CreatedLinearIssue {
   url: string;
 }
 
-async function linearGraphql(input: {
+export async function linearGraphql(input: {
   accessToken: string;
   fetchImpl?: typeof fetch;
   query: string;

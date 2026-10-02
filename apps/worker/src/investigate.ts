@@ -432,9 +432,10 @@ export function investigationInstructions(input: {
   }>;
   vercelAccountIds?: string[];
   threadMode?: boolean;
-  // A Slack thread in an organization with simplified navigation. It works
-  // as a general assistant and is told about its pull request and workspace
-  // tools.
+  // Where a thread request came from and where its reply goes.
+  threadSurface?: "slack" | "linear";
+  // A thread in an organization with simplified navigation. It works as a
+  // general assistant and is told about its pull request and workspace tools.
   assistant?: { integrationsUrl: string; pullRequests: boolean };
   issueFollowupIssueCount?: number;
   scanMode?: boolean;
@@ -455,6 +456,7 @@ export function investigationInstructions(input: {
   const vercelAccountIds = input.vercelAccountIds ?? [];
   const repositoryInstructions = input.repositoryInstructions ?? [];
   const assistant = input.threadMode ? input.assistant : undefined;
+  const linear = input.threadMode && input.threadSurface === "linear";
   const issueUpdateFollowup = (input.issueFollowupIssueCount ?? 0) > 0;
   const noIssueFollowup = input.issueFollowupIssueCount === 0;
   const observabilityConnected =
@@ -474,7 +476,9 @@ export function investigationInstructions(input: {
     customMcpNames.length > 0;
   return [
     // The runtime system prompt describes incident investigations.
-    assistant ? prompt("assistantScope") : input.runtimeSystemPrompt,
+    assistant
+      ? prompt(linear ? "linearAssistantScope" : "assistantScope")
+      : input.runtimeSystemPrompt,
     input.agentPrompt,
     input.scanMode
       ? prompt("scanScope")
@@ -590,7 +594,7 @@ export function investigationInstructions(input: {
         ? prompt("assistantPullRequests")
         : null
       : input.threadMode
-        ? prompt("threadMode")
+        ? prompt(linear ? "linearThreadMode" : "threadMode")
         : issueUpdateFollowup
           ? null
           : prompt("existingIssues"),
@@ -615,7 +619,11 @@ export function investigationInstructions(input: {
       ? null
       : prompt("timeline"),
     input.threadMode
-      ? prompt(assistant ? "assistantResponse" : "threadResponse")
+      ? prompt(
+          assistant
+            ? linear ? "linearAssistantResponse" : "assistantResponse"
+            : linear ? "linearThreadResponse" : "threadResponse",
+        )
       : issueUpdateFollowup
         ? prompt("followupResponse")
         : prompt("submitReport"),
@@ -1114,6 +1122,7 @@ export async function runInvestigationAgent(
       workspaceSecrets,
       vercelAccountIds: vercelConnections.map((connection) => connection.accountId),
       threadMode,
+      threadSurface: investigationInput.provider === "linear" ? "linear" : "slack",
       ...(assistant
         ? { assistant: { integrationsUrl, pullRequests: repositories.length > 0 } }
         : {}),

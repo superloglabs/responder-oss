@@ -3263,6 +3263,9 @@ export async function beginInvestigation(
   });
 }
 
+// Linear agent sessions reuse tag mode's thread sessions: the team is the
+// Linear workspace, the channel is the issue, and the thread is the agent
+// session.
 export async function beginSlackThreadInvestigation(input: {
   agentId: string;
   investigationInput: InvestigationInput;
@@ -3405,7 +3408,7 @@ export async function beginSlackThreadInvestigation(input: {
       .insert(webhookReceipts)
       .values({
         organizationId: agent.organizationId,
-        provider: "slack",
+        provider: input.investigationInput.provider,
         externalEventId: input.investigationInput.externalEventId,
         investigationId,
         payloadHash,
@@ -3421,7 +3424,7 @@ export async function beginSlackThreadInvestigation(input: {
         .from(webhookReceipts)
         .where(
           and(
-            eq(webhookReceipts.provider, "slack"),
+            eq(webhookReceipts.provider, input.investigationInput.provider),
             eq(
               webhookReceipts.externalEventId,
               input.investigationInput.externalEventId,
