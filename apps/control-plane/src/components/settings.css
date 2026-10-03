@@ -155,7 +155,8 @@
 .appShell--workspace.appShell--settings .inviteForm__controls .button { white-space: nowrap; flex-shrink: 0; }
 
 /* Settings → MCP: client tabs with a setup snippet. */
-.appShell--settings .mcpSetup .dsTabs { padding: 0 12px; }
+.appShell--settings .mcpSetup .dsTabs { padding: 0 12px; overflow-x: auto; }
+.appShell--settings .mcpSetup .dsTabs__tab { flex-shrink: 0; white-space: nowrap; }
 .appShell--settings .mcpSetup__panel { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: .5px solid #e6e8ec; border-radius: 12px; background: #fff; }
 .appShell--settings .mcpSetup__panel p { margin: 0; color: #666; font-size: 13px; line-height: 20px; }
 .appShell--settings .mcpSetup__panel pre { font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }

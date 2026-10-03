@@ -29,6 +29,7 @@ describe("MCP connection snippets", () => {
     expect(setups["claude-code"]).toBe(
       "claude mcp add --transport http superlog https://superlog.sh/api/mcp",
     );
+    expect(setups.claude).toBe("Name: Superlog\nURL:  https://superlog.sh/api/mcp");
     expect(JSON.parse(setups.cursor ?? "")).toEqual({
       mcpServers: { superlog: { url } },
     });

@@ -54,7 +54,12 @@ export function McpSettingsPage() {
             <p>Streamable HTTP. Clients sign in with OAuth.</p>
           </div>
           <div className="invitationLink">
-            <input aria-label="MCP server URL" readOnly value={serverUrl} />
+            <input
+              aria-label="MCP server URL"
+              onFocus={(event) => event.currentTarget.select()}
+              readOnly
+              value={serverUrl}
+            />
             <button className="button button--secondary" onClick={() => void copyUrl()} type="button">
               Copy URL
             </button>
