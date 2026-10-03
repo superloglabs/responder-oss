@@ -456,6 +456,13 @@
       "when": 1790953358648,
       "tag": "0064_automation_grant_allowance_exhausted",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1791038310155,
+      "tag": "0065_mcp_oauth",
+      "breakpoints": true
     }
   ]
 }

@@ -41,6 +41,7 @@ const previewDocumentRoutes: Plugin = {
         url.pathname !== "/" &&
         url.pathname !== "/api" &&
         !url.pathname.startsWith("/api/") &&
+        !url.pathname.startsWith("/.well-known/") &&
         !url.pathname.split("/").pop()?.includes(".")
       ) {
         request.url = `/app.html${url.search}`;
@@ -76,6 +77,7 @@ export default defineConfig({
   ],
   preview: {
     proxy: {
+      "/.well-known": `http://127.0.0.1:${apiPort}`,
       "/api": `http://127.0.0.1:${apiPort}`,
     },
   },
@@ -90,6 +92,7 @@ export default defineConfig({
     port: webPort,
     strictPort: true,
     proxy: {
+      "/.well-known": `http://127.0.0.1:${apiPort}`,
       "/api": `http://127.0.0.1:${apiPort}`,
     },
   },

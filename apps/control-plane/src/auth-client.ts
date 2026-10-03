@@ -1,3 +1,4 @@
+import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { createAuthClient } from "better-auth/react";
 import { adminClient, organizationClient } from "better-auth/client/plugins";
 import {
@@ -23,5 +24,8 @@ export const authClient = createAuthClient({
         member: memberAc,
       },
     }),
+    // On the MCP OAuth page, sends the signed authorization request with
+    // sign-in so the server can continue the flow afterwards.
+    oauthProviderClient(),
   ],
 });

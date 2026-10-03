@@ -40,6 +40,7 @@ import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/
 import { apiKeyRoutes } from "./management/api-key-routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
+import { oauthMetadataRoutes } from "./oauth-metadata-routes.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -414,6 +415,7 @@ export const app = instrumentedApp
       user: tenant.user,
     });
   })
+  .route("/.well-known", oauthMetadataRoutes)
   .route("/api/v1", managementApiRoutes)
   .route("/api/mcp", managementMcpRoutes)
   .route("/api/api-keys", apiKeyRoutes)

@@ -1,6 +1,8 @@
 import * as Sentry from "@sentry/hono/node";
 import { authenticateApiKey } from "../../../../packages/core/src/db/api-keys.js";
+import { authenticateOAuthAccessToken } from "../../../../packages/core/src/db/oauth-access-tokens.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { mcpAccessTokenPrefix, mcpOAuthScope } from "../mcp-oauth.js";
 import {
   ManagementError,
   type ManagementContext,
@@ -13,18 +15,33 @@ export type ManagementResult = {
 };
 
 // Accepts `Authorization: Bearer <key>` only. Session cookies never
-// authenticate management requests.
+// authenticate management requests. The MCP server also accepts OAuth access
+// tokens; the REST API takes API keys only.
 export async function authenticateManagementRequest(
   headers: Headers,
   source: ManagementContext["source"],
 ): Promise<ManagementContext | null> {
   const match = /^Bearer\s+(\S+)\s*$/iu.exec(headers.get("authorization") ?? "");
-  if (!match?.[1]) return null;
-  const principal = await authenticateApiKey(match[1]);
-  if (!principal) return null;
-  Sentry.setUser({ id: principal.user.id, username: principal.user.name });
-  Sentry.setTag("organization_id", principal.organizationId);
-  return { ...principal, source };
+  const token = match?.[1];
+  if (!token) return null;
+  let context: ManagementContext | null = null;
+  if (source === "mcp" && token.startsWith(mcpAccessTokenPrefix)) {
+    const principal = await authenticateOAuthAccessToken(token, {
+      prefix: mcpAccessTokenPrefix,
+      scope: mcpOAuthScope,
+    });
+    if (principal) {
+      const { clientId, ...rest } = principal;
+      context = { ...rest, apiKeyId: null, oauthClientId: clientId, source };
+    }
+  } else {
+    const principal = await authenticateApiKey(token);
+    if (principal) context = { ...principal, oauthClientId: null, source };
+  }
+  if (!context) return null;
+  Sentry.setUser({ id: context.user.id, username: context.user.name });
+  Sentry.setTag("organization_id", context.organizationId);
+  return context;
 }
 
 export const unauthorizedBody = {
@@ -107,6 +124,7 @@ export async function executeOperation(
   }
   console.info(JSON.stringify({
     apiKeyId: context.apiKeyId,
+    oauthClientId: context.oauthClientId,
     durationMs: Date.now() - started,
     event: "management_request",
     operation: operation.name,

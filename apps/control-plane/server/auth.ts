@@ -17,7 +17,9 @@ import {
   rememberedOrganizationId,
   rememberOrganization,
 } from "../../../packages/core/src/db/workspace-preferences.js";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { admin, organization } from "better-auth/plugins";
 import {
   adminAc as superuserAc,
@@ -29,6 +31,13 @@ import {
 } from "better-auth/plugins/organization/access";
 import { allowsMarketing } from "./consent-policy.js";
 import { sendEmail, workspaceInvitationEmailBody } from "./email.js";
+import {
+  mcpAccessTokenPrefix,
+  mcpOAuthPagePath,
+  mcpOAuthScopes,
+  mcpRefreshTokenPrefix,
+  mcpResourceUrl,
+} from "./mcp-oauth.js";
 
 export const superuserRoles = {
   superuser: superuserAc,
@@ -325,6 +334,40 @@ export function createResponderAuth() {
             });
           },
         },
+      }),
+      oauthProvider({
+        // MCP clients register themselves and authenticate with PKCE.
+        allowDynamicClientRegistration: true,
+        allowUnauthenticatedClientRegistration: true,
+        consentPage: mcpOAuthPagePath,
+        // Access tokens are opaque and stored hashed, like API keys.
+        disableJwtPlugin: true,
+        grantTypes: ["authorization_code", "refresh_token"],
+        loginPage: mcpOAuthPagePath,
+        // Each grant is bound to one workspace: the session's active
+        // workspace when the person approves the client.
+        postLogin: {
+          consentReferenceId: ({ session }) => {
+            const organizationId = session?.activeOrganizationId;
+            if (typeof organizationId !== "string" || !organizationId) {
+              throw new APIError("BAD_REQUEST", {
+                error: "invalid_request",
+                error_description: "Choose a workspace first",
+              });
+            }
+            return organizationId;
+          },
+          page: mcpOAuthPagePath,
+          shouldRedirect: ({ session }) =>
+            typeof session.activeOrganizationId !== "string" ||
+            !session.activeOrganizationId,
+        },
+        prefix: {
+          opaqueAccessToken: mcpAccessTokenPrefix,
+          refreshToken: mcpRefreshTokenPrefix,
+        },
+        scopes: mcpOAuthScopes,
+        validAudiences: [mcpResourceUrl(baseURL)],
       }),
     ],
     secret,

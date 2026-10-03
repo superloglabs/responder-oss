@@ -12,13 +12,17 @@ const runId = "51515151-5151-4151-8151-515151515151";
 const repositoryId = "61616161-6161-4161-8161-616161616161";
 const slackAccountId = "71717171-7171-4171-8171-717171717171";
 const token = `slk_${"a".repeat(43)}`;
+const oauthToken = `slo_${"b".repeat(32)}`;
+const oauthClientId = "mcp-client";
 
 const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(),
+  authenticateOAuth: vi.fn(),
   capability: vi.fn(),
   createAutomation: vi.fn(),
   getAutomation: vi.fn(),
   getAutomationRun: vi.fn(),
+  getOrganizationSummary: vi.fn(),
   getTagMode: vi.fn(),
   listAutomations: vi.fn(),
   listCapabilities: vi.fn(),
@@ -33,6 +37,13 @@ vi.mock("../../../../packages/core/src/db/api-keys.js", () => ({
   authenticateApiKey: mocks.authenticate,
   listApiKeys: vi.fn().mockResolvedValue([]),
   revokeApiKey: mocks.revokeApiKey,
+}));
+vi.mock("../../../../packages/core/src/db/oauth-access-tokens.js", () => ({
+  authenticateOAuthAccessToken: mocks.authenticateOAuth,
+}));
+vi.mock("../../../../packages/core/src/db/organizations.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getOrganizationSummary: mocks.getOrganizationSummary,
 }));
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   listEnabledOrganizationCapabilities: mocks.listCapabilities,
@@ -145,6 +156,17 @@ describe("management API", () => {
     expect(mocks.authenticate).toHaveBeenCalledTimes(1);
     expect(mocks.authenticate).toHaveBeenCalledWith(token);
     expect(mocks.listAutomations).not.toHaveBeenCalled();
+  });
+
+  it("does not accept MCP OAuth access tokens", async () => {
+    mocks.authenticate.mockResolvedValue(null);
+
+    const response = await request("/workspace", {
+      headers: { authorization: `Bearer ${oauthToken}` },
+    });
+
+    expect(response.status).toBe(401);
+    expect(mocks.authenticateOAuth).not.toHaveBeenCalled();
   });
 
   it("hides automation operations from workspaces without automations", async () => {
@@ -443,13 +465,65 @@ describe("management MCP server", () => {
     mocks.capability.mockResolvedValue(true);
   }
 
-  it("requires an API key", async () => {
+  it("requires an API key or OAuth access token and points clients to OAuth", async () => {
     mocks.authenticate.mockResolvedValue(null);
 
     const response = await mcp({ id: 1, jsonrpc: "2.0", method: "tools/list" });
 
     expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toBe('Bearer realm="superlog"');
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer realm="superlog", resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource/api/mcp", scope="mcp offline_access"',
+    );
+    expect(await response.json()).toMatchObject({ code: "unauthorized" });
+  });
+
+  it("acts as the person and workspace an OAuth grant was made for", async () => {
+    mocks.authenticateOAuth.mockResolvedValue({
+      clientId: oauthClientId,
+      organizationId,
+      role: "member",
+      user: { email: "ash@example.com", id: userId, name: "Ash" },
+    });
+    mocks.listCapabilities.mockResolvedValue(["automations"]);
+    mocks.getOrganizationSummary.mockResolvedValue({
+      createdAt: new Date("2026-10-01T10:00:00.000Z"),
+      id: organizationId,
+      name: "Acme",
+      slug: "acme",
+    });
+
+    const response = await mcp(
+      {
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "get_workspace" },
+      },
+      { authorization: `Bearer ${oauthToken}` },
+    );
+    const body = await response.json() as { result: { content: Array<{ text: string }> } };
+
+    expect(response.status).toBe(200);
+    expect(mocks.authenticateOAuth).toHaveBeenCalledWith(oauthToken, {
+      prefix: "slo_",
+      scope: "mcp",
+    });
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expect(JSON.parse(body.result.content[0]?.text ?? "{}")).toMatchObject({
+      workspace: { apiKeyId: null, id: organizationId, member: { userId } },
+    });
+  });
+
+  it("rejects OAuth access tokens that are expired, revoked, or for a removed member", async () => {
+    mocks.authenticateOAuth.mockResolvedValue(null);
+
+    const response = await mcp(
+      { id: 1, jsonrpc: "2.0", method: "tools/list" },
+      { authorization: `Bearer ${oauthToken}` },
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.authenticate).not.toHaveBeenCalled();
   });
 
   it("initializes without a session", async () => {

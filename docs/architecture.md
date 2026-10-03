@@ -98,11 +98,19 @@ types. `drizzle/` contains the ordered schema history.
   branch, reply to the supplied thread IDs, and resolve those threads.
 - Tenant trace responses omit the initial composed runtime instructions. The
   raw stored trace retains them for an operator's private diagnostics.
-- The management API (`/api/v1`) and MCP server (`/api/mcp`) accept only
+- The management API (`/api/v1`) and MCP server (`/api/mcp`) accept
   workspace API keys sent as bearer tokens; session cookies do not
   authenticate them. Only a SHA-256 digest of each key is stored. A key acts
   as the member who created it, so changes record that member, and the key
   stops working when they leave the workspace or the key is revoked.
+- The MCP server also accepts OAuth access tokens (`slo_`) from Better Auth's
+  OAuth provider at `/api/auth/oauth2/*`. Clients register dynamically as
+  public clients and must use PKCE. Each grant is bound to the person who
+  approved it and the workspace they chose on `/oauth/authorize`; the token
+  stops working when that person leaves the workspace. Access tokens last one
+  hour and rotating refresh tokens (`slr_`) thirty days; only their digests
+  are stored. The REST API does not accept OAuth tokens. Discovery documents
+  are served under `/.well-known/`.
   Responses are parsed with their documented schemas, so undocumented fields
   are dropped. Operations that take a secret value, such as storing a
   workspace secret or a model API key, are not offered as MCP tools.

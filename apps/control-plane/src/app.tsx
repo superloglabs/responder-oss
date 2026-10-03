@@ -10,6 +10,7 @@ import { AutomationCreatePage } from "./pages/automation-create";
 import { AutomationDetailPage, AutomationEditRedirect } from "./pages/automation-detail";
 import { AutomationRunPage, AutomationTestChatPage } from "./pages/automation-run";
 import { BillingPage } from "./pages/billing";
+import { OAuthAuthorizePage } from "./pages/oauth-authorize";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
@@ -79,6 +80,7 @@ export function App() {
       <Route element={<SecurityPage />} path="/security" />
       <Route element={<SubprocessorsPage />} path="/subprocessors" />
       <Route element={<SharedAutomationTemplatePage />} path="/templates/:slug" />
+      <Route element={<OAuthAuthorizePage />} path="/oauth/authorize" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}

@@ -11345,6 +11345,41 @@ body:has(.appShell--scans) {
 .authPage .authHeading { flex-direction: column; gap: 8px; }
 .authPage .authHeading .authSwitch { max-width: none; margin: 0; text-align: center; }
 
+/* MCP OAuth consent: workspace choice, then Allow or Cancel. */
+.authPage .workspaceChoice[aria-checked="true"] {
+  border-color: var(--border-logo);
+  box-shadow: inset 0 0 0 1px var(--border-logo);
+}
+.authPage .oauthLabel {
+  margin: 0 auto 12px;
+}
+.authPage .authSubmit.oauthSecondary {
+  border: 0;
+  background: #fff;
+  color: #202020;
+  box-shadow: inset 0 0 0 .5px #ffffffcc,0 1px 2px -.5px #0000001f,0 0 0 .5px #00000029;
+}
+.authPage .oauthActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.authPage .oauthError {
+  margin: 0 0 12px;
+}
+.authPage .oauthWorkspaceCreate {
+  margin-bottom: 20px;
+}
+.authPage .oauthSwitchAccount {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .appShell--settings .billingSectionTitle {
   margin: 12px 0 0;
   color: var(--ds-text-primary);
