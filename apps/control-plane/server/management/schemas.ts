@@ -43,7 +43,10 @@ const memberSchema = z.object({
 
 export const workspaceSchema = z.object({
   workspace: z.object({
-    apiKeyId: id("The API key used for this request."),
+    apiKeyId: z
+      .uuid()
+      .nullable()
+      .describe("The API key used for this request, or null when an MCP client signed in with OAuth."),
     capabilities: z.array(z.string()).describe("Features enabled for this workspace, such as `automations`."),
     createdAt: timestamp("When the workspace was created."),
     id: id("Workspace ID."),
@@ -54,7 +57,7 @@ export const workspaceSchema = z.object({
         role: z.string(),
         userId: id("User ID."),
       })
-      .describe("The member this API key acts as. Changes are recorded under their name."),
+      .describe("The member this request acts as. Changes are recorded under their name."),
     name: z.string(),
     slug: z.string(),
   }),

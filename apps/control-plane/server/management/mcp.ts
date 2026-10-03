@@ -7,10 +7,11 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Hono } from "hono";
+import { controlPlaneBaseUrl } from "../integrations/urls.js";
+import { mcpWwwAuthenticate } from "../mcp-oauth.js";
 import {
   authenticateManagementRequest,
   executeOperation,
-  unauthorizedBody,
 } from "./execute.js";
 import { jsonSchema } from "./openapi.js";
 import type { ManagementContext, ManagementOperation } from "./operation.js";
@@ -76,14 +77,20 @@ export function createManagementMcpServer(context: ManagementContext): Server {
   return server;
 }
 
+export const mcpUnauthorizedBody = {
+  code: "unauthorized",
+  error: "Connect with OAuth, or send a valid API key as `Authorization: Bearer <key>`. Create keys in Superlog under Settings → API keys.",
+};
+
 // A stateless Streamable HTTP endpoint: each POST is handled by a new server
-// for the API key that sent it.
+// for the API key or OAuth access token that sent it. The challenge points
+// MCP clients to the OAuth metadata so they can sign the person in.
 export const managementMcpRoutes = new Hono()
   .post("/", async (context) => {
     const caller = await authenticateManagementRequest(context.req.raw.headers, "mcp");
     if (!caller) {
-      context.header("WWW-Authenticate", 'Bearer realm="superlog"');
-      return context.json(unauthorizedBody, 401);
+      context.header("WWW-Authenticate", mcpWwwAuthenticate(controlPlaneBaseUrl()));
+      return context.json(mcpUnauthorizedBody, 401);
     }
     const server = createManagementMcpServer(caller);
     const transport = new WebStandardStreamableHTTPServerTransport({

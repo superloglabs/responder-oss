@@ -22,7 +22,7 @@ interface AuthGateProps {
   children: ReactNode;
 }
 
-function AuthFrame({ children }: AuthGateProps) {
+export function AuthFrame({ children }: AuthGateProps) {
   return (
     <main className="authPage">
       <ColorThemeToggle className="authThemeToggle" />
@@ -36,7 +36,13 @@ function AuthFrame({ children }: AuthGateProps) {
   );
 }
 
-function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
+export function SignIn({
+  allowLegacyHandoff = true,
+  isInvitation = false,
+}: {
+  allowLegacyHandoff?: boolean;
+  isInvitation?: boolean;
+}) {
   // Visitors who follow a sign-up link or open an automation template are
   // usually new, so they start on account creation.
   const [settingUpTemplate] = useState(() => automationSetupReturnPath(window.location) !== null);
@@ -125,7 +131,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") ?? "");
     const password = String(data.get("password") ?? "");
-    if (isCreatingAccount) {
+    if (isCreatingAccount && allowLegacyHandoff) {
       // AuthGate clears a legacy marker after the newly-created session is
       // visible. Keeping this intent in sessionStorage closes the race between
       // Better Auth returning a session and the clear request completing.
@@ -142,7 +148,7 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
     if (result.error) {
       if (isCreatingAccount) {
         sessionStorage.removeItem(explicitSignupStorageKey);
-      } else {
+      } else if (allowLegacyHandoff) {
         const targetUrl = await tryLegacyEmailSignIn(email, password);
         if (targetUrl) {
           console.info(
@@ -172,9 +178,12 @@ function SignIn({ isInvitation = false }: { isInvitation?: boolean }) {
           : "email_sign_in_success",
       }),
     );
-    if (isCreatingAccount) {
-      trackRedditSignupPixel(result.data.user.id);
-      trackXSignupPixel(result.data.user.id);
+    // During MCP OAuth the response is the next step of that flow, which
+    // the auth client follows, so it may not include the new user.
+    const signedUpUserId = (result.data as { user?: { id?: string } }).user?.id;
+    if (isCreatingAccount && signedUpUserId) {
+      trackRedditSignupPixel(signedUpUserId);
+      trackXSignupPixel(signedUpUserId);
     }
   }
 

@@ -93,7 +93,8 @@ Responder is designed as two long-running Node.js services backed by one
 Postgres database:
 
 1. Build and serve `apps/control-plane/dist` at your public origin.
-2. Route `/api/*` on that origin to the control-plane service.
+2. Route `/api/*` and `/.well-known/*` on that origin to the control-plane
+   service.
 3. Run the worker with the same database and encryption configuration.
 4. Apply every migration in `drizzle/` before starting a new release.
 5. Store all credentials in your deployment's secret environment.
@@ -107,9 +108,10 @@ security boundaries.
 
 Workspace API keys, created under **Settings → API keys**, authenticate a REST
 API at `/api/v1` and a remote MCP server at `/api/mcp`. Both manage
-automations, runs, tag mode, model access, and workspace secrets. The OpenAPI
-document is served at `/api/v1/openapi.json`; `pnpm -s api:openapi` prints
-it.
+automations, runs, tag mode, model access, and workspace secrets. MCP clients
+can also connect with OAuth: they register themselves, and the person signs in
+and chooses a workspace at `/oauth/authorize`. The OpenAPI document is served
+at `/api/v1/openapi.json`; `pnpm -s api:openapi` prints it.
 
 ## Development
 

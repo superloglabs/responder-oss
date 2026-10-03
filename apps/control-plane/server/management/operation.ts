@@ -1,9 +1,11 @@
 import type { z } from "zod";
 
 // The caller of a management API request or MCP tool call. API keys act as
-// the member who created them.
+// the member who created them; OAuth access tokens act as the member who
+// approved the MCP client.
 export interface ManagementContext {
-  apiKeyId: string;
+  apiKeyId: string | null;
+  oauthClientId: string | null;
   organizationId: string;
   role: string;
   source: "api" | "mcp";
