@@ -221,6 +221,11 @@ describe("automation Slack card", () => {
     await slackCard.finish("complete");
     expect(dependencies.post).toHaveBeenCalledTimes(2);
     expect(dependencies.post).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Automation complete" }));
+    // Both attempts carry one message ID, so Slack can drop a repeat of a
+    // post it already accepted.
+    const [first, second] = dependencies.post.mock.calls.map(([call]) => call.clientMessageId);
+    expect(first).toEqual(expect.any(String));
+    expect(second).toBe(first);
   });
 
   it("posts nothing when the agent never posts in the thread", async () => {

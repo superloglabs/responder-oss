@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AutomationTranscriptItem } from "@responder/core/automations/transcript";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
@@ -93,6 +94,9 @@ export function createAutomationSlackCard(input: {
   let timestamp: string | null = null;
   let finished = false;
   let waiting = Boolean(input.agentPosted);
+  // One ID for every attempt to post the card, so Slack drops a repeat of a
+  // post it already accepted.
+  const clientMessageId = randomUUID();
   // When the card last changed, or while waiting, when the agent's posts
   // were last checked.
   let lastSentAt = Number.NEGATIVE_INFINITY;
@@ -119,6 +123,7 @@ export function createAutomationSlackCard(input: {
         accessToken: input.target.accessToken,
         blocks: message.blocks,
         channelId: input.target.channelId,
+        clientMessageId,
         text: message.text,
         threadTimestamp: input.target.threadTimestamp,
       });

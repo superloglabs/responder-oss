@@ -116,29 +116,31 @@ describe("trigger matching", () => {
       ]);
   });
 
-  it("lists each Slack author once, newest first", async () => {
-    // The database returns each author's newest row, ordered by author ID.
+  it("lists each Slack author once, newest first, up to a limit", async () => {
+    const calls: string[] = [];
     const query = {
+      as: () => ({ lastSeenAt: "lastSeenAt" }),
       from: () => query,
       innerJoin: () => query,
+      limit: (limit: number) => { calls.push(`limit ${limit}`); return query; },
       orderBy: () => query,
       where: () => query,
       then: (resolve: (rows: unknown[]) => unknown) => resolve([
-        { id: "A-DEVIN", kind: "app", lastSeenAt: new Date("2026-10-03T10:00:00Z"), name: "Devin" },
         { id: "A-QOVERY", kind: "app", lastSeenAt: new Date("2026-10-03T12:00:00Z"), name: "Qovery" },
         { id: "U-ADA", kind: "person", lastSeenAt: new Date("2026-10-03T11:00:00Z"), name: "Ada" },
       ]),
     };
-    const selectDistinctOn = vi.fn(() => query);
-    vi.mocked(getDatabase).mockReturnValue({ selectDistinctOn } as unknown as ReturnType<typeof getDatabase>);
+    // Each author's newest row, then the newest authors.
+    const selectDistinctOn = vi.fn(() => { calls.push("distinct on author"); return query; });
+    const select = vi.fn(() => { calls.push("select"); return query; });
+    vi.mocked(getDatabase).mockReturnValue({ select, selectDistinctOn } as unknown as ReturnType<typeof getDatabase>);
 
     await expect(listSlackMessageAuthors({ channelIds: ["C1", "C2"], integrationAccountId: accountId, organizationId: "organization" }))
       .resolves.toEqual([
         { id: "A-QOVERY", kind: "app", name: "Qovery" },
         { id: "U-ADA", kind: "person", name: "Ada" },
-        { id: "A-DEVIN", kind: "app", name: "Devin" },
       ]);
-    expect(selectDistinctOn).toHaveBeenCalledOnce();
+    expect(calls).toEqual(["distinct on author", "select", "limit 500"]);
   });
 
   it("matches an event against any of an automation's triggers", async () => {
