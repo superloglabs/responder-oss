@@ -405,7 +405,7 @@ test("ignores Slack authors chosen from who posted in the selected channels", as
   const ignore = page.getByRole("button", { name: "Ignore messages from", exact: true });
   await expect(ignore).toContainText("No one");
   await ignore.click();
-  expect(requested).toEqual(["C123"]);
+  await expect.poll(() => requested).toEqual(["C123"]);
   await page.getByRole("checkbox", { name: "Devin (app)", exact: true }).check();
   await page.getByRole("checkbox", { name: "Qovery (app)", exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors-picker.png"), fullPage: true });
@@ -428,6 +428,19 @@ test("ignores Slack authors chosen from who posted in the selected channels", as
   await expect.poll(() => saved).toMatchObject({ configuration: {
     triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], kind: "slack" }],
   } });
+});
+
+test("says when the Slack authors could not load", async ({ page }) => {
+  await page.route("**/api/automations/slack/*/authors?*", (route) => route.fulfill({ status: 502, json: { error: "Unavailable" } }));
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New message in channel", exact: true }).click();
+  await page.getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  await page.getByRole("button", { name: "Ignore messages from", exact: true }).click();
+  await expect(page.getByText("Could not load authors. Refresh to try again.")).toBeVisible();
 });
 
 test("chooses included models from the provider submenu and filters compatible harnesses", async ({ page }, testInfo) => {

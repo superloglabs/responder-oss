@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   claimAutomationRun,
   findAutomationsForSlackEvent,
+  listSlackMessageAuthors,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   summarizeAutomationList,
@@ -113,6 +114,31 @@ describe("trigger matching", () => {
         { automationId: "ignoring", integrationAccountId: accountId, mentioned: true, startsRun: true },
         { automationId: "open", integrationAccountId: accountId, mentioned: true, startsRun: true },
       ]);
+  });
+
+  it("lists each Slack author once, newest first", async () => {
+    // The database returns each author's newest row, ordered by author ID.
+    const query = {
+      from: () => query,
+      innerJoin: () => query,
+      orderBy: () => query,
+      where: () => query,
+      then: (resolve: (rows: unknown[]) => unknown) => resolve([
+        { id: "A-DEVIN", kind: "app", lastSeenAt: new Date("2026-10-03T10:00:00Z"), name: "Devin" },
+        { id: "A-QOVERY", kind: "app", lastSeenAt: new Date("2026-10-03T12:00:00Z"), name: "Qovery" },
+        { id: "U-ADA", kind: "person", lastSeenAt: new Date("2026-10-03T11:00:00Z"), name: "Ada" },
+      ]),
+    };
+    const selectDistinctOn = vi.fn(() => query);
+    vi.mocked(getDatabase).mockReturnValue({ selectDistinctOn } as unknown as ReturnType<typeof getDatabase>);
+
+    await expect(listSlackMessageAuthors({ channelIds: ["C1", "C2"], integrationAccountId: accountId, organizationId: "organization" }))
+      .resolves.toEqual([
+        { id: "A-QOVERY", kind: "app", name: "Qovery" },
+        { id: "U-ADA", kind: "person", name: "Ada" },
+        { id: "A-DEVIN", kind: "app", name: "Devin" },
+      ]);
+    expect(selectDistinctOn).toHaveBeenCalledOnce();
   });
 
   it("matches an event against any of an automation's triggers", async () => {

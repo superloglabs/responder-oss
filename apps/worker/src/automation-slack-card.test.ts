@@ -206,6 +206,23 @@ describe("automation Slack card", () => {
     }));
   });
 
+  it("tries the card again after a failed first post", async () => {
+    const postError = new Error("ratelimited");
+    const post = vi.fn<AutomationSlackCardDependencies["post"]>()
+      .mockRejectedValueOnce(postError)
+      .mockResolvedValue("1790000001.000300");
+    const { card: slackCard, dependencies, onError } = card({ agentPosted: async () => true, post });
+
+    await slackCard.start();
+    slackCard.progress([tool("search_events")]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onError).toHaveBeenCalledWith(postError);
+
+    await slackCard.finish("complete");
+    expect(dependencies.post).toHaveBeenCalledTimes(2);
+    expect(dependencies.post).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Automation complete" }));
+  });
+
   it("posts nothing when the agent never posts in the thread", async () => {
     const { card: slackCard, dependencies } = card({ agentPosted: async () => false });
 

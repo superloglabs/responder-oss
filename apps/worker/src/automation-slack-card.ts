@@ -133,8 +133,9 @@ export function createAutomationSlackCard(input: {
     writes = writes.then(async () => {
       if (waiting) {
         if (!(await input.agentPosted!())) return;
-        waiting = false;
+        // A failed post leaves the card waiting, so the next send tries again.
         await post(status, detail);
+        if (timestamp) waiting = false;
         return;
       }
       if (!timestamp) return;

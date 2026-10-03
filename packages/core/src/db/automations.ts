@@ -183,8 +183,9 @@ export async function listSlackMessageAuthors(input: {
   organizationId: string;
 }): Promise<Array<{ id: string; kind: "app" | "person"; name: string }>> {
   if (input.channelIds.length === 0) return [];
+  // Each author's newest row across the channels.
   const rows = await getDatabase()
-    .select({
+    .selectDistinctOn([slackMessageAuthors.authorId], {
       id: slackMessageAuthors.authorId,
       kind: slackMessageAuthors.kind,
       lastSeenAt: slackMessageAuthors.lastSeenAt,
@@ -202,13 +203,11 @@ export async function listSlackMessageAuthors(input: {
       eq(slackMessageAuthors.integrationAccountId, input.integrationAccountId),
       inArray(slackMessageAuthors.channelId, input.channelIds),
     ))
-    .orderBy(desc(slackMessageAuthors.lastSeenAt))
-    .limit(500);
-  const authors = new Map<string, { id: string; kind: "app" | "person"; name: string }>();
-  for (const row of rows) {
-    if (!authors.has(row.id)) authors.set(row.id, { id: row.id, kind: row.kind, name: row.name });
-  }
-  return [...authors.values()];
+    .orderBy(slackMessageAuthors.authorId, desc(slackMessageAuthors.lastSeenAt));
+  return rows
+    .sort((first, second) => second.lastSeenAt.getTime() - first.lastSeenAt.getTime())
+    .slice(0, 500)
+    .map(({ id, kind, name }) => ({ id, kind, name }));
 }
 
 // Every enabled automation with a Sentry trigger on the project and event

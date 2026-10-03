@@ -63,6 +63,7 @@ describe("Slack replies to automation runs", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("sends a person's reply in the run's thread to that run", async () => {

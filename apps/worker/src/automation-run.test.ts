@@ -308,6 +308,9 @@ describe("automation run processor", () => {
       triggerInput: {
         ...claimedRun().triggerInput,
         attributes: {
+          authorId: "A-QOVERY",
+          authorName: "Qovery",
+          authorType: "app",
           channelId: "C123",
           mentioned,
           teamId: "T123",
@@ -366,6 +369,10 @@ describe("automation run processor", () => {
       const prompt = deps.runCodex.mock.calls[0]![1].prompt;
       expect(prompt).toContain("name who posted the message (authorName, authorId, and authorType");
       expect(prompt).toContain("when the automation's instructions say to skip this message, finish without posting or reacting");
+      expect(prompt).toContain('"authorId": "A-QOVERY"');
+      expect(prompt).toContain('"authorName": "Qovery"');
+      expect(prompt).toContain('"authorType": "app"');
+      expect(prompt).toContain('"mentioned": false');
       expect(deps.postedInSlackThread).toHaveBeenCalledWith({
         channelId: "C123",
         runId,
