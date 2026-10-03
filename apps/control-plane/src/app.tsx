@@ -39,6 +39,7 @@ import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
 import { ModelAccessSettingsPage } from "./pages/model-access-settings";
 import { ApiKeySettingsPage } from "./pages/api-key-settings";
+import { McpSettingsPage } from "./pages/mcp-settings";
 import { TagModeSettingsPage } from "./pages/tag-mode-settings";
 import { blogArticlePath } from "./public-routes";
 import { usePageMetadata } from "./use-page-metadata";
@@ -144,6 +145,7 @@ export function App() {
         <Route element={<WorkspaceSettingsPage />} path="/settings/workspace" />
         <Route element={<TagModeSettingsPage />} path="/settings/tag-mode" />
         <Route element={<ModelAccessSettingsPage />} path="/settings/models" />
+        <Route element={<McpSettingsPage />} path="/settings/mcp" />
         <Route element={<ApiKeySettingsPage />} path="/settings/api-keys" />
         <Route element={<SuperuserUsersPage />} path="/superuser/users" />
       </Route>
