@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   claimAutomationRun,
   findAutomationsForSlackEvent,
+  listSlackMessageAuthors,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   summarizeAutomationList,
@@ -88,11 +89,58 @@ describe("trigger matching", () => {
 
     // A plain message starts only "every message" automations, but a reply in
     // a run's thread reaches every automation watching the channel.
-    await expect(findAutomationsForSlackEvent({ channelId: "C1", eventType: "message", teamId: "T1", userId: "U1" }))
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "message", teamId: "T1", text: "Checkout is down" }))
       .resolves.toEqual([
-        { automationId: "mentions", startsRun: false },
-        { automationId: "messages", startsRun: true },
+        { automationId: "mentions", integrationAccountId: accountId, mentioned: false, startsRun: false },
+        { automationId: "messages", integrationAccountId: accountId, mentioned: false, startsRun: true },
       ]);
+  });
+
+  it("skips the app's own messages and authors a trigger ignores", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const ignoring = { ...slack, eventMode: "every_message", ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }] } as const;
+    const rows = [
+      { accountId, accountMetadata: metadata, automationId: "ignoring", triggers: [ignoring] },
+      { accountId, accountMetadata: metadata, automationId: "open", triggers: [{ ...slack, eventMode: "every_message" }] },
+    ];
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows]));
+
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U-DEVIN", "B-DEVIN", "A-DEVIN"], channelId: "C1", eventType: "message", teamId: "T1", text: "Agreed" }))
+      .resolves.toEqual([{ automationId: "open", integrationAccountId: accountId, mentioned: false, startsRun: true }]);
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U-BOT", "B-RESPONDER"], channelId: "C1", eventType: "message", teamId: "T1", text: "Done" }))
+      .resolves.toEqual([]);
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "message", teamId: "T1", text: "<@U-BOT> look" }))
+      .resolves.toEqual([
+        { automationId: "ignoring", integrationAccountId: accountId, mentioned: true, startsRun: true },
+        { automationId: "open", integrationAccountId: accountId, mentioned: true, startsRun: true },
+      ]);
+  });
+
+  it("lists each Slack author once, newest first, up to a limit", async () => {
+    const calls: string[] = [];
+    const query = {
+      as: () => ({ lastSeenAt: "lastSeenAt" }),
+      from: () => query,
+      innerJoin: () => query,
+      limit: (limit: number) => { calls.push(`limit ${limit}`); return query; },
+      orderBy: () => query,
+      where: () => query,
+      then: (resolve: (rows: unknown[]) => unknown) => resolve([
+        { id: "A-QOVERY", kind: "app", lastSeenAt: new Date("2026-10-03T12:00:00Z"), name: "Qovery" },
+        { id: "U-ADA", kind: "person", lastSeenAt: new Date("2026-10-03T11:00:00Z"), name: "Ada" },
+      ]),
+    };
+    // Each author's newest row, then the newest authors.
+    const selectDistinctOn = vi.fn(() => { calls.push("distinct on author"); return query; });
+    const select = vi.fn(() => { calls.push("select"); return query; });
+    vi.mocked(getDatabase).mockReturnValue({ select, selectDistinctOn } as unknown as ReturnType<typeof getDatabase>);
+
+    await expect(listSlackMessageAuthors({ channelIds: ["C1", "C2"], integrationAccountId: accountId, organizationId: "organization" }))
+      .resolves.toEqual([
+        { id: "A-QOVERY", kind: "app", name: "Qovery" },
+        { id: "U-ADA", kind: "person", name: "Ada" },
+      ]);
+    expect(calls).toEqual(["distinct on author", "select", "limit 500"]);
   });
 
   it("matches an event against any of an automation's triggers", async () => {

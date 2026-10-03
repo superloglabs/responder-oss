@@ -6,6 +6,7 @@ import {
   automationRunCancellationRequested,
   automationRunHasFinishedTurn,
   automationRunHasNewMessages,
+  automationRunPostedInSlackThread,
   claimAutomationRun,
   getAutomationNotificationChannelNames,
   getAutomationRunActor,
@@ -122,6 +123,7 @@ export interface AutomationRunDependencies {
   loadRepositories: typeof loadCheckedOutRepositories;
   notify: typeof sendAutomationRunNotifications;
   now(): Date;
+  postedInSlackThread: typeof automationRunPostedInSlackThread;
   reopenRun: typeof reopenAutomationRun;
   reportException: typeof reportWorkerException;
   // Queues the next turn of a run; the worker's job queue provides it.
@@ -166,6 +168,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   loadRepositories: loadCheckedOutRepositories,
   notify: sendAutomationRunNotifications,
   now: () => new Date(),
+  postedInSlackThread: automationRunPostedInSlackThread,
   reopenRun: reopenAutomationRun,
   reportException: reportWorkerException,
   requeueRun: async () => {
@@ -328,6 +331,15 @@ function contextInstructions(
   ];
 }
 
+// The trigger names the author, so instructions about whose messages to
+// answer can be followed.
+function slackTriggerInstructions(triggerInput: Record<string, unknown>): string[] {
+  if (triggerInput.provider !== "slack") return [];
+  return [
+    "Slack started this run. The trigger payload's attributes name who posted the message (authorName, authorId, and authorType, which is app or person) and whether it mentions you (mentioned). Nothing appears in Slack unless you post it: when the automation's instructions say to skip this message, finish without posting or reacting.",
+  ];
+}
+
 function automationPrompt(
   run: ClaimedAutomationRun,
   repositories: Array<{ path: string; repository: string }>,
@@ -346,6 +358,7 @@ function automationPrompt(
     automationActionInstructions(notificationChannels, workspace),
     repositoryInstructions(repositories),
     ...contextInstructions(connections),
+    ...slackTriggerInstructions(run.triggerInput),
     "Trigger payload:",
     JSON.stringify(run.triggerInput, null, 2),
     ...(continuation ? ["", continuation] : []),
@@ -411,7 +424,9 @@ function slackReplyTurn(conversation: AutomationConversation): boolean {
 
 // A Slack-started run keeps a live card in the triggering thread, like an
 // investigation. The first turn and each turn that answers a Slack reply post
-// one; follow-ups from the run page continue there.
+// one; follow-ups from the run page continue there. A first turn that nobody
+// asked for, such as one started by every message in a channel, posts its
+// card only once the agent posts in the thread.
 async function startSlackCard(
   dependencies: AutomationRunDependencies,
   run: ClaimedAutomationRun,
@@ -433,7 +448,17 @@ async function startSlackCard(
     return null;
   }
   if (!target) return null;
+  const asked = !firstTurn || target.mentioned;
   const card = createAutomationSlackCard({
+    ...(asked
+      ? {}
+      : {
+          agentPosted: () => dependencies.postedInSlackThread({
+            channelId: target.channelId,
+            runId: run.runId,
+            threadTimestamp: target.threadTimestamp,
+          }),
+        }),
     automationId: run.automationId,
     dependencies: dependencies.slackCard,
     onError,

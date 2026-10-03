@@ -10,6 +10,7 @@ export type AutomationTrigger =
   | {
       channelIds: string[];
       eventMode: "mentions" | "every_message" | "both";
+      ignoredAuthors?: SlackAuthor[];
       integrationAccountId: string;
       kind: "slack";
     }
@@ -32,6 +33,12 @@ export type AutomationTrigger =
       timezone: string;
       weekday: number;
     };
+
+// A Slack person or app, by user ID or app ID.
+export interface SlackAuthor {
+  id: string;
+  name: string;
+}
 
 export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "schedule" }>;
 
@@ -212,6 +219,13 @@ export function fetchAutomationRuns(id: string, page: number): Promise<Automatio
 
 export async function fetchSentryEnvironments(accountId: string, signal?: AbortSignal): Promise<string[]> {
   return (await automationJson<{ environments: string[] }>(`/api/automations/sentry/${encodeURIComponent(accountId)}/environments`, { signal })).environments;
+}
+
+// The people and apps that posted in the channels, most recent first.
+export async function fetchSlackAuthors(accountId: string, channelIds: string[], signal?: AbortSignal): Promise<Array<SlackAuthor & { kind: "app" | "person" }>> {
+  const query = new URLSearchParams(channelIds.map((channelId) => ["channel", channelId]));
+  const { authors } = await automationJson<{ authors?: Array<SlackAuthor & { kind: "app" | "person" }> }>(`/api/automations/slack/${encodeURIComponent(accountId)}/authors?${query}`, { signal });
+  return authors ?? [];
 }
 
 export function fetchAutomationOptions(): Promise<AutomationOptions> {

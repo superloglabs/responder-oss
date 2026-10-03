@@ -117,6 +117,7 @@ function dependencies() {
     }]),
     notify: vi.fn().mockResolvedValue(undefined),
     now: () => new Date("2026-09-22T19:00:00.000Z"),
+    postedInSlackThread: vi.fn().mockResolvedValue(false),
     reopenRun: vi.fn().mockResolvedValue(true),
     reportException: vi.fn().mockResolvedValue(undefined),
     requeueRun: vi.fn().mockResolvedValue(undefined),
@@ -302,12 +303,16 @@ describe("automation run processor", () => {
   });
 
   describe("Slack plan card", () => {
-    const slackStartedRun = () => ({
+    const slackStartedRun = (mentioned = true) => ({
       ...claimedRun(),
       triggerInput: {
         ...claimedRun().triggerInput,
         attributes: {
+          authorId: "A-QOVERY",
+          authorName: "Qovery",
+          authorType: "app",
           channelId: "C123",
+          mentioned,
           teamId: "T123",
           threadTimestamp: "1790000000.000100",
           timestamp: "1790000000.000200",
@@ -350,6 +355,50 @@ describe("automation run processor", () => {
         text: "Automation complete",
         timestamp: "1790000001.000200",
       }));
+    });
+
+    it("posts nothing in the thread when the agent does not post in a run nobody asked for", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun(false));
+      deps.getConnections.mockResolvedValue([slackConnection]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+      expect(prompt).toContain("name who posted the message (authorName, authorId, and authorType");
+      expect(prompt).toContain("when the automation's instructions say to skip this message, finish without posting or reacting");
+      expect(prompt).toContain('"authorId": "A-QOVERY"');
+      expect(prompt).toContain('"authorName": "Qovery"');
+      expect(prompt).toContain('"authorType": "app"');
+      expect(prompt).toContain('"mentioned": false');
+      expect(deps.postedInSlackThread).toHaveBeenCalledWith({
+        channelId: "C123",
+        runId,
+        threadTimestamp: "1790000000.000100",
+      });
+      expect(deps.slackCard.post).not.toHaveBeenCalled();
+    });
+
+    it("posts the card after the agent posts in the thread of a run nobody asked for", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(slackStartedRun(false));
+      deps.getConnections.mockResolvedValue([slackConnection]);
+      deps.postedInSlackThread.mockResolvedValue(true);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.slackCard.post).toHaveBeenCalledOnce();
+      expect(deps.slackCard.post).toHaveBeenCalledWith(expect.objectContaining({
+        text: "Automation complete",
+        threadTimestamp: "1790000000.000100",
+      }));
+      expect(deps.slackCard.post.mock.invocationCallOrder[0]).toBeGreaterThan(
+        deps.runInSandbox.mock.invocationCallOrder[0]!,
+      );
     });
 
     it("marks the card stopped when the run fails", async () => {

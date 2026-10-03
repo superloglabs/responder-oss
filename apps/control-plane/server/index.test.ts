@@ -41,6 +41,7 @@ const slackWebhookMocks = vi.hoisted(() => ({
   getSlackChannelConnection: vi.fn(),
   organizationHasCapability: vi.fn().mockResolvedValue(false),
   recordInvestigationSlackSource: vi.fn(),
+  recordSlackMessageAuthor: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock(
@@ -54,6 +55,7 @@ vi.mock(
 vi.mock("../../../packages/core/src/db/automations.js", async (importOriginal) => ({
   ...(await importOriginal()),
   findAutomationsForSlackEvent: slackWebhookMocks.findAutomationsForSlackEvent,
+  recordSlackMessageAuthor: slackWebhookMocks.recordSlackMessageAuthor,
 }));
 
 vi.mock("./automations/queue.js", () => ({
@@ -1693,7 +1695,7 @@ describe("control-plane API", () => {
   ])("does not start automations for $name", async ({ event, reason }) => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     slackWebhookMocks.findAutomationsForSlackEvent.mockResolvedValueOnce([
-      { automationId: "31313131-3131-4313-8313-313131313131", startsRun: true },
+      { automationId: "31313131-3131-4313-8313-313131313131", integrationAccountId: "41414141-4141-4141-8141-414141414141", mentioned: false, startsRun: true },
     ]);
 
     const response = await postSignedSlackEvent(event);
@@ -1712,7 +1714,7 @@ describe("control-plane API", () => {
   it("starts automations for teammate messages that are not alerts", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     slackWebhookMocks.findAutomationsForSlackEvent.mockResolvedValueOnce([
-      { automationId: "31313131-3131-4313-8313-313131313131", startsRun: true },
+      { automationId: "31313131-3131-4313-8313-313131313131", integrationAccountId: "41414141-4141-4141-8141-414141414141", mentioned: false, startsRun: true },
     ]);
     vi.mocked(queueAutomationRun).mockResolvedValueOnce({
       duplicate: false,

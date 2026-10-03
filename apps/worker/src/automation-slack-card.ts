@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AutomationTranscriptItem } from "@responder/core/automations/transcript";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
@@ -12,6 +13,8 @@ export const automationSlackCardUpdateIntervalMs = 3_000;
 export interface AutomationSlackCardTarget {
   accessToken: string;
   channelId: string;
+  // Whether the message that started the run mentions the app.
+  mentioned: boolean;
   threadTimestamp: string;
 }
 
@@ -30,6 +33,7 @@ export const defaultAutomationSlackCardDependencies: AutomationSlackCardDependen
 const slackTriggerSchema = z.object({
   attributes: z.object({
     channelId: z.string().min(1),
+    mentioned: z.boolean().optional(),
     teamId: z.string().min(1),
     threadTimestamp: z.string().min(1).optional(),
     timestamp: z.string().min(1),
@@ -50,7 +54,7 @@ export function automationSlackCardTarget(
 ): AutomationSlackCardTarget | null {
   const trigger = slackTriggerSchema.safeParse(triggerInput);
   if (!trigger.success) return null;
-  const { channelId, teamId, threadTimestamp, timestamp } = trigger.data.attributes;
+  const { channelId, mentioned, teamId, threadTimestamp, timestamp } = trigger.data.attributes;
   const connection = connections.find((candidate) =>
     candidate.provider === "slack" &&
     candidate.externalAccountId === teamId &&
@@ -64,6 +68,7 @@ export function automationSlackCardTarget(
   return {
     accessToken: credentials.data.accessToken,
     channelId,
+    mentioned: mentioned === true,
     threadTimestamp: threadTimestamp ?? timestamp,
   };
 }
@@ -71,9 +76,12 @@ export function automationSlackCardTarget(
 export type AutomationSlackCard = ReturnType<typeof createAutomationSlackCard>;
 
 // Posts the run's live card when the run starts, keeps it current as the
-// transcript grows, and marks it finished. The card is best effort: Slack
-// failures go to onError and never stop the run.
+// transcript grows, and marks it finished. With `agentPosted`, the card waits
+// until the agent has posted in the thread, so a run that decides to stay
+// quiet leaves nothing there. The card is best effort: Slack failures go to
+// onError and never stop the run.
 export function createAutomationSlackCard(input: {
+  agentPosted?: () => Promise<boolean>;
   automationId: string;
   dependencies?: AutomationSlackCardDependencies;
   onError(error: unknown): void;
@@ -85,7 +93,13 @@ export function createAutomationSlackCard(input: {
   let items: AutomationTranscriptItem[] = [];
   let timestamp: string | null = null;
   let finished = false;
-  let lastSentAt = 0;
+  let waiting = Boolean(input.agentPosted);
+  // One ID for every attempt to post the card, so Slack drops a repeat of a
+  // post it already accepted.
+  const clientMessageId = randomUUID();
+  // When the card last changed, or while waiting, when the agent's posts
+  // were last checked.
+  let lastSentAt = Number.NEGATIVE_INFINITY;
   let trailing: ReturnType<typeof setTimeout> | undefined;
   // Updates run in order so an older card never replaces a newer one.
   let writes = Promise.resolve();
@@ -102,11 +116,35 @@ export function createAutomationSlackCard(input: {
     status,
   });
 
+  async function post(status: "complete" | "error" | "in_progress", detail?: string): Promise<void> {
+    const message = card(status, detail);
+    try {
+      timestamp = await dependencies.post({
+        accessToken: input.target.accessToken,
+        blocks: message.blocks,
+        channelId: input.target.channelId,
+        clientMessageId,
+        text: message.text,
+        threadTimestamp: input.target.threadTimestamp,
+      });
+      lastSentAt = dependencies.now();
+    } catch (error) {
+      input.onError(error);
+    }
+  }
+
   function send(status: "complete" | "error" | "in_progress", detail?: string) {
     lastSentAt = dependencies.now();
-    const message = card(status, detail);
     writes = writes.then(async () => {
+      if (waiting) {
+        if (!(await input.agentPosted!())) return;
+        // A failed post leaves the card waiting, so the next send tries again.
+        await post(status, detail);
+        if (timestamp) waiting = false;
+        return;
+      }
       if (!timestamp) return;
+      const message = card(status, detail);
       await dependencies.update({
         accessToken: input.target.accessToken,
         blocks: message.blocks,
@@ -120,22 +158,10 @@ export function createAutomationSlackCard(input: {
 
   return {
     async start(): Promise<void> {
-      const message = card("in_progress");
-      try {
-        timestamp = await dependencies.post({
-          accessToken: input.target.accessToken,
-          blocks: message.blocks,
-          channelId: input.target.channelId,
-          text: message.text,
-          threadTimestamp: input.target.threadTimestamp,
-        });
-        lastSentAt = dependencies.now();
-      } catch (error) {
-        input.onError(error);
-      }
+      if (!waiting) await post("in_progress");
     },
     progress(next: AutomationTranscriptItem[]): void {
-      if (finished || !timestamp || next.length === items.length) return;
+      if (finished || (!waiting && !timestamp) || next.length === items.length) return;
       items = next;
       if (trailing) return;
       const wait = lastSentAt + automationSlackCardUpdateIntervalMs - dependencies.now();

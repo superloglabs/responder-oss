@@ -19,6 +19,7 @@ import {
   getAutomationRun,
   listAutomationRuns,
   listAutomations,
+  listSlackMessageAuthors,
   requestAutomationRunCancellation,
   setAutomationEnabled,
   updateAutomation,
@@ -54,6 +55,7 @@ const automationEnabledSchema = z.object({ enabled: z.boolean() });
 const runMessageSchema = z.object({
   message: z.string().trim().min(1).max(automationUserMessageMaxLength),
 });
+const slackAuthorChannelsSchema = z.array(z.string().min(1).max(255)).max(50);
 const runPageSize = 10;
 const runPageSchema = z.coerce.number().int().min(1).max(10_000).catch(1);
 const credentialInputSchema = z.object({
@@ -260,6 +262,20 @@ export const automationRoutes = new Hono()
     } catch {
       return context.json({ error: "Unable to load Sentry environments. Try again." }, 502);
     }
+  })
+  .get("/slack/:accountId/authors", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const accountId = context.req.param("accountId");
+    const channelIds = slackAuthorChannelsSchema.safeParse(context.req.queries("channel") ?? []);
+    if (!z.uuid().safeParse(accountId).success || !channelIds.success) return context.json({ error: "Invalid request" }, 400);
+    return context.json({
+      authors: await listSlackMessageAuthors({
+        channelIds: channelIds.data,
+        integrationAccountId: accountId,
+        organizationId: access.tenant.organizationId,
+      }),
+    });
   })
   .get("/credentials", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
