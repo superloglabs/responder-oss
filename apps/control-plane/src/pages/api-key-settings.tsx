@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   apiKeyUsage,
   createApiKey,
@@ -87,7 +88,8 @@ export function ApiKeySettingsPage() {
           API keys give the <a href={docsUrl} rel="noreferrer" target="_blank">management API</a> and
           the Superlog MCP server access to this workspace&apos;s automations,
           runs, tag mode, model access, and secrets. A key acts as the member
-          who created it and stops working if they leave the workspace.
+          who created it and stops working if they leave the workspace. Most
+          MCP clients can <Link to="/settings/mcp">sign in without a key</Link>.
         </p>
 
         {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}

@@ -5,6 +5,7 @@ export type SettingsSection =
   | "api-keys"
   | "billing"
   | "integrations"
+  | "mcp"
   | "models"
   | "tag-mode"
   | "workspace";
@@ -74,6 +75,13 @@ export function SettingsTabs({
           Models
         </Link>
       ) : null}
+      <Link
+        aria-current={active === "mcp" ? "page" : undefined}
+        className={active === "mcp" ? "isActive" : undefined}
+        to="/settings/mcp"
+      >
+        MCP
+      </Link>
       <Link
         aria-current={active === "api-keys" ? "page" : undefined}
         className={active === "api-keys" ? "isActive" : undefined}
