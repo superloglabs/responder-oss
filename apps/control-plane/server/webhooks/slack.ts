@@ -7,6 +7,7 @@ import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents
 import {
   findAutomationsForSlackEvent,
   findSlackThreadAutomationRun,
+  recordSlackMessageAuthor,
 } from "../../../../packages/core/src/db/automations.js";
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
@@ -80,6 +81,7 @@ const slackMessageSchema = z.object({
   bot_profile: z
     .object({
       app_id: z.string().optional(),
+      id: z.string().optional(),
       name: z.string().optional(),
     })
     .passthrough()
@@ -232,6 +234,35 @@ function slackMessageTitle(body: string): string {
     .map((line) => line.trim())
     .find(Boolean);
   return (firstLine ?? "Slack channel alert").slice(0, 500);
+}
+
+export interface SlackEventAuthor {
+  // The app ID for an app when Slack sends one, else its bot ID; the user ID
+  // for a person.
+  id: string;
+  // Every user, bot, and app ID Slack sent for the sender.
+  ids: string[];
+  kind: "app" | "person";
+  // Absent for a person whose profile Slack did not send.
+  name?: string;
+}
+
+// Who posted the message. A message without a bot or app is a person's.
+export function slackEventAuthor(
+  event: Pick<z.infer<typeof slackMessageSchema>, "app_id" | "bot_id" | "bot_profile" | "user" | "user_profile" | "username">,
+): SlackEventAuthor | null {
+  const ids = [
+    ...new Set([event.user, event.bot_id, event.bot_profile?.id, event.app_id, event.bot_profile?.app_id]
+      .filter((value): value is string => Boolean(value))),
+  ];
+  if (event.user && !event.bot_id && !event.app_id && !event.bot_profile) {
+    const name = event.user_profile?.display_name?.trim() || event.user_profile?.real_name?.trim();
+    return { id: event.user, ids, kind: "person", ...(name ? { name } : {}) };
+  }
+  const id = event.app_id || event.bot_profile?.app_id || event.bot_id || event.bot_profile?.id || event.user;
+  if (!id) return null;
+  const name = event.bot_profile?.name?.trim() || event.username?.trim();
+  return { id, ids, kind: "app", ...(name ? { name } : {}) };
 }
 
 function slackMessageAuthor(
@@ -903,48 +934,76 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ ok: true, ignored: true, reason: ignoreReason });
   }
 
+  const author = slackEventAuthor(event);
   const automationMatches = await findAutomationsForSlackEvent({
+    authorIds: author?.ids ?? [],
     channelId: event.channel,
     eventType: event.type,
-    senderAppId: event.app_id ?? event.bot_profile?.app_id,
     teamId: callback.data.team_id,
-    userId: event.user,
+    text: rawMessageBody,
   });
+  if (author) {
+    // The trigger editor offers the people and apps seen here as authors to
+    // ignore. A failure only leaves that list a message behind.
+    await Promise.all(
+      [...new Set(automationMatches.map((match) => match.integrationAccountId))].map((integrationAccountId) =>
+        recordSlackMessageAuthor({
+          authorId: author.id,
+          channelId: event.channel,
+          integrationAccountId,
+          kind: author.kind,
+          name: author.name ?? author.id,
+        }).catch((error: unknown) => {
+          console.error(JSON.stringify({
+            errorCode: error instanceof Error ? error.name : typeof error,
+            event: "slack_message_author_record_failed",
+            eventId: callback.data.event_id,
+          }));
+        })
+      ),
+    );
+  }
   // A person replying in a thread that an automation is working in continues
-  // that run. Alerts from other apps in the thread still start new runs.
-  const reply = event.thread_ts && event.user && !event.bot_id && !event.app_id && !event.bot_profile
+  // that run.
+  const reply = event.thread_ts && author?.kind === "person"
     ? {
-        authorId: event.user,
-        authorName:
-          event.user_profile?.display_name?.trim() ||
-          event.user_profile?.real_name?.trim() ||
-          `<@${event.user}>`,
+        authorId: author.id,
+        authorName: author.name || `<@${author.id}>`,
         // Slack sends a mention as both a message and an app_mention event.
         externalEventId: `${event.channel}:${event.ts}`,
         source: "slack" as const,
         text: body,
-        threadTimestamp: event.thread_ts,
       }
     : null;
   const automationResults = await Promise.allSettled(
     automationMatches.map(async (match) => {
-      if (reply) {
-        const { threadTimestamp, ...message } = reply;
+      if (event.thread_ts) {
         const run = await findSlackThreadAutomationRun({
           automationId: match.automationId,
           channelId: event.channel,
           teamId: callback.data.team_id,
-          threadTimestamp,
+          threadTimestamp: event.thread_ts,
         });
         // A redelivery of the message that started this run is not a reply;
         // starting the run again finds it as a duplicate.
         if (run && run.triggerTimestamp !== event.ts) {
-          const outcome = await queueAutomationRunReply({ message, runId: run.id });
+          if (reply) {
+            const outcome = await queueAutomationRunReply({ message: reply, runId: run.id });
+            console.info(JSON.stringify({
+              automationId: match.automationId,
+              event: "slack_automation_reply",
+              eventId: callback.data.event_id,
+              outcome,
+              runId: run.id,
+            }));
+            return;
+          }
+          // Another app answering in the thread, such as another agent,
+          // would start a run that answers it back, and so on.
           console.info(JSON.stringify({
             automationId: match.automationId,
-            event: "slack_automation_reply",
+            event: "slack_automation_app_reply_ignored",
             eventId: callback.data.event_id,
-            outcome,
             runId: run.id,
           }));
           return;
@@ -955,7 +1014,15 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         automationId: match.automationId,
         trigger: {
           attributes: {
+            ...(author
+              ? {
+                  authorId: author.id,
+                  ...(author.name ? { authorName: author.name } : {}),
+                  authorType: author.kind,
+                }
+              : {}),
             channelId: event.channel,
+            mentioned: match.mentioned,
             teamId: callback.data.team_id,
             threadTimestamp: event.thread_ts ?? event.ts,
             timestamp: event.ts,

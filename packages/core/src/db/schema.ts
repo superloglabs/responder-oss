@@ -385,6 +385,26 @@ export const integrationResources = pgTable(
   ],
 );
 
+// The people and apps that posted in Slack channels an automation watches,
+// newest first, so a Slack trigger can offer them as authors to ignore.
+// Thread replies count, which channel history does not show.
+export const slackMessageAuthors = pgTable(
+  "slack_message_authors",
+  {
+    integrationAccountId: uuid("integration_account_id")
+      .notNull()
+      .references(() => integrationAccounts.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").notNull(),
+    authorId: text("author_id").notNull(),
+    name: text("name").notNull(),
+    kind: text("kind").$type<"app" | "person">().notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.integrationAccountId, table.channelId, table.authorId] }),
+  ],
+);
+
 export const repositories = pgTable(
   "repositories",
   {

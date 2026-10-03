@@ -39,6 +39,7 @@ import {
   integrationResources,
   organizationCapabilities,
   repositories,
+  slackMessageAuthors,
   workspaceSecrets,
   type AutomationActionKind,
   type AutomationRunStatus,
@@ -65,14 +66,22 @@ export class AutomationConfigurationError extends Error {
 
 // Every enabled automation with a Slack trigger on the channel. A reply in a
 // run's thread continues that run whatever the trigger's event mode, so
-// `startsRun` says only whether this event starts a new run.
+// `startsRun` says only whether this event starts a new run. A trigger that
+// ignores the message's author does not watch for it. `authorIds` are the
+// sender's user, bot, and app IDs that Slack sent.
 export async function findAutomationsForSlackEvent(input: {
+  authorIds: string[];
   channelId: string;
   eventType: "app_mention" | "message";
-  senderAppId?: string;
   teamId: string;
-  userId?: string;
-}): Promise<Array<{ automationId: string; startsRun: boolean }>> {
+  text: string;
+}): Promise<Array<{
+  automationId: string;
+  integrationAccountId: string;
+  // Whether the message mentions the app, as an app mention or in its text.
+  mentioned: boolean;
+  startsRun: boolean;
+}>> {
   const rows = await getDatabase()
     .select({
       accountId: integrationAccounts.id,
@@ -114,16 +123,18 @@ export async function findAutomationsForSlackEvent(input: {
     .where(eq(automations.enabled, true));
 
   return rows.flatMap((row) => {
+    const { appId, botUserId } = row.accountMetadata;
     if (
-      (input.userId && row.accountMetadata.botUserId === input.userId) ||
-      (input.senderAppId && row.accountMetadata.appId === input.senderAppId)
+      (typeof botUserId === "string" && input.authorIds.includes(botUserId)) ||
+      (typeof appId === "string" && input.authorIds.includes(appId))
     ) {
       return [];
     }
     const watching = row.triggers.filter((trigger) =>
       trigger.kind === "slack" &&
       trigger.integrationAccountId === row.accountId &&
-      trigger.channelIds.includes(input.channelId)
+      trigger.channelIds.includes(input.channelId) &&
+      !trigger.ignoredAuthors?.some((author) => input.authorIds.includes(author.id))
     );
     if (watching.length === 0) return [];
     const startsRun = watching.some((trigger) =>
@@ -132,8 +143,72 @@ export async function findAutomationsForSlackEvent(input: {
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
         (trigger.eventMode === "every_message" && input.eventType === "message"))
     );
-    return [{ automationId: row.automationId, startsRun }];
+    return [{
+      automationId: row.automationId,
+      integrationAccountId: row.accountId,
+      mentioned: input.eventType === "app_mention" ||
+        (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`)),
+      startsRun,
+    }];
   });
+}
+
+// Records who posted in a channel that an automation watches. A name that
+// changed replaces the stored one.
+export async function recordSlackMessageAuthor(input: {
+  authorId: string;
+  channelId: string;
+  integrationAccountId: string;
+  kind: "app" | "person";
+  name: string;
+}): Promise<void> {
+  const seenAt = new Date();
+  await getDatabase()
+    .insert(slackMessageAuthors)
+    .values({ ...input, lastSeenAt: seenAt })
+    .onConflictDoUpdate({
+      set: { kind: input.kind, lastSeenAt: seenAt, name: input.name },
+      target: [
+        slackMessageAuthors.integrationAccountId,
+        slackMessageAuthors.channelId,
+        slackMessageAuthors.authorId,
+      ],
+    });
+}
+
+// The people and apps that posted in any of the channels, most recent first.
+export async function listSlackMessageAuthors(input: {
+  channelIds: string[];
+  integrationAccountId: string;
+  organizationId: string;
+}): Promise<Array<{ id: string; kind: "app" | "person"; name: string }>> {
+  if (input.channelIds.length === 0) return [];
+  const rows = await getDatabase()
+    .select({
+      id: slackMessageAuthors.authorId,
+      kind: slackMessageAuthors.kind,
+      lastSeenAt: slackMessageAuthors.lastSeenAt,
+      name: slackMessageAuthors.name,
+    })
+    .from(slackMessageAuthors)
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.id, slackMessageAuthors.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+      ),
+    )
+    .where(and(
+      eq(slackMessageAuthors.integrationAccountId, input.integrationAccountId),
+      inArray(slackMessageAuthors.channelId, input.channelIds),
+    ))
+    .orderBy(desc(slackMessageAuthors.lastSeenAt))
+    .limit(500);
+  const authors = new Map<string, { id: string; kind: "app" | "person"; name: string }>();
+  for (const row of rows) {
+    if (!authors.has(row.id)) authors.set(row.id, { id: row.id, kind: row.kind, name: row.name });
+  }
+  return [...authors.values()];
 }
 
 // Every enabled automation with a Sentry trigger on the project and event
@@ -1198,6 +1273,26 @@ export async function automationRunHasFinishedTurn(runId: string): Promise<boole
     .where(and(
       eq(automationRunEvents.runId, runId),
       inArray(automationRunEvents.type, ["run_succeeded", "run_failed", "run_cancelled"]),
+    ))
+    .limit(1);
+  return rows.length > 0;
+}
+
+// Whether the run's agent posted a message in the Slack thread.
+export async function automationRunPostedInSlackThread(input: {
+  channelId: string;
+  runId: string;
+  threadTimestamp: string;
+}): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: automationActionAttempts.id })
+    .from(automationActionAttempts)
+    .where(and(
+      eq(automationActionAttempts.runId, input.runId),
+      eq(automationActionAttempts.kind, "send_slack_message"),
+      eq(automationActionAttempts.status, "succeeded"),
+      sql`${automationActionAttempts.redactedInput}->>'channelId' = ${input.channelId}`,
+      sql`${automationActionAttempts.redactedInput}->>'threadTimestamp' = ${input.threadTimestamp}`,
     ))
     .limit(1);
   return rows.length > 0;

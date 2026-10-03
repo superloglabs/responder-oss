@@ -88,10 +88,30 @@ describe("trigger matching", () => {
 
     // A plain message starts only "every message" automations, but a reply in
     // a run's thread reaches every automation watching the channel.
-    await expect(findAutomationsForSlackEvent({ channelId: "C1", eventType: "message", teamId: "T1", userId: "U1" }))
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "message", teamId: "T1", text: "Checkout is down" }))
       .resolves.toEqual([
-        { automationId: "mentions", startsRun: false },
-        { automationId: "messages", startsRun: true },
+        { automationId: "mentions", integrationAccountId: accountId, mentioned: false, startsRun: false },
+        { automationId: "messages", integrationAccountId: accountId, mentioned: false, startsRun: true },
+      ]);
+  });
+
+  it("skips the app's own messages and authors a trigger ignores", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const ignoring = { ...slack, eventMode: "every_message", ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }] } as const;
+    const rows = [
+      { accountId, accountMetadata: metadata, automationId: "ignoring", triggers: [ignoring] },
+      { accountId, accountMetadata: metadata, automationId: "open", triggers: [{ ...slack, eventMode: "every_message" }] },
+    ];
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows]));
+
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U-DEVIN", "B-DEVIN", "A-DEVIN"], channelId: "C1", eventType: "message", teamId: "T1", text: "Agreed" }))
+      .resolves.toEqual([{ automationId: "open", integrationAccountId: accountId, mentioned: false, startsRun: true }]);
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U-BOT", "B-RESPONDER"], channelId: "C1", eventType: "message", teamId: "T1", text: "Done" }))
+      .resolves.toEqual([]);
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "message", teamId: "T1", text: "<@U-BOT> look" }))
+      .resolves.toEqual([
+        { automationId: "ignoring", integrationAccountId: accountId, mentioned: true, startsRun: true },
+        { automationId: "open", integrationAccountId: accountId, mentioned: true, startsRun: true },
       ]);
   });
 

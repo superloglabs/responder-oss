@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getAutomationRun: vi.fn(),
   listAutomationRuns: vi.fn().mockResolvedValue({ runs: [], total: 0 }),
   listAutomations: vi.fn().mockResolvedValue([]),
+  listSlackAuthors: vi.fn().mockResolvedValue([]),
   listCredentials: vi.fn().mockResolvedValue([]),
   analytics: vi.fn(),
   getShare: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock(
     getAutomationRun: mocks.getAutomationRun,
     listAutomationRuns: mocks.listAutomationRuns,
     listAutomations: mocks.listAutomations,
+    listSlackMessageAuthors: mocks.listSlackAuthors,
     requestAutomationRunCancellation: vi.fn(),
     setAutomationEnabled: vi.fn(),
     updateAutomation: vi.fn(),
@@ -144,6 +146,22 @@ describe("automation control-plane routes", () => {
       organizationId,
       "31313131-3131-4131-8131-313131313131",
     );
+  });
+
+  it("lists the Slack authors of the selected channels in the active organization", async () => {
+    const accountId = "41414141-4141-4141-8141-414141414141";
+    mocks.listSlackAuthors.mockResolvedValue([{ id: "A123", kind: "app", name: "Devin" }]);
+
+    const response = await app.request(`/api/automations/slack/${accountId}/authors?channel=C1&channel=C2`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ authors: [{ id: "A123", kind: "app", name: "Devin" }] });
+    expect(mocks.listSlackAuthors).toHaveBeenCalledWith({
+      channelIds: ["C1", "C2"],
+      integrationAccountId: accountId,
+      organizationId,
+    });
+    expect((await app.request("/api/automations/slack/not-a-uuid/authors?channel=C1")).status).toBe(400);
   });
 
   it("pages run history within the active organization", async () => {

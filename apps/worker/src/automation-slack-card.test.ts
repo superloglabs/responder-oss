@@ -33,6 +33,7 @@ const slackConnection = {
 const target = {
   accessToken: "xoxb-token",
   channelId: "C123",
+  mentioned: false,
   threadTimestamp: "1790000000.000100",
 };
 
@@ -83,6 +84,7 @@ describe("automation Slack card", () => {
   afterEach(() => vi.useRealTimers());
 
   function card(overrides: {
+    agentPosted?: () => Promise<boolean>;
     post?: AutomationSlackCardDependencies["post"];
     update?: AutomationSlackCardDependencies["update"];
   } = {}) {
@@ -94,6 +96,7 @@ describe("automation Slack card", () => {
     const onError = vi.fn();
     return {
       card: createAutomationSlackCard({
+        ...(overrides.agentPosted ? { agentPosted: overrides.agentPosted } : {}),
         automationId: "31313131-3131-4131-8131-313131313131",
         dependencies,
         onError,
@@ -170,6 +173,48 @@ describe("automation Slack card", () => {
     await expect(slackCard.finish("complete")).resolves.toBeUndefined();
 
     expect(onError).toHaveBeenCalledWith(postError);
+    expect(dependencies.update).not.toHaveBeenCalled();
+  });
+
+  it("waits for the agent to post in the thread before posting", async () => {
+    let agentPosted = false;
+    const check = vi.fn(async () => agentPosted);
+    const { card: slackCard, dependencies } = card({ agentPosted: check });
+
+    await slackCard.start();
+    slackCard.progress([tool("search_events")]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(check).toHaveBeenCalledOnce();
+    expect(dependencies.post).not.toHaveBeenCalled();
+
+    // Checks are throttled like updates; the next one finds the post.
+    agentPosted = true;
+    slackCard.progress([tool("search_events"), tool("get_sentry_resource")]);
+    now += automationSlackCardUpdateIntervalMs;
+    await vi.advanceTimersByTimeAsync(automationSlackCardUpdateIntervalMs);
+    expect(dependencies.post).toHaveBeenCalledOnce();
+    expect(taskTitles(dependencies.post.mock.calls[0]![0])).toEqual([
+      "Search Sentry events",
+      "Get Sentry resource",
+      "Automation running",
+    ]);
+
+    await slackCard.finish("complete");
+    expect(dependencies.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      text: "Automation complete",
+      timestamp: "1790000001.000300",
+    }));
+  });
+
+  it("posts nothing when the agent never posts in the thread", async () => {
+    const { card: slackCard, dependencies } = card({ agentPosted: async () => false });
+
+    await slackCard.start();
+    slackCard.progress([tool("search_events")]);
+    await slackCard.finish("error", "Automation run was cancelled");
+    await vi.runAllTimersAsync();
+
+    expect(dependencies.post).not.toHaveBeenCalled();
     expect(dependencies.update).not.toHaveBeenCalled();
   });
 

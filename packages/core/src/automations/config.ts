@@ -29,6 +29,16 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       .describe("Slack channel IDs, such as C0123456789."),
     eventMode: z.enum(["mentions", "every_message", "both"])
       .describe("Run when the app is mentioned, on every new message, or both."),
+    // Messages from these people and apps neither start a run nor reach a
+    // run as replies. The name is what the trigger editor shows.
+    ignoredAuthors: z.array(z.object({
+      id: externalResourceIdSchema
+        .describe("Slack user ID, such as U0123456789, or app ID, such as A0123456789."),
+      name: z.string().trim().min(1).max(255),
+    })).max(100)
+      .refine((authors) => uniqueIds(authors.map((author) => author.id)), "Ignored authors must be unique")
+      .optional()
+      .describe("Slack people and apps whose messages do not start or continue a run."),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("slack"),
   }).describe("Runs on Slack messages in the selected channels."),
