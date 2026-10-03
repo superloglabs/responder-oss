@@ -1,5 +1,5 @@
 {
-  "id": "4063683c-bd04-4b29-ac14-b0a3945a5df0",
+  "id": "2e094a40-0ef6-4378-91a2-b10abd143317",
   "prevId": "8b7f50f9-6e25-4a5a-bd8a-4524dca39f8b",
   "version": "7",
   "dialect": "postgresql",
@@ -464,6 +464,21 @@
           "method": "btree",
           "with": {}
         },
+        "oauthAccessToken_referenceId_idx": {
+          "name": "oauthAccessToken_referenceId_idx",
+          "columns": [
+            {
+              "expression": "reference_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "oauthAccessToken_refreshId_idx": {
           "name": "oauthAccessToken_refreshId_idx",
           "columns": [
@@ -872,6 +887,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "oauthConsent_referenceId_idx": {
+          "name": "oauthConsent_referenceId_idx",
+          "columns": [
+            {
+              "expression": "reference_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1029,6 +1059,21 @@
           "columns": [
             {
               "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "oauthRefreshToken_referenceId_idx": {
+          "name": "oauthRefreshToken_referenceId_idx",
+          "columns": [
+            {
+              "expression": "reference_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

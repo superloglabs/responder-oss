@@ -15,7 +15,10 @@ describe("MCP OAuth page", () => {
     ).toEqual({ clientId: "abc", redirectHost: "localhost:6274" });
     expect(
       oauthAuthorizationRequest("?client_id=abc&redirect_uri=cursor%3A%2F%2Fauth&sig=s"),
-    ).toEqual({ clientId: "abc", redirectHost: "cursor" });
+    ).toEqual({ clientId: "abc", redirectHost: "cursor://auth" });
+    expect(
+      oauthAuthorizationRequest("?client_id=abc&redirect_uri=vscode%3A%2Fcallback&sig=s"),
+    ).toEqual({ clientId: "abc", redirectHost: "vscode" });
   });
 
   it("treats an unsigned or incomplete request as missing", () => {

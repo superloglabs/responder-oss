@@ -93,7 +93,8 @@ Responder is designed as two long-running Node.js services backed by one
 Postgres database:
 
 1. Build and serve `apps/control-plane/dist` at your public origin.
-2. Route `/api/*` on that origin to the control-plane service.
+2. Route `/api/*` and `/.well-known/*` on that origin to the control-plane
+   service.
 3. Run the worker with the same database and encryption configuration.
 4. Apply every migration in `drizzle/` before starting a new release.
 5. Store all credentials in your deployment's secret environment.

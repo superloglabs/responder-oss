@@ -137,21 +137,23 @@ function Consent({
       {organizations.isPending ? (
         <p className="authMuted">Loading workspaces…</p>
       ) : workspaces.length > 0 ? (
-        <div className="workspaceList" role="radiogroup" aria-label="Workspace">
+        <fieldset className="workspaceList oauthWorkspaceList">
+          <legend className="srOnly">Workspace</legend>
           {workspaces.map((workspace) => (
-            <button
-              aria-checked={selectedWorkspace?.id === workspace.id}
-              className="workspaceChoice"
-              disabled={isSubmitting}
-              key={workspace.id}
-              onClick={() => setSelected(workspace.id)}
-              role="radio"
-              type="button"
-            >
+            <label className="workspaceChoice" key={workspace.id}>
+              <input
+                checked={selectedWorkspace?.id === workspace.id}
+                className="srOnly"
+                disabled={isSubmitting}
+                name="workspace"
+                onChange={() => setSelected(workspace.id)}
+                type="radio"
+                value={workspace.id}
+              />
               <span>{workspace.name}</span>
-            </button>
+            </label>
           ))}
-        </div>
+        </fieldset>
       ) : (
         <form className="authForm workspaceCreate oauthWorkspaceCreate" onSubmit={createWorkspace}>
           <label className="authField">

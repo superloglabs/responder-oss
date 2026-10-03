@@ -20,9 +20,9 @@ function redirectHost(redirectUri: string | null): string | null {
   if (!redirectUri) return null;
   try {
     const url = new URL(redirectUri);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.host
-      : url.protocol.replace(/:$/, "");
+    if (url.protocol === "http:" || url.protocol === "https:") return url.host;
+    // Custom schemes open a desktop app; show the scheme with any host.
+    return url.host ? `${url.protocol}//${url.host}` : url.protocol.replace(/:$/, "");
   } catch {
     return null;
   }

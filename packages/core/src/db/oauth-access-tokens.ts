@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, arrayContains, eq, gt, or, isNull } from "drizzle-orm";
+import { and, arrayContains, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { member, oauthAccessToken, oauthClient, user } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 
@@ -53,7 +53,11 @@ export async function authenticateOAuthAccessToken(
         gt(oauthAccessToken.expiresAt, now),
         arrayContains(oauthAccessToken.scopes, [input.scope]),
         or(isNull(oauthClient.disabled), eq(oauthClient.disabled, false)),
-        or(isNull(user.banned), eq(user.banned, false)),
+        or(
+          isNull(user.banned),
+          eq(user.banned, false),
+          lte(user.banExpires, now),
+        ),
       ),
     )
     .limit(1);

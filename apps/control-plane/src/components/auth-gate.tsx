@@ -131,7 +131,7 @@ export function SignIn({
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") ?? "");
     const password = String(data.get("password") ?? "");
-    if (isCreatingAccount) {
+    if (isCreatingAccount && allowLegacyHandoff) {
       // AuthGate clears a legacy marker after the newly-created session is
       // visible. Keeping this intent in sessionStorage closes the race between
       // Better Auth returning a session and the clear request completing.
