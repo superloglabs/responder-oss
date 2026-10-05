@@ -152,6 +152,24 @@ function errorForMonitoring(
   return sanitized;
 }
 
+// An AggregateError's message names only the operation; the errors it holds
+// say what failed.
+function aggregatedErrorsForMonitoring(
+  value: unknown,
+  secrets: readonly string[],
+): { message: string; name: string }[] {
+  if (!(value instanceof AggregateError)) return [];
+  return value.errors.slice(0, 10).map((item: unknown) => {
+    const error = asError(item);
+    return {
+      message: error
+        ? redactString(error.message, secrets).slice(0, 2_000)
+        : "Non-Error exception",
+      name: error?.name ?? typeof item,
+    };
+  });
+}
+
 function scrubWorkerSentryEvent(
   event: Event,
   environment: NodeJS.ProcessEnv,
@@ -232,9 +250,12 @@ export async function reportWorkerException(
       if (context.operation === "slack_delivery") {
         scope.setContext("slack", slackErrorLogFields(error));
       }
-      Sentry.captureException(
-        errorForMonitoring(error, eventSecrets(eventScrubbingEnvironment)),
-      );
+      const secrets = eventSecrets(eventScrubbingEnvironment);
+      const aggregatedErrors = aggregatedErrorsForMonitoring(error, secrets);
+      if (aggregatedErrors.length > 0) {
+        scope.setContext("aggregated_errors", { errors: aggregatedErrors });
+      }
+      Sentry.captureException(errorForMonitoring(error, secrets));
     });
   } catch (reportingError) {
     console.error(

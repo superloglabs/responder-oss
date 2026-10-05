@@ -64,6 +64,41 @@ describe("worker error monitoring", () => {
     expect(sentryMocks.captureException).toHaveBeenCalledOnce();
   });
 
+  it("reports what each error inside an AggregateError says", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      DAYTONA_API_KEY: "daytona-secret-key",
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+    const conflict = Object.assign(
+      new Error("Sandbox is starting (key daytona-secret-key)"),
+      { name: "DaytonaConflictError" },
+    );
+    await monitoring.reportWorkerException(
+      new AggregateError(
+        [new Error("Failed to create and start sandbox within 60 seconds"), conflict],
+        "Unable to create or clean up Daytona sandbox responder-automation-1",
+      ),
+      { operation: "automation" },
+    );
+
+    expect(sentryMocks.scope.setContext).toHaveBeenCalledWith(
+      "aggregated_errors",
+      {
+        errors: [
+          {
+            message: "Failed to create and start sandbox within 60 seconds",
+            name: "Error",
+          },
+          {
+            message: "Sandbox is starting (key [redacted])",
+            name: "DaytonaConflictError",
+          },
+        ],
+      },
+    );
+  });
+
   it("stays disabled when no DSN is configured", async () => {
     const monitoring = await import("./monitoring.js");
 

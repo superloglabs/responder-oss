@@ -16,6 +16,7 @@ import {
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
   deleteDaytonaSandboxByName,
+  maxDaytonaSandboxBaseNameLength,
   prepareDaytonaSandbox,
   replaceDaytonaSandboxSecrets,
   sandboxDeletedAfterFailedCreation,
@@ -97,7 +98,7 @@ function sandboxNameForRun(runId: string): string {
     throw new Error("Automation run ID cannot be used as a sandbox name");
   }
   const sandboxName = `responder-automation-${runId}`;
-  if (sandboxName.length > 64) {
+  if (sandboxName.length > maxDaytonaSandboxBaseNameLength) {
     throw new Error("Automation run ID cannot be used as a sandbox name");
   }
   return sandboxName;

@@ -53,8 +53,21 @@ const daytonaAppearanceRetryDelaysMs = [
   10_000,
   10_000,
 ] as const;
-const daytonaStartAttempts = 2;
-const daytonaStartRetryDelayMs = 5_000;
+// A sandbox that is still starting rejects deletion with a conflict until it
+// settles, which can take a few minutes.
+const daytonaSettleRetryDelaysMs = [
+  ...daytonaAppearanceRetryDelaysMs,
+  15_000,
+  30_000,
+  60_000,
+  60_000,
+] as const;
+const daytonaCreateAttempts = 3;
+const daytonaCreateRetryDelayMs = 5_000;
+// The Daytona SDK gives up on a sandbox that has not started within 60
+// seconds by default, while Daytona keeps starting it.
+const daytonaCreateTimeoutSec = 120;
+const daytonaSandboxNameLimit = 64;
 
 // Daytona returns this when the runner it picked cannot start the container,
 // for example when the runner's container runtime is broken. A new attempt
@@ -64,7 +77,11 @@ function isDaytonaStartFailure(error: unknown): boolean {
     error.message.includes("Sandbox failed to start");
 }
 
-// Creation errors thrown after the failed sandbox was confirmed deleted.
+// Cleanup errors for a sandbox that never appeared, already reported where
+// they were raised.
+const missingSandboxErrors = new WeakSet<object>();
+
+// Creation errors thrown after every failed sandbox was confirmed deleted.
 const creationErrorsWithDeletedSandbox = new WeakSet<object>();
 
 export function sandboxDeletedAfterFailedCreation(error: unknown): boolean {
@@ -73,27 +90,69 @@ export function sandboxDeletedAfterFailedCreation(error: unknown): boolean {
     creationErrorsWithDeletedSandbox.has(error);
 }
 
+const transientDaytonaErrorNames = [
+  "DaytonaBadGatewayError",
+  "DaytonaConnectionError",
+  "DaytonaConnectionTimeoutError",
+  "DaytonaInternalServerError",
+  "DaytonaRateLimitError",
+  "DaytonaServiceUnavailableError",
+  "DaytonaTimeoutError",
+];
+
+function isTransientStatus(statusCode: unknown): boolean {
+  return typeof statusCode === "number" &&
+    (statusCode === 408 || statusCode === 429 || statusCode >= 500);
+}
+
 function isTransientDaytonaError(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "statusCode" in error) {
-    const statusCode = error.statusCode;
-    if (
-      typeof statusCode === "number" &&
-      (statusCode === 408 || statusCode === 429 || statusCode >= 500)
-    ) {
-      return true;
-    }
+    if (isTransientStatus(error.statusCode)) return true;
   }
   return (
     error instanceof Error &&
-    [
-      "DaytonaBadGatewayError",
-      "DaytonaConnectionError",
-      "DaytonaConnectionTimeoutError",
-      "DaytonaInternalServerError",
-      "DaytonaRateLimitError",
-      "DaytonaServiceUnavailableError",
-      "DaytonaTimeoutError",
-    ].includes(error.name)
+    transientDaytonaErrorNames.includes(error.name)
+  );
+}
+
+function isDaytonaConflict(error: unknown): boolean {
+  return (error instanceof Error && error.name === "DaytonaConflictError") ||
+    (typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 409);
+}
+
+// The sandbox client wraps Daytona errors in a provider error that keeps the
+// original error name and status in its details.
+function providerErrorDetails(
+  error: unknown,
+): { errorName?: unknown; status?: unknown } {
+  if (typeof error !== "object" || error === null || !("details" in error)) {
+    return {};
+  }
+  const details = error.details;
+  return typeof details === "object" && details !== null ? details : {};
+}
+
+// A new sandbox under a new name can succeed after a timeout, an
+// unavailable Daytona API, a runner that could not start the container, or a
+// name still held by an earlier sandbox.
+function isRetryableCreationError(error: unknown): boolean {
+  if (
+    isDaytonaStartFailure(error) ||
+    isTransientDaytonaError(error) ||
+    isDaytonaConflict(error)
+  ) {
+    return true;
+  }
+  const { errorName, status } = providerErrorDetails(error);
+  return (
+    (typeof errorName === "string" &&
+      (transientDaytonaErrorNames.includes(errorName) ||
+        errorName === "DaytonaConflictError")) ||
+    isTransientStatus(status) ||
+    status === 409
   );
 }
 
@@ -122,7 +181,7 @@ async function deleteDaytonaSandboxByReference(
 ): Promise<void> {
   const client = dependencies.createClient(config);
   const retryDelays = waitForAppearance
-    ? daytonaAppearanceRetryDelaysMs
+    ? daytonaSettleRetryDelaysMs
     : daytonaRetryDelaysMs;
   try {
     for (const [index, delayMs] of retryDelays.entries()) {
@@ -133,7 +192,10 @@ async function deleteDaytonaSandboxByReference(
         return;
       } catch (error) {
         if (isDaytonaNotFound(error)) {
-          if (waitForAppearance && index < retryDelays.length - 1) {
+          if (
+            waitForAppearance &&
+            index < daytonaAppearanceRetryDelaysMs.length - 1
+          ) {
             continue;
           }
           if (waitForAppearance) {
@@ -144,6 +206,7 @@ async function deleteDaytonaSandboxByReference(
               operation: "sandbox_cleanup",
               sandboxId: reference,
             });
+            missingSandboxErrors.add(cleanupError);
             console.error(JSON.stringify({
               event: "daytona_pending_sandbox_not_found",
               sandboxId: reference,
@@ -153,8 +216,8 @@ async function deleteDaytonaSandboxByReference(
           return;
         }
         if (
-          !isTransientDaytonaError(error) ||
-          index === daytonaRetryDelaysMs.length - 1
+          !(isTransientDaytonaError(error) || isDaytonaConflict(error)) ||
+          index === retryDelays.length - 1
         ) {
           throw error;
         }
@@ -178,6 +241,84 @@ export async function deleteDaytonaSandboxByName(
   );
 }
 
+// The first attempt uses the job's sandbox name. Later attempts add a suffix,
+// because a sandbox that failed to start keeps its name until Daytona
+// finishes deleting it.
+function sandboxNameForAttempt(sandboxName: string, attempt: number): string {
+  return attempt === 1 ? sandboxName : `${sandboxName}-${attempt}`;
+}
+
+// Leaves room for the suffix of the last attempt.
+export const maxDaytonaSandboxBaseNameLength =
+  daytonaSandboxNameLimit - `-${daytonaCreateAttempts}`.length;
+
+interface AbandonedSandbox {
+  // Resolves to the deletion failure, if any. Never rejects.
+  deletion: Promise<unknown>;
+  name: string;
+}
+
+// Asks Daytona to delete the sandbox once it stops, so a sandbox that could
+// not be deleted directly is removed after its auto-stop.
+async function deleteSandboxWhenStopped(
+  name: string,
+  config: DaytonaCleanupConfig,
+  dependencies: DaytonaCleanupDependencies,
+): Promise<void> {
+  const client = dependencies.createClient(config);
+  try {
+    const sandbox = await client.get(name);
+    await sandbox.setAutoDeleteInterval(0);
+  } catch {
+    // The deletion failure is reported by the caller.
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
+function deleteAbandonedSandbox(
+  name: string,
+  config: DaytonaCleanupConfig,
+  dependencies: DaytonaCleanupDependencies,
+): AbandonedSandbox {
+  return {
+    deletion: deleteDaytonaSandboxByReference(name, config, true, dependencies)
+      .then(() => undefined, async (error: unknown) => {
+        if (!missingSandboxErrors.has(error as object)) {
+          await deleteSandboxWhenStopped(name, config, dependencies);
+        }
+        return error ?? new Error(`Unable to delete Daytona sandbox ${name}`);
+      }),
+    name,
+  };
+}
+
+// Waits for every abandoned sandbox to be deleted, then throws the creation
+// failure, together with any deletion failure.
+async function failCreation(
+  createError: unknown,
+  sandboxName: string,
+  abandoned: AbandonedSandbox[],
+): Promise<never> {
+  const cleanupErrors = (await Promise.all(
+    abandoned.map((sandbox) => sandbox.deletion),
+  )).filter((error) => error !== undefined);
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [createError, ...cleanupErrors],
+      `Unable to create or clean up Daytona sandbox ${sandboxName}`,
+    );
+  }
+  if (typeof createError === "object" && createError !== null) {
+    creationErrorsWithDeletedSandbox.add(createError);
+  }
+  throw createError;
+}
+
+// Creates a sandbox for a job. When an attempt fails with an error a new
+// sandbox can get past, the failed sandbox is deleted in the background and a
+// new one is created under a new name, so the job does not wait on a sandbox
+// that may take minutes to delete.
 export async function createDaytonaSandboxSession(
   creator: DaytonaSandboxCreator,
   config: DaytonaCleanupConfig,
@@ -186,46 +327,82 @@ export async function createDaytonaSandboxSession(
   // Stops a retry from creating a sandbox after the caller has given up.
   signal?: AbortSignal,
 ): Promise<DaytonaSandboxSession> {
-  await deleteDaytonaSandboxByReference(
-    sandboxName,
-    config,
-    false,
-    dependencies,
-  );
+  if (sandboxName.length > maxDaytonaSandboxBaseNameLength) {
+    throw new Error(`Sandbox name ${sandboxName} is too long`);
+  }
+  const abandoned: AbandonedSandbox[] = [];
   for (let attempt = 1; ; attempt += 1) {
+    const attemptName = sandboxNameForAttempt(sandboxName, attempt);
+    let session: DaytonaSandboxSession;
     try {
-      return await creator.create();
+      // A sandbox from an earlier run of the same job may hold the name.
+      await deleteDaytonaSandboxByReference(
+        attemptName,
+        config,
+        false,
+        dependencies,
+      );
+      session = await creator.create({
+        options: { createTimeoutSec: daytonaCreateTimeoutSec, name: attemptName },
+      });
     } catch (createError) {
-      try {
-        await deleteDaytonaSandboxByReference(
-          sandboxName,
-          config,
-          true,
-          dependencies,
-        );
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [createError, cleanupError],
-          `Unable to create or clean up Daytona sandbox ${sandboxName}`,
-        );
-      }
-      if (typeof createError === "object" && createError !== null) {
-        creationErrorsWithDeletedSandbox.add(createError);
-      }
+      abandoned.push(deleteAbandonedSandbox(attemptName, config, dependencies));
       if (
-        attempt >= daytonaStartAttempts ||
-        !isDaytonaStartFailure(createError) ||
+        attempt >= daytonaCreateAttempts ||
+        !isRetryableCreationError(createError) ||
         signal?.aborted
       ) {
-        throw createError;
+        return await failCreation(createError, sandboxName, abandoned);
       }
       console.error(JSON.stringify({
-        event: "daytona_sandbox_start_retry",
-        sandboxId: sandboxName,
+        attempt,
+        errorName: createError instanceof Error
+          ? createError.name
+          : typeof createError,
+        event: "daytona_sandbox_create_retry",
+        sandboxId: sandboxNameForAttempt(sandboxName, attempt + 1),
       }));
-      await dependencies.sleep(daytonaStartRetryDelayMs);
-      if (signal?.aborted) throw createError;
+      await dependencies.sleep(daytonaCreateRetryDelayMs);
+      if (signal?.aborted) {
+        return await failCreation(createError, sandboxName, abandoned);
+      }
+      continue;
     }
+    if (signal?.aborted) {
+      abandoned.push(deleteAbandonedSandbox(attemptName, config, dependencies));
+      return await failCreation(signal.reason, sandboxName, abandoned);
+    }
+    reportAbandonedSandboxDeletions(abandoned, dependencies);
+    return session;
+  }
+}
+
+// Reports abandoned sandboxes that could not be deleted without failing the
+// job that already has a working sandbox.
+function reportAbandonedSandboxDeletions(
+  abandoned: AbandonedSandbox[],
+  dependencies: DaytonaCleanupDependencies,
+): void {
+  for (const sandbox of abandoned) {
+    void sandbox.deletion.then(async (error) => {
+      if (
+        error === undefined ||
+        (typeof error === "object" &&
+          error !== null &&
+          missingSandboxErrors.has(error))
+      ) {
+        return;
+      }
+      console.error(JSON.stringify({
+        errorName: error instanceof Error ? error.name : typeof error,
+        event: "daytona_abandoned_sandbox_cleanup_failed",
+        sandboxId: sandbox.name,
+      }));
+      await dependencies.reportException(error, {
+        operation: "sandbox_cleanup",
+        sandboxId: sandbox.name,
+      });
+    }).catch(() => undefined);
   }
 }
 

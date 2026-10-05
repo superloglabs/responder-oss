@@ -183,17 +183,28 @@ describe("Daytona sandbox cleanup", () => {
     expect(harness.sleep).toHaveBeenCalledWith(500);
   });
 
-  it("deletes a sandbox that failed to start and creates it again", async () => {
+  it("creates a replacement under a new name without waiting for the failed sandbox", async () => {
     const harness = cleanupHarness();
     const createdSession = { state: { sandboxId: "sandbox-2" } };
     const startFailure = new Error(
       "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start: Error response from daemon: failed to start shim (status: 400)",
     );
+    let firstAttemptFailed = false;
     const creator = {
       create: vi.fn()
-        .mockRejectedValueOnce(startFailure)
+        .mockImplementationOnce(async () => {
+          firstAttemptFailed = true;
+          throw startFailure;
+        })
         .mockResolvedValueOnce(createdSession),
     };
+    harness.get.mockImplementation(async (name: string) => ({ id: name }));
+    // The failed sandbox is still starting and cannot be deleted yet.
+    harness.deleteSandbox.mockImplementation(async (sandbox: { id: string }) => {
+      if (firstAttemptFailed && sandbox.id === "responder-investigation-1") {
+        await new Promise(() => undefined);
+      }
+    });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
@@ -205,21 +216,99 @@ describe("Daytona sandbox cleanup", () => {
       ),
     ).resolves.toBe(createdSession);
 
-    expect(creator.create).toHaveBeenCalledTimes(2);
-    // Once before the first attempt, then once for the failed sandbox.
-    expect(harness.deleteSandbox).toHaveBeenCalledTimes(2);
-    expect(harness.deleteSandbox.mock.invocationCallOrder[1]).toBeLessThan(
-      creator.create.mock.invocationCallOrder[1]!,
-    );
+    expect(creator.create.mock.calls).toEqual([
+      [{ options: { createTimeoutSec: 120, name: "responder-investigation-1" } }],
+      [{ options: { createTimeoutSec: 120, name: "responder-investigation-1-2" } }],
+    ]);
     expect(harness.sleep).toHaveBeenCalledWith(5_000);
     expect(harness.reportException).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
-      expect.stringContaining("daytona_sandbox_start_retry"),
+      expect.stringContaining("daytona_sandbox_create_retry"),
     );
     consoleError.mockRestore();
   });
 
-  it("stops after a second sandbox start failure", async () => {
+  it("creates a replacement after Daytona times out starting a sandbox", async () => {
+    const harness = cleanupHarness();
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const timeout = Object.assign(
+      new Error(
+        "DaytonaSandboxClient failed to create sandbox: Failed to create and start sandbox within 120 seconds. Operation timed out.",
+      ),
+      { details: { errorName: "DaytonaTimeoutError" } },
+    );
+    const creator = {
+      create: vi.fn()
+        .mockRejectedValueOnce(timeout)
+        .mockResolvedValueOnce(createdSession),
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-automation-run-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(creator.create).toHaveBeenCalledTimes(2);
+    consoleError.mockRestore();
+  });
+
+  it("reports a failed sandbox it could not delete without failing the job", async () => {
+    const harness = cleanupHarness();
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const startFailure = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start (status: 400)",
+    );
+    const deleteError = new Error("delete rejected");
+    let firstAttemptFailed = false;
+    const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
+    const creator = {
+      create: vi.fn()
+        .mockImplementationOnce(async () => {
+          firstAttemptFailed = true;
+          throw startFailure;
+        })
+        .mockResolvedValueOnce(createdSession),
+    };
+    harness.get.mockImplementation(async (name: string) => ({
+      id: name,
+      setAutoDeleteInterval,
+    }));
+    harness.deleteSandbox.mockImplementation(async (sandbox: { id: string }) => {
+      if (firstAttemptFailed && sandbox.id === "responder-investigation-1") {
+        throw deleteError;
+      }
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+    await vi.waitFor(() => {
+      expect(harness.reportException).toHaveBeenCalledWith(deleteError, {
+        operation: "sandbox_cleanup",
+        sandboxId: "responder-investigation-1",
+      });
+    });
+
+    // Daytona deletes the sandbox once it stops.
+    expect(setAutoDeleteInterval).toHaveBeenCalledWith(0);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("daytona_abandoned_sandbox_cleanup_failed"),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("stops after three failed attempts", async () => {
     const harness = cleanupHarness();
     const startFailure = new Error(
       "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start (status: 400)",
@@ -236,8 +325,51 @@ describe("Daytona sandbox cleanup", () => {
       ),
     ).rejects.toBe(startFailure);
 
-    expect(creator.create).toHaveBeenCalledTimes(2);
+    expect(creator.create).toHaveBeenCalledTimes(3);
+    expect(creator.create).toHaveBeenLastCalledWith({
+      options: { createTimeoutSec: 120, name: "responder-investigation-1-3" },
+    });
+    expect(sandboxDeletedAfterFailedCreation(startFailure)).toBe(true);
     consoleError.mockRestore();
+  });
+
+  it("deletes a sandbox created after the caller aborted", async () => {
+    const harness = cleanupHarness();
+    const controller = new AbortController();
+    const reason = new Error("runtime limit reached");
+    const creator = {
+      create: vi.fn(async () => {
+        controller.abort(reason);
+        return { state: { sandboxId: "sandbox-1" } } as DaytonaSandboxSession;
+      }),
+    };
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+        controller.signal,
+      ),
+    ).rejects.toBe(reason);
+
+    // Once before creation, then once for the sandbox nobody will use.
+    expect(harness.deleteSandbox).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects sandbox names without room for a replacement suffix", async () => {
+    const creator = { create: vi.fn() };
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "a".repeat(63),
+        cleanupHarness().dependencies,
+      ),
+    ).rejects.toThrow("is too long");
+    expect(creator.create).not.toHaveBeenCalled();
   });
 
   it("marks a creation failure once its sandbox is deleted", async () => {
@@ -275,7 +407,10 @@ describe("Daytona sandbox cleanup", () => {
       cleanupHarness({ missing: true }).dependencies,
     ).catch((error: unknown) => error);
 
-    expect(failedBeforeCreation).toBe(initialDeleteError);
+    expect(failedBeforeCreation).toBeInstanceOf(AggregateError);
+    expect((failedBeforeCreation as AggregateError).errors[0]).toBe(
+      initialDeleteError,
+    );
     expect(sandboxDeletedAfterFailedCreation(failedBeforeCreation)).toBe(false);
     expect(failedCleanup).toBeInstanceOf(AggregateError);
     expect(sandboxDeletedAfterFailedCreation(failedCleanup)).toBe(false);
@@ -351,6 +486,47 @@ describe("Daytona sandbox cleanup", () => {
       expect.stringContaining("daytona_pending_sandbox_not_found"),
     );
     consoleError.mockRestore();
+  });
+
+  it("waits for a starting sandbox to accept deletion", async () => {
+    const harness = cleanupHarness();
+    const conflict = Object.assign(new Error("state change in progress"), {
+      name: "DaytonaConflictError",
+      statusCode: 409,
+    });
+    harness.deleteSandbox
+      .mockRejectedValueOnce(conflict)
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      deleteDaytonaSandboxByName(
+        "responder-automation-run-1",
+        { daytonaApiKey: "daytona-test" },
+        harness.dependencies,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(harness.deleteSandbox).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps retrying transient deletion failures for the whole wait", async () => {
+    const harness = cleanupHarness();
+    const unavailable = Object.assign(new Error("unavailable"), {
+      statusCode: 503,
+    });
+    harness.get.mockRejectedValue(unavailable);
+
+    await expect(
+      deleteDaytonaSandboxByName(
+        "responder-automation-run-1",
+        { daytonaApiKey: "daytona-test" },
+        harness.dependencies,
+      ),
+    ).rejects.toBe(unavailable);
+
+    expect(harness.get).toHaveBeenCalledTimes(11);
+    expect(harness.sleep).toHaveBeenCalledWith(60_000);
   });
 
   it("enables provider-side deletion when a sandbox stops", async () => {
