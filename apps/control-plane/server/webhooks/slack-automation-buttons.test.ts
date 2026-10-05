@@ -76,17 +76,34 @@ describe("automation buttons in Slack", () => {
     vi.unstubAllGlobals();
   });
 
-  it("acknowledges Slack before the run is continued", async () => {
-    let finishQueueing: (outcome: string) => void = () => undefined;
-    mocks.queueReply.mockReturnValue(new Promise((resolve) => { finishQueueing = resolve; }));
+  it("stores the press before acknowledging Slack and updates the message afterwards", async () => {
+    let queued = false;
+    mocks.queueReply.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      queued = true;
+      return "queued";
+    });
+    // Slack's response URL never answers.
+    fetchMock.mockReturnValue(new Promise(() => undefined));
 
     const response = await press();
 
     expect(response.status).toBe(200);
-    await vi.waitFor(() => expect(mocks.queueReply).toHaveBeenCalled());
-    expect(fetchMock).not.toHaveBeenCalled();
-    finishQueueing("queued");
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(queued).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("tells the person when the press cannot be looked up", async () => {
+    mocks.getButtons.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await press();
+
+    expect(response.status).toBe(200);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(responses(fetchMock)).toEqual([{
+      body: { replace_original: false, response_type: "ephemeral", text: "Responder could not continue the run. Continue it from the run page in Responder." },
+      url: responseUrl,
+    }]);
   });
 
   it("continues the run that posted the message and replaces its buttons", async () => {
