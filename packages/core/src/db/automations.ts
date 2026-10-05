@@ -75,9 +75,9 @@ export class AutomationConfigurationError extends Error {
 // ignores the message's author does not watch for it. `authorIds` are the
 // sender's user, bot, and app IDs that Slack sent.
 //
-// When the organization has tag mode on, tag mode answers a message that
-// mentions the app unless a trigger watches for mentions, and it keeps the
-// threads it answers in: a message there starts no run while tag mode is on.
+// While the organization has tag mode on, tag mode keeps the threads it
+// answers in: a message there starts no run. Elsewhere, tag mode answers a
+// message that mentions the app unless a trigger watches for mentions.
 export async function findAutomationsForSlackEvent(input: {
   authorIds: string[];
   channelId: string;
