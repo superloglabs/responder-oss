@@ -50,15 +50,15 @@ describe("agent configuration", () => {
       instructions: "Investigate the request.",
       options: {
         accounts: [
-          { id: "slack", provider: "slack" },
-          { id: "github", provider: "github" },
-          { id: "sentry", provider: "sentry" },
-          { id: "vercel", provider: "vercel" },
-          { id: "mcp", provider: "custom_mcp" },
+          { id: "slack", provider: "slack", displayName: "Acme" },
+          { id: "github", provider: "github", displayName: "acme" },
+          { id: "sentry", provider: "sentry", displayName: "acme" },
+          { id: "vercel", provider: "vercel", displayName: "Acme" },
+          { id: "mcp", provider: "custom_mcp", displayName: "Tools" },
         ],
         resources: [
-          { id: "channel", integrationAccountId: "slack", kind: "slack_channel" },
-          { id: "project", integrationAccountId: "vercel", kind: "vercel_project" },
+          { id: "channel", integrationAccountId: "slack", kind: "slack_channel", displayName: "alerts" },
+          { id: "project", integrationAccountId: "vercel", kind: "vercel_project", displayName: "web" },
         ],
       },
     });
@@ -74,19 +74,47 @@ describe("agent configuration", () => {
     });
   });
 
-  it("keeps the default tag mode within the configuration limits", () => {
+  it("keeps one account of each provider before a second when over the limit", () => {
     const configuration = defaultSlackThreadModeConfiguration({
       instructions: "Investigate the request.",
       options: {
-        accounts: Array.from({ length: 25 }, (_, index) => ({
-          id: `mcp-${index}`,
-          provider: "custom_mcp",
-        })),
+        accounts: [
+          ...Array.from({ length: 25 }, (_, index) => ({
+            id: `mcp-${String(index).padStart(2, "0")}`,
+            provider: "custom_mcp",
+            displayName: `Server ${String(index).padStart(2, "0")}`,
+          })),
+          { id: "sentry", provider: "sentry", displayName: "acme" },
+        ],
         resources: [],
       },
     });
 
     expect(configuration.contextAccountIds).toHaveLength(20);
+    expect(configuration.contextAccountIds[0]).toBe("sentry");
+    expect(configuration.contextAccountIds.slice(1)).toEqual(
+      Array.from({ length: 19 }, (_, index) => `mcp-${String(index).padStart(2, "0")}`),
+    );
+  });
+
+  it("keeps the first 100 Vercel projects by name", () => {
+    const projects = Array.from({ length: 101 }, (_, index) => ({
+      id: `project-${String(index).padStart(3, "0")}`,
+      integrationAccountId: "vercel",
+      kind: "vercel_project",
+      displayName: `web-${String(index).padStart(3, "0")}`,
+    }));
+    const configuration = defaultSlackThreadModeConfiguration({
+      instructions: "Investigate the request.",
+      options: {
+        accounts: [{ id: "vercel", provider: "vercel", displayName: "Acme" }],
+        resources: projects.toReversed(),
+      },
+    });
+
+    expect(configuration.contextResourceIds).toEqual(
+      projects.slice(0, 100).map((project) => project.id),
+    );
   });
 
   it("accepts a Slack mention agent that reports in the source thread", () => {

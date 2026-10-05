@@ -149,6 +149,23 @@ function automationSaveError(error: unknown, name: string): never {
   throw error;
 }
 
+// A first tag mode change that picks its own integrations starts from only
+// those, so default Vercel projects of an integration it leaves out are
+// dropped too.
+async function defaultTagModeOptions(
+  organizationId: string,
+  contextAccountIds: string[] | undefined,
+) {
+  const options = await listAgentOptions(organizationId);
+  if (!contextAccountIds) return options;
+  return {
+    ...options,
+    accounts: options.accounts.filter((account) =>
+      contextAccountIds.includes(account.id),
+    ),
+  };
+}
+
 async function requireAutomation(context: ManagementContext, id: string) {
   const automation = await getAutomation(context.organizationId, id);
   if (!automation) {
@@ -707,7 +724,10 @@ export const managementOperations: ManagementOperation[] = [
           instructions: capabilities.includes("simplified_navigation")
             ? tagModeAssistantInstructions
             : tagModeInvestigationInstructions,
-          options: await listAgentOptions(context.organizationId),
+          options: await defaultTagModeOptions(
+            context.organizationId,
+            changes.contextAccountIds,
+          ),
         })),
         ...changes,
       });
