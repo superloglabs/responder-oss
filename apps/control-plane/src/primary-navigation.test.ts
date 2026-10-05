@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeNavigationSection, homePath, primaryNavigation } from "./primary-navigation";
+import { activeNavigationSection, homePath, newWorkspacePath, primaryNavigation } from "./primary-navigation";
 
 describe("primaryNavigation", () => {
   it("lists every product area by default", () => {
@@ -55,5 +55,20 @@ describe("homePath", () => {
 
   it("opens integrations in simplified navigation without automations", () => {
     expect(homePath(["simplified_navigation"])).toBe("/settings");
+  });
+});
+
+describe("newWorkspacePath", () => {
+  it("opens the automation form when the workspace has automations", () => {
+    expect(newWorkspacePath(["automations", "simplified_navigation"])).toBe("/automations/new");
+    expect(newWorkspacePath(["automations"])).toBe("/automations/new");
+  });
+
+  it("opens the agent form without automations", () => {
+    expect(newWorkspacePath([])).toBe("/agents/new");
+  });
+
+  it("opens the application home when the capabilities could not be read", () => {
+    expect(newWorkspacePath(null)).toBe("/app");
   });
 });

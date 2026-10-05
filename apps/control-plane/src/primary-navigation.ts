@@ -64,3 +64,11 @@ export function homePath(capabilities: readonly string[]): string {
     simplified: capabilities.includes("simplified_navigation"),
   })[0].to;
 }
+
+// Where a member lands after creating a workspace: the form for its first
+// automation, or its first agent when the workspace has no automations. When
+// the capabilities could not be read, the application home chooses later.
+export function newWorkspacePath(capabilities: readonly string[] | null): string {
+  if (!capabilities) return "/app";
+  return capabilities.includes("automations") ? "/automations/new" : "/agents/new";
+}
