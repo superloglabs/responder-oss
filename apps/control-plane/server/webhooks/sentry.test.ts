@@ -79,6 +79,7 @@ function signedIssueRequest(
 describe("Sentry issue webhooks", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -274,6 +275,35 @@ describe("Sentry issue webhooks", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Unable to start Sentry investigation",
     });
+  });
+
+  it("acknowledges an issue when the investigation allowance is used up", async () => {
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.mocked(findAgentsForSentryIssue).mockResolvedValue([
+      {
+        agentId: "00000000-0000-4000-8000-000000000001",
+        organizationId: "10000000-0000-4000-8000-000000000000",
+      },
+    ]);
+    vi.mocked(queueInvestigation).mockResolvedValue({ kind: "blocked" });
+    const request = signedIssueRequest("1234567892");
+
+    const response = await app.request("/api/webhooks/sentry", {
+      method: "POST",
+      body: request.body,
+      headers: {
+        "sentry-hook-resource": "issue",
+        "sentry-hook-signature": request.signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, matchedAgents: 1 });
+    expect(queueInvestigation).toHaveBeenCalledTimes(1);
+    expect(console.info).toHaveBeenCalledWith(
+      expect.stringContaining('"reason":"investigation_allowance_exhausted"'),
+    );
   });
 
   describe("environment filters", () => {

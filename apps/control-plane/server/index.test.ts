@@ -773,6 +773,65 @@ describe("control-plane API", () => {
     );
   });
 
+  it("acknowledges a Slack alert when the investigation allowance is used up", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    slackWebhookMocks.findAgentsForSlackEvent.mockResolvedValueOnce([
+      {
+        agentId: "17171717-1717-4717-8717-171717171717",
+        integrationAccountId: "04040404-0404-4404-8404-040404040404",
+        organizationId: "03030303-0303-4303-8303-030303030303",
+        trigger: "slack_channel",
+      },
+    ]);
+    vi.mocked(queueInvestigation).mockResolvedValueOnce({ kind: "blocked" });
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvBlocked",
+      event: {
+        type: "message",
+        subtype: "bot_message",
+        bot_id: "B-AWS",
+        bot_profile: {
+          app_id: "A-AWS",
+          name: "AWS Alarm notification",
+        },
+        channel: "C123",
+        ts: "1700000006.000001",
+        text: [
+          "The alarm checkout-errors changed state to ALARM: Threshold Crossed.",
+          "https://eu-west-3.console.aws.amazon.com/cloudwatch/home?region=eu-west-3#alarmsV2:alarm/checkout-errors",
+        ].join("\n"),
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      matchedAgents: 1,
+      ok: true,
+    });
+    expect(slackWebhookMocks.recordInvestigationSlackSource).not.toHaveBeenCalled();
+    expect(slackWebhookMocks.getSlackChannelConnection).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"slack_investigation_blocked"'),
+    );
+  });
+
   it("ignores AWS alarm recovery and unrelated Amazon Q messages", () => {
     const recovery = [
       "The alarm checkout-errors changed state to OK: Threshold Crossed.",

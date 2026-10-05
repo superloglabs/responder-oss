@@ -47,7 +47,10 @@ function payload(type = "alert.ongoing") {
 }
 
 describe("Dash0 webhooks", () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
 
   function connected() {
     vi.mocked(getConnectedIntegrationAccountCredential).mockResolvedValue({
@@ -94,6 +97,30 @@ describe("Dash0 webhooks", () => {
         sourceUrl: "https://app.dash0.com/failed-checks/issue-1",
         attributes: expect.objectContaining({ dataset: "production" }),
       }),
+    );
+  });
+
+  it("acknowledges an alert when the investigation allowance is used up", async () => {
+    connected();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.mocked(findAgentsForDash0Alert).mockResolvedValue([
+      { agentId: "20000000-0000-4000-8000-000000000000", organizationId: "organization-1" },
+    ]);
+    vi.mocked(queueInvestigation).mockResolvedValue({ kind: "blocked" });
+
+    const response = await app.request(`/api/webhooks/dash0/${accountId}`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dash0-webhook-secret-that-is-long-enough",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload()),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, matchedAgents: 1 });
+    expect(console.info).toHaveBeenCalledWith(
+      expect.stringContaining('"reason":"investigation_allowance_exhausted"'),
     );
   });
 
