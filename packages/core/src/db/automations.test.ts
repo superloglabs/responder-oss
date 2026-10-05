@@ -130,6 +130,39 @@ describe("trigger matching", () => {
       ]);
   });
 
+  it("leaves mentions and tag mode's threads to tag mode", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const automation = (automationId: string, eventMode: "both" | "every_message" | "mentions", tagModeThread = false) => ({
+      accountId,
+      accountMetadata: metadata,
+      automationId,
+      organizationId: "organization",
+      tagMode: true,
+      tagModeThread,
+      triggers: [{ ...slack, eventMode }],
+    });
+    const rows = [automation("messages", "every_message"), automation("mentions", "mentions"), automation("both", "both")];
+    const threadRows = rows.map((row) => ({ ...row, tagModeThread: true }));
+    const tagModeOffRows = threadRows.map((row) => ({ ...row, tagMode: false }));
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows, threadRows, tagModeOffRows]));
+    const startsRun = async (input: { eventType: "app_mention" | "message"; text: string; threadTimestamp?: string }) =>
+      (await findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", teamId: "T1", ...input }))
+        .filter((match) => match.startsRun)
+        .map((match) => match.automationId);
+
+    // A message that mentions the app starts only automations that watch for
+    // mentions; tag mode answers it otherwise.
+    await expect(startsRun({ eventType: "message", text: "Checkout is down" })).resolves.toEqual(["messages", "both"]);
+    await expect(startsRun({ eventType: "message", text: "<@U-BOT> why is checkout down?" })).resolves.toEqual(["both"]);
+    await expect(startsRun({ eventType: "app_mention", text: "<@U-BOT> why is checkout down?" })).resolves.toEqual(["mentions", "both"]);
+    // No message in a thread tag mode answers in starts a run.
+    await expect(startsRun({ eventType: "app_mention", text: "<@U-BOT> and now?", threadTimestamp: "1790000000.000100" }))
+      .resolves.toEqual([]);
+    // Once tag mode is off, its old threads start runs again.
+    await expect(startsRun({ eventType: "app_mention", text: "<@U-BOT> and now?", threadTimestamp: "1790000000.000100" }))
+      .resolves.toEqual(["mentions", "both"]);
+  });
+
   it("lists each Slack author once, newest first, up to a limit", async () => {
     const calls: string[] = [];
     const query = {
