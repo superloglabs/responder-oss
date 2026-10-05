@@ -388,6 +388,12 @@ export async function runInFreshAutomationSandbox<T>(
       try {
         await dependencies.closePending(name, input.config);
       } catch (error) {
+        console.error(JSON.stringify({
+          errorCode: error instanceof Error ? error.constructor.name : "unknown",
+          event: "automation_pending_sandbox_delete_failed",
+          runId: input.runId,
+          sandboxId: name,
+        }));
         cleanupFailure ??= error;
       }
     }

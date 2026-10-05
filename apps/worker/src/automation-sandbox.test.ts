@@ -241,7 +241,7 @@ describe("fresh automation sandbox", () => {
     expect(onCleanupConfirmed).toHaveBeenCalledOnce();
   });
 
-  it("deletes every sandbox a failed creation left behind", async () => {
+  it("deletes and logs every sandbox a failed creation left behind", async () => {
     const { dependencies } = harness();
     const startFailure = new Error(
       "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start (status: 400)",
@@ -273,6 +273,7 @@ describe("fresh automation sandbox", () => {
       sandboxDependencies,
     ).catch((error: unknown) => error);
     dependencies.createSession.mockRejectedValue(setupError);
+    dependencies.closePending.mockRejectedValue(new Error("delete rejected"));
 
     await expect(runInFreshAutomationSandbox(input, dependencies)).rejects.toBe(
       setupError,
@@ -282,6 +283,14 @@ describe("fresh automation sandbox", () => {
       ["responder-automation-run-1-2", input.config],
       ["responder-automation-run-1-3", input.config],
     ]);
+    for (const sandboxId of [
+      "responder-automation-run-1-2",
+      "responder-automation-run-1-3",
+    ]) {
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(
+        `"event":"automation_pending_sandbox_delete_failed","runId":"run-1","sandboxId":"${sandboxId}"`,
+      ));
+    }
     consoleError.mockRestore();
   });
 
