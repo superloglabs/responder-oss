@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  defaultSlackThreadModeConfiguration,
   slackThreadModeConfigurationSchema,
   tagModeAssistantInstructions,
   tagModeInvestigationInstructions,
@@ -146,6 +147,23 @@ function automationSaveError(error: unknown, name: string): never {
     );
   }
   throw error;
+}
+
+// A first tag mode change that picks its own integrations starts from only
+// those, so default Vercel projects of an integration it leaves out are
+// dropped too.
+async function defaultTagModeOptions(
+  organizationId: string,
+  contextAccountIds: string[] | undefined,
+) {
+  const options = await listAgentOptions(organizationId);
+  if (!contextAccountIds) return options;
+  return {
+    ...options,
+    accounts: options.accounts.filter((account) =>
+      contextAccountIds.includes(account.id),
+    ),
+  };
 }
 
 async function requireAutomation(context: ManagementContext, id: string) {
@@ -683,7 +701,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Changes tag mode. Send only what changes; each list you send replaces the current selection. Tag mode needs a Slack connection.",
+      "Changes tag mode. Send only what changes; each list you send replaces the current selection. The first change starts from every connected context integration. Tag mode needs a Slack connection.",
     effect: "write",
     input: tagModeChangesSchema,
     method: "PATCH",
@@ -702,17 +720,15 @@ export const managementOperations: ManagementOperation[] = [
         listEnabledOrganizationCapabilities(context.organizationId),
       ]);
       const parsed = slackThreadModeConfigurationSchema.safeParse({
-        ...(current ?? {
-          contextAccountIds: [],
-          contextResourceIds: [],
-          enabled: false,
+        ...(current ?? defaultSlackThreadModeConfiguration({
           instructions: capabilities.includes("simplified_navigation")
             ? tagModeAssistantInstructions
             : tagModeInvestigationInstructions,
-          model: "instance/default",
-          repositoryIds: [],
-          secretIds: [],
-        }),
+          options: await defaultTagModeOptions(
+            context.organizationId,
+            changes.contextAccountIds,
+          ),
+        })),
         ...changes,
       });
       if (!parsed.success) throw invalid("Invalid tag mode settings", parsed.error);

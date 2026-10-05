@@ -163,6 +163,77 @@ export const slackThreadModeConfigurationSchema = z.object({
   secretIds: z.array(z.uuid()).max(20).default([]),
 });
 
+// Integrations an agent or tag mode can use as context.
+export const contextIntegrationProviders = [
+  "aws",
+  "gcp",
+  "sentry",
+  "datadog",
+  "dash0",
+  "posthog",
+  "grafana",
+  "axiom",
+  "clickstack",
+  "upstash",
+  "langfuse",
+  "supabase",
+  "vercel",
+  "custom_mcp",
+  "linear",
+] as const;
+
+// Tag mode that has never been saved starts with every connected context
+// integration and every Vercel project, up to the configuration limits.
+// Over the account limit, each provider keeps one account before any keeps a
+// second. Repositories and secrets are still chosen by hand.
+export function defaultSlackThreadModeConfiguration(input: {
+  instructions: string;
+  options: {
+    accounts: { id: string; provider: string; displayName: string }[];
+    resources: {
+      id: string;
+      integrationAccountId: string;
+      kind: string;
+      displayName: string;
+    }[];
+  };
+}): SlackThreadModeConfiguration {
+  const byName = (
+    left: { id: string; displayName: string },
+    right: { id: string; displayName: string },
+  ) =>
+    left.displayName.localeCompare(right.displayName) ||
+    left.id.localeCompare(right.id);
+  const contextAccountIds = contextIntegrationProviders
+    .flatMap((provider, order) =>
+      input.options.accounts
+        .filter((account) => account.provider === provider)
+        .sort(byName)
+        .map((account, rank) => ({ id: account.id, order, rank })),
+    )
+    .sort((left, right) => left.rank - right.rank || left.order - right.order)
+    .map((account) => account.id)
+    .slice(0, 20);
+  const contextResourceIds = input.options.resources
+    .filter(
+      (resource) =>
+        resource.kind === "vercel_project" &&
+        contextAccountIds.includes(resource.integrationAccountId),
+    )
+    .sort(byName)
+    .map((resource) => resource.id)
+    .slice(0, 100);
+  return {
+    enabled: false,
+    model: "instance/default",
+    instructions: input.instructions,
+    repositoryIds: [],
+    contextAccountIds,
+    contextResourceIds,
+    secretIds: [],
+  };
+}
+
 export type AgentConfigurationInput = z.input<typeof agentConfigurationSchema>;
 export type AgentConfiguration = z.output<typeof agentConfigurationSchema>;
 export type AgentTrigger = AgentConfiguration["trigger"];

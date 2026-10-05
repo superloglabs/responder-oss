@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   getAutomationRun: vi.fn(),
   getOrganizationSummary: vi.fn(),
   getTagMode: vi.fn(),
+  listAgentOptions: vi.fn(),
   listAutomations: vi.fn(),
   listCapabilities: vi.fn(),
   queueRun: vi.fn(),
@@ -61,6 +62,7 @@ vi.mock("../../../../packages/core/src/db/automations.js", async (importOriginal
 vi.mock("../../../../packages/core/src/db/agents.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getSlackThreadModeConfiguration: mocks.getTagMode,
+  listAgentOptions: mocks.listAgentOptions,
   saveSlackThreadModeConfiguration: mocks.saveTagMode,
 }));
 vi.mock("../../../../packages/core/src/analytics.js", () => ({
@@ -398,6 +400,80 @@ describe("management API", () => {
       organizationId,
       userId,
     });
+  });
+
+  it("starts tag mode with every connected context integration", async () => {
+    signedIn();
+    const sentryAccountId = "91919191-9191-4191-8191-919191919191";
+    const vercelAccountId = "92929292-9292-4292-8292-929292929292";
+    const vercelProjectId = "93939393-9393-4393-8393-939393939393";
+    mocks.getTagMode.mockResolvedValue(null);
+    mocks.listCapabilities.mockResolvedValue([]);
+    mocks.listAgentOptions.mockResolvedValue({
+      accounts: [
+        { id: slackAccountId, provider: "slack", displayName: "Acme" },
+        { id: sentryAccountId, provider: "sentry", displayName: "acme" },
+        { id: vercelAccountId, provider: "vercel", displayName: "Acme" },
+      ],
+      repositories: [{ id: repositoryId, integrationAccountId: slackAccountId }],
+      resources: [
+        { id: vercelProjectId, integrationAccountId: vercelAccountId, kind: "vercel_project", displayName: "web" },
+        { id: "94949494-9494-4494-8494-949494949494", integrationAccountId: slackAccountId, kind: "slack_channel", displayName: "alerts" },
+      ],
+      secrets: [],
+    });
+
+    const response = await request("/tag-mode", {
+      body: JSON.stringify({ enabled: true }),
+      method: "PATCH",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveTagMode).toHaveBeenCalledWith({
+      configuration: expect.objectContaining({
+        contextAccountIds: [sentryAccountId, vercelAccountId],
+        contextResourceIds: [vercelProjectId],
+        enabled: true,
+        repositoryIds: [],
+      }),
+      organizationId,
+      userId,
+    });
+  });
+
+  it("leaves out default Vercel projects when the first change drops Vercel", async () => {
+    signedIn();
+    const sentryAccountId = "91919191-9191-4191-8191-919191919191";
+    const vercelAccountId = "92929292-9292-4292-8292-929292929292";
+    mocks.getTagMode.mockResolvedValue(null);
+    mocks.listCapabilities.mockResolvedValue([]);
+    mocks.listAgentOptions.mockResolvedValue({
+      accounts: [
+        { id: sentryAccountId, provider: "sentry", displayName: "acme" },
+        { id: vercelAccountId, provider: "vercel", displayName: "Acme" },
+      ],
+      repositories: [],
+      resources: [{
+        id: "93939393-9393-4393-8393-939393939393",
+        integrationAccountId: vercelAccountId,
+        kind: "vercel_project",
+        displayName: "web",
+      }],
+      secrets: [],
+    });
+
+    const response = await request("/tag-mode", {
+      body: JSON.stringify({ contextAccountIds: [sentryAccountId] }),
+      method: "PATCH",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveTagMode).toHaveBeenCalledWith(expect.objectContaining({
+      configuration: expect.objectContaining({
+        contextAccountIds: [sentryAccountId],
+        contextResourceIds: [],
+      }),
+    }));
   });
 
   it("revokes keys with the caller's role", async () => {
