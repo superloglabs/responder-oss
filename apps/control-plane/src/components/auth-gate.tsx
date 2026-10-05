@@ -15,6 +15,8 @@ import { workspaceSlug } from "./workspace";
 import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
+import { fetchCapabilities } from "../organization-capabilities";
+import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 
@@ -327,7 +329,12 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
   const [error, setError] = useState<string | null>(null);
   const hasOrganizations = (organizations.data?.length ?? 0) > 0;
 
-  async function activate(organizationId: string, redirectTo?: string) {
+  // A function destination is resolved after activation, when the new
+  // workspace's capabilities are readable.
+  async function activate(
+    organizationId: string,
+    redirectTo?: string | (() => Promise<string>),
+  ) {
     setError(null);
     setIsSubmitting(true);
     const result = await authClient.organization.setActive({ organizationId });
@@ -350,7 +357,8 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
       }),
     );
     await onReady();
-    if (redirectTo) window.location.replace(redirectTo);
+    const destination = typeof redirectTo === "function" ? await redirectTo() : redirectTo;
+    if (destination) window.location.replace(destination);
   }
 
   async function create(event: FormEvent<HTMLFormElement>) {
@@ -386,7 +394,11 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
         organizationId: result.data.id,
       }),
     );
-    await activate(result.data.id, automationSetupReturnPath(window.location) ?? "/agents/new");
+    await activate(
+      result.data.id,
+      automationSetupReturnPath(window.location) ??
+        (async () => newWorkspacePath(await fetchCapabilities())),
+    );
   }
 
   return (
