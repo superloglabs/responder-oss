@@ -134,16 +134,17 @@ export function renderSkillMarkdown(skill: {
 
 function frontMatterScalar(value: string): string {
   const trimmed = value.trim();
-  const doubleQuoted = /^"(?:[^"\\]|\\.)*"/u.exec(trimmed);
+  // A quoted value may be followed only by a comment.
+  const doubleQuoted = /^("(?:[^"\\]|\\.)*")\s*(?:#.*)?$/u.exec(trimmed);
   if (doubleQuoted) {
     try {
-      return JSON.parse(doubleQuoted[0]) as string;
+      return JSON.parse(doubleQuoted[1]!) as string;
     } catch {
-      return doubleQuoted[0].slice(1, -1);
+      return doubleQuoted[1]!.slice(1, -1);
     }
   }
-  const singleQuoted = /^'(?:[^']|'')*'/u.exec(trimmed);
-  if (singleQuoted) return singleQuoted[0].slice(1, -1).replaceAll("''", "'");
+  const singleQuoted = /^('(?:[^']|'')*')\s*(?:#.*)?$/u.exec(trimmed);
+  if (singleQuoted) return singleQuoted[1]!.slice(1, -1).replaceAll("''", "'");
   // In a plain scalar, a `#` after whitespace starts a comment.
   return trimmed.replace(/\s+#.*$/u, "");
 }

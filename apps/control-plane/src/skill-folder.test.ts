@@ -80,8 +80,9 @@ describe("likelyCredentialSources", () => {
       { name: "SKILL.md", content: "curl -H \"Authorization: Bearer $BILLING_API_KEY\" https://api.example" },
       { name: "keys.md", content: "aws_access_key_id = AKIAABCDEFGHIJKLMNOP" },
       { name: "notes.md", content: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456" },
+      { name: "lowercase.md", content: "authorization: bearer abcdefghijklmnopqrstuvwxyz123456" },
       { name: "key.pem", content: "-----BEGIN RSA PRIVATE KEY-----\nMIIE" },
-    ])).toEqual(["keys.md", "notes.md", "key.pem"]);
+    ])).toEqual(["keys.md", "notes.md", "lowercase.md", "key.pem"]);
   });
 });
 

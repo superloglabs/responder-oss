@@ -120,6 +120,10 @@ describe("SKILL.md", () => {
     });
   });
 
+  it("keeps a quoted value whole when other text follows the closing quote", () => {
+    expect(parseSkillMarkdown("---\nname: \"billing\" typo\n---\nUse it.").name).toBe("\"billing\" typo");
+  });
+
   it("treats a file without front matter as instructions", () => {
     expect(parseSkillMarkdown("# Billing\nUse the API.\n")).toEqual({
       instructions: "# Billing\nUse the API.",

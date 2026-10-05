@@ -121,6 +121,8 @@ export function SkillEditorPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [creatingSecret, setCreatingSecret] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const latestSkill = useRef(skill);
+  useEffect(() => { latestSkill.current = skill; }, [skill]);
   const folderInput = useRef<HTMLInputElement>(null);
   useDocumentTitle(savedName ? `${savedName} · Skills` : "New skill");
 
@@ -164,16 +166,17 @@ export function SkillEditorPage() {
     if (!list?.length) return;
     try {
       const read = readSkillFolder(await uploadedFiles(list, folder));
-      const merged = mergeSkillFiles(skill.files, read.files);
+      // Reading the files is asynchronous, so they are merged into the files
+      // the skill has by then.
       setSkill((current) => ({
         ...current,
         ...(read.skill?.name ? { name: skillNameFrom(read.skill.name) } : {}),
         ...(read.skill?.description ? { description: read.skill.description } : {}),
         ...(read.skill?.instructions ? { instructions: read.skill.instructions } : {}),
-        files: merged.files,
+        files: mergeSkillFiles(current.files, read.files).files,
       }));
       setSaved(false);
-      const skipped = [...read.skipped, ...merged.skipped];
+      const skipped = [...read.skipped, ...mergeSkillFiles(latestSkill.current.files, read.files).skipped];
       setNotice(skipped.length > 0
         ? `Skipped ${skipped.map((file) => `${file.path} (${file.reason})`).join(", ")}.`
         : null);

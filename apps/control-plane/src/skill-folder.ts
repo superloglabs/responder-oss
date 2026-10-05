@@ -104,7 +104,7 @@ const credentialPatterns = [
   /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/u,
   /\b[rs]k_live_[A-Za-z0-9]{16,}/u,
   /\bAIza[0-9A-Za-z_-]{35}\b/u,
-  /\bBearer [A-Za-z0-9._~+/-]{24,}/u,
+  /\bbearer [A-Za-z0-9._~+/-]{24,}/iu,
 ];
 
 // The names of the texts that look like they hold a credential.

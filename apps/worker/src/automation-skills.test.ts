@@ -27,8 +27,9 @@ describe("materializeAutomationSkills", () => {
     await materializeAutomationSkills(sandbox, [skill]);
 
     const command: string = sandbox.execCommand.mock.calls[0]![0].cmd;
-    expect(command.indexOf("realpath -e -- '/home/daytona/workspace/.responder'"))
-      .toBeLessThan(command.indexOf("rm -rf -- '/home/daytona/workspace/.responder/skills'"));
+    const guard = command.indexOf("[ \"$(realpath -e -- '/home/daytona/workspace/.responder')\" = '/home/daytona/workspace/.responder' ]");
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeLessThan(command.indexOf("rm -rf -- '/home/daytona/workspace/.responder/skills'"));
     expect(command.startsWith("set -eu\n")).toBe(true);
     expect(sandbox.materializeEntry.mock.calls.map(([call]) => call.path)).toEqual([
       "/home/daytona/workspace/.responder/skills/billing-api/SKILL.md",
