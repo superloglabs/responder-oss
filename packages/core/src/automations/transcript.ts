@@ -62,15 +62,27 @@ export interface AutomationTranscriptEventData {
   truncated: boolean;
 }
 
-// A follow-up or test chat message from a workspace member, or a reply in
-// the Slack thread that started the run.
+// A follow-up or test chat message from a workspace member, a reply in the
+// Slack thread that started the run, or a press of a button the agent added
+// to a Slack message.
 export interface AutomationUserMessageEventData {
   authorId: string;
   authorName: string;
   // The Slack event, so a redelivered event is stored once.
   externalEventId?: string;
+  slackButton?: AutomationSlackButtonPress;
   source?: "slack";
   text: string;
+}
+
+export interface AutomationSlackButtonPress {
+  channelId: string;
+  // The Slack connection that posted the message.
+  integrationAccountId: string;
+  label: string;
+  messageTimestamp: string;
+  // The message's thread, where the run answers.
+  threadTimestamp: string;
 }
 
 export const automationUserMessageMaxLength = 20_000;

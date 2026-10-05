@@ -7,6 +7,7 @@ import {
   listSlackMessageAuthors,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
+  getAutomationRunSlackButtons,
   summarizeAutomationList,
 } from "./automations.js";
 import { getDatabase } from "./client.js";
@@ -300,5 +301,43 @@ describe("claimAutomationRun", () => {
     await expect(claimAutomationRun(runId)).resolves.toBeNull();
     expect(deleted).toHaveLength(0);
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAutomationRunSlackButtons", () => {
+  const runId = "96751171-8931-4f9b-aaea-098f400f93b2";
+  const input = { channelId: "C1", messageTimestamp: "1790000001.000100", runId, teamId: "T1" };
+
+  function buttonsDatabase(rows: unknown[]) {
+    const conditions: SQL[] = [];
+    const query = {
+      from: () => query,
+      innerJoin: () => query,
+      limit: async () => rows,
+      where: (where: SQL) => { conditions.push(where); return query; },
+    };
+    vi.mocked(getDatabase).mockReturnValue({ select: () => query } as never);
+    return conditions;
+  }
+
+  it("looks up the run's message by channel, timestamp, and Slack workspace", async () => {
+    const conditions = buttonsDatabase([{ automationEnabled: true, buttons: ["Create PR", "Ignore"], integrationAccountId: "account" }]);
+
+    await expect(getAutomationRunSlackButtons(input)).resolves.toEqual({
+      automationEnabled: true,
+      buttons: ["Create PR", "Ignore"],
+      integrationAccountId: "account",
+    });
+    const where = new PgDialect().sqlToQuery(conditions[0]!);
+    expect(where.params).toEqual(expect.arrayContaining([runId, "send_slack_message", "succeeded", "C1:1790000001.000100", "slack", "T1"]));
+  });
+
+  it("finds nothing for a message without buttons", async () => {
+    for (const buttons of [null, "Create PR", ["Create PR", 1]]) {
+      buttonsDatabase([{ automationEnabled: true, buttons, integrationAccountId: "account" }]);
+      await expect(getAutomationRunSlackButtons(input)).resolves.toBeNull();
+    }
+    buttonsDatabase([]);
+    await expect(getAutomationRunSlackButtons(input)).resolves.toBeNull();
   });
 });

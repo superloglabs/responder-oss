@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import {
+  automationSlackButtonCardTarget,
   automationSlackCardTarget,
   automationSlackCardUpdateIntervalMs,
   createAutomationSlackCard,
@@ -65,6 +66,18 @@ describe("automation Slack card target", () => {
       { ...slackTrigger, attributes },
       [slackConnection],
     )?.threadTimestamp).toBe("1790000000.000200");
+  });
+
+  it("posts in the thread of a message whose button was pressed", () => {
+    expect(automationSlackButtonCardTarget(
+      { channelId: "C555", threadTimestamp: "1790000001.000100" },
+      "encrypted-slack-token",
+    )).toEqual({ accessToken: "xoxb-token", channelId: "C555", mentioned: true, threadTimestamp: "1790000001.000100" });
+    vi.mocked(decryptCredentials).mockReturnValue({});
+    expect(automationSlackButtonCardTarget(
+      { channelId: "C555", threadTimestamp: "1790000001.000100" },
+      "encrypted-slack-token",
+    )).toBeNull();
   });
 
   it("skips runs that Slack did not start or cannot reach", () => {

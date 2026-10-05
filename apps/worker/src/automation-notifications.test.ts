@@ -120,6 +120,50 @@ describe("sending automation notifications", () => {
     }));
   });
 
+  it("adds buttons under the message", async () => {
+    const post = vi.fn().mockResolvedValue("1790000000.000200");
+    const buttonsBlock = { block_id: "automation_run_buttons", elements: [], type: "actions" };
+    await postAutomationNotification({
+      buttonsBlock,
+      markdown: "Checkout fails.",
+      notifications: [notification],
+      organizationId,
+      seed: "attempt-1",
+      text: "Checkout fails.",
+    }, { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), post });
+
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      blocks: [{ text: "Checkout fails.", type: "markdown" }, buttonsBlock],
+    }));
+  });
+
+  it("reports a turn that answered a button in that message's thread", async () => {
+    const post = vi.fn().mockResolvedValue("1790000000.000300");
+    const dependencies = { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), post };
+    const report = (eventId: number) => sendAutomationRunNotifications({
+      automationId,
+      automationName: "Sentry triage",
+      environment: {},
+      notifications: [notification],
+      onError: vi.fn(),
+      organizationId,
+      outcome: { message: "Opened the pull request.", status: "succeeded" },
+      runId,
+      thread: { eventId, timestamp: "1790000000.000100" },
+    }, dependencies);
+
+    await report(2);
+    await report(5);
+    await report(2);
+
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ threadTimestamp: "1790000000.000100" }));
+    // Each turn's report is its own Slack message, and a retried report is
+    // the same message to Slack.
+    const ids = post.mock.calls.map(([input]) => input.clientMessageId);
+    expect(ids[0]).not.toBe(ids[1]);
+    expect(ids[2]).toBe(ids[0]);
+  });
+
   it("keeps posting to other channels when one fails", async () => {
     const failure = new Error("not_in_channel");
     const { dependencies, onError, sent } = send({

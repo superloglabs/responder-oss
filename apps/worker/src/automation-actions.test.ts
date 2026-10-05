@@ -261,6 +261,67 @@ describe("automation notification tool", () => {
     });
   });
 
+  it("adds buttons that continue the run and records their labels", async () => {
+    const deps = dependencies();
+    deps.postNotification.mockResolvedValue([{ notification, timestamp: "1790000000.000100" }]);
+    const { handle } = handler(deps, { notifications: target() });
+
+    await handle({
+      arguments: { buttons: [{ label: "Create PR", style: "primary" }, { label: "Ignore" }], text: "Checkout fails for guests." },
+      name: "post_notification",
+    });
+
+    expect(deps.postNotification).toHaveBeenCalledWith(expect.objectContaining({
+      buttonsBlock: {
+        block_id: "automation_run_buttons",
+        elements: [
+          { action_id: "automation_run_button:0", style: "primary", text: { emoji: true, text: "Create PR", type: "plain_text" }, type: "button", value: runId },
+          { action_id: "automation_run_button:1", text: { emoji: true, text: "Ignore", type: "plain_text" }, type: "button", value: runId },
+        ],
+        type: "actions",
+      },
+    }));
+    expect(deps.beginAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      redactedInput: {
+        buttons: ["Create PR", "Ignore"],
+        channel: "#ops",
+        channelId: "C100",
+        integrationAccountId: notification.integrationAccountId,
+      },
+    }));
+  });
+
+  it("refuses more buttons than Slack shows or repeated labels", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps, { notifications: target() });
+
+    for (const buttons of [
+      Array.from({ length: 6 }, (_, index) => ({ label: `Option ${index}` })),
+      [{ label: "Yes" }, { label: "Yes" }],
+    ]) {
+      await expect(handle({ arguments: { buttons, text: "Choose." }, name: "post_notification" }))
+        .resolves.toMatchObject({ isError: true });
+    }
+    expect(deps.postNotification).not.toHaveBeenCalled();
+
+    deps.postNotification.mockResolvedValue([{ notification, timestamp: "1790000000.000100" }]);
+    const five = Array.from({ length: 5 }, (_, index) => ({ label: `Option ${index}` }));
+    await expect(handle({ arguments: { buttons: five, text: "Choose." }, name: "post_notification" }))
+      .resolves.not.toMatchObject({ isError: true });
+    expect(deps.postNotification).toHaveBeenCalledOnce();
+  });
+
+  it("replies in the thread of a pressed button's message", async () => {
+    const deps = dependencies();
+    deps.postNotification.mockResolvedValue([{ notification, timestamp: "1790000002.000100" }]);
+    const { handle } = handler(deps, { notifications: { ...target(), threadTimestamp: "1790000001.000100" } });
+
+    await handle({ arguments: { details: ["The diff."], text: "Opened the pull request." }, name: "post_notification" });
+
+    expect(deps.postNotification.mock.calls.map(([input]) => input.threadTimestamp))
+      .toEqual(["1790000001.000100", "1790000001.000100"]);
+  });
+
   it("keeps the posted message and reports a reply that failed", async () => {
     const deps = dependencies();
     deps.postNotification

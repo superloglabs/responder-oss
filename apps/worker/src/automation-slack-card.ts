@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { AutomationTranscriptItem } from "@responder/core/automations/transcript";
+import type {
+  AutomationSlackButtonPress,
+  AutomationTranscriptItem,
+} from "@responder/core/automations/transcript";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import {
   postSlackMessage,
@@ -70,6 +73,24 @@ export function automationSlackCardTarget(
     channelId,
     mentioned: mentioned === true,
     threadTimestamp: threadTimestamp ?? timestamp,
+  };
+}
+
+// The thread of a message whose button was pressed, reached through the
+// connection that posted the message.
+export function automationSlackButtonCardTarget(
+  button: Pick<AutomationSlackButtonPress, "channelId" | "threadTimestamp">,
+  encryptedCredentials: string,
+): AutomationSlackCardTarget | null {
+  const credentials = z.object({ accessToken: z.string().min(1) }).safeParse(
+    decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+  );
+  if (!credentials.success) return null;
+  return {
+    accessToken: credentials.data.accessToken,
+    channelId: button.channelId,
+    mentioned: true,
+    threadTimestamp: button.threadTimestamp,
   };
 }
 

@@ -9,6 +9,11 @@ import {
 } from "../../../../packages/core/src/db/automations.js";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  automationButtonsBlock,
+  automationButtonsInputSchema,
+  automationButtonsSchema,
+} from "../../../../packages/core/src/automations/slack-buttons.js";
+import {
   addSlackReaction,
   postSlackMessage,
   removeSlackReaction,
@@ -130,7 +135,10 @@ const readThreadInput = z.object({
   limit: z.number().int().min(1).max(200).default(50),
   thread_ts: timestampSchema,
 });
+// A message with buttons is a section block, which holds less text.
+const maxSectionTextLength = 3_000;
 const postMessageInput = z.object({
+  buttons: automationButtonsSchema.default([]),
   channel_id: z.string().min(1),
   text: z.string().trim().min(1).max(40_000),
   thread_ts: timestampSchema.optional(),
@@ -209,10 +217,11 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Post a message to a Slack channel as the Responder app. Set thread_ts to reply in a thread. Uses Slack mrkdwn formatting.${onlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
+      description: `Post a message to a Slack channel as the Responder app. Set thread_ts to reply in a thread. Uses Slack mrkdwn formatting. A message with buttons holds at most ${maxSectionTextLength.toLocaleString("en-US")} characters of text.${onlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
       inputSchema: {
         additionalProperties: false,
         properties: {
+          buttons: automationButtonsInputSchema,
           channel_id: { enum: allChannels, type: "string" },
           text: { maxLength: 40_000, minLength: 1, type: "string" },
           thread_ts: timestamp,
@@ -356,23 +365,42 @@ async function runTool(
   if (name === "slack_post_message") {
     const parsed = postMessageInput.safeParse(args);
     if (!parsed.success) return failure("Invalid tool arguments");
-    const { channel_id: channelId, text, thread_ts: threadTimestamp } = parsed.data;
+    const { buttons, channel_id: channelId, text, thread_ts: threadTimestamp } = parsed.data;
     if (
       !scope.channels.has(channelId) &&
       !inTriggerThread(scope, channelId, threadTimestamp)
     ) {
       return notAllowed;
     }
+    if (buttons.length > 0 && text.length > maxSectionTextLength) {
+      return failure(`A message with buttons holds at most ${maxSectionTextLength.toLocaleString("en-US")} characters of text. Shorten it, or post the details in the thread.`);
+    }
     const result = await recordedWrite({
       claim,
       dependencies,
-      identity: [channelId, threadTimestamp ?? null, text],
+      identity: [channelId, threadTimestamp ?? null, text, ...(buttons.length > 0 ? [buttons] : [])],
       kind: "send_slack_message",
-      redactedInput: { channelId, ...(threadTimestamp ? { threadTimestamp } : {}) },
+      // A press of a button finds the message's run, labels, and connection
+      // here.
+      redactedInput: {
+        channelId,
+        ...(threadTimestamp ? { threadTimestamp } : {}),
+        ...(buttons.length > 0
+          ? { buttons: buttons.map((button) => button.label), integrationAccountId: claim.account.id }
+          : {}),
+      },
       toolName: name,
       write: async (attemptId) => {
         const timestamp = await dependencies.postMessage({
           accessToken: botToken,
+          ...(buttons.length > 0
+            ? {
+                blocks: [
+                  { text: { text, type: "mrkdwn" }, type: "section" },
+                  automationButtonsBlock(claim.runId, buttons),
+                ],
+              }
+            : {}),
           channelId,
           clientMessageId: attemptId,
           text,

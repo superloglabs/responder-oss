@@ -9,6 +9,10 @@ import {
 import { z } from "zod";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import {
+  automationButtonsBlock,
+  automationButtonsSchema,
+} from "@responder/core/automations/slack-buttons";
+import {
   automationToolServerName,
   postNotificationToolName,
   skipNotificationToolName,
@@ -34,6 +38,7 @@ import { callWorkspaceTool, type WorkspaceTool } from "./workspace-tools.js";
 // are live tools served by the worker, which reads the changes from the
 // sandbox.
 const notificationSchema = z.object({
+  buttons: automationButtonsSchema.default([]),
   details: z.array(z.string().trim().min(1).max(maxNotificationLength)).max(maxNotificationDetails).default([]),
   text: z.string().trim().min(1).max(maxNotificationLength),
 });
@@ -84,10 +89,15 @@ export function automationActionInstructions(
   notificationChannels: string[] = [],
   // Present when the run has the workspace tools.
   workspace?: { integrationsUrl: string },
+  // This turn answers a button pressed on one of the run's posts.
+  inThread = false,
 ): string {
+  const buttons = `When the automation's instructions ask people to decide what happens next, such as whether to open a pull request, add buttons to the post and end your turn. Pressing one continues this run with a message naming the button.`;
   return [
     ...(notificationChannels.length > 0
-      ? [`This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. Keep its text short and put longer findings in details, which are posted as replies in its thread. If you do not post, your final reply is posted for you. When there is nothing worth reporting, call ${skipNotificationToolName} with a short reason instead, and nothing is posted. Follow the automation's instructions on what is worth reporting.`]
+      ? [inThread
+          ? `Reply in the Slack thread of the message whose button was pressed (${notificationChannels.join(", ")}) with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. If you do not post, your final reply is posted there for you. ${buttons}`
+          : `This automation reports to Slack: ${notificationChannels.join(", ")}. When you finish, post your complete result there with the ${postNotificationToolName} tool from the ${automationToolServerName} tool server. That post is what people read. Keep its text short and put longer findings in details, which are posted as replies in its thread. If you do not post, your final reply is posted for you. When there is nothing worth reporting, call ${skipNotificationToolName} with a short reason instead, and nothing is posted. Follow the automation's instructions on what is worth reporting. ${buttons}`]
       : []),
     `The ${automationToolServerName} tool server works with the selected repositories as the Superlog GitHub App; the sandbox has no GitHub credentials of its own.`,
     "- github_api reads the GitHub REST API: pull requests, commits, compares, issues, files, and user profiles. Use it instead of unauthenticated requests to api.github.com.",
@@ -122,6 +132,8 @@ export function createAutomationToolHandler(input: {
     onSkipped(reason: string): Promise<void>;
     organizationId: string;
     runUrl: string | null;
+    // Posts as replies in this thread, for a turn that answers a button.
+    threadTimestamp?: string;
   };
   onAction(action: AutomationActionResult): Promise<void>;
   runId: string;
@@ -140,6 +152,8 @@ export function createAutomationToolHandler(input: {
     if (!target?.notifications.length) return toolError("This automation has no notification channels.");
     const parsed = notificationSchema.safeParse(args);
     if (!parsed.success) return toolError("Invalid tool arguments");
+    const { buttons } = parsed.data;
+    const threadTimestamp = target.threadTimestamp;
     const kind = "send_slack_message";
     const message = agentNotificationMessage(parsed.data.text, target.runUrl);
     const alreadyPosted: string[] = [];
@@ -156,9 +170,22 @@ export function createAutomationToolHandler(input: {
           notification.channelId,
           parsed.data.text,
           parsed.data.details,
+          ...(buttons.length > 0 ? [buttons] : []),
+          ...(threadTimestamp ? [threadTimestamp] : []),
         ]),
         kind,
-        redactedInput: { channel },
+        // A press of a button finds the message's run, labels, and
+        // connection here.
+        redactedInput: {
+          channel,
+          ...(buttons.length > 0
+            ? {
+                buttons: buttons.map((button) => button.label),
+                channelId: notification.channelId,
+                integrationAccountId: notification.integrationAccountId,
+              }
+            : {}),
+        },
         retryFailed: true,
         runId: input.runId,
         toolCallId: postNotificationToolName,
@@ -170,9 +197,11 @@ export function createAutomationToolHandler(input: {
       }
       const [delivery] = await dependencies.postNotification({
         ...message,
+        ...(buttons.length > 0 ? { buttonsBlock: automationButtonsBlock(input.runId, buttons) } : {}),
         notifications: [notification],
         organizationId: target.organizationId,
         seed: attempt.id,
+        ...(threadTimestamp ? { threadTimestamp } : {}),
       });
       if (!delivery || "error" in delivery) {
         const error = delivery?.error instanceof Error ? delivery.error.message.slice(0, 200) : "Failed";
@@ -198,7 +227,7 @@ export function createAutomationToolHandler(input: {
           notifications: [notification],
           organizationId: target.organizationId,
           seed: `${attempt.id}:${index + 1}`,
-          threadTimestamp: delivery.timestamp,
+          threadTimestamp: threadTimestamp ?? delivery.timestamp,
         });
         if (!replyDelivery || "error" in replyDelivery) {
           failed.push({ channel: reply, error: replyDelivery?.error instanceof Error ? replyDelivery.error.message.slice(0, 200) : "Failed" });

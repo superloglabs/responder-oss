@@ -5,8 +5,13 @@ import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents.js";
 import {
+  automationButtonIndex,
+  pressedAutomationButtonBlocks,
+} from "../../../../packages/core/src/automations/slack-buttons.js";
+import {
   findAutomationsForSlackEvent,
   findSlackThreadAutomationRun,
+  getAutomationRunSlackButtons,
   recordSlackMessageAuthor,
 } from "../../../../packages/core/src/db/automations.js";
 import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
@@ -836,12 +841,66 @@ export function slackPullRequestQueuedResponse(
   };
 }
 
-function slackPullRequestErrorResponse(error: string) {
+function slackEphemeralResponse(text: string) {
   return {
     response_type: "ephemeral" as const,
     replace_original: false,
-    text: error,
+    text,
   };
+}
+
+function slackPullRequestErrorResponse(error: string) {
+  return slackEphemeralResponse(error);
+}
+
+// A press of a button an automation's agent added to its message continues
+// the run that posted it. The first press is the choice, so the buttons are
+// replaced with who pressed which one. Returns what to send to the message's
+// response URL.
+async function pressAutomationRunButton(
+  payload: z.infer<typeof slackBlockActionsSchema>,
+  index: number,
+  runId: string,
+): Promise<Record<string, unknown> | null> {
+  const message = payload.message;
+  if (!message?.ts) return null;
+  const run = await getAutomationRunSlackButtons({
+    channelId: payload.channel.id,
+    messageTimestamp: message.ts,
+    runId,
+    teamId: payload.team.id,
+  });
+  const label = run?.buttons[index];
+  if (!run || !label) return slackEphemeralResponse("This button is no longer available.");
+  if (!run.automationEnabled) {
+    return slackEphemeralResponse("This automation is turned off. Turn it on in Responder, then press the button again.");
+  }
+  const outcome = await queueAutomationRunReply({
+    message: {
+      authorId: payload.user.id,
+      authorName: payload.user.name || payload.user.username || `<@${payload.user.id}>`,
+      externalEventId: `slack_button:${payload.channel.id}:${message.ts}`,
+      slackButton: {
+        channelId: payload.channel.id,
+        integrationAccountId: run.integrationAccountId,
+        label,
+        messageTimestamp: message.ts,
+        threadTimestamp: message.thread_ts ?? message.ts,
+      },
+      source: "slack",
+      text: `Pressed "${label}"`,
+    },
+    runId,
+  });
+  console.info(JSON.stringify({ event: "slack_automation_button", outcome, runId }));
+  if (outcome === "duplicate") return slackEphemeralResponse("A button on this message was already pressed.");
+  return message.blocks
+    ? {
+        blocks: pressedAutomationButtonBlocks(message.blocks, { label, userId: payload.user.id }),
+        replace_original: true,
+        text: message.text ?? label,
+      }
+    : null;
 }
 
 async function sendSlackActionResponse(
@@ -1270,6 +1329,43 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
 
   if (!action.data.response_url.startsWith("https://hooks.slack.com/actions/")) {
     return context.json({ error: "Invalid Slack response URL" }, 400);
+  }
+
+  const automationButton = action.data.actions
+    .map((item) => ({ index: automationButtonIndex(item.action_id), item }))
+    .find((candidate) => candidate.index !== null);
+  if (automationButton) {
+    const runId = z.uuid().safeParse(automationButton.item.value);
+    if (!runId.success) return context.json({ ok: true });
+    // The press is stored and queued before Slack hears back, so a restart
+    // cannot lose it.
+    let response: Record<string, unknown> | null;
+    try {
+      response = await pressAutomationRunButton(
+        action.data,
+        automationButton.index!,
+        runId.data,
+      );
+    } catch (error) {
+      console.error(JSON.stringify({
+        errorCode: error instanceof Error ? error.name : typeof error,
+        event: "slack_automation_button_failed",
+        runId: runId.data,
+      }));
+      response = slackEphemeralResponse("Responder could not continue the run. Continue it from the run page in Responder.");
+    }
+    // Slack expects an answer within three seconds, and the response URL
+    // accepts the update later.
+    if (response) {
+      void sendSlackActionResponse(action.data.response_url, response).catch((error: unknown) => {
+        console.error(JSON.stringify({
+          errorCode: error instanceof Error ? error.name : typeof error,
+          event: "slack_automation_button_response_failed",
+          runId: runId.data,
+        }));
+      });
+    }
+    return context.json({ ok: true });
   }
 
   const dismissAction = action.data.actions.find(

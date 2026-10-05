@@ -77,6 +77,8 @@ export type AutomationNotificationDelivery =
 // Posts one message to each channel. A failed channel does not stop the
 // others. The seed makes a retry of the same message a duplicate to Slack.
 export async function postAutomationNotification(input: {
+  // Buttons that continue the run, under the message.
+  buttonsBlock?: unknown;
   markdown: string;
   notifications: AutomationNotification[];
   organizationId: string;
@@ -98,7 +100,10 @@ export async function postAutomationNotification(input: {
       );
       const timestamp = await dependencies.post({
         accessToken,
-        blocks: [{ type: "markdown", text: input.markdown }],
+        blocks: [
+          { type: "markdown", text: input.markdown },
+          ...(input.buttonsBlock ? [input.buttonsBlock] : []),
+        ],
         channelId: notification.channelId,
         clientMessageId: notificationMessageId(input.seed, notification.channelId),
         text: input.text,
@@ -134,6 +139,9 @@ export async function sendAutomationRunNotifications(input: {
   organizationId: string;
   outcome: AutomationRunOutcome;
   runId: string;
+  // Reports a turn that answered a button in the pressed message's thread.
+  // The pressed message's event tells Slack which turn's report a retry is.
+  thread?: { eventId: number; timestamp: string };
 }, dependencies: AutomationNotificationDependencies = defaultDependencies): Promise<void> {
   const message = automationNotificationMessage({
     automationName: input.automationName,
@@ -144,7 +152,8 @@ export async function sendAutomationRunNotifications(input: {
     ...message,
     notifications: input.notifications,
     organizationId: input.organizationId,
-    seed: input.runId,
+    seed: input.thread ? `${input.runId}:${input.thread.eventId}` : input.runId,
+    ...(input.thread ? { threadTimestamp: input.thread.timestamp } : {}),
   }, dependencies);
   for (const delivery of deliveries) {
     if ("error" in delivery) await input.onError(delivery.notification, delivery.error);
