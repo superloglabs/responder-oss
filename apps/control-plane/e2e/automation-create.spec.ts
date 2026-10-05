@@ -443,6 +443,29 @@ test("says when the Slack authors could not load", async ({ page }) => {
   await expect(page.getByText("Could not load authors. Refresh to try again.")).toBeVisible();
 });
 
+test("lists Slack authors by ID until Slack is reconnected", async ({ page }, testInfo) => {
+  await page.route("**/api/automations/slack/*/authors?*", (route) => route.fulfill({ json: {
+    authors: [
+      { id: "A-DATADOG", kind: "app", name: "Datadog" },
+      { id: "U0990LUEJKW", kind: "person", name: "U0990LUEJKW" },
+      { id: "B09UTRWSBQQ", kind: "app", name: "B09UTRWSBQQ" },
+    ],
+    namesNeedReconnect: true,
+  } }));
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New message in channel", exact: true }).click();
+  await page.getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  await page.getByRole("button", { name: "Ignore messages from", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "U0990LUEJKW", exact: true })).toBeVisible();
+  await expect(page.getByText("Reconnect Slack in Settings to show names instead of IDs.")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors-reconnect.png"), fullPage: true });
+});
+
 test("chooses included models from the provider submenu and filters compatible harnesses", async ({ page }, testInfo) => {
   await page.goto("/automations/new");
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Keep my instructions");

@@ -6,13 +6,14 @@ import "./automation-resource-picker.css";
 
 // Chooses trigger resources, or with `single` one resource, such as the
 // channel a notification posts to. `summary` replaces the list of selected
-// names on the button, `title` the field's label, and `empty` the message
-// for an empty list.
-export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel = false, label, resources, selected, single = false, summary, title, onChange, onClose, onRefresh }: {
+// names on the button, `title` the field's label, `empty` the message for
+// an empty list, and `note` a line under the list.
+export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel = false, label, note, resources, selected, single = false, summary, title, onChange, onClose, onRefresh }: {
   defaultOpen?: boolean;
   empty?: string;
   hideLabel?: boolean;
   label: "Author" | "Channel" | "Environment" | "Project";
+  note?: string;
   resources: Array<{ externalId: string; displayName: string }>;
   selected: string[];
   single?: boolean;
@@ -88,6 +89,7 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
         }} type={single ? "radio" : "checkbox"} /></label>)}
         {!filtered.length ? <p className="automationResourcePicker__empty">{resources.length ? `No matching ${label.toLowerCase()}s.` : (empty ?? `No ${label.toLowerCase()}s available.`)}</p> : null}
       </div>
+      {note ? <p className="automationResourcePicker__note">{note}</p> : null}
       {error ? <p className="automationResourcePicker__error" role="alert">{error}</p> : null}
       {onRefresh ? <button className="automationResourcePicker__refresh" disabled={refreshing} onClick={() => void refresh()} type="button"><ArrowClockwiseIcon size={14} />{refreshing ? "Refreshing…" : `Refresh ${label.toLowerCase()}s`}</button> : null}
     </div> : null}

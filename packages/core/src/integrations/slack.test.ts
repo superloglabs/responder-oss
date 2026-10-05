@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   addSlackReaction,
+  getSlackAuthorName,
   postSlackEphemeralMessage,
   postSlackMessage,
   removeSlackReaction,
@@ -348,5 +349,51 @@ describe("Slack delivery client", () => {
         }),
       }),
     );
+  });
+});
+
+describe("Slack author names", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names a person by their display name, then their full name", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, user: { name: "ada", profile: { display_name: "Ada", real_name: "Ada Lovelace" } } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, user: { name: "grace", profile: { display_name: " ", real_name: "Grace Hopper" } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getSlackAuthorName({ accessToken: "xoxb-test", id: "U123" })).resolves.toBe("Ada");
+    await expect(getSlackAuthorName({ accessToken: "xoxb-test", id: "W456" })).resolves.toBe("Grace Hopper");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://slack.com/api/users.info",
+      expect.objectContaining({
+        body: new URLSearchParams({ user: "U123" }),
+        headers: expect.objectContaining({ "content-type": "application/x-www-form-urlencoded" }),
+      }),
+    );
+  });
+
+  it("names a bot, and leaves app IDs and unknown authors unnamed", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, bot: { app_id: "A123", name: "Deploy Bot" } }))
+      .mockResolvedValueOnce(Response.json({ ok: false, error: "bot_not_found" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getSlackAuthorName({ accessToken: "xoxb-test", id: "B123" })).resolves.toBe("Deploy Bot");
+    await expect(getSlackAuthorName({ accessToken: "xoxb-test", id: "B999" })).resolves.toBeNull();
+    await expect(getSlackAuthorName({ accessToken: "xoxb-test", id: "A123" })).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://slack.com/api/bots.info",
+      expect.objectContaining({ body: new URLSearchParams({ bot: "B123" }) }),
+    );
+  });
+
+  it("fails when the connection lacks the scope", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, error: "missing_scope" })));
+
+    await expect(getSlackAuthorName({ accessToken: "xoxb-test", id: "U123" }))
+      .rejects.toMatchObject({ code: "missing_scope" });
   });
 });

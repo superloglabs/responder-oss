@@ -19,7 +19,6 @@ import {
   getAutomationRun,
   listAutomationRuns,
   listAutomations,
-  listSlackMessageAuthors,
   requestAutomationRunCancellation,
   setAutomationEnabled,
   updateAutomation,
@@ -45,6 +44,7 @@ import {
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
+import { listNamedSlackAuthors } from "./slack-authors.js";
 import { listSentryEnvironments } from "../integrations/sentry.js";
 import {
   getFreshSentryCredentials,
@@ -277,13 +277,11 @@ export const automationRoutes = new Hono()
     const accountId = context.req.param("accountId");
     const channelIds = slackAuthorChannelsSchema.safeParse(context.req.queries("channel") ?? []);
     if (!z.uuid().safeParse(accountId).success || !channelIds.success) return context.json({ error: "Invalid request" }, 400);
-    return context.json({
-      authors: await listSlackMessageAuthors({
-        channelIds: channelIds.data,
-        integrationAccountId: accountId,
-        organizationId: access.tenant.organizationId,
-      }),
-    });
+    return context.json(await listNamedSlackAuthors({
+      channelIds: channelIds.data,
+      integrationAccountId: accountId,
+      organizationId: access.tenant.organizationId,
+    }));
   })
   .get("/credentials", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

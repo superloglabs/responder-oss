@@ -157,7 +157,8 @@ export async function findAutomationsForSlackEvent(input: {
 }
 
 // Records who posted in a channel that an automation watches. A name that
-// changed replaces the stored one.
+// changed replaces the stored one. A message without a name, recorded under
+// the author's ID, keeps a name found earlier.
 export async function recordSlackMessageAuthor(input: {
   authorId: string;
   channelId: string;
@@ -170,13 +171,35 @@ export async function recordSlackMessageAuthor(input: {
     .insert(slackMessageAuthors)
     .values({ ...input, lastSeenAt: seenAt })
     .onConflictDoUpdate({
-      set: { kind: input.kind, lastSeenAt: seenAt, name: input.name },
+      set: {
+        kind: input.kind,
+        lastSeenAt: seenAt,
+        name: input.name === input.authorId ? sql`${slackMessageAuthors.name}` : input.name,
+      },
       target: [
         slackMessageAuthors.integrationAccountId,
         slackMessageAuthors.channelId,
         slackMessageAuthors.authorId,
       ],
     });
+}
+
+// Saves names looked up in Slack for authors recorded under their IDs, in
+// every channel they posted in.
+export async function nameSlackMessageAuthors(input: {
+  integrationAccountId: string;
+  names: Array<{ id: string; name: string }>;
+}): Promise<void> {
+  const database = getDatabase();
+  await Promise.all(input.names.map(({ id, name }) =>
+    database
+      .update(slackMessageAuthors)
+      .set({ name })
+      .where(and(
+        eq(slackMessageAuthors.integrationAccountId, input.integrationAccountId),
+        eq(slackMessageAuthors.authorId, id),
+      ))
+  ));
 }
 
 // The people and apps that posted in any of the channels, most recent first.

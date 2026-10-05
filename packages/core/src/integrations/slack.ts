@@ -84,18 +84,25 @@ export class SlackApiError extends Error {
   }
 }
 
+// Slack accepts JSON bodies only for methods that write. Reads such as
+// users.info take form fields.
 async function callSlackApi(
   accessToken: string,
   method: string,
   body: Record<string, unknown>,
+  encoding: "form" | "json" = "json",
 ) {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
+      "content-type": encoding === "json"
+        ? "application/json"
+        : "application/x-www-form-urlencoded",
     },
-    body: JSON.stringify(body),
+    body: encoding === "json"
+      ? JSON.stringify(body)
+      : new URLSearchParams(Object.entries(body).map(([name, value]) => [name, String(value)])),
   });
   const responseText = await response.text();
   let responseBody: unknown;
@@ -135,6 +142,54 @@ function isRetryableSlackPostError(error: unknown): boolean {
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+const slackUserInfoSchema = z.object({
+  user: z.object({
+    name: z.string().optional(),
+    profile: z.object({
+      display_name: z.string().optional(),
+      real_name: z.string().optional(),
+    }).optional(),
+    real_name: z.string().optional(),
+  }),
+});
+const slackBotInfoSchema = z.object({
+  bot: z.object({ name: z.string().optional() }),
+});
+
+// The name Slack shows for a person (U or W ID) or a bot (B ID), or null when
+// Slack has none. App IDs have no lookup; their messages carry the app's name.
+// Needs the users:read scope.
+export async function getSlackAuthorName(input: {
+  accessToken: string;
+  id: string;
+}): Promise<string | null> {
+  try {
+    if (/^[UW]/u.test(input.id)) {
+      const { user } = slackUserInfoSchema.parse(
+        await callSlackApi(input.accessToken, "users.info", { user: input.id }, "form"),
+      );
+      return [user.profile?.display_name, user.profile?.real_name, user.real_name, user.name]
+        .map((name) => name?.trim())
+        .find((name) => name) ?? null;
+    }
+    if (/^B/u.test(input.id)) {
+      const { bot } = slackBotInfoSchema.parse(
+        await callSlackApi(input.accessToken, "bots.info", { bot: input.id }, "form"),
+      );
+      return bot.name?.trim() || null;
+    }
+    return null;
+  } catch (error) {
+    if (
+      error instanceof SlackApiError &&
+      (error.code === "user_not_found" || error.code === "bot_not_found")
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export const INITIAL_TRIAGE_SLACK_REACTIONS = [
