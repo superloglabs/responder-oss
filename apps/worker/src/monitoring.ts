@@ -163,7 +163,8 @@ function aggregatedErrorsForMonitoring(
     const error = asError(item);
     return {
       message: error
-        ? redactString(error.message, secrets).slice(0, 2_000)
+        ? redactString(error.message, secrets).slice(0, 2_000) ||
+          "Worker operation failed"
         : "Non-Error exception",
       name: error?.name ?? typeof item,
     };

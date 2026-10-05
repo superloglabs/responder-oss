@@ -19,7 +19,7 @@ import {
   maxDaytonaSandboxBaseNameLength,
   prepareDaytonaSandbox,
   replaceDaytonaSandboxSecrets,
-  sandboxDeletedAfterFailedCreation,
+  sandboxesLeftAfterFailedCreation,
   type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
@@ -253,15 +253,15 @@ export async function runInFreshAutomationSandbox<T>(
   });
   let session: DaytonaSandboxSession | null = null;
   let meter: SandboxMeter | null = null;
-  // Set while a sandbox may exist that `session` does not hold yet.
-  let pendingSandbox = false;
+  // Sandboxes that may exist while `session` does not hold one yet.
+  let pendingSandboxNames: readonly string[] = [];
   let resumed = false;
   let executionOutcome:
     | { error: unknown; succeeded: false }
     | { succeeded: true; value: T };
 
   try {
-    pendingSandbox = true;
+    pendingSandboxNames = [sandboxName];
     if (input.resumeState) {
       try {
         session = await abortable(
@@ -288,10 +288,11 @@ export async function runInFreshAutomationSandbox<T>(
         undefined,
         input.signal,
       );
-      // Skip the cleanup below only when the failed creation confirmed that
-      // its sandbox is gone. This handler runs before the rejection reaches it.
+      // Limit the cleanup below to the sandboxes a failed creation could not
+      // confirm deleted. This handler runs before the rejection reaches it.
       creation.catch((error: unknown) => {
-        if (sandboxDeletedAfterFailedCreation(error)) pendingSandbox = false;
+        pendingSandboxNames =
+          sandboxesLeftAfterFailedCreation(error) ?? pendingSandboxNames;
       });
       session = await abortable(creation, input.signal);
     }
@@ -373,17 +374,23 @@ export async function runInFreshAutomationSandbox<T>(
   }
 
   let cleanupFailure: unknown;
-  try {
-    if (session) {
+  if (session) {
+    try {
       await dependencies.close(session, input.config, {
         jobId: input.runId,
         organizationId: input.organizationId,
       });
-    } else if (pendingSandbox) {
-      await dependencies.closePending(sandboxName, input.config);
+    } catch (error) {
+      cleanupFailure = error;
     }
-  } catch (error) {
-    cleanupFailure = error;
+  } else {
+    for (const name of pendingSandboxNames) {
+      try {
+        await dependencies.closePending(name, input.config);
+      } catch (error) {
+        cleanupFailure ??= error;
+      }
+    }
   }
   await meter?.stop();
 

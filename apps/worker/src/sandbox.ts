@@ -81,13 +81,22 @@ function isDaytonaStartFailure(error: unknown): boolean {
 // they were raised.
 const missingSandboxErrors = new WeakSet<object>();
 
-// Creation errors thrown after every failed sandbox was confirmed deleted.
-const creationErrorsWithDeletedSandbox = new WeakSet<object>();
+// The sandboxes a failed creation could not confirm deleted, by the error it
+// threw.
+const sandboxesLeftByFailedCreation = new WeakMap<object, readonly string[]>();
+
+// Returns undefined for an error that did not end a sandbox creation, such as
+// an abort while creation was still running.
+export function sandboxesLeftAfterFailedCreation(
+  error: unknown,
+): readonly string[] | undefined {
+  return typeof error === "object" && error !== null
+    ? sandboxesLeftByFailedCreation.get(error)
+    : undefined;
+}
 
 export function sandboxDeletedAfterFailedCreation(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    creationErrorsWithDeletedSandbox.has(error);
+  return sandboxesLeftAfterFailedCreation(error)?.length === 0;
 }
 
 const transientDaytonaErrorNames = [
@@ -300,19 +309,23 @@ async function failCreation(
   sandboxName: string,
   abandoned: AbandonedSandbox[],
 ): Promise<never> {
-  const cleanupErrors = (await Promise.all(
+  const deletionErrors = await Promise.all(
     abandoned.map((sandbox) => sandbox.deletion),
-  )).filter((error) => error !== undefined);
-  if (cleanupErrors.length > 0) {
-    throw new AggregateError(
+  );
+  const left = abandoned
+    .filter((_sandbox, index) => deletionErrors[index] !== undefined)
+    .map((sandbox) => sandbox.name);
+  const cleanupErrors = deletionErrors.filter((error) => error !== undefined);
+  const error = cleanupErrors.length > 0
+    ? new AggregateError(
       [createError, ...cleanupErrors],
       `Unable to create or clean up Daytona sandbox ${sandboxName}`,
-    );
+    )
+    : createError;
+  if (typeof error === "object" && error !== null) {
+    sandboxesLeftByFailedCreation.set(error, left);
   }
-  if (typeof createError === "object" && createError !== null) {
-    creationErrorsWithDeletedSandbox.add(createError);
-  }
-  throw createError;
+  throw error;
 }
 
 // Creates a sandbox for a job. When an attempt fails with an error a new
@@ -333,7 +346,7 @@ export async function createDaytonaSandboxSession(
   const abandoned: AbandonedSandbox[] = [];
   for (let attempt = 1; ; attempt += 1) {
     const attemptName = sandboxNameForAttempt(sandboxName, attempt);
-    let session: DaytonaSandboxSession;
+    let session: DaytonaSandboxSession | undefined;
     try {
       // A sandbox from an earlier run of the same job may hold the name.
       await deleteDaytonaSandboxByReference(
@@ -342,9 +355,12 @@ export async function createDaytonaSandboxSession(
         false,
         dependencies,
       );
-      session = await creator.create({
-        options: { createTimeoutSec: daytonaCreateTimeoutSec, name: attemptName },
-      });
+      // The caller may give up while the earlier sandbox is deleted.
+      if (!signal?.aborted) {
+        session = await creator.create({
+          options: { createTimeoutSec: daytonaCreateTimeoutSec, name: attemptName },
+        });
+      }
     } catch (createError) {
       abandoned.push(deleteAbandonedSandbox(attemptName, config, dependencies));
       if (
@@ -368,9 +384,12 @@ export async function createDaytonaSandboxSession(
       }
       continue;
     }
-    if (signal?.aborted) {
-      abandoned.push(deleteAbandonedSandbox(attemptName, config, dependencies));
-      return await failCreation(signal.reason, sandboxName, abandoned);
+    // No session means the caller aborted before this attempt's creation.
+    if (!session || signal?.aborted) {
+      if (session) {
+        abandoned.push(deleteAbandonedSandbox(attemptName, config, dependencies));
+      }
+      return await failCreation(signal?.reason, sandboxName, abandoned);
     }
     reportAbandonedSandboxDeletions(abandoned, dependencies);
     return session;

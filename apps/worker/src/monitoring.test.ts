@@ -76,7 +76,11 @@ describe("worker error monitoring", () => {
     );
     await monitoring.reportWorkerException(
       new AggregateError(
-        [new Error("Failed to create and start sandbox within 60 seconds"), conflict],
+        [
+          new Error("Failed to create and start sandbox within 60 seconds"),
+          conflict,
+          new Error(""),
+        ],
         "Unable to create or clean up Daytona sandbox responder-automation-1",
       ),
       { operation: "automation" },
@@ -94,6 +98,7 @@ describe("worker error monitoring", () => {
             message: "Sandbox is starting (key [redacted])",
             name: "DaytonaConflictError",
           },
+          { message: "Worker operation failed", name: "Error" },
         ],
       },
     );

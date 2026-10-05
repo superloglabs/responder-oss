@@ -241,6 +241,50 @@ describe("fresh automation sandbox", () => {
     expect(onCleanupConfirmed).toHaveBeenCalledOnce();
   });
 
+  it("deletes every sandbox a failed creation left behind", async () => {
+    const { dependencies } = harness();
+    const startFailure = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Sandbox failed to start (status: 400)",
+    );
+    const failedNames = new Set<string>();
+    const sandboxDependencies = {
+      createClient: () => ({
+        delete: vi.fn(async (sandbox: { id: string }) => {
+          if (failedNames.has(sandbox.id) && sandbox.id !== "responder-automation-run-1") {
+            throw new Error("delete rejected");
+          }
+        }),
+        get: vi.fn(async (name: string) => ({ id: name })),
+        [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
+      }),
+      reportException: vi.fn(),
+      sleep: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Parameters<typeof createDaytonaSandboxSession>[3];
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const setupError = await createDaytonaSandboxSession(
+      {
+        create: vi.fn(async (args: { options: { name: string } }) => {
+          failedNames.add(args.options.name);
+          throw startFailure;
+        }),
+      } as unknown as Parameters<typeof createDaytonaSandboxSession>[0],
+      { daytonaApiKey: "daytona-test" },
+      "responder-automation-run-1",
+      sandboxDependencies,
+    ).catch((error: unknown) => error);
+    dependencies.createSession.mockRejectedValue(setupError);
+
+    await expect(runInFreshAutomationSandbox(input, dependencies)).rejects.toBe(
+      setupError,
+    );
+
+    expect(dependencies.closePending.mock.calls).toEqual([
+      ["responder-automation-run-1-2", input.config],
+      ["responder-automation-run-1-3", input.config],
+    ]);
+    consoleError.mockRestore();
+  });
+
   it("does not confirm cleanup when neither deletion succeeds", async () => {
     const { dependencies } = harness();
     const onCleanupConfirmed = vi.fn();
