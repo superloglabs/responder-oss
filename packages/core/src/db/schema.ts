@@ -329,6 +329,12 @@ export const integrationAccounts = pgTable(
       table.externalAccountId,
     ),
     index("integration_accounts_organization_idx").on(table.organizationId),
+    // Finds the organizations connected to an external account, such as a
+    // Slack workspace.
+    index("integration_accounts_provider_external_idx").on(
+      table.provider,
+      table.externalAccountId,
+    ),
   ],
 );
 
@@ -406,13 +412,15 @@ export const slackMessageAuthors = pgTable(
 );
 
 // The people the app has welcomed in its Slack messages tab. Slack asks apps
-// to welcome each person once, the first time they open the tab.
+// to welcome each person once, the first time they open the tab. A claim
+// without a sent time expires, so a welcome lost mid-post is tried again.
 export const slackDirectMessageWelcomes = pgTable(
   "slack_direct_message_welcomes",
   {
     teamId: text("team_id").notNull(),
     userId: text("user_id").notNull(),
-    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
   },
   (table) => [primaryKey({ columns: [table.teamId, table.userId] })],
 );

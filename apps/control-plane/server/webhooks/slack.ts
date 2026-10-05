@@ -14,6 +14,7 @@ import {
   getConnectedIntegrationAccountCredential,
   getSlackChannelConnection,
   listConnectedSlackAccountsForTeam,
+  markSlackDirectMessageWelcomeSent,
   releaseSlackDirectMessageWelcome,
 } from "../../../../packages/core/src/db/integrations.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
@@ -95,6 +96,14 @@ const slackMessageSchema = z.object({
     .passthrough()
     .optional(),
   blocks: z.array(z.unknown()).optional(),
+  files: z
+    .array(
+      z.object({
+        name: z.string().optional(),
+        title: z.string().optional(),
+      }).passthrough(),
+    )
+    .optional(),
   attachments: z
     .array(
       z.object({
@@ -1024,10 +1033,19 @@ async function replyInSlackDirectMessage(input: {
   }
 }
 
+// Tag mode can't open Slack files, so it is told their names instead.
+export function slackDirectMessageBody(event: SlackMessageEvent): string {
+  const fileNames = (event.files ?? [])
+    .map((file) => file.name?.trim() || file.title?.trim())
+    .filter((name): name is string => Boolean(name));
+  if (fileNames.length === 0) return slackMessageBody(event);
+  const fileNote = `The person attached files you can't open: ${fileNames.join(", ")}`;
+  return event.text.trim() ? `${slackMessageBody(event)}\n\n${fileNote}` : fileNote;
+}
+
 // A direct message works like a mention: tag mode answers in the message's
 // thread, and a reply in that thread continues the conversation.
 export async function answerSlackDirectMessage(input: {
-  body: string;
   event: SlackMessageEvent;
   eventId: string;
   teamId: string;
@@ -1039,6 +1057,7 @@ export async function answerSlackDirectMessage(input: {
     return { ok: true, ignored: true, reason: "direct_message_from_app" };
   }
   const threadTimestamp = event.thread_ts ?? event.ts;
+  const body = slackDirectMessageBody(event);
   const matches = await findAgentsForSlackEvent({
     channelId: event.channel,
     eventType: "direct_message",
@@ -1054,29 +1073,29 @@ export async function answerSlackDirectMessage(input: {
     });
     return { ok: true, matchedAgents: 0 };
   }
-  await Promise.all(
-    matches.map(async (match) => {
-      const started = await startSlackAgentRequest({
+  const started = await Promise.all(
+    matches.map((match) =>
+      startSlackAgentRequest({
         alertProvider: null,
         awsAlarm: null,
-        body: input.body,
+        body,
         directMessage: true,
         event,
         eventId: input.eventId,
         match,
         teamId: input.teamId,
-      });
-      if (!started) {
-        await replyInSlackDirectMessage({
-          channelId: event.channel,
-          integrationAccountId: match.integrationAccountId,
-          teamId: input.teamId,
-          text: slackAllowanceExhaustedReply,
-          threadTimestamp,
-        });
-      }
-    }),
+      })),
   );
+  // Another organization on the workspace may still answer.
+  if (!started.some(Boolean)) {
+    await replyInSlackDirectMessage({
+      channelId: event.channel,
+      integrationAccountId: matches[0]?.integrationAccountId,
+      teamId: input.teamId,
+      text: slackAllowanceExhaustedReply,
+      threadTimestamp,
+    });
+  }
   return { ok: true, matchedAgents: matches.length };
 }
 
@@ -1099,7 +1118,6 @@ export async function welcomeToSlackMessagesTab(input: {
       channelId: input.channelId,
       text: slackWelcomeMessage(botUserId),
     });
-    return true;
   } catch (error) {
     await releaseSlackDirectMessageWelcome(claim).catch(() => undefined);
     console.error(JSON.stringify({
@@ -1109,6 +1127,15 @@ export async function welcomeToSlackMessagesTab(input: {
     }));
     return false;
   }
+  // An unmarked claim expires, so a failure here can repeat the welcome.
+  await markSlackDirectMessageWelcomeSent(claim).catch((error: unknown) => {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      event: "slack_welcome_message_record_failed",
+      teamId: input.teamId,
+    }));
+  });
+  return true;
 }
 
 export const slackWebhookRoutes = new Hono().post("/", async (context) => {
@@ -1167,7 +1194,6 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ ok: true, ignored: true });
   }
 
-  const rawMessageBody = slackMessageBody(event);
   if (directMessage) {
     // Slack sends a direct message as a message event, so a mention there
     // would answer it twice.
@@ -1175,12 +1201,12 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       return context.json({ ok: true, ignored: true });
     }
     return context.json(await answerSlackDirectMessage({
-      body: rawMessageBody,
       event,
       eventId: callback.data.event_id,
       teamId: callback.data.team_id,
     }));
   }
+  const rawMessageBody = slackMessageBody(event);
   const body = event.type === "app_mention"
     ? rawMessageBody.replace(/^\s*<@[A-Z0-9]+>\s*/iu, "").trim() || rawMessageBody
     : rawMessageBody;

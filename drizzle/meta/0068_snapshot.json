@@ -1,5 +1,5 @@
 {
-  "id": "a85ffe6a-74af-4fef-af8e-c66ea3880ded",
+  "id": "62f62fa6-3160-4ae8-ac3d-60f1f4767107",
   "prevId": "978fea43-6d3d-4e60-917d-341a62fcb19f",
   "version": "7",
   "dialect": "postgresql",
@@ -4361,6 +4361,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "integration_accounts_provider_external_idx": {
+          "name": "integration_accounts_provider_external_idx",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -7347,12 +7368,18 @@
           "primaryKey": false,
           "notNull": true
         },
-        "sent_at": {
-          "name": "sent_at",
+        "claimed_at": {
+          "name": "claimed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

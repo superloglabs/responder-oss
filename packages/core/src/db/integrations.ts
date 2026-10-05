@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, count, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   automations,
@@ -828,17 +828,40 @@ export async function listConnectedSlackAccountsForTeam(teamId: string) {
     .orderBy(integrationAccounts.createdAt);
 }
 
-// True for the first caller only, so a person is welcomed once.
+// True for one caller at a time, and never after the welcome was sent. A
+// claim that was never marked sent can be taken again after five minutes.
 export async function claimSlackDirectMessageWelcome(input: {
   teamId: string;
   userId: string;
 }): Promise<boolean> {
-  const inserted = await getDatabase()
+  const claimed = await getDatabase()
     .insert(slackDirectMessageWelcomes)
     .values(input)
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: [slackDirectMessageWelcomes.teamId, slackDirectMessageWelcomes.userId],
+      set: { claimedAt: sql`now()` },
+      setWhere: and(
+        isNull(slackDirectMessageWelcomes.sentAt),
+        lt(slackDirectMessageWelcomes.claimedAt, sql`now() - interval '5 minutes'`),
+      ),
+    })
     .returning({ userId: slackDirectMessageWelcomes.userId });
-  return inserted.length > 0;
+  return claimed.length > 0;
+}
+
+export async function markSlackDirectMessageWelcomeSent(input: {
+  teamId: string;
+  userId: string;
+}): Promise<void> {
+  await getDatabase()
+    .update(slackDirectMessageWelcomes)
+    .set({ sentAt: sql`now()` })
+    .where(
+      and(
+        eq(slackDirectMessageWelcomes.teamId, input.teamId),
+        eq(slackDirectMessageWelcomes.userId, input.userId),
+      ),
+    );
 }
 
 // Lets the next visit try again after the welcome failed to post.
@@ -852,6 +875,7 @@ export async function releaseSlackDirectMessageWelcome(input: {
       and(
         eq(slackDirectMessageWelcomes.teamId, input.teamId),
         eq(slackDirectMessageWelcomes.userId, input.userId),
+        isNull(slackDirectMessageWelcomes.sentAt),
       ),
     );
 }

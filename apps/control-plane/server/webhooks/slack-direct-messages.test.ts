@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   findAutomations: vi.fn(),
   hasCapability: vi.fn(),
   listAccounts: vi.fn(),
+  markWelcomeSent: vi.fn(),
   postMessage: vi.fn(),
   queueInvestigation: vi.fn(),
   queueRun: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   getConnectedIntegrationAccountCredential: mocks.accountCredential,
   getSlackChannelConnection: mocks.channelConnection,
   listConnectedSlackAccountsForTeam: mocks.listAccounts,
+  markSlackDirectMessageWelcomeSent: mocks.markWelcomeSent,
   releaseSlackDirectMessageWelcome: mocks.releaseWelcome,
 }));
 vi.mock("../../../../packages/core/src/db/investigations.js", async (importOriginal) => ({
@@ -192,10 +194,19 @@ describe("Slack direct messages", () => {
     );
   });
 
-  it("answers a direct message with a file", async () => {
-    await directMessage({ files: [{ id: "F123" }], subtype: "file_share" });
+  it("names the files in a direct message", async () => {
+    await directMessage({
+      files: [{ id: "F123", name: "trace.png" }, { id: "F456", title: "Heap dump" }],
+      subtype: "file_share",
+      text: "",
+    });
 
-    expect(mocks.queueThreadInvestigation).toHaveBeenCalledTimes(1);
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "The person attached files you can't open: trace.png, Heap dump",
+      }),
+      expect.anything(),
+    );
   });
 
   it("ignores the app's own messages", async () => {
@@ -245,6 +256,23 @@ describe("Slack direct messages", () => {
       threadTimestamp: "1790000002.000100",
     });
   });
+
+  it("does not report the usage limit when another organization answers", async () => {
+    mocks.findAgents.mockResolvedValue([
+      tagMode,
+      { ...tagMode, agentId: "71717171-7171-4171-8171-717171717171", organizationId: "other-org" },
+    ]);
+    mocks.queueThreadInvestigation
+      .mockResolvedValueOnce({ kind: "blocked" })
+      .mockResolvedValueOnce({ investigationId, kind: "queued" });
+    mocks.accountCredential.mockResolvedValue({ encryptedCredentials: "sealed", organizationId: "other-org" });
+
+    await directMessage();
+
+    expect(mocks.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: slackAllowanceExhaustedReply }),
+    );
+  });
 });
 
 describe("Slack messages tab welcome", () => {
@@ -254,6 +282,7 @@ describe("Slack messages tab welcome", () => {
     mocks.listAccounts.mockResolvedValue([account]);
     mocks.postMessage.mockResolvedValue("1790000003.000100");
     mocks.releaseWelcome.mockResolvedValue(undefined);
+    mocks.markWelcomeSent.mockResolvedValue(undefined);
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -271,6 +300,7 @@ describe("Slack messages tab welcome", () => {
       text: slackWelcomeMessage("UBOT"),
     });
     expect(slackWelcomeMessage("UBOT")).toContain("<@UBOT>");
+    expect(mocks.markWelcomeSent).toHaveBeenCalledWith({ teamId: "T123", userId: "U123" });
   });
 
   it("does not welcome a person twice", async () => {
