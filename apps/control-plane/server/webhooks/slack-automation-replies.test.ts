@@ -249,6 +249,21 @@ describe("Slack replies to automation runs", () => {
     expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
   });
 
+  it("starts tag mode when the reply cannot reach the run", async () => {
+    mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    mocks.queueReply.mockRejectedValue(new Error("Automation worker is unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await deliver({
+      text: "<@UBOT> Can you open a PR?",
+      thread_ts: "1790000000.000100",
+      type: "app_mention",
+      user: "U123",
+    });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
+  });
+
   it("starts tag mode for a mention in a thread without a run", async () => {
     mocks.findAgents.mockResolvedValue([tagModeAgent]);
     mocks.findThreadRun.mockResolvedValue(null);

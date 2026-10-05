@@ -1004,9 +1004,11 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         // A redelivery of the message that started this run is not a reply;
         // starting the run again finds it as a duplicate.
         if (run && run.triggerTimestamp !== event.ts) {
-          automationThreadOrganizations.add(run.organizationId);
           if (reply) {
+            // A reply that fails to queue leaves the run failed, so the
+            // organization's agents may still answer it.
             const outcome = await queueAutomationRunReply({ message: reply, runId: run.id });
+            automationThreadOrganizations.add(run.organizationId);
             console.info(JSON.stringify({
               automationId: match.automationId,
               event: "slack_automation_reply",
@@ -1018,6 +1020,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           }
           // Another app answering in the thread, such as another agent,
           // would start a run that answers it back, and so on.
+          automationThreadOrganizations.add(run.organizationId);
           console.info(JSON.stringify({
             automationId: match.automationId,
             event: "slack_automation_app_reply_ignored",
