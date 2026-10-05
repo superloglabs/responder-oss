@@ -15,7 +15,7 @@ import { workspaceSlug } from "./workspace";
 import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
-import { fetchCapabilities } from "../organization-capabilities";
+import { requestCapabilities } from "../organization-capabilities";
 import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
@@ -397,7 +397,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
     await activate(
       result.data.id,
       automationSetupReturnPath(window.location) ??
-        (async () => newWorkspacePath(await fetchCapabilities())),
+        (async () => newWorkspacePath(await requestCapabilities())),
     );
   }
 

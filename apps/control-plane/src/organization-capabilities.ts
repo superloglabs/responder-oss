@@ -4,11 +4,17 @@ import { authClient } from "./auth-client";
 export const OrganizationCapabilitiesContext = createContext<string[] | null>(null);
 
 export async function fetchCapabilities(): Promise<string[]> {
+  return (await requestCapabilities()) ?? [];
+}
+
+// Returns null when the request fails, so callers can tell a failure from a
+// workspace without capabilities.
+export async function requestCapabilities(): Promise<string[] | null> {
   const response = await fetch("/api/context").catch(() => null);
-  if (!response?.ok) return [];
+  if (!response?.ok) return null;
   const context = await (response.json() as Promise<{ capabilities?: string[] }>)
     .catch(() => null);
-  return context?.capabilities ?? [];
+  return context ? context.capabilities ?? [] : null;
 }
 
 // Pages outside the provider, such as public templates, fetch their own copy.

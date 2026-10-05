@@ -67,4 +67,8 @@ describe("newWorkspacePath", () => {
   it("opens the agent form without automations", () => {
     expect(newWorkspacePath([])).toBe("/agents/new");
   });
+
+  it("opens the application home when the capabilities could not be read", () => {
+    expect(newWorkspacePath(null)).toBe("/app");
+  });
 });
