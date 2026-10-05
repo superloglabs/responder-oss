@@ -65,6 +65,7 @@ export interface AutomationConfiguration {
   notifications: AutomationNotification[];
   prompt: string;
   repositoryIds: string[];
+  skillIds: string[];
   toolPolicy: "full";
   triggers: AutomationTrigger[];
   workspaceSecretIds: string[];
@@ -180,6 +181,8 @@ export interface AutomationOptions extends Omit<AgentOptions, "accounts" | "reso
     provider: AgentOptions["accounts"][number]["provider"] | "discord";
   }>;
   credentials: AutomationCredential[];
+  // Workspace skills, with the names of the secrets each one brings.
+  skills: Array<{ id: string; name: string; description: string; secretNames: string[] }>;
   resources: Array<Omit<AgentOptions["resources"][number], "kind"> & {
     kind: AgentOptions["resources"][number]["kind"] | "discord_channel";
   }>;

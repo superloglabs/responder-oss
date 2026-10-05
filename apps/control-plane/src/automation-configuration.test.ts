@@ -11,6 +11,7 @@ const options = {
   repositories: [{ id: "repository", integrationAccountId: "github", fullName: "acme/app", defaultBranch: "main", private: true }],
   resources: [{ id: "project", integrationAccountId: "sentry", kind: "sentry_project", externalId: "web", displayName: "web" }],
   secrets: [{ id: "secret", name: "TOKEN", allowedHosts: [] }],
+  skills: [{ id: "skill", name: "billing-api", description: "Billing", secretNames: [] }],
 } as unknown as AutomationOptions;
 
 const configuration = {
@@ -24,6 +25,7 @@ const configuration = {
   notifications: [],
   prompt: "Investigate",
   repositoryIds: ["repository", "removed-repository"],
+  skillIds: ["skill", "removed-skill"],
   toolPolicy: "full",
   triggers: [{ eventTypes: ["new_issue"], integrationAccountId: "sentry", kind: "sentry", projectIds: ["web", "removed-project"] }],
   workspaceSecretIds: ["secret", "removed-secret"],
@@ -34,6 +36,7 @@ describe("availableAutomationConfiguration", () => {
     expect(availableAutomationConfiguration(configuration, options)).toMatchObject({
       contextAccountIds: ["datadog"],
       repositoryIds: ["repository"],
+      skillIds: ["skill"],
       triggers: [{ integrationAccountId: "sentry", projectIds: ["web"] }],
       workspaceSecretIds: ["secret"],
     });

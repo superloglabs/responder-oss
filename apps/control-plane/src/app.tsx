@@ -34,6 +34,8 @@ import {
   TermsPage,
 } from "./edition-pages";
 import { SettingsPage } from "./pages/settings";
+import { SkillEditorPage } from "./pages/skill-editor";
+import { SkillsPage } from "./pages/skills";
 import { SuggestionsPage } from "./pages/suggestions";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
@@ -124,6 +126,9 @@ export function App() {
         <Route element={<AutomationEditRedirect />} path="/automations/:automationId/edit" />
         <Route element={<AutomationTestChatPage />} path="/automations/:automationId/test" />
         <Route element={<AutomationRunPage />} path="/automations/:automationId/runs/:runId" />
+        <Route element={<SkillsPage />} path="/skills" />
+        <Route element={<SkillEditorPage />} path="/skills/new" />
+        <Route element={<SkillEditorPage />} path="/skills/:skillId" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />

@@ -137,6 +137,8 @@ export const automationConfigurationOutputSchema = z
       .describe("Slack channels that receive the result of scheduled and Sentry runs."),
     prompt: z.string().describe("The agent instructions."),
     repositoryIds: z.array(z.uuid()),
+    skillIds: z.array(z.uuid())
+      .describe("Workspace skills written to the sandbox for the agent to read."),
     toolPolicy: z.literal("full"),
     triggers: z.array(automationTriggerSchema),
     workspaceSecretIds: z.array(z.uuid()),
@@ -151,6 +153,8 @@ const describedConfigurationShape = {
   prompt: configurationShape.prompt.describe("The agent instructions."),
   repositoryIds: configurationShape.repositoryIds
     .describe("Repositories checked out in the sandbox. See `GET /integrations`."),
+  skillIds: configurationShape.skillIds
+    .describe("Workspace skills written to the sandbox for the agent to read. Skills are managed on the Skills page."),
   triggers: configurationShape.triggers
     .describe("What starts a run. Each trigger starts runs on its own."),
   workspaceSecretIds: configurationShape.workspaceSecretIds
@@ -207,6 +211,7 @@ export const automationConfigurationChangesSchema = z
     notifications: changed(shape.notifications),
     prompt: changed(shape.prompt),
     repositoryIds: changed(shape.repositoryIds),
+    skillIds: changed(shape.skillIds),
     toolPolicy: changed(shape.toolPolicy),
     triggers: changed(shape.triggers),
     workspaceSecretIds: changed(shape.workspaceSecretIds),

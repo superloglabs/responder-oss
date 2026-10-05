@@ -5,6 +5,7 @@ export type NavigationSection =
   | "issues"
   | "scans"
   | "settings"
+  | "skills"
   | "suggestions"
   | "tag-mode";
 
@@ -20,8 +21,12 @@ export function primaryNavigation(options: {
   automations: boolean;
   simplified: boolean;
 }): NavigationItem[] {
+  // Skills extend automations, so they appear with them.
   const automations: NavigationItem[] = options.automations
-    ? [{ label: "Automations", section: "automations", to: "/automations" }]
+    ? [
+        { label: "Automations", section: "automations", to: "/automations" },
+        { label: "Skills", section: "skills", to: "/skills" },
+      ]
     : [];
   if (options.simplified) {
     return [

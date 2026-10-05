@@ -34,7 +34,8 @@ import { getOrganizationModelCredential, selectOrganizationModelCredential } fro
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
 import { parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
-import { getAutomationRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
+import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
+import { getAutomationRuntimeSkills, type RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
@@ -96,6 +97,12 @@ import {
   workspaceToolDefinitions,
   workspaceToolSpecs,
 } from "./workspace-tools.js";
+import {
+  automationRunSecrets,
+  automationSkillInstructions,
+  materializeAutomationSkills,
+} from "./automation-skills.js";
+import { workspaceSecretUsageInstructions } from "./secret-safety.js";
 
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
@@ -115,6 +122,7 @@ export interface AutomationRunDependencies {
   getNotificationChannelNames: typeof getAutomationNotificationChannelNames;
   getRunActor: typeof getAutomationRunActor;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
+  getSkills: typeof getAutomationRuntimeSkills;
   grantAllowanceExhausted: typeof automationModelBrokerGrantAllowanceExhausted;
   hasCapability: typeof organizationHasCapability;
   hasFinishedTurn: typeof automationRunHasFinishedTurn;
@@ -160,6 +168,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getNotificationChannelNames: getAutomationNotificationChannelNames,
   getRunActor: getAutomationRunActor,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
+  getSkills: getAutomationRuntimeSkills,
   grantAllowanceExhausted: automationModelBrokerGrantAllowanceExhausted,
   hasCapability: organizationHasCapability,
   hasFinishedTurn: automationRunHasFinishedTurn,
@@ -347,9 +356,11 @@ function automationPrompt(
   resumed: boolean,
   notificationChannels: string[],
   connections: Parameters<typeof contextInstructions>[0],
+  extensions: { secrets: RuntimeWorkspaceSecret[]; skills: RuntimeWorkspaceSkill[] },
   workspace?: { integrationsUrl: string },
 ): string {
   const continuation = conversationPrompt(conversation, resumed);
+  const secretInstructions = workspaceSecretUsageInstructions(extensions.secrets);
   return [
     run.prompt,
     "",
@@ -358,6 +369,8 @@ function automationPrompt(
     automationActionInstructions(notificationChannels, workspace),
     repositoryInstructions(repositories),
     ...contextInstructions(connections),
+    ...automationSkillInstructions(extensions.skills),
+    ...(secretInstructions ? [secretInstructions] : []),
     ...slackTriggerInstructions(run.triggerInput),
     "Trigger payload:",
     JSON.stringify(run.triggerInput, null, 2),
@@ -657,11 +670,13 @@ export async function processAutomationRun(
       runId: run.runId,
     });
     grantId = grant.id;
-    const [daytonaConfig, workspaceSecrets, connections] = await Promise.all([
+    const [daytonaConfig, automationSecrets, skills, connections] = await Promise.all([
       Promise.resolve(requireDaytonaClientConfig(environment)),
       dependencies.getWorkspaceSecrets(run.automationVersionId),
+      dependencies.getSkills(run.automationVersionId),
       dependencies.getConnections(run.automationVersionId),
     ]);
+    const workspaceSecrets = automationRunSecrets(automationSecrets, skills);
     const contextServers = automationContextServers(environment, connections, run.triggerInput);
     const channelNames = await dependencies.getNotificationChannelNames({
       notifications: run.notifications,
@@ -710,6 +725,7 @@ export async function processAutomationRun(
             path: automationSandboxReadyMarker,
           });
         }
+        await materializeAutomationSkills(session, skills, resumed);
         await recordEvent(dependencies, run.runId, "repositories_checked_out", {
           ...(resumed ? { resumed: true } : {}),
           count: repositories.length,
@@ -809,6 +825,7 @@ export async function processAutomationRun(
                   resumed,
                   notificationChannels,
                   connections,
+                  { secrets: workspaceSecrets, skills },
                   workspaceTools.length > 0 ? { integrationsUrl } : undefined,
                 ),
                 toolServer: automationToolServer,

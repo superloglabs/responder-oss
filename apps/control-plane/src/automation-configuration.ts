@@ -11,7 +11,7 @@ export function defaultScheduleTrigger(frequency: AutomationScheduleFrequency, t
 }
 
 // Saved automation settings can reference connections, trigger resources,
-// repositories, or secrets that were removed since. The page cannot show them
+// repositories, secrets, or skills that were removed since. The page cannot show them
 // and the server rejects them, so keep only what the current options offer.
 // Options hold connected accounts and available resources, which is what the
 // server accepts.
@@ -23,6 +23,7 @@ export function availableAutomationConfiguration(
     ...configuration,
     contextAccountIds: configuration.contextAccountIds.filter((id) => options.accounts.some((account) => account.id === id)),
     repositoryIds: configuration.repositoryIds.filter((id) => options.repositories.some((repository) => repository.id === id)),
+    skillIds: configuration.skillIds.filter((id) => options.skills.some((skill) => skill.id === id)),
     triggers: configuration.triggers.map((trigger) => availableTrigger(trigger, options)),
     workspaceSecretIds: configuration.workspaceSecretIds.filter((id) => options.secrets.some((secret) => secret.id === id)),
   };

@@ -33,6 +33,7 @@ import {
   automationVersionIntegrationAccounts,
   automationVersionRepositories,
   automationVersionSecrets,
+  automationVersionSkills,
   automationVersions,
   automations,
   integrationAccounts,
@@ -41,6 +42,7 @@ import {
   repositories,
   slackMessageAuthors,
   workspaceSecrets,
+  workspaceSkills,
   type AutomationActionKind,
   type AutomationRunStatus,
 } from "./schema.js";
@@ -57,7 +59,8 @@ export class AutomationConfigurationError extends Error {
       | "capability_disabled"
       | "integration_not_found"
       | "repository_not_found"
-      | "secret_not_found",
+      | "secret_not_found"
+      | "skill_not_found",
   ) {
     super(message);
     this.name = "AutomationConfigurationError";
@@ -573,6 +576,24 @@ async function validateConfigurationResources(
       );
     }
   }
+
+  if (configuration.skillIds.length > 0) {
+    const skillRows = await tx
+      .select({ id: workspaceSkills.id })
+      .from(workspaceSkills)
+      .where(
+        and(
+          eq(workspaceSkills.organizationId, organizationId),
+          inArray(workspaceSkills.id, configuration.skillIds),
+        ),
+      );
+    if (skillRows.length !== configuration.skillIds.length) {
+      throw new AutomationConfigurationError(
+        "One or more selected skills are unavailable",
+        "skill_not_found",
+      );
+    }
+  }
 }
 
 async function insertAutomationVersion(
@@ -643,6 +664,16 @@ async function insertAutomationVersion(
             input.configuration.workspaceSecretIds.map((workspaceSecretId) => ({
               automationVersionId: versionId,
               workspaceSecretId,
+            })),
+          ),
+        ]
+      : []),
+    ...(input.configuration.skillIds.length > 0
+      ? [
+          tx.insert(automationVersionSkills).values(
+            input.configuration.skillIds.map((skillId) => ({
+              automationVersionId: versionId,
+              skillId,
             })),
           ),
         ]
@@ -903,7 +934,7 @@ export async function getAutomation(
     .limit(1);
   const automation = rows[0];
   if (!automation) return null;
-  const [accountRows, repositoryRows, secretRows, runPage] = await Promise.all([
+  const [accountRows, repositoryRows, secretRows, skillRows, runPage] = await Promise.all([
     db
       .select({
         id: automationVersionIntegrationAccounts.integrationAccountId,
@@ -935,6 +966,12 @@ export async function getAutomation(
       .where(
         eq(automationVersionSecrets.automationVersionId, automation.versionId),
       ),
+    db
+      .select({ id: automationVersionSkills.skillId })
+      .from(automationVersionSkills)
+      .where(
+        eq(automationVersionSkills.automationVersionId, automation.versionId),
+      ),
     listAutomationRuns(organizationId, automationId, { limit: 50, offset: 0 }),
   ]);
   return {
@@ -945,6 +982,7 @@ export async function getAutomation(
         .filter((row) => row.role === "context")
         .map((row) => row.id),
       repositoryIds: repositoryRows.map((row) => row.id),
+      skillIds: skillRows.map((row) => row.id),
       workspaceSecretIds: secretRows.map((row) => row.id),
     },
     runs: runPage.runs,

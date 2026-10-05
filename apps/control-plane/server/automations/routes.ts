@@ -25,6 +25,7 @@ import {
   updateAutomation,
 } from "../../../../packages/core/src/db/automations.js";
 import { listAgentOptions } from "../../../../packages/core/src/db/agents.js";
+import { listWorkspaceSkills } from "../../../../packages/core/src/db/workspace-skills.js";
 import {
   createOrganizationModelCredential,
   deleteOrganizationModelCredential,
@@ -215,9 +216,10 @@ export const automationRoutes = new Hono()
   .get("/options", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
-    const [options, credentials] = await Promise.all([
+    const [options, credentials, skills] = await Promise.all([
       listAgentOptions(access.tenant.organizationId),
       listOrganizationModelCredentials(access.tenant.organizationId),
+      listWorkspaceSkills(access.tenant.organizationId),
     ]);
     return context.json({
       ...options,
@@ -235,6 +237,12 @@ export const automationRoutes = new Hono()
         ].includes(account.provider)
       ),
       credentials,
+      skills: skills.map(({ id, name, description, secrets }) => ({
+        id,
+        name,
+        description,
+        secretNames: secrets.map((secret) => secret.name),
+      })),
     });
   })
   .get("/sentry/:accountId/environments", async (context) => {

@@ -1,0 +1,11 @@
+.appShell--workspace .emptyState.skillsEmpty p { max-width: 460px; }
+
+.skillEditor__fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+.skillEditor__fileInput { display: none; }
+.skillEditor__hint { margin: 0; color: #666; font-size: 12px; line-height: 16px; }
+.automationCreate__toolbar.skillEditor__hint { padding-top: 0; }
+.automationCreate__row > .skillEditor__meta { flex: 0 1 auto; min-width: 0; overflow: hidden; color: #666; font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .skillEditor__fields { grid-template-columns: minmax(0, 1fr); }
+}

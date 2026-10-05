@@ -64,6 +64,7 @@ function dependencies() {
     await toolHandlers.at(-1)!.onAction(pullRequest);
   };
   const session = {
+    execCommand: vi.fn().mockResolvedValue("Process exited with code 0"),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockRejectedValue(new Error("not found")),
     state: { environment: {} },
@@ -91,7 +92,7 @@ function dependencies() {
       return vi.fn();
     }),
     openPullRequest,
-    session: session as DaytonaSandboxSession & { materializeEntry: ReturnType<typeof vi.fn> },
+    session: session as DaytonaSandboxSession & { execCommand: ReturnType<typeof vi.fn>; materializeEntry: ReturnType<typeof vi.fn> },
     getCredential: vi.fn().mockResolvedValue({
       apiKey: "customer-provider-secret",
       provider: "openai",
@@ -105,6 +106,7 @@ function dependencies() {
     hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
+    getSkills: vi.fn<AutomationRunDependencies["getSkills"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
@@ -191,6 +193,46 @@ describe("automation run processor", () => {
       name: "linear_63636363636343638363636363636363",
       url: `https://responder.example/api/automation-context-broker/v1/${linearId}`,
     }]);
+  });
+
+  it("writes the automation's skills to the sandbox and gives the run their secrets", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const billingKey = { allowedHosts: ["api.billing.example"], daytonaSecretName: "dtn_billing", environmentVariable: "BILLING_API_KEY" };
+    deps.getWorkspaceSecrets.mockResolvedValue([billingKey]);
+    deps.getSkills.mockResolvedValue([{
+      description: "Look up invoices in the billing API.",
+      files: [{ content: "openapi: 3.1.0\n", path: "reference/openapi.yaml" }],
+      instructions: "Call GET /v1/invoices.",
+      name: "billing-api",
+      secrets: [
+        billingKey,
+        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", environmentVariable: "BILLING_STATUS_TOKEN" },
+      ],
+    }]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    const written = Object.fromEntries(deps.session.materializeEntry.mock.calls.map(([call]) => [call.path, call.entry.content]));
+    expect(written["/home/daytona/workspace/.responder/skills/billing-api/SKILL.md"]).toBe(
+      "---\nname: \"billing-api\"\ndescription: \"Look up invoices in the billing API.\"\n---\n\nCall GET /v1/invoices.\n",
+    );
+    expect(written["/home/daytona/workspace/.responder/skills/billing-api/reference/openapi.yaml"]).toBe("openapi: 3.1.0\n");
+    expect(deps.runInSandbox).toHaveBeenCalledWith(expect.objectContaining({
+      secrets: [
+        billingKey,
+        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", environmentVariable: "BILLING_STATUS_TOKEN" },
+      ],
+    }));
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(prompt).toContain("- billing-api: Look up invoices in the billing API. Read /home/daytona/workspace/.responder/skills/billing-api/SKILL.md. Uses BILLING_API_KEY, BILLING_STATUS_TOKEN.");
+    expect(prompt).toContain("- BILLING_STATUS_TOKEN: may be used only for outbound requests to status.billing.example");
+    expect(deps.session.execCommand).not.toHaveBeenCalled();
   });
 
   it("serves each Google Cloud context connection as one server per Google service", async () => {
@@ -1334,8 +1376,9 @@ describe("automation run processor", () => {
     const order: string[] = [];
     deps.saveSandbox.mockImplementation(async () => { order.push("save"); });
     deps.setStatus.mockImplementation(async () => { order.push("status"); return true; });
+    const execCommand = vi.fn().mockResolvedValue("Process exited with code 0");
     deps.runInSandbox.mockImplementation(async (input) => {
-      const session = { materializeEntry: vi.fn(), readFile: vi.fn().mockRejectedValue(new Error("not found")), state: { environment: {} } } as unknown as DaytonaSandboxSession;
+      const session = { execCommand, materializeEntry: vi.fn(), readFile: vi.fn().mockRejectedValue(new Error("not found")), state: { environment: {} } } as unknown as DaytonaSandboxSession;
       const value = await input.run(session, async (operation: () => Promise<unknown>) => operation(), undefined, true);
       input.onPaused?.({ id: "sandbox-1", sessionState });
       return value;
@@ -1347,6 +1390,8 @@ describe("automation run processor", () => {
     expect(deps.loadRepositories).toHaveBeenCalledOnce();
     expect(deps.checkoutRepositories).not.toHaveBeenCalled();
     expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("Earlier turns ran in this sandbox");
+    // Skills are written again each turn, so edits since the last turn apply.
+    expect(execCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: "rm -rf -- '/home/daytona/workspace/.responder/skills'" }));
     expect(deps.saveSandbox).toHaveBeenCalledWith({ leaseId: claimedRun().leaseId, runId, sandbox: { id: "sandbox-1", sessionState } });
     expect(order).toEqual(["save", "status"]);
   });
