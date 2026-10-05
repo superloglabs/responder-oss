@@ -142,8 +142,16 @@ export const dash0WebhookRoutes = new Hono().post("/:accountId", async (context)
             timestamp: issue.start ?? null,
           },
         });
+        // The organization is already told when its allowance runs out.
         if (result.kind === "blocked") {
-          throw new Error("Monthly investigation allowance exhausted");
+          console.info(
+            JSON.stringify({
+              agentId: match.agentId,
+              event: "dash0_investigation_blocked",
+              issueId: issue.id,
+              reason: "investigation_allowance_exhausted",
+            }),
+          );
         }
       }),
     );

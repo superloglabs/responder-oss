@@ -576,9 +576,8 @@ async function forwardSlackEvent(input: {
         threadTimestamp: input.threadTimestamp,
       })
     : await queueInvestigation(request);
-  if (result.kind === "blocked") {
-    throw new Error("Monthly investigation allowance exhausted");
-  }
+  // The organization is already told when its allowance runs out.
+  if (result.kind === "blocked") return null;
   return investigationStartResponseSchema.parse({
     duplicate: result.kind === "duplicate",
     investigationId: result.investigationId,
@@ -859,6 +858,21 @@ async function sendSlackActionResponse(
   }
 }
 
+function logBlockedSlackInvestigation(input: {
+  agentId: string;
+  channelId: string;
+  eventId: string;
+  teamId: string;
+}) {
+  console.info(
+    JSON.stringify({
+      ...input,
+      event: "slack_webhook_ignored",
+      reason: "investigation_allowance_exhausted",
+    }),
+  );
+}
+
 export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   const rawBody = await context.req.text();
   if (
@@ -1094,7 +1108,13 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         },
       );
       if (result.kind === "blocked") {
-        throw new Error("Monthly investigation allowance exhausted");
+        logBlockedSlackInvestigation({
+          agentId: linked.agentId,
+          channelId: event.channel,
+          eventId: callback.data.event_id,
+          teamId: callback.data.team_id,
+        });
+        return context.json({ ok: true, followup: true, blocked: true });
       }
       return context.json({
         ok: true,
@@ -1170,6 +1190,15 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         userId: event.user,
         userName: event.username?.trim() || undefined,
       });
+      if (!result) {
+        logBlockedSlackInvestigation({
+          agentId: match.agentId,
+          channelId: event.channel,
+          eventId: callback.data.event_id,
+          teamId: callback.data.team_id,
+        });
+        return;
+      }
       await recordInvestigationSlackSource(result.investigationId, {
         attachments: event.attachments ?? [],
         authorName: slackMessageAuthor(event),

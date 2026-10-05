@@ -147,8 +147,17 @@ async function forwardSentryIssue(input: {
       timestamp: input.issue.lastSeen ?? input.issue.firstSeen ?? null,
     },
   });
+  // The organization is already told when its allowance runs out.
   if (result.kind === "blocked") {
-    throw new Error("Monthly investigation allowance exhausted");
+    console.info(
+      JSON.stringify({
+        agentId: input.agentId,
+        event: "sentry_investigation_blocked",
+        issueId: input.issue.id,
+        reason: "investigation_allowance_exhausted",
+      }),
+    );
+    return null;
   }
   return investigationStartResponseSchema.parse({
     duplicate: result.kind === "duplicate",
