@@ -163,6 +163,60 @@ export const slackThreadModeConfigurationSchema = z.object({
   secretIds: z.array(z.uuid()).max(20).default([]),
 });
 
+// Integrations an agent or tag mode can use as context.
+export const contextIntegrationProviders = [
+  "aws",
+  "gcp",
+  "sentry",
+  "datadog",
+  "dash0",
+  "posthog",
+  "grafana",
+  "axiom",
+  "clickstack",
+  "upstash",
+  "langfuse",
+  "supabase",
+  "vercel",
+  "custom_mcp",
+  "linear",
+] as const;
+
+// Tag mode that has never been saved starts with every connected context
+// integration and every Vercel project, up to the configuration limits.
+// Repositories and secrets are still chosen by hand.
+export function defaultSlackThreadModeConfiguration(input: {
+  instructions: string;
+  options: {
+    accounts: { id: string; provider: string }[];
+    resources: { id: string; integrationAccountId: string; kind: string }[];
+  };
+}): SlackThreadModeConfiguration {
+  const contextAccountIds = input.options.accounts
+    .filter((account) =>
+      (contextIntegrationProviders as readonly string[]).includes(account.provider),
+    )
+    .map((account) => account.id)
+    .slice(0, 20);
+  const contextResourceIds = input.options.resources
+    .filter(
+      (resource) =>
+        resource.kind === "vercel_project" &&
+        contextAccountIds.includes(resource.integrationAccountId),
+    )
+    .map((resource) => resource.id)
+    .slice(0, 100);
+  return {
+    enabled: false,
+    model: "instance/default",
+    instructions: input.instructions,
+    repositoryIds: [],
+    contextAccountIds,
+    contextResourceIds,
+    secretIds: [],
+  };
+}
+
 export type AgentConfigurationInput = z.input<typeof agentConfigurationSchema>;
 export type AgentConfiguration = z.output<typeof agentConfigurationSchema>;
 export type AgentTrigger = AgentConfiguration["trigger"];

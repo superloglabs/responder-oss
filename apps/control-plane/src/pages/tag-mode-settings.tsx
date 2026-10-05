@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AGENT_PROMPT_MAX_LENGTH,
   customTagModeInstructions,
+  defaultSlackThreadModeConfiguration,
   tagModeAssistantInstructions,
   tagModeInvestigationInstructions,
 } from "@responder/core/agents/config";
@@ -183,7 +184,10 @@ export function TagModeSettingsPage() {
         if (cancelled) return;
         setOptions(loadedOptions);
         setIntegrations(loadedIntegrations);
-        const loaded = loadedConfiguration ?? defaultConfiguration;
+        const loaded = loadedConfiguration ?? defaultSlackThreadModeConfiguration({
+          instructions: tagModeInvestigationInstructions,
+          options: loadedOptions,
+        });
         const available = availableTagModeConfiguration(
           assistant && customTagModeInstructions(loaded.instructions) === null
             ? { ...loaded, instructions: tagModeAssistantInstructions }

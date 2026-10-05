@@ -1,7 +1,8 @@
 import { and, desc, eq, exists, inArray, or } from "drizzle-orm";
-import type {
-  AgentConfiguration,
-  SlackThreadModeConfiguration,
+import {
+  contextIntegrationProviders,
+  type AgentConfiguration,
+  type SlackThreadModeConfiguration,
 } from "../agents/config.js";
 import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { member } from "./auth-schema.js";
@@ -309,23 +310,7 @@ async function validateConfigurationResources(
     const account = accountsById.get(accountId);
     if (
       !account ||
-      ![
-        "aws",
-        "gcp",
-        "sentry",
-        "datadog",
-        "dash0",
-        "posthog",
-        "grafana",
-        "axiom",
-        "clickstack",
-        "upstash",
-        "langfuse",
-        "supabase",
-        "vercel",
-        "custom_mcp",
-        "linear",
-      ].includes(
+      !(contextIntegrationProviders as readonly string[]).includes(
         account.provider,
       ) ||
       account.status !== "connected" ||

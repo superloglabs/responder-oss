@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentConfigurationSchema,
   AGENT_PROMPT_MAX_LENGTH,
+  defaultSlackThreadModeConfiguration,
   slackThreadModeConfigurationSchema,
 } from "./config.js";
 
@@ -42,6 +43,50 @@ describe("agent configuration", () => {
     });
     expect(parsed).not.toHaveProperty("prMode");
     expect(parsed).not.toHaveProperty("createLinearTickets");
+  });
+
+  it("starts tag mode with every connected context integration and Vercel project", () => {
+    const configuration = defaultSlackThreadModeConfiguration({
+      instructions: "Investigate the request.",
+      options: {
+        accounts: [
+          { id: "slack", provider: "slack" },
+          { id: "github", provider: "github" },
+          { id: "sentry", provider: "sentry" },
+          { id: "vercel", provider: "vercel" },
+          { id: "mcp", provider: "custom_mcp" },
+        ],
+        resources: [
+          { id: "channel", integrationAccountId: "slack", kind: "slack_channel" },
+          { id: "project", integrationAccountId: "vercel", kind: "vercel_project" },
+        ],
+      },
+    });
+
+    expect(configuration).toEqual({
+      enabled: false,
+      model: "instance/default",
+      instructions: "Investigate the request.",
+      repositoryIds: [],
+      contextAccountIds: ["sentry", "vercel", "mcp"],
+      contextResourceIds: ["project"],
+      secretIds: [],
+    });
+  });
+
+  it("keeps the default tag mode within the configuration limits", () => {
+    const configuration = defaultSlackThreadModeConfiguration({
+      instructions: "Investigate the request.",
+      options: {
+        accounts: Array.from({ length: 25 }, (_, index) => ({
+          id: `mcp-${index}`,
+          provider: "custom_mcp",
+        })),
+        resources: [],
+      },
+    });
+
+    expect(configuration.contextAccountIds).toHaveLength(20);
   });
 
   it("accepts a Slack mention agent that reports in the source thread", () => {
