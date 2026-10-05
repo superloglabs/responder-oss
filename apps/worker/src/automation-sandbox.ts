@@ -389,7 +389,7 @@ export async function runInFreshAutomationSandbox<T>(
         await dependencies.closePending(name, input.config);
       } catch (error) {
         console.error(JSON.stringify({
-          errorCode: error instanceof Error ? error.constructor.name : "unknown",
+          errorCode: error instanceof Error ? error.name : typeof error,
           event: "automation_pending_sandbox_delete_failed",
           runId: input.runId,
           sandboxId: name,
