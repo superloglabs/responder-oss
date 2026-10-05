@@ -955,6 +955,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     eventType: event.type,
     teamId: callback.data.team_id,
     text: rawMessageBody,
+    threadTimestamp: event.thread_ts,
   });
   if (author) {
     // The trigger editor offers the people and apps seen here as authors to
@@ -989,8 +990,9 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         text: body,
       }
     : null;
-  // Organizations with an automation run working in this thread. The run
-  // answers there, so the organization's agents stay out of it.
+  // Organizations with an automation run working in this thread, or one this
+  // mention starts. The run answers there, so the organization's agents stay
+  // out of it.
   const automationThreadOrganizations = new Set<string>();
   const automationResults = await Promise.allSettled(
     automationMatches.map(async (match) => {
@@ -1055,6 +1057,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           title: slackMessageTitle(body),
         },
       });
+      if (match.mentioned) automationThreadOrganizations.add(match.organizationId);
     }),
   );
   if (automationResults.some((result) => result.status === "rejected")) {

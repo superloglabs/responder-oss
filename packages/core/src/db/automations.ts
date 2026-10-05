@@ -24,6 +24,7 @@ import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
+  agents,
   automationModelBrokerGrants,
   automationModelUsage,
   automationRunEvents,
@@ -40,6 +41,7 @@ import {
   integrationResources,
   organizationCapabilities,
   repositories,
+  slackInvestigationSessions,
   slackMessageAuthors,
   workspaceSecrets,
   workspaceSkills,
@@ -72,17 +74,23 @@ export class AutomationConfigurationError extends Error {
 // `startsRun` says only whether this event starts a new run. A trigger that
 // ignores the message's author does not watch for it. `authorIds` are the
 // sender's user, bot, and app IDs that Slack sent.
+//
+// When the organization has tag mode on, tag mode answers a message that
+// mentions the app unless a trigger watches for mentions, and it keeps the
+// threads it answers in: a message there starts no run.
 export async function findAutomationsForSlackEvent(input: {
   authorIds: string[];
   channelId: string;
   eventType: "app_mention" | "message";
   teamId: string;
   text: string;
+  threadTimestamp?: string;
 }): Promise<Array<{
   automationId: string;
   integrationAccountId: string;
   // Whether the message mentions the app, as an app mention or in its text.
   mentioned: boolean;
+  organizationId: string;
   startsRun: boolean;
 }>> {
   const rows = await getDatabase()
@@ -90,6 +98,11 @@ export async function findAutomationsForSlackEvent(input: {
       accountId: integrationAccounts.id,
       accountMetadata: integrationAccounts.metadata,
       automationId: automations.id,
+      organizationId: automations.organizationId,
+      tagMode: sql<boolean>`exists (select 1 from ${agents} where ${agents.organizationId} = ${automations.organizationId} and ${agents.purpose} = 'slack_thread' and ${agents.enabled} and ${agents.activeVersionId} is not null)`,
+      tagModeThread: input.threadTimestamp
+        ? sql<boolean>`exists (select 1 from ${slackInvestigationSessions} where ${slackInvestigationSessions.organizationId} = ${automations.organizationId} and ${slackInvestigationSessions.teamId} = ${input.teamId} and ${slackInvestigationSessions.channelId} = ${input.channelId} and ${slackInvestigationSessions.threadTimestamp} = ${input.threadTimestamp})`
+        : sql<boolean>`false`,
       triggers: automationVersions.triggers,
     })
     .from(automations)
@@ -140,17 +153,20 @@ export async function findAutomationsForSlackEvent(input: {
       !trigger.ignoredAuthors?.some((author) => input.authorIds.includes(author.id))
     );
     if (watching.length === 0) return [];
-    const startsRun = watching.some((trigger) =>
+    const mentioned = input.eventType === "app_mention" ||
+      (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`));
+    const startsRun = !row.tagModeThread && watching.some((trigger) =>
       trigger.kind === "slack" &&
       (trigger.eventMode === "both" ||
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
-        (trigger.eventMode === "every_message" && input.eventType === "message"))
+        (trigger.eventMode === "every_message" && input.eventType === "message" &&
+          !(mentioned && row.tagMode)))
     );
     return [{
       automationId: row.automationId,
       integrationAccountId: row.accountId,
-      mentioned: input.eventType === "app_mention" ||
-        (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`)),
+      mentioned,
+      organizationId: row.organizationId,
       startsRun,
     }];
   });

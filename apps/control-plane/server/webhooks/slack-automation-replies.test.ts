@@ -51,7 +51,7 @@ const tagModeAgent = {
   organizationId: "org",
   trigger: "slack_thread",
 };
-const match = { automationId, integrationAccountId, mentioned: false, startsRun: true };
+const match = { automationId, integrationAccountId, mentioned: false, organizationId: "org", startsRun: true };
 
 function deliver(event: Record<string, unknown>) {
   const body = JSON.stringify({
@@ -154,6 +154,7 @@ describe("Slack replies to automation runs", () => {
 
     await deliver({ thread_ts: "1790000000.000100", user: "U123" });
 
+    expect(mocks.findAutomations).toHaveBeenCalledWith(expect.objectContaining({ threadTimestamp: "1790000000.000100" }));
     expect(mocks.queueReply).not.toHaveBeenCalled();
     expect(mocks.queueRun).toHaveBeenCalledWith(expect.objectContaining({
       automationId,
@@ -277,5 +278,25 @@ describe("Slack replies to automation runs", () => {
     });
 
     expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a mention to tag mode when no automation starts on it", async () => {
+    mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    mocks.findAutomations.mockResolvedValue([{ ...match, mentioned: true, startsRun: false }]);
+
+    await deliver({ text: "<@UBOT> Why is checkout slow?", type: "app_mention", user: "U123" });
+
+    expect(mocks.queueRun).not.toHaveBeenCalled();
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
+  });
+
+  it("keeps tag mode out of a mention that starts an automation run", async () => {
+    mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    mocks.findAutomations.mockResolvedValue([{ ...match, mentioned: true }]);
+
+    await deliver({ text: "<@UBOT> Why is checkout slow?", type: "app_mention", user: "U123" });
+
+    expect(mocks.queueRun).toHaveBeenCalledOnce();
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
   });
 });
