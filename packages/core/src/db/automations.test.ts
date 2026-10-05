@@ -143,7 +143,8 @@ describe("trigger matching", () => {
     });
     const rows = [automation("messages", "every_message"), automation("mentions", "mentions"), automation("both", "both")];
     const threadRows = rows.map((row) => ({ ...row, tagModeThread: true }));
-    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows, threadRows]));
+    const tagModeOffRows = threadRows.map((row) => ({ ...row, tagMode: false }));
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows, threadRows, tagModeOffRows]));
     const startsRun = async (input: { eventType: "app_mention" | "message"; text: string; threadTimestamp?: string }) =>
       (await findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", teamId: "T1", ...input }))
         .filter((match) => match.startsRun)
@@ -157,6 +158,9 @@ describe("trigger matching", () => {
     // No message in a thread tag mode answers in starts a run.
     await expect(startsRun({ eventType: "app_mention", text: "<@U-BOT> and now?", threadTimestamp: "1790000000.000100" }))
       .resolves.toEqual([]);
+    // Once tag mode is off, its old threads start runs again.
+    await expect(startsRun({ eventType: "app_mention", text: "<@U-BOT> and now?", threadTimestamp: "1790000000.000100" }))
+      .resolves.toEqual(["mentions", "both"]);
   });
 
   it("lists each Slack author once, newest first, up to a limit", async () => {

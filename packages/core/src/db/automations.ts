@@ -77,7 +77,7 @@ export class AutomationConfigurationError extends Error {
 //
 // When the organization has tag mode on, tag mode answers a message that
 // mentions the app unless a trigger watches for mentions, and it keeps the
-// threads it answers in: a message there starts no run.
+// threads it answers in: a message there starts no run while tag mode is on.
 export async function findAutomationsForSlackEvent(input: {
   authorIds: string[];
   channelId: string;
@@ -155,7 +155,7 @@ export async function findAutomationsForSlackEvent(input: {
     if (watching.length === 0) return [];
     const mentioned = input.eventType === "app_mention" ||
       (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`));
-    const startsRun = !row.tagModeThread && watching.some((trigger) =>
+    const startsRun = !(row.tagMode && row.tagModeThread) && watching.some((trigger) =>
       trigger.kind === "slack" &&
       (trigger.eventMode === "both" ||
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
