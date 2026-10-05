@@ -5,9 +5,13 @@ import { slackWebhookRoutes } from "./slack.js";
 const mocks = vi.hoisted(() => ({
   findAgents: vi.fn(),
   findAutomations: vi.fn(),
+  findIssueThread: vi.fn(),
   findThreadRun: vi.fn(),
+  hasCapability: vi.fn(),
+  queueThreadInvestigation: vi.fn(),
   queueReply: vi.fn(),
   recordAuthor: vi.fn(),
+  recordSource: vi.fn(),
   queueRun: vi.fn(),
 }));
 
@@ -23,11 +27,30 @@ vi.mock("../automations/queue.js", () => ({
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   findAgentsForSlackEvent: mocks.findAgents,
 }));
+vi.mock("../../../../packages/core/src/db/investigations.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../../packages/core/src/db/investigations.js")>(),
+  findSlackIssueThread: mocks.findIssueThread,
+  recordInvestigationSlackSource: mocks.recordSource,
+}));
+vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
+  organizationHasCapability: mocks.hasCapability,
+}));
+vi.mock("../investigations/queue.js", () => ({
+  queueInvestigation: vi.fn(),
+  queueSlackThreadInvestigation: mocks.queueThreadInvestigation,
+}));
 
 const signingSecret = "slack-signing-secret";
 const automationId = "31313131-3131-4131-8131-313131313131";
 const runId = "21212121-2121-4121-8121-212121212121";
 const integrationAccountId = "41414141-4141-4141-8141-414141414141";
+const investigationId = "51515151-5151-4151-8151-515151515151";
+const tagModeAgent = {
+  agentId: "61616161-6161-4161-8161-616161616161",
+  integrationAccountId,
+  organizationId: "org",
+  trigger: "slack_thread",
+};
 const match = { automationId, integrationAccountId, mentioned: false, startsRun: true };
 
 function deliver(event: Record<string, unknown>) {
@@ -54,6 +77,10 @@ describe("Slack replies to automation runs", () => {
   beforeEach(() => {
     vi.stubEnv("SLACK_SIGNING_SECRET", signingSecret);
     mocks.findAgents.mockResolvedValue([]);
+    mocks.findIssueThread.mockResolvedValue(null);
+    mocks.hasCapability.mockResolvedValue(false);
+    mocks.queueThreadInvestigation.mockResolvedValue({ investigationId, kind: "duplicate" });
+    mocks.recordSource.mockResolvedValue(undefined);
     mocks.findAutomations.mockResolvedValue([match]);
     mocks.findThreadRun.mockResolvedValue({ id: runId, organizationId: "org" });
     mocks.queueReply.mockResolvedValue("queued");
@@ -209,5 +236,31 @@ describe("Slack replies to automation runs", () => {
 
     expect(mocks.findThreadRun).not.toHaveBeenCalled();
     expect(mocks.queueRun).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a mention in the run's thread to the run, not to tag mode", async () => {
+    mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    const mention = { text: "<@UBOT> Can you open a PR?", thread_ts: "1790000000.000100", user: "U123" };
+
+    await deliver(mention);
+    await deliver({ ...mention, type: "app_mention" });
+
+    expect(mocks.queueReply).toHaveBeenCalledTimes(2);
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("starts tag mode for a mention in a thread without a run", async () => {
+    mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    mocks.findThreadRun.mockResolvedValue(null);
+    mocks.findAutomations.mockResolvedValue([{ ...match, startsRun: false }]);
+
+    await deliver({
+      text: "<@UBOT> Can you open a PR?",
+      thread_ts: "1790000000.000100",
+      type: "app_mention",
+      user: "U123",
+    });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
   });
 });
