@@ -209,6 +209,22 @@ describe("Slack direct messages", () => {
     );
   });
 
+  it("keeps block text when a direct message with a file has no plain text", async () => {
+    await directMessage({
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "See the trace" } }],
+      files: [{ id: "F123", name: "trace.png" }],
+      subtype: "file_share",
+      text: "",
+    });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "See the trace\n\nThe person attached files you can't open: trace.png",
+      }),
+      expect.anything(),
+    );
+  });
+
   it("ignores the app's own messages", async () => {
     const response = await directMessage({ bot_id: "B123", subtype: "bot_message" });
 

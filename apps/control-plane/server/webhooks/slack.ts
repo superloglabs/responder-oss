@@ -223,7 +223,8 @@ function slackBlockStrings(value: unknown): string[] {
   );
 }
 
-export function slackMessageBody(
+// The message's text, attachments, and block text; empty when it has none.
+function slackMessageContent(
   event: z.infer<typeof slackMessageSchema>,
 ): string {
   const attachmentText = event.attachments
@@ -245,7 +246,14 @@ export function slackMessageBody(
   return [event.text, attachmentText, blockText]
     .filter((value): value is string => Boolean(value?.trim()))
     .join("\n\n")
-    .slice(0, 100_000) || "A new alert was posted in the configured Slack channel.";
+    .slice(0, 100_000);
+}
+
+export function slackMessageBody(
+  event: z.infer<typeof slackMessageSchema>,
+): string {
+  return slackMessageContent(event) ||
+    "A new alert was posted in the configured Slack channel.";
 }
 
 export function isSupportedSlackMessageSubtype(
@@ -1040,7 +1048,7 @@ export function slackDirectMessageBody(event: SlackMessageEvent): string {
     .filter((name): name is string => Boolean(name));
   if (fileNames.length === 0) return slackMessageBody(event);
   const fileNote = `The person attached files you can't open: ${fileNames.join(", ")}`;
-  return event.text.trim() ? `${slackMessageBody(event)}\n\n${fileNote}` : fileNote;
+  return [slackMessageContent(event), fileNote].filter(Boolean).join("\n\n");
 }
 
 // A direct message works like a mention: tag mode answers in the message's
