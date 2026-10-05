@@ -96,6 +96,14 @@ describe("tool definitions", () => {
     const notify = automationToolDefinitions(["#ops"]).find((tool) => tool.name === "post_notification");
     expect(notify?.description).toContain("(#ops)");
     expect(notify?.inputSchema.properties).toHaveProperty("details");
+    expect(notify?.inputSchema.properties).toHaveProperty("buttons");
+  });
+
+  it("replies in a pressed button's thread without offering to skip", () => {
+    const tools = automationToolDefinitions(["#ops"], [], true);
+    expect(tools.map((tool) => tool.name)).not.toContain("skip_notification");
+    expect(tools.find((tool) => tool.name === "post_notification")?.description)
+      .toContain("Reply in the Slack thread of the message whose button was pressed (#ops)");
   });
 });
 

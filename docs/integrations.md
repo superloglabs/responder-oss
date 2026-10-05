@@ -92,6 +92,16 @@ cached across investigations. Reconnect existing installations after changing
 scopes. The connecting user must be able to search each selected channel, and
 private channels also require the bot to be invited.
 
+An automation's agent can add up to five buttons to a Slack message it posts,
+through `post_notification` or `slack_post_message`. Each button carries the
+run ID, and the run's action attempt for the message records the button labels
+and the Slack connection that posted it. A press reaches the interactivity URL,
+which accepts it only when that run posted the message through a connection to
+the same Slack workspace. The press is stored as a message on the run, which
+then starts its next turn and answers in the message's thread. The first press
+on a message is the choice: the buttons are replaced with who pressed which
+one, and later presses are refused.
+
 Watched channels accept app-authored CloudWatch alarm notifications from AWS
 and Amazon Q Developer in chat applications. Responder starts investigations
 only for `ALARM` notifications, normalizes the alarm name, region, state, and

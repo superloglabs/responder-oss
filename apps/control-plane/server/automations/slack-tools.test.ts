@@ -251,6 +251,51 @@ describe("automation Slack tools", () => {
       .toBe(deps.beginAttempt.mock.calls[1]![0].idempotencyKey);
   });
 
+  it("posts buttons that continue the run and records their labels", async () => {
+    const deps = dependencies();
+    const buttons = [{ label: "Create PR", style: "primary" }, { label: "Ignore" }];
+
+    await call(claim(), deps, "slack_post_message", { buttons, channel_id: "C123", text: "Checkout is failing." });
+
+    expect(deps.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      blocks: [
+        { text: { text: "Checkout is failing.", type: "mrkdwn" }, type: "section" },
+        {
+          block_id: "automation_run_buttons",
+          elements: [
+            { action_id: "automation_run_button:0", style: "primary", text: { emoji: true, text: "Create PR", type: "plain_text" }, type: "button", value: runId },
+            { action_id: "automation_run_button:1", text: { emoji: true, text: "Ignore", type: "plain_text" }, type: "button", value: runId },
+          ],
+          type: "actions",
+        },
+      ],
+      text: "Checkout is failing.",
+    }));
+    expect(deps.beginAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      redactedInput: {
+        buttons: ["Create PR", "Ignore"],
+        channelId: "C123",
+        integrationAccountId: "61616161-6161-4161-8161-616161616161",
+      },
+    }));
+  });
+
+  it("refuses buttons with repeated labels or too much text", async () => {
+    const deps = dependencies();
+
+    await expect(call(claim(), deps, "slack_post_message", {
+      buttons: [{ label: "Yes" }, { label: "Yes" }],
+      channel_id: "C123",
+      text: "Open a PR?",
+    })).resolves.toMatchObject({ isError: true });
+    await expect(call(claim(), deps, "slack_post_message", {
+      buttons: [{ label: "Yes" }],
+      channel_id: "C123",
+      text: "x".repeat(3_001),
+    })).resolves.toMatchObject({ isError: true });
+    expect(deps.postMessage).not.toHaveBeenCalled();
+  });
+
   it("returns Slack errors to the agent and marks the attempt failed", async () => {
     const deps = dependencies();
     deps.postMessage.mockRejectedValue(new SlackApiError("chat.postMessage", "not_in_channel"));

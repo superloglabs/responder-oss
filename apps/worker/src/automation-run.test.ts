@@ -103,6 +103,7 @@ function dependencies() {
     getConversation: vi.fn().mockResolvedValue([]),
     getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
     getRunActor: vi.fn().mockResolvedValue("user-1"),
+    getSlackAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted-slack" }),
     hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
@@ -737,6 +738,85 @@ describe("automation run processor", () => {
       expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
         outcome: expect.objectContaining({ status: "failed" }),
       }));
+    });
+
+    const buttonPress = (press: { channelId: string; integrationAccountId: string }) => ({
+      data: {
+        authorId: "U123",
+        authorName: "Ada",
+        externalEventId: `slack_button:${press.channelId}:1790000001.000100`,
+        slackButton: {
+          ...press,
+          label: "Create PR",
+          messageTimestamp: "1790000001.000100",
+          threadTimestamp: "1790000001.000100",
+        },
+        source: "slack",
+        text: "Pressed \"Create PR\"",
+      },
+      id: 2,
+      type: "user_message",
+    });
+
+    it("answers a button pressed on a notification in that message's thread", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.getNotificationChannelNames.mockResolvedValue(new Map([[`${notification.integrationAccountId}:C999`, "ops"]]));
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [{ kind: "message", text: "Checkout fails for guests." }], truncated: false }, id: 1, type: "transcript" },
+        buttonPress(notification),
+      ]);
+      deps.runCodex.mockResolvedValue({
+        eventStream: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Opened the pull request." } }),
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+      expect(prompt).toContain("Ada (<@U123>) pressed the \"Create PR\" button on your Slack message (channel_id C999, ts 1790000001.000100).");
+      expect(prompt).toContain("answer in that message's thread: channel_id C999, thread_ts 1790000001.000100");
+      expect(prompt).toContain("Reply in the Slack thread of the message whose button was pressed (#ops)");
+      expect(prompt).not.toContain("skip_notification");
+      expect(deps.createToolHandler.mock.calls[0]![0].notifications).toMatchObject({
+        notifications: [notification],
+        threadTimestamp: "1790000001.000100",
+      });
+      expect(deps.getSlackAccount).toHaveBeenCalledWith({
+        integrationAccountId: notification.integrationAccountId,
+        organizationId,
+      });
+      expect(deps.slackCard.post).toHaveBeenCalledWith(expect.objectContaining({
+        channelId: "C999",
+        threadTimestamp: "1790000001.000100",
+      }));
+      // The agent did not reply, so its final reply goes to the thread.
+      expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+        notifications: [notification],
+        outcome: { message: "Opened the pull request.", status: "succeeded" },
+        thread: { eventId: 2, timestamp: "1790000001.000100" },
+      }));
+    });
+
+    it("answers a button on a message posted with the Slack tools through those tools", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.claimRun.mockResolvedValue(scheduledRun());
+      deps.getConversation.mockResolvedValue([
+        { data: { items: [], truncated: false }, id: 1, type: "transcript" },
+        buttonPress({ channelId: "C555", integrationAccountId: notification.integrationAccountId }),
+      ]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("channel_id C555, thread_ts 1790000001.000100");
+      expect(deps.createToolHandler.mock.calls[0]![0].notifications).toBeUndefined();
+      expect(deps.slackCard.post).toHaveBeenCalledWith(expect.objectContaining({ channelId: "C555" }));
+      expect(deps.notify).not.toHaveBeenCalled();
     });
 
     it("does not notify for follow-up turns, cancelled runs, or automations without notifications", async () => {

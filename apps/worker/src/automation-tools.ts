@@ -1,4 +1,5 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { automationButtonsInputSchema } from "@responder/core/automations/slack-buttons";
 import { z } from "zod";
 import {
   automationToolServerName,
@@ -82,37 +83,45 @@ export type AutomationToolDefinition = (typeof repositoryToolDefinitions)[number
 };
 
 // A run with notification channels can post to them itself, so the agent
-// knows where its results go. Workspace tools follow the run's own tools.
+// knows where its results go. A turn that answers a button pressed on one of
+// its posts replies in that post's thread instead. Workspace tools follow
+// the run's own tools.
 export function automationToolDefinitions(
   notificationChannels: string[] = [],
   workspaceTools: AutomationToolDefinition[] = [],
+  inThread = false,
 ): AutomationToolDefinition[] {
   if (notificationChannels.length === 0) return [...repositoryToolDefinitions, ...workspaceTools];
+  const postNotification = {
+    annotations: {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+    description: inThread
+      ? `Reply in the Slack thread of the message whose button was pressed (${notificationChannels.join(", ")}). Post the complete result, not a pointer to it. Put the short result in text and longer findings in details: each details entry is posted, in order, as a further reply. Uses Markdown. If you do not reply, your final reply is posted there. Posting the same text and details again does not post them twice.`
+      : `Post a message to this automation's Slack notification channels (${notificationChannels.join(", ")}). People read the automation's results there, so post the complete report, not a pointer to it. Put the short result in text and longer findings in details: each details entry is posted, in order, as a reply in the new message's thread. Uses Markdown. Returns where the message was posted. Posting the same text and details again does not post them twice.`,
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        buttons: automationButtonsInputSchema,
+        details: {
+          items: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
+          maxItems: maxNotificationDetails,
+          type: "array",
+        },
+        text: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
+      },
+      required: ["text"],
+      type: "object",
+    },
+    name: postNotificationToolName,
+  };
+  if (inThread) return [...repositoryToolDefinitions, postNotification, ...workspaceTools];
   return [
     ...repositoryToolDefinitions,
-    {
-      annotations: {
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-        readOnlyHint: false,
-      },
-      description: `Post a message to this automation's Slack notification channels (${notificationChannels.join(", ")}). People read the automation's results there, so post the complete report, not a pointer to it. Put the short result in text and longer findings in details: each details entry is posted, in order, as a reply in the new message's thread. Uses Markdown. Returns where the message was posted. Posting the same text and details again does not post them twice.`,
-      inputSchema: {
-        additionalProperties: false,
-        properties: {
-          details: {
-            items: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
-            maxItems: maxNotificationDetails,
-            type: "array",
-          },
-          text: { maxLength: maxNotificationLength, minLength: 1, type: "string" },
-        },
-        required: ["text"],
-        type: "object",
-      },
-      name: postNotificationToolName,
-    },
+    postNotification,
     {
       annotations: {
         destructiveHint: false,
@@ -205,6 +214,7 @@ export async function installAutomationToolServer(
   session: Pick<DaytonaSandboxSession, "materializeEntry">,
   notificationChannels: string[] = [],
   workspaceTools: AutomationToolDefinition[] = [],
+  inThread = false,
 ): Promise<void> {
   await session.materializeEntry({
     entry: {
@@ -212,7 +222,7 @@ export async function installAutomationToolServer(
       content: automationToolServerSource(
         toolsRoot,
         automationToolServerWaitMs,
-        automationToolDefinitions(notificationChannels, workspaceTools),
+        automationToolDefinitions(notificationChannels, workspaceTools, inThread),
       ),
     },
     path: serverPath,

@@ -1304,6 +1304,47 @@ export async function addAutomationRunReply(input: {
   });
 }
 
+// The buttons on a Slack message a run posted, for a press of one of them.
+// Null unless the run posted that message through a connection to the Slack
+// workspace the press came from.
+export async function getAutomationRunSlackButtons(input: {
+  channelId: string;
+  messageTimestamp: string;
+  runId: string;
+  teamId: string;
+}): Promise<{ automationEnabled: boolean; buttons: string[]; integrationAccountId: string } | null> {
+  const rows = await getDatabase()
+    .select({
+      automationEnabled: automations.enabled,
+      buttons: sql<unknown>`${automationActionAttempts.redactedInput}->'buttons'`,
+      integrationAccountId: integrationAccounts.id,
+    })
+    .from(automationActionAttempts)
+    .innerJoin(automationRuns, eq(automationRuns.id, automationActionAttempts.runId))
+    .innerJoin(automations, eq(automations.id, automationRuns.automationId))
+    .innerJoin(integrationAccounts, and(
+      sql`${integrationAccounts.id}::text = ${automationActionAttempts.redactedInput}->>'integrationAccountId'`,
+      eq(integrationAccounts.organizationId, automationRuns.organizationId),
+    ))
+    .where(and(
+      eq(automationActionAttempts.runId, input.runId),
+      eq(automationActionAttempts.kind, "send_slack_message"),
+      eq(automationActionAttempts.status, "succeeded"),
+      eq(automationActionAttempts.externalReference, `${input.channelId}:${input.messageTimestamp}`),
+      eq(integrationAccounts.provider, "slack"),
+      eq(integrationAccounts.externalAccountId, input.teamId),
+    ))
+    .limit(1);
+  const row = rows[0];
+  const buttons = row?.buttons;
+  if (!row || !Array.isArray(buttons) || !buttons.every((label) => typeof label === "string")) return null;
+  return {
+    automationEnabled: row.automationEnabled,
+    buttons,
+    integrationAccountId: row.integrationAccountId,
+  };
+}
+
 // Queues another turn of a finished run for messages it has not answered.
 // Only one caller can reopen a run, so only that caller queues its job. With
 // a lease, it reopens only if no turn has claimed or reopened the run since
