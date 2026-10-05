@@ -52,6 +52,7 @@ const SLACK_BOT_SCOPES = [
   "chat:write.public",
   "groups:history",
   "groups:read",
+  "im:history",
   "reactions:write",
 ].join(",");
 

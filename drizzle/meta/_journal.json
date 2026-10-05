@@ -477,6 +477,13 @@
       "when": 1791187544106,
       "tag": "0067_workspace_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1791207159434,
+      "tag": "0068_slack_direct_message_welcomes",
+      "breakpoints": true
     }
   ]
 }

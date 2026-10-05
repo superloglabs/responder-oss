@@ -405,6 +405,18 @@ export const slackMessageAuthors = pgTable(
   ],
 );
 
+// The people the app has welcomed in its Slack messages tab. Slack asks apps
+// to welcome each person once, the first time they open the tab.
+export const slackDirectMessageWelcomes = pgTable(
+  "slack_direct_message_welcomes",
+  {
+    teamId: text("team_id").notNull(),
+    userId: text("user_id").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.teamId, table.userId] })],
+);
+
 export const repositories = pgTable(
   "repositories",
   {

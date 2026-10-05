@@ -365,6 +365,7 @@ describe("integration providers", () => {
     expect(scopes).toContain("channels:join");
     expect(scopes).toContain("chat:write");
     expect(scopes).toContain("chat:write.public");
+    expect(scopes).toContain("im:history");
     const userScopes = url.searchParams.get("user_scope")?.split(",") ?? [];
     expect(userScopes).toEqual(["search:read"]);
   });

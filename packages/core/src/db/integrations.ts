@@ -10,6 +10,7 @@ import {
   integrationResourceKind,
   integrationResources,
   repositories,
+  slackDirectMessageWelcomes,
 } from "./schema.js";
 
 export type IntegrationProvider = (typeof integrationProvider.enumValues)[number];
@@ -803,6 +804,56 @@ export async function getSlackChannelConnection(input: {
     .limit(1);
 
   return rows[0] ?? null;
+}
+
+// Every organization connected to a Slack workspace shares the workspace's
+// app, so any of their tokens can write to a person's messages tab.
+export async function listConnectedSlackAccountsForTeam(teamId: string) {
+  return getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
+      organizationId: integrationAccounts.organizationId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.externalAccountId, teamId),
+        eq(integrationAccounts.status, "connected"),
+        isNotNull(integrationAccounts.encryptedCredentials),
+      ),
+    )
+    .orderBy(integrationAccounts.createdAt);
+}
+
+// True for the first caller only, so a person is welcomed once.
+export async function claimSlackDirectMessageWelcome(input: {
+  teamId: string;
+  userId: string;
+}): Promise<boolean> {
+  const inserted = await getDatabase()
+    .insert(slackDirectMessageWelcomes)
+    .values(input)
+    .onConflictDoNothing()
+    .returning({ userId: slackDirectMessageWelcomes.userId });
+  return inserted.length > 0;
+}
+
+// Lets the next visit try again after the welcome failed to post.
+export async function releaseSlackDirectMessageWelcome(input: {
+  teamId: string;
+  userId: string;
+}): Promise<void> {
+  await getDatabase()
+    .delete(slackDirectMessageWelcomes)
+    .where(
+      and(
+        eq(slackDirectMessageWelcomes.teamId, input.teamId),
+        eq(slackDirectMessageWelcomes.userId, input.userId),
+      ),
+    );
 }
 
 export async function markSlackChannelJoined(input: {
