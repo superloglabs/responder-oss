@@ -174,15 +174,15 @@ test("saves each change to a saved automation immediately", async ({ page }) => 
   await page.getByRole("button", { name: "Remove superloglabs/responder", exact: true }).click();
   await expect.poll(() => saves.length).toBe(3);
   await page.getByRole("button", { name: "Remove superloglabs/responder-oss" }).click();
-  await expect(page.getByText("Choose at least one repository. Changes save once the automation is complete.")).toBeVisible();
-  expect(saves).toHaveLength(3);
+  await expect.poll(() => saves.length).toBe(4);
+  expect(saves[3]).toMatchObject({ configuration: { repositoryIds: [] } });
+  await expect(page.getByText(/Changes save once/)).toHaveCount(0);
 
   await page.getByRole("button", { name: "Add repository", exact: true }).click();
   await page.getByRole("option", { name: "superloglabs/responder", exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect.poll(() => saves.length).toBe(4);
-  expect(saves[3]).toMatchObject({ configuration: { repositoryIds: [repositoryIds[0]] } });
-  await expect(page.getByText(/Changes save once/)).toHaveCount(0);
+  await expect.poll(() => saves.length).toBe(5);
+  expect(saves[4]).toMatchObject({ configuration: { repositoryIds: [repositoryIds[0]] } });
 
   failNext = true;
   await page.getByRole("button", { name: "Add repository", exact: true }).click();

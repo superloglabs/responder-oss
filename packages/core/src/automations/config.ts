@@ -113,7 +113,8 @@ export const automationConfigurationSchema = z
         "Each notification needs a different channel",
       ),
     prompt: z.string().trim().min(1).max(50_000),
-    repositoryIds: z.array(z.uuid()).min(1).max(10)
+    // Runs without repositories start in an empty workspace.
+    repositoryIds: z.array(z.uuid()).max(10).default([])
       .refine(uniqueIds, "Repository IDs must be unique"),
     skillIds: z.array(z.uuid()).max(20).default([])
       .refine(uniqueIds, "Skill IDs must be unique"),
