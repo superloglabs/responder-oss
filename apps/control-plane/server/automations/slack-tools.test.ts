@@ -323,4 +323,58 @@ describe("automation Slack tools", () => {
       limit: 5,
     }));
   });
+
+  it("searches every available channel when no channel is chosen", async () => {
+    const deps = dependencies();
+    deps.search.mockResolvedValue({ matches: [], page: 1, pageCount: 1, query: "timeout", slackTotal: 0 });
+    const twoChannels = claim({
+      resources: [
+        { displayName: "incidents", externalId: "C123", kind: "slack_channel" },
+        { displayName: "deploys", externalId: "C456", kind: "slack_channel" },
+        { displayName: "web", externalId: "P1", kind: "vercel_project" },
+      ],
+    });
+
+    const result = await call(twoChannels, deps, "slack_search_channel", {
+      query: "timeout from:@ana",
+      page: 2,
+      sort: "score",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.search).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "xoxp-user",
+      channels: [{ id: "C123", name: "incidents" }, { id: "C456", name: "deploys" }],
+      limit: 20,
+      page: 2,
+      query: "timeout from:@ana",
+      sort: "score",
+    }));
+
+    await call(twoChannels, deps, "slack_search_channel", { channel_id: "C456", query: "rollback" });
+    expect(deps.search).toHaveBeenLastCalledWith(expect.objectContaining({
+      channels: [{ id: "C456", name: "deploys" }],
+      page: 1,
+      sort: "timestamp",
+    }));
+  });
+
+  it("refuses to search a channel outside the connection or a trigger-only run", async () => {
+    const deps = dependencies();
+
+    await expect(call(claim(), deps, "slack_search_channel", {
+      channel_id: "C999",
+      query: "timeout",
+    })).resolves.toMatchObject({ isError: true });
+    await expect(call(claim({ roles: ["trigger"], trigger: slackTrigger }), deps, "slack_search_channel", {
+      query: "timeout",
+    })).resolves.toMatchObject({ isError: true });
+    await expect(call(claim(), deps, "slack_search_channel", {
+      query: "timeout in:secret",
+    })).resolves.toEqual({
+      content: [{ text: "The Slack in: modifier is not allowed; choose the channel instead", type: "text" }],
+      isError: true,
+    });
+    expect(deps.search).not.toHaveBeenCalled();
+  });
 });

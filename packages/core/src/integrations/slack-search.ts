@@ -1,19 +1,28 @@
 import { z } from "zod";
 import { SlackApiError } from "./slack.js";
+import { slackAttachmentsSchema, slackMessageText } from "./slack-history.js";
 
 const slackSearchResponseSchema = z.object({
   ok: z.literal(true),
   messages: z.object({
     matches: z.array(
       z.object({
-        channel: z.object({ id: z.string().min(1) }),
+        attachments: slackAttachmentsSchema,
+        channel: z.object({ id: z.string().min(1), name: z.string().optional() }),
         permalink: z.string().url(),
-        text: z.string(),
+        text: z.string().default(""),
         ts: z.string().min(1),
         user: z.string().optional(),
         username: z.string().optional(),
       }),
     ),
+    paging: z
+      .object({
+        page: z.number().int().optional(),
+        pages: z.number().int().optional(),
+        total: z.number().int().optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -22,8 +31,12 @@ const slackErrorResponseSchema = z.object({
   ok: z.literal(false),
 });
 
-const slackSearchModifier =
-  /(?:^|\s)(?:after|before|during|from|has|in|is|on|to|with):\S+/iu;
+// The caller owns the channel constraint, so only `in:` is refused. Other
+// modifiers such as `from:`, `after:`, and `has:` only narrow the results.
+const slackChannelModifier = /(?:^|\s)in:\S+/iu;
+
+export const slackSearchSorts = ["timestamp", "score"] as const;
+export type SlackSearchSort = (typeof slackSearchSorts)[number];
 
 export interface SlackSearchChannel {
   id: string;
@@ -33,16 +46,30 @@ export interface SlackSearchChannel {
 export interface SlackSearchMatch {
   permalink: string;
   text: string;
+  threadTimestamp?: string;
   timestamp: string;
+  truncated?: true;
   userId?: string;
   username?: string;
 }
 
-export interface SlackChannelSearchResult {
+export interface SlackSearchPaging {
+  page: number;
+  pageCount: number;
+  // Slack's count before matches outside the allowed channels are dropped.
+  slackTotal: number;
+}
+
+export interface SlackChannelSearchResult extends SlackSearchPaging {
   channel: SlackSearchChannel;
   matches: SlackSearchMatch[];
   query: string;
   totalMatches: number;
+}
+
+export interface SlackChannelsSearchResult extends SlackSearchPaging {
+  matches: Array<SlackSearchMatch & { channel: SlackSearchChannel }>;
+  query: string;
 }
 
 export class SlackSearchError extends SlackApiError {
@@ -67,29 +94,52 @@ export function normalizeSlackSearchQuery(query: string): string {
   if (normalized.length > 500) {
     throw new Error("Slack search query must be at most 500 characters");
   }
-  if (slackSearchModifier.test(normalized)) {
-    throw new Error("Slack search modifiers are not allowed");
+  if (slackChannelModifier.test(normalized)) {
+    throw new Error("The Slack in: modifier is not allowed; choose the channel instead");
   }
   return normalized;
 }
 
-export async function searchSlackChannel(input: {
-  accessToken: string;
-  channel: SlackSearchChannel;
+function threadTimestamp(permalink: string, timestamp: string): string | undefined {
+  const value = new URL(permalink).searchParams.get("thread_ts");
+  return value && value !== timestamp ? value : undefined;
+}
+
+interface SearchPage extends SlackSearchPaging {
+  matches: Array<{ channel: SlackSearchChannel; match: SlackSearchMatch }>;
   query: string;
-  limit: number;
-  signal?: AbortSignal;
+}
+
+// Searches as the connecting user and keeps only matches in `channels`.
+// Slack's index also covers that user's direct messages and other channels,
+// so the filter by channel ID is the boundary.
+async function searchMessages(input: {
+  accessToken: string;
+  channels: readonly SlackSearchChannel[];
   fetchImpl?: typeof fetch;
-}): Promise<SlackChannelSearchResult> {
+  limit: number;
+  page?: number;
+  query: string;
+  signal?: AbortSignal;
+  sort?: SlackSearchSort;
+}): Promise<SearchPage> {
   const query = normalizeSlackSearchQuery(input.query);
-  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 20) {
-    throw new Error("Slack search limit must be between 1 and 20");
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+    throw new Error("Slack search limit must be between 1 and 100");
   }
+  const page = input.page ?? 1;
+  if (!Number.isInteger(page) || page < 1 || page > 100) {
+    throw new Error("Slack search page must be between 1 and 100");
+  }
+  const channelsById = new Map(input.channels.map((channel) => [channel.id, channel]));
+  if (channelsById.size === 0) throw new Error("Slack search needs at least one channel");
 
   const url = new URL("https://slack.com/api/search.messages");
-  url.searchParams.set("query", `${query} in:${input.channel.name}`);
+  const only = input.channels.length === 1 ? input.channels[0] : undefined;
+  url.searchParams.set("query", only ? `${query} in:${only.name}` : query);
   url.searchParams.set("count", String(input.limit));
-  url.searchParams.set("sort", "timestamp");
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("sort", input.sort ?? "timestamp");
   url.searchParams.set("sort_dir", "desc");
 
   const response = await (input.fetchImpl ?? fetch)(url, {
@@ -109,21 +159,73 @@ export async function searchSlackChannel(input: {
     );
   }
 
-  const page = slackSearchResponseSchema.parse(payload);
-  const matches = page.messages.matches
-    .filter((match) => match.channel.id === input.channel.id)
-    .map((match) => ({
-      permalink: match.permalink,
-      text: match.text,
-      timestamp: match.ts,
-      ...(match.user ? { userId: match.user } : {}),
-      ...(match.username ? { username: match.username } : {}),
-    }));
-
+  const result = slackSearchResponseSchema.parse(payload);
+  const matches = result.messages.matches.flatMap((match) => {
+    const channel = channelsById.get(match.channel.id);
+    if (!channel) return [];
+    const { text, truncated } = slackMessageText(match.text, match.attachments);
+    const thread = threadTimestamp(match.permalink, match.ts);
+    return [{
+      channel,
+      match: {
+        permalink: match.permalink,
+        text,
+        ...(thread ? { threadTimestamp: thread } : {}),
+        timestamp: match.ts,
+        ...(truncated ? { truncated } : {}),
+        ...(match.user ? { userId: match.user } : {}),
+        ...(match.username ? { username: match.username } : {}),
+      },
+    }];
+  });
+  const paging = result.messages.paging;
   return {
-    channel: input.channel,
     matches,
+    page: paging?.page ?? page,
+    pageCount: paging?.pages ?? page,
     query,
-    totalMatches: matches.length,
+    slackTotal: paging?.total ?? matches.length,
+  };
+}
+
+export async function searchSlackChannel(input: {
+  accessToken: string;
+  channel: SlackSearchChannel;
+  query: string;
+  limit: number;
+  page?: number;
+  signal?: AbortSignal;
+  sort?: SlackSearchSort;
+  fetchImpl?: typeof fetch;
+}): Promise<SlackChannelSearchResult> {
+  const { channel, ...rest } = input;
+  const result = await searchMessages({ ...rest, channels: [channel] });
+  return {
+    channel,
+    matches: result.matches.map(({ match }) => match),
+    page: result.page,
+    pageCount: result.pageCount,
+    query: result.query,
+    slackTotal: result.slackTotal,
+    totalMatches: result.matches.length,
+  };
+}
+
+// One search across several channels. Matches from any other conversation
+// are dropped, so a page can hold fewer than `limit` matches.
+export async function searchSlackChannels(input: {
+  accessToken: string;
+  channels: readonly SlackSearchChannel[];
+  query: string;
+  limit: number;
+  page?: number;
+  signal?: AbortSignal;
+  sort?: SlackSearchSort;
+  fetchImpl?: typeof fetch;
+}): Promise<SlackChannelsSearchResult> {
+  const result = await searchMessages(input);
+  return {
+    ...result,
+    matches: result.matches.map(({ channel, match }) => ({ channel, ...match })),
   };
 }

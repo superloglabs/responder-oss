@@ -92,12 +92,18 @@ A new message starts a new conversation. When tag mode is off, the app replies
 that an admin has to turn it on. The first time a person opens the app's
 Messages tab, the app sends them a welcome message once.
 
-Responder searches selected channels on demand through Slack's
-`search.messages` Web API method. The worker rejects Slack search modifiers,
-adds the selected channel constraint itself, and drops any result whose channel
-ID does not match the agent's immutable configuration. Identical searches share
-one in-memory request and result within an investigation; message content is not
-cached across investigations. Reconnect existing installations after changing
+Responder searches Slack on demand through Slack's `search.messages` Web API
+method with the connecting user's token. Search accepts Slack's search syntax,
+such as `from:`, `after:`, `has:`, and quoted phrases, except `in:`: Responder
+sets the channel constraint itself and drops any result whose channel ID is not
+allowed, including the connecting user's direct messages. An investigation
+searches one of its selected channels per call. An automation with Slack as
+context can search one channel or every available channel in one call, page
+through results, and sort by time or relevance. Each result includes text from
+message attachments, where alert bots put their content, and the thread it
+belongs to. Identical investigation searches share one in-memory request and
+result within an investigation; message content is not cached across
+investigations. Reconnect existing installations after changing
 scopes. The connecting user must be able to search each selected channel, and
 private channels also require the bot to be invited.
 

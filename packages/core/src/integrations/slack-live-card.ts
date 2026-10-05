@@ -712,14 +712,15 @@ function formattedTraceTask(
 
   if (item.title === "slack_search_channel") {
     const channelId = input?.channel_id;
-    if (!input || typeof channelId !== "string") return null;
-    const query = input.query;
-    if (typeof query !== "string") return null;
+    const query = input?.query;
+    if (!input || typeof query !== "string") return null;
     const details = objectDetails(input, new Set(["channel_id", "query"]));
     const url = firstUrl(item.output);
     return {
       task_id: taskId,
-      title: `Search Slack channel \`${channelId}\` for \`${query}\``,
+      title: typeof channelId === "string"
+        ? `Search Slack channel \`${channelId}\` for \`${query}\``
+        : `Search Slack for \`${query}\``,
       status,
       ...(details ? { details } : {}),
       ...(item.output ? { output: preformatted(item.output) } : {}),

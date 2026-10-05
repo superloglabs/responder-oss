@@ -39,6 +39,9 @@ const searchResult = {
     },
   ],
   query: "database timeout",
+  page: 1,
+  pageCount: 1,
+  slackTotal: 1,
   totalMatches: 1,
 };
 

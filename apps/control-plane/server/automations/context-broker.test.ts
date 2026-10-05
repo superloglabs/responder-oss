@@ -220,7 +220,7 @@ describe("automation context broker", () => {
     expect(call.status).toBe(200);
     expect(dependencies.slack.search).toHaveBeenCalledWith(expect.objectContaining({
       accessToken: "xoxp-worker-only",
-      channel: { id: "C123", name: "incidents" },
+      channels: [{ id: "C123", name: "incidents" }],
       signal: expect.any(AbortSignal),
     }));
     expect(await call.text()).not.toContain("xoxp-worker-only");

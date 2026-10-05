@@ -7,7 +7,37 @@ import { SlackApiError } from "./slack.js";
 const maximumMessageLength = 4_000;
 export const slackTimestampPattern = /^\d{1,12}\.\d{1,8}$/u;
 
+// Alert bots often post an empty text and put the content in attachments.
+export const slackAttachmentsSchema = z
+  .array(
+    z.object({
+      fallback: z.string().optional(),
+      pretext: z.string().optional(),
+      text: z.string().optional(),
+      title: z.string().optional(),
+    }),
+  )
+  .optional();
+
+export function slackMessageText(
+  text: string,
+  attachments: z.infer<typeof slackAttachmentsSchema>,
+): { text: string; truncated?: true } {
+  const parts = [text];
+  for (const attachment of attachments ?? []) {
+    const body = [attachment.pretext, attachment.title, attachment.text]
+      .filter((part): part is string => Boolean(part));
+    if (body.length === 0 && attachment.fallback) body.push(attachment.fallback);
+    parts.push(...body);
+  }
+  const combined = parts.filter(Boolean).join("\n");
+  return combined.length > maximumMessageLength
+    ? { text: `${combined.slice(0, maximumMessageLength)}…`, truncated: true }
+    : { text: combined };
+}
+
 const slackMessageSchema = z.object({
+  attachments: slackAttachmentsSchema,
   bot_id: z.string().optional(),
   reply_count: z.number().int().optional(),
   subtype: z.string().optional(),
@@ -49,15 +79,15 @@ export interface SlackHistoryPage {
 }
 
 function message(value: z.infer<typeof slackMessageSchema>): SlackHistoryMessage {
-  const truncated = value.text.length > maximumMessageLength;
+  const { text, truncated } = slackMessageText(value.text, value.attachments);
   return {
     ...(value.bot_id ? { botId: value.bot_id } : {}),
     ...(value.reply_count ? { replyCount: value.reply_count } : {}),
     ...(value.subtype ? { subtype: value.subtype } : {}),
-    text: truncated ? `${value.text.slice(0, maximumMessageLength)}…` : value.text,
+    text,
     ...(value.thread_ts ? { threadTimestamp: value.thread_ts } : {}),
     timestamp: value.ts,
-    ...(truncated ? { truncated: true as const } : {}),
+    ...(truncated ? { truncated } : {}),
     ...(value.user ? { userId: value.user } : {}),
     ...(value.username ? { username: value.username } : {}),
   };
