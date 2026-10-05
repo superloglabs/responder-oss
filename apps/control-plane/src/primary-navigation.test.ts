@@ -5,18 +5,19 @@ describe("primaryNavigation", () => {
   it("lists every product area by default", () => {
     expect(
       primaryNavigation({ automations: true, simplified: false }).map((item) => item.label),
-    ).toEqual(["Agents", "Automations", "Issues", "Scans", "Suggestions", "Settings"]);
+    ).toEqual(["Agents", "Automations", "Skills", "Issues", "Scans", "Suggestions", "Settings"]);
   });
 
-  it("hides automations without the automations capability", () => {
-    expect(
-      primaryNavigation({ automations: false, simplified: false }).map((item) => item.section),
-    ).not.toContain("automations");
+  it("hides automations and skills without the automations capability", () => {
+    const sections = primaryNavigation({ automations: false, simplified: false }).map((item) => item.section);
+    expect(sections).not.toContain("automations");
+    expect(sections).not.toContain("skills");
   });
 
   it("promotes integrations and tag mode in simplified navigation", () => {
     expect(primaryNavigation({ automations: true, simplified: true })).toEqual([
       { label: "Automations", section: "automations", to: "/automations" },
+      { label: "Skills", section: "skills", to: "/skills" },
       { label: "Integrations", section: "integrations", to: "/settings" },
       { label: "Tag mode", section: "tag-mode", to: "/settings/tag-mode" },
       { label: "Settings", section: "settings", to: "/settings/workspace" },

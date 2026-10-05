@@ -115,6 +115,8 @@ export const automationConfigurationSchema = z
     prompt: z.string().trim().min(1).max(50_000),
     repositoryIds: z.array(z.uuid()).min(1).max(10)
       .refine(uniqueIds, "Repository IDs must be unique"),
+    skillIds: z.array(z.uuid()).max(20).default([])
+      .refine(uniqueIds, "Skill IDs must be unique"),
     toolPolicy: z.literal("full"),
     // Every trigger starts a run on its own.
     triggers: z.array(automationTriggerSchema).min(1).max(10),

@@ -539,6 +539,66 @@ export const agentVersionSecrets = pgTable(
   ],
 );
 
+// Instructions and reference files the agent reads before a task, written to
+// the sandbox as a SKILL.md folder. The SKILL.md body is `instructions`; its
+// front matter comes from `name` and `description`.
+export const workspaceSkills = pgTable(
+  "workspace_skills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    instructions: text("instructions").notNull(),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_skills_organization_name_idx").on(
+      table.organizationId,
+      table.name,
+    ),
+  ],
+);
+
+export const workspaceSkillFiles = pgTable(
+  "workspace_skill_files",
+  {
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => workspaceSkills.id, { onDelete: "cascade" }),
+    // Relative to the skill folder, such as `reference/openapi.yaml`.
+    path: text("path").notNull(),
+    content: text("content").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.skillId, table.path] })],
+);
+
+// Secrets a skill needs. An automation that uses the skill receives them.
+export const workspaceSkillSecrets = pgTable(
+  "workspace_skill_secrets",
+  {
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => workspaceSkills.id, { onDelete: "cascade" }),
+    workspaceSecretId: uuid("workspace_secret_id")
+      .notNull()
+      .references(() => workspaceSecrets.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.skillId, table.workspaceSecretId] }),
+  ],
+);
+
 export const organizationCapabilityValues = [
   "automations",
   "simplified_navigation",
@@ -786,6 +846,24 @@ export const automationVersionSecrets = pgTable(
     primaryKey({
       columns: [table.automationVersionId, table.workspaceSecretId],
     }),
+  ],
+);
+
+// Deleting a skill removes it from past versions. The skills API refuses to
+// delete a skill that an automation's active version still uses.
+export const automationVersionSkills = pgTable(
+  "automation_version_skills",
+  {
+    automationVersionId: uuid("automation_version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => workspaceSkills.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.automationVersionId, table.skillId] }),
+    index("automation_version_skills_skill_idx").on(table.skillId),
   ],
 );
 

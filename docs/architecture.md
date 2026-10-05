@@ -92,6 +92,13 @@ types. `drizzle/` contains the ordered schema history.
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without
   buffering the complete archive in worker memory.
+- Workspace skills are text folders (a `SKILL.md` and reference files such as
+  an OpenAPI spec) that an automation run writes to
+  `.responder/skills/<name>` in its sandbox and lists in the agent's prompt.
+  A skill can name workspace secrets; a run that uses the skill mounts them
+  like the automation's own secrets, as Daytona placeholders that work only
+  for their allowed hosts. Skill files are stored in the database, not
+  encrypted, so they must not hold credentials.
 - Pull-request review follow-ups accept only new top-level bot comments on PRs
   created by Responder. Comment text is untrusted input, human comments are
   ignored, and the controlled publisher can only fast-forward the existing PR

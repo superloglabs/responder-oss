@@ -38,6 +38,7 @@ import { sharedAutomationTemplateRoutes } from "./automations/shared-templates.j
 import { createAutomationContextBrokerRoutes } from "./automations/context-broker.js";
 import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/db/organization-capabilities.js";
 import { apiKeyRoutes } from "./management/api-key-routes.js";
+import { skillRoutes } from "./skills/routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
 import { oauthMetadataRoutes } from "./oauth-metadata-routes.js";
@@ -49,6 +50,8 @@ export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 // GitHub accepts webhook deliveries up to 25 MiB. Keep signed provider
 // callbacks compatible while retaining a finite in-process buffering bound.
 export const MAX_WEBHOOK_REQUEST_BODY_BYTES = 25 * 1024 * 1024;
+// A skill is saved whole, with up to 3 MiB of reference files.
+export const MAX_SKILL_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 
 export function sessionCookieFingerprint(cookieHeader: string): string {
   const match =
@@ -262,6 +265,7 @@ const apiBodyLimit = requestBodyLimit(MAX_REQUEST_BODY_BYTES);
 const githubWebhookBodyLimit = requestBodyLimit(
   MAX_WEBHOOK_REQUEST_BODY_BYTES,
 );
+const skillBodyLimit = requestBodyLimit(MAX_SKILL_REQUEST_BODY_BYTES);
 const githubWebhookPaths = new Set([
   "/api/webhooks/github",
   "/api/webhooks/github/",
@@ -269,7 +273,9 @@ const githubWebhookPaths = new Set([
 instrumentedApp.use("*", (context, next) =>
   githubWebhookPaths.has(context.req.path)
     ? githubWebhookBodyLimit(context, next)
-    : apiBodyLimit(context, next),
+    : context.req.path === "/api/skills" || context.req.path.startsWith("/api/skills/")
+      ? skillBodyLimit(context, next)
+      : apiBodyLimit(context, next),
 );
 if (Sentry.isInitialized()) {
   instrumentedApp.use(Sentry.sentry(instrumentedApp));
@@ -422,6 +428,7 @@ export const app = instrumentedApp
   .route("/api/automations", automationRoutes)
   .route("/api/automation-templates", sharedAutomationTemplateRoutes)
   .route("/api/agents", agentRoutes)
+  .route("/api/skills", skillRoutes)
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)

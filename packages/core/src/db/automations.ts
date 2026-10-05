@@ -33,6 +33,7 @@ import {
   automationVersionIntegrationAccounts,
   automationVersionRepositories,
   automationVersionSecrets,
+  automationVersionSkills,
   automationVersions,
   automations,
   integrationAccounts,
@@ -41,6 +42,7 @@ import {
   repositories,
   slackMessageAuthors,
   workspaceSecrets,
+  workspaceSkills,
   type AutomationActionKind,
   type AutomationRunStatus,
 } from "./schema.js";
@@ -57,7 +59,8 @@ export class AutomationConfigurationError extends Error {
       | "capability_disabled"
       | "integration_not_found"
       | "repository_not_found"
-      | "secret_not_found",
+      | "secret_not_found"
+      | "skill_not_found",
   ) {
     super(message);
     this.name = "AutomationConfigurationError";
@@ -573,6 +576,24 @@ async function validateConfigurationResources(
       );
     }
   }
+
+  if (configuration.skillIds.length > 0) {
+    const skillRows = await tx
+      .select({ id: workspaceSkills.id })
+      .from(workspaceSkills)
+      .where(
+        and(
+          eq(workspaceSkills.organizationId, organizationId),
+          inArray(workspaceSkills.id, configuration.skillIds),
+        ),
+      );
+    if (skillRows.length !== configuration.skillIds.length) {
+      throw new AutomationConfigurationError(
+        "One or more selected skills are unavailable",
+        "skill_not_found",
+      );
+    }
+  }
 }
 
 async function insertAutomationVersion(
@@ -643,6 +664,16 @@ async function insertAutomationVersion(
             input.configuration.workspaceSecretIds.map((workspaceSecretId) => ({
               automationVersionId: versionId,
               workspaceSecretId,
+            })),
+          ),
+        ]
+      : []),
+    ...(input.configuration.skillIds.length > 0
+      ? [
+          tx.insert(automationVersionSkills).values(
+            input.configuration.skillIds.map((skillId) => ({
+              automationVersionId: versionId,
+              skillId,
             })),
           ),
         ]
@@ -784,7 +815,7 @@ export async function listAutomations(organizationId: string) {
     .orderBy(desc(automations.updatedAt));
   if (rows.length === 0) return [];
   const versionIds = rows.map((row) => row.versionId);
-  const [accountRows, repositoryRows, runRows] = await Promise.all([
+  const [accountRows, repositoryRows, skillRows, runRows] = await Promise.all([
     db
       .select({
         provider: integrationAccounts.provider,
@@ -809,6 +840,10 @@ export async function listAutomations(organizationId: string) {
       .from(automationVersionRepositories)
       .where(inArray(automationVersionRepositories.automationVersionId, versionIds)),
     db
+      .selectDistinct({ versionId: automationVersionSkills.automationVersionId })
+      .from(automationVersionSkills)
+      .where(inArray(automationVersionSkills.automationVersionId, versionIds)),
+    db
       .selectDistinctOn([automationRuns.automationId], {
         automationId: automationRuns.automationId,
         createdAt: automationRuns.createdAt,
@@ -823,11 +858,12 @@ export async function listAutomations(organizationId: string) {
       )
       .orderBy(automationRuns.automationId, desc(automationRuns.createdAt)),
   ]);
-  return summarizeAutomationList(rows, { accountRows, repositoryRows, runRows });
+  return summarizeAutomationList(rows, { accountRows, repositoryRows, runRows, skillRows });
 }
 
 // Connectors list GitHub first when the version has repositories, followed by
-// each distinct context provider in alphabetical order.
+// each distinct context provider in alphabetical order, then `skills` when the
+// version uses workspace skills.
 export function summarizeAutomationList<
   Row extends { id: string; versionId: string },
 >(
@@ -836,6 +872,7 @@ export function summarizeAutomationList<
     accountRows: Array<{ provider: string; versionId: string }>;
     repositoryRows: Array<{ versionId: string }>;
     runRows: Array<{ automationId: string; createdAt: Date; status: AutomationRunStatus }>;
+    skillRows?: Array<{ versionId: string }>;
   },
 ) {
   const connectors = new Map<string, Set<string>>();
@@ -849,6 +886,9 @@ export function summarizeAutomationList<
     const providers = connectors.get(versionId) ?? new Set<string>();
     providers.add(provider);
     connectors.set(versionId, providers);
+  }
+  for (const { versionId } of links.skillRows ?? []) {
+    connectors.set(versionId, (connectors.get(versionId) ?? new Set<string>()).add("skills"));
   }
   const lastRuns = new Map(
     links.runRows.map(({ automationId, ...run }) => [automationId, run]),
@@ -903,7 +943,7 @@ export async function getAutomation(
     .limit(1);
   const automation = rows[0];
   if (!automation) return null;
-  const [accountRows, repositoryRows, secretRows, runPage] = await Promise.all([
+  const [accountRows, repositoryRows, secretRows, skillRows, runPage] = await Promise.all([
     db
       .select({
         id: automationVersionIntegrationAccounts.integrationAccountId,
@@ -935,6 +975,12 @@ export async function getAutomation(
       .where(
         eq(automationVersionSecrets.automationVersionId, automation.versionId),
       ),
+    db
+      .select({ id: automationVersionSkills.skillId })
+      .from(automationVersionSkills)
+      .where(
+        eq(automationVersionSkills.automationVersionId, automation.versionId),
+      ),
     listAutomationRuns(organizationId, automationId, { limit: 50, offset: 0 }),
   ]);
   return {
@@ -945,6 +991,7 @@ export async function getAutomation(
         .filter((row) => row.role === "context")
         .map((row) => row.id),
       repositoryIds: repositoryRows.map((row) => row.id),
+      skillIds: skillRows.map((row) => row.id),
       workspaceSecretIds: secretRows.map((row) => row.id),
     },
     runs: runPage.runs,

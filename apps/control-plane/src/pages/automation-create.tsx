@@ -13,7 +13,7 @@ import {
   triggerAccountIds,
 } from "../automations-api";
 import { automationTriggersNotify, defaultAutomationModelSettings } from "../../../../packages/core/src/automations/config";
-import { ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
+import { BookOpenTextIcon, ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import { automationConnectorProviders, type AutomationConnectorProvider } from "../components/automation-connectors";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
@@ -44,6 +44,7 @@ const defaultConfiguration: AutomationConfiguration = {
   notifications: [],
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
   repositoryIds: [],
+  skillIds: [],
   triggers: [],
   workspaceSecretIds: [],
 };
@@ -243,6 +244,18 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     return () => { cancelled = true; };
   }, [sharedTemplateSlug]);
 
+  // A skill created from the picker opens in a new tab. Its options are read
+  // again when this tab regains focus, so the new skill can be added.
+  const refreshOptionsOnFocus = useRef(false);
+  useEffect(() => {
+    function refresh() {
+      if (!refreshOptionsOnFocus.current) return;
+      void fetchAutomationOptions().then(setOptions).catch(() => {});
+    }
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
+
   // Connects in this tab. OAuth providers redirect; Datadog and custom MCP
   // collect credentials in a dialog first. Both return to this page.
   async function connectConnector(provider: AutomationConnectorProvider) {
@@ -355,6 +368,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const selectedRepositories = configuration.repositoryIds.flatMap((id) => options?.repositories.find((repository) => repository.id === id) ?? []);
   const selectedConnectors = contextAccounts.filter((account) => configuration.contextAccountIds.includes(account.id));
   const selectedSecrets = options?.secrets.filter((secret) => configuration.workspaceSecretIds.includes(secret.id)) ?? [];
+  const selectedSkills = options?.skills.filter((skill) => configuration.skillIds.includes(skill.id)) ?? [];
   const repositoryPicker = <AutomationRepositoryPicker options={options} selectedIds={configuration.repositoryIds} open={repositoryPickerOpen} onOpenChange={setRepositoryPickerOpen} onToggle={(repositoryId) => {
     setGithubIncluded(true);
     updateConfiguration((current) => ({ ...current, repositoryIds: toggle(current.repositoryIds, repositoryId) }));
@@ -453,9 +467,12 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
               {githubIncluded && options?.repositories.length ? <div className="automationCreate__row"><GithubLogoIcon size={16} weight="fill" /><span>GitHub</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label="Remove GitHub connector" className="automationCreate__iconButton" onClick={() => { setGithubIncluded(false); updateConfiguration((current) => ({ ...current, repositoryIds: [] })); }} type="button"><TrashIcon size={14} /></button></div> : null}
               {selectedConnectors.map((account) => <div className="automationCreate__row" key={account.id}><ProviderGlyph decorative provider={account.provider as AutomationConnectorProvider} /><span>{account.displayName}</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label={`Remove ${account.displayName}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => id !== account.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
               {selectedSecrets.map((secret) => <div className="automationCreate__row" key={secret.id}><KeyIcon size={16} /><span>{secret.name}</span><button aria-label={`Remove ${secret.name}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, workspaceSecretIds: current.workspaceSecretIds.filter((id) => id !== secret.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
-              <AutomationConnectorPicker options={options} triggerAccountIds={selectedTriggerAccountIds} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} githubIncluded={githubIncluded}
+              {selectedSkills.map((skill) => <div className="automationCreate__row" key={skill.id}><BookOpenTextIcon size={16} /><span>{skill.name}</span><Link className="automationCreate__manage" rel="noopener" target="_blank" to={`/skills/${skill.id}`}>Manage</Link><button aria-label={`Remove ${skill.name}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, skillIds: current.skillIds.filter((id) => id !== skill.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
+              <AutomationConnectorPicker options={options} triggerAccountIds={selectedTriggerAccountIds} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} selectedSkillIds={configuration.skillIds} githubIncluded={githubIncluded}
                 onToggleAccount={(accountId) => updateConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, accountId) }))}
                 onToggleSecret={(secretId) => updateConfiguration((current) => ({ ...current, workspaceSecretIds: toggle(current.workspaceSecretIds, secretId) }))}
+                onToggleSkill={(skillId) => updateConfiguration((current) => ({ ...current, skillIds: toggle(current.skillIds, skillId) }))}
+                onCreateSkill={() => { refreshOptionsOnFocus.current = true; window.open("/skills/new", "_blank", "noopener"); }}
                 onToggleGithub={() => { if (githubIncluded) updateConfiguration((current) => ({ ...current, repositoryIds: [] })); setGithubIncluded(!githubIncluded); }}
                 onConnect={(provider) => void connectConnector(provider)} />
             </div>

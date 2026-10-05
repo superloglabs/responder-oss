@@ -17,6 +17,7 @@ import {
   createDaytonaSandboxSession,
   deleteDaytonaSandboxByName,
   prepareDaytonaSandbox,
+  replaceDaytonaSandboxSecrets,
   sandboxDeletedAfterFailedCreation,
   type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
@@ -30,6 +31,7 @@ interface AutomationSandboxDependencies {
   createSession: typeof createDaytonaSandboxSession;
   meter: typeof startSandboxMeter;
   prepare: typeof prepareDaytonaSandbox;
+  replaceSecrets: typeof replaceDaytonaSandboxSecrets;
 }
 
 const defaultDependencies: AutomationSandboxDependencies = {
@@ -40,12 +42,26 @@ const defaultDependencies: AutomationSandboxDependencies = {
   createSession: createDaytonaSandboxSession,
   meter: startSandboxMeter,
   prepare: prepareDaytonaSandbox,
+  replaceSecrets: replaceDaytonaSandboxSecrets,
 };
 
 // Written once a sandbox has its tools and repositories. A resumed sandbox
 // without it is set up again.
 export const automationSandboxReadyMarker =
   `${automationWorkspaceRoot}/.responder/automation-sandbox-ready`;
+
+// The secrets mounted in a paused sandbox: environment variable and Daytona
+// secret names, never values. A later turn may need different secrets, for
+// example after a skill it uses gained one, so a resumed sandbox compares
+// them and mounts the current set when they differ.
+export const automationSecretMountsPath =
+  `${automationWorkspaceRoot}/.responder/secret-mounts.json`;
+
+function secretMountsRecord(secrets: DaytonaSandboxSecretMount[]): string {
+  return JSON.stringify(secrets
+    .map((secret) => [secret.environmentVariable, secret.daytonaSecretName])
+    .sort(([left], [right]) => left!.localeCompare(right!)));
+}
 
 // A paused sandbox is deleted by Daytona this long after it stops.
 export const pausedAutomationSandboxLifetimeMinutes = 24 * 60;
@@ -300,6 +316,23 @@ export async function runInFreshAutomationSandbox<T>(
       if (!input.config.sandboxSnapshotName) {
         await abortable(dependencies.prepare(session), input.signal);
       }
+    } else {
+      const mounted = await session
+        .readFile({ maxBytes: 64_000, path: automationSecretMountsPath })
+        .then((bytes) => new TextDecoder().decode(bytes))
+        .catch(() => null);
+      if (mounted !== secretMountsRecord(input.secrets ?? [])) {
+        await abortable(
+          dependencies.replaceSecrets(session, input.config, input.secrets ?? []),
+          input.signal,
+        );
+      }
+    }
+    if (input.keepPaused) {
+      await session.materializeEntry({
+        entry: { type: "file", content: secretMountsRecord(input.secrets ?? []) },
+        path: automationSecretMountsPath,
+      });
     }
     const activeSession = session;
     const modelBroker = serializedModelBrokerAccess(

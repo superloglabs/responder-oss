@@ -24,7 +24,7 @@ const baseConfiguration = {
 describe("automation configuration", () => {
   it("accepts an unattended full-access Slack automation", () => {
     expect(automationConfigurationSchema.parse(baseConfiguration)).toEqual(
-      { ...baseConfiguration, notifications: [] },
+      { ...baseConfiguration, notifications: [], skillIds: [] },
     );
   });
 

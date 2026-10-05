@@ -9,6 +9,7 @@ import {
   pauseDaytonaSandbox,
   prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
+  replaceDaytonaSandboxSecrets,
   sandboxDeletedAfterFailedCreation,
 } from "./sandbox.js";
 
@@ -369,6 +370,30 @@ describe("Daytona sandbox cleanup", () => {
 
     expect(setAutoDeleteInterval).toHaveBeenCalledWith(0);
     expect(harness.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a sandbox's secrets, detaching all when none remain, and restarts it", async () => {
+    const harness = cleanupHarness();
+    const sandbox = {
+      id: "sandbox-1",
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      updateSecrets: vi.fn().mockResolvedValue(undefined),
+    };
+    harness.get.mockResolvedValue(sandbox);
+
+    await replaceDaytonaSandboxSecrets(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [{ daytonaSecretName: "dtn_billing", environmentVariable: "BILLING_API_KEY" }],
+      harness.dependencies,
+    );
+    await replaceDaytonaSandboxSecrets(harness.session, { daytonaApiKey: "daytona-test" }, [], harness.dependencies);
+
+    expect(sandbox.updateSecrets.mock.calls).toEqual([[{ BILLING_API_KEY: "dtn_billing" }], [{}]]);
+    expect(sandbox.stop).toHaveBeenCalledTimes(2);
+    expect(sandbox.start).toHaveBeenCalledTimes(2);
+    expect(harness.dispose).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a thread sandbox after it pauses", async () => {

@@ -18,6 +18,7 @@ import {
   LightningIcon,
   ListIcon,
   ListBulletsIcon,
+  BookOpenTextIcon,
   PlugsConnectedIcon,
   ScanIcon,
   RobotIcon,
@@ -36,6 +37,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   issues: ListBulletsIcon,
   scans: ScanIcon,
   settings: GearIcon,
+  skills: BookOpenTextIcon,
   suggestions: FlagIcon,
   "tag-mode": TagIcon,
 };
