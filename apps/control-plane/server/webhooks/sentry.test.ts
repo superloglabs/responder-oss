@@ -79,6 +79,7 @@ function signedIssueRequest(
 describe("Sentry issue webhooks", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -299,6 +300,10 @@ describe("Sentry issue webhooks", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, matchedAgents: 1 });
+    expect(queueInvestigation).toHaveBeenCalledTimes(1);
+    expect(console.info).toHaveBeenCalledWith(
+      expect.stringContaining('"reason":"investigation_allowance_exhausted"'),
+    );
   });
 
   describe("environment filters", () => {

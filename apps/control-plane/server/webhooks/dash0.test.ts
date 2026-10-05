@@ -47,7 +47,10 @@ function payload(type = "alert.ongoing") {
 }
 
 describe("Dash0 webhooks", () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
 
   function connected() {
     vi.mocked(getConnectedIntegrationAccountCredential).mockResolvedValue({
@@ -116,6 +119,9 @@ describe("Dash0 webhooks", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, matchedAgents: 1 });
+    expect(console.info).toHaveBeenCalledWith(
+      expect.stringContaining('"reason":"investigation_allowance_exhausted"'),
+    );
   });
 
   it("rejects a request with the wrong bearer secret", async () => {

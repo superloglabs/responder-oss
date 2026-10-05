@@ -867,7 +867,7 @@ function logBlockedSlackInvestigation(input: {
   console.info(
     JSON.stringify({
       ...input,
-      event: "slack_webhook_ignored",
+      event: "slack_investigation_blocked",
       reason: "investigation_allowance_exhausted",
     }),
   );

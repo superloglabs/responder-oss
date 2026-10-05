@@ -828,7 +828,7 @@ describe("control-plane API", () => {
     expect(slackWebhookMocks.recordInvestigationSlackSource).not.toHaveBeenCalled();
     expect(slackWebhookMocks.getSlackChannelConnection).not.toHaveBeenCalled();
     expect(console.info).toHaveBeenCalledWith(
-      expect.stringContaining('"reason":"investigation_allowance_exhausted"'),
+      expect.stringContaining('"event":"slack_investigation_blocked"'),
     );
   });
 
