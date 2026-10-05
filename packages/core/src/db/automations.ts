@@ -815,7 +815,7 @@ export async function listAutomations(organizationId: string) {
     .orderBy(desc(automations.updatedAt));
   if (rows.length === 0) return [];
   const versionIds = rows.map((row) => row.versionId);
-  const [accountRows, repositoryRows, runRows] = await Promise.all([
+  const [accountRows, repositoryRows, skillRows, runRows] = await Promise.all([
     db
       .select({
         provider: integrationAccounts.provider,
@@ -840,6 +840,10 @@ export async function listAutomations(organizationId: string) {
       .from(automationVersionRepositories)
       .where(inArray(automationVersionRepositories.automationVersionId, versionIds)),
     db
+      .selectDistinct({ versionId: automationVersionSkills.automationVersionId })
+      .from(automationVersionSkills)
+      .where(inArray(automationVersionSkills.automationVersionId, versionIds)),
+    db
       .selectDistinctOn([automationRuns.automationId], {
         automationId: automationRuns.automationId,
         createdAt: automationRuns.createdAt,
@@ -854,11 +858,12 @@ export async function listAutomations(organizationId: string) {
       )
       .orderBy(automationRuns.automationId, desc(automationRuns.createdAt)),
   ]);
-  return summarizeAutomationList(rows, { accountRows, repositoryRows, runRows });
+  return summarizeAutomationList(rows, { accountRows, repositoryRows, runRows, skillRows });
 }
 
 // Connectors list GitHub first when the version has repositories, followed by
-// each distinct context provider in alphabetical order.
+// each distinct context provider in alphabetical order, then `skills` when the
+// version uses workspace skills.
 export function summarizeAutomationList<
   Row extends { id: string; versionId: string },
 >(
@@ -867,6 +872,7 @@ export function summarizeAutomationList<
     accountRows: Array<{ provider: string; versionId: string }>;
     repositoryRows: Array<{ versionId: string }>;
     runRows: Array<{ automationId: string; createdAt: Date; status: AutomationRunStatus }>;
+    skillRows?: Array<{ versionId: string }>;
   },
 ) {
   const connectors = new Map<string, Set<string>>();
@@ -880,6 +886,9 @@ export function summarizeAutomationList<
     const providers = connectors.get(versionId) ?? new Set<string>();
     providers.add(provider);
     connectors.set(versionId, providers);
+  }
+  for (const { versionId } of links.skillRows ?? []) {
+    connectors.set(versionId, (connectors.get(versionId) ?? new Set<string>()).add("skills"));
   }
   const lastRuns = new Map(
     links.runRows.map(({ automationId, ...run }) => [automationId, run]),

@@ -32,7 +32,7 @@ describe("skill input", () => {
   });
 
   it("rejects paths that leave the folder, hide a file, or replace SKILL.md", () => {
-    for (const path of ["../secrets", "/etc/passwd", "reference/../x", ".env", "docs/.hidden", "skill.md", "a//b", "docs/"]) {
+    for (const path of ["../secrets", "/etc/passwd", "reference/../x", ".env", "docs/.hidden", "skill.md", "SKILL.md/notes.md", "a//b", "docs/"]) {
       expect(
         skillInputSchema.safeParse({ ...baseSkill, files: [{ path, content: "x" }] }).success,
         path,
@@ -59,6 +59,14 @@ describe("skill input", () => {
     expect(skillInputSchema.safeParse({
       ...baseSkill,
       files: [{ path: "spec.json", content: "x".repeat(3 * 1024 * 1024 + 1) }],
+    }).success).toBe(false);
+  });
+
+  it("measures files as they are sent, so escaping cannot push a request over its limit", () => {
+    // Each quote is escaped, so 2 MiB of quotes is 4 MiB in the request.
+    expect(skillInputSchema.safeParse({
+      ...baseSkill,
+      files: [{ path: "quotes.txt", content: "\"".repeat(2 * 1024 * 1024) }],
     }).success).toBe(false);
   });
 });
@@ -91,7 +99,8 @@ describe("SKILL.md", () => {
       "description: >",
       "  Look up invoices",
       "  and refunds.",
-      "license: 'Apache-2.0'",
+      "license: 'Apache-2.0' # SPDX",
+      "compatibility: claude-code # and codex",
       "---",
       "# Billing",
       "",
@@ -100,6 +109,14 @@ describe("SKILL.md", () => {
       name: "billing-api",
       description: "Look up invoices and refunds.",
       instructions: "# Billing\n\nUse the API.",
+    });
+  });
+
+  it("drops trailing comments from plain values", () => {
+    expect(parseSkillMarkdown("---\nname: billing-api # API skill\ndescription: \"Billing # invoices\" # quoted\n---\nUse it.")).toEqual({
+      name: "billing-api",
+      description: "Billing # invoices",
+      instructions: "Use it.",
     });
   });
 

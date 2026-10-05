@@ -11,7 +11,8 @@ export const skillDescriptionMaxLength = 1_024;
 export const skillInstructionsMaxLength = 100_000;
 export const skillFilesMaxCount = 100;
 export const skillFilePathMaxLength = 255;
-// Requests to the skills API may be up to 4 MiB, so the files stay below it.
+// Requests to the skills API may be up to 4 MiB. Files are measured as they
+// are sent, JSON-escaped, so a full skill always fits in one request.
 export const skillFilesMaxBytes = 3 * 1024 * 1024;
 export const skillSecretsMaxCount = 20;
 
@@ -20,6 +21,11 @@ const pathSegmentPattern = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/u;
 
 export function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).length;
+}
+
+// The size of a file's content in a skills API request body.
+export function skillFileRequestBytes(content: string): number {
+  return utf8ByteLength(JSON.stringify(content));
 }
 
 export const skillNameSchema = z
@@ -43,7 +49,7 @@ export const skillFilePathSchema = z
     "Use a relative path of letters, numbers, dots, hyphens, and underscores",
   )
   .refine(
-    (path) => path.toLowerCase() !== skillInstructionsFileName.toLowerCase(),
+    (path) => path.split("/")[0]!.toLowerCase() !== skillInstructionsFileName.toLowerCase(),
     "SKILL.md holds the instructions and cannot be added as a file",
   );
 
@@ -95,7 +101,7 @@ export const skillInputSchema = z
         path: ["files"],
       });
     }
-    const bytes = skill.files.reduce((total, file) => total + utf8ByteLength(file.content), 0);
+    const bytes = skill.files.reduce((total, file) => total + skillFileRequestBytes(file.content), 0);
     if (bytes > skillFilesMaxBytes) {
       context.addIssue({
         code: "custom",
@@ -128,17 +134,18 @@ export function renderSkillMarkdown(skill: {
 
 function frontMatterScalar(value: string): string {
   const trimmed = value.trim();
-  if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length >= 2) {
+  const doubleQuoted = /^"(?:[^"\\]|\\.)*"/u.exec(trimmed);
+  if (doubleQuoted) {
     try {
-      return JSON.parse(trimmed) as string;
+      return JSON.parse(doubleQuoted[0]) as string;
     } catch {
-      return trimmed.slice(1, -1);
+      return doubleQuoted[0].slice(1, -1);
     }
   }
-  if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
-    return trimmed.slice(1, -1).replaceAll("''", "'");
-  }
-  return trimmed;
+  const singleQuoted = /^'(?:[^']|'')*'/u.exec(trimmed);
+  if (singleQuoted) return singleQuoted[0].slice(1, -1).replaceAll("''", "'");
+  // In a plain scalar, a `#` after whitespace starts a comment.
+  return trimmed.replace(/\s+#.*$/u, "");
 }
 
 // Reads the name and description from a SKILL.md front matter and returns the

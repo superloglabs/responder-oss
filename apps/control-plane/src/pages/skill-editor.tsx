@@ -12,7 +12,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { TextField } from "../design-system";
 import { deleteSkill, fetchSkill, saveSkill, type SkillInput, type SkillSecret } from "../skills-api";
-import { folderRelativePath, formatFileSize, mergeSkillFiles, readSkillFolder, type UploadedSkillFile } from "../skill-folder";
+import { folderRelativePath, formatFileSize, likelyCredentialSources, mergeSkillFiles, readSkillFolder, type UploadedSkillFile } from "../skill-folder";
 import { useDocumentTitle } from "../use-document-title";
 import { skillNameSchema } from "../../../../packages/core/src/skills/config";
 import "./automation-create.css";
@@ -110,7 +110,11 @@ export function SkillEditorPage() {
   const [usedBy, setUsedBy] = useState<Array<{ id: string; name: string }>>([]);
   const [knownSecrets, setKnownSecrets] = useState<SkillSecret[]>([]);
   const [workspaceSecrets, setWorkspaceSecrets] = useState<SkillSecret[] | null>(null);
-  const [loading, setLoading] = useState(Boolean(skillId));
+  // The skill the form holds. A skill this page just created is not read
+  // again, so nothing overwrites edits made after saving.
+  const [loadedSkillId, setLoadedSkillId] = useState<string | undefined>(undefined);
+  const loadedSkillIdRef = useRef<string | undefined>(undefined);
+  const loading = Boolean(skillId) && loadedSkillId !== skillId;
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +129,7 @@ export function SkillEditorPage() {
     void fetchAutomationOptions()
       .then((options) => { if (!cancelled) setWorkspaceSecrets(options.secrets); })
       .catch(() => { if (!cancelled) setWorkspaceSecrets([]); });
-    if (skillId) {
+    if (skillId && loadedSkillIdRef.current !== skillId) {
       void fetchSkill(skillId)
         .then((loaded) => {
           if (cancelled) return;
@@ -141,7 +145,11 @@ export function SkillEditorPage() {
           setUsedBy(loaded.automations);
         })
         .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Unable to load the skill"); })
-        .finally(() => { if (!cancelled) setLoading(false); });
+        .finally(() => {
+          if (cancelled) return;
+          loadedSkillIdRef.current = skillId;
+          setLoadedSkillId(skillId);
+        });
     }
     return () => { cancelled = true; };
   }, [skillId]);
@@ -156,16 +164,18 @@ export function SkillEditorPage() {
     if (!list?.length) return;
     try {
       const read = readSkillFolder(await uploadedFiles(list, folder));
+      const merged = mergeSkillFiles(skill.files, read.files);
       setSkill((current) => ({
         ...current,
         ...(read.skill?.name ? { name: skillNameFrom(read.skill.name) } : {}),
         ...(read.skill?.description ? { description: read.skill.description } : {}),
         ...(read.skill?.instructions ? { instructions: read.skill.instructions } : {}),
-        files: mergeSkillFiles(current.files, read.files),
+        files: merged.files,
       }));
       setSaved(false);
-      setNotice(read.skipped.length > 0
-        ? `Skipped ${read.skipped.map((file) => `${file.path} (${file.reason})`).join(", ")}.`
+      const skipped = [...read.skipped, ...merged.skipped];
+      setNotice(skipped.length > 0
+        ? `Skipped ${skipped.map((file) => `${file.path} (${file.reason})`).join(", ")}.`
         : null);
     } catch {
       setError("Unable to read the uploaded files");
@@ -182,7 +192,11 @@ export function SkillEditorPage() {
       const id = await saveSkill(skillId, skill);
       setSavedName(skill.name);
       setSaved(true);
-      if (!skillId) navigate(`/skills/${id}`, { replace: true });
+      if (!skillId) {
+        loadedSkillIdRef.current = id;
+        setLoadedSkillId(id);
+        navigate(`/skills/${id}`, { replace: true });
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save the skill");
     } finally {
@@ -204,6 +218,10 @@ export function SkillEditorPage() {
   const secretsById = new Map([...knownSecrets, ...(workspaceSecrets ?? [])].map((secret) => [secret.id, secret]));
   const selectedSecrets = skill.secretIds.flatMap((id) => secretsById.get(id) ?? []);
   const folderPath = `.responder/skills/${skill.name || "<name>"}`;
+  const credentialSources = likelyCredentialSources([
+    { name: "The instructions", content: skill.instructions },
+    ...skill.files.map((file) => ({ name: file.path, content: file.content })),
+  ]);
 
   return (
     <AppShell active="skills" redesigned density="create">
@@ -223,6 +241,7 @@ export function SkillEditorPage() {
         <input className="skillEditor__fileInput" multiple onChange={(event) => void addUploaded(event, false)} ref={fileInput} tabIndex={-1} type="file" />
         {error ? <p className="formError" role="alert">{error}</p> : null}
         {notice ? <p className="automationCreate__unsaved" role="status">{notice}</p> : null}
+        {credentialSources.length > 0 ? <p className="automationCreate__unsaved" role="alert">{credentialSources.join(", ")} may contain a credential. Skill text is stored as written and the agent can read it. Store keys as secrets instead.</p> : null}
         {loading ? <AutomationEditorSkeleton /> : <form className="automationCreate__form" id="skill-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="skill-details">
             <h2 id="skill-details">Details</h2>

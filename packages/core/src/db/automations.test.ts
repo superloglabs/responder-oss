@@ -32,6 +32,20 @@ describe("summarizeAutomationList", () => {
     expect(row?.connectors).toEqual(["github", "datadog", "sentry", "slack"]);
   });
 
+  it("lists skills after the providers, and for an automation that uses only skills", () => {
+    const rows = summarizeAutomationList(
+      [{ id: "automation-1", versionId: "version-1" }, { id: "automation-2", versionId: "version-2" }],
+      {
+        accountRows: [{ provider: "sentry", versionId: "version-1" }],
+        repositoryRows: [{ versionId: "version-1" }],
+        runRows: [],
+        skillRows: [{ versionId: "version-1" }, { versionId: "version-2" }],
+      },
+    );
+
+    expect(rows.map((row) => row.connectors)).toEqual([["github", "sentry", "skills"], ["skills"]]);
+  });
+
   it("attaches connectors and the latest run to each automation", () => {
     const runAt = new Date("2026-09-24T10:00:00Z");
     const rows = summarizeAutomationList(

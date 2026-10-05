@@ -72,3 +72,18 @@ FOR EACH ROW EXECUTE FUNCTION "validate_workspace_skill_link_scope"();--> statem
 CREATE TRIGGER "workspace_skills_organization_immutable_trigger"
 BEFORE UPDATE OF "organization_id" ON "workspace_skills"
 FOR EACH ROW EXECUTE FUNCTION "prevent_automation_resource_ownership_change"();
+--> statement-breakpoint
+CREATE FUNCTION "prevent_automation_version_move"() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW."automation_id" IS DISTINCT FROM OLD."automation_id" THEN
+    RAISE EXCEPTION 'automation versions cannot move to another automation' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+-- A version's links were checked against its automation's organization when
+-- they were added, so the version stays with that automation.
+CREATE TRIGGER "automation_versions_automation_immutable_trigger"
+BEFORE UPDATE OF "automation_id" ON "automation_versions"
+FOR EACH ROW EXECUTE FUNCTION "prevent_automation_version_move"();

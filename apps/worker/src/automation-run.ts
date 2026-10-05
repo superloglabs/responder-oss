@@ -725,7 +725,7 @@ export async function processAutomationRun(
             path: automationSandboxReadyMarker,
           });
         }
-        await materializeAutomationSkills(session, skills, resumed);
+        await materializeAutomationSkills(session, skills);
         await recordEvent(dependencies, run.runId, "repositories_checked_out", {
           ...(resumed ? { resumed: true } : {}),
           count: repositories.length,

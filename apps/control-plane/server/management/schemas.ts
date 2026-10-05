@@ -225,7 +225,7 @@ const lastRunSchema = z.object({
 
 const automationSummarySchema = z
   .object({
-    connectors: z.array(z.string()).describe("Providers the automation uses, such as `github` and `sentry`."),
+    connectors: z.array(z.string()).describe("Providers the automation uses, such as `github` and `sentry`, and `skills` when it uses workspace skills."),
     createdAt: timestamp("When the automation was created."),
     description: z.string(),
     enabled: z.boolean(),

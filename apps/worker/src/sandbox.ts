@@ -274,6 +274,33 @@ export async function configureDaytonaSandboxLifecycle(
   }
 }
 
+// Mounts exactly these secrets, detaching any others, then restarts the
+// sandbox so a sandbox that had none can use them.
+export async function replaceDaytonaSandboxSecrets(
+  session: DaytonaSandboxSession,
+  config: DaytonaCleanupConfig,
+  secrets: DaytonaSandboxSecretMount[],
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<void> {
+  const client = dependencies.createClient(config);
+  try {
+    const sandbox = await retryTransientDaytonaOperation(
+      () => client.get(session.state.sandboxId),
+      dependencies,
+    );
+    await retryTransientDaytonaOperation(
+      () => sandbox.updateSecrets(Object.fromEntries(
+        secrets.map((secret) => [secret.environmentVariable, secret.daytonaSecretName]),
+      )),
+      dependencies,
+    );
+    await retryTransientDaytonaOperation(() => sandbox.stop(), dependencies);
+    await retryTransientDaytonaOperation(() => sandbox.start(), dependencies);
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
 // A thread sandbox that fails to stop keeps running until Daytona's
 // auto-stop, and the next turn resumes or replaces it. The failure is
 // reported without failing the turn that already has its answer.

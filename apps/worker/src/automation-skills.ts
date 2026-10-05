@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import type { RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import type { RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
@@ -23,22 +24,28 @@ export function automationRunSecrets(
   return [...byName.values()];
 }
 
-// Writes every skill folder. A resumed sandbox has the folders of an earlier
-// turn, which are removed first so edits and removals since then apply.
+// Writes every skill folder. The folder is emptied first: a sandbox can hold
+// the skills of an earlier turn, and edits and removals since then must apply.
+// The agent controls the sandbox between turns, so `.responder` must resolve
+// to itself before anything under it is removed.
 export async function materializeAutomationSkills(
   session: DaytonaSandboxSession,
   skills: RuntimeWorkspaceSkill[],
-  resumed: boolean,
 ): Promise<void> {
-  if (resumed) {
-    const output = await session.execCommand({
-      cmd: `rm -rf -- '${automationSkillsRoot}'`,
-      maxOutputTokens: 200,
-      workdir: automationWorkspaceRoot,
-    });
-    if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
-      throw new Error("Unable to clear the sandbox skills folder");
-    }
+  const parent = path.posix.dirname(automationSkillsRoot);
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `mkdir -p -- '${parent}'`,
+      `[ "$(realpath -e -- '${parent}')" = '${parent}' ]`,
+      `rm -rf -- '${automationSkillsRoot}'`,
+      `mkdir -- '${automationSkillsRoot}'`,
+    ].join("\n"),
+    maxOutputTokens: 200,
+    workdir: automationWorkspaceRoot,
+  });
+  if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
+    throw new Error("Unable to prepare the sandbox skills folder");
   }
   for (const skill of skills) {
     const folder = automationSkillPath(skill);

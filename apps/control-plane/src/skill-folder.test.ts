@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderRelativePath, formatFileSize, mergeSkillFiles, readSkillFolder } from "./skill-folder";
+import { folderRelativePath, formatFileSize, likelyCredentialSources, mergeSkillFiles, readSkillFolder } from "./skill-folder";
 
 const text = (value: string) => new TextEncoder().encode(value);
 
@@ -47,10 +47,41 @@ describe("mergeSkillFiles", () => {
     expect(mergeSkillFiles(
       [{ path: "openapi.yaml", content: "old" }, { path: "notes.md", content: "keep" }],
       [{ path: "openapi.yaml", content: "new" }],
-    )).toEqual([
-      { path: "notes.md", content: "keep" },
-      { path: "openapi.yaml", content: "new" },
+    )).toEqual({
+      files: [
+        { path: "notes.md", content: "keep" },
+        { path: "openapi.yaml", content: "new" },
+      ],
+      skipped: [],
+    });
+  });
+
+  it("leaves out files past the count and size limits so the skill stays savable", () => {
+    const current = Array.from({ length: 99 }, (_, index) => ({ path: `file-${index}.md`, content: "x" }));
+    expect(mergeSkillFiles(current, [
+      { path: "file-0.md", content: "replaced" },
+      { path: "one-more.md", content: "x" },
+      { path: "two-more.md", content: "x" },
+    ]).skipped).toEqual([{ path: "two-more.md", reason: "over the 100-file limit" }]);
+
+    const big = "x".repeat(2 * 1024 * 1024);
+    const merged = mergeSkillFiles([{ path: "spec.json", content: big }], [
+      { path: "other.json", content: big },
+      { path: "small.md", content: "x" },
     ]);
+    expect(merged.files.map((file) => file.path)).toEqual(["small.md", "spec.json"]);
+    expect(merged.skipped).toEqual([{ path: "other.json", reason: "over the 3 MB limit" }]);
+  });
+});
+
+describe("likelyCredentialSources", () => {
+  it("names texts that hold common credential formats", () => {
+    expect(likelyCredentialSources([
+      { name: "SKILL.md", content: "curl -H \"Authorization: Bearer $BILLING_API_KEY\" https://api.example" },
+      { name: "keys.md", content: "aws_access_key_id = AKIAABCDEFGHIJKLMNOP" },
+      { name: "notes.md", content: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456" },
+      { name: "key.pem", content: "-----BEGIN RSA PRIVATE KEY-----\nMIIE" },
+    ])).toEqual(["keys.md", "notes.md", "key.pem"]);
   });
 });
 

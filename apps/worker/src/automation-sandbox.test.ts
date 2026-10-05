@@ -8,8 +8,13 @@ import { createDaytonaSandboxSession } from "./sandbox.js";
 
 function harness() {
   const session = {
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockRejectedValue(new Error("not found")),
     state: { environment: {}, sandboxId: "sandbox-1" },
-  } as unknown as DaytonaSandboxSession;
+  } as unknown as DaytonaSandboxSession & {
+    materializeEntry: ReturnType<typeof vi.fn>;
+    readFile: ReturnType<typeof vi.fn>;
+  };
   const client = { create: vi.fn() } as unknown as DaytonaSandboxClient;
   const meter = { stop: vi.fn().mockResolvedValue(undefined) };
   const dependencies = {
@@ -20,6 +25,7 @@ function harness() {
     createSession: vi.fn().mockResolvedValue(session),
     meter: vi.fn(() => meter),
     prepare: vi.fn().mockResolvedValue(undefined),
+    replaceSecrets: vi.fn().mockResolvedValue(undefined),
   };
   return { client, dependencies, meter, session };
 }
@@ -504,6 +510,56 @@ describe("fresh automation sandbox", () => {
     expect(dependencies.configure).not.toHaveBeenCalled();
     expect(dependencies.prepare).not.toHaveBeenCalled();
     expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, true);
+  });
+
+  it("records a paused sandbox's secrets and keeps them when a resumed turn needs the same", async () => {
+    const secrets = [
+      { daytonaSecretName: "dtn_status", environmentVariable: "STATUS_TOKEN" },
+      { daytonaSecretName: "dtn_billing", environmentVariable: "BILLING_API_KEY" },
+    ];
+    const first = harness();
+    Object.assign(first.session, { close: vi.fn() });
+    Object.assign(first.client, { serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }) });
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, secrets }, first.dependencies);
+
+    const [record] = first.session.materializeEntry.mock.calls.map(([call]) => call)
+      .filter((call) => call.path === "/home/daytona/workspace/.responder/secret-mounts.json");
+    expect(record?.entry.content).toBe('[["BILLING_API_KEY","dtn_billing"],["STATUS_TOKEN","dtn_status"]]');
+
+    const resumed = harness();
+    Object.assign(resumed.session, { close: vi.fn(), pathExists: vi.fn().mockResolvedValue(true) });
+    resumed.session.readFile.mockResolvedValue(new TextEncoder().encode(record!.entry.content));
+    Object.assign(resumed.client, {
+      deserializeSessionState: vi.fn(async (state: unknown) => state),
+      resume: vi.fn().mockResolvedValue(resumed.session),
+      serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }),
+    });
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" }, secrets: [...secrets].reverse() }, resumed.dependencies);
+
+    expect(resumed.dependencies.replaceSecrets).not.toHaveBeenCalled();
+  });
+
+  it("mounts the current secrets when a resumed turn needs different ones", async () => {
+    const { client, dependencies, session } = harness();
+    Object.assign(session, { close: vi.fn(), pathExists: vi.fn().mockResolvedValue(true) });
+    session.readFile.mockResolvedValue(new TextEncoder().encode('[["BILLING_API_KEY","dtn_billing"]]'));
+    Object.assign(client, {
+      deserializeSessionState: vi.fn(async (state: unknown) => state),
+      resume: vi.fn().mockResolvedValue(session),
+      serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }),
+    });
+    const secrets = [{ daytonaSecretName: "dtn_status", environmentVariable: "STATUS_TOKEN" }];
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" }, secrets }, dependencies);
+
+    expect(dependencies.replaceSecrets).toHaveBeenCalledWith(session, input.config, secrets);
+    expect(dependencies.configure).not.toHaveBeenCalled();
+    expect(session.materializeEntry).toHaveBeenCalledWith({
+      entry: { type: "file", content: '[["STATUS_TOKEN","dtn_status"]]' },
+      path: "/home/daytona/workspace/.responder/secret-mounts.json",
+    });
   });
 
   it("starts a fresh sandbox when the paused one cannot be resumed", async () => {

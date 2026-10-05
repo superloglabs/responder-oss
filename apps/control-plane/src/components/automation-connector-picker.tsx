@@ -10,7 +10,7 @@ import { searchInputProps } from "./search-input-props";
 
 // Lists every connector. Connections already in the workspace are added to the
 // draft; the rest start a connection, after which the page adds them.
-export function AutomationConnectorPicker({ options, triggerAccountIds, selectedAccountIds, selectedSecretIds, selectedSkillIds, githubIncluded, onToggleAccount, onToggleSecret, onToggleSkill, onToggleGithub, onConnect }: {
+export function AutomationConnectorPicker({ options, triggerAccountIds, selectedAccountIds, selectedSecretIds, selectedSkillIds, githubIncluded, onToggleAccount, onToggleSecret, onToggleSkill, onCreateSkill, onToggleGithub, onConnect }: {
   options: AutomationOptions | null;
   triggerAccountIds: string[];
   selectedAccountIds: string[];
@@ -20,6 +20,7 @@ export function AutomationConnectorPicker({ options, triggerAccountIds, selected
   onToggleAccount: (accountId: string) => void;
   onToggleSecret: (secretId: string) => void;
   onToggleSkill: (skillId: string) => void;
+  onCreateSkill: () => void;
   onToggleGithub: () => void;
   onConnect: (provider: AutomationConnectorProvider) => void;
 }) {
@@ -53,7 +54,7 @@ export function AutomationConnectorPicker({ options, triggerAccountIds, selected
           <CommandGroup heading="Skills">
             {options?.skills.map(skill => <CommandItem key={skill.id} value={skill.id} keywords={[skill.name, skill.description, "skill"]} onSelect={() => onToggleSkill(skill.id)}><BookOpenTextIcon /><span className="truncate">{skill.name}</span>{check(selectedSkillIds.includes(skill.id))}</CommandItem>)}
             {/* A new tab keeps this automation's unsaved settings. */}
-            <CommandItem value="create-skill" keywords={["skill", "create"]} onSelect={() => window.open("/skills/new", "_blank", "noopener")}><PlusIcon />Create a skill<span className="ml-auto text-xs text-muted-foreground">New tab</span></CommandItem>
+            <CommandItem value="create-skill" keywords={["skill", "create"]} onSelect={onCreateSkill}><PlusIcon />Create a skill<span className="ml-auto text-xs text-muted-foreground">New tab</span></CommandItem>
           </CommandGroup>
           {options?.secrets.length ? <CommandGroup heading="Workspace secrets">
             {options.secrets.map(secret => <CommandItem key={secret.id} value={secret.id} keywords={[secret.name, "secret"]} onSelect={() => onToggleSecret(secret.id)}><KeyIcon />{secret.name}{check(selectedSecretIds.includes(secret.id))}</CommandItem>)}
