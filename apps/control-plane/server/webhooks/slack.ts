@@ -989,6 +989,9 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         text: body,
       }
     : null;
+  // Organizations with an automation run working in this thread. The run
+  // answers there, so the organization's agents stay out of it.
+  const automationThreadOrganizations = new Set<string>();
   const automationResults = await Promise.allSettled(
     automationMatches.map(async (match) => {
       if (event.thread_ts) {
@@ -1002,7 +1005,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         // starting the run again finds it as a duplicate.
         if (run && run.triggerTimestamp !== event.ts) {
           if (reply) {
+            // A reply that fails to queue leaves the run failed, so the
+            // organization's agents may still answer it.
             const outcome = await queueAutomationRunReply({ message: reply, runId: run.id });
+            automationThreadOrganizations.add(run.organizationId);
             console.info(JSON.stringify({
               automationId: match.automationId,
               event: "slack_automation_reply",
@@ -1014,6 +1020,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
           }
           // Another app answering in the thread, such as another agent,
           // would start a run that answers it back, and so on.
+          automationThreadOrganizations.add(run.organizationId);
           console.info(JSON.stringify({
             automationId: match.automationId,
             event: "slack_automation_app_reply_ignored",
@@ -1063,7 +1070,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       teamId: callback.data.team_id,
       threadTimestamp: event.thread_ts,
     }).catch(() => null);
-    if (linked) {
+    if (linked && !automationThreadOrganizations.has(linked.organizationId)) {
       const priorIssues = linked.issues
         .map((issue) => [
           `Issue ${issue.id}: ${issue.title}`,
@@ -1169,6 +1176,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     userId: event.user,
     senderAppId: event.app_id ?? event.bot_profile?.app_id,
   }) ?? [];
+  matches = matches.filter((match) => !automationThreadOrganizations.has(match.organizationId));
   await Promise.all(
     matches.map(async (match) => {
       const threadMode = match.trigger === "slack_thread";
