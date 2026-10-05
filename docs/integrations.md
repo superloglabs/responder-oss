@@ -100,7 +100,10 @@ which accepts it only when that run posted the message through a connection to
 the same Slack workspace. The press is stored as a message on the run, which
 then starts its next turn and answers in the message's thread. The first press
 on a message is the choice: the buttons are replaced with who pressed which
-one, and later presses are refused.
+one, and later presses are refused. Anyone who can see the message can press
+a button. A paused run's sandbox is deleted after 24 hours, so a later press
+continues the conversation in a new sandbox, where the agent repeats any
+changes it had not pushed.
 
 Watched channels accept app-authored CloudWatch alarm notifications from AWS
 and Amazon Q Developer in chat applications. Responder starts investigations

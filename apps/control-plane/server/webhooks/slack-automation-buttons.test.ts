@@ -27,7 +27,8 @@ const messageBlocks = [
   { block_id: "automation_run_buttons", elements: [], type: "actions" },
 ];
 
-function press(overrides: Record<string, unknown> = {}) {
+// Sends a press and lets the work after Slack's acknowledgement finish.
+async function press(overrides: Record<string, unknown> = {}) {
   const payload = {
     actions: [{ action_id: "automation_run_button:0", block_id: "automation_run_buttons", value: runId }],
     channel: { id: "C123" },
@@ -41,7 +42,7 @@ function press(overrides: Record<string, unknown> = {}) {
   const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
   const timestamp = String(Math.floor(Date.now() / 1_000));
   const signature = `v0=${createHmac("sha256", signingSecret).update(`v0:${timestamp}:${body}`).digest("hex")}`;
-  return slackWebhookRoutes.request("/actions", {
+  const response = await slackWebhookRoutes.request("/actions", {
     body,
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -50,6 +51,8 @@ function press(overrides: Record<string, unknown> = {}) {
     },
     method: "POST",
   });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return response;
 }
 
 function responses(fetchMock: ReturnType<typeof vi.fn>) {
@@ -71,6 +74,19 @@ describe("automation buttons in Slack", () => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it("acknowledges Slack before the run is continued", async () => {
+    let finishQueueing: (outcome: string) => void = () => undefined;
+    mocks.queueReply.mockReturnValue(new Promise((resolve) => { finishQueueing = resolve; }));
+
+    const response = await press();
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(mocks.queueReply).toHaveBeenCalled());
+    expect(fetchMock).not.toHaveBeenCalled();
+    finishQueueing("queued");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
   });
 
   it("continues the run that posted the message and replaces its buttons", async () => {
@@ -104,7 +120,13 @@ describe("automation buttons in Slack", () => {
       body: {
         blocks: [
           messageBlocks[0],
-          { elements: [{ text: "<@U123> pressed *Create PR*", type: "mrkdwn" }], type: "context" },
+          {
+            elements: [
+              { text: "<@U123> pressed", type: "mrkdwn" },
+              { emoji: true, text: "Create PR", type: "plain_text" },
+            ],
+            type: "context",
+          },
         ],
         replace_original: true,
         text: "Checkout is failing.",

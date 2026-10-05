@@ -1354,7 +1354,15 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     .map((item) => ({ index: automationButtonIndex(item.action_id), item }))
     .find((candidate) => candidate.index !== null);
   if (automationButton) {
-    await pressAutomationRunButton(action.data, automationButton.item, automationButton.index!);
+    // Slack expects an answer within three seconds, and the response URL
+    // accepts the outcome later.
+    void pressAutomationRunButton(action.data, automationButton.item, automationButton.index!)
+      .catch((error: unknown) => {
+        console.error(JSON.stringify({
+          errorCode: error instanceof Error ? error.name : typeof error,
+          event: "slack_automation_button_failed",
+        }));
+      });
     return context.json({ ok: true });
   }
 

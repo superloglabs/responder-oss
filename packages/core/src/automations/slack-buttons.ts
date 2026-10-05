@@ -59,15 +59,14 @@ export function automationButtonsBlock(runId: string, buttons: AutomationButton[
 
 export function automationButtonIndex(actionId: string): number | null {
   if (!actionId.startsWith(automationButtonActionPrefix)) return null;
-  const index = Number(actionId.slice(automationButtonActionPrefix.length));
-  return Number.isSafeInteger(index) && index >= 0 && index < maxAutomationButtons ? index : null;
-}
-
-function escapeMrkdwn(text: string): string {
-  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const suffix = actionId.slice(automationButtonActionPrefix.length);
+  if (!/^\d$/u.test(suffix)) return null;
+  const index = Number(suffix);
+  return index < maxAutomationButtons ? index : null;
 }
 
 // The message's blocks with its buttons replaced by who pressed which one.
+// The label is plain text, so Slack shows it as the agent wrote it.
 export function pressedAutomationButtonBlocks(
   blocks: unknown[],
   pressed: { label: string; userId: string },
@@ -77,10 +76,10 @@ export function pressedAutomationButtonBlocks(
       (block as { block_id?: unknown } | null)?.block_id !== automationButtonsBlockId
     ),
     {
-      elements: [{
-        text: `<@${pressed.userId}> pressed *${escapeMrkdwn(pressed.label)}*`,
-        type: "mrkdwn",
-      }],
+      elements: [
+        { text: `<@${pressed.userId}> pressed`, type: "mrkdwn" },
+        { emoji: true, text: pressed.label, type: "plain_text" },
+      ],
       type: "context",
     },
   ];

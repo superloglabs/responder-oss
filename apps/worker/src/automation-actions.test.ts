@@ -303,6 +303,12 @@ describe("automation notification tool", () => {
         .resolves.toMatchObject({ isError: true });
     }
     expect(deps.postNotification).not.toHaveBeenCalled();
+
+    deps.postNotification.mockResolvedValue([{ notification, timestamp: "1790000000.000100" }]);
+    const five = Array.from({ length: 5 }, (_, index) => ({ label: `Option ${index}` }));
+    await expect(handle({ arguments: { buttons: five, text: "Choose." }, name: "post_notification" }))
+      .resolves.not.toMatchObject({ isError: true });
+    expect(deps.postNotification).toHaveBeenCalledOnce();
   });
 
   it("replies in the thread of a pressed button's message", async () => {

@@ -300,8 +300,10 @@ describe("getAutomationRunSlackButtons", () => {
   });
 
   it("finds nothing for a message without buttons", async () => {
-    buttonsDatabase([{ automationEnabled: true, buttons: null, integrationAccountId: "account" }]);
-    await expect(getAutomationRunSlackButtons(input)).resolves.toBeNull();
+    for (const buttons of [null, "Create PR", ["Create PR", 1]]) {
+      buttonsDatabase([{ automationEnabled: true, buttons, integrationAccountId: "account" }]);
+      await expect(getAutomationRunSlackButtons(input)).resolves.toBeNull();
+    }
     buttonsDatabase([]);
     await expect(getAutomationRunSlackButtons(input)).resolves.toBeNull();
   });

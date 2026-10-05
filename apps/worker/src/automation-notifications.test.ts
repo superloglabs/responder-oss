@@ -154,11 +154,14 @@ describe("sending automation notifications", () => {
 
     await report(2);
     await report(5);
+    await report(2);
 
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ threadTimestamp: "1790000000.000100" }));
-    // Each turn's report is its own Slack message.
+    // Each turn's report is its own Slack message, and a retried report is
+    // the same message to Slack.
     const ids = post.mock.calls.map(([input]) => input.clientMessageId);
     expect(ids[0]).not.toBe(ids[1]);
+    expect(ids[2]).toBe(ids[0]);
   });
 
   it("keeps posting to other channels when one fails", async () => {

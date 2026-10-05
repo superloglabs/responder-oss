@@ -744,11 +744,11 @@ describe("automation run processor", () => {
       data: {
         authorId: "U123",
         authorName: "Ada",
-        externalEventId: `slack_button:${press.channelId}:1790000001.000100`,
+        externalEventId: `slack_button:${press.channelId}:1790000002.000100`,
         slackButton: {
           ...press,
           label: "Create PR",
-          messageTimestamp: "1790000001.000100",
+          messageTimestamp: "1790000002.000100",
           threadTimestamp: "1790000001.000100",
         },
         source: "slack",
@@ -776,7 +776,7 @@ describe("automation run processor", () => {
       await processAutomationRun("job-1", job, process.env, deps);
 
       const prompt = deps.runCodex.mock.calls[0]![1].prompt;
-      expect(prompt).toContain("Ada (<@U123>) pressed the \"Create PR\" button on your Slack message (channel_id C999, ts 1790000001.000100).");
+      expect(prompt).toContain("Ada (<@U123>) pressed the \"Create PR\" button on your Slack message (channel_id C999, ts 1790000002.000100).");
       expect(prompt).toContain("answer in that message's thread: channel_id C999, thread_ts 1790000001.000100");
       expect(prompt).toContain("Reply in the Slack thread of the message whose button was pressed (#ops)");
       expect(prompt).not.toContain("skip_notification");
