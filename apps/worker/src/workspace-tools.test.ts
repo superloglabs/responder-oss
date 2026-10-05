@@ -137,7 +137,7 @@ describe("Slack workspace tools", () => {
       description: null,
       enabled: true,
       name: "Incomplete",
-    })).resolves.toContain("Invalid automation: configuration.repositoryIds");
+    })).resolves.toContain("Invalid automation: configuration.triggers");
     expect(dependencies.createAutomation).not.toHaveBeenCalled();
   });
 
