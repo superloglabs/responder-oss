@@ -50,12 +50,11 @@ const defaultConfiguration: AutomationConfiguration = {
 };
 
 // Returns why the configuration cannot be saved yet, or null when it can.
-function incompleteReason(configuration: AutomationConfiguration): { field: "trigger" | "repositories" | "model"; message: string } | null {
+function incompleteReason(configuration: AutomationConfiguration): { field: "trigger" | "model"; message: string } | null {
   if (!configuration.triggers.length) return { field: "trigger", message: "Add at least one trigger." };
   if (!configuration.triggers.every(isTriggerComplete)) {
     return { field: "trigger", message: "Choose a connection and at least one channel or project for each trigger." };
   }
-  if (!configuration.repositoryIds.length) return { field: "repositories", message: "Choose at least one repository." };
   if (!configuration.model.trim()) return { field: "model", message: "Choose a model." };
   return null;
 }
@@ -299,8 +298,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       if (incomplete.field === "trigger") {
         if (!configuration.triggers.length) setTriggerMenuOpen(true);
         triggerSectionRef.current?.scrollIntoView({ block: "nearest" });
-      } else if (incomplete.field === "repositories") setRepositoryPickerOpen(true);
-      else setModelRequestedOpen((value) => value + 1);
+      } else setModelRequestedOpen((value) => value + 1);
       return;
     }
     setSaving(true);

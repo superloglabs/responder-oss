@@ -534,29 +534,31 @@ async function validateConfigurationResources(
     );
   }
 
-  const repositoryRows = await tx
-    .select({ id: repositories.id })
-    .from(repositories)
-    .innerJoin(
-      integrationAccounts,
-      and(
-        eq(integrationAccounts.id, repositories.integrationAccountId),
-        eq(integrationAccounts.organizationId, organizationId),
-        eq(integrationAccounts.provider, "github"),
-        eq(integrationAccounts.status, "connected"),
-      ),
-    )
-    .where(
-      and(
-        inArray(repositories.id, configuration.repositoryIds),
-        eq(repositories.available, true),
-      ),
-    );
-  if (repositoryRows.length !== configuration.repositoryIds.length) {
-    throw new AutomationConfigurationError(
-      "One or more selected repositories are unavailable",
-      "repository_not_found",
-    );
+  if (configuration.repositoryIds.length > 0) {
+    const repositoryRows = await tx
+      .select({ id: repositories.id })
+      .from(repositories)
+      .innerJoin(
+        integrationAccounts,
+        and(
+          eq(integrationAccounts.id, repositories.integrationAccountId),
+          eq(integrationAccounts.organizationId, organizationId),
+          eq(integrationAccounts.provider, "github"),
+          eq(integrationAccounts.status, "connected"),
+        ),
+      )
+      .where(
+        and(
+          inArray(repositories.id, configuration.repositoryIds),
+          eq(repositories.available, true),
+        ),
+      );
+    if (repositoryRows.length !== configuration.repositoryIds.length) {
+      throw new AutomationConfigurationError(
+        "One or more selected repositories are unavailable",
+        "repository_not_found",
+      );
+    }
   }
 
   if (configuration.workspaceSecretIds.length > 0) {
@@ -651,13 +653,17 @@ async function insertAutomationVersion(
           ),
         ]
       : []),
-    tx.insert(automationVersionRepositories).values(
-      input.configuration.repositoryIds.map((repositoryId, position) => ({
-        automationVersionId: versionId,
-        position,
-        repositoryId,
-      })),
-    ),
+    ...(input.configuration.repositoryIds.length > 0
+      ? [
+          tx.insert(automationVersionRepositories).values(
+            input.configuration.repositoryIds.map((repositoryId, position) => ({
+              automationVersionId: versionId,
+              position,
+              repositoryId,
+            })),
+          ),
+        ]
+      : []),
     ...(input.configuration.workspaceSecretIds.length > 0
       ? [
           tx.insert(automationVersionSecrets).values(

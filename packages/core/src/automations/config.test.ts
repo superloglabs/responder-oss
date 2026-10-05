@@ -120,12 +120,17 @@ describe("automation configuration", () => {
     ).not.toHaveProperty("modelCredentialId");
   });
 
-  it("requires at least one repository and bounded unattended limits", () => {
+  it("accepts an automation without repositories", () => {
+    expect(
+      automationConfigurationSchema.parse({ ...baseConfiguration, repositoryIds: [] }).repositoryIds,
+    ).toEqual([]);
+  });
+
+  it("requires bounded unattended limits", () => {
     expect(() =>
       automationConfigurationSchema.parse({
         ...baseConfiguration,
         maxRuntimeSeconds: 7_200,
-        repositoryIds: [],
       })
     ).toThrow();
   });
