@@ -45,10 +45,11 @@ export class AgentConfigurationError extends Error {
   }
 }
 
+// A direct message reaches tag mode only, as a mention does.
 export async function findAgentsForSlackEvent(input: {
   teamId: string;
   channelId: string;
-  eventType: "message" | "app_mention";
+  eventType: "message" | "app_mention" | "direct_message";
   userId?: string;
   senderAppId?: string;
 }): Promise<
@@ -91,9 +92,10 @@ export async function findAgentsForSlackEvent(input: {
       ),
     );
 
+  const tagModeEvent = input.eventType === "app_mention" ||
+    input.eventType === "direct_message";
   const useSlackThreadMode =
-    input.eventType === "app_mention" &&
-    rows.some((row) => row.purpose === "slack_thread");
+    tagModeEvent && rows.some((row) => row.purpose === "slack_thread");
 
   return rows
     .filter((row) => {
@@ -105,10 +107,10 @@ export async function findAgentsForSlackEvent(input: {
       ) {
         return false;
       }
-      if (row.purpose === "slack_thread") {
-        return input.eventType === "app_mention";
+      if (row.purpose === "slack_thread") return tagModeEvent;
+      if (useSlackThreadMode || input.eventType === "direct_message") {
+        return false;
       }
-      if (useSlackThreadMode) return false;
       if (row.triggerConfig.integrationAccountId !== row.integrationAccountId) return false;
       if (row.trigger === "slack_channel" && input.eventType === "message") {
         return (

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, count, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   automations,
@@ -10,6 +10,7 @@ import {
   integrationResourceKind,
   integrationResources,
   repositories,
+  slackDirectMessageWelcomes,
 } from "./schema.js";
 
 export type IntegrationProvider = (typeof integrationProvider.enumValues)[number];
@@ -803,6 +804,80 @@ export async function getSlackChannelConnection(input: {
     .limit(1);
 
   return rows[0] ?? null;
+}
+
+// Every organization connected to a Slack workspace shares the workspace's
+// app, so any of their tokens can write to a person's messages tab.
+export async function listConnectedSlackAccountsForTeam(teamId: string) {
+  return getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
+      organizationId: integrationAccounts.organizationId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.externalAccountId, teamId),
+        eq(integrationAccounts.status, "connected"),
+        isNotNull(integrationAccounts.encryptedCredentials),
+      ),
+    )
+    .orderBy(integrationAccounts.createdAt);
+}
+
+// True for one caller at a time, and never after the welcome was sent. A
+// claim that was never marked sent can be taken again after five minutes.
+export async function claimSlackDirectMessageWelcome(input: {
+  teamId: string;
+  userId: string;
+}): Promise<boolean> {
+  const claimed = await getDatabase()
+    .insert(slackDirectMessageWelcomes)
+    .values(input)
+    .onConflictDoUpdate({
+      target: [slackDirectMessageWelcomes.teamId, slackDirectMessageWelcomes.userId],
+      set: { claimedAt: sql`now()` },
+      setWhere: and(
+        isNull(slackDirectMessageWelcomes.sentAt),
+        lt(slackDirectMessageWelcomes.claimedAt, sql`now() - interval '5 minutes'`),
+      ),
+    })
+    .returning({ userId: slackDirectMessageWelcomes.userId });
+  return claimed.length > 0;
+}
+
+export async function markSlackDirectMessageWelcomeSent(input: {
+  teamId: string;
+  userId: string;
+}): Promise<void> {
+  await getDatabase()
+    .update(slackDirectMessageWelcomes)
+    .set({ sentAt: sql`now()` })
+    .where(
+      and(
+        eq(slackDirectMessageWelcomes.teamId, input.teamId),
+        eq(slackDirectMessageWelcomes.userId, input.userId),
+      ),
+    );
+}
+
+// Lets the next visit try again after the welcome failed to post.
+export async function releaseSlackDirectMessageWelcome(input: {
+  teamId: string;
+  userId: string;
+}): Promise<void> {
+  await getDatabase()
+    .delete(slackDirectMessageWelcomes)
+    .where(
+      and(
+        eq(slackDirectMessageWelcomes.teamId, input.teamId),
+        eq(slackDirectMessageWelcomes.userId, input.userId),
+        isNull(slackDirectMessageWelcomes.sentAt),
+      ),
+    );
 }
 
 export async function markSlackChannelJoined(input: {

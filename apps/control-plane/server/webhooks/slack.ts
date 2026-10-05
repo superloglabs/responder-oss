@@ -14,7 +14,14 @@ import {
   getAutomationRunSlackButtons,
   recordSlackMessageAuthor,
 } from "../../../../packages/core/src/db/automations.js";
-import { getSlackChannelConnection } from "../../../../packages/core/src/db/integrations.js";
+import {
+  claimSlackDirectMessageWelcome,
+  getConnectedIntegrationAccountCredential,
+  getSlackChannelConnection,
+  listConnectedSlackAccountsForTeam,
+  markSlackDirectMessageWelcomeSent,
+  releaseSlackDirectMessageWelcome,
+} from "../../../../packages/core/src/db/integrations.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   getInvestigationForSlackAction,
@@ -68,6 +75,8 @@ const slackUrlVerificationSchema = z.object({
 const slackMessageSchema = z.object({
   type: z.enum(["message", "app_mention"]),
   channel: z.string().min(1),
+  // "im" for a direct message to the app.
+  channel_type: z.string().optional(),
   ts: z.string().min(1),
   thread_ts: z.string().optional(),
   user: z.string().optional(),
@@ -92,6 +101,14 @@ const slackMessageSchema = z.object({
     .passthrough()
     .optional(),
   blocks: z.array(z.unknown()).optional(),
+  files: z
+    .array(
+      z.object({
+        name: z.string().optional(),
+        title: z.string().optional(),
+      }).passthrough(),
+    )
+    .optional(),
   attachments: z
     .array(
       z.object({
@@ -116,6 +133,17 @@ const slackEventCallbackSchema = z.object({
   team_id: z.string().min(1),
   event_id: z.string().min(1),
   event: slackMessageSchema,
+});
+// Slack sends this each time a person opens one of the app's tabs.
+const slackAppHomeOpenedSchema = z.object({
+  type: z.literal("event_callback"),
+  team_id: z.string().min(1),
+  event: z.object({
+    type: z.literal("app_home_opened"),
+    channel: z.string().min(1),
+    tab: z.string(),
+    user: z.string().min(1),
+  }),
 });
 const slackCredentialsSchema = z.object({
   accessToken: z.string().min(1),
@@ -200,7 +228,8 @@ function slackBlockStrings(value: unknown): string[] {
   );
 }
 
-export function slackMessageBody(
+// The message's text, attachments, and block text; empty when it has none.
+function slackMessageContent(
   event: z.infer<typeof slackMessageSchema>,
 ): string {
   const attachmentText = event.attachments
@@ -222,7 +251,14 @@ export function slackMessageBody(
   return [event.text, attachmentText, blockText]
     .filter((value): value is string => Boolean(value?.trim()))
     .join("\n\n")
-    .slice(0, 100_000) || "A new alert was posted in the configured Slack channel.";
+    .slice(0, 100_000);
+}
+
+export function slackMessageBody(
+  event: z.infer<typeof slackMessageSchema>,
+): string {
+  return slackMessageContent(event) ||
+    "A new alert was posted in the configured Slack channel.";
 }
 
 export function isSupportedSlackMessageSubtype(
@@ -593,6 +629,7 @@ export async function acknowledgeSlackAlert(input: {
   agentId: string;
   assistant?: boolean;
   channelId: string;
+  directMessage?: boolean;
   integrationAccountId: string;
   investigationId: string;
   organizationId: string;
@@ -601,11 +638,18 @@ export async function acknowledgeSlackAlert(input: {
   threadTimestamp: string;
   threadMode?: boolean;
 }): Promise<void> {
-  const connection = await getSlackChannelConnection({
-    organizationId: input.organizationId,
-    integrationAccountId: input.integrationAccountId,
-    channelId: input.channelId,
-  });
+  // A direct message is not one of the workspace's synced channels.
+  const connection = input.directMessage
+    ? await getConnectedIntegrationAccountCredential({
+        integrationAccountId: input.integrationAccountId,
+        provider: "slack",
+      }).then((account) =>
+        account?.organizationId === input.organizationId ? account : null)
+    : await getSlackChannelConnection({
+        organizationId: input.organizationId,
+        integrationAccountId: input.integrationAccountId,
+        channelId: input.channelId,
+      });
   if (!connection?.encryptedCredentials) {
     throw new Error("Slack alert acknowledgement is not configured");
   }
@@ -932,6 +976,235 @@ function logBlockedSlackInvestigation(input: {
   );
 }
 
+type SlackMessageEvent = z.infer<typeof slackMessageSchema>;
+type SlackAgentMatch = Awaited<ReturnType<typeof findAgentsForSlackEvent>>[number];
+
+// Returns false when the organization has no allowance left.
+async function startSlackAgentRequest(input: {
+  alertProvider: SlackAlertProvider | null;
+  awsAlarm: SlackAwsAlarm | null;
+  body: string;
+  directMessage?: boolean;
+  event: SlackMessageEvent;
+  eventId: string;
+  match: SlackAgentMatch;
+  teamId: string;
+}): Promise<boolean> {
+  const { event, match } = input;
+  const threadMode = match.trigger === "slack_thread";
+  const assistant = threadMode &&
+    await organizationHasCapability(match.organizationId, "simplified_navigation");
+  const result = await forwardSlackEvent({
+    agentId: match.agentId,
+    alertProvider: input.alertProvider,
+    assistant,
+    awsAlarm: input.awsAlarm,
+    body: input.body,
+    channelId: event.channel,
+    eventId: input.eventId,
+    integrationAccountId: match.integrationAccountId,
+    teamId: input.teamId,
+    threadTimestamp: event.thread_ts ?? event.ts,
+    timestamp: event.ts,
+    threadMode,
+    userId: event.user,
+    userName: event.username?.trim() || undefined,
+  });
+  if (!result) {
+    logBlockedSlackInvestigation({
+      agentId: match.agentId,
+      channelId: event.channel,
+      eventId: input.eventId,
+      teamId: input.teamId,
+    });
+    return false;
+  }
+  await recordInvestigationSlackSource(result.investigationId, {
+    attachments: event.attachments ?? [],
+    authorName: slackMessageAuthor(event),
+    blocks: event.blocks ?? [],
+    slackTimestamp: event.ts,
+    text: event.text,
+  });
+  if (
+    !result.duplicate &&
+    (match.trigger === "slack_channel" || match.trigger === "slack_thread")
+  ) {
+    await acknowledgeSlackAlert({
+      agentId: match.agentId,
+      assistant,
+      channelId: event.channel,
+      directMessage: input.directMessage,
+      integrationAccountId: match.integrationAccountId,
+      investigationId: result.investigationId,
+      organizationId: match.organizationId,
+      messageTimestamp: event.ts,
+      title: slackMessageTitle(input.body),
+      threadTimestamp: event.thread_ts ?? event.ts,
+      threadMode,
+    }).catch((error: unknown) => {
+      logSlackAcknowledgementFailure({
+        alertProvider: input.alertProvider,
+        error,
+        investigationId: result.investigationId,
+      });
+    });
+  }
+  return true;
+}
+
+export const slackTagModeOffReply =
+  "I can't answer direct messages in this workspace yet. Ask a workspace admin to turn on Tag mode.";
+export const slackAllowanceExhaustedReply =
+  "I can't take new requests right now because this workspace has reached its usage limit.";
+
+export function slackWelcomeMessage(botUserId?: string): string {
+  return [
+    "Hi! Send me a message here to ask about your alerts, systems, or code.",
+    "Each message starts a new conversation. Reply in its thread to continue it.",
+    `You can also mention ${botUserId ? `<@${botUserId}>` : "me"} in any channel.`,
+  ].join(" ");
+}
+
+function slackAccountToken(encryptedCredentials: string): string {
+  return slackCredentialsSchema.parse(
+    decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+  ).accessToken;
+}
+
+// Uses the organization's own token when one is named.
+async function replyInSlackDirectMessage(input: {
+  channelId: string;
+  integrationAccountId?: string;
+  teamId: string;
+  text: string;
+  threadTimestamp: string;
+}): Promise<void> {
+  const accounts = await listConnectedSlackAccountsForTeam(input.teamId);
+  const account = accounts.find((candidate) => candidate.id === input.integrationAccountId) ??
+    accounts[0];
+  if (!account?.encryptedCredentials) return;
+  try {
+    await postSlackMessage({
+      accessToken: slackAccountToken(account.encryptedCredentials),
+      channelId: input.channelId,
+      text: input.text,
+      threadTimestamp: input.threadTimestamp,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      ...slackErrorLogFields(error),
+      event: "slack_direct_message_reply_failed",
+      teamId: input.teamId,
+    }));
+  }
+}
+
+// Tag mode can't open Slack files, so it is told their names instead.
+export function slackDirectMessageBody(event: SlackMessageEvent): string {
+  const fileNames = (event.files ?? [])
+    .map((file) => file.name?.trim() || file.title?.trim())
+    .filter((name): name is string => Boolean(name));
+  if (fileNames.length === 0) return slackMessageBody(event);
+  const fileNote = `The person attached files you can't open: ${fileNames.join(", ")}`;
+  return [slackMessageContent(event), fileNote].filter(Boolean).join("\n\n");
+}
+
+// A direct message works like a mention: tag mode answers in the message's
+// thread, and a reply in that thread continues the conversation.
+export async function answerSlackDirectMessage(input: {
+  event: SlackMessageEvent;
+  eventId: string;
+  teamId: string;
+}) {
+  const { event } = input;
+  const author = slackEventAuthor(event);
+  // The app's own replies arrive as direct messages too.
+  if (author?.kind !== "person") {
+    return { ok: true, ignored: true, reason: "direct_message_from_app" };
+  }
+  const threadTimestamp = event.thread_ts ?? event.ts;
+  const body = slackDirectMessageBody(event);
+  const matches = await findAgentsForSlackEvent({
+    channelId: event.channel,
+    eventType: "direct_message",
+    teamId: input.teamId,
+    userId: author.id,
+  });
+  if (matches.length === 0) {
+    await replyInSlackDirectMessage({
+      channelId: event.channel,
+      teamId: input.teamId,
+      text: slackTagModeOffReply,
+      threadTimestamp,
+    });
+    return { ok: true, matchedAgents: 0 };
+  }
+  const started = await Promise.all(
+    matches.map((match) =>
+      startSlackAgentRequest({
+        alertProvider: null,
+        awsAlarm: null,
+        body,
+        directMessage: true,
+        event,
+        eventId: input.eventId,
+        match,
+        teamId: input.teamId,
+      })),
+  );
+  // Another organization on the workspace may still answer.
+  if (!started.some(Boolean)) {
+    await replyInSlackDirectMessage({
+      channelId: event.channel,
+      integrationAccountId: matches[0]?.integrationAccountId,
+      teamId: input.teamId,
+      text: slackAllowanceExhaustedReply,
+      threadTimestamp,
+    });
+  }
+  return { ok: true, matchedAgents: matches.length };
+}
+
+// Welcomes a person the first time they open the app's messages tab.
+export async function welcomeToSlackMessagesTab(input: {
+  channelId: string;
+  teamId: string;
+  userId: string;
+}): Promise<boolean> {
+  const [account] = await listConnectedSlackAccountsForTeam(input.teamId);
+  if (!account?.encryptedCredentials) return false;
+  const claim = { teamId: input.teamId, userId: input.userId };
+  if (!(await claimSlackDirectMessageWelcome(claim))) return false;
+  try {
+    const botUserId = typeof account.metadata.botUserId === "string"
+      ? account.metadata.botUserId
+      : undefined;
+    await postSlackMessage({
+      accessToken: slackAccountToken(account.encryptedCredentials),
+      channelId: input.channelId,
+      text: slackWelcomeMessage(botUserId),
+    });
+  } catch (error) {
+    await releaseSlackDirectMessageWelcome(claim).catch(() => undefined);
+    console.error(JSON.stringify({
+      ...slackErrorLogFields(error),
+      event: "slack_welcome_message_failed",
+      teamId: input.teamId,
+    }));
+    return false;
+  }
+  // An unmarked claim expires, so a failure here can repeat the welcome.
+  await markSlackDirectMessageWelcomeSent(claim).catch((error: unknown) => {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      event: "slack_welcome_message_record_failed",
+      teamId: input.teamId,
+    }));
+  });
+  return true;
+}
+
 export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   const rawBody = await context.req.text();
   if (
@@ -950,12 +1223,31 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ challenge: verification.data.challenge });
   }
 
+  const appHomeOpened = slackAppHomeOpenedSchema.safeParse(payload);
+  if (appHomeOpened.success) {
+    const { event, team_id: teamId } = appHomeOpened.data;
+    const welcomed = event.tab === "messages" &&
+      await welcomeToSlackMessagesTab({
+        channelId: event.channel,
+        teamId,
+        userId: event.user,
+      });
+    return context.json({ ok: true, welcomed });
+  }
+
   const callback = slackEventCallbackSchema.safeParse(payload);
   if (!callback.success) {
     return context.json({ ok: true, ignored: true });
   }
   const { event } = callback.data;
-  if (!isSupportedSlackMessageSubtype(event.subtype)) {
+  // Direct message channel IDs start with D.
+  const directMessage = event.channel_type === "im" || event.channel.startsWith("D");
+  // A mention with a file arrives without a subtype; a direct message with a
+  // file arrives as a file share.
+  if (
+    !isSupportedSlackMessageSubtype(event.subtype) &&
+    !(directMessage && event.subtype === "file_share")
+  ) {
     console.info(
       JSON.stringify({
         channelId: event.channel,
@@ -969,6 +1261,18 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ ok: true, ignored: true });
   }
 
+  if (directMessage) {
+    // Slack sends a direct message as a message event, so a mention there
+    // would answer it twice.
+    if (event.type === "app_mention") {
+      return context.json({ ok: true, ignored: true });
+    }
+    return context.json(await answerSlackDirectMessage({
+      event,
+      eventId: callback.data.event_id,
+      teamId: callback.data.team_id,
+    }));
+  }
   const rawMessageBody = slackMessageBody(event);
   const body = event.type === "app_mention"
     ? rawMessageBody.replace(/^\s*<@[A-Z0-9]+>\s*/iu, "").trim() || rawMessageBody
@@ -1240,66 +1544,16 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   }) ?? [];
   matches = matches.filter((match) => !automationThreadOrganizations.has(match.organizationId));
   await Promise.all(
-    matches.map(async (match) => {
-      const threadMode = match.trigger === "slack_thread";
-      const assistant = threadMode &&
-        await organizationHasCapability(match.organizationId, "simplified_navigation");
-      const result = await forwardSlackEvent({
-        agentId: match.agentId,
+    matches.map((match) =>
+      startSlackAgentRequest({
         alertProvider,
-        assistant,
         awsAlarm,
         body,
-        channelId: event.channel,
+        event,
         eventId: callback.data.event_id,
-        integrationAccountId: match.integrationAccountId,
+        match,
         teamId: callback.data.team_id,
-        threadTimestamp: event.thread_ts ?? event.ts,
-        timestamp: event.ts,
-        threadMode,
-        userId: event.user,
-        userName: event.username?.trim() || undefined,
-      });
-      if (!result) {
-        logBlockedSlackInvestigation({
-          agentId: match.agentId,
-          channelId: event.channel,
-          eventId: callback.data.event_id,
-          teamId: callback.data.team_id,
-        });
-        return;
-      }
-      await recordInvestigationSlackSource(result.investigationId, {
-        attachments: event.attachments ?? [],
-        authorName: slackMessageAuthor(event),
-        blocks: event.blocks ?? [],
-        slackTimestamp: event.ts,
-        text: event.text,
-      });
-      if (
-        !result.duplicate &&
-        (match.trigger === "slack_channel" || match.trigger === "slack_thread")
-      ) {
-        await acknowledgeSlackAlert({
-          agentId: match.agentId,
-          assistant,
-          channelId: event.channel,
-          integrationAccountId: match.integrationAccountId,
-          investigationId: result.investigationId,
-          organizationId: match.organizationId,
-          messageTimestamp: event.ts,
-          title: slackMessageTitle(body),
-          threadTimestamp: event.thread_ts ?? event.ts,
-          threadMode,
-        }).catch((error: unknown) => {
-          logSlackAcknowledgementFailure({
-            alertProvider,
-            error,
-            investigationId: result.investigationId,
-          });
-        });
-      }
-    }),
+      })),
   );
 
   return context.json({

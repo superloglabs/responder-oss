@@ -75,13 +75,22 @@ Configure a distributed Slack app with:
 - OAuth redirect: `<public>/api/integrations/slack/callback`
 - Events request URL: `<public>/api/webhooks/slack`
 - Interactivity URL: `<public>/api/webhooks/slack/actions`
-- Bot events: `app_mention`, `message.channels`, and `message.groups`
+- Bot events: `app_home_opened`, `app_mention`, `message.channels`,
+  `message.groups`, and `message.im`
 - Bot scopes: `app_mentions:read`, `channels:history`, `channels:join`,
   `channels:read`, `chat:write`, `chat:write.public`, `groups:history`,
-  `groups:read`, and `reactions:write`
+  `groups:read`, `im:history`, and `reactions:write`
 - User scope: `search:read`
+- App Home: turn on the **Messages Tab** and allow users to send messages
+  from it
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
+
+A direct message to the app works like a mention. Tag mode answers in the
+message's thread, and a reply in that thread continues the same conversation.
+A new message starts a new conversation. When tag mode is off, the app replies
+that an admin has to turn it on. The first time a person opens the app's
+Messages tab, the app sends them a welcome message once.
 
 Responder searches selected channels on demand through Slack's
 `search.messages` Web API method. The worker rejects Slack search modifiers,

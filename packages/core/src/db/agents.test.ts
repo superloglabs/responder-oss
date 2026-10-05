@@ -76,6 +76,68 @@ describe("Slack event routing", () => {
       },
     ]);
   });
+
+  it("sends a direct message to tag mode only", async () => {
+    returnAgents([
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "channel-agent",
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        purpose: "standard",
+        trigger: "slack_mention",
+        triggerConfig: { channelIds: [], integrationAccountId: "slack-account-1" },
+      },
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "tag-mode",
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        purpose: "slack_thread",
+        trigger: "slack_mention",
+        triggerConfig: {},
+      },
+    ]);
+
+    await expect(
+      findAgentsForSlackEvent({
+        channelId: "D123",
+        eventType: "direct_message",
+        teamId: "T123",
+        userId: "U999",
+      }),
+    ).resolves.toEqual([
+      {
+        agentId: "tag-mode",
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        trigger: "slack_thread",
+      },
+    ]);
+  });
+
+  it("does not send a direct message to channel agents when tag mode is off", async () => {
+    returnAgents([
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "channel-agent",
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        purpose: "standard",
+        trigger: "slack_mention",
+        triggerConfig: { channelIds: [], integrationAccountId: "slack-account-1" },
+      },
+    ]);
+
+    await expect(
+      findAgentsForSlackEvent({
+        channelId: "D123",
+        eventType: "direct_message",
+        teamId: "T123",
+        userId: "U999",
+      }),
+    ).resolves.toEqual([]);
+  });
 });
 
 describe("Sentry issue routing", () => {
