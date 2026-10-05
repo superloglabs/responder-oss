@@ -53,6 +53,7 @@ const SLACK_BOT_SCOPES = [
   "groups:history",
   "groups:read",
   "reactions:write",
+  "users:read",
 ].join(",");
 
 const SLACK_USER_SCOPES = "search:read";

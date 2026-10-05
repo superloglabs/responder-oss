@@ -78,7 +78,7 @@ Configure a distributed Slack app with:
 - Bot events: `app_mention`, `message.channels`, and `message.groups`
 - Bot scopes: `app_mentions:read`, `channels:history`, `channels:join`,
   `channels:read`, `chat:write`, `chat:write.public`, `groups:history`,
-  `groups:read`, and `reactions:write`
+  `groups:read`, `reactions:write`, and `users:read`
 - User scope: `search:read`
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`

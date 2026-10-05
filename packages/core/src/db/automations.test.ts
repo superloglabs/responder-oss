@@ -5,6 +5,7 @@ import {
   claimAutomationRun,
   findAutomationsForSlackEvent,
   listSlackMessageAuthors,
+  recordSlackMessageAuthor,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   summarizeAutomationList,
@@ -128,6 +129,28 @@ describe("trigger matching", () => {
         { automationId: "ignoring", integrationAccountId: accountId, mentioned: true, startsRun: true },
         { automationId: "open", integrationAccountId: accountId, mentioned: true, startsRun: true },
       ]);
+  });
+
+  it("keeps a Slack author's name when a later message has none", async () => {
+    const conflicts: Array<{ set: { name: unknown } }> = [];
+    const insert = vi.fn(() => ({
+      values: () => ({
+        onConflictDoUpdate: (conflict: { set: { name: unknown } }) => {
+          conflicts.push(conflict);
+          return Promise.resolve();
+        },
+      }),
+    }));
+    vi.mocked(getDatabase).mockReturnValue({ insert } as unknown as ReturnType<typeof getDatabase>);
+    const author = { authorId: "U-ADA", channelId: "C1", integrationAccountId: accountId, kind: "person" } as const;
+
+    await recordSlackMessageAuthor({ ...author, name: "Ada" });
+    await recordSlackMessageAuthor({ ...author, name: "U-ADA" });
+
+    expect(conflicts[0]?.set.name).toBe("Ada");
+    // The stored name, not the ID.
+    expect(conflicts[1]?.set.name).not.toBe("U-ADA");
+    expect(typeof conflicts[1]?.set.name).toBe("object");
   });
 
   it("lists each Slack author once, newest first, up to a limit", async () => {

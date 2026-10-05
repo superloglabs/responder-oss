@@ -155,7 +155,7 @@ describe("automation control-plane routes", () => {
     const response = await app.request(`/api/automations/slack/${accountId}/authors?channel=C1&channel=C2`);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ authors: [{ id: "A123", kind: "app", name: "Devin" }] });
+    await expect(response.json()).resolves.toEqual({ authors: [{ id: "A123", kind: "app", name: "Devin" }], namesNeedReconnect: false });
     expect(mocks.listSlackAuthors).toHaveBeenCalledWith({
       channelIds: ["C1", "C2"],
       integrationAccountId: accountId,

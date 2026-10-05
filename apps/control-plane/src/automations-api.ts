@@ -225,10 +225,12 @@ export async function fetchSentryEnvironments(accountId: string, signal?: AbortS
 }
 
 // The people and apps that posted in the channels, most recent first.
-export async function fetchSlackAuthors(accountId: string, channelIds: string[], signal?: AbortSignal): Promise<Array<SlackAuthor & { kind: "app" | "person" }>> {
+// `namesNeedReconnect` says some authors are listed by ID because the Slack
+// connection cannot look names up until it is reconnected.
+export async function fetchSlackAuthors(accountId: string, channelIds: string[], signal?: AbortSignal): Promise<{ authors: Array<SlackAuthor & { kind: "app" | "person" }>; namesNeedReconnect: boolean }> {
   const query = new URLSearchParams(channelIds.map((channelId) => ["channel", channelId]));
-  const { authors } = await automationJson<{ authors?: Array<SlackAuthor & { kind: "app" | "person" }> }>(`/api/automations/slack/${encodeURIComponent(accountId)}/authors?${query}`, { signal });
-  return authors ?? [];
+  const { authors, namesNeedReconnect } = await automationJson<{ authors?: Array<SlackAuthor & { kind: "app" | "person" }>; namesNeedReconnect?: boolean }>(`/api/automations/slack/${encodeURIComponent(accountId)}/authors?${query}`, { signal });
+  return { authors: authors ?? [], namesNeedReconnect: namesNeedReconnect === true };
 }
 
 export function fetchAutomationOptions(): Promise<AutomationOptions> {
