@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+interface UsageBalance {
+  overageAllowed: boolean;
+  remaining: number;
+}
+
 interface BillingBannerSummary {
-  automations?: { configured: boolean; remaining: number } | null;
+  automations?: {
+    configured: boolean;
+    creditOverageAllowed?: boolean;
+    machineHours?: UsageBalance | null;
+    remaining: number;
+  } | null;
   configured: boolean;
   enabled: boolean;
   payAsYouGo: boolean;
@@ -10,14 +20,20 @@ interface BillingBannerSummary {
   usageBased?: boolean;
 }
 
-type BannerKind = "investigations" | "usage" | null;
+type BannerKind = "investigations" | "machine_hours" | "usage" | null;
 
 function bannerKind(summary: BillingBannerSummary): BannerKind {
   if (!summary.enabled) return null;
   if (summary.usageBased) {
     const usage = summary.automations;
-    // New work needs at least one cent of allowance.
-    return usage?.configured && usage.remaining < 0.01 ? "usage" : null;
+    if (!usage?.configured) return null;
+    // New work needs at least one cent of credit and a minute of machine
+    // time, unless the plan bills usage past them.
+    if (!usage.creditOverageAllowed && usage.remaining < 0.01) return "usage";
+    const machineHours = usage.machineHours;
+    return machineHours && !machineHours.overageAllowed && machineHours.remaining < 1 / 60
+      ? "machine_hours"
+      : null;
   }
   return summary.configured && !summary.payAsYouGo && summary.remaining === 0
     ? "investigations"
@@ -50,6 +66,19 @@ export function BillingBanner() {
   }, []);
 
   if (!banner) return null;
+  if (banner === "machine_hours") {
+    return (
+      <aside className="billingBanner" role="status">
+        <span>
+          <strong>Machine hours used up.</strong> New investigations and runs are
+          paused until your hours reset or the plan is upgraded.
+        </span>
+        <Link className="button button--primary" to="/settings/billing">
+          Upgrade plan
+        </Link>
+      </aside>
+    );
+  }
   if (banner === "usage") {
     return (
       <aside className="billingBanner" role="status">

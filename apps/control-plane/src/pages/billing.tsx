@@ -4,10 +4,15 @@ import { BillingSkeleton } from "../components/screen-skeletons";
 import { SettingsHeading } from "../components/settings-heading";
 import { useDocumentTitle } from "../use-document-title";
 
-type AutomationPlanId =
-  | "responder_automations_free"
-  | "responder_automations_100"
-  | "responder_automations_200";
+type AutomationPlanId = string;
+
+interface UsageBalance {
+  granted: number;
+  nextResetAt: number | null;
+  overageAllowed: boolean;
+  remaining: number;
+  usage: number;
+}
 
 interface AutomationBillingSummary {
   allowance: number;
@@ -15,13 +20,27 @@ interface AutomationBillingSummary {
   breakdown?: { inference: number; sandbox: number } | null;
   cancelsAtPeriodEnd: boolean;
   configured: boolean;
+  creditOverageAllowed: boolean;
   enabled: boolean;
+  // Null on plans that pay for sandbox time from the usage credit.
+  machineHours: UsageBalance | null;
   nextResetAt: number | null;
+  paid: boolean;
   planId: AutomationPlanId;
-  plans: Array<{ id: Exclude<AutomationPlanId, "responder_automations_free">; included: number; price: number }>;
+  planName: string;
+  planPrice: number;
+  plans: Array<{
+    id: AutomationPlanId;
+    included: number;
+    machineHours: number;
+    name: string;
+    price: number;
+  }>;
   remaining: number;
+  // The usage credit also pays for sandbox time.
   sandboxTimeBilled: boolean;
   scheduledPlanId: AutomationPlanId | null;
+  scheduledPlanName: string | null;
   usage: number;
 }
 
@@ -51,9 +70,89 @@ function dollars(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-function automationPlanName(summary: AutomationBillingSummary, planId: AutomationPlanId): string {
-  const plan = summary.plans.find((candidate) => candidate.id === planId);
-  return plan ? `$${plan.price} / month` : "Free";
+function hours(value: number): string {
+  return `${value.toFixed(value < 10 ? 1 : 0)} h`;
+}
+
+function UsageMeter({
+  format,
+  label,
+  total,
+  usage,
+}: {
+  format: (value: number) => string;
+  label: string;
+  total: number;
+  usage: number;
+}) {
+  const used = Math.min(usage, total);
+  const percent = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+  return (
+    <>
+      <header>
+        <span>{label}</span>
+        <strong>{format(usage)}</strong>
+      </header>
+      <div
+        aria-label={`${format(used)} of ${format(total)} used`}
+        className="billingProgress"
+        role="progressbar"
+        aria-valuemax={total}
+        aria-valuemin={0}
+        aria-valuenow={used}
+      >
+        <span style={{ width: `${percent}%` }} />
+      </div>
+    </>
+  );
+}
+
+// Usage credit and machine hours, for plans that include machine hours.
+function PlanUsage({
+  machineHours,
+  summary,
+}: {
+  machineHours: UsageBalance;
+  summary: AutomationBillingSummary;
+}) {
+  return (
+    <article className="billingUsageCard">
+      <section className="billingMeter">
+        <UsageMeter
+          format={dollars}
+          label="Usage credit"
+          total={summary.allowance}
+          usage={summary.usage}
+        />
+        <p>
+          {dollars(summary.remaining)} of {dollars(summary.allowance)} remains.{" "}
+          {summary.nextResetAt ? `Resets ${resetLabel(summary.nextResetAt)}. ` : "One-time credit. "}
+          {summary.creditOverageAllowed
+            ? "Usage past the credit is billed at the end of the period."
+            : "Runs that use Superlog models stop when it runs out. Runs with your own API key or ChatGPT subscription keep working."}
+        </p>
+      </section>
+      <section className="billingMeter">
+        <UsageMeter
+          format={hours}
+          label="Machine hours"
+          total={machineHours.granted}
+          usage={machineHours.usage}
+        />
+        <p>
+          {hours(machineHours.remaining)} of {hours(machineHours.granted)} remain.
+          Resets {resetLabel(machineHours.nextResetAt)}.{" "}
+          {machineHours.overageAllowed
+            ? "Extra hours are billed per hour at the end of the period."
+            : "When they run out, runs in progress finish and new runs wait until they reset or the plan is upgraded."}
+        </p>
+      </section>
+    </article>
+  );
+}
+
+function planIncludes(plan: AutomationBillingSummary["plans"][number]): string {
+  return `${dollars(plan.included)} of usage credit and ${plan.machineHours} machine hours each month`;
 }
 
 // Splits the used share of the bar between model usage and sandbox time in
@@ -84,14 +183,18 @@ function AutomationBilling({
 }) {
   const used = Math.min(summary.usage, summary.allowance);
   const percent = summary.allowance > 0 ? Math.min(100, (used / summary.allowance) * 100) : 0;
-  const paid = summary.planId !== "responder_automations_free";
+  const paid = summary.paid;
   const usageKind = summary.sandboxTimeBilled ? "usage" : "model usage";
   const breakdown = summary.sandboxTimeBilled ? summary.breakdown ?? null : null;
   const segments = breakdown ? usageSegments(breakdown, percent) : null;
+  const currentPlan = summary.plans.find((plan) => plan.id === summary.planId);
   return (
     <>
       <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
       <section className="billingGrid">
+        {summary.machineHours ? (
+          <PlanUsage machineHours={summary.machineHours} summary={summary} />
+        ) : (
         <article className="billingUsageCard">
           <header>
             <span>{`Included ${usageKind} this month`}</span>
@@ -154,17 +257,22 @@ function AutomationBilling({
             </p>
           )}
         </article>
+        )}
 
         <article className="billingPlanCard">
           <span className="billingPlanCard__eyebrow">
             {usageBased ? "Current plan" : "Automation plan"}
           </span>
-          <h2>{automationPlanName(summary, summary.planId)}</h2>
+          <h2>{summary.planName}</h2>
           <p>
-            {`Includes ${paid ? dollars(summary.allowance) : "$20.00"} of ${usageKind} each month.`}
+            {currentPlan
+              ? `Includes ${planIncludes(currentPlan)}.`
+              : summary.machineHours
+                ? `Includes ${dollars(summary.allowance)} of usage credit once and ${summary.machineHours.granted} machine hours each month.`
+                : `Includes ${dollars(summary.allowance)} of ${usageKind} each month.`}
             {summary.cancelsAtPeriodEnd ? " Returns to the free plan at the end of this billing period." : ""}
-            {summary.scheduledPlanId
-              ? ` Changes to ${automationPlanName(summary, summary.scheduledPlanId)} at the end of this billing period.`
+            {summary.scheduledPlanName
+              ? ` Changes to ${summary.scheduledPlanName} at the end of this billing period.`
               : ""}
           </p>
           {!summary.configured ? (
@@ -183,7 +291,7 @@ function AutomationBilling({
                   onClick={() => onChangePlan(plan.id)}
                   type="button"
                 >
-                  {`Switch to $${plan.price} / month`}
+                  {`Switch to ${plan.name}`}
                 </button>
               ))}
             {paid && !summary.cancelsAtPeriodEnd ? (
@@ -213,7 +321,7 @@ function AutomationBilling({
                 onClick={() => onChangePlan("resume")}
                 type="button"
               >
-                {`Keep ${automationPlanName(summary, summary.planId)}`}
+                {`Keep ${summary.planName}`}
               </button>
             ) : null}
           </div>
@@ -281,9 +389,7 @@ export function BillingPage() {
   async function changeAutomationPlan(planId: AutomationPlanId | "free" | "resume") {
     const plans = summary?.automations?.plans ?? [];
     const plan = plans.find((candidate) => candidate.id === planId);
-    const currentPrice = plans.find(
-      (candidate) => candidate.id === summary?.automations?.planId,
-    )?.price ?? 0;
+    const currentPrice = summary?.automations?.planPrice ?? 0;
     // Upgrades charge a saved payment method without a checkout page, so
     // confirm first. Downgrades take effect at the end of the period.
     const confirmation = planId === "resume"
@@ -291,8 +397,8 @@ export function BillingPage() {
       : !plan
       ? "Switch to the free automation plan at the end of this billing period?"
       : plan.price > currentPrice
-        ? `Switch to the $${plan.price} / month automation plan now? A saved payment method is charged immediately, prorated for this period.`
-        : `Switch to the $${plan.price} / month automation plan at the end of this billing period?`;
+        ? `Switch to ${plan.name} ($${plan.price} / month) now? A saved payment method is charged immediately, prorated for this period.`
+        : `Switch to ${plan.name} ($${plan.price} / month) at the end of this billing period?`;
     if (!window.confirm(confirmation)) return;
     setError(null);
     setIsRedirecting(true);
@@ -408,7 +514,7 @@ export function BillingPage() {
           // and payment methods are reached from here.
           onManageBilling={
             summary.usageBased &&
-            (summary.payAsYouGo || summary.automations.planId !== "responder_automations_free")
+            (summary.payAsYouGo || summary.automations.paid)
               ? () => void openBilling("portal")
               : undefined
           }

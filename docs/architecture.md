@@ -146,11 +146,16 @@ external-action behavior.
 
 ## Usage metering
 
-Autumn holds a monthly dollar allowance per organization. Automations always
-draw on it; organizations with simplified navigation also pay for
-investigations, pull request reviews, and remediations from it instead of
-spending investigation credits.
+Autumn holds each organization's usage balances. Automations always draw on
+them; organizations with simplified navigation also pay for investigations,
+pull request reviews, and remediations from them instead of spending
+investigation credits.
 
+- The usage credit, in dollars, pays for Responder-funded model usage. Runs
+  with the organization's own API key or subscription do not use it.
+- Free, Pro, and Team also include machine hours, which meter sandbox time.
+  Plans from before them have no machine hours and pay for sandbox time from
+  the usage credit.
 - Responder-funded model requests are reserved before they run and recorded
   after. Investigation and pull request review runs record their model usage
   when they finish.
@@ -158,13 +163,17 @@ spending investigation credits.
   is paused or deleted, and renews the period every minute. A period whose
   worker exited is closed at its last heartbeat.
 - `packages/core/src/billing/usage-pricing.ts` turns provider cost and sandbox
-  time into the charged amount. The default charges model usage at cost and
-  does not charge for sandbox time. A hosted edition may replace the file.
-- Work checks the allowance before it starts. Work already running finishes and
-  is charged even if it goes past the allowance. Operator replays are not
-  charged.
-- The billing page splits the period's charges into model usage and sandbox
-  time from these rows. Autumn's balance remains the total.
+  time into the amount charged to the usage credit. The default charges model
+  usage at cost and does not charge for sandbox time. A hosted edition may
+  replace the file. Machine hours are reported as hours.
+- Work checks its balances before a sandbox starts: the usage credit when it
+  uses Responder-funded models or the plan pays for sandbox time from it, and
+  machine hours when the plan includes them. A balance whose plan bills usage
+  past it does not stop work. Work already running finishes and is charged
+  even if it goes past a balance. Operator replays are not charged.
+- On plans without machine hours, the billing page splits the period's charges
+  into model usage and sandbox time from these rows. Autumn's balance remains
+  the total.
 - Usage rows are reported with their row ID as the idempotency key. Rows that
   fail are retried for up to a day.
 

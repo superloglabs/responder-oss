@@ -22,7 +22,12 @@ import {
   stopSandboxUsage,
   type SandboxUsageRecord,
 } from "../db/sandbox-usage.js";
-import { billingIsEnabled, trackUsageCharge } from "./autumn.js";
+import {
+  billingIsEnabled,
+  organizationUsesMachineHours,
+  trackMachineHours,
+  trackUsageCharge,
+} from "./autumn.js";
 import { inferenceCharge, sandboxCharge } from "./usage-charges.js";
 
 // Organizations with simplified navigation pay for investigations, pull
@@ -36,24 +41,32 @@ interface SandboxSettlementDependencies {
   markBilled: typeof markSandboxUsageBilled;
   setCharge: typeof setSandboxUsageCharge;
   track: typeof trackUsageCharge;
+  trackMachineHours: typeof trackMachineHours;
+  usesMachineHours: typeof organizationUsesMachineHours;
 }
 
 const defaultSandboxDependencies: SandboxSettlementDependencies = {
   markBilled: markSandboxUsageBilled,
   setCharge: setSandboxUsageCharge,
   track: trackUsageCharge,
+  trackMachineHours,
+  usesMachineHours: organizationUsesMachineHours,
 };
 
+function sandboxUsageSeconds(row: SandboxUsageRecord): number {
+  return Math.max(0, (row.stoppedAt.getTime() - row.startedAt.getTime()) / 1_000);
+}
+
 export function sandboxUsageChargeMicros(row: SandboxUsageRecord): number {
-  const seconds = Math.max(0, (row.stoppedAt.getTime() - row.startedAt.getTime()) / 1_000);
   return sandboxCharge(
     { cpu: row.cpu, diskGiB: row.diskGiB, memoryGiB: row.memoryGiB },
-    seconds,
+    sandboxUsageSeconds(row),
   );
 }
 
-// Prices a stopped sandbox period and reports billable periods. Failures
-// leave the row unsettled for the worker to retry.
+// Prices a stopped sandbox period and reports billable periods: as machine
+// hours on plans that include them, otherwise as a charge to the usage
+// credit. Failures leave the row unsettled for the worker to retry.
 export async function settleSandboxUsage(
   row: SandboxUsageRecord,
   dependencies: SandboxSettlementDependencies = defaultSandboxDependencies,
@@ -61,12 +74,22 @@ export async function settleSandboxUsage(
   const chargeMicros = row.chargeMicros ?? sandboxUsageChargeMicros(row);
   if (row.chargeMicros === null) await dependencies.setCharge(row.id, chargeMicros);
   if (row.billable && billingIsEnabled()) {
-    await dependencies.track({
-      chargeMicros,
-      idempotencyKey: `sandbox-usage:${row.id}`,
-      organizationId: row.organizationId,
-      properties: { kind: "sandbox", workload: row.workload, workloadId: row.workloadId },
-    });
+    const properties = { kind: "sandbox", workload: row.workload, workloadId: row.workloadId };
+    if (await dependencies.usesMachineHours(row.organizationId)) {
+      await dependencies.trackMachineHours({
+        hours: sandboxUsageSeconds(row) / 3_600,
+        idempotencyKey: `sandbox-hours:${row.id}`,
+        organizationId: row.organizationId,
+        properties,
+      });
+    } else {
+      await dependencies.track({
+        chargeMicros,
+        idempotencyKey: `sandbox-usage:${row.id}`,
+        organizationId: row.organizationId,
+        properties,
+      });
+    }
   }
   await dependencies.markBilled(row.id);
 }

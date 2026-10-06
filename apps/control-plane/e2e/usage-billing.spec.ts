@@ -10,30 +10,44 @@ const organization = {
 };
 
 const plans = [
-  { id: "responder_automations_100", included: 100, price: 100 },
-  { id: "responder_automations_200", included: 200, price: 200 },
+  { id: "responder_plan_pro", included: 100, machineHours: 50, name: "Pro", price: 100 },
+  { id: "responder_plan_team", included: 200, machineHours: 500, name: "Team", price: 200 },
 ];
 
+function machineHours(remaining: number) {
+  return { granted: 2, nextResetAt: null, overageAllowed: false, remaining, usage: 2 - remaining };
+}
+
+// A workspace on the free plan from before machine hours, unless the
+// overrides give it machine hours.
 function billing(overrides: {
+  machineHours?: ReturnType<typeof machineHours>;
   payAsYouGo?: boolean;
   remaining?: number;
   usageBased: boolean;
 }) {
   const remaining = overrides.remaining ?? 12.5;
+  const allowance = overrides.machineHours ? 5 : 20;
   return {
     automations: {
-      allowance: 20,
+      allowance,
       breakdown: { inference: 5.25, sandbox: 2.25 },
       cancelsAtPeriodEnd: false,
       configured: true,
+      creditOverageAllowed: false,
       enabled: true,
+      machineHours: overrides.machineHours ?? null,
       nextResetAt: null,
-      planId: "responder_automations_free",
+      paid: false,
+      planId: overrides.machineHours ? "responder_plan_free" : "responder_automations_free",
+      planName: "Free",
+      planPrice: 0,
       plans,
       remaining,
-      sandboxTimeBilled: true,
+      sandboxTimeBilled: !overrides.machineHours,
       scheduledPlanId: null,
-      usage: 20 - remaining,
+      scheduledPlanName: null,
+      usage: Math.max(0, allowance - remaining),
     },
     configured: true,
     enabled: true,
@@ -106,7 +120,30 @@ test("shows only the usage allowance to a usage-billed workspace", async ({ page
   await expect(page.getByText(/Covers model usage and sandbox time/u)).toBeVisible();
   await expect(page.getByText("Monthly investigations")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Enable pay as you go" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Switch to $100 / month" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Switch to Pro" })).toBeVisible();
+});
+
+test("shows usage credit and machine hours on plans that include machine hours", async ({ page }) => {
+  await mockWorkspace(page, billing({
+    machineHours: machineHours(1.5),
+    remaining: 4,
+    usageBased: true,
+  }));
+  await page.goto("/settings/billing");
+
+  await expect(page.getByText("Usage credit", { exact: true })).toBeVisible();
+  await expect(page.getByText("$4.00 of $5.00 remains. One-time credit.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Machine hours", { exact: true })).toBeVisible();
+  await expect(page.getByText(/1\.5 h of 2\.0 h remain/u)).toBeVisible();
+  await expect(page.locator(".billingBreakdown")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Switch to Team" })).toBeVisible();
+});
+
+test("warns a workspace when its machine hours are used up", async ({ page }) => {
+  await mockWorkspace(page, billing({ machineHours: machineHours(0), usageBased: true }));
+  await page.goto("/automations");
+
+  await expect(page.getByRole("status").filter({ hasText: "Machine hours used up." })).toBeVisible();
 });
 
 test("splits used allowance into inference and sandbox compute", async ({ page }) => {

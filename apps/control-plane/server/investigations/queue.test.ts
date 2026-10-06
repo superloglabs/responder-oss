@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   bossStart: vi.fn(),
   bossStop: vi.fn(),
   captureAnalyticsEvent: vi.fn(),
-  checkUsageAllowance: vi.fn(),
+  checkWorkAllowance: vi.fn(),
   claimIssuePullRequestForRemediation: vi.fn(),
   consumeInvestigation: vi.fn(),
   discardPendingInvestigation: vi.fn(),
@@ -30,7 +30,7 @@ vi.mock("../../../../packages/core/src/analytics.js", () => ({
 }));
 
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
-  checkUsageAllowance: mocks.checkUsageAllowance,
+  checkWorkAllowance: mocks.checkWorkAllowance,
   consumeInvestigation: mocks.consumeInvestigation,
   finalizeInvestigationReservation: mocks.finalizeInvestigationReservation,
   reserveInvestigation: mocks.reserveInvestigation,
@@ -138,7 +138,7 @@ describe("investigation queue", () => {
       slackInvestigationSessionId: "22222222-2222-4222-8222-222222222222",
     });
     mocks.organizationUsesUsageBilling.mockResolvedValue(false);
-    mocks.checkUsageAllowance.mockResolvedValue({ allowed: true, nextResetAt: null });
+    mocks.checkWorkAllowance.mockResolvedValue({ allowed: true, nextResetAt: null });
     mocks.consumeInvestigation.mockResolvedValue({
       allowed: true,
       configured: false,
@@ -262,15 +262,16 @@ describe("investigation queue", () => {
     await expect(queueInvestigation(request)).resolves.toMatchObject({
       kind: "queued",
     });
-    expect(mocks.checkUsageAllowance).toHaveBeenCalledWith(
+    expect(mocks.checkWorkAllowance).toHaveBeenCalledWith(
       created.config.organizationId,
+      { responderModels: true },
     );
     expect(mocks.consumeInvestigation).not.toHaveBeenCalled();
   });
 
   it("blocks a usage-billed organization's investigation once its allowance is used", async () => {
     mocks.organizationUsesUsageBilling.mockResolvedValue(true);
-    mocks.checkUsageAllowance.mockResolvedValue({
+    mocks.checkWorkAllowance.mockResolvedValue({
       allowed: false,
       nextResetAt: 1_800_000_000,
     });

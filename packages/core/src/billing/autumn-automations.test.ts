@@ -16,13 +16,33 @@ vi.mock("autumn-js", () => ({
 
 const {
   checkUsageAllowance,
+  checkWorkAllowance,
+  organizationUsesMachineHours,
   summarizeAutomationBillingCustomer,
   trackAutomationInferenceUsage,
+  trackMachineHours,
 } = await import("./autumn.js");
 
-function customer(subscriptions: Array<Record<string, unknown>>): Customer {
-  return { balances: {}, id: "organization-1", subscriptions } as unknown as Customer;
+function customer(
+  subscriptions: Array<Record<string, unknown>>,
+  balances: Record<string, unknown> = {},
+): Customer {
+  return { balances, id: "organization-1", subscriptions } as unknown as Customer;
 }
+
+function balance(overrides: Record<string, unknown> = {}) {
+  return {
+    granted: 2,
+    nextResetAt: 11,
+    overageAllowed: false,
+    remaining: 2,
+    unlimited: false,
+    usage: 0,
+    ...overrides,
+  };
+}
+
+const freePlan = [{ planId: "responder_plan_free", status: "active" }];
 
 describe("automation billing", () => {
   beforeEach(() => {
@@ -62,7 +82,7 @@ describe("automation billing", () => {
     });
     expect(client.billing.attach).toHaveBeenCalledWith({
       customerId: "organization-1",
-      planId: "responder_automations_free",
+      planId: "responder_plan_free",
       redirectMode: "never",
     });
     expect(client.check).toHaveBeenCalledWith({
@@ -170,6 +190,119 @@ describe("automation billing", () => {
     })).rejects.toThrow("down");
   });
 
+  it("starts a run on its own key while machine hours last", async () => {
+    client.customers.getOrCreate.mockResolvedValue(customer(freePlan, {
+      responder_automation_inference: balance({ granted: 5, remaining: 0, usage: 5 }),
+      responder_machine_hours: balance({ remaining: 1 }),
+    }));
+
+    await expect(checkWorkAllowance("organization-1", { responderModels: false }))
+      .resolves.toEqual({
+        allowed: true,
+        exhausted: null,
+        machinesUseCredit: false,
+        nextResetAt: null,
+      });
+  });
+
+  it("stops Responder-funded work once the usage credit is used up", async () => {
+    client.customers.getOrCreate.mockResolvedValue(customer(freePlan, {
+      responder_automation_inference: balance({ granted: 5, nextResetAt: null, remaining: 0 }),
+      responder_machine_hours: balance(),
+    }));
+
+    await expect(checkWorkAllowance("organization-1", { responderModels: true }))
+      .resolves.toEqual({
+        allowed: false,
+        exhausted: "usage_credit",
+        machinesUseCredit: false,
+        nextResetAt: null,
+      });
+  });
+
+  it("stops work at the machine hours cap unless the plan bills extra hours", async () => {
+    const exhausted = balance({ remaining: 0, usage: 2 });
+    client.customers.getOrCreate.mockResolvedValueOnce(customer(freePlan, {
+      responder_automation_inference: balance({ granted: 5, remaining: 5 }),
+      responder_machine_hours: exhausted,
+    }));
+
+    await expect(checkWorkAllowance("organization-1", { responderModels: false }))
+      .resolves.toMatchObject({ allowed: false, exhausted: "machine_hours", nextResetAt: 11 });
+
+    client.customers.getOrCreate.mockResolvedValueOnce(customer(
+      [{ planId: "responder_plan_pro", status: "active" }],
+      {
+        responder_automation_inference: balance({ granted: 100, remaining: 0, overageAllowed: true }),
+        responder_machine_hours: { ...exhausted, overageAllowed: true },
+      },
+    ));
+
+    await expect(checkWorkAllowance("organization-1", { responderModels: true }))
+      .resolves.toMatchObject({ allowed: true, exhausted: null });
+  });
+
+  it("looks up and caches whether a plan meters machine hours", async () => {
+    client.customers.getOrCreate.mockResolvedValue(customer(freePlan, {
+      responder_machine_hours: balance(),
+    }));
+
+    await expect(organizationUsesMachineHours("organization-hours")).resolves.toBe(true);
+    await expect(organizationUsesMachineHours("organization-hours")).resolves.toBe(true);
+    expect(client.customers.getOrCreate).toHaveBeenCalledOnce();
+
+    client.customers.getOrCreate.mockResolvedValue(customer([
+      { planId: "responder_automations_100", status: "active" },
+    ]));
+    await expect(organizationUsesMachineHours("organization-legacy")).resolves.toBe(false);
+  });
+
+  it("tracks machine hours with an idempotency key", async () => {
+    await trackMachineHours({
+      hours: 0.25,
+      idempotencyKey: "sandbox-hours:usage-1",
+      organizationId: "organization-1",
+      properties: { kind: "sandbox" },
+    });
+
+    expect(client.track).toHaveBeenCalledWith(
+      {
+        customerId: "organization-1",
+        featureId: "responder_machine_hours",
+        properties: { kind: "sandbox" },
+        value: 0.25,
+      },
+      {
+        headers: { "Idempotency-Key": "sandbox-hours:usage-1" },
+        timeoutMs: 30_000,
+      },
+    );
+  });
+
+  it("summarizes a plan with machine hours", () => {
+    expect(summarizeAutomationBillingCustomer(customer(
+      [{ canceledAt: null, planId: "responder_plan_pro", status: "active" }],
+      {
+        responder_automation_inference: balance({
+          granted: 100,
+          overageAllowed: true,
+          remaining: 40,
+          usage: 60,
+        }),
+        responder_machine_hours: balance({ granted: 50, remaining: 45, usage: 5 }),
+      },
+    ))).toMatchObject({
+      allowance: 100,
+      creditOverageAllowed: true,
+      machineHours: { granted: 50, overageAllowed: false, remaining: 45, usage: 5 },
+      paid: true,
+      planId: "responder_plan_pro",
+      planName: "Pro",
+      remaining: 40,
+      usage: 60,
+    });
+  });
+
   it("summarizes the active and scheduled automation plans", () => {
     expect(summarizeAutomationBillingCustomer({
       balances: {
@@ -188,10 +321,14 @@ describe("automation billing", () => {
     } as unknown as Customer)).toMatchObject({
       allowance: 200,
       cancelsAtPeriodEnd: false,
+      machineHours: null,
       nextResetAt: 7,
+      paid: true,
       planId: "responder_automations_200",
+      planName: "$200 / month",
       remaining: 0,
       scheduledPlanId: "responder_automations_100",
+      scheduledPlanName: "$100 / month",
       usage: 201,
     });
   });

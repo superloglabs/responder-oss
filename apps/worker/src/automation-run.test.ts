@@ -72,8 +72,12 @@ function dependencies() {
   return {
     appendEvent: vi.fn().mockResolvedValue(undefined),
     cancellationRequested: vi.fn().mockResolvedValue(false),
-    checkAllowance: vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
-    sandboxTimeIsBilled: vi.fn(() => false),
+    checkAllowance: vi.fn().mockResolvedValue({
+      allowed: true,
+      exhausted: null,
+      machinesUseCredit: false,
+      nextResetAt: null,
+    }),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -832,7 +836,12 @@ describe("automation run processor", () => {
       const deps = dependencies();
       deps.claimRun.mockResolvedValue(scheduledRun());
       deps.selectCredential.mockResolvedValue(null);
-      deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+      deps.checkAllowance.mockResolvedValue({
+        allowed: false,
+        exhausted: "usage_credit",
+        machinesUseCredit: false,
+        nextResetAt: null,
+      });
 
       await processAutomationRun("job-1", job, process.env, deps);
 
@@ -1059,8 +1068,8 @@ describe("automation run processor", () => {
       runId,
     }, process.env, deps)).resolves.toEqual({ runId });
 
-    // Organization-funded runs do not use the monthly allowance.
-    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    // Organization-funded runs need only machine time, not the usage credit.
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: false });
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
       credential: {
         apiKey: "customer-provider-secret",
@@ -1204,7 +1213,7 @@ describe("automation run processor", () => {
     }, process.env, deps);
 
     expect(deps.selectCredential).toHaveBeenCalledWith({ harness: "codex", organizationId, provider: "openai" });
-    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId);
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: true });
     expect(deps.getCredential).not.toHaveBeenCalled();
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
       credential: { inferenceSource: "responder" },
@@ -1231,7 +1240,7 @@ describe("automation run processor", () => {
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
-    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: false });
     expect(deps.getCredential).toHaveBeenCalledWith({ credentialId: "81818181-8181-4181-8181-818181818181", organizationId, provider: "anthropic" });
     expect(deps.listProviderModels).toHaveBeenCalledWith("anthropic", "customer-anthropic-secret");
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
@@ -1256,7 +1265,7 @@ describe("automation run processor", () => {
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
-    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: false });
     expect(deps.subscriptionAuth).toHaveBeenCalledWith({ credentialId: "91919191-9191-4191-8191-919191919191", organizationId }, expect.any(Date));
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
     expect(deps.createSubscriptionSecret).toHaveBeenCalledWith({ accessToken: "access", runId });
@@ -1272,7 +1281,7 @@ describe("automation run processor", () => {
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
-    expect(deps.checkAllowance).not.toHaveBeenCalled();
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: false });
     expect(deps.createGrant).not.toHaveBeenCalled();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       failureMessage: "gpt-5.4 is not available with the organization's OpenAI API key. Choose another model or remove the key in model settings.",
@@ -1303,7 +1312,12 @@ describe("automation run processor", () => {
     const deps = dependencies();
     deps.claimRun.mockResolvedValue(claimedRun());
     deps.selectCredential.mockResolvedValue(null);
-    deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+    deps.checkAllowance.mockResolvedValue({
+        allowed: false,
+        exhausted: "usage_credit",
+        machinesUseCredit: false,
+        nextResetAt: null,
+      });
 
     await processAutomationRun("job-1", {
       kind: "automation_run",
@@ -1321,12 +1335,16 @@ describe("automation run processor", () => {
     }));
   });
 
-  it("stops an organization-funded run before the sandbox when sandbox time is billed", async () => {
+  it("stops an organization-funded run before the sandbox when the usage credit pays for sandbox time", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    deps.sandboxTimeIsBilled.mockReturnValue(true);
-    deps.checkAllowance.mockResolvedValue({ allowed: false, nextResetAt: null });
+    deps.checkAllowance.mockResolvedValue({
+      allowed: false,
+      exhausted: "usage_credit",
+      machinesUseCredit: true,
+      nextResetAt: null,
+    });
 
     await processAutomationRun("job-1", {
       kind: "automation_run",
@@ -1334,12 +1352,38 @@ describe("automation run processor", () => {
       runId,
     }, process.env, deps);
 
-    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId);
+    expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: false });
     expect(deps.createGrant).not.toHaveBeenCalled();
     expect(deps.runInSandbox).not.toHaveBeenCalled();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       failureCategory: "usage_limit_reached",
       failureMessage: expect.not.stringContaining("own model key"),
+      status: "failed",
+    }));
+  });
+
+  it("stops an organization-funded run before the sandbox when machine hours are used up", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.checkAllowance.mockResolvedValue({
+      allowed: false,
+      exhausted: "machine_hours",
+      machinesUseCredit: false,
+      nextResetAt: null,
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.createGrant).not.toHaveBeenCalled();
+    expect(deps.runInSandbox).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "usage_limit_reached",
+      failureMessage: expect.stringContaining("machine hours"),
       status: "failed",
     }));
   });

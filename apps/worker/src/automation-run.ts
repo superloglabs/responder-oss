@@ -32,8 +32,7 @@ import {
   revokeAutomationModelBrokerGrant,
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
-import { checkUsageAllowance } from "@responder/core/billing/autumn";
-import { sandboxTimeIsBilled } from "@responder/core/billing/usage-charges";
+import { checkWorkAllowance } from "@responder/core/billing/autumn";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
@@ -115,7 +114,7 @@ import { workspaceSecretUsageInstructions } from "./secret-safety.js";
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
 export interface AutomationRunDependencies {
-  checkAllowance: typeof checkUsageAllowance;
+  checkAllowance: typeof checkWorkAllowance;
   appendEvent: typeof appendAutomationRunEvent;
   cancellationRequested: typeof automationRunCancellationRequested;
   checkoutRepositories: typeof checkoutAutomationRuntimeRepositories;
@@ -150,7 +149,6 @@ export interface AutomationRunDependencies {
   runClaude: typeof runClaudeAutomation;
   runOpenCode: typeof runOpenCodeAutomation;
   runInSandbox: typeof runInFreshAutomationSandbox;
-  sandboxTimeIsBilled: typeof sandboxTimeIsBilled;
   saveSandbox: typeof saveAutomationRunSandbox;
   setStatus: typeof setAutomationRunStatus;
   slackCard: AutomationSlackCardDependencies;
@@ -162,7 +160,7 @@ export interface AutomationRunDependencies {
 }
 
 export const defaultAutomationRunDependencies: AutomationRunDependencies = {
-  checkAllowance: checkUsageAllowance,
+  checkAllowance: checkWorkAllowance,
   appendEvent: appendAutomationRunEvent,
   cancellationRequested: automationRunCancellationRequested,
   checkoutRepositories: checkoutAutomationRuntimeRepositories,
@@ -198,7 +196,6 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   runClaude: runClaudeAutomation,
   runOpenCode: runOpenCodeAutomation,
   runInSandbox: runInFreshAutomationSandbox,
-  sandboxTimeIsBilled,
   saveSandbox: saveAutomationRunSandbox,
   setStatus: setAutomationRunStatus,
   slackCard: defaultAutomationSlackCardDependencies,
@@ -720,13 +717,15 @@ export async function processAutomationRun(
       organizationId: run.organizationId,
       provider: run.modelProvider,
     });
-    // Runs stop here, before a sandbox starts, when the organization's
-    // allowance is used up. Responder-funded model usage and billed sandbox
-    // time draw on it. A turn that has started finishes.
-    const sandboxBilled = dependencies.sandboxTimeIsBilled();
-    if (!credentialId || sandboxBilled) {
-      const access = await dependencies.checkAllowance(run.organizationId);
-      if (!access.allowed) throw new AutomationAllowanceExhaustedError(sandboxBilled);
+    // Runs stop here, before a sandbox starts, when the usage credit for
+    // Responder-funded models or the machine time is used up. A turn that has
+    // started finishes.
+    const access = await dependencies.checkAllowance(run.organizationId, {
+      responderModels: !credentialId,
+    });
+    const machinesUseCredit = access.machinesUseCredit;
+    if (!access.allowed) {
+      throw new AutomationAllowanceExhaustedError(access.exhausted, machinesUseCredit);
     }
     if (!credentialId) {
       grantCredential = { inferenceSource: "responder" };
@@ -969,7 +968,7 @@ export async function processAutomationRun(
                 organizationId: run.organizationId,
                 runId: run.runId,
               }).catch(() => false);
-            if (allowanceExhausted) throw new AutomationAllowanceExhaustedError(sandboxBilled);
+            if (allowanceExhausted) throw new AutomationAllowanceExhaustedError("usage_credit", machinesUseCredit);
           }
           throw error;
         }
@@ -1198,11 +1197,13 @@ async function answerNewMessages(
 }
 
 class AutomationAllowanceExhaustedError extends Error {
-  constructor(sandboxBilled: boolean) {
+  constructor(exhausted: "machine_hours" | "usage_credit" | null, machinesUseCredit: boolean) {
     super(
-      sandboxBilled
-        ? "The usage allowance for this billing period is used up. Upgrade the plan in billing settings to keep running automations."
-        : "The automation usage allowance for this billing period is used up. Upgrade the plan in billing settings or connect your own model key.",
+      exhausted === "machine_hours"
+        ? "The machine hours for this billing period are used up. Upgrade the plan in billing settings to keep running automations."
+        : machinesUseCredit
+          ? "The usage allowance for this billing period is used up. Upgrade the plan in billing settings to keep running automations."
+          : "The automation usage allowance for this billing period is used up. Upgrade the plan in billing settings or connect your own model key.",
     );
     this.name = "AutomationAllowanceExhaustedError";
   }
