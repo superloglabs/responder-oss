@@ -89,9 +89,10 @@ export async function getPullRequestHead(
 }
 
 // Replaces the repository's checkout with the pull request's head commit,
-// unless it is already there. Changes that were not pushed are lost.
-// `repositories` is updated in place so the run's other tools see the new
-// checkout.
+// unless it is already there. Changes the old checkout had since its
+// baseline are first saved as a patch beside it, since they may not have
+// been pushed. `repositories` is updated in place so the run's other tools
+// see the new checkout.
 export async function checkoutPullRequest(
   input: {
     checkoutAtRef: (reference: RuntimeRepositoryReference) => Promise<CheckedOutRepository>;
@@ -100,7 +101,12 @@ export async function checkoutPullRequest(
     target: PullRequestTarget;
   },
   dependencies: PullRequestFollowUpDependencies = defaultDependencies,
-): Promise<{ checkout: CheckedOutRepository; head: PullRequestHead; replaced: boolean }> {
+): Promise<{
+  checkout: CheckedOutRepository;
+  head: PullRequestHead;
+  replaced: boolean;
+  savedChanges?: string;
+}> {
   const head = await getPullRequestHead(input.target, dependencies);
   const index = input.repositories.findIndex(
     (repository) => repository.repository === input.target.repository,
@@ -109,11 +115,38 @@ export async function checkoutPullRequest(
   if (current && current.branch === head.branch && current.sha === head.sha) {
     return { checkout: current, head, replaced: false };
   }
+  const savedChanges = current
+    ? await saveCheckoutChanges(input.session, current)
+    : undefined;
   const checkout = await input.checkoutAtRef({ branch: head.branch, sha: head.sha });
   if (index >= 0) input.repositories[index] = checkout;
   else input.repositories.push(checkout);
   await saveCheckedOutRepositories(input.session, input.repositories);
-  return { checkout, head, replaced: true };
+  return { checkout, head, replaced: true, ...(savedChanges ? { savedChanges } : {}) };
+}
+
+// Writes the checkout's changes since its baseline, including new files, to a
+// patch outside the checkout. Returns its path, or nothing without changes.
+async function saveCheckoutChanges(
+  session: DaytonaSandboxSession,
+  checkout: CheckedOutRepository,
+): Promise<string | undefined> {
+  const name = checkout.repository.split("/").at(-1) ?? "repository";
+  const patch = `${checkout.path.slice(0, checkout.path.lastIndexOf("/"))}/${name}-unpushed-${Date.now()}.patch`;
+  const repository = shellQuote(checkout.path);
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `git -C ${repository} add -A`,
+      `if git -C ${repository} diff --cached --quiet ${checkout.workspaceBaseSha}; then echo none; else git -C ${repository} diff --cached --binary ${checkout.workspaceBaseSha} > ${shellQuote(patch)}; echo saved; fi`,
+    ].join("\n"),
+    maxOutputTokens: 2_000,
+    workdir: checkout.path,
+  });
+  if (!execSucceeded(output)) {
+    throw new Error(`Unable to save the changes in ${checkout.repository} before replacing its checkout`);
+  }
+  return output.split("\nOutput:\n", 2)[1]?.trim().endsWith("saved") ? patch : undefined;
 }
 
 function shellQuote(value: string): string {
@@ -209,6 +242,15 @@ export async function updatePullRequest(
       }),
     }),
   );
+  // Checked again just before the branch moves: a branch reset to an older
+  // commit in the meantime would otherwise accept this commit as a fast
+  // forward and bring back the commits it dropped.
+  const latest = await getPullRequestHead(input.target, dependencies);
+  if (latest.branch !== head.branch || latest.sha !== head.sha) {
+    throw new Error(
+      `Pull request #${input.target.number} changed while the commit was prepared. Call checkout_pull_request to get its latest commit, then make your changes again.`,
+    );
+  }
   const encodedBranch = head.branch.split("/").map(encodeURIComponent).join("/");
   await githubJson(dependencies.fetch, token, `${apiBase}/git/refs/heads/${encodedBranch}`, {
     method: "PATCH",
@@ -237,6 +279,12 @@ export async function updatePullRequest(
   await saveCheckedOutRepositories(input.session, input.repositories);
   return { changedFiles: files.map((file) => file.path), headSha: commit.sha, url: head.url };
 }
+
+const reviewCommentSchema = z.object({
+  id: z.number().int().positive(),
+  in_reply_to_id: z.number().int().positive().optional(),
+  pull_request_url: z.string().url(),
+});
 
 const reviewThreadsSchema = z.object({
   repository: z.object({
@@ -282,7 +330,8 @@ async function githubGraphql(
 }
 
 // Replies in the review thread that holds the comment, and resolves the
-// thread when asked. Any comment in the thread can be named.
+// thread when asked. Any comment in the thread can be named. A failed
+// resolve is reported in the result, so the reply is not posted twice.
 export async function replyToPullRequestComment(
   input: {
     body: string;
@@ -291,10 +340,30 @@ export async function replyToPullRequestComment(
     target: PullRequestTarget;
   },
   dependencies: PullRequestFollowUpDependencies = defaultDependencies,
-): Promise<{ resolved: boolean }> {
+): Promise<{ resolved: boolean; resolveError?: string }> {
   assertNoDaytonaSecretPlaceholders(input.body, "Review reply");
   const token = await dependencies.createInstallationToken(input.target.installationId);
-  const [owner, name] = repositoryApiPath(input.target.repository).split("/").map(decodeURIComponent);
+  const repositoryPath = repositoryApiPath(input.target.repository);
+  const pullRequestUrl = `https://api.github.com/repos/${repositoryPath}/pulls/${input.target.number}`;
+  const notOnPullRequest = new Error(
+    `Comment ${input.commentId} is not a review comment on pull request #${input.target.number}`,
+  );
+  let comment: z.infer<typeof reviewCommentSchema>;
+  try {
+    comment = reviewCommentSchema.parse(await githubJson(
+      dependencies.fetch,
+      token,
+      `https://api.github.com/repos/${repositoryPath}/pulls/comments/${input.commentId}`,
+      { method: "GET" },
+    ));
+  } catch {
+    throw notOnPullRequest;
+  }
+  if (comment.pull_request_url.toLowerCase() !== pullRequestUrl.toLowerCase()) throw notOnPullRequest;
+  // A thread is named by its first comment; replies point to it.
+  const rootId = comment.in_reply_to_id ?? comment.id;
+
+  const [owner, name] = repositoryPath.split("/").map(decodeURIComponent);
   let after: string | null = null;
   let thread: { id: string; isResolved: boolean } | undefined;
   do {
@@ -305,7 +374,7 @@ export async function replyToPullRequestComment(
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
             reviewThreads(first: 100, after: $after) {
-              nodes { id isResolved comments(first: 100) { nodes { databaseId } } }
+              nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
               pageInfo { endCursor hasNextPage }
             }
           }
@@ -315,13 +384,10 @@ export async function replyToPullRequestComment(
     ));
     const threads = data.repository?.pullRequest?.reviewThreads;
     if (!threads) throw new Error(`Pull request #${input.target.number} is unavailable`);
-    thread = threads.nodes.find((candidate) =>
-      candidate.comments.nodes.some((comment) => comment.databaseId === input.commentId));
+    thread = threads.nodes.find((candidate) => candidate.comments.nodes[0]?.databaseId === rootId);
     after = !thread && threads.pageInfo.hasNextPage ? threads.pageInfo.endCursor : null;
   } while (after);
-  if (!thread) {
-    throw new Error(`Comment ${input.commentId} is not a review comment on pull request #${input.target.number}`);
-  }
+  if (!thread) throw notOnPullRequest;
 
   await githubGraphql(
     dependencies.fetch,
@@ -333,7 +399,8 @@ export async function replyToPullRequestComment(
     }`,
     { body: input.body, threadId: thread.id },
   );
-  if (input.resolve && !thread.isResolved) {
+  if (!input.resolve || thread.isResolved) return { resolved: thread.isResolved };
+  try {
     await githubGraphql(
       dependencies.fetch,
       token,
@@ -342,6 +409,11 @@ export async function replyToPullRequestComment(
       }`,
       { threadId: thread.id },
     );
+    return { resolved: true };
+  } catch (error) {
+    return {
+      resolveError: error instanceof Error ? error.message : "Unable to resolve the thread",
+      resolved: false,
+    };
   }
-  return { resolved: input.resolve || thread.isResolved };
 }

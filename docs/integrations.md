@@ -205,20 +205,24 @@ The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.
 A review on a pull request that a tag mode thread or an automation run opened
 continues that thread or run. GitHub sends one `pull_request_review` event per
-review, with all of its inline comments. Responder passes the review and its
-comments to the thread or run as a new message, on the pull request's latest
-commit. The agent checks each comment, pushes fixes with `update_pull_request`,
+review. Responder reads the review's inline comments and passes the review and
+its comments to the thread or run as one message, on the pull request's latest
+commit. Comments that do not fit in the message are left out, and the message
+says how many. The agent checks each comment, pushes fixes with `update_pull_request`,
 and answers each comment with `reply_to_pull_request_comment`. A tag mode
 thread answers in its Slack thread or Linear session; an automation run shows
 the turn on its run page.
 
-- Reviews from bots and from people who can push to the repository (owners,
-  members, and collaborators) start a turn. Other people's reviews and the
-  app's own replies are ignored.
+- Reviews from bots, and from people GitHub lists as the repository's owner, a
+  member of its organization, or a collaborator, start a turn. Other people's
+  reviews and the app's own replies are ignored.
 - Bot reviews start at most five turns per pull request, so a reviewer that
   comments on every commit cannot keep the agent pushing.
 - Pushes are fast-forward only, so commits pushed by someone else are never
   overwritten.
+- Starting a review turn replaces the repository's checkout with the pull
+  request's latest commit. Earlier changes in that checkout are saved as a
+  patch file beside it.
 - Pull requests from remediation and suggestion jobs are not continued.
 
 ## Datadog

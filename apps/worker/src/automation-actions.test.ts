@@ -495,11 +495,52 @@ describe("automation pull request follow-up tools", () => {
 
     expect(deps.recordOrigin).toHaveBeenCalledWith({
       automationRunId: runId,
-      branch: "fix/example-attempt",
       organizationId: "organization-1",
       pullRequestNumber: 1,
       repositoryFullName: "acme/app",
     });
+  });
+
+  it("reports a failed origin write and repairs it when the pull request is opened again", async () => {
+    const deps = dependencies();
+    deps.recordOrigin.mockRejectedValueOnce(new Error("connection reset"));
+    const { handle } = handler(deps);
+
+    expect(resultText(await handle(openPullRequest))).toMatchObject({
+      warning: expect.stringContaining("cannot reach this run yet"),
+    });
+    deps.beginAttempt.mockResolvedValue({
+      externalReference: "https://github.com/acme/app/pull/1",
+      id: "attempt-1",
+      status: "existing_succeeded",
+    });
+    const repeated = resultText(await handle(openPullRequest));
+
+    expect(repeated).toMatchObject({ note: "This pull request was already opened in this run." });
+    expect(repeated).not.toHaveProperty("warning");
+    expect(deps.recordOrigin).toHaveBeenLastCalledWith({
+      automationRunId: runId,
+      organizationId: "organization-1",
+      pullRequestNumber: 1,
+      repositoryFullName: "acme/app",
+    });
+    expect(deps.createPullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not record a push with no changes as done, so a later call still pushes", async () => {
+    const deps = dependencies();
+    deps.updatePullRequest.mockResolvedValue({ changedFiles: [], headSha: "c".repeat(40), url: "https://github.com/acme/app/pull/1" });
+    const { handle, onAction } = handler(deps);
+
+    const result = await handle({
+      arguments: { commitMessage: "Fix", pullRequestNumber: 1, repository: "acme/app" },
+      name: "update_pull_request",
+    });
+
+    expect(resultText(result)).toMatchObject({ note: "The checkout has no changes to push." });
+    expect(deps.failAttempt).toHaveBeenCalledWith({ attemptId: "attempt-1", failureMessage: "No changes to push" });
+    expect(deps.completeAttempt).not.toHaveBeenCalled();
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it("checks out the latest commit of a pull request the run opened", async () => {

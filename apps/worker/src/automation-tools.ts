@@ -83,11 +83,11 @@ const repositoryToolDefinitions = [
     annotations: {
       destructiveHint: true,
       idempotentHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
       readOnlyHint: false,
     },
     description:
-      "Replace a repository's checkout with the latest commit of a pull request this run opened, so you can change it. Changes in that checkout that were not pushed are lost. Does nothing when the checkout is already at that commit.",
+      "Replace a repository's checkout with the latest commit of a pull request this run opened, so you can change it. The old checkout's changes are saved as a patch file whose path is returned as savedChanges; they may include changes already in a pull request. Does nothing when the checkout is already at that commit.",
     inputSchema: {
       additionalProperties: false,
       properties: pullRequestProperties,

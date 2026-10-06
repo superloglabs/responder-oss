@@ -446,6 +446,7 @@ export function investigationInstructions(input: {
     checkoutError?: string;
     pullRequestNumber: number;
     repository: string;
+    savedChanges?: string;
   };
   issueFollowupIssueCount?: number;
   scanMode?: boolean;
@@ -624,7 +625,12 @@ export function investigationInstructions(input: {
             : prompt("pullRequestReviewCheckout", {
                 repository: input.pullRequestReview.repository,
               }),
-        ].join("\n")
+          input.pullRequestReview.savedChanges
+            ? prompt("pullRequestReviewSavedChanges", {
+                path: input.pullRequestReview.savedChanges,
+              })
+            : null,
+        ].filter(Boolean).join("\n")
       : null,
     !input.threadMode && !input.scanMode ? prompt("remediationChoice") : null,
     input.threadMode || input.replay || issueUpdateFollowup
@@ -1023,9 +1029,11 @@ export async function runInvestigationAgent(
       ? pullRequestReviewOf(investigationInput.attributes)
       : null;
     let pullRequestReviewCheckoutError: string | undefined;
+    let pullRequestReviewSavedChanges: string | undefined;
     if (pullRequestFollowUp && pullRequestReview) {
       try {
-        await pullRequestFollowUp.checkout(pullRequestReview);
+        pullRequestReviewSavedChanges =
+          (await pullRequestFollowUp.checkout(pullRequestReview)).savedChanges;
       } catch (error) {
         pullRequestReviewCheckoutError = safeInvestigationError(error, environment);
       }
@@ -1180,6 +1188,9 @@ export async function runInvestigationAgent(
               ...pullRequestReview,
               ...(pullRequestReviewCheckoutError
                 ? { checkoutError: pullRequestReviewCheckoutError }
+                : {}),
+              ...(pullRequestReviewSavedChanges
+                ? { savedChanges: pullRequestReviewSavedChanges }
                 : {}),
             },
           }

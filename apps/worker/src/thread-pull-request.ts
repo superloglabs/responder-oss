@@ -62,6 +62,23 @@ export function createThreadPullRequestTool(input: {
     throw new Error("No repositories are checked out for this thread");
   }
   const opened = new Map<string, Awaited<ReturnType<typeof createPullRequestFromSandbox>>>();
+  // A review on the pull request continues this thread. Recording is safe to
+  // repeat, so a failed write is retried when the agent calls again.
+  const recordOrigin = async (repository: string, pullRequestNumber: number) => {
+    try {
+      await dependencies.recordOrigin({
+        organizationId: input.organizationId,
+        pullRequestNumber,
+        repositoryFullName: repository,
+        slackInvestigationSessionId: input.slackInvestigationSessionId,
+      });
+      return {};
+    } catch {
+      return {
+        warning: `Reviews of this pull request cannot reach this thread yet. Call ${threadPullRequestToolName} again with the same repository and title to retry.`,
+      };
+    }
+  };
   return tool({
     name: threadPullRequestToolName,
     description:
@@ -81,6 +98,7 @@ export function createThreadPullRequestTool(input: {
           note: "This pull request was already opened.",
           number: existing.number,
           url: existing.url,
+          ...await recordOrigin(request.repository, existing.number),
         };
       }
       const checkout = input.repositories.find(
@@ -103,14 +121,7 @@ export function createThreadPullRequestTool(input: {
         workspaceBaseSha: checkout.workspaceBaseSha,
       }, input.session);
       opened.set(key, pullRequest);
-      // A review on the pull request continues this thread.
-      await dependencies.recordOrigin({
-        branch: pullRequest.branch,
-        organizationId: input.organizationId,
-        pullRequestNumber: pullRequest.number,
-        repositoryFullName: repository.fullName,
-        slackInvestigationSessionId: input.slackInvestigationSessionId,
-      });
+      const origin = await recordOrigin(repository.fullName, pullRequest.number);
       await dependencies.captureEvent({
         distinctId: `investigation:${input.investigationId}`,
         event: "pr opened",
@@ -130,6 +141,7 @@ export function createThreadPullRequestTool(input: {
         changedFiles: pullRequest.changedFiles,
         number: pullRequest.number,
         url: pullRequest.url,
+        ...origin,
       };
     },
   });
@@ -199,7 +211,7 @@ export function createThreadPullRequestFollowUpTools(input: {
     tool({
       name: "checkout_pull_request",
       description:
-        "Replace a repository's checkout with the latest commit of a pull request this thread opened, so you can change it. Changes in that checkout that were not pushed are lost. Does nothing when the checkout is already at that commit.",
+        "Replace a repository's checkout with the latest commit of a pull request this thread opened, so you can change it. The old checkout's changes are saved as a patch file whose path is returned as savedChanges; they may include changes already in a pull request. Does nothing when the checkout is already at that commit.",
       parameters: z.object(pullRequestParameters),
       async execute(request) {
         const result = await checkout(request);
@@ -208,6 +220,7 @@ export function createThreadPullRequestFollowUpTools(input: {
           headSha: result.head.sha,
           path: result.checkout.path,
           replaced: result.replaced,
+          ...(result.savedChanges ? { savedChanges: result.savedChanges } : {}),
         };
       },
     }),

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PullRequestReviewTarget } from "@responder/core/db/pull-request-origins";
 import {
+  listReviewComments,
   pullRequestReviewMessage,
   startPullRequestReviewTurn,
   type PullRequestReviewComment,
@@ -10,8 +11,9 @@ import {
 vi.mock("../automations/queue.js", () => ({ queueAutomationRunReply: vi.fn() }));
 vi.mock("../investigations/queue.js", () => ({ queueSlackThreadInvestigation: vi.fn() }));
 vi.mock("@responder/core/db/pull-request-origins", () => ({
-  admitBotReviewTurn: vi.fn(),
+  countBotReviewTurn: vi.fn(),
   findPullRequestReviewTarget: vi.fn(),
+  maxBotReviewTurns: 5,
 }));
 
 function reviewEvent(overrides: {
@@ -50,6 +52,7 @@ const comment: PullRequestReviewComment = {
 
 const automationTarget: PullRequestReviewTarget = {
   automationRun: { automationEnabled: true, id: "run-1" },
+  botReviewTurns: 0,
   id: "origin-1",
   organizationId: "organization-1",
   thread: null,
@@ -57,6 +60,7 @@ const automationTarget: PullRequestReviewTarget = {
 
 const threadTarget: PullRequestReviewTarget = {
   automationRun: null,
+  botReviewTurns: 0,
   id: "origin-2",
   organizationId: "organization-1",
   thread: {
@@ -86,7 +90,7 @@ const threadTarget: PullRequestReviewTarget = {
 
 function dependencies(target: PullRequestReviewTarget | null = automationTarget) {
   return {
-    admitBotReviewTurn: vi.fn().mockResolvedValue(true),
+    countBotReviewTurn: vi.fn().mockResolvedValue(undefined),
     findTarget: vi.fn().mockResolvedValue(target),
     listComments: vi.fn().mockResolvedValue([comment]),
     queueAutomationRunReply: vi.fn().mockResolvedValue("queued"),
@@ -182,14 +186,30 @@ describe("pull request review turns", () => {
       deps,
       environment,
     )).resolves.toBe("queued");
-    expect(deps.admitBotReviewTurn).not.toHaveBeenCalled();
+    expect(deps.countBotReviewTurn).not.toHaveBeenCalled();
+  });
+
+  it("counts a bot's review once it starts a turn", async () => {
+    const deps = dependencies();
+
+    await startPullRequestReviewTurn(reviewEvent(), deps, environment);
+
+    expect(deps.countBotReviewTurn).toHaveBeenCalledWith("origin-1");
+  });
+
+  it("does not count a redelivered review", async () => {
+    const deps = dependencies();
+    deps.queueAutomationRunReply.mockResolvedValue("duplicate");
+
+    await expect(startPullRequestReviewTurn(reviewEvent(), deps, environment)).resolves.toBe("duplicate");
+    expect(deps.countBotReviewTurn).not.toHaveBeenCalled();
   });
 
   it("stops answering a bot once the pull request used its bot turns", async () => {
-    const deps = dependencies();
-    deps.admitBotReviewTurn.mockResolvedValue(false);
+    const deps = dependencies({ ...automationTarget, botReviewTurns: 5 });
 
     await expect(startPullRequestReviewTurn(reviewEvent(), deps, environment)).resolves.toBe("bot_limit_reached");
+    expect(deps.listComments).not.toHaveBeenCalled();
     expect(deps.queueAutomationRunReply).not.toHaveBeenCalled();
   });
 
@@ -205,8 +225,9 @@ describe("pull request review turns", () => {
     deps.listComments.mockResolvedValue([]);
 
     await expect(startPullRequestReviewTurn(reviewEvent(), deps, environment)).resolves.toBe("ignored");
+    await expect(startPullRequestReviewTurn(reviewEvent({ action: "edited" }), deps, environment)).resolves.toBe("ignored");
     await expect(startPullRequestReviewTurn(reviewEvent({ action: "dismissed" }), deps, environment)).resolves.toBe("ignored");
-    expect(deps.admitBotReviewTurn).not.toHaveBeenCalled();
+    expect(deps.countBotReviewTurn).not.toHaveBeenCalled();
     expect(deps.queueAutomationRunReply).not.toHaveBeenCalled();
   });
 
@@ -236,5 +257,29 @@ describe("pull request review turns", () => {
       "- Comment 124 (a reply to comment 123) on tests/test_schema.py line 30:",
       "New test always fails: the query references the catalog twice.",
     ].join("\n"));
+  });
+
+  it("leaves out whole comments that do not fit and says how many", () => {
+    const long = { ...comment, body: "x".repeat(3_900) };
+    const comments = Array.from({ length: 8 }, (_, index) => ({ ...long, id: index + 1 }));
+
+    const message = pullRequestReviewMessage(reviewEvent(), comments);
+
+    expect(message.length).toBeLessThan(20_000);
+    expect(message).toContain("- Comment 4 on");
+    expect(message).not.toContain("- Comment 5 on");
+    expect(message).toContain("4 more comments did not fit. Read them on the review page.");
+  });
+
+  it("reads every page of a review's comments", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([comment]), {
+        headers: { link: '<https://api.github.com/repositories/1/pulls/42/reviews/5/comments?per_page=100&page=2>; rel="next"' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ ...comment, id: 124 }])));
+
+    await expect(listReviewComments(reviewEvent(), fetchImpl, vi.fn().mockResolvedValue("token")))
+      .resolves.toEqual([comment, { ...comment, id: 124 }]);
+    expect(fetchImpl.mock.calls[1]![0]).toBe("https://api.github.com/repositories/1/pulls/42/reviews/5/comments?per_page=100&page=2");
   });
 });

@@ -72,12 +72,26 @@ describe("Slack thread pull requests", () => {
 
     await tool.invoke(undefined as never, request);
     expect(recordOrigin).toHaveBeenCalledWith({
-      branch: "fix/add-retries-12345678",
       organizationId: "organization-1",
       pullRequestNumber: 42,
       repositoryFullName: "acme/api",
       slackInvestigationSessionId: "session-1",
     });
+  });
+
+  it("reports a failed origin write and retries it when called again", async () => {
+    const { createPullRequest, recordOrigin, tool } = pullRequestTool();
+    recordOrigin.mockRejectedValueOnce(new Error("connection reset"));
+
+    await expect(tool.invoke(undefined as never, request)).resolves.toMatchObject({
+      number: 42,
+      warning: expect.stringContaining("cannot reach this thread yet"),
+    });
+    const retried = await tool.invoke(undefined as never, request);
+    expect(retried).toMatchObject({ number: 42, note: "This pull request was already opened." });
+    expect(retried).not.toHaveProperty("warning");
+    expect(recordOrigin).toHaveBeenCalledTimes(2);
+    expect(createPullRequest).toHaveBeenCalledTimes(1);
   });
 
   it("returns the pull request it already opened for the same title", async () => {

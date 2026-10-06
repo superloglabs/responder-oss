@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   automationRuns,
@@ -17,8 +17,8 @@ export type PullRequestOwner =
 // comments on every commit cannot keep an agent pushing forever.
 export const maxBotReviewTurns = 5;
 
+// Safe to call again for the same pull request.
 export async function recordPullRequestOrigin(input: PullRequestOwner & {
-  branch: string;
   organizationId: string;
   pullRequestNumber: number;
   repositoryFullName: string;
@@ -27,7 +27,6 @@ export async function recordPullRequestOrigin(input: PullRequestOwner & {
     .insert(pullRequestOrigins)
     .values({
       automationRunId: input.automationRunId ?? null,
-      branch: input.branch,
       organizationId: input.organizationId,
       pullRequestNumber: input.pullRequestNumber,
       repositoryFullName: input.repositoryFullName,
@@ -48,7 +47,6 @@ export async function getOwnedPullRequest(input: PullRequestOwner & {
 }) {
   const rows = await getDatabase()
     .select({
-      branch: pullRequestOrigins.branch,
       pullRequestNumber: pullRequestOrigins.pullRequestNumber,
       repositoryFullName: pullRequestOrigins.repositoryFullName,
     })
@@ -68,6 +66,7 @@ export async function getOwnedPullRequest(input: PullRequestOwner & {
 }
 
 export interface PullRequestReviewTarget {
+  botReviewTurns: number;
   id: string;
   organizationId: string;
   // Set for a pull request an automation run opened.
@@ -93,6 +92,7 @@ export async function findPullRequestReviewTarget(input: {
     .select({
       automationEnabled: automations.enabled,
       automationRunId: pullRequestOrigins.automationRunId,
+      botReviewTurns: pullRequestOrigins.botReviewTurns,
       id: pullRequestOrigins.id,
       organizationId: pullRequestOrigins.organizationId,
       sessionAgentId: slackInvestigationSessions.agentId,
@@ -142,25 +142,21 @@ export async function findPullRequestReviewTarget(input: {
     automationRun: row.automationRunId
       ? { automationEnabled: row.automationEnabled === true, id: row.automationRunId }
       : null,
+    botReviewTurns: row.botReviewTurns,
     id: row.id,
     organizationId: row.organizationId,
     thread,
   };
 }
 
-// Counts a turn started by a bot's review. Returns false once the pull
-// request has used its bot turns.
-export async function admitBotReviewTurn(originId: string): Promise<boolean> {
-  const rows = await getDatabase()
+// Counts a turn a bot's review started. Called once the turn is queued, so a
+// redelivered review does not use up the pull request's bot turns.
+export async function countBotReviewTurn(originId: string): Promise<void> {
+  await getDatabase()
     .update(pullRequestOrigins)
     .set({
       botReviewTurns: sql`${pullRequestOrigins.botReviewTurns} + 1`,
       updatedAt: new Date(),
     })
-    .where(and(
-      eq(pullRequestOrigins.id, originId),
-      lt(pullRequestOrigins.botReviewTurns, maxBotReviewTurns),
-    ))
-    .returning({ id: pullRequestOrigins.id });
-  return rows.length > 0;
+    .where(eq(pullRequestOrigins.id, originId));
 }

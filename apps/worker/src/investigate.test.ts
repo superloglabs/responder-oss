@@ -314,6 +314,10 @@ describe("sandbox agent configuration", () => {
       ...base,
       pullRequestReview: { checkoutError: "Pull request #42 is closed", pullRequestNumber: 42, repository: "acme/api" },
     })).toContain("Checking out the pull request failed: Pull request #42 is closed Call checkout_pull_request before changing it.");
+    expect(investigationInstructions({
+      ...base,
+      pullRequestReview: { pullRequestNumber: 42, repository: "acme/api", savedChanges: "/repos/acme/api-unpushed-1.patch" },
+    })).toContain("The checkout's earlier changes are saved in /repos/acme/api-unpushed-1.patch");
     expect(investigationInstructions(base)).not.toContain("GitHub review");
   });
 

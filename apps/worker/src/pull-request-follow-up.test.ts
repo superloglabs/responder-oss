@@ -77,6 +77,7 @@ describe("pull request follow-up", () => {
     const other = { ...checkout(), path: "/other", repository: "acme/web" };
     const repositories = [checkout({ branch: "main", sha: "a".repeat(40) }), other];
     const sandbox = session();
+    sandbox.execCommand.mockResolvedValue("Process exited with code 0\nOutput:\nnone");
 
     const result = await checkoutPullRequest({
       checkoutAtRef: vi.fn().mockResolvedValue(replaced),
@@ -86,10 +87,43 @@ describe("pull request follow-up", () => {
     }, dependencies(vi.fn().mockResolvedValue(json(pullRequest))));
 
     expect(result).toMatchObject({ checkout: replaced, replaced: true });
+    expect(result).not.toHaveProperty("savedChanges");
     expect(repositories).toEqual([replaced, other]);
     expect(JSON.parse(sandbox.materializeEntry.mock.calls[0]![0].entry.content)).toEqual({
       repositories: [replaced, other],
     });
+  });
+
+  it("saves the old checkout's changes as a patch before replacing it", async () => {
+    const sandbox = session();
+    sandbox.execCommand.mockResolvedValue("Process exited with code 0\nOutput:\nsaved");
+    const checkoutAtRef = vi.fn().mockResolvedValue(checkout());
+
+    const result = await checkoutPullRequest({
+      checkoutAtRef,
+      repositories: [checkout({ branch: "main", sha: "a".repeat(40) })],
+      session: sandbox,
+      target,
+    }, dependencies(vi.fn().mockResolvedValue(json(pullRequest))));
+
+    expect(result.savedChanges).toMatch(/^\/home\/daytona\/workspace\/repositories\/acme\/api-unpushed-\d+\.patch$/u);
+    const command = sandbox.execCommand.mock.calls[0]![0].cmd as string;
+    expect(command).toContain(`git -C '/home/daytona/workspace/repositories/acme/api' diff --cached --binary ${"b".repeat(40)} > '${result.savedChanges}'`);
+    expect(sandbox.execCommand.mock.invocationCallOrder[0]!).toBeLessThan(checkoutAtRef.mock.invocationCallOrder[0]!);
+  });
+
+  it("keeps the old checkout when its changes cannot be saved", async () => {
+    const sandbox = session();
+    sandbox.execCommand.mockResolvedValue("Process exited with code 1\nOutput:\nfatal");
+    const checkoutAtRef = vi.fn();
+
+    await expect(checkoutPullRequest({
+      checkoutAtRef,
+      repositories: [checkout({ branch: "main", sha: "a".repeat(40) })],
+      session: sandbox,
+      target,
+    }, dependencies(vi.fn().mockResolvedValue(json(pullRequest))))).rejects.toThrow("Unable to save the changes");
+    expect(checkoutAtRef).not.toHaveBeenCalled();
   });
 
   it("refuses a pull request from a fork", async () => {
@@ -134,6 +168,7 @@ describe("pull request follow-up", () => {
       .mockResolvedValueOnce(json({ sha: "blob-1" }))
       .mockResolvedValueOnce(json({ sha: "tree-new" }))
       .mockResolvedValueOnce(json({ sha: pushedSha }))
+      .mockResolvedValueOnce(json(pullRequest))
       .mockResolvedValueOnce(json({ object: { sha: pushedSha } }));
     const repositories = [checkout()];
     const sandbox = session("e".repeat(40));
@@ -159,9 +194,34 @@ describe("pull request follow-up", () => {
       ],
     });
     expect(JSON.parse(calls[4]![1].body as string)).toMatchObject({ parents: [headSha] });
-    expect(calls[5]![0]).toBe("https://api.github.com/repos/acme/api/git/refs/heads/fix/schema-reads-12345678");
-    expect(JSON.parse(calls[5]![1].body as string)).toEqual({ force: false, sha: pushedSha });
+    expect(calls[5]![0]).toBe("https://api.github.com/repos/acme/api/pulls/42");
+    expect(calls[6]![0]).toBe("https://api.github.com/repos/acme/api/git/refs/heads/fix/schema-reads-12345678");
+    expect(JSON.parse(calls[6]![1].body as string)).toEqual({ force: false, sha: pushedSha });
     expect(repositories[0]).toMatchObject({ sha: pushedSha, workspaceBaseSha: "e".repeat(40) });
+  });
+
+  it("does not move the branch when the pull request changed while the commit was prepared", async () => {
+    vi.mocked(changedFiles).mockResolvedValue([
+      { content: new TextEncoder().encode("fixed\n"), mode: "100644", path: "tests/test_schema.py" },
+    ]);
+    const reset = { ...pullRequest, head: { ...pullRequest.head, sha: "a".repeat(40) } };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json(pullRequest))
+      .mockResolvedValueOnce(json({ tree: { sha: "tree-head" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-1" }))
+      .mockResolvedValueOnce(json({ sha: "tree-new" }))
+      .mockResolvedValueOnce(json({ sha: pushedSha }))
+      .mockResolvedValueOnce(json(reset));
+    const repositories = [checkout()];
+
+    await expect(updatePullRequest({
+      commitMessage: "Fix the test",
+      repositories,
+      session: session(),
+      target,
+    }, dependencies(fetchImpl))).rejects.toThrow("changed while the commit was prepared");
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
+    expect(repositories[0]).toEqual(checkout());
   });
 
   it("pushes nothing when the checkout has no changes", async () => {
@@ -181,23 +241,34 @@ describe("pull request follow-up", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("replies in the thread that holds the comment and resolves it", async () => {
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(json({
-        data: {
-          repository: {
-            pullRequest: {
-              reviewThreads: {
-                nodes: [
-                  { comments: { nodes: [{ databaseId: 99 }] }, id: "thread-a", isResolved: false },
-                  { comments: { nodes: [{ databaseId: 123 }, { databaseId: 124 }] }, id: "thread-b", isResolved: false },
-                ],
-                pageInfo: { endCursor: null, hasNextPage: false },
-              },
+  function threads(nodes: Array<{ first: number; id: string; isResolved?: boolean }>) {
+    return json({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: nodes.map((node) => ({
+                comments: { nodes: [{ databaseId: node.first }] },
+                id: node.id,
+                isResolved: node.isResolved ?? false,
+              })),
+              pageInfo: { endCursor: null, hasNextPage: false },
             },
           },
         },
-      }))
+      },
+    });
+  }
+  const reviewComment = (id: number, inReplyTo?: number, number = 42) => json({
+    id,
+    ...(inReplyTo ? { in_reply_to_id: inReplyTo } : {}),
+    pull_request_url: `https://api.github.com/repos/acme/api/pulls/${number}`,
+  });
+
+  it("replies in the thread that holds the comment and resolves it", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reviewComment(124, 123))
+      .mockResolvedValueOnce(threads([{ first: 99, id: "thread-a" }, { first: 123, id: "thread-b" }]))
       .mockResolvedValueOnce(json({ data: { addPullRequestReviewThreadReply: { comment: { id: "c" } } } }))
       .mockResolvedValueOnce(json({ data: { resolveReviewThread: { thread: { id: "thread-b" } } } }));
 
@@ -208,8 +279,9 @@ describe("pull request follow-up", () => {
       target,
     }, dependencies(fetchImpl))).resolves.toEqual({ resolved: true });
 
-    const bodies = (fetchImpl.mock.calls as Array<[string, RequestInit]>)
-      .map(([, init]) => JSON.parse(init.body as string) as { variables: Record<string, unknown> });
+    const calls = fetchImpl.mock.calls as Array<[string, RequestInit]>;
+    expect(calls[0]![0]).toBe("https://api.github.com/repos/acme/api/pulls/comments/124");
+    const bodies = calls.slice(1).map(([, init]) => JSON.parse(init.body as string) as { variables: Record<string, unknown> });
     expect(bodies[1]!.variables).toEqual({
       body: "Fixed: the test now checks one catalog reference.",
       threadId: "thread-b",
@@ -217,22 +289,36 @@ describe("pull request follow-up", () => {
     expect(bodies[2]!.variables).toEqual({ threadId: "thread-b" });
   });
 
-  it("refuses a comment that is not on the pull request", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(json({
-      data: {
-        repository: {
-          pullRequest: {
-            reviewThreads: { nodes: [], pageInfo: { endCursor: null, hasNextPage: false } },
-          },
-        },
-      },
-    }));
+  it("reports a failed resolve without failing the posted reply", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reviewComment(123))
+      .mockResolvedValueOnce(threads([{ first: 123, id: "thread-b" }]))
+      .mockResolvedValueOnce(json({ data: { addPullRequestReviewThreadReply: { comment: { id: "c" } } } }))
+      .mockResolvedValueOnce(json({ errors: [{ message: "Resource not accessible by integration" }] }));
 
     await expect(replyToPullRequestComment({
       body: "Done.",
-      commentId: 5,
-      resolve: false,
+      commentId: 123,
+      resolve: true,
       target,
-    }, dependencies(fetchImpl))).rejects.toThrow("is not a review comment on pull request #42");
+    }, dependencies(fetchImpl))).resolves.toEqual({
+      resolveError: "Resource not accessible by integration",
+      resolved: false,
+    });
+  });
+
+  it("refuses a comment that is not on the pull request", async () => {
+    const otherPullRequest = vi.fn().mockResolvedValueOnce(reviewComment(5, undefined, 7));
+    const missing = vi.fn().mockResolvedValueOnce(json({ message: "Not Found" }, 404));
+
+    for (const fetchImpl of [otherPullRequest, missing]) {
+      await expect(replyToPullRequestComment({
+        body: "Done.",
+        commentId: 5,
+        resolve: false,
+        target,
+      }, dependencies(fetchImpl))).rejects.toThrow("is not a review comment on pull request #42");
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    }
   });
 });

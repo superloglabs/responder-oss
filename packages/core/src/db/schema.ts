@@ -1381,7 +1381,6 @@ export const pullRequestOrigins = pgTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     repositoryFullName: text("repository_full_name").notNull(),
     pullRequestNumber: integer("pull_request_number").notNull(),
-    branch: text("branch").notNull(),
     slackInvestigationSessionId: uuid("slack_investigation_session_id")
       .references(() => slackInvestigationSessions.id, { onDelete: "cascade" }),
     automationRunId: uuid("automation_run_id")
