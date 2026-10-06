@@ -18,6 +18,7 @@ const automation = {
     repositoryIds,
     toolPolicy: "full",
     triggers: [{ eventTypes: ["new_issue"], integrationAccountId: sentryAccountId, kind: "sentry", projectIds: ["responder-web"] }],
+    skillIds: [],
     workspaceSecretIds: [],
   },
   createdAt: "2026-09-01T10:00:00Z",
@@ -63,6 +64,7 @@ test.beforeEach(async ({ context }) => {
     if (path.endsWith("/organization/get-full-organization")) return route.fulfill({ json: organization });
     if (path === "/api/context") return route.fulfill({ json: { capabilities: ["automations"] } });
     if (path === "/api/billing") return route.fulfill({ json: { configured: false, enabled: false } });
+    if (/^\/api\/automations\/sentry\/[^/]+\/environments$/.test(path)) return route.fulfill({ json: { environments: ["production"] } });
     if (path === "/api/automations/options") return route.fulfill({ json: {
       accounts: [
         { id: sentryAccountId, provider: "sentry", displayName: "Acme workspace" },
@@ -71,7 +73,7 @@ test.beforeEach(async ({ context }) => {
       ],
       resources: [{ id: "project", integrationAccountId: sentryAccountId, kind: "sentry_project", externalId: "responder-web", displayName: "responder-web" }],
       repositories: [{ id: repositoryIds[0], fullName: "superloglabs/responder" }, { id: repositoryIds[1], fullName: "superloglabs/responder-oss" }],
-      credentials: [], secrets: [],
+      credentials: [], secrets: [], skills: [],
     } });
     if (path === `/api/automations/${automationId}`) return route.fulfill({ json: { automation } });
     if (path === `/api/automations/${automationId}/runs`) {
@@ -327,7 +329,7 @@ test("adds a Slack notification to a scheduled automation", async ({ page }, tes
         displayName: `team-${index}`,
       })),
     ],
-    secrets: [],
+    secrets: [], skills: [],
   } }));
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto(`/automations/${automationId}/settings`);

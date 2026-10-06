@@ -24,7 +24,12 @@ import {
   readSlackThread,
   slackTimestampPattern,
 } from "../../../../packages/core/src/integrations/slack-history.js";
-import { searchSlackChannel } from "../../../../packages/core/src/integrations/slack-search.js";
+import {
+  maxSlackSearchChannels,
+  normalizeSlackSearchQuery,
+  searchSlackChannels,
+  slackSearchSorts,
+} from "../../../../packages/core/src/integrations/slack-search.js";
 import { recordedWrite } from "./recorded-write.js";
 
 // Slack tools for automation runs. A context link grants every tool on the
@@ -42,7 +47,7 @@ export interface SlackToolDependencies {
   readChannel: typeof readSlackChannelHistory;
   readThread: typeof readSlackThread;
   removeReaction: typeof removeSlackReaction;
-  search: typeof searchSlackChannel;
+  search: typeof searchSlackChannels;
 }
 
 export const defaultSlackToolDependencies: SlackToolDependencies = {
@@ -55,7 +60,7 @@ export const defaultSlackToolDependencies: SlackToolDependencies = {
   readChannel: readSlackChannelHistory,
   readThread: readSlackThread,
   removeReaction: removeSlackReaction,
-  search: searchSlackChannel,
+  search: searchSlackChannels,
 };
 
 interface SlackTriggerThread {
@@ -118,10 +123,12 @@ function threadNote(scope: SlackToolScope): string {
 }
 
 const searchInput = z.object({
-  channel_id: z.string().min(1),
-  limit: z.number().int().min(1).max(20).default(10),
+  channel_ids: z.array(z.string().min(1)).min(1).max(maxSlackSearchChannels).optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+  page: z.number().int().min(1).max(100).default(1),
   query: z.string().min(1).max(500),
-});
+  sort: z.enum(slackSearchSorts).default("timestamp"),
+}).strict();
 const readChannelInput = z.object({
   channel_id: z.string().min(1),
   cursor: cursorSchema.optional(),
@@ -160,15 +167,29 @@ export function slackToolDefinitions(scope: SlackToolScope) {
   const channelTools = fullChannels.length === 0 ? [] : [
     {
       annotations: { readOnlyHint: true },
-      description: "Search messages in a Slack channel from this connected workspace.",
+      description: `Search messages, including thread replies, in this connected workspace's Slack channels. Omit channel_ids to search every available channel at once${fullChannels.length > maxSlackSearchChannels ? `; this workspace has ${fullChannels.length} channels, so pass up to ${maxSlackSearchChannels} channel_ids instead` : ""}. The query accepts Slack search syntax except in:, for example "checkout timeout", an exact "quoted phrase", from:@name, after:2026-01-31, before:, on:, during:month, has:link, and is:thread. Each match has its channel, permalink, and threadTimestamp when it is a reply; pass the thread's timestamp to slack_read_thread for the whole conversation. When page is less than pageCount, request the next page for more matches.`,
       inputSchema: {
         additionalProperties: false,
         properties: {
-          channel_id: { enum: fullChannels, type: "string" },
-          limit: { default: 10, maximum: 20, minimum: 1, type: "integer" },
+          channel_ids: {
+            description: "Search only these channels. Omit to search every available channel.",
+            items: { enum: fullChannels, type: "string" },
+            maxItems: maxSlackSearchChannels,
+            minItems: 1,
+            type: "array",
+            uniqueItems: true,
+          },
+          limit: { default: 20, description: "Matches per page.", maximum: 100, minimum: 1, type: "integer" },
+          page: { default: 1, maximum: 100, minimum: 1, type: "integer" },
           query: { maxLength: 500, minLength: 1, type: "string" },
+          sort: {
+            default: "timestamp",
+            description: "timestamp for newest first, score for best match first.",
+            enum: [...slackSearchSorts],
+            type: "string",
+          },
         },
-        required: ["channel_id", "query"],
+        required: ["query"],
         type: "object",
       },
       name: "slack_search_channel",
@@ -317,15 +338,24 @@ async function runTool(
   if (name === "slack_search_channel") {
     const parsed = searchInput.safeParse(args);
     if (!parsed.success) return failure("Invalid tool arguments");
-    const channelName = scope.channels.get(parsed.data.channel_id);
-    if (channelName === undefined) return notAllowed;
+    const { channel_ids: channelIds, ...search } = parsed.data;
+    if (!channelIds && scope.channels.size > maxSlackSearchChannels) {
+      return failure(`This workspace has ${scope.channels.size} channels. Pass up to ${maxSlackSearchChannels} of them as channel_ids.`);
+    }
+    const ids = channelIds ? [...new Set(channelIds)] : [...scope.channels.keys()];
+    if (ids.length === 0 || ids.some((id) => !scope.channels.has(id))) return notAllowed;
+    const channels = ids.map((id) => ({ id, name: scope.channels.get(id)! }));
+    try {
+      normalizeSlackSearchQuery(search.query);
+    } catch (error) {
+      return failure(error instanceof Error ? error.message : "Invalid Slack search query");
+    }
     const userToken = tokenFrom(values, "userAccessToken");
     if (!userToken) return failure("Slack search is unavailable for this connection. Reconnect Slack to enable it.");
     return success(await dependencies.search({
+      ...search,
       accessToken: userToken,
-      channel: { id: parsed.data.channel_id, name: channelName },
-      limit: parsed.data.limit,
-      query: parsed.data.query,
+      channels,
       signal,
     }));
   }

@@ -212,7 +212,7 @@ describe("automation context broker", () => {
         jsonrpc: "2.0",
         method: "tools/call",
         params: {
-          arguments: { channel_id: "C123", query: "deploy failed" },
+          arguments: { channel_ids: ["C123"], query: "deploy failed" },
           name: "slack_search_channel",
         },
       }),
@@ -220,7 +220,7 @@ describe("automation context broker", () => {
     expect(call.status).toBe(200);
     expect(dependencies.slack.search).toHaveBeenCalledWith(expect.objectContaining({
       accessToken: "xoxp-worker-only",
-      channel: { id: "C123", name: "incidents" },
+      channels: [{ id: "C123", name: "incidents" }],
       signal: expect.any(AbortSignal),
     }));
     expect(await call.text()).not.toContain("xoxp-worker-only");

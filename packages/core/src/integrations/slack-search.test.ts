@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   normalizeSlackSearchQuery,
   searchSlackChannel,
+  searchSlackChannels,
   SlackSearchError,
 } from "./slack-search.js";
 
@@ -11,7 +12,7 @@ describe("Slack channel search", () => {
       Response.json({
         ok: true,
         messages: {
-          total: 2,
+          paging: { count: 10, page: 1, pages: 1, total: 2 },
           matches: [
             {
               channel: { id: "C123", name: "incidents" },
@@ -50,7 +51,10 @@ describe("Slack channel search", () => {
           userId: "U123",
         },
       ],
+      page: 1,
+      pageCount: 1,
       query: "database timeout",
+      total: 2,
       totalMatches: 1,
     });
 
@@ -70,7 +74,87 @@ describe("Slack channel search", () => {
     );
   });
 
-  it("rejects Slack search modifiers before making a request", async () => {
+  it("searches several channels at once, scoped by Slack, and keeps only their matches", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        ok: true,
+        messages: {
+          paging: { count: 50, page: 2, pages: 4, total: 180 },
+          matches: [
+            {
+              channel: { id: "C456", name: "deploys" },
+              permalink: "https://example.slack.com/archives/C456/p3?thread_ts=2.000001&cid=C456",
+              text: "",
+              ts: "3.000001",
+              username: "CloudWatch",
+              attachments: [
+                { fallback: "ignored", title: "ALARM: checkout-5xx", text: "Threshold crossed" },
+                { fallback: "Only a fallback" },
+              ],
+            },
+            {
+              channel: { id: "D123", name: "U999" },
+              permalink: "https://example.slack.com/archives/D123/p4",
+              text: "a direct message that must stay private",
+              ts: "4.000001",
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      searchSlackChannels({
+        accessToken: "xoxp-secret",
+        channels: [
+          { id: "C123", name: "incidents" },
+          { id: "C456", name: "deploys" },
+        ],
+        fetchImpl: fetchMock,
+        limit: 50,
+        page: 2,
+        query: "checkout from:@ana after:2026-01-31",
+        sort: "score",
+      }),
+    ).resolves.toEqual({
+      matches: [
+        {
+          channel: { id: "C456", name: "deploys" },
+          permalink: "https://example.slack.com/archives/C456/p3?thread_ts=2.000001&cid=C456",
+          text: "ALARM: checkout-5xx\nThreshold crossed\nOnly a fallback",
+          threadTimestamp: "2.000001",
+          timestamp: "3.000001",
+          username: "CloudWatch",
+        },
+      ],
+      page: 2,
+      pageCount: 4,
+      query: "checkout from:@ana after:2026-01-31",
+      total: 180,
+    });
+
+    // Slack ORs repeated in: modifiers, so its totals and pages count only
+    // these channels and say nothing about other conversations.
+    const url = new URL(fetchMock.mock.calls[0]![0] as URL);
+    expect(url.searchParams.get("query")).toBe(
+      "checkout from:@ana after:2026-01-31 in:incidents in:deploys",
+    );
+    expect(url.searchParams.get("count")).toBe("50");
+    expect(url.searchParams.get("page")).toBe("2");
+    expect(url.searchParams.get("sort")).toBe("score");
+  });
+
+  it("refuses to search more channels than one Slack query can scope", async () => {
+    const fetchMock = vi.fn();
+    const channels = Array.from({ length: 51 }, (_, index) => ({ id: `C${index}`, name: `channel-${index}` }));
+
+    await expect(
+      searchSlackChannels({ accessToken: "xoxp-secret", channels, fetchImpl: fetchMock, limit: 10, query: "timeout" }),
+    ).rejects.toThrow("Slack search covers at most 50 channels at once");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects the in: modifier before making a request", async () => {
     const fetchMock = vi.fn();
 
     await expect(
@@ -81,7 +165,7 @@ describe("Slack channel search", () => {
         limit: 10,
         query: "timeout in:private-channel",
       }),
-    ).rejects.toThrow("Slack search modifiers are not allowed");
+    ).rejects.toThrow("The Slack in: modifier is not allowed");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

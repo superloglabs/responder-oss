@@ -17,12 +17,13 @@ test.beforeEach(async ({ context }) => {
     if (path.endsWith("/organization/get-full-organization")) return route.fulfill({ json: organization });
     if (path === "/api/context") return route.fulfill({ json: { capabilities: ["automations"] } });
     if (path === "/api/billing") return route.fulfill({ json: { configured: false, enabled: false } });
+    if (/^\/api\/automations\/sentry\/[^/]+\/environments$/.test(path)) return route.fulfill({ json: { environments: ["production"] } });
     if (path === "/api/automations/options") return route.fulfill({ json: {
       accounts: [{ id: accountId, provider: "slack", displayName: "Engineering" }, { id: githubAccountId, provider: "github", displayName: "acme" }],
       resources: [{ id: "channel", integrationAccountId: accountId, kind: "slack_channel", externalId: "C123", displayName: "#incidents" }],
       repositories: [{ id: repositoryId, fullName: "acme/api" }],
       credentials: [{ id: credentialId, provider: "openai", label: "Team key", lastFour: "1234", status: "active" }],
-      secrets: [],
+      secrets: [], skills: [],
     } });
     if (/\/credentials\/[^/]+\/models$/.test(path)) return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
     if (path === "/api/automations/included-models/openai") return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
@@ -57,6 +58,8 @@ test("creates an automation using the compact editor and selected resources", as
   await page.getByRole("button", { name: "Channel", exact: true }).click();
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  // The trigger's Slack connection stays a connector, so runs can search Slack.
+  await expect(page.getByRole("button", { name: "Remove Engineering" })).toBeVisible();
   await page.getByRole("button", { name: "Add repository", exact: true }).click();
   await page.getByRole("option", { name: "acme/api" }).click();
   await page.keyboard.press("Escape");
@@ -68,7 +71,7 @@ test("creates an automation using the compact editor and selected resources", as
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ name: "Fix incoming issues", configuration: {
-    repositoryIds: [repositoryId], contextAccountIds: [],
+    repositoryIds: [repositoryId], contextAccountIds: [accountId],
     triggers: [{ integrationAccountId: accountId, channelIds: ["C123"], kind: "slack", eventMode: "every_message" }],
   } });
   await expect(page.getByRole("alert")).toBeVisible();
@@ -95,7 +98,7 @@ test("chooses and configures Sentry inline with only supported options", async (
       { id: "other", provider: "sentry", displayName: "Other workspace" },
     ],
     resources: [{ id: "project", integrationAccountId: accountId, kind: "sentry_project", externalId: "responder-web", displayName: "responder-web" }],
-    repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [],
+    repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [], skills: [],
   } }));
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
@@ -152,7 +155,7 @@ test("connects from the trigger card and preserves the automation draft", async 
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: connected ? [{ id: accountId, provider: "slack", displayName: "Engineering" }] : [],
     resources: connected ? [{ id: "channel", integrationAccountId: accountId, kind: "slack_channel", externalId: "C123", displayName: "#incidents" }] : [],
-    repositories: [], credentials: [], secrets: [],
+    repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "slack", connectUrl: "/api/integrations/slack/start" }],
@@ -193,7 +196,7 @@ test("connects GitHub from the repositories section and searches its repositorie
     accounts: connected ? [{ id: githubAccountId, provider: "github", displayName: "acme" }] : [],
     resources: [],
     repositories: connected ? [{ id: repositoryId, fullName: "acme/api" }, { id: "66666666-6666-4666-8666-666666666666", fullName: "acme/web" }] : [],
-    credentials: [], secrets: [],
+    credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "github", connectUrl: "/api/integrations/github/start?mode=install" }],
@@ -233,7 +236,7 @@ test("connects a missing connector in the same tab and restores the draft", asyn
   const datadogAccountId = "77777777-7777-4777-8777-777777777777";
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: [{ id: githubAccountId, provider: "github", displayName: "acme" }, ...(connected ? [{ id: datadogAccountId, provider: "datadog", displayName: "Datadog US1" }] : [])],
-    resources: [], repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [],
+    resources: [], repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "datadog", connectUrl: "/api/integrations/datadog/connect" }],
@@ -273,7 +276,7 @@ test("connects an OAuth connector in the same tab", async ({ page, context }) =>
   const slackAccountId = "88888888-8888-4888-8888-888888888888";
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: connected ? [{ id: slackAccountId, provider: "slack", displayName: "Engineering" }] : [],
-    resources: [], repositories: [], credentials: [], secrets: [],
+    resources: [], repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "slack", connectUrl: "/api/integrations/slack/start" }],
@@ -303,7 +306,7 @@ test("returns a Sentry connection that finishes on settings to the draft", async
     if (started) loadsAfterReturn++;
     return route.fulfill({ json: {
       accounts: loadsAfterReturn > 2 ? [{ id: sentryAccountId, provider: "sentry", displayName: "Acme Sentry" }] : [],
-      resources: [], repositories: [], credentials: [], secrets: [],
+      resources: [], repositories: [], credentials: [], secrets: [], skills: [],
     } });
   });
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
@@ -325,7 +328,7 @@ test("returns a Sentry connection that finishes on settings to the draft", async
 
 test("shows connection setup errors on the trigger card", async ({ page }) => {
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
-    accounts: [], resources: [], repositories: [], credentials: [], secrets: [],
+    accounts: [], resources: [], repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "slack", connectUrl: null }],
@@ -353,7 +356,7 @@ test("searches channels by name or ID, selects multiple, and refreshes the list"
       { id: "first", integrationAccountId: accountId, kind: "slack_channel", externalId: "C123", displayName: "01-superlog-issues" },
       { id: "second", integrationAccountId: accountId, kind: "slack_channel", externalId: "C456", displayName: "all-nbax" },
       ...(refreshed ? [{ id: "third", integrationAccountId: accountId, kind: "slack_channel", externalId: "C789", displayName: "new-channel" }] : []),
-    ], repositories: [], credentials: [], secrets: [],
+    ], repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
@@ -491,7 +494,7 @@ test("keeps removed resources deselectable after a refresh", async ({ page }) =>
   await page.route("**/api/automations/options", route => route.fulfill({ json: {
     accounts: [{ id: accountId, provider: "slack", displayName: "Engineering" }],
     resources: refreshed ? [] : [{ id: "channel", integrationAccountId: accountId, kind: "slack_channel", externalId: "C123", displayName: "#incidents" }],
-    repositories: [], credentials: [], secrets: [],
+    repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.goto("/automations/new");
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
@@ -537,7 +540,7 @@ test("completes an asynchronous Sentry connection without losing the draft", asy
   await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
     accounts: connected ? [{ id: accountId, provider: "sentry", displayName: "Engineering" }] : [],
     resources: connected ? [{ id: "channel", integrationAccountId: accountId, kind: "sentry_project", externalId: "C123", displayName: "#incidents" }] : [],
-    repositories: [], credentials: [], secrets: [],
+    repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "sentry", connectUrl: "/api/integrations/sentry/start" }],
@@ -576,7 +579,7 @@ test("stops connection refresh retries after removing the trigger", async ({ pag
   let loads = 0;
   await page.route("**/api/automations/options", (route) => {
     loads++;
-    return route.fulfill({ json: { accounts: [], resources: [], repositories: [], credentials: [], secrets: [] } });
+    return route.fulfill({ json: { accounts: [], resources: [], repositories: [], credentials: [], secrets: [], skills: [] } });
   });
   await page.route("**/api/integrations", (route) => route.fulfill({ json: {
     integrations: [{ id: "sentry", connectUrl: "/api/integrations/sentry/start" }],
@@ -608,7 +611,7 @@ test("preserves the selected Discord server after reconnecting", async ({ page, 
     accounts: [
       { id: accountId, provider: "discord", displayName: "First server" },
       { id: secondAccountId, provider: "discord", displayName: "Selected server" },
-    ], resources: [], repositories: [], credentials: [], secrets: [],
+    ], resources: [], repositories: [], credentials: [], secrets: [], skills: [],
   } }));
   await page.route("**/api/integrations", route => route.fulfill({ json: {
     integrations: [{ id: "discord", connectUrl: "/api/integrations/discord/start" }],

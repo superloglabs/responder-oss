@@ -56,7 +56,8 @@ export class SlackSearchMcpServer implements MCPServer {
       {
         name: SLACK_SEARCH_TOOL,
         description:
-          "Search one Slack channel selected for this agent. Use concise keywords from the incident. Search modifiers are not accepted. " +
+          "Search one Slack channel selected for this agent, including thread replies. Use concise keywords from the incident. " +
+          "Slack search syntax other than in: works, for example from:@name, after:2026-01-31, has:link, and an exact \"quoted phrase\". " +
           `Available channels: ${channels}.`,
         inputSchema: {
           type: "object",
@@ -70,7 +71,7 @@ export class SlackSearchMcpServer implements MCPServer {
               type: "string",
               minLength: 1,
               maxLength: 500,
-              description: "Keywords or an exact error phrase without Slack modifiers",
+              description: "Keywords or an exact error phrase, without in:",
             },
             limit: {
               type: "integer",

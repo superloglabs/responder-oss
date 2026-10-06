@@ -37,6 +37,43 @@ describe("Slack history", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer xoxb-bot");
   });
 
+  it("includes attachment text, which alert bots use instead of text", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      messages: [{
+        attachments: [{ fallback: "unused", pretext: "Sentry", text: "TypeError in checkout", title: "New issue" }],
+        bot_id: "B1",
+        text: "",
+        ts: "1.000001",
+      }],
+      ok: true,
+    }));
+
+    const page = await readSlackChannelHistory({
+      accessToken: "xoxb-bot",
+      channelId: "C123",
+      fetchImpl: fetchMock,
+      limit: 1,
+    });
+
+    expect(page.messages[0]!.text).toBe("Sentry\nNew issue\nTypeError in checkout");
+  });
+
+  it("never cuts a long message inside a character", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      messages: [{ text: `${"x".repeat(3_999)}😀😀`, ts: "1.000001" }],
+      ok: true,
+    }));
+
+    const page = await readSlackChannelHistory({
+      accessToken: "xoxb-bot",
+      channelId: "C123",
+      fetchImpl: fetchMock,
+      limit: 1,
+    });
+
+    expect(page.messages[0]).toMatchObject({ text: `${"x".repeat(3_999)}😀…`, truncated: true });
+  });
+
   it("reads a thread by its first message timestamp", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({
       has_more: false,

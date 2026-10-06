@@ -790,6 +790,27 @@ describe("Slack live investigation card", () => {
           status: "complete",
           title: "slack_search_channel",
         },
+        {
+          detail: JSON.stringify({ channel_ids: ["C123", "C456"], query: "rollback" }),
+          id: "call-slack-some",
+          output: '{"matches":[]}',
+          status: "complete",
+          title: "slack_search_channel",
+        },
+        {
+          detail: JSON.stringify({ channel_ids: ["C1", "C2", "C3", "C4"], query: "rollback" }),
+          id: "call-slack-many",
+          output: '{"matches":[]}',
+          status: "complete",
+          title: "slack_search_channel",
+        },
+        {
+          detail: JSON.stringify({ query: "rollback" }),
+          id: "call-slack-every",
+          output: '{"matches":[]}',
+          status: "complete",
+          title: "slack_search_channel",
+        },
       ],
     });
 
@@ -864,6 +885,16 @@ describe("Slack live investigation card", () => {
           }),
           expect.objectContaining({
             title: "Search Slack channel `C123` for `database timeout`",
+          }),
+          expect.objectContaining({
+            title: "Search Slack channels `C123`, `C456` for `rollback`",
+          }),
+          expect.objectContaining({
+            title: "Search 4 Slack channels for `rollback`",
+            details: expect.objectContaining({ type: "rich_text" }),
+          }),
+          expect.objectContaining({
+            title: "Search every available Slack channel for `rollback`",
           }),
         ]),
       }),

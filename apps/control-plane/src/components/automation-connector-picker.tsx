@@ -10,9 +10,8 @@ import { searchInputProps } from "./search-input-props";
 
 // Lists every connector. Connections already in the workspace are added to the
 // draft; the rest start a connection, after which the page adds them.
-export function AutomationConnectorPicker({ options, triggerAccountIds, selectedAccountIds, selectedSecretIds, selectedSkillIds, githubIncluded, onToggleAccount, onToggleSecret, onToggleSkill, onCreateSkill, onToggleGithub, onConnect }: {
+export function AutomationConnectorPicker({ options, selectedAccountIds, selectedSecretIds, selectedSkillIds, githubIncluded, onToggleAccount, onToggleSecret, onToggleSkill, onCreateSkill, onToggleGithub, onConnect }: {
   options: AutomationOptions | null;
-  triggerAccountIds: string[];
   selectedAccountIds: string[];
   selectedSecretIds: string[];
   selectedSkillIds: string[];
@@ -41,9 +40,7 @@ export function AutomationConnectorPicker({ options, triggerAccountIds, selected
               if (provider === "github" && connected.length) {
                 return [<CommandItem key="github" value="github" keywords={[name]} onSelect={onToggleGithub}>{glyph}{name}{check(githubIncluded)}</CommandItem>];
               }
-              const items = provider === "github" ? [] : connected.map(account => triggerAccountIds.includes(account.id)
-                ? <CommandItem key={account.id} value={account.id} keywords={[account.displayName, name]} disabled>{glyph}<span className="truncate">{account.displayName}</span><span className="ml-auto text-xs text-muted-foreground">Trigger</span></CommandItem>
-                : <CommandItem key={account.id} value={account.id} keywords={[account.displayName, name]} onSelect={() => onToggleAccount(account.id)}>{glyph}<span className="truncate">{account.displayName}</span><span className="text-xs text-muted-foreground">{name}</span>{check(selectedAccountIds.includes(account.id))}</CommandItem>);
+              const items = provider === "github" ? [] : connected.map(account => <CommandItem key={account.id} value={account.id} keywords={[account.displayName, name]} onSelect={() => onToggleAccount(account.id)}>{glyph}<span className="truncate">{account.displayName}</span><span className="text-xs text-muted-foreground">{name}</span>{check(selectedAccountIds.includes(account.id))}</CommandItem>);
               // Custom MCP can have several servers, so it can always add another.
               if (!connected.length || provider === "custom_mcp") {
                 items.push(<CommandItem key={`connect-${provider}`} value={`connect-${provider}`} keywords={[name, "connect"]} onSelect={() => onConnect(provider)}>{glyph}{provider === "custom_mcp" ? "Add custom MCP server" : `Connect ${name}`}<span className="ml-auto text-xs text-muted-foreground">Connect</span></CommandItem>);

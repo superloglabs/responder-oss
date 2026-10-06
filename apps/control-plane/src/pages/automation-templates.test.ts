@@ -20,10 +20,9 @@ describe("automation templates", () => {
     }
   });
 
-  it("uses only connectors an automation run can use, apart from the trigger", () => {
+  it("uses only connectors an automation run can use", () => {
     for (const template of automationTemplates) {
       expect(template.connectors.every((provider) => automationConnectorProviders.includes(provider))).toBe(true);
-      for (const trigger of template.triggers) expect(template.connectors).not.toContain(trigger.kind);
       expect(template.prompt.trim()).not.toBe("");
     }
   });
@@ -54,7 +53,8 @@ describe("automation templates", () => {
       { id: "github-1", provider: "github" },
     ]));
     expect(applied.triggers).toEqual([{ eventTypes: ["new_issue"], integrationAccountId: "sentry-1", kind: "sentry", projectIds: [] }]);
-    expect(applied.contextAccountIds).toEqual(["slack-1"]);
+    // The trigger connection is also a connector, so the run can query Sentry.
+    expect(applied.contextAccountIds).toEqual(["sentry-1", "slack-1"]);
     expect(applied.prompt).toBe(template.prompt);
     expect(applied.repositoryIds).toEqual(["repository"]);
     expect(applied.model).toBe("gpt-5.4");
@@ -78,15 +78,6 @@ describe("automation templates", () => {
     expect(applied.contextAccountIds).toEqual([]);
   });
 
-  it("does not add the trigger connection as a connector", () => {
-    const applied = applyAutomationTemplate(configuration, findAutomationTemplate("match-reports-to-errors")!, options([
-      { id: "slack-1", provider: "slack" },
-      { id: "sentry-1", provider: "sentry" },
-    ]));
-    expect(applied.triggers[0]).toMatchObject({ eventMode: "mentions", integrationAccountId: "slack-1", kind: "slack" });
-    expect(applied.contextAccountIds).toEqual(["sentry-1"]);
-  });
-
   it("fills every trigger of a shared template", () => {
     const applied = applyAutomationTemplate(configuration, {
       connectors: ["github", "slack"],
@@ -107,8 +98,7 @@ describe("automation templates", () => {
       { channelIds: [], eventMode: "mentions", integrationAccountId: "slack-1", kind: "slack" },
       { frequency: "daily", hour: 8, kind: "schedule", timezone: "Asia/Tokyo", weekday: 1 },
     ]);
-    // Slack is already the trigger connection, so it is not added again.
-    expect(applied.contextAccountIds).toEqual([]);
+    expect(applied.contextAccountIds).toEqual(["slack-1"]);
   });
 
   it("lists what the user still chooses for each trigger", () => {

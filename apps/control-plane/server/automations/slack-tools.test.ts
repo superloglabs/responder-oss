@@ -323,4 +323,87 @@ describe("automation Slack tools", () => {
       limit: 5,
     }));
   });
+
+  it("searches every available channel when no channel is chosen", async () => {
+    const deps = dependencies();
+    deps.search.mockResolvedValue({ matches: [], page: 1, pageCount: 1, query: "timeout", total: 0 });
+    const twoChannels = claim({
+      resources: [
+        { displayName: "incidents", externalId: "C123", kind: "slack_channel" },
+        { displayName: "deploys", externalId: "C456", kind: "slack_channel" },
+        { displayName: "web", externalId: "P1", kind: "vercel_project" },
+      ],
+    });
+
+    const result = await call(twoChannels, deps, "slack_search_channel", {
+      query: "timeout from:@ana",
+      page: 2,
+      sort: "score",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.search).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "xoxp-user",
+      channels: [{ id: "C123", name: "incidents" }, { id: "C456", name: "deploys" }],
+      limit: 20,
+      page: 2,
+      query: "timeout from:@ana",
+      sort: "score",
+    }));
+
+    await call(twoChannels, deps, "slack_search_channel", { channel_ids: ["C456"], query: "rollback" });
+    expect(deps.search).toHaveBeenLastCalledWith(expect.objectContaining({
+      channels: [{ id: "C456", name: "deploys" }],
+      page: 1,
+      sort: "timestamp",
+    }));
+  });
+
+  it("asks for chosen channels when there are too many to search at once", async () => {
+    const deps = dependencies();
+    deps.search.mockResolvedValue({ matches: [], page: 1, pageCount: 1, query: "timeout", total: 0 });
+    const many = claim({
+      resources: Array.from({ length: 51 }, (_, index) => ({
+        displayName: `channel-${index}`,
+        externalId: `C${index}`,
+        kind: "slack_channel",
+      })),
+    });
+
+    await expect(call(many, deps, "slack_search_channel", { query: "timeout" })).resolves.toEqual({
+      content: [{ text: "This workspace has 51 channels. Pass up to 50 of them as channel_ids.", type: "text" }],
+      isError: true,
+    });
+    await call(many, deps, "slack_search_channel", { channel_ids: ["C1", "C2"], query: "timeout" });
+    expect(deps.search).toHaveBeenCalledWith(expect.objectContaining({
+      channels: [{ id: "C1", name: "channel-1" }, { id: "C2", name: "channel-2" }],
+    }));
+  });
+
+  it("refuses to search a channel outside the connection or a trigger-only run", async () => {
+    const deps = dependencies();
+
+    await expect(call(claim(), deps, "slack_search_channel", {
+      channel_ids: ["C123", "C999"],
+      query: "timeout",
+    })).resolves.toMatchObject({ isError: true });
+    await expect(call(claim({ roles: ["trigger"], trigger: slackTrigger }), deps, "slack_search_channel", {
+      query: "timeout",
+    })).resolves.toMatchObject({ isError: true });
+    // An unknown argument fails instead of widening the search to every channel.
+    await expect(call(claim(), deps, "slack_search_channel", {
+      channel_id: "C123",
+      query: "timeout",
+    })).resolves.toEqual({
+      content: [{ text: "Invalid tool arguments", type: "text" }],
+      isError: true,
+    });
+    await expect(call(claim(), deps, "slack_search_channel", {
+      query: "timeout in:secret",
+    })).resolves.toEqual({
+      content: [{ text: "The Slack in: modifier is not allowed; choose the channel instead", type: "text" }],
+      isError: true,
+    });
+    expect(deps.search).not.toHaveBeenCalled();
+  });
 });

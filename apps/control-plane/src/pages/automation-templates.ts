@@ -1,4 +1,4 @@
-import { triggerAccountIds, type AutomationConfiguration, type AutomationOptions, type AutomationTrigger, type ConnectedAutomationTrigger } from "../automations-api";
+import { type AutomationConfiguration, type AutomationOptions, type AutomationTrigger, type ConnectedAutomationTrigger } from "../automations-api";
 import { browserTimeZone } from "../automation-configuration";
 import type { AutomationConnectorProvider } from "../components/automation-connectors";
 
@@ -15,7 +15,8 @@ export const automationTemplateCategoryLabels: Record<AutomationTemplateCategory
 // in the connections and the user picks the channels, projects, and
 // repositories.
 export interface AutomationTemplateContent {
-  // Connectors besides the triggers' own connections.
+  // Connectors for the run. A trigger's connection is added only when its
+  // provider is listed here.
   connectors: string[];
   description: string;
   name: string;
@@ -80,7 +81,7 @@ export const automationTemplates: AutomationTemplate[] = [
   },
   {
     category: "bug_triage",
-    connectors: ["github", "slack"],
+    connectors: ["sentry", "github", "slack"],
     description: "Rate severity, trace the root cause in your repositories, and post a summary with the suspected commit and owner to Slack.",
     id: "triage-sentry-issues",
     name: "Triage new Sentry issues",
@@ -110,7 +111,7 @@ export const automationTemplates: AutomationTemplate[] = [
   },
   {
     category: "bug_triage",
-    connectors: ["github", "datadog"],
+    connectors: ["sentry", "github", "datadog"],
     description: "When a resolved Sentry issue comes back, compare it with the earlier fix, check Datadog logs, and open a pull request.",
     id: "fix-sentry-regressions",
     name: "Fix regressions",
@@ -224,9 +225,8 @@ export function applyAutomationTemplate(configuration: AutomationConfiguration, 
   const triggers = template.triggers.map((trigger): AutomationTrigger => trigger.kind === "schedule"
     ? { ...trigger, timezone }
     : { ...trigger, integrationAccountId: options.accounts.find((account) => account.provider === trigger.kind)?.id ?? "" });
-  const triggerAccounts = triggerAccountIds(triggers);
   const contextAccountIds = template.connectors.flatMap((provider) => {
-    const account = options.accounts.find((candidate) => candidate.provider === provider && !triggerAccounts.includes(candidate.id));
+    const account = options.accounts.find((candidate) => candidate.provider === provider);
     return provider === "github" || !account ? [] : [account.id];
   });
   return { ...configuration, contextAccountIds, prompt: template.prompt, triggers };
