@@ -19,7 +19,6 @@ export const slackThreadInvestigationQueue =
 // leaves an existing queue's policy unchanged.
 export const linearTicketQueue = "responder-linear-tickets-v2";
 export const remediationQueue = "responder-remediations-v2";
-export const pullRequestReviewQueue = "responder-pull-request-reviews-v1";
 // Runs are independent. The run lease keeps two workers off the same run, so
 // this queue has no per-automation ordering and one busy automation never
 // holds back another run.
@@ -118,25 +117,6 @@ export const remediationJobSchema = z.union([
 
 export type RemediationJob = z.infer<typeof remediationJobSchema>;
 
-export const pullRequestReviewJobSchema = z.object({
-  kind: z.literal("pull_request_review"),
-  config: runtimeAgentJobConfigSchema,
-  installationId: z.number().int().positive(),
-  investigationId: z.uuid(),
-  issue: remediationIssueSchema,
-  pullRequest: z.object({
-    branch: z.string().min(1),
-    number: z.number().int().positive(),
-    repository: z.string().min(1),
-  }),
-  queuedAt: z.iso.datetime(),
-  requestId: z.uuid(),
-  runtimeProfileId: z.uuid(),
-});
-
-export type PullRequestReviewJob = z.infer<
-  typeof pullRequestReviewJobSchema
->;
 export const linearTicketJobSchema = z.object({
   kind: z.literal("linear_ticket"),
   config: runtimeAgentJobConfigSchema,
@@ -300,19 +280,6 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       // Retrying the agent could repeat PR side effects. Terminal writes are
       // independent of monitoring, and a worker sweep reconciles abandoned rows.
       retryLimit: 0,
-    }),
-    boss.createQueue(pullRequestReviewQueue, {
-      deleteAfterSeconds: 604_800,
-      expireInSeconds: 3_600,
-      notify: true,
-      // Preserve every comment event while running only one follow-up per PR.
-      // Redundant queued passes are cheap because they exit when no threads remain.
-      policy: "key_strict_fifo",
-      retryBackoff: true,
-      retryDelay: 30,
-      // Thread replies carry stable markers, so partial publication can resume
-      // without posting duplicate replies.
-      retryLimit: 3,
     }),
     boss.createQueue(linearTicketQueue, {
       deleteAfterSeconds: 604_800,

@@ -196,17 +196,30 @@ Configure a public GitHub App with:
   tool.
 - Account permission: Email addresses read-only
 - Webhook URL: `<public>/api/webhooks/github`
-- Subscribe to: Pull request and Pull request review comment
+- Subscribe to: Pull request and Pull request review
 - Environment: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`,
   `GITHUB_APP_PRIVATE_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and
   `GITHUB_WEBHOOK_SECRET`
 
 The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.
-When a reviewer bot leaves a new inline comment on a pull request created by
-Responder, the agent checks every unresolved bot thread, pushes any needed
-follow-up commit, replies to the addressed threads, and resolves them. Human
-review comments are never handled automatically.
+A review on a pull request that a tag mode thread or an automation run opened
+continues that thread or run. GitHub sends one `pull_request_review` event per
+review, with all of its inline comments. Responder passes the review and its
+comments to the thread or run as a new message, on the pull request's latest
+commit. The agent checks each comment, pushes fixes with `update_pull_request`,
+and answers each comment with `reply_to_pull_request_comment`. A tag mode
+thread answers in its Slack thread or Linear session; an automation run shows
+the turn on its run page.
+
+- Reviews from bots and from people who can push to the repository (owners,
+  members, and collaborators) start a turn. Other people's reviews and the
+  app's own replies are ignored.
+- Bot reviews start at most five turns per pull request, so a reviewer that
+  comments on every commit cannot keep the agent pushing.
+- Pushes are fast-forward only, so commits pushed by someone else are never
+  overwritten.
+- Pull requests from remediation and suggestion jobs are not continued.
 
 ## Datadog
 

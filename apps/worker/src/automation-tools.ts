@@ -38,6 +38,19 @@ export interface AutomationToolResult {
 }
 
 export const openPullRequestToolName = "open_pull_request";
+export const checkoutPullRequestToolName = "checkout_pull_request";
+export const updatePullRequestToolName = "update_pull_request";
+export const replyToPullRequestCommentToolName = "reply_to_pull_request_comment";
+
+const pullRequestProperties = {
+  pullRequestNumber: { minimum: 1, type: "integer" },
+  repository: {
+    description: "The repository, as owner/name.",
+    maxLength: 255,
+    minLength: 1,
+    type: "string",
+  },
+};
 
 const repositoryToolDefinitions = [
   {
@@ -65,6 +78,65 @@ const repositoryToolDefinitions = [
       type: "object",
     },
     name: openPullRequestToolName,
+  },
+  {
+    annotations: {
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: false,
+    },
+    description:
+      "Replace a repository's checkout with the latest commit of a pull request this run opened, so you can change it. Changes in that checkout that were not pushed are lost. Does nothing when the checkout is already at that commit.",
+    inputSchema: {
+      additionalProperties: false,
+      properties: pullRequestProperties,
+      required: ["repository", "pullRequestNumber"],
+      type: "object",
+    },
+    name: checkoutPullRequestToolName,
+  },
+  {
+    annotations: {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+    description:
+      `Push the checkout's changes as one commit to a pull request this run opened. The checkout must be at the pull request's latest commit: call ${checkoutPullRequestToolName} before making the changes. Make and test the changes first.`,
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        ...pullRequestProperties,
+        commitMessage: { maxLength: 240, minLength: 1, type: "string" },
+      },
+      required: ["repository", "pullRequestNumber", "commitMessage"],
+      type: "object",
+    },
+    name: updatePullRequestToolName,
+  },
+  {
+    annotations: {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+    description:
+      "Reply to a review comment on a pull request this run opened, in the comment's thread. Set resolve when the comment is addressed or needs no change.",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        ...pullRequestProperties,
+        body: { maxLength: 4_000, minLength: 1, type: "string" },
+        commentId: { minimum: 1, type: "integer" },
+        resolve: { type: "boolean" },
+      },
+      required: ["repository", "pullRequestNumber", "commentId", "body", "resolve"],
+      type: "object",
+    },
+    name: replyToPullRequestCommentToolName,
   },
   ...githubReadToolDefinitions,
 ];

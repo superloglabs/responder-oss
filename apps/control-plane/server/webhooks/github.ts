@@ -5,7 +5,10 @@ import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-p
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { Hono } from "hono";
 import { z } from "zod";
-import { queuePullRequestReview } from "../investigations/queue.js";
+import {
+  pullRequestReviewEventSchema,
+  startPullRequestReviewTurn,
+} from "./github-reviews.js";
 
 const pullRequestEventSchema = z.object({
   action: z.string(),
@@ -17,27 +20,6 @@ const pullRequestEventSchema = z.object({
   repository: z.object({
     full_name: z.string().min(1),
   }),
-});
-
-const pullRequestReviewCommentEventSchema = z.object({
-  action: z.string(),
-  comment: z.object({
-    id: z.number().int().positive(),
-    body: z.string().max(65_536),
-    html_url: z.string().url(),
-    in_reply_to_id: z.number().int().positive().optional(),
-    line: z.number().int().positive().nullable().optional(),
-    original_line: z.number().int().positive().nullable().optional(),
-    path: z.string().min(1).max(4_096),
-    user: z.object({
-      login: z.string().min(1),
-      type: z.string(),
-    }),
-  }),
-  installation: z.object({ id: z.number().int().positive() }),
-  pull_request: z.object({ number: z.number().int().positive() }),
-  repository: z.object({ full_name: z.string().min(1) }),
-  sender: z.object({ type: z.string() }),
 });
 
 function safeEqual(left: string, right: string): boolean {
@@ -88,52 +70,22 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
   }
 
   const eventType = context.req.header("x-github-event");
-  if (eventType === "pull_request_review_comment") {
-    const parsed = pullRequestReviewCommentEventSchema.safeParse(
-      parseJson(rawBody),
-    );
-    if (
-      !parsed.success ||
-      parsed.data.action !== "created" ||
-      parsed.data.comment.in_reply_to_id !== undefined ||
-      parsed.data.comment.user.type !== "Bot" ||
-      parsed.data.sender.type !== "Bot"
-    ) {
-      return context.json({ ok: true, ignored: true });
+  if (eventType === "pull_request_review") {
+    const parsed = pullRequestReviewEventSchema.safeParse(parseJson(rawBody));
+    if (!parsed.success) return context.json({ ok: true, ignored: true });
+    const outcome = await startPullRequestReviewTurn(parsed.data);
+    if (outcome !== "ignored" && outcome !== "not_ours") {
+      console.info(
+        JSON.stringify({
+          event: "github_pull_request_review_turn",
+          outcome,
+          pullRequestNumber: parsed.data.pull_request.number,
+          repository: parsed.data.repository.full_name,
+          reviewId: parsed.data.review.id,
+        }),
+      );
     }
-
-    const queued = await queuePullRequestReview({
-      installationId: parsed.data.installation.id,
-      pullRequestNumber: parsed.data.pull_request.number,
-      reviewComment: {
-        author: parsed.data.comment.user.login,
-        body: parsed.data.comment.body,
-        id: parsed.data.comment.id,
-        line:
-          parsed.data.comment.line ?? parsed.data.comment.original_line ?? null,
-        path: parsed.data.comment.path,
-        url: parsed.data.comment.html_url,
-      },
-      repositoryFullName: parsed.data.repository.full_name,
-    });
-    if (!queued.matched) {
-      return context.json({ ok: true, matched: false });
-    }
-
-    console.info(
-      JSON.stringify({
-        event: "github_pull_request_review_queued",
-        pullRequestNumber: parsed.data.pull_request.number,
-        repository: parsed.data.repository.full_name,
-        requestId: queued.requestId,
-        queued: queued.queued,
-      }),
-    );
-    return context.json({
-      ok: true,
-      matched: true,
-      queued: queued.queued,
-    });
+    return context.json({ ok: true, outcome });
   }
 
   if (eventType !== "pull_request") {

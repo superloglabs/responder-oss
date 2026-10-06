@@ -116,6 +116,20 @@ export async function loadCheckedOutRepositories(
   ).repositories;
 }
 
+// Records the checkouts that later turns and tools load.
+export async function saveCheckedOutRepositories(
+  session: DaytonaSandboxSession,
+  repositories: CheckedOutRepository[],
+): Promise<void> {
+  await session.materializeEntry({
+    entry: {
+      type: "file",
+      content: `${JSON.stringify({ repositories }, null, 2)}\n`,
+    },
+    path: `${workspaceRoot}/.responder/repositories.json`,
+  });
+}
+
 export interface RuntimeRepositoryReference {
   branch: string;
   sha: string;
@@ -749,6 +763,25 @@ export async function checkoutRuntimeRepositoryAtRef(
   );
 }
 
+export async function checkoutAutomationRuntimeRepositoryAtRef(
+  session: DaytonaSandboxSession,
+  automationVersionId: string,
+  repositoryFullName: string,
+  reference: RuntimeRepositoryReference,
+  dependencies: RepositoryCheckoutDependencies = {
+    ...defaultDependencies,
+    getRepositories: getAutomationRuntimeRepositories,
+  },
+): Promise<CheckedOutRepository> {
+  return checkoutRuntimeRepositoryWithRef(
+    session,
+    automationVersionId,
+    repositoryFullName,
+    reference,
+    dependencies,
+  );
+}
+
 async function checkoutRuntimeRepositoryWithRef(
   session: DaytonaSandboxSession,
   versionId: string,
@@ -915,12 +948,6 @@ async function checkoutRuntimeRepositoriesWithRefs(
     }
   }
 
-  await session.materializeEntry({
-    entry: {
-      type: "file",
-      content: `${JSON.stringify({ repositories: checkedOut }, null, 2)}\n`,
-    },
-    path: `${workspaceRoot}/.responder/repositories.json`,
-  });
+  await saveCheckedOutRepositories(session, checkedOut);
   return checkedOut;
 }

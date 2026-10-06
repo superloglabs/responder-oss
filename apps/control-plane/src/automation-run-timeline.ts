@@ -51,7 +51,8 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
   for (const event of run.events) {
     const key = String(event.id);
     if (event.type === "user_message" && isUserMessage(event.data)) {
-      entries.push({ authorName: event.data.authorName, createdAt: event.createdAt, key, kind: "user", text: event.data.text });
+      const authorName = event.data.source === "github" ? `${event.data.authorName} on GitHub` : event.data.authorName;
+      entries.push({ authorName, createdAt: event.createdAt, key, kind: "user", text: event.data.text });
     } else if (event.type === "transcript" && isTranscript(event.data)) {
       // Items carry the time the worker first saw them, so an activity lasts
       // from the item before it to its last step.
@@ -106,6 +107,9 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
           title: stringField(event.data, "title"),
           url,
         });
+      } else if (kind === "update_github_pull_request" && url) {
+        const number = /\/pull\/(\d+)/u.exec(url)?.[1];
+        entries.push({ key, kind: "notice", text: number ? `Pushed a commit to pull request #${number}.` : "Pushed a commit to the pull request." });
       } else if (kind === "send_slack_message") {
         entries.push({ key, kind: "notice", text: "Sent a Slack message." });
       }
