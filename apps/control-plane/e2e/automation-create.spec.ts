@@ -648,9 +648,9 @@ test("starts an automation from a template on the automation list", async ({ pag
   await expect(templates.getByRole("link").first()).toContainText("Answer community questions");
   await page.screenshot({ path: testInfo.outputPath("automation-templates-suggested.png"), fullPage: true });
   await templates.getByRole("radio", { name: "All", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(11);
+  await expect(templates.getByRole("link")).toHaveCount(12);
   await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(3);
+  await expect(templates.getByRole("link")).toHaveCount(4);
   await templates.getByRole("radio", { name: "Scans", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(5);
   await expect(templates.getByText("Schedule · Every hour")).toBeVisible();
@@ -770,7 +770,7 @@ test("keeps the trigger menu open when a password manager menu takes focus", asy
 test("clears a template with Start blank", async ({ page }) => {
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new?template=triage-sentry-issues");
-  await expect(page.getByRole("heading", { name: "Triage new Sentry issues" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alert on critical Sentry issues" })).toBeVisible();
   await expect(page.getByText("Connect Sentry to use this trigger")).toBeVisible();
   await page.getByRole("button", { name: "Start blank", exact: true }).click();
   await expect(page).toHaveURL(/\/automations\/new$/);
