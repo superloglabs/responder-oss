@@ -1,6 +1,6 @@
 import { processFile, type FileDiffMetadata } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { estimatedDiffHeight, missingPatchReason, pullRequestFilePatch } from "../pull-request-diff";
 import type { PullRequestFile } from "../pull-requests-api";
 
@@ -31,6 +31,36 @@ function scrollingAncestor(node: HTMLElement): HTMLElement | null {
   return null;
 }
 
+// Calls onNear once the element comes within reach of the viewport. Returns
+// a function that stops watching it.
+type ObserveNear = (node: HTMLElement, onNear: () => void) => () => void;
+
+const ObserveNearContext = createContext<ObserveNear | null>(null);
+
+// One observer watches every placeholder in the list.
+function useObserveNear(): ObserveNear {
+  const observer = useRef<IntersectionObserver | null>(null);
+  const callbacks = useRef(new Map<Element, () => void>());
+  useEffect(() => () => observer.current?.disconnect(), []);
+  return useCallback((node, onNear) => {
+    const waiting = callbacks.current;
+    observer.current ??= new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        observer.current?.unobserve(entry.target);
+        waiting.get(entry.target)?.();
+        waiting.delete(entry.target);
+      }
+    }, { root: scrollingAncestor(node), rootMargin: "1200px 0px" });
+    waiting.set(node, onNear);
+    observer.current.observe(node);
+    return () => {
+      waiting.delete(node);
+      observer.current?.unobserve(node);
+    };
+  }, []);
+}
+
 // A pull request can change thousands of files, so each diff is parsed and
 // rendered only when it comes near the viewport. Until then it holds its
 // estimated height, and once rendered it stays.
@@ -42,16 +72,13 @@ function DeferredFileDiff({ diffStyle, file, index, patch, url }: {
   url: string;
 }) {
   const placeholder = useRef<HTMLDivElement>(null);
+  const observeNear = useContext(ObserveNearContext);
   const [near, setNear] = useState(false);
   useEffect(() => {
     const node = placeholder.current;
-    if (near || !node) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) setNear(true);
-    }, { root: scrollingAncestor(node), rootMargin: "1200px 0px" });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [near]);
+    if (near || !node || !observeNear) return;
+    return observeNear(node, () => setNear(true));
+  }, [near, observeNear]);
   const diff = useMemo(() => near ? parsedFile({ ...file, patch }, index) : null, [file, index, near, patch]);
 
   if (!near) {
@@ -72,9 +99,12 @@ export function PullRequestFiles({ diffStyle, files, url }: {
   files: PullRequestFile[];
   url: string;
 }) {
-  return <div className="pullRequestFiles">
-    {files.map((file, index) => file.patch === null
-      ? <MissingDiff file={file} key={file.filename} reason={missingPatchReason(file)} url={url} />
-      : <DeferredFileDiff diffStyle={diffStyle} file={file} index={index} key={file.filename} patch={file.patch} url={url} />)}
-  </div>;
+  const observeNear = useObserveNear();
+  return <ObserveNearContext.Provider value={observeNear}>
+    <div className="pullRequestFiles">
+      {files.map((file, index) => file.patch === null
+        ? <MissingDiff file={file} key={file.filename} reason={missingPatchReason(file)} url={url} />
+        : <DeferredFileDiff diffStyle={diffStyle} file={file} index={index} key={file.filename} patch={file.patch} url={url} />)}
+    </div>
+  </ObserveNearContext.Provider>;
 }

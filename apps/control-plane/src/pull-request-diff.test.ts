@@ -48,6 +48,7 @@ describe("file summaries", () => {
   it("reserves space for a diff before it renders", () => {
     expect(estimatedDiffHeight({ ...file, patch: "@@ -1 +1 @@\n-a\n+b" })).toBeGreaterThan(estimatedDiffHeight({ ...file, patch: "@@ -1 +1 @@" }));
     expect(estimatedDiffHeight({ ...file, patch: "x\n".repeat(100_000) })).toBeLessThanOrEqual(4_000);
+    expect(estimatedDiffHeight({ ...file, patch: "a\nb\nc" })).toBe(48 + 3 * 20);
   });
 
   it("totals the changes", () => {

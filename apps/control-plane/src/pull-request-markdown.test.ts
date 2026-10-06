@@ -34,4 +34,13 @@ describe("remarkHtmlAsText", () => {
   it("keeps an entity that names no character", () => {
     expect(htmlText("<b>&#99999999; &#x41; &bogus;</b>")).toBe("&#99999999; A &bogus;");
   });
+
+  it("keeps adjacent blocks and line breaks apart", () => {
+    expect(htmlText("<p>first</p><p>second</p>")).toMatch(/^first\s+second\s*$/u);
+    expect(htmlText("one<br>two<br/>three")).toBe("one\ntwo\nthree");
+  });
+
+  it("decodes the entities GitHub text commonly uses", () => {
+    expect(htmlText("<p>Wait&hellip; it&rsquo;s &ldquo;done&rdquo; &mdash; &copy; &middot;</p>")).toBe("Wait… it’s “done” — © ·\n");
+  });
 });

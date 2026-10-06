@@ -23,7 +23,8 @@ export function pullRequestFilePatch(file: PullRequestFile & { patch: string }):
 // The height a file's diff takes once rendered, so the page keeps its length
 // while diffs render only near the viewport.
 export function estimatedDiffHeight(file: PullRequestFile & { patch: string }): number {
-  const lines = file.patch.split("\n").length;
+  let lines = 1;
+  for (let index = file.patch.indexOf("\n"); index !== -1; index = file.patch.indexOf("\n", index + 1)) lines += 1;
   return Math.min(4_000, 48 + lines * 20);
 }
 

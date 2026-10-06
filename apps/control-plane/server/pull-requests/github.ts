@@ -181,12 +181,20 @@ export class GitHubPullRequestError extends Error {
   }
 }
 
+// A timeout reads as 504 and any other failure to reach GitHub as 502, so
+// the routes can log a status for every failure.
+function gitHubFailure(error: unknown): GitHubPullRequestError {
+  if (error instanceof GitHubPullRequestError) return error;
+  const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+  return new GitHubPullRequestError(timedOut ? "GitHub did not respond in time" : "Unable to reach GitHub", timedOut ? 504 : 502);
+}
+
 async function githubRequest(token: string, url: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(url, {
     ...init,
     headers: { ...githubAppHeaders(token), ...init.headers },
     signal: AbortSignal.timeout(requestTimeoutMs),
-  });
+  }).catch((error: unknown) => { throw gitHubFailure(error); });
   if (!response.ok) {
     throw new GitHubPullRequestError(`GitHub returned ${response.status}`, response.status);
   }
@@ -217,7 +225,8 @@ async function listAll<T>(
 }
 
 function installationToken(installationId: number): Promise<string> {
-  return createGitHubInstallationToken(installationId, AbortSignal.timeout(requestTimeoutMs));
+  return createGitHubInstallationToken(installationId, AbortSignal.timeout(requestTimeoutMs))
+    .catch((error: unknown) => { throw gitHubFailure(error); });
 }
 
 function pullRequestState(pull: { draft?: boolean | null; merged_at?: string | null; state: "open" | "closed" }): PullRequestState {

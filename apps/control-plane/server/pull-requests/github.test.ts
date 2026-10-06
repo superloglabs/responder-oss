@@ -124,6 +124,20 @@ describe("fetchPullRequestDetail", () => {
     expect(tokenMock).toHaveBeenCalledWith(7, expect.any(AbortSignal));
   });
 
+  it("reports a timed-out GitHub request with a gateway timeout status", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("The operation timed out.", "TimeoutError"); }));
+
+    await expect(fetchPullRequestDetail(7, { number: 1, owner: "acme", repo: "api" })).rejects.toMatchObject({ name: "GitHubPullRequestError", status: 504 });
+  });
+
+  it("reports a failed installation token with a status", async () => {
+    tokenMock.mockRejectedValueOnce(new DOMException("The operation timed out.", "TimeoutError"));
+    await expect(fetchPullRequestFiles(7, { number: 1, owner: "acme", repo: "api" })).rejects.toMatchObject({ status: 504 });
+
+    tokenMock.mockRejectedValueOnce(new Error("Unable to create GitHub installation token"));
+    await expect(fetchPullRequestFiles(7, { number: 1, owner: "acme", repo: "api" })).rejects.toMatchObject({ status: 502 });
+  });
+
   it("says when the conversation has more pages than it reads", async () => {
     let page = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {

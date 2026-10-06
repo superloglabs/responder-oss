@@ -18,13 +18,38 @@ const phrasingParents = new Set([
   "tableCell",
 ]);
 
-const entities: Record<string, string> = { amp: "&", gt: ">", lt: "<", nbsp: " ", quot: "\"" };
+const entities: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  bull: "•",
+  copy: "©",
+  gt: ">",
+  hellip: "…",
+  larr: "←",
+  ldquo: "“",
+  lsquo: "‘",
+  lt: "<",
+  mdash: "—",
+  middot: "·",
+  nbsp: " ",
+  ndash: "–",
+  quot: "\"",
+  rarr: "→",
+  rdquo: "”",
+  reg: "®",
+  rsquo: "’",
+  times: "×",
+  trade: "™",
+};
+
+// Tags that end a line, so the text on either side stays apart.
+const lineBreakTags = /<br\s*\/?>|<\/(?:blockquote|details|div|h[1-6]|li|ol|p|pre|summary|table|tr|ul)\s*>/giu;
 
 // Removing a tag can join the pieces around it into a new one, so tags are
 // removed until none are left, and any stray bracket goes too. Entities are
 // decoded last; the result is rendered as text, never as markup.
 export function htmlText(html: string): string {
-  let text = html;
+  let text = html.replace(lineBreakTags, "\n");
   for (let previous = ""; previous !== text;) {
     previous = text;
     text = text.replace(/<!--[\s\S]*?(?:-->|$)/gu, "").replace(/<[^<>]*>/gu, "");
