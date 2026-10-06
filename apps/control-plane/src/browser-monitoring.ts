@@ -1,11 +1,14 @@
 import * as Sentry from "@sentry/react";
 import { sentrySampleRate } from "@responder/core/observability/sentry";
+import { isBrowserNoiseEvent } from "./browser-monitoring-filter";
 
 export interface BrowserMonitoringConfig {
   dsn?: string;
   environment?: string;
   release?: string;
   tracesSampleRate?: string;
+  /** Origin our scripts are served from. Defaults to the page origin. */
+  appOrigin?: string;
 }
 
 const defaultConfig: BrowserMonitoringConfig = {
@@ -23,7 +26,10 @@ export function initializeBrowserMonitoring(
   if (Sentry.isInitialized()) return true;
 
   const tracesSampleRate = sentrySampleRate(config.tracesSampleRate);
+  const appOrigin = config.appOrigin ?? globalThis.location?.origin;
   Sentry.init({
+    beforeSend: (event) =>
+      appOrigin && isBrowserNoiseEvent(event, appOrigin) ? null : event,
     dsn,
     environment: config.environment?.trim() || undefined,
     integrations:
