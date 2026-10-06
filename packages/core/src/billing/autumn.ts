@@ -306,9 +306,9 @@ export const AUTOMATION_FREE_MACHINE_HOURS = 2;
 // until they change plans. They have no machine hours, so where the edition
 // prices sandbox time it is paid from the usage credit.
 const LEGACY_AUTOMATION_PLANS = [
-  { id: "responder_automations_free", name: "Free", price: 0 },
-  { id: "responder_automations_100", name: "$100 / month", price: 100 },
-  { id: "responder_automations_200", name: "$200 / month", price: 200 },
+  { id: "responder_automations_free", included: 20, name: "Free", price: 0 },
+  { id: "responder_automations_100", included: 100, name: "$100 / month", price: 100 },
+  { id: "responder_automations_200", included: 200, name: "$200 / month", price: 200 },
 ] as const;
 
 const usageTrackTimeoutMs = 30_000;
@@ -324,8 +324,13 @@ export type AutomationPlanId =
   | AutomationPaidPlanId
   | (typeof LEGACY_AUTOMATION_PLANS)[number]["id"];
 
-const automationPlans: ReadonlyArray<{ id: AutomationPlanId; name: string; price: number }> = [
-  { id: AUTOMATION_FREE_PLAN_ID, name: "Free", price: 0 },
+const automationPlans: ReadonlyArray<{
+  id: AutomationPlanId;
+  included: number;
+  name: string;
+  price: number;
+}> = [
+  { id: AUTOMATION_FREE_PLAN_ID, included: AUTOMATION_FREE_ALLOWANCE_DOLLARS, name: "Free", price: 0 },
   ...AUTOMATION_PAID_PLANS,
   ...LEGACY_AUTOMATION_PLANS,
 ];
@@ -486,9 +491,7 @@ export function summarizeAutomationBillingCustomer(
   const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
   const plan = automationPlanFromCustomer(customer);
   const current = automationPlan(plan.active ?? AUTOMATION_FREE_PLAN_ID);
-  const allowance = balance?.granted ??
-    AUTOMATION_PAID_PLANS.find((candidate) => candidate.id === current.id)?.included ??
-    AUTOMATION_FREE_ALLOWANCE_DOLLARS;
+  const allowance = balance?.granted ?? current.included;
   return {
     allowance,
     cancelsAtPeriodEnd: plan.cancelsAtPeriodEnd,
@@ -572,7 +575,8 @@ function balanceAllows(
 
 // Read-only check that a run may start a sandbox. The usage credit must last
 // when the run uses Responder-funded models or the plan pays for sandbox time
-// from it; machine hours must last on plans that include them.
+// from it; machine hours must last on plans that include them. A balance
+// whose plan bills usage past it does not stop the run.
 export async function checkWorkAllowance(
   organizationId: string,
   options: { responderModels: boolean },
@@ -614,20 +618,25 @@ export async function checkWorkAllowance(
   return { ...open, machinesUseCredit };
 }
 
-const machineHoursLookupLifetimeMs = 5 * 60_000;
+// Short, so a plan change reaches settlement within a minute or two.
+const machineHoursLookupLifetimeMs = 60_000;
 const machineHoursLookups = new Map<string, { expiresAt: number; value: boolean }>();
 
 // Whether the organization's plan meters sandbox time in machine hours rather
 // than paying for it from the usage credit. Throws when Autumn cannot answer,
 // so the caller retries rather than charging the wrong balance.
 export async function organizationUsesMachineHours(organizationId: string): Promise<boolean> {
+  const now = Date.now();
   const cached = machineHoursLookups.get(organizationId);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached && cached.expiresAt > now) return cached.value;
+  for (const [key, entry] of machineHoursLookups) {
+    if (entry.expiresAt <= now) machineHoursLookups.delete(key);
+  }
   const customer = await getOrCreateCustomer(requireAutumnClient(), organizationId);
   if (customer.id === null) throw new Error("Autumn did not return the billing customer");
   const value = customer.balances[MACHINE_HOURS_FEATURE_ID] !== undefined;
   machineHoursLookups.set(organizationId, {
-    expiresAt: Date.now() + machineHoursLookupLifetimeMs,
+    expiresAt: now + machineHoursLookupLifetimeMs,
     value,
   });
   return value;

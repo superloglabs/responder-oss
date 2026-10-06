@@ -154,8 +154,8 @@ investigation credits.
 - The usage credit, in dollars, pays for Responder-funded model usage. Runs
   with the organization's own API key or subscription do not use it.
 - Free, Pro, and Team also include machine hours, which meter sandbox time.
-  Plans from before them have no machine hours and pay for sandbox time from
-  the usage credit.
+  Plans from before them have no machine hours; where the edition prices
+  sandbox time, they pay for it from the usage credit.
 - Responder-funded model requests are reserved before they run and recorded
   after. Investigation and pull request review runs record their model usage
   when they finish.

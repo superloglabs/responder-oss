@@ -36,13 +36,15 @@ export class UsageAllowanceExhaustedError extends Error {
   }
 }
 
-// Stops billable pull request work before its sandbox starts when the usage
-// credit or machine time is used up. Work that has started finishes.
+// Stops billable pull request work before its sandbox starts when machine
+// time is used up. The work applies a proposed change without calling a
+// model, so it needs the usage credit only where that pays for sandbox time.
+// Work that has started finishes.
 export async function requireUsageAllowance(
   organizationId: string,
   check: typeof checkWorkAllowance = checkWorkAllowance,
 ): Promise<void> {
-  const access = await check(organizationId, { responderModels: true });
+  const access = await check(organizationId, { responderModels: false });
   if (!access.allowed) throw new UsageAllowanceExhaustedError(access.exhausted);
 }
 

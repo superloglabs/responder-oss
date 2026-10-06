@@ -106,7 +106,7 @@ describe("usage billing", () => {
     expect(deps.setCharge).toHaveBeenCalledWith("sandbox-usage-1", 16_860);
     expect(deps.trackMachineHours).toHaveBeenCalledWith({
       hours: 1 / 6,
-      idempotencyKey: "sandbox-hours:sandbox-usage-1",
+      idempotencyKey: "sandbox-usage:sandbox-usage-1",
       organizationId: "organization-1",
       properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
     });

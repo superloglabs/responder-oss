@@ -66,7 +66,9 @@ export function sandboxUsageChargeMicros(row: SandboxUsageRecord): number {
 
 // Prices a stopped sandbox period and reports billable periods: as machine
 // hours on plans that include them, otherwise as a charge to the usage
-// credit. Failures leave the row unsettled for the worker to retry.
+// credit. Both use the same idempotency key, and Autumn's keys apply across
+// features, so a retry after a plan change cannot report the period to both.
+// Failures leave the row unsettled for the worker to retry.
 export async function settleSandboxUsage(
   row: SandboxUsageRecord,
   dependencies: SandboxSettlementDependencies = defaultSandboxDependencies,
@@ -74,21 +76,15 @@ export async function settleSandboxUsage(
   const chargeMicros = row.chargeMicros ?? sandboxUsageChargeMicros(row);
   if (row.chargeMicros === null) await dependencies.setCharge(row.id, chargeMicros);
   if (row.billable && billingIsEnabled()) {
-    const properties = { kind: "sandbox", workload: row.workload, workloadId: row.workloadId };
+    const report = {
+      idempotencyKey: `sandbox-usage:${row.id}`,
+      organizationId: row.organizationId,
+      properties: { kind: "sandbox", workload: row.workload, workloadId: row.workloadId },
+    };
     if (await dependencies.usesMachineHours(row.organizationId)) {
-      await dependencies.trackMachineHours({
-        hours: sandboxUsageSeconds(row) / 3_600,
-        idempotencyKey: `sandbox-hours:${row.id}`,
-        organizationId: row.organizationId,
-        properties,
-      });
+      await dependencies.trackMachineHours({ ...report, hours: sandboxUsageSeconds(row) / 3_600 });
     } else {
-      await dependencies.track({
-        chargeMicros,
-        idempotencyKey: `sandbox-usage:${row.id}`,
-        organizationId: row.organizationId,
-        properties,
-      });
+      await dependencies.track({ ...report, chargeMicros });
     }
   }
   await dependencies.markBilled(row.id);

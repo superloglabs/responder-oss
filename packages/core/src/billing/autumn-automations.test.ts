@@ -238,7 +238,7 @@ describe("automation billing", () => {
       },
     ));
 
-    await expect(checkWorkAllowance("organization-1", { responderModels: true }))
+    await expect(checkWorkAllowance("organization-1", { responderModels: false }))
       .resolves.toMatchObject({ allowed: true, exhausted: null });
   });
 

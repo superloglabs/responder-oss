@@ -23,8 +23,9 @@ const dependencies = {
 };
 
 // Admits a new investigation. Usage-billed organizations start one while
-// their usage credit and machine time last and pay for what it uses; the
-// others spend one investigation credit.
+// their usage credit and machine time last, or while their plan bills usage
+// past them, and pay for what it uses; the others spend one investigation
+// credit.
 export async function admitInvestigation(
   organizationId: string,
   investigationId: string,
