@@ -54,7 +54,7 @@ describe("Slack channel search", () => {
       page: 1,
       pageCount: 1,
       query: "database timeout",
-      slackTotal: 2,
+      total: 2,
       totalMatches: 1,
     });
 
@@ -74,7 +74,7 @@ describe("Slack channel search", () => {
     );
   });
 
-  it("searches several channels at once and keeps only their matches", async () => {
+  it("searches several channels at once, scoped by Slack, and keeps only their matches", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json({
         ok: true,
@@ -130,14 +130,28 @@ describe("Slack channel search", () => {
       page: 2,
       pageCount: 4,
       query: "checkout from:@ana after:2026-01-31",
-      slackTotal: 180,
+      total: 180,
     });
 
+    // Slack ORs repeated in: modifiers, so its totals and pages count only
+    // these channels and say nothing about other conversations.
     const url = new URL(fetchMock.mock.calls[0]![0] as URL);
-    expect(url.searchParams.get("query")).toBe("checkout from:@ana after:2026-01-31");
+    expect(url.searchParams.get("query")).toBe(
+      "checkout from:@ana after:2026-01-31 in:incidents in:deploys",
+    );
     expect(url.searchParams.get("count")).toBe("50");
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("sort")).toBe("score");
+  });
+
+  it("refuses to search more channels than one Slack query can scope", async () => {
+    const fetchMock = vi.fn();
+    const channels = Array.from({ length: 51 }, (_, index) => ({ id: `C${index}`, name: `channel-${index}` }));
+
+    await expect(
+      searchSlackChannels({ accessToken: "xoxp-secret", channels, fetchImpl: fetchMock, limit: 10, query: "timeout" }),
+    ).rejects.toThrow("Slack search covers at most 50 channels at once");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects the in: modifier before making a request", async () => {

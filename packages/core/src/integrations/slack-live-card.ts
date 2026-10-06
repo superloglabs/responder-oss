@@ -714,7 +714,7 @@ function formattedTraceTask(
     const channelId = input?.channel_id;
     const query = input?.query;
     if (!input || typeof query !== "string") return null;
-    const details = objectDetails(input, new Set(["channel_id", "query"]));
+    const details = objectDetails(input, new Set(["channel_id", "channel_ids", "query"]));
     const url = firstUrl(item.output);
     return {
       task_id: taskId,

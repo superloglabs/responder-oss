@@ -31,8 +31,11 @@ export function slackMessageText(
     parts.push(...body);
   }
   const combined = parts.filter(Boolean).join("\n");
-  return combined.length > maximumMessageLength
-    ? { text: `${combined.slice(0, maximumMessageLength)}…`, truncated: true }
+  if (combined.length <= maximumMessageLength) return { text: combined };
+  // Count code points so the cut never splits an emoji.
+  const characters = Array.from(combined);
+  return characters.length > maximumMessageLength
+    ? { text: `${characters.slice(0, maximumMessageLength).join("")}…`, truncated: true }
     : { text: combined };
 }
 

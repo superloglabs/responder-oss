@@ -15,7 +15,8 @@ export const automationTemplateCategoryLabels: Record<AutomationTemplateCategory
 // in the connections and the user picks the channels, projects, and
 // repositories.
 export interface AutomationTemplateContent {
-  // Connectors besides the triggers' own connections.
+  // Connectors for the run. A trigger's connection is added only when its
+  // provider is listed here.
   connectors: string[];
   description: string;
   name: string;

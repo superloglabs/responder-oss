@@ -212,7 +212,7 @@ describe("automation context broker", () => {
         jsonrpc: "2.0",
         method: "tools/call",
         params: {
-          arguments: { channel_id: "C123", query: "deploy failed" },
+          arguments: { channel_ids: ["C123"], query: "deploy failed" },
           name: "slack_search_channel",
         },
       }),

@@ -56,8 +56,8 @@ export interface SlackSearchMatch {
 export interface SlackSearchPaging {
   page: number;
   pageCount: number;
-  // Slack's count before matches outside the allowed channels are dropped.
-  slackTotal: number;
+  // Matches in the searched channels across every page.
+  total: number;
 }
 
 export interface SlackChannelSearchResult extends SlackSearchPaging {
@@ -110,9 +110,14 @@ interface SearchPage extends SlackSearchPaging {
   query: string;
 }
 
-// Searches as the connecting user and keeps only matches in `channels`.
-// Slack's index also covers that user's direct messages and other channels,
-// so the filter by channel ID is the boundary.
+// Slack ORs repeated in: modifiers, and each one adds to the query, so one
+// search covers a bounded number of channels.
+export const maxSlackSearchChannels = 50;
+
+// Searches as the connecting user, whose index also covers their direct
+// messages and other channels. The in: modifiers make Slack search, count,
+// and page only `channels`, so the totals reveal nothing about other
+// conversations. Matches are still filtered by channel ID.
 async function searchMessages(input: {
   accessToken: string;
   channels: readonly SlackSearchChannel[];
@@ -133,10 +138,13 @@ async function searchMessages(input: {
   }
   const channelsById = new Map(input.channels.map((channel) => [channel.id, channel]));
   if (channelsById.size === 0) throw new Error("Slack search needs at least one channel");
+  if (channelsById.size > maxSlackSearchChannels) {
+    throw new Error(`Slack search covers at most ${maxSlackSearchChannels} channels at once`);
+  }
 
   const url = new URL("https://slack.com/api/search.messages");
-  const only = input.channels.length === 1 ? input.channels[0] : undefined;
-  url.searchParams.set("query", only ? `${query} in:${only.name}` : query);
+  const scope = [...channelsById.values()].map((channel) => `in:${channel.name}`);
+  url.searchParams.set("query", [query, ...scope].join(" "));
   url.searchParams.set("count", String(input.limit));
   url.searchParams.set("page", String(page));
   url.searchParams.set("sort", input.sort ?? "timestamp");
@@ -184,7 +192,7 @@ async function searchMessages(input: {
     page: paging?.page ?? page,
     pageCount: paging?.pages ?? page,
     query,
-    slackTotal: paging?.total ?? matches.length,
+    total: paging?.total ?? matches.length,
   };
 }
 
@@ -206,13 +214,12 @@ export async function searchSlackChannel(input: {
     page: result.page,
     pageCount: result.pageCount,
     query: result.query,
-    slackTotal: result.slackTotal,
+    total: result.total,
     totalMatches: result.matches.length,
   };
 }
 
-// One search across several channels. Matches from any other conversation
-// are dropped, so a page can hold fewer than `limit` matches.
+// One search across up to `maxSlackSearchChannels` channels.
 export async function searchSlackChannels(input: {
   accessToken: string;
   channels: readonly SlackSearchChannel[];

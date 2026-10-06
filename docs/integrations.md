@@ -95,23 +95,24 @@ Messages tab, the app sends them a welcome message once.
 Responder searches Slack on demand through Slack's `search.messages` Web API
 method with the connecting user's token. Search accepts Slack's search syntax,
 such as `from:`, `after:`, `has:`, and quoted phrases, except `in:`: Responder
-sets the channel constraint itself and drops any result whose channel ID is not
-allowed, including the connecting user's direct messages. An investigation
-searches one of its selected channels per call. An automation with Slack as
-context can search one channel or every available channel in one call, page
-through results, and sort by time or relevance. Each result includes text from
-message attachments, where alert bots put their content, and the thread it
+sets the channel constraint itself, so Slack searches, counts, and pages only
+allowed channels and never the connecting user's direct messages; any result
+from another channel is also dropped. An investigation searches one of its
+selected channels per call. An automation with Slack as context can search up
+to 50 of its channels in one call, or every channel when it has 50 or fewer,
+page through results, and sort by time or relevance. Each result includes text
+from message attachments, where alert bots put their content, and the thread it
 belongs to. Identical investigation searches share one in-memory request and
 result within an investigation; message content is not cached across
-investigations. Reconnect existing installations after changing
-scopes. The connecting user must be able to search each selected channel, and
+investigations. Reconnect existing installations after changing scopes. The connecting user must be able to search each selected channel, and
 private channels also require the bot to be invited.
 
 A Slack connection that only triggers an automation gives its runs the
-thread that started the run: they can read it, reply in it, and react to its
-messages. Add the same connection as a connector to give runs search, channel
-history, and posting in its channels. The same applies to other triggers: a
-Sentry connection gives Sentry tools only when it is also a connector.
+thread that started the run: they can read it, reply in it, and react to the
+message that started the run and the thread's first message. Add the same
+connection as a connector to give runs search, channel history, and posting in
+its channels. The same applies to other triggers: a Sentry connection gives
+Sentry tools only when it is also a connector.
 
 An automation's agent can add up to five buttons to a Slack message it posts,
 through `post_notification` or `slack_post_message`. Each button carries the

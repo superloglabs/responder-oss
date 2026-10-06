@@ -25,6 +25,7 @@ import {
   slackTimestampPattern,
 } from "../../../../packages/core/src/integrations/slack-history.js";
 import {
+  maxSlackSearchChannels,
   normalizeSlackSearchQuery,
   searchSlackChannels,
   slackSearchSorts,
@@ -122,7 +123,7 @@ function threadNote(scope: SlackToolScope): string {
 }
 
 const searchInput = z.object({
-  channel_id: z.string().min(1).optional(),
+  channel_ids: z.array(z.string().min(1)).min(1).max(maxSlackSearchChannels).optional(),
   limit: z.number().int().min(1).max(100).default(20),
   page: z.number().int().min(1).max(100).default(1),
   query: z.string().min(1).max(500),
@@ -166,14 +167,17 @@ export function slackToolDefinitions(scope: SlackToolScope) {
   const channelTools = fullChannels.length === 0 ? [] : [
     {
       annotations: { readOnlyHint: true },
-      description: "Search messages, including thread replies, in this connected workspace's Slack channels. Omit channel_id to search every available channel at once. The query accepts Slack search syntax except in:, for example \"checkout timeout\", an exact \"quoted phrase\", from:@name, after:2026-01-31, before:, on:, during:month, has:link, and is:thread. Each match has its channel, permalink, and threadTimestamp when it is a reply; pass the thread's timestamp to slack_read_thread for the whole conversation. When page is less than pageCount, request the next page for more matches.",
+      description: `Search messages, including thread replies, in this connected workspace's Slack channels. Omit channel_ids to search every available channel at once${fullChannels.length > maxSlackSearchChannels ? `; this workspace has ${fullChannels.length} channels, so pass up to ${maxSlackSearchChannels} channel_ids instead` : ""}. The query accepts Slack search syntax except in:, for example "checkout timeout", an exact "quoted phrase", from:@name, after:2026-01-31, before:, on:, during:month, has:link, and is:thread. Each match has its channel, permalink, and threadTimestamp when it is a reply; pass the thread's timestamp to slack_read_thread for the whole conversation. When page is less than pageCount, request the next page for more matches.`,
       inputSchema: {
         additionalProperties: false,
         properties: {
-          channel_id: {
-            description: "Search only this channel. Omit to search every available channel.",
-            enum: fullChannels,
-            type: "string",
+          channel_ids: {
+            description: "Search only these channels. Omit to search every available channel.",
+            items: { enum: fullChannels, type: "string" },
+            maxItems: maxSlackSearchChannels,
+            minItems: 1,
+            type: "array",
+            uniqueItems: true,
           },
           limit: { default: 20, description: "Matches per page.", maximum: 100, minimum: 1, type: "integer" },
           page: { default: 1, maximum: 100, minimum: 1, type: "integer" },
@@ -334,13 +338,13 @@ async function runTool(
   if (name === "slack_search_channel") {
     const parsed = searchInput.safeParse(args);
     if (!parsed.success) return failure("Invalid tool arguments");
-    const { channel_id: channelId, ...search } = parsed.data;
-    const channels = channelId === undefined
-      ? [...scope.channels].map(([id, name]) => ({ id, name }))
-      : scope.channels.has(channelId)
-        ? [{ id: channelId, name: scope.channels.get(channelId)! }]
-        : null;
-    if (!channels?.length) return notAllowed;
+    const { channel_ids: channelIds, ...search } = parsed.data;
+    if (!channelIds && scope.channels.size > maxSlackSearchChannels) {
+      return failure(`This workspace has ${scope.channels.size} channels. Pass up to ${maxSlackSearchChannels} of them as channel_ids.`);
+    }
+    const ids = channelIds ? [...new Set(channelIds)] : [...scope.channels.keys()];
+    if (ids.length === 0 || ids.some((id) => !scope.channels.has(id))) return notAllowed;
+    const channels = ids.map((id) => ({ id, name: scope.channels.get(id)! }));
     try {
       normalizeSlackSearchQuery(search.query);
     } catch (error) {
