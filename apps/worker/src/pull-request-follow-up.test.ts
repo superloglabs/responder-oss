@@ -308,14 +308,14 @@ describe("pull request follow-up", () => {
   });
 
   it("reports a GitHub failure while reading the comment as a failure, not a missing comment", async () => {
-    const fetchImpl = vi.fn().mockResolvedValueOnce(json({ message: "Server Error" }, 502));
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json({ message: "Resource not accessible by integration" }, 403));
 
     await expect(replyToPullRequestComment({
       body: "Done.",
       commentId: 5,
       resolve: false,
       target,
-    }, dependencies(fetchImpl))).rejects.toThrow("GitHub request failed (502)");
+    }, dependencies(fetchImpl))).rejects.toThrow("Resource not accessible by integration (403)");
   });
 
   it("refuses a comment that is not on the pull request", async () => {

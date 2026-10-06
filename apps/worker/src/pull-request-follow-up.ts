@@ -353,7 +353,11 @@ export async function replyToPullRequestComment(
     { headers: githubAppHeaders(token), signal: AbortSignal.timeout(30_000) },
   );
   if (response.status === 404) throw notOnPullRequest;
-  if (!response.ok) throw new Error(`GitHub request failed (${response.status})`);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { message?: unknown } | null;
+    const message = typeof payload?.message === "string" ? payload.message : "GitHub request failed";
+    throw new Error(`${message} (${response.status})`);
+  }
   const comment = reviewCommentSchema.parse(await response.json());
   if (comment.pull_request_url.toLowerCase() !== pullRequestUrl.toLowerCase()) throw notOnPullRequest;
   // A thread is named by its first comment; replies point to it.
