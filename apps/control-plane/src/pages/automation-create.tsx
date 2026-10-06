@@ -10,7 +10,6 @@ import {
   type AutomationDetail,
   type AutomationOptions,
   type SharedAutomationTemplate,
-  triggerAccountIds,
 } from "../automations-api";
 import { automationTriggersNotify, defaultAutomationModelSettings } from "../../../../packages/core/src/automations/config";
 import { BookOpenTextIcon, ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
@@ -278,13 +277,11 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     }
   }
 
-  const selectedTriggerAccountIds = triggerAccountIds(configuration.triggers);
   // Scheduled automations can run now from any tab; event-triggered ones run
   // from their history.
   const scheduled = configuration.triggers.some((trigger) => trigger.kind === "schedule");
   const notifies = automationTriggersNotify(configuration.triggers);
   const contextAccounts = options?.accounts.filter((account) =>
-    !selectedTriggerAccountIds.includes(account.id) &&
     account.provider !== "github" &&
     (automationConnectorProviders as readonly string[]).includes(account.provider)
   ) ?? [];
@@ -431,11 +428,9 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
               return true;
             }} onChange={(triggers) => {
               setError(null);
-              const accountIds = triggerAccountIds(triggers);
               const stillNotifies = automationTriggersNotify(triggers);
               updateConfiguration((current) => ({
                 ...current,
-                contextAccountIds: current.contextAccountIds.filter((id) => !accountIds.includes(id)),
                 notifications: stillNotifies ? current.notifications : [],
                 triggers,
               }));
@@ -466,7 +461,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
               {selectedConnectors.map((account) => <div className="automationCreate__row" key={account.id}><ProviderGlyph decorative provider={account.provider as AutomationConnectorProvider} /><span>{account.displayName}</span><Link className="automationCreate__manage" to="/settings">Manage</Link><button aria-label={`Remove ${account.displayName}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, contextAccountIds: current.contextAccountIds.filter((id) => id !== account.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
               {selectedSecrets.map((secret) => <div className="automationCreate__row" key={secret.id}><KeyIcon size={16} /><span>{secret.name}</span><button aria-label={`Remove ${secret.name}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, workspaceSecretIds: current.workspaceSecretIds.filter((id) => id !== secret.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
               {selectedSkills.map((skill) => <div className="automationCreate__row" key={skill.id}><BookOpenTextIcon size={16} /><span>{skill.name}</span><Link className="automationCreate__manage" rel="noopener" target="_blank" to={`/skills/${skill.id}`}>Manage</Link><button aria-label={`Remove ${skill.name}`} className="automationCreate__iconButton" onClick={() => updateConfiguration((current) => ({ ...current, skillIds: current.skillIds.filter((id) => id !== skill.id) }))} type="button"><TrashIcon size={14} /></button></div>)}
-              <AutomationConnectorPicker options={options} triggerAccountIds={selectedTriggerAccountIds} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} selectedSkillIds={configuration.skillIds} githubIncluded={githubIncluded}
+              <AutomationConnectorPicker options={options} selectedAccountIds={configuration.contextAccountIds} selectedSecretIds={configuration.workspaceSecretIds} selectedSkillIds={configuration.skillIds} githubIncluded={githubIncluded}
                 onToggleAccount={(accountId) => updateConfiguration((current) => ({ ...current, contextAccountIds: toggle(current.contextAccountIds, accountId) }))}
                 onToggleSecret={(secretId) => updateConfiguration((current) => ({ ...current, workspaceSecretIds: toggle(current.workspaceSecretIds, secretId) }))}
                 onToggleSkill={(skillId) => updateConfiguration((current) => ({ ...current, skillIds: toggle(current.skillIds, skillId) }))}
