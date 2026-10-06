@@ -3,6 +3,7 @@ import type {
   PullRequestCommit,
   PullRequestConversationEntry,
   PullRequestDetail,
+  PullRequestFile,
   PullRequestPerson,
   PullRequestState,
 } from "../server/pull-requests/github";
@@ -11,6 +12,7 @@ export type {
   PullRequestCommit,
   PullRequestConversationEntry,
   PullRequestDetail,
+  PullRequestFile,
   PullRequestPerson,
   PullRequestState,
 };
@@ -46,6 +48,11 @@ export interface AutomationPullRequestDetail {
   pullRequest: AutomationPullRequest;
 }
 
+export interface AutomationPullRequestFiles {
+  files: PullRequestFile[] | null;
+  githubError: string | null;
+}
+
 async function pullRequestJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   const body = (await response.json().catch(() => null)) as T | null;
@@ -59,4 +66,8 @@ export function fetchPullRequests(page: number): Promise<AutomationPullRequestPa
 
 export function fetchPullRequest(id: string): Promise<AutomationPullRequestDetail> {
   return pullRequestJson(`/api/pull-requests/${encodeURIComponent(id)}`);
+}
+
+export function fetchPullRequestFiles(id: string): Promise<AutomationPullRequestFiles> {
+  return pullRequestJson(`/api/pull-requests/${encodeURIComponent(id)}/files`);
 }

@@ -1,10 +1,12 @@
 import { ArrowUpRightIcon, GitCommitIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useMatch, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { PullRequestDetailSkeleton } from "../components/screen-skeletons";
+import { SegmentedControl } from "../design-system";
+import { filesChangedLabel } from "../pull-request-diff";
 import {
   commitMessageParts,
   conversationAction,
@@ -15,7 +17,9 @@ import {
 } from "../pull-request-presentation";
 import {
   fetchPullRequest,
+  fetchPullRequestFiles,
   type AutomationPullRequestDetail,
+  type AutomationPullRequestFiles,
   type PullRequestCommit,
   type PullRequestConversationEntry,
   type PullRequestPerson,
@@ -25,6 +29,11 @@ import { PullRequestStatus } from "./pull-requests";
 import "./automation-create.css";
 import "./automation-run.css";
 import "./pull-requests.css";
+
+// The diff viewer and its syntax highlighter load with the files tab.
+const PullRequestFiles = lazy(() =>
+  import("../components/pull-request-files").then((module) => ({ default: module.PullRequestFiles })),
+);
 
 // Links open on GitHub. Images there need a GitHub session, so they become
 // links too. Raw HTML, such as the comments review bots leave, is dropped and
@@ -103,7 +112,12 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
   const [detail, setDetail] = useState<AutomationPullRequestDetail | null>(null);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [files, setFiles] = useState<AutomationPullRequestFiles | null>(null);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  const [diffStyle, setDiffStyle] = useState<"split" | "unified">("unified");
   const request = useRef(0);
+  const navigate = useNavigate();
+  const activeTab = useMatch("/pull-requests/:pullRequestId/files") ? "files" : "overview";
   useDocumentTitle(detail ? pullRequestTitle(detail.github ?? detail.pullRequest) : "Pull request");
 
   const load = useCallback(async () => {
@@ -126,6 +140,21 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
     return () => { request.current += 1; };
   }, [load]);
 
+  // The changed files load the first time the tab opens.
+  const loadFiles = useCallback(async () => {
+    try {
+      setFiles(await fetchPullRequestFiles(pullRequestId));
+      setFilesError(null);
+    } catch (cause) {
+      setFilesError(cause instanceof Error ? cause.message : "Unable to load the changed files");
+    }
+  }, [pullRequestId]);
+
+  const needsFiles = activeTab === "files" && files === null && filesError === null;
+  useEffect(() => {
+    if (needsFiles) void Promise.resolve().then(loadFiles);
+  }, [loadFiles, needsFiles]);
+
   if (missing) return <Navigate replace to="/pull-requests" />;
   if (!detail) {
     return <AppShell active="pull-requests" redesigned density="create">
@@ -137,7 +166,7 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
 
   const { github, githubError, pullRequest } = detail;
   return <AppShell active="pull-requests" redesigned density="create">
-    <div className="automationCreate pullRequestDetail">
+    <div className={`automationCreate pullRequestDetail${activeTab === "files" ? " pullRequestDetail--files" : ""}`}>
       <header className="automationCreate__header">
         <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
           <Link to="/pull-requests">Pull requests</Link><span aria-hidden="true">›</span>
@@ -156,9 +185,27 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
             <span>{lineCountLabel(github.additions, github.deletions, github.changedFiles)}</span>
           </> : null}
         </p>
+        {github ? <div className="automationCreate__tabs" role="tablist" aria-label="Pull request sections">
+          <button aria-selected={activeTab === "overview"} onClick={() => { if (activeTab !== "overview") navigate(`/pull-requests/${pullRequestId}`); }} role="tab" type="button">Overview</button>
+          <button aria-selected={activeTab === "files"} onClick={() => { if (activeTab !== "files") navigate(`/pull-requests/${pullRequestId}/files`); }} role="tab" type="button">Files changed <small>{github.changedFiles.toLocaleString()}</small></button>
+        </div> : null}
       </header>
       {githubError ? <p className="automationRun__failure" role="alert">{githubError}</p> : null}
-      {github ? <>
+      {github && activeTab === "files" ? <section aria-label="Files changed" className="pullRequestDetail__section">
+        {filesError || files?.githubError
+          ? <div className="automationRun__loading" role="alert"><p>{filesError ?? files?.githubError}</p><button className="automationCreate__secondary" onClick={() => { setFiles(null); setFilesError(null); }} type="button">Retry</button></div>
+          : files?.files ? <>
+              <div className="pullRequestFiles__toolbar">
+                <span>{filesChangedLabel(files.files)}{files.files.length < github.changedFiles ? ` · GitHub lists the first ${files.files.length.toLocaleString()}` : ""}</span>
+                <SegmentedControl aria-label="Diff layout" onChange={setDiffStyle} options={[{ label: "Unified", value: "unified" }, { label: "Split", value: "split" }]} value={diffStyle} />
+              </div>
+              <Suspense fallback={<p className="pullRequestDetail__empty" role="status">Loading diffs…</p>}>
+                <PullRequestFiles diffStyle={diffStyle} files={files.files} url={github.url} />
+              </Suspense>
+            </>
+          : <p className="pullRequestDetail__empty" role="status">Loading changed files…</p>}
+      </section> : null}
+      {github && activeTab === "overview" ? <>
         <section aria-labelledby="pull-request-description" className="pullRequestDetail__section">
           <h2 id="pull-request-description">Description</h2>
           <article className="automationRun__card pullRequestDetail__card">

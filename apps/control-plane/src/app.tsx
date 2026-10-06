@@ -129,7 +129,10 @@ export function App() {
         <Route element={<AutomationTestChatPage />} path="/automations/:automationId/test" />
         <Route element={<AutomationRunPage />} path="/automations/:automationId/runs/:runId" />
         <Route element={<PullRequestsPage />} path="/pull-requests" />
-        <Route element={<PullRequestDetailPage />} path="/pull-requests/:pullRequestId" />
+        <Route element={<PullRequestDetailPage />} path="/pull-requests/:pullRequestId">
+          <Route element={null} index />
+          <Route element={null} path="files" />
+        </Route>
         <Route element={<SkillsPage />} path="/skills" />
         <Route element={<SkillEditorPage />} path="/skills/new" />
         <Route element={<SkillEditorPage />} path="/skills/:skillId" />

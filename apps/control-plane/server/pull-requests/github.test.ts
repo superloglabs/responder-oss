@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchPullRequestDetail,
+  fetchPullRequestFiles,
   fetchPullRequestStates,
   parsePullRequestUrl,
   pullRequestConversation,
@@ -107,6 +108,26 @@ describe("fetchPullRequestDetail", () => {
 
     expect(detail.state).toBe("merged");
     expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe("fetchPullRequestFiles", () => {
+  it("reads every changed file and keeps a missing patch as null", async () => {
+    const fetchMock = vi.fn(async () => json([
+      { additions: 2, deletions: 1, filename: "src/a.ts", patch: "@@ -1 +1,2 @@\n-a\n+b\n+c", status: "modified" },
+      { additions: 0, deletions: 0, filename: "logo.png", status: "added" },
+      { additions: 0, deletions: 0, filename: "src/new.ts", previous_filename: "src/old.ts", status: "renamed" },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const files = await fetchPullRequestFiles(7, { number: 42, owner: "acme", repo: "api" });
+
+    expect(String((fetchMock.mock.calls[0] as unknown as [string])[0])).toBe("https://api.github.com/repos/acme/api/pulls/42/files?per_page=100");
+    expect(files).toEqual([
+      { additions: 2, deletions: 1, filename: "src/a.ts", patch: "@@ -1 +1,2 @@\n-a\n+b\n+c", previousFilename: null, status: "modified" },
+      { additions: 0, deletions: 0, filename: "logo.png", patch: null, previousFilename: null, status: "added" },
+      { additions: 0, deletions: 0, filename: "src/new.ts", patch: null, previousFilename: "src/old.ts", status: "renamed" },
+    ]);
   });
 });
 

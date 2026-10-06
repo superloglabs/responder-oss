@@ -8,6 +8,7 @@ const pullRequestId = "31313131-3131-4131-8131-313131313131";
 const mocks = vi.hoisted(() => ({
   capability: vi.fn().mockResolvedValue(true),
   detail: vi.fn(),
+  files: vi.fn(),
   get: vi.fn(),
   installations: vi.fn(),
   list: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("../../../../packages/core/src/db/automations.js", () => ({
 vi.mock("./github.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./github.js")>()),
   fetchPullRequestDetail: mocks.detail,
+  fetchPullRequestFiles: mocks.files,
   fetchPullRequestStates: mocks.states,
 }));
 
@@ -131,5 +133,37 @@ describe("pull request routes", () => {
     expect(body.github).toBeNull();
     expect(body.githubError).toContain("Reconnect GitHub");
     expect(mocks.detail).not.toHaveBeenCalled();
+  });
+
+  it("reads the changed files with the organization's installation", async () => {
+    mocks.get.mockResolvedValue(record());
+    mocks.installations.mockResolvedValue(new Map([["acme/api", 11]]));
+    mocks.files.mockResolvedValue([{ filename: "src/a.ts" }]);
+
+    const response = await app.request(`/api/pull-requests/${pullRequestId}/files`);
+
+    expect(mocks.get).toHaveBeenCalledWith(organizationId, pullRequestId);
+    expect(mocks.files).toHaveBeenCalledWith(11, { number: 42, owner: "acme", repo: "api" });
+    expect(await response.json()).toEqual({ files: [{ filename: "src/a.ts" }], githubError: null });
+  });
+
+  it("returns not found for another organization's changed files", async () => {
+    mocks.get.mockResolvedValue(null);
+
+    const response = await app.request(`/api/pull-requests/${pullRequestId}/files`);
+
+    expect(response.status).toBe(404);
+    expect(mocks.files).not.toHaveBeenCalled();
+  });
+
+  it("explains when GitHub cannot return the changed files", async () => {
+    mocks.get.mockResolvedValue(record());
+    mocks.installations.mockResolvedValue(new Map([["acme/api", 11]]));
+    mocks.files.mockRejectedValue(new Error("GitHub returned 500"));
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const response = await app.request(`/api/pull-requests/${pullRequestId}/files`);
+
+    expect(await response.json()).toEqual({ files: null, githubError: "Unable to load the changed files from GitHub. Try again." });
   });
 });

@@ -9,6 +9,7 @@ import { organizationHasCapability } from "../../../../packages/core/src/db/orga
 import { getActiveTenant } from "../tenant.js";
 import {
   fetchPullRequestDetail,
+  fetchPullRequestFiles,
   fetchPullRequestStates,
   parsePullRequestUrl,
   type PullRequestReference,
@@ -59,14 +60,38 @@ async function pullRequestStates(
       const loaded = await fetchPullRequestStates(installationId, indexes.map((index) => references[index]!));
       indexes.forEach((index, position) => { states[index] = loaded[position] ?? null; });
     } catch (error) {
-      console.warn(JSON.stringify({
-        event: "pull_request_states_failed",
-        installationId,
-        status: error instanceof Error && "status" in error ? error.status : null,
-      }));
+      logGitHubFailure("pull_request_states_failed", installationId, error);
     }
   }));
   return states;
+}
+
+function logGitHubFailure(event: string, installationId: number, error: unknown) {
+  console.warn(JSON.stringify({
+    event,
+    installationId,
+    status: error instanceof Error && "status" in error ? error.status : null,
+  }));
+}
+
+// The organization's pull request and the installation that can read it.
+// Null when the organization has no such pull request.
+async function resolvePullRequest(organizationId: string, pullRequestId: string) {
+  if (!z.string().uuid().safeParse(pullRequestId).success) return null;
+  const pullRequest = await getAutomationPullRequest(organizationId, pullRequestId);
+  if (!pullRequest) return null;
+  const reference = parsePullRequestUrl(pullRequest.url);
+  const summary = { ...pullRequest, number: reference?.number ?? null };
+  if (!reference) {
+    return { githubError: "This pull request link is not a GitHub pull request.", ok: false as const, summary };
+  }
+  const installationId = (
+    await getGitHubRepositoryInstallations(organizationId, [repositoryKey(reference)])
+  ).get(repositoryKey(reference));
+  if (!installationId) {
+    return { githubError: "Responder no longer has access to this repository. Reconnect GitHub to see the pull request here.", ok: false as const, summary };
+  }
+  return { installationId, ok: true as const, reference, summary };
 }
 
 export const pullRequestRoutes = new Hono()
@@ -96,31 +121,26 @@ export const pullRequestRoutes = new Hono()
   .get("/:pullRequestId", async (context) => {
     const access = await getPullRequestTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
-    const pullRequestId = context.req.param("pullRequestId");
-    if (!z.string().uuid().safeParse(pullRequestId).success) {
-      return context.json({ error: "Pull request not found" }, 404);
-    }
-    const pullRequest = await getAutomationPullRequest(access.organizationId, pullRequestId);
-    if (!pullRequest) return context.json({ error: "Pull request not found" }, 404);
-    const reference = parsePullRequestUrl(pullRequest.url);
-    const summary = { ...pullRequest, number: reference?.number ?? null };
-    if (!reference) {
-      return context.json({ github: null, githubError: "This pull request link is not a GitHub pull request.", pullRequest: summary });
-    }
-    const installationId = (
-      await getGitHubRepositoryInstallations(access.organizationId, [repositoryKey(reference)])
-    ).get(repositoryKey(reference));
-    if (!installationId) {
-      return context.json({ github: null, githubError: "Responder no longer has access to this repository. Reconnect GitHub to see the pull request here.", pullRequest: summary });
-    }
+    const resolved = await resolvePullRequest(access.organizationId, context.req.param("pullRequestId"));
+    if (!resolved) return context.json({ error: "Pull request not found" }, 404);
+    if (!resolved.ok) return context.json({ github: null, githubError: resolved.githubError, pullRequest: resolved.summary });
     try {
-      return context.json({ github: await fetchPullRequestDetail(installationId, reference), githubError: null, pullRequest: summary });
+      return context.json({ github: await fetchPullRequestDetail(resolved.installationId, resolved.reference), githubError: null, pullRequest: resolved.summary });
     } catch (error) {
-      console.warn(JSON.stringify({
-        event: "pull_request_detail_failed",
-        installationId,
-        status: error instanceof Error && "status" in error ? error.status : null,
-      }));
-      return context.json({ github: null, githubError: "Unable to load the pull request from GitHub. Try again.", pullRequest: summary });
+      logGitHubFailure("pull_request_detail_failed", resolved.installationId, error);
+      return context.json({ github: null, githubError: "Unable to load the pull request from GitHub. Try again.", pullRequest: resolved.summary });
+    }
+  })
+  .get("/:pullRequestId/files", async (context) => {
+    const access = await getPullRequestTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const resolved = await resolvePullRequest(access.organizationId, context.req.param("pullRequestId"));
+    if (!resolved) return context.json({ error: "Pull request not found" }, 404);
+    if (!resolved.ok) return context.json({ files: null, githubError: resolved.githubError });
+    try {
+      return context.json({ files: await fetchPullRequestFiles(resolved.installationId, resolved.reference), githubError: null });
+    } catch (error) {
+      logGitHubFailure("pull_request_files_failed", resolved.installationId, error);
+      return context.json({ files: null, githubError: "Unable to load the changed files from GitHub. Try again." });
     }
   });

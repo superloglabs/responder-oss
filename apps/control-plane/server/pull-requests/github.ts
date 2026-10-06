@@ -9,6 +9,8 @@ const requestTimeoutMs = 10_000;
 // Up to 1,000 comments or commits per list; GitHub itself lists at most 250
 // commits for a pull request.
 const maxPages = 10;
+// GitHub lists at most 3,000 changed files for a pull request.
+const maxFilePages = 30;
 
 export interface PullRequestReference {
   number: number;
@@ -59,6 +61,17 @@ export interface PullRequestCommit {
   message: string;
   sha: string;
   url: string;
+}
+
+// A changed file. GitHub leaves out the patch of a binary file, a file
+// renamed without changes, and a file whose diff is too large.
+export interface PullRequestFile {
+  additions: number;
+  deletions: number;
+  filename: string;
+  patch: string | null;
+  previousFilename: string | null;
+  status: "added" | "changed" | "copied" | "modified" | "removed" | "renamed" | "unchanged";
 }
 
 export interface PullRequestDetail {
@@ -150,6 +163,15 @@ const commitSchema = z.object({
   sha: z.string(),
 });
 
+const fileSchema = z.object({
+  additions: z.number().default(0),
+  deletions: z.number().default(0),
+  filename: z.string(),
+  patch: z.string().nullish(),
+  previous_filename: z.string().nullish(),
+  status: z.enum(["added", "changed", "copied", "modified", "removed", "renamed", "unchanged"]).catch("modified"),
+});
+
 export class GitHubPullRequestError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -175,10 +197,10 @@ function nextPageUrl(link: string | null): string | null {
   return url?.startsWith(`${githubApiUrl}/`) ? url : null;
 }
 
-async function listAll<T>(token: string, path: string, schema: z.ZodType<T>): Promise<T[]> {
+async function listAll<T>(token: string, path: string, schema: z.ZodType<T>, pages = maxPages): Promise<T[]> {
   const items: T[] = [];
   let url: string | null = `${githubApiUrl}${path}?per_page=100`;
-  for (let page = 0; url && page < maxPages; page += 1) {
+  for (let page = 0; url && page < pages; page += 1) {
     const response = await githubRequest(token, url);
     items.push(...z.array(schema).parse(await response.json()));
     url = nextPageUrl(response.headers.get("link"));
@@ -289,6 +311,23 @@ export async function fetchPullRequestDetail(
     title: pull.title,
     url: pull.html_url,
   };
+}
+
+export async function fetchPullRequestFiles(
+  installationId: number,
+  reference: PullRequestReference,
+): Promise<PullRequestFile[]> {
+  const token = await createGitHubInstallationToken(installationId);
+  const path = `/repos/${encodeURIComponent(reference.owner)}/${encodeURIComponent(reference.repo)}/pulls/${reference.number}/files`;
+  const files = await listAll(token, path, fileSchema, maxFilePages);
+  return files.map((file) => ({
+    additions: file.additions,
+    deletions: file.deletions,
+    filename: file.filename,
+    patch: file.patch ?? null,
+    previousFilename: file.previous_filename ?? null,
+    status: file.status,
+  }));
 }
 
 const graphqlStateSchema = z.object({
