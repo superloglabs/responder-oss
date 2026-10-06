@@ -58,12 +58,14 @@ export function githubAppHeaders(token: string): HeadersInit {
 
 export async function createGitHubInstallationToken(
   installationId: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
       method: "POST",
       headers: githubAppHeaders(createGitHubAppJwt()),
+      signal,
     },
   );
   if (!response.ok) {

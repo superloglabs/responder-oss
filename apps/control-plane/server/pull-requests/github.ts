@@ -83,6 +83,8 @@ export interface PullRequestDetail {
   closedAt: string | null;
   commits: PullRequestCommit[];
   conversation: PullRequestConversationEntry[];
+  // GitHub has more comments or reviews than the page reads.
+  conversationTruncated: boolean;
   createdAt: string;
   deletions: number;
   headBranch: string;
@@ -197,7 +199,13 @@ function nextPageUrl(link: string | null): string | null {
   return url?.startsWith(`${githubApiUrl}/`) ? url : null;
 }
 
-async function listAll<T>(token: string, path: string, schema: z.ZodType<T>, pages = maxPages): Promise<T[]> {
+// Reads pages until GitHub has no next page or the limit is reached.
+async function listAll<T>(
+  token: string,
+  path: string,
+  schema: z.ZodType<T>,
+  pages = maxPages,
+): Promise<{ items: T[]; truncated: boolean }> {
   const items: T[] = [];
   let url: string | null = `${githubApiUrl}${path}?per_page=100`;
   for (let page = 0; url && page < pages; page += 1) {
@@ -205,7 +213,11 @@ async function listAll<T>(token: string, path: string, schema: z.ZodType<T>, pag
     items.push(...z.array(schema).parse(await response.json()));
     url = nextPageUrl(response.headers.get("link"));
   }
-  return items;
+  return { items, truncated: url !== null };
+}
+
+function installationToken(installationId: number): Promise<string> {
+  return createGitHubInstallationToken(installationId, AbortSignal.timeout(requestTimeoutMs));
 }
 
 function pullRequestState(pull: { draft?: boolean | null; merged_at?: string | null; state: "open" | "closed" }): PullRequestState {
@@ -277,7 +289,7 @@ export async function fetchPullRequestDetail(
   installationId: number,
   reference: PullRequestReference,
 ): Promise<PullRequestDetail> {
-  const token = await createGitHubInstallationToken(installationId);
+  const token = await installationToken(installationId);
   const base = `/repos/${encodeURIComponent(reference.owner)}/${encodeURIComponent(reference.repo)}`;
   const [pull, issueComments, reviews, reviewComments, commits] = await Promise.all([
     githubRequest(token, `${githubApiUrl}${base}/pulls/${reference.number}`)
@@ -294,7 +306,7 @@ export async function fetchPullRequestDetail(
     body: pull.body ?? "",
     changedFiles: pull.changed_files,
     closedAt: pull.closed_at ?? null,
-    commits: commits.map((commit) => ({
+    commits: commits.items.map((commit) => ({
       author: commit.author,
       authorName: commit.commit.author?.name ?? null,
       committedAt: commit.commit.author?.date ?? null,
@@ -302,7 +314,12 @@ export async function fetchPullRequestDetail(
       sha: commit.sha,
       url: commit.html_url,
     })),
-    conversation: pullRequestConversation({ issueComments, reviewComments, reviews }),
+    conversation: pullRequestConversation({
+      issueComments: issueComments.items,
+      reviewComments: reviewComments.items,
+      reviews: reviews.items,
+    }),
+    conversationTruncated: issueComments.truncated || reviews.truncated || reviewComments.truncated,
     createdAt: pull.created_at,
     deletions: pull.deletions,
     headBranch: pull.head.ref,
@@ -317,9 +334,9 @@ export async function fetchPullRequestFiles(
   installationId: number,
   reference: PullRequestReference,
 ): Promise<PullRequestFile[]> {
-  const token = await createGitHubInstallationToken(installationId);
+  const token = await installationToken(installationId);
   const path = `/repos/${encodeURIComponent(reference.owner)}/${encodeURIComponent(reference.repo)}/pulls/${reference.number}/files`;
-  const files = await listAll(token, path, fileSchema, maxFilePages);
+  const { items: files } = await listAll(token, path, fileSchema, maxFilePages);
   return files.map((file) => ({
     additions: file.additions,
     deletions: file.deletions,
@@ -337,6 +354,7 @@ const graphqlStateSchema = z.object({
       pullRequest: z.object({ isDraft: z.boolean(), state: z.enum(["CLOSED", "MERGED", "OPEN"]) }).nullable(),
     }).nullable(),
   ).nullish(),
+  errors: z.array(z.unknown()).nullish(),
 });
 
 // The state of each pull request, in one GraphQL request for an
@@ -346,7 +364,7 @@ export async function fetchPullRequestStates(
   references: PullRequestReference[],
 ): Promise<Array<PullRequestState | null>> {
   if (references.length === 0) return [];
-  const token = await createGitHubInstallationToken(installationId);
+  const token = await installationToken(installationId);
   const variables: Record<string, string | number> = {};
   const declarations: string[] = [];
   const fields = references.map((reference, index) => {
@@ -361,7 +379,14 @@ export async function fetchPullRequestStates(
     headers: { "content-type": "application/json" },
     method: "POST",
   });
-  const data = graphqlStateSchema.parse(await response.json()).data ?? {};
+  // GraphQL reports failures in a 200 response. A pull request GitHub cannot
+  // find comes back as an error next to the others' data.
+  const result = graphqlStateSchema.parse(await response.json());
+  if (!result.data) throw new GitHubPullRequestError("GitHub GraphQL returned no data", response.status);
+  if (result.errors?.length) {
+    console.warn(JSON.stringify({ errors: result.errors.length, event: "pull_request_states_partial", installationId }));
+  }
+  const data = result.data;
   return references.map((_, index) => {
     const pull = data[`pr${index}`]?.pullRequest;
     if (!pull) return null;

@@ -7,8 +7,10 @@ import {
   pullRequestConversation,
 } from "./github.js";
 
+const tokenMock = vi.hoisted(() => vi.fn().mockResolvedValue("installation-token"));
+
 vi.mock("../../../../packages/core/src/integrations/github.js", () => ({
-  createGitHubInstallationToken: vi.fn().mockResolvedValue("installation-token"),
+  createGitHubInstallationToken: tokenMock,
   githubAppHeaders: (token: string) => ({ authorization: `Bearer ${token}` }),
 }));
 
@@ -20,6 +22,8 @@ function json(body: unknown, headers: Record<string, string> = {}) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  tokenMock.mockClear();
 });
 
 describe("parsePullRequestUrl", () => {
@@ -109,6 +113,35 @@ describe("fetchPullRequestDetail", () => {
     expect(detail.state).toBe("merged");
     expect(fetchMock).toHaveBeenCalledTimes(5);
   });
+
+  it("bounds the installation token request with a timeout", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/pulls/1")
+      ? json({ base: { ref: "main" }, created_at: "2026-10-01T00:00:00Z", head: { ref: "fix" }, html_url: "https://github.com/acme/api/pull/1", state: "open", title: "Fix" })
+      : json([])));
+
+    await fetchPullRequestDetail(7, { number: 1, owner: "acme", repo: "api" });
+
+    expect(tokenMock).toHaveBeenCalledWith(7, expect.any(AbortSignal));
+  });
+
+  it("says when the conversation has more pages than it reads", async () => {
+    let page = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/pulls/1")) {
+        return json({ base: { ref: "main" }, created_at: "2026-10-01T00:00:00Z", head: { ref: "fix" }, html_url: "https://github.com/acme/api/pull/1", state: "open", title: "Fix" });
+      }
+      if (url.includes("/issues/1/comments")) {
+        page += 1;
+        return json([], { link: `<https://api.github.com/repositories/1/issues/1/comments?per_page=100&page=${page + 1}>; rel="next"` });
+      }
+      return json([]);
+    }));
+
+    const detail = await fetchPullRequestDetail(7, { number: 1, owner: "acme", repo: "api" });
+
+    expect(detail.conversationTruncated).toBe(true);
+  });
 });
 
 describe("fetchPullRequestFiles", () => {
@@ -152,5 +185,24 @@ describe("fetchPullRequestStates", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as { variables: Record<string, unknown> };
     expect(body.variables).toMatchObject({ name2: "gone", number2: 3, owner0: "acme" });
+  });
+
+  it("fails when GitHub returns GraphQL errors and no data", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ data: null, errors: [{ message: "Bad credentials" }] })));
+
+    await expect(fetchPullRequestStates(7, [{ number: 1, owner: "acme", repo: "api" }])).rejects.toThrow("GitHub GraphQL returned no data");
+  });
+
+  it("logs GraphQL errors that come with partial data", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({
+      data: { pr0: { pullRequest: { isDraft: false, state: "OPEN" } }, pr1: null },
+      errors: [{ type: "NOT_FOUND" }],
+    })));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const states = await fetchPullRequestStates(7, [{ number: 1, owner: "acme", repo: "api" }, { number: 2, owner: "acme", repo: "gone" }]);
+
+    expect(states).toEqual(["open", null]);
+    expect(warn).toHaveBeenCalledWith(JSON.stringify({ errors: 1, event: "pull_request_states_partial", installationId: 7 }));
   });
 });

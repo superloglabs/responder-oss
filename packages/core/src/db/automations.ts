@@ -1952,8 +1952,10 @@ function automationPullRequestScope(organizationId: string) {
 const automationPullRequestColumns = {
   automationId: automations.id,
   automationName: automations.name,
-  createdAt: automationActionAttempts.createdAt,
   id: automationActionAttempts.id,
+  // A failed attempt is retried in its own row, so the pull request opened
+  // when the attempt last changed: when it succeeded.
+  openedAt: automationActionAttempts.updatedAt,
   repository: sql<string | null>`${automationActionAttempts.redactedInput}->>'repository'`,
   runId: automationRuns.id,
   title: sql<string | null>`${automationActionAttempts.redactedInput}->>'title'`,
@@ -1974,7 +1976,7 @@ export async function listAutomationPullRequests(
       .innerJoin(automationRuns, eq(automationRuns.id, automationActionAttempts.runId))
       .innerJoin(automations, eq(automations.id, automationRuns.automationId))
       .where(scope)
-      .orderBy(desc(automationActionAttempts.createdAt), desc(automationActionAttempts.id))
+      .orderBy(desc(automationActionAttempts.updatedAt), desc(automationActionAttempts.id))
       .limit(page.limit)
       .offset(page.offset),
     db

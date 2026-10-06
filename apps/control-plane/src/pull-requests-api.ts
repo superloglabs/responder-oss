@@ -21,9 +21,9 @@ export type {
 export interface AutomationPullRequest {
   automationId: string;
   automationName: string;
-  createdAt: string;
   id: string;
   number: number | null;
+  openedAt: string;
   repository: string | null;
   runId: string;
   title: string | null;

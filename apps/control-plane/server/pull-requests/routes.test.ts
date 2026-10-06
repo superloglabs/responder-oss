@@ -38,7 +38,7 @@ function record(overrides: Record<string, unknown> = {}) {
   return {
     automationId: "a1",
     automationName: "Fix errors",
-    createdAt: "2026-10-01T00:00:00.000Z",
+    openedAt: "2026-10-01T00:00:00.000Z",
     id: pullRequestId,
     repository: "acme/api",
     runId: "r1",
@@ -51,6 +51,7 @@ function record(overrides: Record<string, unknown> = {}) {
 describe("pull request routes", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     mocks.capability.mockResolvedValue(true);
   });
 
@@ -164,6 +165,7 @@ describe("pull request routes", () => {
 
     const response = await app.request(`/api/pull-requests/${pullRequestId}/files`);
 
+    expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ files: null, githubError: "Unable to load the changed files from GitHub. Try again." });
   });
 });

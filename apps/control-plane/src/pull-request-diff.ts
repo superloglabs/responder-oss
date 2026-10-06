@@ -2,9 +2,11 @@ import type { PullRequestFile } from "./pull-requests-api";
 
 // GitHub returns each file's hunks without the git headers. These headers
 // tell the diff viewer the file's name, whether it was added, deleted, or
-// renamed, and what it was called before.
-export function pullRequestFilePatch(file: PullRequestFile & { patch: string }): string {
+// renamed, and what it was called before. A path with a line break would
+// split the headers, so that file is left for GitHub to show.
+export function pullRequestFilePatch(file: PullRequestFile & { patch: string }): string | null {
   const previous = file.previousFilename ?? file.filename;
+  if (/[\r\n]/u.test(previous) || /[\r\n]/u.test(file.filename)) return null;
   const header = [`diff --git a/${previous} b/${file.filename}`];
   if (file.status === "added") header.push("new file mode 100644");
   if (file.status === "removed") header.push("deleted file mode 100644");
@@ -16,6 +18,13 @@ export function pullRequestFilePatch(file: PullRequestFile & { patch: string }):
     file.status === "removed" ? "+++ /dev/null" : `+++ b/${file.filename}`,
   );
   return `${header.join("\n")}\n${file.patch}`;
+}
+
+// The height a file's diff takes once rendered, so the page keeps its length
+// while diffs render only near the viewport.
+export function estimatedDiffHeight(file: PullRequestFile & { patch: string }): number {
+  const lines = file.patch.split("\n").length;
+  return Math.min(4_000, 48 + lines * 20);
 }
 
 // Why a file has no diff to show.

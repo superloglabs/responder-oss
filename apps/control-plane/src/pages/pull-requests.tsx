@@ -109,8 +109,8 @@ export function PullRequestsPage() {
                 header: "Opened",
                 key: "opened",
                 render: (pullRequest) => (
-                  <time className="agentTableCell" dateTime={pullRequest.createdAt} title={new Date(pullRequest.createdAt).toLocaleString()}>
-                    {relativeTime(pullRequest.createdAt)}
+                  <time className="agentTableCell" dateTime={pullRequest.openedAt} title={new Date(pullRequest.openedAt).toLocaleString()}>
+                    {relativeTime(pullRequest.openedAt)}
                   </time>
                 ),
                 width: "12%",
@@ -128,7 +128,8 @@ export function PullRequestsPage() {
             variant="workspace"
           />
           <footer className="automationRuns__footer">
-            <span>Showing {first + 1}–{first + result.pullRequests.length} of {result.total} {result.total === 1 ? "pull request" : "pull requests"}</span>
+            {/* A page past the end, after pull requests were removed, has no rows to count. */}
+            <span>{result.pullRequests.length > 0 ? `Showing ${first + 1}–${first + result.pullRequests.length} of ${result.total}` : `${result.total}`} {result.total === 1 ? "pull request" : "pull requests"}</span>
             <div>
               <button disabled={result.page <= 1} onClick={() => setPage(result.page - 1)} type="button">Previous</button>
               <button disabled={result.page >= lastPage} onClick={() => setPage(result.page + 1)} type="button">Next</button>

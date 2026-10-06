@@ -1,5 +1,5 @@
 import { ArrowUpRightIcon, GitCommitIcon } from "@phosphor-icons/react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import { Link, Navigate, useMatch, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -7,6 +7,7 @@ import { AppShell } from "../components/app-shell";
 import { PullRequestDetailSkeleton } from "../components/screen-skeletons";
 import { SegmentedControl } from "../design-system";
 import { filesChangedLabel } from "../pull-request-diff";
+import { remarkHtmlAsText } from "../pull-request-markdown";
 import {
   commitMessageParts,
   conversationAction,
@@ -36,8 +37,8 @@ const PullRequestFiles = lazy(() =>
 );
 
 // Links open on GitHub. Images there need a GitHub session, so they become
-// links too. Raw HTML, such as the comments review bots leave, is dropped and
-// the text inside it is kept.
+// links too. Raw HTML, such as the comments review bots leave, becomes its
+// text.
 const markdownComponents: Components = {
   a: ({ children, href }) => href && /^https?:\/\//u.test(href)
     ? <a href={href} rel="noreferrer" target="_blank">{children}</a>
@@ -47,9 +48,18 @@ const markdownComponents: Components = {
     : <span>{alt}</span>,
 };
 
+const remarkPlugins = [remarkHtmlAsText];
+
+const tabs = [
+  { label: "Overview", value: "overview" },
+  { label: "Files changed", value: "files" },
+] as const;
+
+type PullRequestTab = (typeof tabs)[number]["value"];
+
 function MarkdownBody({ text }: { text: string }) {
   return <div className="automationRun__message pullRequestDetail__markdown">
-    <Markdown components={markdownComponents} skipHtml>{text}</Markdown>
+    <Markdown components={markdownComponents} remarkPlugins={remarkPlugins}>{text}</Markdown>
   </div>;
 }
 
@@ -116,8 +126,9 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
   const [filesError, setFilesError] = useState<string | null>(null);
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("unified");
   const request = useRef(0);
+  const filesRequest = useRef(0);
   const navigate = useNavigate();
-  const activeTab = useMatch("/pull-requests/:pullRequestId/files") ? "files" : "overview";
+  const activeTab: PullRequestTab = useMatch("/pull-requests/:pullRequestId/files") ? "files" : "overview";
   useDocumentTitle(detail ? pullRequestTitle(detail.github ?? detail.pullRequest) : "Pull request");
 
   const load = useCallback(async () => {
@@ -140,12 +151,18 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
     return () => { request.current += 1; };
   }, [load]);
 
-  // The changed files load the first time the tab opens.
+  // The changed files load the first time the tab opens. Leaving the tab
+  // and coming back while they load starts a new request, and only the
+  // newest one counts.
   const loadFiles = useCallback(async () => {
+    const generation = ++filesRequest.current;
     try {
-      setFiles(await fetchPullRequestFiles(pullRequestId));
+      const loaded = await fetchPullRequestFiles(pullRequestId);
+      if (filesRequest.current !== generation) return;
+      setFiles(loaded);
       setFilesError(null);
     } catch (cause) {
+      if (filesRequest.current !== generation) return;
       setFilesError(cause instanceof Error ? cause.message : "Unable to load the changed files");
     }
   }, [pullRequestId]);
@@ -154,6 +171,23 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
   useEffect(() => {
     if (needsFiles) void Promise.resolve().then(loadFiles);
   }, [loadFiles, needsFiles]);
+
+  function openTab(tab: PullRequestTab) {
+    if (tab !== activeTab) navigate(tab === "files" ? `/pull-requests/${pullRequestId}/files` : `/pull-requests/${pullRequestId}`);
+  }
+
+  function moveBetweenTabs(event: KeyboardEvent<HTMLDivElement>) {
+    const index = tabs.findIndex((tab) => tab.value === activeTab);
+    const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+      : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length
+        : event.key === "Home" ? 0
+          : event.key === "End" ? tabs.length - 1
+            : null;
+    if (next === null) return;
+    event.preventDefault();
+    openTab(tabs[next].value);
+    event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='tab']")[next]?.focus();
+  }
 
   if (missing) return <Navigate replace to="/pull-requests" />;
   if (!detail) {
@@ -179,20 +213,30 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
           <a className="automationRun__button" href={github?.url ?? pullRequest.url} rel="noreferrer" target="_blank">View on GitHub<ArrowUpRightIcon size={12} /></a>
         </div>
         <p className="pullRequestDetail__meta">
-          <span>Opened by <Link to={`/automations/${pullRequest.automationId}/runs/${pullRequest.runId}`}>{pullRequest.automationName}</Link> <Timestamp value={pullRequest.createdAt} /></span>
+          <span>Opened by <Link to={`/automations/${pullRequest.automationId}/runs/${pullRequest.runId}`}>{pullRequest.automationName}</Link> <Timestamp value={pullRequest.openedAt} /></span>
           {github ? <>
             <span><code>{github.headBranch}</code> into <code>{github.baseBranch}</code></span>
             <span>{lineCountLabel(github.additions, github.deletions, github.changedFiles)}</span>
           </> : null}
         </p>
-        {github ? <div className="automationCreate__tabs" role="tablist" aria-label="Pull request sections">
-          <button aria-selected={activeTab === "overview"} onClick={() => { if (activeTab !== "overview") navigate(`/pull-requests/${pullRequestId}`); }} role="tab" type="button">Overview</button>
-          <button aria-selected={activeTab === "files"} onClick={() => { if (activeTab !== "files") navigate(`/pull-requests/${pullRequestId}/files`); }} role="tab" type="button">Files changed <small>{github.changedFiles.toLocaleString()}</small></button>
+        {github ? <div aria-label="Pull request sections" className="automationCreate__tabs" onKeyDown={moveBetweenTabs} role="tablist">
+          {tabs.map((tab) => <button
+            aria-controls={`pull-request-panel-${tab.value}`}
+            aria-selected={activeTab === tab.value}
+            id={`pull-request-tab-${tab.value}`}
+            key={tab.value}
+            onClick={() => openTab(tab.value)}
+            role="tab"
+            tabIndex={activeTab === tab.value ? 0 : -1}
+            type="button"
+          >
+            {tab.label}{tab.value === "files" ? <small>{github.changedFiles.toLocaleString()}</small> : null}
+          </button>)}
         </div> : null}
       </header>
       {githubError ? <p className="automationRun__failure" role="alert">{githubError}</p> : null}
-      {github && activeTab === "files" ? <section aria-label="Files changed" className="pullRequestDetail__section">
-        {filesError || files?.githubError
+      {github ? <div aria-labelledby="pull-request-tab-files" className="pullRequestDetail__section" hidden={activeTab !== "files"} id="pull-request-panel-files" role="tabpanel">
+        {activeTab !== "files" ? null : filesError || files?.githubError
           ? <div className="automationRun__loading" role="alert"><p>{filesError ?? files?.githubError}</p><button className="automationCreate__secondary" onClick={() => { setFiles(null); setFilesError(null); }} type="button">Retry</button></div>
           : files?.files ? <>
               <div className="pullRequestFiles__toolbar">
@@ -204,8 +248,8 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
               </Suspense>
             </>
           : <p className="pullRequestDetail__empty" role="status">Loading changed files…</p>}
-      </section> : null}
-      {github && activeTab === "overview" ? <>
+      </div> : null}
+      {github ? <div aria-labelledby="pull-request-tab-overview" className="pullRequestDetail__panel" hidden={activeTab !== "overview"} id="pull-request-panel-overview" role="tabpanel">
         <section aria-labelledby="pull-request-description" className="pullRequestDetail__section">
           <h2 id="pull-request-description">Description</h2>
           <article className="automationRun__card pullRequestDetail__card">
@@ -217,6 +261,9 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
           {github.conversation.length === 0
             ? <p className="pullRequestDetail__empty">No comments yet.</p>
             : github.conversation.map((entry) => <ConversationEntry entry={entry} key={`${entry.kind}-${entry.id}`} />)}
+          {github.conversationTruncated
+            ? <p className="pullRequestDetail__notice">This pull request has more comments than are shown here. <a href={github.url} rel="noreferrer" target="_blank">See them all on GitHub</a></p>
+            : null}
         </section>
         <section aria-labelledby="pull-request-commits" className="pullRequestDetail__section">
           <h2 id="pull-request-commits">Commits <small>{github.commits.length}</small></h2>
@@ -226,7 +273,7 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
                 {github.commits.map((commit) => <CommitRow commit={commit} key={commit.sha} />)}
               </ol>}
         </section>
-      </> : null}
+      </div> : null}
     </div>
   </AppShell>;
 }
