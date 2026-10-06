@@ -39,7 +39,8 @@ describe("automation templates", () => {
   });
 
   it("finds templates by id", () => {
-    expect(findAutomationTemplate("triage-sentry-issues")?.name).toBe("Triage new Sentry issues");
+    expect(findAutomationTemplate("triage-sentry-issues")?.name).toBe("Alert on critical Sentry issues");
+    expect(findAutomationTemplate("triage-slack-alerts")?.name).toBe("Triage alerts in Slack");
     expect(findAutomationTemplate("unknown")).toBeUndefined();
     expect(findAutomationTemplate(null)).toBeUndefined();
   });
@@ -104,6 +105,7 @@ describe("automation templates", () => {
   it("lists what the user still chooses for each trigger", () => {
     expect(automationTemplateMissingFields({ triggers: [{ frequency: "daily", hour: 8, kind: "schedule", timezone: "UTC", weekday: 1 }] })).toBe("a repository");
     expect(automationTemplateMissingFields(findAutomationTemplate("triage-sentry-issues")!)).toBe("a Sentry project and a repository");
+    expect(automationTemplateMissingFields(findAutomationTemplate("triage-slack-alerts")!)).toBe("a Slack channel and a repository");
     expect(automationTemplateMissingFields({ triggers: [
       { eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: [] },
       { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
