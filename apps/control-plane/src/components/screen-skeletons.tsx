@@ -96,6 +96,37 @@ export function AutomationRunHistorySkeleton() {
   );
 }
 
+export function PullRequestListSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton screenSkeleton--list" label="Loading pull requests…">
+      <TableSkeleton kind="automationRuns" />
+    </LoadingRegion>
+  );
+}
+
+// Mirrors a pull request: breadcrumb, title, then the description card.
+export function PullRequestDetailSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading pull request…">
+      <div className="automationCreate pullRequestDetail">
+        <header className="automationCreate__header">
+          <div className="automationCreate__breadcrumb">
+            {["40px", "120px"].map((width) => (
+              <Skeleton className="automationSkeleton__small" key={width} style={{ width }} />
+            ))}
+          </div>
+          <div className="automationCreate__titleRow">
+            <Skeleton className="automationSkeleton__title" style={{ width: "320px" }} />
+          </div>
+        </header>
+        <div className="automationRun__card pullRequestDetail__card">
+          {["88%", "94%", "62%"].map((width) => <Skeleton key={width} style={{ width }} />)}
+        </div>
+      </div>
+    </LoadingRegion>
+  );
+}
+
 // Mirrors the automation editor: breadcrumb, title row, tabs, then the
 // trigger, instructions, repository and connector sections.
 export function AutomationEditorSkeleton({ saved = true }: { saved?: boolean }) {
