@@ -307,6 +307,17 @@ describe("pull request follow-up", () => {
     });
   });
 
+  it("reports a GitHub failure while reading the comment as a failure, not a missing comment", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json({ message: "Server Error" }, 502));
+
+    await expect(replyToPullRequestComment({
+      body: "Done.",
+      commentId: 5,
+      resolve: false,
+      target,
+    }, dependencies(fetchImpl))).rejects.toThrow("GitHub request failed (502)");
+  });
+
   it("refuses a comment that is not on the pull request", async () => {
     const otherPullRequest = vi.fn().mockResolvedValueOnce(reviewComment(5, undefined, 7));
     const missing = vi.fn().mockResolvedValueOnce(json({ message: "Not Found" }, 404));

@@ -73,7 +73,12 @@ export function createThreadPullRequestTool(input: {
         slackInvestigationSessionId: input.slackInvestigationSessionId,
       });
       return {};
-    } catch {
+    } catch (error) {
+      console.error(JSON.stringify({
+        errorCode: error instanceof Error ? error.name : typeof error,
+        event: "pull_request_origin_record_failed",
+        slackInvestigationSessionId: input.slackInvestigationSessionId,
+      }));
       return {
         warning: `Reviews of this pull request cannot reach this thread yet. Call ${threadPullRequestToolName} again with the same repository and title to retry.`,
       };

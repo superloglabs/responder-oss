@@ -348,17 +348,13 @@ export async function replyToPullRequestComment(
   const notOnPullRequest = new Error(
     `Comment ${input.commentId} is not a review comment on pull request #${input.target.number}`,
   );
-  let comment: z.infer<typeof reviewCommentSchema>;
-  try {
-    comment = reviewCommentSchema.parse(await githubJson(
-      dependencies.fetch,
-      token,
-      `https://api.github.com/repos/${repositoryPath}/pulls/comments/${input.commentId}`,
-      { method: "GET" },
-    ));
-  } catch {
-    throw notOnPullRequest;
-  }
+  const response = await dependencies.fetch(
+    `https://api.github.com/repos/${repositoryPath}/pulls/comments/${input.commentId}`,
+    { headers: githubAppHeaders(token), signal: AbortSignal.timeout(30_000) },
+  );
+  if (response.status === 404) throw notOnPullRequest;
+  if (!response.ok) throw new Error(`GitHub request failed (${response.status})`);
+  const comment = reviewCommentSchema.parse(await response.json());
   if (comment.pull_request_url.toLowerCase() !== pullRequestUrl.toLowerCase()) throw notOnPullRequest;
   // A thread is named by its first comment; replies point to it.
   const rootId = comment.in_reply_to_id ?? comment.id;

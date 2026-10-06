@@ -82,6 +82,7 @@ describe("Slack thread pull requests", () => {
   it("reports a failed origin write and retries it when called again", async () => {
     const { createPullRequest, recordOrigin, tool } = pullRequestTool();
     recordOrigin.mockRejectedValueOnce(new Error("connection reset"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(tool.invoke(undefined as never, request)).resolves.toMatchObject({
       number: 42,
@@ -92,6 +93,12 @@ describe("Slack thread pull requests", () => {
     expect(retried).not.toHaveProperty("warning");
     expect(recordOrigin).toHaveBeenCalledTimes(2);
     expect(createPullRequest).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(logged.mock.calls[0]![0] as string)).toEqual({
+      errorCode: "Error",
+      event: "pull_request_origin_record_failed",
+      slackInvestigationSessionId: "session-1",
+    });
+    logged.mockRestore();
   });
 
   it("returns the pull request it already opened for the same title", async () => {
