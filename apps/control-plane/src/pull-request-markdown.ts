@@ -20,14 +20,21 @@ const phrasingParents = new Set([
 
 const entities: Record<string, string> = { amp: "&", gt: ">", lt: "<", nbsp: " ", quot: "\"" };
 
+// Removing a tag can join the pieces around it into a new one, so tags are
+// removed until none are left, and any stray bracket goes too. Entities are
+// decoded last; the result is rendered as text, never as markup.
 export function htmlText(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?(?:-->|$)/gu, "")
-    .replace(/<[^>]*>/gu, "")
+  let text = html;
+  for (let previous = ""; previous !== text;) {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?(?:-->|$)/gu, "").replace(/<[^<>]*>/gu, "");
+  }
+  return text
+    .replace(/[<>]/gu, "")
     .replace(/&(#\d+|#x[\da-f]+|[a-z]+);/giu, (entity, name: string) => {
-      if (name.startsWith("#x") || name.startsWith("#X")) return String.fromCodePoint(Number.parseInt(name.slice(2), 16));
-      if (name.startsWith("#")) return String.fromCodePoint(Number(name.slice(1)));
-      return entities[name.toLowerCase()] ?? entity;
+      if (!name.startsWith("#")) return entities[name.toLowerCase()] ?? entity;
+      const codePoint = /^#x/iu.test(name) ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
+      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : entity;
     });
 }
 

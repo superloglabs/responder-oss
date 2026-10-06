@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import Markdown from "react-markdown";
 import { describe, expect, it } from "vitest";
-import { remarkHtmlAsText } from "./pull-request-markdown";
+import { htmlText, remarkHtmlAsText } from "./pull-request-markdown";
 
 function render(text: string) {
   return renderToStaticMarkup(createElement(Markdown, { remarkPlugins: [remarkHtmlAsText] }, text));
@@ -24,5 +24,14 @@ describe("remarkHtmlAsText", () => {
 
   it("never renders the HTML as markup", () => {
     expect(render("<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>")).toBe("<p>alert(1)</p>");
+  });
+
+  it("removes tags rebuilt from nested fragments", () => {
+    expect(htmlText("<scr<script>ipt>alert(1)</script>")).not.toMatch(/[<>]/u);
+    expect(htmlText("<!<!--- comment --->-->text")).toBe("text");
+  });
+
+  it("keeps an entity that names no character", () => {
+    expect(htmlText("<b>&#99999999; &#x41; &bogus;</b>")).toBe("&#99999999; A &bogus;");
   });
 });
