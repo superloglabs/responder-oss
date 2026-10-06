@@ -11,6 +11,8 @@ import {
   MemberListSkeleton,
   IssueDetailSkeleton,
   IssueListSkeleton,
+  PullRequestDetailSkeleton,
+  PullRequestListSkeleton,
 } from "./screen-skeletons";
 
 const screens: Array<[ComponentType, string]> = [
@@ -23,6 +25,8 @@ const screens: Array<[ComponentType, string]> = [
   [IntegrationSettingsSkeleton, "Loading integrations…"],
   [BillingSkeleton, "Loading billing…"],
   [MemberListSkeleton, "Loading members…"],
+  [PullRequestListSkeleton, "Loading pull requests…"],
+  [PullRequestDetailSkeleton, "Loading pull request…"],
 ];
 
 describe("screen skeletons", () => {

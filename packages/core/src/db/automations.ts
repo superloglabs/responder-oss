@@ -1940,6 +1940,101 @@ export async function getAutomationRuntimeRepositories(versionId: string) {
   });
 }
 
+function automationPullRequestScope(organizationId: string) {
+  return and(
+    eq(automationRuns.organizationId, organizationId),
+    eq(automationActionAttempts.kind, "open_github_pull_request"),
+    eq(automationActionAttempts.status, "succeeded"),
+    isNotNull(automationActionAttempts.externalReference),
+  );
+}
+
+const automationPullRequestColumns = {
+  automationId: automations.id,
+  automationName: automations.name,
+  id: automationActionAttempts.id,
+  // A failed attempt is retried in its own row, so the pull request opened
+  // when the attempt last changed: when it succeeded.
+  openedAt: automationActionAttempts.updatedAt,
+  repository: sql<string | null>`${automationActionAttempts.redactedInput}->>'repository'`,
+  runId: automationRuns.id,
+  title: sql<string | null>`${automationActionAttempts.redactedInput}->>'title'`,
+  url: sql<string>`${automationActionAttempts.externalReference}`,
+};
+
+// Pull requests that automation runs opened, newest first.
+export async function listAutomationPullRequests(
+  organizationId: string,
+  page: { limit: number; offset: number },
+) {
+  const db = getDatabase();
+  const scope = automationPullRequestScope(organizationId);
+  const [pullRequests, totals] = await Promise.all([
+    db
+      .select(automationPullRequestColumns)
+      .from(automationActionAttempts)
+      .innerJoin(automationRuns, eq(automationRuns.id, automationActionAttempts.runId))
+      .innerJoin(automations, eq(automations.id, automationRuns.automationId))
+      .where(scope)
+      .orderBy(desc(automationActionAttempts.updatedAt), desc(automationActionAttempts.id))
+      .limit(page.limit)
+      .offset(page.offset),
+    db
+      .select({ total: sql<string>`count(*)` })
+      .from(automationActionAttempts)
+      .innerJoin(automationRuns, eq(automationRuns.id, automationActionAttempts.runId))
+      .where(scope),
+  ]);
+  return { pullRequests, total: Number(totals[0]?.total ?? 0) };
+}
+
+export async function getAutomationPullRequest(organizationId: string, id: string) {
+  const rows = await getDatabase()
+    .select(automationPullRequestColumns)
+    .from(automationActionAttempts)
+    .innerJoin(automationRuns, eq(automationRuns.id, automationActionAttempts.runId))
+    .innerJoin(automations, eq(automations.id, automationRuns.automationId))
+    .where(and(eq(automationActionAttempts.id, id), automationPullRequestScope(organizationId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+// The GitHub App installation that can read each repository, keyed by its
+// lowercase full name. GitHub compares repository names case-insensitively.
+export async function getGitHubRepositoryInstallations(
+  organizationId: string,
+  fullNames: string[],
+): Promise<Map<string, number>> {
+  const names = [...new Set(fullNames.map((name) => name.toLowerCase()))];
+  if (names.length === 0) return new Map();
+  const rows = await getDatabase()
+    .select({
+      fullName: sql<string>`lower(${repositories.fullName})`,
+      installationId: integrationAccounts.externalAccountId,
+    })
+    .from(repositories)
+    .innerJoin(
+      integrationAccounts,
+      eq(integrationAccounts.id, repositories.integrationAccountId),
+    )
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, organizationId),
+        eq(integrationAccounts.provider, "github"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(sql`lower(${repositories.fullName})`, names),
+      ),
+    );
+  const installations = new Map<string, number>();
+  for (const row of rows) {
+    const installationId = Number(row.installationId);
+    if (Number.isSafeInteger(installationId) && installationId > 0 && !installations.has(row.fullName)) {
+      installations.set(row.fullName, installationId);
+    }
+  }
+  return installations;
+}
+
 // The names of the channels an automation's notifications post to.
 export async function getAutomationNotificationChannelNames(input: {
   notifications: AutomationNotification[];

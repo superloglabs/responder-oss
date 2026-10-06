@@ -30,6 +30,7 @@ import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 import { discordWebhookRoutes } from "./webhooks/discord.js";
 import { linearWebhookRoutes } from "./webhooks/linear.js";
+import { pullRequestRoutes } from "./pull-requests/routes.js";
 import { scanRoutes } from "./scans/routes.js";
 import { suggestionRoutes } from "./suggestions/routes.js";
 import { automationModelBrokerRoutes } from "./automations/model-broker.js";
@@ -427,6 +428,7 @@ export const app = instrumentedApp
   .route("/api/api-keys", apiKeyRoutes)
   .route("/api/automations", automationRoutes)
   .route("/api/automation-templates", sharedAutomationTemplateRoutes)
+  .route("/api/pull-requests", pullRequestRoutes)
   .route("/api/agents", agentRoutes)
   .route("/api/skills", skillRoutes)
   .route("/api/billing", billingRoutes)

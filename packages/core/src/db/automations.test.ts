@@ -8,10 +8,11 @@ import {
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   getAutomationRunSlackButtons,
+  listAutomationPullRequests,
   summarizeAutomationList,
 } from "./automations.js";
 import { getDatabase } from "./client.js";
-import { automationModelBrokerGrants } from "./schema.js";
+import { automationActionAttempts, automationModelBrokerGrants } from "./schema.js";
 
 vi.mock("./client.js", () => ({ getDatabase: vi.fn() }));
 
@@ -339,5 +340,30 @@ describe("getAutomationRunSlackButtons", () => {
     }
     buttonsDatabase([]);
     await expect(getAutomationRunSlackButtons(input)).resolves.toBeNull();
+  });
+});
+
+describe("listAutomationPullRequests", () => {
+  it("dates and orders pull requests by when they were opened, not when the first attempt started", async () => {
+    const selections: Array<Record<string, unknown>> = [];
+    const orders: unknown[][] = [];
+    const query = {
+      from: () => query,
+      innerJoin: () => query,
+      limit: () => query,
+      offset: async () => [],
+      orderBy: (...columns: unknown[]) => { orders.push(columns); return query; },
+      then: (resolve: (rows: unknown[]) => void) => resolve([{ total: "0" }]),
+      where: () => query,
+    };
+    vi.mocked(getDatabase).mockReturnValue({
+      select: (selection: Record<string, unknown>) => { selections.push(selection); return query; },
+    } as never);
+
+    await listAutomationPullRequests("organization", { limit: 25, offset: 0 });
+
+    expect(selections[0]?.openedAt).toBe(automationActionAttempts.updatedAt);
+    const dialect = new PgDialect();
+    expect(dialect.sqlToQuery(orders[0]![0] as SQL).sql).toContain('"updated_at" desc');
   });
 });

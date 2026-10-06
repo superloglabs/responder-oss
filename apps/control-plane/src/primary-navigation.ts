@@ -3,6 +3,7 @@ export type NavigationSection =
   | "automations"
   | "integrations"
   | "issues"
+  | "pull-requests"
   | "scans"
   | "settings"
   | "skills"
@@ -21,10 +22,12 @@ export function primaryNavigation(options: {
   automations: boolean;
   simplified: boolean;
 }): NavigationItem[] {
-  // Skills extend automations, so they appear with them.
+  // Skills extend automations and pull requests come from their runs, so
+  // both appear with them.
   const automations: NavigationItem[] = options.automations
     ? [
         { label: "Automations", section: "automations", to: "/automations" },
+        { label: "PRs", section: "pull-requests", to: "/pull-requests" },
         { label: "Skills", section: "skills", to: "/skills" },
       ]
     : [];

@@ -15,6 +15,8 @@ import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
+import { PullRequestDetailPage } from "./pages/pull-request-detail";
+import { PullRequestsPage } from "./pages/pull-requests";
 import { ScanDetailPage } from "./pages/scan-detail";
 import { ScansPage } from "./pages/scans";
 import { SharedAutomationTemplatePage } from "./pages/shared-automation-template";
@@ -126,6 +128,11 @@ export function App() {
         <Route element={<AutomationEditRedirect />} path="/automations/:automationId/edit" />
         <Route element={<AutomationTestChatPage />} path="/automations/:automationId/test" />
         <Route element={<AutomationRunPage />} path="/automations/:automationId/runs/:runId" />
+        <Route element={<PullRequestsPage />} path="/pull-requests" />
+        <Route element={<PullRequestDetailPage />} path="/pull-requests/:pullRequestId">
+          <Route element={null} index />
+          <Route element={null} path="files" />
+        </Route>
         <Route element={<SkillsPage />} path="/skills" />
         <Route element={<SkillEditorPage />} path="/skills/new" />
         <Route element={<SkillEditorPage />} path="/skills/:skillId" />
