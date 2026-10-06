@@ -527,6 +527,108 @@ describe("automation run processor", () => {
     });
   });
 
+  describe("pull request reviews", () => {
+    const job = { kind: "automation_run" as const, queuedAt: "2026-09-22T19:00:00.000Z", runId };
+    const reviewConversation = [
+      { data: { items: [{ kind: "message", text: "Opened a pull request." }], truncated: false }, id: 1, type: "transcript" },
+      {
+        data: {
+          authorId: "greptile-apps[bot]",
+          authorName: "greptile-apps[bot]",
+          externalEventId: "github-review:5",
+          githubReview: {
+            pullRequestNumber: 1,
+            repository: "acme/app",
+            reviewUrl: "https://github.com/acme/app/pull/1#pullrequestreview-5",
+          },
+          source: "github",
+          text: "greptile-apps[bot] (a bot) reviewed pull request #1 in acme/app, which you opened.",
+        },
+        id: 2,
+        type: "user_message",
+      },
+    ];
+
+    it("checks out the reviewed pull request before the agent answers the review", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.runCodex.mockResolvedValue({ eventStream: "completed" });
+      deps.getConversation.mockResolvedValue(reviewConversation);
+      const handle = vi.fn().mockResolvedValue({ content: [{ text: "{}", type: "text" }] });
+      deps.createToolHandler.mockImplementation(() => handle);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(handle).toHaveBeenCalledWith({
+        arguments: { pullRequestNumber: 1, repository: "acme/app" },
+        name: "checkout_pull_request",
+      });
+      expect(handle.mock.invocationCallOrder[0]!).toBeLessThan(deps.runCodex.mock.invocationCallOrder[0]!);
+      const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+      expect(prompt).toContain("GitHub:\ngreptile-apps[bot] (a bot) reviewed pull request #1 in acme/app");
+      expect(prompt).toContain("The latest message is a GitHub review of pull request #1 in acme/app, which this run opened.");
+      expect(prompt).toContain("The checkout of acme/app is at the pull request's latest commit.");
+    });
+
+    it("tells the agent where the replaced checkout's changes were saved", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.runCodex.mockResolvedValue({ eventStream: "completed" });
+      deps.getConversation.mockResolvedValue(reviewConversation);
+      deps.createToolHandler.mockImplementation(() => vi.fn().mockResolvedValue({
+        content: [{ text: JSON.stringify({ replaced: true, savedChanges: "/home/daytona/workspace/repositories/acme/app-unpushed-1.patch" }), type: "text" }],
+      }));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
+        "The checkout's earlier changes are saved in /home/daytona/workspace/repositories/acme/app-unpushed-1.patch",
+      );
+    });
+
+    it("tells the agent when the pull request could not be checked out", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.runCodex.mockResolvedValue({ eventStream: "completed" });
+      deps.getConversation.mockResolvedValue(reviewConversation);
+      deps.createToolHandler.mockImplementation(() => vi.fn().mockResolvedValue({
+        content: [{ text: "Unable to check out the pull request: Pull request #1 is closed", type: "text" }],
+        isError: true,
+      }));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
+        "Checking out the pull request failed: Unable to check out the pull request: Pull request #1 is closed Call checkout_pull_request before changing it.",
+      );
+    });
+
+    it("does not check out a pull request for other follow-ups", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.hasFinishedTurn.mockResolvedValue(true);
+      deps.runCodex.mockResolvedValue({ eventStream: "completed" });
+      deps.getConversation.mockResolvedValue([
+        reviewConversation[0]!,
+        { data: { authorId: "user-1", authorName: "Ada", text: "Thanks" }, id: 2, type: "user_message" },
+      ]);
+      const handle = vi.fn();
+      deps.createToolHandler.mockImplementation(() => handle);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(handle).not.toHaveBeenCalled();
+      expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("GitHub review");
+    });
+  });
+
   it("records a cancel as cancelled when cleanup also fails", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");

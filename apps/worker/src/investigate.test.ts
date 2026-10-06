@@ -291,6 +291,36 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("evidence");
   });
 
+  it("tells a review turn to answer the review on the pull request the thread opened", () => {
+    const base = {
+      agentPrompt: "",
+      assistant: { integrationsUrl: "https://app.example.com/settings", pullRequests: true },
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+    };
+
+    const instructions = investigationInstructions({
+      ...base,
+      pullRequestReview: { pullRequestNumber: 42, repository: "acme/api" },
+    });
+    expect(instructions).toContain("call checkout_pull_request, make and test the changes, then call update_pull_request");
+    expect(instructions).toContain("The latest message is a GitHub review of pull request #42 in acme/api");
+    expect(instructions).toContain("The checkout of acme/api is at the pull request's latest commit.");
+
+    expect(investigationInstructions({
+      ...base,
+      pullRequestReview: { checkoutError: "Pull request #42 is closed", pullRequestNumber: 42, repository: "acme/api" },
+    })).toContain("Checking out the pull request failed: Pull request #42 is closed Call checkout_pull_request before changing it.");
+    expect(investigationInstructions({
+      ...base,
+      pullRequestReview: { pullRequestNumber: 42, repository: "acme/api", savedChanges: "/repos/acme/api-unpushed-1.patch" },
+    })).toContain("The checkout's earlier changes are saved in /repos/acme/api-unpushed-1.patch");
+    expect(investigationInstructions(base)).not.toContain("GitHub review");
+  });
+
   it("words Linear assistant turns for the agent session", () => {
     const instructions = investigationInstructions({
       agentPrompt: "",

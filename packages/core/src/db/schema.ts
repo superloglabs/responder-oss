@@ -1226,7 +1226,9 @@ export type AutomationActionKind =
   | "create_linear_issue"
   | "open_github_pull_request"
   | "remove_slack_reaction"
-  | "send_slack_message";
+  | "reply_github_pull_request_comment"
+  | "send_slack_message"
+  | "update_github_pull_request";
 
 export const automationActionAttempts = pgTable(
   "automation_action_attempts",
@@ -1364,6 +1366,41 @@ export const slackInvestigationSessions = pgTable(
       table.teamId,
       table.channelId,
       table.threadTimestamp,
+    ),
+  ],
+);
+
+// A pull request that a tag mode thread or an automation run opened. A review
+// on it continues that thread or run.
+export const pullRequestOrigins = pgTable(
+  "pull_request_origins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    repositoryFullName: text("repository_full_name").notNull(),
+    pullRequestNumber: integer("pull_request_number").notNull(),
+    slackInvestigationSessionId: uuid("slack_investigation_session_id")
+      .references(() => slackInvestigationSessions.id, { onDelete: "cascade" }),
+    automationRunId: uuid("automation_run_id")
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    // Turns started by reviews from bots, which stop at a limit so two
+    // agents cannot review each other's commits forever.
+    botReviewTurns: integer("bot_review_turns").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("pull_request_origins_pull_request_idx").on(
+      table.repositoryFullName,
+      table.pullRequestNumber,
+    ),
+    index("pull_request_origins_session_idx").on(table.slackInvestigationSessionId),
+    index("pull_request_origins_run_idx").on(table.automationRunId),
+    check(
+      "pull_request_origins_single_origin_check",
+      sql`num_nonnulls(${table.slackInvestigationSessionId}, ${table.automationRunId}) = 1`,
     ),
   ],
 );

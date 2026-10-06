@@ -63,16 +63,23 @@ export interface AutomationTranscriptEventData {
 }
 
 // A follow-up or test chat message from a workspace member, a reply in the
-// Slack thread that started the run, or a press of a button the agent added
-// to a Slack message.
+// Slack thread that started the run, a press of a button the agent added to a
+// Slack message, or a review on a pull request the run opened.
 export interface AutomationUserMessageEventData {
   authorId: string;
   authorName: string;
-  // The Slack event, so a redelivered event is stored once.
+  // The Slack or GitHub event, so a redelivered event is stored once.
   externalEventId?: string;
+  githubReview?: GitHubPullRequestReviewMessage;
   slackButton?: AutomationSlackButtonPress;
-  source?: "slack";
+  source?: "github" | "slack";
   text: string;
+}
+
+export interface GitHubPullRequestReviewMessage {
+  pullRequestNumber: number;
+  repository: string;
+  reviewUrl: string;
 }
 
 export interface AutomationSlackButtonPress {

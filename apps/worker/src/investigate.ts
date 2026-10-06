@@ -111,7 +111,11 @@ import {
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
-import { createThreadPullRequestTool } from "./thread-pull-request.js";
+import {
+  createThreadPullRequestFollowUpTools,
+  createThreadPullRequestTool,
+  pullRequestReviewOf,
+} from "./thread-pull-request.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
@@ -437,6 +441,13 @@ export function investigationInstructions(input: {
   // A thread in an organization with simplified navigation. It works as a
   // general assistant and is told about its pull request and workspace tools.
   assistant?: { integrationsUrl: string; pullRequests: boolean };
+  // A turn started by a review of a pull request the thread opened.
+  pullRequestReview?: {
+    checkoutError?: string;
+    pullRequestNumber: number;
+    repository: string;
+    savedChanges?: string;
+  };
   issueFollowupIssueCount?: number;
   scanMode?: boolean;
   replay?: boolean;
@@ -591,7 +602,7 @@ export function investigationInstructions(input: {
     workspaceSecretUsageInstructions(workspaceSecrets, input.runtimePromptParts),
     assistant
       ? assistant.pullRequests
-        ? prompt("assistantPullRequests")
+        ? [prompt("assistantPullRequests"), prompt("assistantPullRequestFollowUp")].join("\n")
         : null
       : input.threadMode
         ? prompt(linear ? "linearThreadMode" : "threadMode")
@@ -600,6 +611,26 @@ export function investigationInstructions(input: {
           : prompt("existingIssues"),
     assistant
       ? prompt("assistantWorkspace", { integrationsUrl: assistant.integrationsUrl })
+      : null,
+    assistant?.pullRequests && input.pullRequestReview
+      ? [
+          prompt("pullRequestReview", {
+            pullRequestNumber: String(input.pullRequestReview.pullRequestNumber),
+            repository: input.pullRequestReview.repository,
+          }),
+          input.pullRequestReview.checkoutError
+            ? prompt("pullRequestReviewCheckoutFailed", {
+                error: input.pullRequestReview.checkoutError,
+              })
+            : prompt("pullRequestReviewCheckout", {
+                repository: input.pullRequestReview.repository,
+              }),
+          input.pullRequestReview.savedChanges
+            ? prompt("pullRequestReviewSavedChanges", {
+                path: input.pullRequestReview.savedChanges,
+              })
+            : null,
+        ].filter(Boolean).join("\n")
       : null,
     !input.threadMode && !input.scanMode ? prompt("remediationChoice") : null,
     input.threadMode || input.replay || issueUpdateFollowup
@@ -984,6 +1015,29 @@ export async function runInvestigationAgent(
         ? await refreshRuntimeRepositories(session, job.config.id)
         : await loadCheckedOutRepositories(session)
       : await checkoutRuntimeRepositories(session, job.config.id);
+    // A review of a pull request the thread opened is answered on the pull
+    // request's latest commit.
+    const pullRequestFollowUp = threadMode && assistant && repositories.length > 0
+      ? createThreadPullRequestFollowUpTools({
+          agentConfigVersionId: job.config.id,
+          repositories,
+          session,
+          slackInvestigationSessionId: job.slackInvestigationSessionId,
+        })
+      : null;
+    const pullRequestReview = pullRequestFollowUp
+      ? pullRequestReviewOf(investigationInput.attributes)
+      : null;
+    let pullRequestReviewCheckoutError: string | undefined;
+    let pullRequestReviewSavedChanges: string | undefined;
+    if (pullRequestFollowUp && pullRequestReview) {
+      try {
+        pullRequestReviewSavedChanges =
+          (await pullRequestFollowUp.checkout(pullRequestReview)).savedChanges;
+      } catch (error) {
+        pullRequestReviewCheckoutError = safeInvestigationError(error, environment);
+      }
+    }
     const repositorySkills = await loadRepositorySkills(session, repositories);
     const repositoryInstructions = await discoverRepositoryInstructions(
       session,
@@ -1062,8 +1116,10 @@ export async function runInvestigationAgent(
                 organizationId: job.config.organizationId,
                 repositories,
                 session,
+                slackInvestigationSessionId: job.slackInvestigationSessionId,
               })]
             : []),
+          ...(pullRequestFollowUp?.tools ?? []),
           ...createWorkspaceTools({
             actorUserId: await getSlackThreadModeActor(job.config.organizationId),
             automationsEnabled: await organizationHasCapability(
@@ -1125,6 +1181,19 @@ export async function runInvestigationAgent(
       threadSurface: investigationInput.provider === "linear" ? "linear" : "slack",
       ...(assistant
         ? { assistant: { integrationsUrl, pullRequests: repositories.length > 0 } }
+        : {}),
+      ...(pullRequestReview
+        ? {
+            pullRequestReview: {
+              ...pullRequestReview,
+              ...(pullRequestReviewCheckoutError
+                ? { checkoutError: pullRequestReviewCheckoutError }
+                : {}),
+              ...(pullRequestReviewSavedChanges
+                ? { savedChanges: pullRequestReviewSavedChanges }
+                : {}),
+            },
+          }
         : {}),
       scanMode,
       replay,

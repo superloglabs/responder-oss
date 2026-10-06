@@ -18,7 +18,6 @@ import {
   queueIssueRemediationJob,
   queueSuggestionRemediationJob,
 } from "../../../../packages/core/src/remediation-queue.js";
-import { queuePullRequestReviewJob } from "../../../../packages/core/src/pull-request-review-queue.js";
 import {
   type InvestigationRequest,
   toInvestigationInput,
@@ -421,28 +420,6 @@ export async function queueSuggestionRemediation(requestId: string) {
         (await getBoss()).send(name, data, options),
     },
     requestId,
-  );
-}
-
-export async function queuePullRequestReview(input: {
-  installationId: number;
-  pullRequestNumber: number;
-  reviewComment: {
-    author: string;
-    body: string;
-    id: number;
-    line: number | null;
-    path: string;
-    url: string;
-  };
-  repositoryFullName: string;
-}) {
-  return queuePullRequestReviewJob(
-    {
-      send: async (name, data, options) =>
-        (await getBoss()).send(name, data, options),
-    },
-    input,
   );
 }
 

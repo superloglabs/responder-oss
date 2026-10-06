@@ -61,6 +61,7 @@ vi.mock("../../../packages/core/src/db/automations.js", async (importOriginal) =
 vi.mock("./automations/queue.js", () => ({
   closeAutomationQueue: vi.fn(),
   queueAutomationRun: vi.fn(),
+  queueAutomationRunReply: vi.fn(),
 }));
 
 vi.mock("../../../packages/core/src/db/agents.js", async (importOriginal) => ({

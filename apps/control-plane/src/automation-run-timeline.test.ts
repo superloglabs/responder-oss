@@ -63,6 +63,18 @@ describe("automationRunTimeline", () => {
     expect(entries.at(-1)).toMatchObject({ kind: "notice", text: "Skipped the Slack notification: Duplicate of OPS-42." });
   });
 
+  it("shows a review on GitHub and the commit the run pushed for it", () => {
+    const entries = automationRunTimeline(run([
+      { data: { authorId: "greptile-apps[bot]", authorName: "greptile-apps[bot]", source: "github", text: "New test always fails." }, type: "user_message" },
+      { data: { externalReference: "https://github.com/acme/app/pull/248", kind: "update_github_pull_request", repository: "acme/app", title: "Fix the test" }, type: "action_succeeded" },
+    ]));
+
+    expect(entries).toMatchObject([
+      { authorName: "greptile-apps[bot] on GitHub", kind: "user", text: "New test always fails." },
+      { kind: "notice", text: "Pushed a commit to pull request #248." },
+    ]);
+  });
+
   it("opens a test chat with the member's message and keeps turns in order", () => {
     const entries = automationRunTimeline(run([
       { data: { authorId: "user-1", authorName: "Ash", text: "Try the checkout flow." }, type: "user_message" },

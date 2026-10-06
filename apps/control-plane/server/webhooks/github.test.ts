@@ -5,8 +5,8 @@ import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
-import { queuePullRequestReview } from "../investigations/queue.js";
 import { githubWebhookRoutes, verifyGitHubSignature } from "./github.js";
+import { startPullRequestReviewTurn } from "./github-reviews.js";
 
 vi.mock("@responder/core/analytics", () => ({
   captureAnalyticsEvent: vi.fn(),
@@ -24,8 +24,9 @@ vi.mock("@responder/core/integrations/slack-remediations", () => ({
   refreshIssuePullRequestSlackMessages: vi.fn(),
 }));
 
-vi.mock("../investigations/queue.js", () => ({
-  queuePullRequestReview: vi.fn(),
+vi.mock("./github-reviews.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./github-reviews.js")>(),
+  startPullRequestReviewTurn: vi.fn(),
 }));
 
 const app = new Hono().route("/api/webhooks/github", githubWebhookRoutes);
@@ -47,31 +48,20 @@ function pullRequestEvent(overrides: {
   });
 }
 
-function reviewCommentEvent(overrides: {
-  action?: string;
-  authorType?: string;
-  inReplyToId?: number;
-} = {}) {
+function reviewEvent() {
   return JSON.stringify({
-    action: overrides.action ?? "created",
-    comment: {
-      body: "Use a null guard here.",
-      html_url: "https://github.com/acme/api/pull/42#discussion_r123",
-      id: 123,
-      ...(overrides.inReplyToId
-        ? { in_reply_to_id: overrides.inReplyToId }
-        : {}),
-      line: 17,
-      path: "src/route.ts",
-      user: {
-        login: "reviewer-bot",
-        type: overrides.authorType ?? "Bot",
-      },
-    },
+    action: "submitted",
     installation: { id: 789 },
-    pull_request: { number: 42 },
+    pull_request: { html_url: "https://github.com/acme/api/pull/42", number: 42 },
     repository: { full_name: "acme/api" },
-    sender: { type: overrides.authorType ?? "Bot" },
+    review: {
+      author_association: "NONE",
+      body: "",
+      html_url: "https://github.com/acme/api/pull/42#pullrequestreview-5",
+      id: 5,
+      state: "commented",
+      user: { login: "greptile-apps[bot]", type: "Bot" },
+    },
   });
 }
 
@@ -221,56 +211,29 @@ describe("GitHub pull request webhooks", () => {
     expect(markIssuePullRequestMerged).not.toHaveBeenCalled();
   });
 
-  it("queues a review pass for a top-level bot review comment", async () => {
+  it("continues the run or thread that opened a reviewed pull request", async () => {
     vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
-    vi.mocked(queuePullRequestReview).mockResolvedValue({
-      jobId: "job-1",
-      matched: true,
-      queued: true,
-      requestId: "request-1",
-    });
-    const body = reviewCommentEvent();
+    vi.mocked(startPullRequestReviewTurn).mockResolvedValue("queued");
 
-    const response = await post(body, {
-      "x-github-event": "pull_request_review_comment",
-    });
+    const response = await post(reviewEvent(), { "x-github-event": "pull_request_review" });
 
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      matched: true,
-      queued: true,
-    });
-    expect(queuePullRequestReview).toHaveBeenCalledWith({
-      installationId: 789,
-      pullRequestNumber: 42,
-      reviewComment: {
-        author: "reviewer-bot",
-        body: "Use a null guard here.",
-        id: 123,
-        line: 17,
-        path: "src/route.ts",
-        url: "https://github.com/acme/api/pull/42#discussion_r123",
-      },
-      repositoryFullName: "acme/api",
-    });
+    await expect(response.json()).resolves.toEqual({ ok: true, outcome: "queued" });
+    expect(startPullRequestReviewTurn).toHaveBeenCalledWith(expect.objectContaining({
+      action: "submitted",
+      pull_request: expect.objectContaining({ number: 42 }),
+      review: expect.objectContaining({ id: 5 }),
+    }));
   });
 
-  it.each([
-    ["a human comment", reviewCommentEvent({ authorType: "User" })],
-    ["a reply", reviewCommentEvent({ inReplyToId: 100 })],
-    ["an edited comment", reviewCommentEvent({ action: "edited" })],
-  ])("ignores %s", async (_label, body) => {
+  it("ignores a malformed review event", async () => {
     vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
 
-    const response = await post(body, {
-      "x-github-event": "pull_request_review_comment",
+    const response = await post(JSON.stringify({ action: "submitted" }), {
+      "x-github-event": "pull_request_review",
     });
 
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      ignored: true,
-    });
-    expect(queuePullRequestReview).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
+    expect(startPullRequestReviewTurn).not.toHaveBeenCalled();
   });
 
   it("does not capture an event when no matching pull request exists", async () => {

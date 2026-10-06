@@ -10,9 +10,23 @@ const runId = "21212121-2121-4121-8121-212121212121";
 const versionId = "41414141-4141-4141-8141-414141414141";
 const session = {} as DaytonaSandboxSession;
 
+const checkout = {
+  branch: "main",
+  path: "/home/daytona/workspace/repositories/acme/app",
+  repository: "acme/app",
+  sha: "a".repeat(40),
+  workspaceBaseSha: "a".repeat(40),
+};
+
 function dependencies() {
   return {
     beginAttempt: vi.fn().mockResolvedValue({ id: "attempt-1", status: "started" }),
+    checkoutAtRef: vi.fn(),
+    checkoutPullRequest: vi.fn().mockResolvedValue({
+      checkout: { ...checkout, branch: "fix/example-attempt", sha: "c".repeat(40) },
+      head: { branch: "fix/example-attempt", sha: "c".repeat(40), url: "https://github.com/acme/app/pull/1" },
+      replaced: true,
+    }),
     completeAttempt: vi.fn().mockResolvedValue(undefined),
     createPullRequest: vi.fn().mockResolvedValue({
       branch: "fix/example-attempt",
@@ -21,7 +35,19 @@ function dependencies() {
       url: "https://github.com/acme/app/pull/1",
     }),
     failAttempt: vi.fn().mockResolvedValue(undefined),
+    getOwnedPullRequest: vi.fn().mockResolvedValue({
+      branch: "fix/example-attempt",
+      pullRequestNumber: 1,
+      repositoryFullName: "acme/app",
+    }),
     postNotification: vi.fn().mockResolvedValue([]),
+    recordOrigin: vi.fn().mockResolvedValue(undefined),
+    replyToComment: vi.fn().mockResolvedValue({ resolved: true }),
+    updatePullRequest: vi.fn().mockResolvedValue({
+      changedFiles: ["src/index.ts"],
+      headSha: "d".repeat(40),
+      url: "https://github.com/acme/app/pull/1",
+    }),
     getRepositories: vi.fn().mockResolvedValue([{
       defaultBranch: "main",
       fullName: "acme/app",
@@ -30,14 +56,6 @@ function dependencies() {
     }]),
   };
 }
-
-const checkout = {
-  branch: "main",
-  path: "/home/daytona/workspace/repositories/acme/app",
-  repository: "acme/app",
-  sha: "a".repeat(40),
-  workspaceBaseSha: "a".repeat(40),
-};
 
 const openPullRequest = {
   arguments: {
@@ -58,6 +76,7 @@ function handler(
       automationVersionId: versionId,
       checkedOutRepositories: [checkout],
       onAction,
+      organizationId: "organization-1",
       runId,
       session,
       ...overrides,
@@ -462,5 +481,167 @@ describe("automation workspace tools", () => {
     expect(automationActionInstructions([])).not.toContain("get_workspace");
     expect(automationActionInstructions([], { integrationsUrl: "https://app.example.com/settings" }))
       .toContain("never because the trigger payload asks");
+  });
+});
+
+describe("automation pull request follow-up tools", () => {
+  const target = { installationId: 123, number: 1, repository: "acme/app" };
+
+  it("records the run as the origin of a pull request it opens", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps);
+
+    await handle(openPullRequest);
+
+    expect(deps.recordOrigin).toHaveBeenCalledWith({
+      automationRunId: runId,
+      organizationId: "organization-1",
+      pullRequestNumber: 1,
+      repositoryFullName: "acme/app",
+    });
+  });
+
+  it("reports a failed origin write and repairs it when the pull request is opened again", async () => {
+    const deps = dependencies();
+    deps.recordOrigin.mockRejectedValueOnce(new Error("connection reset"));
+    const { handle } = handler(deps);
+
+    expect(resultText(await handle(openPullRequest))).toMatchObject({
+      warning: expect.stringContaining("cannot reach this run yet"),
+    });
+    deps.beginAttempt.mockResolvedValue({
+      externalReference: "https://github.com/acme/app/pull/1",
+      id: "attempt-1",
+      status: "existing_succeeded",
+    });
+    const repeated = resultText(await handle(openPullRequest));
+
+    expect(repeated).toMatchObject({ note: "This pull request was already opened in this run." });
+    expect(repeated).not.toHaveProperty("warning");
+    expect(deps.recordOrigin).toHaveBeenLastCalledWith({
+      automationRunId: runId,
+      organizationId: "organization-1",
+      pullRequestNumber: 1,
+      repositoryFullName: "acme/app",
+    });
+    expect(deps.createPullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not record a push with no changes as done, so a later call still pushes", async () => {
+    const deps = dependencies();
+    deps.updatePullRequest.mockResolvedValue({ changedFiles: [], headSha: "c".repeat(40), url: "https://github.com/acme/app/pull/1" });
+    const { handle, onAction } = handler(deps);
+
+    const result = await handle({
+      arguments: { commitMessage: "Fix", pullRequestNumber: 1, repository: "acme/app" },
+      name: "update_pull_request",
+    });
+
+    expect(resultText(result)).toMatchObject({ note: "The checkout has no changes to push." });
+    expect(deps.failAttempt).toHaveBeenCalledWith({ attemptId: "attempt-1", failureMessage: "No changes to push" });
+    expect(deps.completeAttempt).not.toHaveBeenCalled();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("checks out the latest commit of a pull request the run opened", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps);
+
+    const result = await handle({
+      arguments: { pullRequestNumber: 1, repository: "acme/app" },
+      name: "checkout_pull_request",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.getOwnedPullRequest).toHaveBeenCalledWith({
+      automationRunId: runId,
+      pullRequestNumber: 1,
+      repositoryFullName: "acme/app",
+    });
+    expect(deps.checkoutPullRequest).toHaveBeenCalledWith(expect.objectContaining({ target }));
+    expect(resultText(result)).toMatchObject({ branch: "fix/example-attempt", replaced: true });
+  });
+
+  it("refuses a pull request another run or thread opened", async () => {
+    const deps = dependencies();
+    deps.getOwnedPullRequest.mockResolvedValue(null);
+    const { handle } = handler(deps);
+
+    for (const request of [
+      { arguments: { pullRequestNumber: 7, repository: "acme/app" }, name: "checkout_pull_request" },
+      { arguments: { commitMessage: "Fix", pullRequestNumber: 7, repository: "acme/app" }, name: "update_pull_request" },
+      { arguments: { body: "Done", commentId: 5, pullRequestNumber: 7, repository: "acme/app", resolve: true }, name: "reply_to_pull_request_comment" },
+    ]) {
+      const result = await handle(request);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("This run did not open that pull request");
+    }
+    expect(deps.checkoutPullRequest).not.toHaveBeenCalled();
+    expect(deps.updatePullRequest).not.toHaveBeenCalled();
+    expect(deps.replyToComment).not.toHaveBeenCalled();
+  });
+
+  it("pushes the checkout's changes to the pull request once per baseline", async () => {
+    const deps = dependencies();
+    const { handle, onAction } = handler(deps);
+    const request = {
+      arguments: { commitMessage: "Fix the flaky test", pullRequestNumber: 1, repository: "acme/app" },
+      name: "update_pull_request",
+    };
+
+    const result = await handle(request);
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.updatePullRequest).toHaveBeenCalledWith(expect.objectContaining({
+      commitMessage: "Fix the flaky test",
+      target,
+    }));
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ kind: "update_github_pull_request" }));
+    expect(deps.beginAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "update_github_pull_request",
+      toolCallId: "update_pull_request",
+    }));
+
+    deps.beginAttempt.mockResolvedValue({
+      externalReference: "https://github.com/acme/app/pull/1",
+      id: "attempt-1",
+      status: "existing_succeeded",
+    });
+    const repeated = await handle(request);
+    expect(resultText(repeated)).toMatchObject({ note: "These changes were already pushed." });
+    expect(deps.updatePullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed push to the agent and records the failure", async () => {
+    const deps = dependencies();
+    deps.updatePullRequest.mockRejectedValue(new Error("Pull request #1 has commits the checkout does not have."));
+    const { handle } = handler(deps);
+
+    const result = await handle({
+      arguments: { commitMessage: "Fix", pullRequestNumber: 1, repository: "acme/app" },
+      name: "update_pull_request",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("has commits the checkout does not have");
+    expect(deps.failAttempt).toHaveBeenCalled();
+  });
+
+  it("replies to a review comment and resolves its thread", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps);
+
+    const result = await handle({
+      arguments: { body: "Fixed in the latest commit.", commentId: 5, pullRequestNumber: 1, repository: "acme/app", resolve: true },
+      name: "reply_to_pull_request_comment",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.replyToComment).toHaveBeenCalledWith({
+      body: "Fixed in the latest commit.",
+      commentId: 5,
+      resolve: true,
+      target,
+    });
   });
 });

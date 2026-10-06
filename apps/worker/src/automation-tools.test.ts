@@ -135,6 +135,9 @@ describe("sandbox tool server", () => {
       const listed = await request({ id: 2, method: "tools/list" }) as { result: { tools: Array<{ name: string }> } };
       expect(listed.result.tools.map((tool) => tool.name)).toEqual([
         "open_pull_request",
+        "checkout_pull_request",
+        "update_pull_request",
+        "reply_to_pull_request_comment",
         "github_api",
         "fetch_ref",
       ]);
