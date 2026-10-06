@@ -390,6 +390,14 @@ describe("automation Slack tools", () => {
     await expect(call(claim({ roles: ["trigger"], trigger: slackTrigger }), deps, "slack_search_channel", {
       query: "timeout",
     })).resolves.toMatchObject({ isError: true });
+    // An unknown argument fails instead of widening the search to every channel.
+    await expect(call(claim(), deps, "slack_search_channel", {
+      channel_id: "C123",
+      query: "timeout",
+    })).resolves.toEqual({
+      content: [{ text: "Invalid tool arguments", type: "text" }],
+      isError: true,
+    });
     await expect(call(claim(), deps, "slack_search_channel", {
       query: "timeout in:secret",
     })).resolves.toEqual({

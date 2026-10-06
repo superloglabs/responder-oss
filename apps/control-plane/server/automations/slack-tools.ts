@@ -128,7 +128,7 @@ const searchInput = z.object({
   page: z.number().int().min(1).max(100).default(1),
   query: z.string().min(1).max(500),
   sort: z.enum(slackSearchSorts).default("timestamp"),
-});
+}).strict();
 const readChannelInput = z.object({
   channel_id: z.string().min(1),
   cursor: cursorSchema.optional(),

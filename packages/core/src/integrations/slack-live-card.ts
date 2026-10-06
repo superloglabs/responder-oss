@@ -712,15 +712,28 @@ function formattedTraceTask(
 
   if (item.title === "slack_search_channel") {
     const channelId = input?.channel_id;
+    const channelIds = Array.isArray(input?.channel_ids)
+      ? input.channel_ids.filter((id): id is string => typeof id === "string")
+      : null;
     const query = input?.query;
     if (!input || typeof query !== "string") return null;
-    const details = objectDetails(input, new Set(["channel_id", "channel_ids", "query"]));
+    // A few channels fit in the title; a longer list stays in the details.
+    const listed = channelIds !== null && channelIds.length <= 3;
+    const details = objectDetails(
+      input,
+      new Set(["channel_id", "query", ...(listed ? ["channel_ids"] : [])]),
+    );
     const url = firstUrl(item.output);
+    const scope = typeof channelId === "string"
+      ? `Slack channel \`${channelId}\``
+      : channelIds === null
+        ? "every available Slack channel"
+        : listed
+          ? `Slack channel${channelIds.length === 1 ? "" : "s"} ${channelIds.map((id) => `\`${id}\``).join(", ")}`
+          : `${channelIds.length} Slack channels`;
     return {
       task_id: taskId,
-      title: typeof channelId === "string"
-        ? `Search Slack channel \`${channelId}\` for \`${query}\``
-        : `Search Slack for \`${query}\``,
+      title: `Search ${scope} for \`${query}\``,
       status,
       ...(details ? { details } : {}),
       ...(item.output ? { output: preformatted(item.output) } : {}),
