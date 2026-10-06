@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Autumn, type Customer } from "autumn-js";
+import { sandboxTimeIsBilled } from "./usage-charges.js";
 
 export const INVESTIGATIONS_FEATURE_ID = "responder_investigations";
 export const FREE_PLAN_ID = "responder_free";
@@ -287,52 +288,111 @@ export async function createBillingPortal(
   return result.url;
 }
 
-// Usage is metered in US dollars against a separate plan group, so these
-// plans change independently of investigation billing. The balance covers
-// Responder-funded model usage and, where the edition prices it, sandbox time.
+// Usage is metered against a separate plan group, so these plans change
+// independently of investigation billing. The usage credit, in US dollars,
+// covers Responder-funded model usage. Free, Pro, and Team also include
+// machine hours for sandbox time.
 export const AUTOMATION_INFERENCE_FEATURE_ID = "responder_automation_inference";
-export const AUTOMATION_FREE_PLAN_ID = "responder_automations_free";
+export const MACHINE_HOURS_FEATURE_ID = "responder_machine_hours";
+export const AUTOMATION_FREE_PLAN_ID = "responder_plan_free";
 export const AUTOMATION_PAID_PLANS = [
-  { id: "responder_automations_100", included: 100, price: 100 },
-  { id: "responder_automations_200", included: 200, price: 200 },
+  { id: "responder_plan_pro", included: 100, machineHours: 50, name: "Pro", price: 100 },
+  { id: "responder_plan_team", included: 200, machineHours: 500, name: "Team", price: 200 },
 ] as const;
-export const AUTOMATION_FREE_ALLOWANCE_DOLLARS = 20;
+export const AUTOMATION_FREE_ALLOWANCE_DOLLARS = 5;
+export const AUTOMATION_FREE_MACHINE_HOURS = 2;
+
+// Plans from before Free, Pro, and Team. Workspaces that have them keep them
+// until they change plans. They have no machine hours, so where the edition
+// prices sandbox time it is paid from the usage credit.
+const LEGACY_AUTOMATION_PLANS = [
+  { id: "responder_automations_free", included: 20, name: "Free", price: 0 },
+  { id: "responder_automations_100", included: 100, name: "$100 / month", price: 100 },
+  { id: "responder_automations_200", included: 200, name: "$200 / month", price: 200 },
+] as const;
 
 const usageTrackTimeoutMs = 30_000;
 
 // A run may start while at least one cent of the allowance remains.
 const automationMinimumBalanceDollars = 0.01;
+// A sandbox may start while at least a minute of machine time remains.
+const minimumMachineHours = 1 / 60;
 
 export type AutomationPaidPlanId = (typeof AUTOMATION_PAID_PLANS)[number]["id"];
-export type AutomationPlanId = typeof AUTOMATION_FREE_PLAN_ID | AutomationPaidPlanId;
+export type AutomationPlanId =
+  | typeof AUTOMATION_FREE_PLAN_ID
+  | AutomationPaidPlanId
+  | (typeof LEGACY_AUTOMATION_PLANS)[number]["id"];
 
-const automationPlanIds: readonly string[] = [
-  AUTOMATION_FREE_PLAN_ID,
-  ...AUTOMATION_PAID_PLANS.map((plan) => plan.id),
+const automationPlans: ReadonlyArray<{
+  id: AutomationPlanId;
+  included: number;
+  name: string;
+  price: number;
+}> = [
+  { id: AUTOMATION_FREE_PLAN_ID, included: AUTOMATION_FREE_ALLOWANCE_DOLLARS, name: "Free", price: 0 },
+  ...AUTOMATION_PAID_PLANS,
+  ...LEGACY_AUTOMATION_PLANS,
 ];
 
+function automationPlan(planId: AutomationPlanId) {
+  return automationPlans.find((plan) => plan.id === planId) ?? automationPlans[0]!;
+}
+
+// Paid plans a workspace can switch to.
 export function isAutomationPaidPlanId(value: unknown): value is AutomationPaidPlanId {
   return AUTOMATION_PAID_PLANS.some((plan) => plan.id === value);
+}
+
+export interface UsageBalanceSummary {
+  granted: number;
+  nextResetAt: number | null;
+  // Usage past the granted amount is billed instead of stopping work.
+  overageAllowed: boolean;
+  remaining: number;
+  usage: number;
 }
 
 export interface AutomationBillingSummary {
   allowance: number;
   cancelsAtPeriodEnd: boolean;
   configured: boolean;
+  // Usage past the credit is billed instead of stopping work.
+  creditOverageAllowed: boolean;
   enabled: boolean;
+  // Null on plans that pay for sandbox time from the usage credit.
+  machineHours: UsageBalanceSummary | null;
   nextResetAt: number | null;
+  paid: boolean;
   // Start of the current billing period, when Autumn reports one.
   periodStart: number | null;
   planId: AutomationPlanId;
-  plans: Array<{ id: AutomationPaidPlanId; included: number; price: number }>;
+  planName: string;
+  planPrice: number;
+  plans: Array<{
+    id: AutomationPaidPlanId;
+    included: number;
+    machineHours: number;
+    name: string;
+    price: number;
+  }>;
   remaining: number;
   scheduledPlanId: AutomationPlanId | null;
+  scheduledPlanName: string | null;
   usage: number;
 }
 
 export interface AutomationInferenceAccess {
   allowed: boolean;
   nextResetAt: number | null;
+}
+
+export interface WorkAllowance extends AutomationInferenceAccess {
+  // The balance that stopped the work.
+  exhausted: "machine_hours" | "usage_credit" | null;
+  // Sandbox time is paid from the usage credit, as on plans without machine
+  // hours.
+  machinesUseCredit: boolean;
 }
 
 function automationPlanFromCustomer(customer: Customer): {
@@ -345,7 +405,7 @@ function automationPlanFromCustomer(customer: Customer): {
     customer.subscriptions.find(
       (subscription) =>
         subscription.status === status &&
-        automationPlanIds.includes(subscription.planId),
+        automationPlans.some((plan) => plan.id === subscription.planId),
     );
   const active = find("active");
   return {
@@ -382,19 +442,45 @@ async function ensureAutomationPlan(
   return getOrCreateCustomer(client, organizationId, data);
 }
 
+function paidPlanSummaries(): AutomationBillingSummary["plans"] {
+  return AUTOMATION_PAID_PLANS.map((plan) => ({ ...plan }));
+}
+
 function disabledAutomationSummary(configured: boolean, enabled: boolean): AutomationBillingSummary {
   return {
     allowance: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
     cancelsAtPeriodEnd: false,
     configured,
+    creditOverageAllowed: false,
     enabled,
+    machineHours: {
+      granted: AUTOMATION_FREE_MACHINE_HOURS,
+      nextResetAt: null,
+      overageAllowed: false,
+      remaining: AUTOMATION_FREE_MACHINE_HOURS,
+      usage: 0,
+    },
     nextResetAt: null,
+    paid: false,
     periodStart: null,
     planId: AUTOMATION_FREE_PLAN_ID,
-    plans: AUTOMATION_PAID_PLANS.map((plan) => ({ ...plan })),
+    planName: automationPlan(AUTOMATION_FREE_PLAN_ID).name,
+    planPrice: 0,
+    plans: paidPlanSummaries(),
     remaining: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
     scheduledPlanId: null,
+    scheduledPlanName: null,
     usage: 0,
+  };
+}
+
+function balanceSummary(balance: NonNullable<Customer["balances"][string]>): UsageBalanceSummary {
+  return {
+    granted: balance.granted,
+    nextResetAt: balance.nextResetAt ?? null,
+    overageAllowed: balance.overageAllowed,
+    remaining: Math.max(0, balance.remaining),
+    usage: Math.max(0, balance.usage),
   };
 }
 
@@ -402,22 +488,27 @@ export function summarizeAutomationBillingCustomer(
   customer: Customer,
 ): AutomationBillingSummary {
   const balance = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
+  const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
   const plan = automationPlanFromCustomer(customer);
-  const planId = plan.active ?? AUTOMATION_FREE_PLAN_ID;
-  const allowance = balance?.granted ??
-    AUTOMATION_PAID_PLANS.find((candidate) => candidate.id === planId)?.included ??
-    AUTOMATION_FREE_ALLOWANCE_DOLLARS;
+  const current = automationPlan(plan.active ?? AUTOMATION_FREE_PLAN_ID);
+  const allowance = balance?.granted ?? current.included;
   return {
     allowance,
     cancelsAtPeriodEnd: plan.cancelsAtPeriodEnd,
     configured: true,
+    creditOverageAllowed: balance?.overageAllowed ?? false,
     enabled: true,
+    machineHours: machineHours ? balanceSummary(machineHours) : null,
     nextResetAt: balance?.nextResetAt ?? null,
+    paid: current.price > 0,
     periodStart: plan.periodStart,
-    planId,
-    plans: AUTOMATION_PAID_PLANS.map((candidate) => ({ ...candidate })),
+    planId: current.id,
+    planName: current.name,
+    planPrice: current.price,
+    plans: paidPlanSummaries(),
     remaining: Math.max(0, balance?.remaining ?? allowance),
     scheduledPlanId: plan.scheduled,
+    scheduledPlanName: plan.scheduled ? automationPlan(plan.scheduled).name : null,
     usage: Math.max(0, balance?.usage ?? 0),
   };
 }
@@ -475,6 +566,82 @@ export async function checkUsageAllowance(
   };
 }
 
+function balanceAllows(
+  balance: NonNullable<Customer["balances"][string]>,
+  required: number,
+): boolean {
+  return balance.unlimited || balance.overageAllowed || balance.remaining >= required;
+}
+
+// Read-only check that a run may start a sandbox. The usage credit must last
+// when the run uses Responder-funded models or the plan pays for sandbox time
+// from it; machine hours must last on plans that include them. A balance
+// whose plan bills usage past it does not stop the run.
+export async function checkWorkAllowance(
+  organizationId: string,
+  options: { responderModels: boolean },
+): Promise<WorkAllowance> {
+  const open: WorkAllowance = {
+    allowed: true,
+    exhausted: null,
+    machinesUseCredit: false,
+    nextResetAt: null,
+  };
+  if (!billingIsEnabled()) return open;
+  const client = getAutomationClientOrNull();
+  if (!client) return open;
+  const customer = await ensureAutomationPlan(client, organizationId);
+  if (customer.id === null) return open;
+
+  const credit = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
+  const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
+  const machinesUseCredit = !machineHours && sandboxTimeIsBilled();
+  if (
+    (options.responderModels || machinesUseCredit) &&
+    !(credit && balanceAllows(credit, automationMinimumBalanceDollars))
+  ) {
+    return {
+      allowed: false,
+      exhausted: "usage_credit",
+      machinesUseCredit,
+      nextResetAt: credit?.nextResetAt ?? null,
+    };
+  }
+  if (machineHours && !balanceAllows(machineHours, minimumMachineHours)) {
+    return {
+      allowed: false,
+      exhausted: "machine_hours",
+      machinesUseCredit,
+      nextResetAt: machineHours.nextResetAt ?? null,
+    };
+  }
+  return { ...open, machinesUseCredit };
+}
+
+// Short, so a plan change reaches settlement within a minute or two.
+const machineHoursLookupLifetimeMs = 60_000;
+const machineHoursLookups = new Map<string, { expiresAt: number; value: boolean }>();
+
+// Whether the organization's plan meters sandbox time in machine hours rather
+// than paying for it from the usage credit. Throws when Autumn cannot answer,
+// so the caller retries rather than charging the wrong balance.
+export async function organizationUsesMachineHours(organizationId: string): Promise<boolean> {
+  const now = Date.now();
+  const cached = machineHoursLookups.get(organizationId);
+  if (cached && cached.expiresAt > now) return cached.value;
+  for (const [key, entry] of machineHoursLookups) {
+    if (entry.expiresAt <= now) machineHoursLookups.delete(key);
+  }
+  const customer = await getOrCreateCustomer(requireAutumnClient(), organizationId);
+  if (customer.id === null) throw new Error("Autumn did not return the billing customer");
+  const value = customer.balances[MACHINE_HOURS_FEATURE_ID] !== undefined;
+  machineHoursLookups.set(organizationId, {
+    expiresAt: now + machineHoursLookupLifetimeMs,
+    value,
+  });
+  return value;
+}
+
 function hasStatus(error: unknown, status: number): boolean {
   return (
     typeof error === "object" &&
@@ -484,25 +651,23 @@ function hasStatus(error: unknown, status: number): boolean {
   );
 }
 
-// Reports one charge against the usage balance. The idempotency key must be
-// stable for the charged record, so a retry after an uncertain response
-// cannot charge twice.
-export async function trackUsageCharge(input: {
-  chargeMicros: number;
+async function trackUsage(input: {
+  featureId: string;
   idempotencyKey: string;
   organizationId: string;
   properties: Record<string, string>;
+  value: number;
 }): Promise<void> {
   if (!billingIsEnabled()) return;
   const client = requireAutumnClient();
-  if (input.chargeMicros <= 0) return;
+  if (input.value <= 0) return;
   try {
     await client.track(
       {
         customerId: input.organizationId,
-        featureId: AUTOMATION_INFERENCE_FEATURE_ID,
+        featureId: input.featureId,
         properties: input.properties,
-        value: input.chargeMicros / 1_000_000,
+        value: input.value,
       },
       {
         headers: { "Idempotency-Key": input.idempotencyKey },
@@ -512,6 +677,41 @@ export async function trackUsageCharge(input: {
   } catch (error) {
     if (!hasStatus(error, 409)) throw error;
   }
+}
+
+// Reports one charge against the usage credit. The idempotency key must be
+// stable for the charged record, so a retry after an uncertain response
+// cannot charge twice.
+export async function trackUsageCharge(input: {
+  chargeMicros: number;
+  idempotencyKey: string;
+  organizationId: string;
+  properties: Record<string, string>;
+}): Promise<void> {
+  await trackUsage({
+    featureId: AUTOMATION_INFERENCE_FEATURE_ID,
+    idempotencyKey: input.idempotencyKey,
+    organizationId: input.organizationId,
+    properties: input.properties,
+    value: input.chargeMicros / 1_000_000,
+  });
+}
+
+// Reports sandbox time against the machine hours balance, with the same
+// idempotency rule as usage charges.
+export async function trackMachineHours(input: {
+  hours: number;
+  idempotencyKey: string;
+  organizationId: string;
+  properties: Record<string, string>;
+}): Promise<void> {
+  await trackUsage({
+    featureId: MACHINE_HOURS_FEATURE_ID,
+    idempotencyKey: input.idempotencyKey,
+    organizationId: input.organizationId,
+    properties: input.properties,
+    value: input.hours,
+  });
 }
 
 // Reports one model request. The usage row ID is the idempotency key.
@@ -567,7 +767,7 @@ async function updateAutomationPlanCancellation(
   const client = requireAutumnClient();
   const customer = await getOrCreateCustomer(client, organizationId);
   const planId = automationPlanFromCustomer(customer).active;
-  if (!isAutomationPaidPlanId(planId)) return false;
+  if (!planId || automationPlan(planId).price === 0) return false;
   await client.billing.update({ cancelAction, customerId: organizationId, planId });
   return true;
 }

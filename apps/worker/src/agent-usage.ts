@@ -1,5 +1,5 @@
 import type { Usage } from "@openai/agents";
-import { checkUsageAllowance } from "@responder/core/billing/autumn";
+import { checkWorkAllowance } from "@responder/core/billing/autumn";
 import {
   organizationUsesUsageBilling,
   recordAgentModelUsage,
@@ -26,21 +26,26 @@ export async function agentUsageIsBillable(organizationId: string): Promise<bool
 }
 
 export class UsageAllowanceExhaustedError extends Error {
-  constructor() {
+  constructor(exhausted: "machine_hours" | "usage_credit" | null = "usage_credit") {
     super(
-      "The usage allowance for this billing period is used up. Upgrade the plan in billing settings to continue.",
+      exhausted === "machine_hours"
+        ? "The machine hours for this billing period are used up. Upgrade the plan in billing settings to continue."
+        : "The usage allowance for this billing period is used up. Upgrade the plan in billing settings to continue.",
     );
     this.name = "UsageAllowanceExhaustedError";
   }
 }
 
-// Stops billable pull request work before its sandbox starts when the usage
-// allowance is used up. Work that has started finishes.
+// Stops billable pull request work before its sandbox starts when machine
+// time is used up. The work applies a proposed change without calling a
+// model, so it needs the usage credit only where that pays for sandbox time.
+// Work that has started finishes.
 export async function requireUsageAllowance(
   organizationId: string,
-  check: typeof checkUsageAllowance = checkUsageAllowance,
+  check: typeof checkWorkAllowance = checkWorkAllowance,
 ): Promise<void> {
-  if (!(await check(organizationId)).allowed) throw new UsageAllowanceExhaustedError();
+  const access = await check(organizationId, { responderModels: false });
+  if (!access.allowed) throw new UsageAllowanceExhaustedError(access.exhausted);
 }
 
 function splitInputTokens(

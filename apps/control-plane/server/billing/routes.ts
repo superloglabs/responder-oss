@@ -72,7 +72,8 @@ export const billingRoutes = new Hono()
             inference: breakdown.inferenceMicros / 1_000_000,
             sandbox: breakdown.sandboxMicros / 1_000_000,
           },
-          sandboxTimeBilled: sandboxTimeIsBilled(),
+          // Plans with machine hours meter sandbox time there instead.
+          sandboxTimeBilled: sandboxTimeIsBilled() && automations.machineHours === null,
         },
         usageBased,
       });

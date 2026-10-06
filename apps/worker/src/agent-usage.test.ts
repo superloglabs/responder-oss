@@ -53,14 +53,34 @@ describe("agent run usage", () => {
     }, record)).resolves.toBeUndefined();
   });
 
-  it("stops billable work before it starts when the allowance is used", async () => {
+  it("stops pull request work before it starts when machine time is used up", async () => {
+    const exhausted = vi.fn().mockResolvedValue({
+      allowed: false,
+      exhausted: "machine_hours",
+      machinesUseCredit: false,
+      nextResetAt: null,
+    });
+    await expect(requireUsageAllowance("organization-1", exhausted))
+      .rejects.toThrow("machine hours");
+    // The work calls no model, so only machine time is required.
+    expect(exhausted).toHaveBeenCalledWith("organization-1", { responderModels: false });
     await expect(requireUsageAllowance(
       "organization-1",
-      vi.fn().mockResolvedValue({ allowed: false, nextResetAt: null }),
+      vi.fn().mockResolvedValue({
+        allowed: false,
+        exhausted: "usage_credit",
+        machinesUseCredit: true,
+        nextResetAt: null,
+      }),
     )).rejects.toBeInstanceOf(UsageAllowanceExhaustedError);
     await expect(requireUsageAllowance(
       "organization-1",
-      vi.fn().mockResolvedValue({ allowed: true, nextResetAt: null }),
+      vi.fn().mockResolvedValue({
+        allowed: true,
+        exhausted: null,
+        machinesUseCredit: false,
+        nextResetAt: null,
+      }),
     )).resolves.toBeUndefined();
   });
 });

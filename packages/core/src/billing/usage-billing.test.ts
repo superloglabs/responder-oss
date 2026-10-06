@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { getAIGatewayModelPricing } from "../automations/model-pricing.js";
 import type { AgentModelUsageRecord } from "../db/agent-model-usage.js";
 import type { SandboxUsageRecord } from "../db/sandbox-usage.js";
-import type { trackUsageCharge } from "./autumn.js";
+import type {
+  organizationUsesMachineHours,
+  trackMachineHours,
+  trackUsageCharge,
+} from "./autumn.js";
 import {
   finishSandboxUsage,
   recordAgentModelUsage,
@@ -68,6 +72,8 @@ function dependencies() {
     setCharge: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(async () => sandboxRow()),
     track: vi.fn<typeof trackUsageCharge>().mockResolvedValue(undefined),
+    trackMachineHours: vi.fn<typeof trackMachineHours>().mockResolvedValue(undefined),
+    usesMachineHours: vi.fn<typeof organizationUsesMachineHours>().mockResolvedValue(false),
   };
 }
 
@@ -89,6 +95,34 @@ describe("usage billing", () => {
       properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
     });
     expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+  });
+
+  it("reports sandbox time as machine hours on plans that include them", async () => {
+    const deps = dependencies();
+    deps.usesMachineHours.mockResolvedValue(true);
+
+    await settleSandboxUsage(sandboxRow(), deps);
+
+    expect(deps.setCharge).toHaveBeenCalledWith("sandbox-usage-1", 16_860);
+    expect(deps.trackMachineHours).toHaveBeenCalledWith({
+      hours: 1 / 6,
+      idempotencyKey: "sandbox-usage:sandbox-usage-1",
+      organizationId: "organization-1",
+      properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
+    });
+    expect(deps.track).not.toHaveBeenCalled();
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+  });
+
+  it("leaves a sandbox period unbilled when its plan cannot be looked up", async () => {
+    const deps = dependencies();
+    deps.usesMachineHours.mockRejectedValue(new Error("Autumn is unavailable"));
+
+    await expect(settleSandboxUsage(sandboxRow(), deps)).rejects.toThrow("Autumn");
+
+    expect(deps.track).not.toHaveBeenCalled();
+    expect(deps.trackMachineHours).not.toHaveBeenCalled();
+    expect(deps.markBilled).not.toHaveBeenCalled();
   });
 
   it("prices a non-billable sandbox period without reporting it", async () => {

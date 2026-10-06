@@ -1,5 +1,5 @@
 import {
-  checkUsageAllowance,
+  checkWorkAllowance,
   consumeInvestigation,
   reserveInvestigation,
   type InvestigationAccess,
@@ -16,23 +16,26 @@ export interface InvestigationRetryAdmission extends InvestigationReservationAcc
 }
 
 const dependencies = {
-  checkUsageAllowance,
+  checkWorkAllowance,
   consumeInvestigation,
   organizationUsesUsageBilling,
   reserveInvestigation,
 };
 
 // Admits a new investigation. Usage-billed organizations start one while
-// their usage allowance lasts and pay for what it uses; the others spend one
-// investigation credit.
+// their usage credit and machine time last, or while their plan bills usage
+// past them, and pay for what it uses; the others spend one investigation
+// credit.
 export async function admitInvestigation(
   organizationId: string,
   investigationId: string,
   injected: typeof dependencies = dependencies,
 ): Promise<InvestigationAdmission> {
   if (await injected.organizationUsesUsageBilling(organizationId)) {
-    const access = await injected.checkUsageAllowance(organizationId);
-    return { ...access, configured: true, usageBased: true };
+    const { allowed, nextResetAt } = await injected.checkWorkAllowance(organizationId, {
+      responderModels: true,
+    });
+    return { allowed, configured: true, nextResetAt, usageBased: true };
   }
   return {
     ...(await injected.consumeInvestigation(organizationId, investigationId)),
@@ -48,8 +51,10 @@ export async function admitInvestigationRetry(
   injected: typeof dependencies = dependencies,
 ): Promise<InvestigationRetryAdmission> {
   if (await injected.organizationUsesUsageBilling(organizationId)) {
-    const access = await injected.checkUsageAllowance(organizationId);
-    return { ...access, configured: true, reservationId: null, usageBased: true };
+    const { allowed, nextResetAt } = await injected.checkWorkAllowance(organizationId, {
+      responderModels: true,
+    });
+    return { allowed, configured: true, nextResetAt, reservationId: null, usageBased: true };
   }
   return {
     ...(await injected.reserveInvestigation(organizationId, investigationId)),
