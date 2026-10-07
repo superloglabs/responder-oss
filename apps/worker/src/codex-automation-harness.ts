@@ -44,7 +44,15 @@ const codexHome = `${automationWorkspaceRoot}/.responder/codex-home`;
 const promptPath = `${automationWorkspaceRoot}/.responder/automation-prompt.txt`;
 // The sandbox API writes only inside the workspace, so the cache is staged
 // here as root and moved into its private directory before any tool runs.
-const subscriptionModelRefused = /model is not supported when using Codex with a ChatGPT account/u;
+// Names the ChatGPT refusals the organization can fix itself.
+function subscriptionFailure(output: string, model: string): string {
+  // A ChatGPT account serves fewer models than the included catalog.
+  if (/model is not supported when using Codex with a ChatGPT account/u.test(output))
+    return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
+  if (/auth error code: deactivated_workspace/u.test(output))
+    return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+  return "Codex automation harness failed";
+}
 const stagedSubscriptionAuthPath = `${automationWorkspaceRoot}/.responder/subscription-auth.json`;
 
 function commandSucceeded(output: string): boolean {
@@ -260,13 +268,8 @@ export async function runCodexAutomation(
   }
   // Checked after redaction so a failed run can keep its transcript.
   if (!commandSucceeded(output)) {
-    // A ChatGPT account serves fewer models than the included catalog, so a
-    // run can name a model the subscription refuses.
-    if (input.model.subscription && subscriptionModelRefused.test(output))
-      throw new AutomationHarnessError(
-        `${input.model.model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`,
-        output,
-      );
+    if (input.model.subscription)
+      throw new AutomationHarnessError(subscriptionFailure(output, input.model.model), output);
     throw new AutomationHarnessError("Codex automation harness failed", output);
   }
   return { eventStream: output };

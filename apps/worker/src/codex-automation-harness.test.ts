@@ -333,6 +333,39 @@ it("names the model when the ChatGPT subscription does not offer it", async () =
   );
 });
 
+it("says so when the ChatGPT workspace behind the subscription is deactivated", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const refusal = JSON.stringify({
+    type: "turn.failed",
+    error: { message: "unexpected status 402 Payment Required: Payment Required, url: https://chatgpt.com/backend-api/codex/responses, auth error: 402, auth error code: deactivated_workspace" },
+  });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${refusal}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  await expect(runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  })).rejects.toThrow(
+    "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.",
+  );
+});
+
 it("redacts native subscription tokens from persisted harness output", async () => {
   const authJson = JSON.stringify({
     tokens: {
