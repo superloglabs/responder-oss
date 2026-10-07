@@ -62,9 +62,12 @@ test.beforeEach(async ({ page }) => {
   await mockApplicationApis(page);
 });
 
-test("opens agent creation after creating a workspace", async ({ page }) => {
+async function createWorkspace(page: Page, capabilities: string[]) {
   let activeOrganizationId: string | null = null;
 
+  await page.route("**/api/context", (route) =>
+    route.fulfill({ json: { capabilities } }),
+  );
   await page.route("**/api/auth/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
 
@@ -97,13 +100,24 @@ test("opens agent creation after creating a workspace", async ({ page }) => {
     await route.fulfill({ json: null });
   });
   await page.goto("/agents");
-  await expect(page.getByRole("heading", { name: "Create a workspace" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Name your workspace" })).toBeVisible();
 
-  await page.getByLabel("New workspace").fill("Acme");
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  await page.getByLabel("Workspace name").fill("Acme");
+  await page.getByLabel("Workspace name").press("Enter");
+}
+
+test("opens agent creation after creating a workspace", async ({ page }) => {
+  await createWorkspace(page, []);
 
   await expect(page).toHaveURL(/\/agents\/new$/);
   await expect(page.getByRole("heading", { name: "Create agent" })).toBeVisible();
+});
+
+test("continues guided setup after creating a workspace with automations", async ({ page }) => {
+  await createWorkspace(page, ["automations", "simplified_navigation"]);
+
+  await expect(page).toHaveURL(/\/onboarding\/code$/);
+  await expect(page.getByRole("heading", { name: "Connect your code" })).toBeVisible();
 });
 
 test("shows specific workspace secret validation issues", async ({
