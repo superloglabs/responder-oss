@@ -1,5 +1,6 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
+import { syncLoopsSignupContact } from "@responder/core/loops-contacts";
 import { captureRedditSignupConversion } from "@responder/core/reddit-conversions";
 import { captureXSignupConversion } from "@responder/core/x-conversions";
 import { getDatabase } from "../../../packages/core/src/db/client.js";
@@ -212,6 +213,7 @@ export function createResponderAuth() {
                 signup_method: signupMethod,
               },
             });
+            await syncLoopsSignupContact({ email: user.email, name: user.name });
             if (!allowsMarketing(new Headers(context?.headers))) return;
             await Promise.all([
               captureRedditSignupConversion({
