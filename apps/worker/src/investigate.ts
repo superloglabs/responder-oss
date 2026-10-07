@@ -90,6 +90,7 @@ import {
   createDaytonaSandboxSession,
   prepareDaytonaSandbox,
   pauseDaytonaSandbox,
+  resumeDaytonaSandbox,
 } from "./sandbox.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 import { agentUsageIsBillable, recordAgentRunUsage } from "./agent-usage.js";
@@ -967,9 +968,7 @@ export async function runInvestigationAgent(
     const persistedState = sessionRuntime?.sandboxSessionState;
     if (threadMode && persistedState) {
       try {
-        session = await client.resume(
-          await client.deserializeSessionState(persistedState),
-        );
+        session = await resumeDaytonaSandbox(client, persistedState, config);
       } catch (error) {
         // Daytona deletes a paused thread sandbox after a day; the thread
         // continues in a fresh one.

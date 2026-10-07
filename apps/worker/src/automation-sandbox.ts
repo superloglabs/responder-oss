@@ -19,6 +19,7 @@ import {
   maxDaytonaSandboxBaseNameLength,
   prepareDaytonaSandbox,
   replaceDaytonaSandboxSecrets,
+  resumeDaytonaSandbox,
   sandboxesLeftAfterFailedCreation,
   type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
@@ -265,7 +266,7 @@ export async function runInFreshAutomationSandbox<T>(
     if (input.resumeState) {
       try {
         session = await abortable(
-          client.resume(await client.deserializeSessionState(input.resumeState)),
+          resumeDaytonaSandbox(client, input.resumeState, input.config),
           input.signal,
         );
         // Daytona recreates a sandbox it no longer has; that one needs setup.

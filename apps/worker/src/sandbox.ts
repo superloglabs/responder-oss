@@ -497,6 +497,17 @@ export async function replaceDaytonaSandboxSecrets(
   }
 }
 
+// A paused sandbox's saved state leaves out the API key. The resumed
+// session gets it back, because its file transfers read it from the state.
+export async function resumeDaytonaSandbox(
+  client: DaytonaSandboxClient,
+  persistedState: Record<string, unknown>,
+  config: DaytonaClientConfig,
+): Promise<DaytonaSandboxSession> {
+  const state = await client.deserializeSessionState(persistedState);
+  return client.resume({ ...state, apiKey: config.daytonaApiKey });
+}
+
 // A thread sandbox that fails to stop keeps running until Daytona's
 // auto-stop, and the next turn resumes or replaces it. The failure is
 // reported without failing the turn that already has its answer.

@@ -1,4 +1,7 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type {
+  DaytonaSandboxClient,
+  DaytonaSandboxSession,
+} from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
 import {
   closeDaytonaSandbox,
@@ -10,6 +13,7 @@ import {
   prepareDaytonaPatchSandbox,
   prepareDaytonaSandbox,
   replaceDaytonaSandboxSecrets,
+  resumeDaytonaSandbox,
   sandboxDeletedAfterFailedCreation,
   sandboxesLeftAfterFailedCreation,
 } from "./sandbox.js";
@@ -773,6 +777,31 @@ describe("Daytona sandbox cleanup", () => {
       expect.stringContaining("daytona_sandbox_cleanup_failed"),
     );
     consoleError.mockRestore();
+  });
+});
+
+describe("Daytona sandbox resume", () => {
+  it("gives the resumed session the API key its saved state left out", async () => {
+    const session = { state: { sandboxId: "sandbox-1" } };
+    const client = {
+      deserializeSessionState: vi.fn(async (state: Record<string, unknown>) => ({
+        ...state,
+        apiKey: undefined,
+      })),
+      resume: vi.fn().mockResolvedValue(session),
+    };
+
+    await expect(
+      resumeDaytonaSandbox(
+        client as unknown as DaytonaSandboxClient,
+        { sandboxId: "sandbox-1" },
+        { daytonaApiKey: "daytona-key" },
+      ),
+    ).resolves.toBe(session);
+    expect(client.resume).toHaveBeenCalledWith({
+      apiKey: "daytona-key",
+      sandboxId: "sandbox-1",
+    });
   });
 });
 
