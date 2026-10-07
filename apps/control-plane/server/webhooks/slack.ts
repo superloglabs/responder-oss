@@ -1319,6 +1319,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     teamId: callback.data.team_id,
     text: rawMessageBody,
     threadTimestamp: event.thread_ts,
+    timestamp: event.ts,
   });
   if (author) {
     // The trigger editor offers the people and apps seen here as authors to
