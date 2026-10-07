@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
+import { markPullRequestOriginMerged } from "@responder/core/db/pull-request-origins";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
@@ -10,6 +11,11 @@ import { startPullRequestReviewTurn } from "./github-reviews.js";
 
 vi.mock("@responder/core/analytics", () => ({
   captureAnalyticsEvent: vi.fn(),
+}));
+
+vi.mock("@responder/core/db/pull-request-origins", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@responder/core/db/pull-request-origins")>(),
+  markPullRequestOriginMerged: vi.fn(),
 }));
 
 vi.mock("@responder/core/db/pull-requests", () => ({
@@ -240,11 +246,29 @@ describe("GitHub pull request webhooks", () => {
     vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
     vi.mocked(markIssuePullRequestMerged).mockResolvedValue(null);
     vi.mocked(markSuggestionPullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markPullRequestOriginMerged).mockResolvedValue(false);
 
     const response = await post(pullRequestEvent());
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, matched: false });
+    expect(captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("records the merge of a pull request an automation or thread opened", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(markIssuePullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markSuggestionPullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markPullRequestOriginMerged).mockResolvedValue(true);
+
+    const response = await post(pullRequestEvent({ number: 42, repository: "acme/api" }));
+
+    await expect(response.json()).resolves.toEqual({ ok: true, matched: true });
+    expect(markPullRequestOriginMerged).toHaveBeenCalledWith({
+      pullRequestNumber: 42,
+      repositoryFullName: "acme/api",
+    });
+    expect(refreshIssuePullRequestSlackMessages).not.toHaveBeenCalled();
     expect(captureAnalyticsEvent).not.toHaveBeenCalled();
   });
 });

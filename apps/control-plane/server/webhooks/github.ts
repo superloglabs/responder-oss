@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
+import { markPullRequestOriginMerged } from "@responder/core/db/pull-request-origins";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
@@ -114,7 +115,13 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
       });
   const merged = mergedIssue ?? mergedSuggestion;
   if (!merged) {
-    return context.json({ ok: true, matched: false });
+    // Pull requests opened by automations and Slack threads keep their merge
+    // time on their origin.
+    const mergedOrigin = await markPullRequestOriginMerged({
+      pullRequestNumber: pullRequest.number,
+      repositoryFullName: repository.full_name,
+    });
+    return context.json({ ok: true, matched: mergedOrigin });
   }
   if (mergedIssue) {
     await refreshIssuePullRequestSlackMessages(merged.requestId);

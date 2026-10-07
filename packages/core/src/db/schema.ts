@@ -1390,6 +1390,8 @@ export const pullRequestOrigins = pgTable(
     botReviewTurns: integer("bot_review_turns").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    // Set when GitHub reports the pull request merged.
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("pull_request_origins_pull_request_idx").on(
