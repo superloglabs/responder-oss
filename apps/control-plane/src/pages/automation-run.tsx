@@ -282,7 +282,11 @@ function Entry({ animate, entry, live, run }: { animate: boolean; entry: Automat
     case "notice":
       return <p className="automationRun__notice">{entry.text}</p>;
     case "failure":
-      return <p className="automationRun__failure" role="alert">{entry.text}</p>;
+      // The allowance stopping a run is not a broken automation, so it reads
+      // as a notice in the same amber as its status.
+      return automationRunDisplayStatus(run) === "usage_limit"
+        ? <p className="automationRun__failure automationRun__failure--usageLimit" role="status">{entry.text}</p>
+        : <p className="automationRun__failure" role="alert">{entry.text}</p>;
   }
 }
 

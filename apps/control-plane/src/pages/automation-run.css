@@ -74,6 +74,7 @@
 
 .automationRun__notice { margin: 0; color: #666; font-size: 12px; line-height: 18px; }
 .automationRun__failure { max-width: 800px; margin: 0; padding: 10px 12px; border: 1px solid #ecc9c9; border-radius: 8px; background: #fdf4f4; color: #8a2f2b; line-height: 21px; overflow-wrap: anywhere; }
+.automationRun__failure--usageLimit { border-color: #ead9b0; background: #fdf8ec; color: #8a5a00; }
 .automationRun__activity { margin: 0; line-height: 21px; }
 .automationRun__shimmer { color: #666; }
 @supports (background-clip: text) {
