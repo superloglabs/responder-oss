@@ -63,6 +63,9 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
     onChange({ modelProvider: provider, model: model.id, harness });
   }
   const selectedModel = configuration.model ? `${configuration.modelProvider}/${configuration.model}` : "";
+  // The subscription's models run only on Codex, so the other harnesses are hidden.
+  const providerCatalog = catalogs[configuration.modelProvider];
+  const subscriptionModels = providerCatalog?.status === "ready" && providerCatalog.subscription === true;
   return <div className="automationModel">
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
@@ -109,7 +112,7 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
         <DropdownMenuLabel className="font-normal text-muted-foreground">Harnesses for {configuration.model}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup value={configuration.harness} onValueChange={value => onChange({ harness: value as AutomationConfiguration["harness"] })}>
-          {harnesses.filter(item => supportsAutomationHarness(configuration.modelProvider, item.id)).map(item => <DropdownMenuRadioItem key={item.id} value={item.id}>
+          {harnesses.filter(item => supportsAutomationHarness(configuration.modelProvider, item.id) && (!subscriptionModels || item.id === "codex")).map(item => <DropdownMenuRadioItem key={item.id} value={item.id}>
             <div className="flex flex-col"><span>{item.name}</span><span className="text-xs text-muted-foreground">{item.description}</span></div>
           </DropdownMenuRadioItem>)}
         </DropdownMenuRadioGroup>
