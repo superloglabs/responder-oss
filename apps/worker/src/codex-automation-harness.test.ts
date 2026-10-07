@@ -297,6 +297,42 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
   );
 });
 
+it("names the model when the ChatGPT subscription does not offer it", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const refusal = JSON.stringify({
+    type: "turn.failed",
+    error: { message: JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account." } }) },
+  });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${refusal}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  const run = runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  });
+
+  await expect(run).rejects.toBeInstanceOf(AutomationHarnessError);
+  await expect(run).rejects.toThrow(
+    "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.",
+  );
+});
+
 it("redacts native subscription tokens from persisted harness output", async () => {
   const authJson = JSON.stringify({
     tokens: {

@@ -44,6 +44,7 @@ const codexHome = `${automationWorkspaceRoot}/.responder/codex-home`;
 const promptPath = `${automationWorkspaceRoot}/.responder/automation-prompt.txt`;
 // The sandbox API writes only inside the workspace, so the cache is staged
 // here as root and moved into its private directory before any tool runs.
+const subscriptionModelRefused = /model is not supported when using Codex with a ChatGPT account/u;
 const stagedSubscriptionAuthPath = `${automationWorkspaceRoot}/.responder/subscription-auth.json`;
 
 function commandSucceeded(output: string): boolean {
@@ -258,7 +259,15 @@ export async function runCodexAutomation(
       output = output.replaceAll(secret, "[redacted]");
   }
   // Checked after redaction so a failed run can keep its transcript.
-  if (!commandSucceeded(output))
+  if (!commandSucceeded(output)) {
+    // A ChatGPT account serves fewer models than the included catalog, so a
+    // run can name a model the subscription refuses.
+    if (input.model.subscription && subscriptionModelRefused.test(output))
+      throw new AutomationHarnessError(
+        `${input.model.model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`,
+        output,
+      );
     throw new AutomationHarnessError("Codex automation harness failed", output);
+  }
   return { eventStream: output };
 }
