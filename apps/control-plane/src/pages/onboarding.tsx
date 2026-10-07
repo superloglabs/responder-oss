@@ -20,12 +20,14 @@ import {
   onboardingPlanCards,
   onboardingStepFromPath,
   onboardingSteps,
+  planBillingState,
   planChangeConfirmation,
   recommendedTemplates,
   templateProviders,
   type BillingPlanSummary,
   type OnboardingProvider,
   type OnboardingStep,
+  type PlanBillingState,
 } from "./onboarding-presentation";
 
 interface OnboardingIntegration {
@@ -48,13 +50,14 @@ async function fetchIntegrations(signal?: AbortSignal): Promise<OnboardingIntegr
   return ((await response.json()) as { integrations: OnboardingIntegration[] }).integrations;
 }
 
-// Null when this installation cannot change plans, so the usage step offers
-// only the Codex connection.
-async function fetchPlanBilling(): Promise<OnboardingBilling | null> {
+// Installations that cannot change plans offer only the Codex connection on
+// the usage step.
+async function fetchPlanBilling(): Promise<PlanBillingState<OnboardingBilling>> {
   const response = await fetch("/api/billing").catch(() => null);
-  if (!response?.ok) return null;
-  const billing = (await response.json().catch(() => null)) as OnboardingBilling | null;
-  return billing?.enabled && billing.automations?.configured ? billing : null;
+  const billing = response?.ok
+    ? (await response.json().catch(() => null)) as OnboardingBilling | null
+    : null;
+  return planBillingState(billing);
 }
 
 // Guided setup for a new workspace: connect code and alert sources, choose
@@ -67,7 +70,8 @@ export function OnboardingPage() {
   const navigate = useNavigate();
   const { step: stepParameter } = useParams();
   const [integrations, setIntegrations] = useState<OnboardingIntegration[] | null>(null);
-  const [billing, setBilling] = useState<OnboardingBilling | null | undefined>(undefined);
+  const [billing, setBilling] = useState<PlanBillingState<OnboardingBilling> | undefined>(undefined);
+  const [retryingBilling, setRetryingBilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -201,16 +205,38 @@ export function OnboardingPage() {
     );
   }
 
-  if (step === "usage" && billing?.automations) {
+  if (step === "usage" && billing.kind === "plans" && billing.billing.automations) {
+    const { automations, payAsYouGo } = billing.billing;
     return (
       <OnboardingFrame footer={secondaryActions} step={step} steps={steps}>
         <PlanStep
           // A saved payment method is charged without a checkout page.
-          chargesSavedMethod={billing.payAsYouGo || billing.automations.paid}
+          chargesSavedMethod={payAsYouGo || automations.paid}
           onContinue={goNext}
           returnTo={next ? onboardingPath(next) : finish}
-          summary={billing.automations}
+          summary={automations}
         />
+      </OnboardingFrame>
+    );
+  }
+
+  if (step === "usage" && billing.kind === "error") {
+    async function retryBilling() {
+      setRetryingBilling(true);
+      setBilling(await fetchPlanBilling());
+      setRetryingBilling(false);
+    }
+    return (
+      <OnboardingFrame footer={secondaryActions} step={step} steps={steps}>
+        <div className="onboarding__intro">
+          <h1>Choose your plan</h1>
+          <p>Plans could not be loaded. Try again, or skip setup and choose a plan later in Billing.</p>
+        </div>
+        <div>
+          <button className="onboarding__button" disabled={retryingBilling} onClick={() => void retryBilling()} type="button">
+            {retryingBilling ? "Loading plans…" : "Try again"}
+          </button>
+        </div>
       </OnboardingFrame>
     );
   }

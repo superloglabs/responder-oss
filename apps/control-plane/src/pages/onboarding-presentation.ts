@@ -106,6 +106,20 @@ export function recommendedTemplates(connected: readonly string[], limit = 3): T
     .map(({ missing, template }) => ({ missing, template }));
 }
 
+export type PlanBillingState<Billing> =
+  | { billing: Billing; kind: "plans" }
+  | { kind: "error" }
+  | { kind: "none" };
+
+// Reads the billing response for the usage step. A failed request is an
+// error to retry, not an installation without plans.
+export function planBillingState<Billing extends { automations: { configured: boolean } | null; enabled: boolean }>(
+  billing: Billing | null,
+): PlanBillingState<Billing> {
+  if (!billing) return { kind: "error" };
+  return billing.enabled && billing.automations?.configured ? { billing, kind: "plans" } : { kind: "none" };
+}
+
 export interface BillingPlanSummary {
   allowance: number;
   machineHours: { granted: number } | null;

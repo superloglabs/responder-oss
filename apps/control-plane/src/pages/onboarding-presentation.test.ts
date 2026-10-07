@@ -3,6 +3,7 @@ import { automationTemplates } from "./automation-templates";
 import {
   connectedProviders,
   onboardingPlanCards,
+  planBillingState,
   planChangeConfirmation,
   onboardingStepFromPath,
   onboardingSteps,
@@ -44,6 +45,24 @@ describe("planChangeConfirmation", () => {
   it("says a cheaper plan starts at the end of the period", () => {
     expect(planChangeConfirmation({ name: "Pro", price: 100 }, 200))
       .toBe("Switch to Pro ($100 / month) at the end of this billing period?");
+  });
+});
+
+describe("planBillingState", () => {
+  const automations = { configured: true };
+
+  it("offers plans when billing can change them", () => {
+    expect(planBillingState({ automations, enabled: true })).toEqual({ billing: { automations, enabled: true }, kind: "plans" });
+  });
+
+  it("offers no plans when billing is off or not configured", () => {
+    expect(planBillingState({ automations, enabled: false })).toEqual({ kind: "none" });
+    expect(planBillingState({ automations: { configured: false }, enabled: true })).toEqual({ kind: "none" });
+    expect(planBillingState({ automations: null, enabled: true })).toEqual({ kind: "none" });
+  });
+
+  it("reports a failed billing request instead of hiding plans", () => {
+    expect(planBillingState(null)).toEqual({ kind: "error" });
   });
 });
 
