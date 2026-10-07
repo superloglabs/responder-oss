@@ -17,6 +17,8 @@ describe("Loops signup contacts", () => {
   });
 
   it("is disabled when the API key is absent", async () => {
+    vi.stubEnv("LOOPS_API_KEY", "");
+
     await syncLoopsSignupContact({ email: "user@example.com", name: "Ada" });
 
     expect(fetchMock).not.toHaveBeenCalled();
