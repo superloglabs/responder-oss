@@ -27,6 +27,11 @@ import {
   type AutomationSubagentStep,
 } from "../automation-run-timeline";
 import {
+  automationRunDisplayStatus,
+  automationRunStatusLabels,
+  type AutomationRunDisplayStatus,
+} from "../automation-run-status";
+import {
   cancelAutomationRun,
   fetchAutomation,
   fetchAutomationRun,
@@ -46,14 +51,6 @@ import { useDocumentTitle } from "../use-document-title";
 import "./automation-create.css";
 import "./automation-run.css";
 
-const statusLabels: Record<AutomationRunStatus, string> = {
-  cancelled: "Cancelled",
-  failed: "Failed",
-  pending: "Queued",
-  running: "Running",
-  succeeded: "Completed",
-};
-
 function isActive(status: AutomationRunStatus) {
   return status === "pending" || status === "running";
 }
@@ -70,7 +67,7 @@ function RunHeader({ automationId, automationName, current, status, title }: {
   automationId: string;
   automationName: string;
   current: string;
-  status?: AutomationRunStatus;
+  status?: AutomationRunDisplayStatus;
   title: string;
 }) {
   return <header className="automationCreate__header">
@@ -82,7 +79,7 @@ function RunHeader({ automationId, automationName, current, status, title }: {
     <div className="automationCreate__titleRow">
       <h1>{title}</h1>
       <span className="automationCreate__spacer" />
-      {status ? <span className={`automationRun__status automationRun__status--${status}`}><i aria-hidden="true" />{statusLabels[status]}</span> : null}
+      {status ? <span className={`automationRun__status automationRun__status--${status}`}><i aria-hidden="true" />{automationRunStatusLabels[status]}</span> : null}
     </div>
   </header>;
 }
@@ -285,7 +282,11 @@ function Entry({ animate, entry, live, run }: { animate: boolean; entry: Automat
     case "notice":
       return <p className="automationRun__notice">{entry.text}</p>;
     case "failure":
-      return <p className="automationRun__failure" role="alert">{entry.text}</p>;
+      // The allowance stopping a run is not a broken automation, so it reads
+      // as a notice in the same amber as its status.
+      return automationRunDisplayStatus(run) === "usage_limit"
+        ? <p className="automationRun__failure automationRun__failure--usageLimit" role="status">{entry.text}</p>
+        : <p className="automationRun__failure" role="alert">{entry.text}</p>;
   }
 }
 
@@ -429,7 +430,7 @@ function AutomationRunContent({ automationId, runId }: { automationId: string; r
 
   return <AppShell active="automations" redesigned density="create">
     <div className="automationCreate automationRun">
-      <RunHeader automationId={run.automationId} automationName={run.automationName} current={`Run #${run.number}`} status={run.status} title={run.trigger.title} />
+      <RunHeader automationId={run.automationId} automationName={run.automationName} current={`Run #${run.number}`} status={automationRunDisplayStatus(run)} title={run.trigger.title} />
       <section aria-label="Run transcript" className="automationRun__transcript" ref={transcript}>
         {entries.map((entry) => <Entry animate={!initialMessages?.has(entry.key)} entry={entry} key={entry.key} live={entry.key === liveActivity} run={run} />)}
         {active

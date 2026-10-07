@@ -1042,13 +1042,17 @@ export async function processAutomationRun(
       stopped instanceof AutomationRunCancelledError;
     const timedOut = error instanceof AutomationRunTimeoutError ||
       stopped instanceof AutomationRunTimeoutError;
-    const allowanceExhausted = error instanceof AutomationAllowanceExhaustedError;
+    // The harness runs in the model broker queue, so its failure also comes
+    // back from the queue and arrives wrapped with the error the turn raised.
+    const allowanceExhausted = [error, ...(error instanceof AggregateError ? error.errors : [])]
+      .find((cause): cause is AutomationAllowanceExhaustedError =>
+        cause instanceof AutomationAllowanceExhaustedError);
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
       : allowanceExhausted
-        ? error.message
+        ? allowanceExhausted.message
       : safeInvestigationError(error, environment);
     if (!leaseLost) {
       await dependencies.setStatus({
