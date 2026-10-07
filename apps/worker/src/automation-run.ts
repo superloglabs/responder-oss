@@ -33,6 +33,7 @@ import {
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkWorkAllowance } from "@responder/core/billing/autumn";
+import { waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
@@ -156,6 +157,7 @@ export interface AutomationRunDependencies {
   createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
+  waiveUsage: typeof waiveAutomationRunUsage;
   workspaceTools: typeof workspaceToolSpecs;
 }
 
@@ -203,6 +205,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
+  waiveUsage: waiveAutomationRunUsage,
   workspaceTools: workspaceToolSpecs,
 };
 
@@ -615,6 +618,8 @@ export async function processAutomationRun(
 ): Promise<{ runId: string }> {
   const run = await dependencies.claimRun(payload.runId);
   if (!run) return { runId: payload.runId };
+  // Usage recorded from here on belongs to this turn.
+  const turnStartedAt = dependencies.now();
 
   await recordEvent(dependencies, run.runId, "run_started", {
     harness: run.harness,
@@ -1076,6 +1081,17 @@ export async function processAutomationRun(
         cancelled ? "run_cancelled" : "run_failed",
         cancelled ? undefined : { message },
       );
+    }
+    // A turn that failed through Responder's fault is not charged. A run
+    // that reached its own runtime limit or allowance is.
+    if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
+      await dependencies.waiveUsage({ runId: run.runId, since: turnStartedAt }).catch((waiveError) =>
+        dependencies.reportException(waiveError, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
     }
     turnEnded = !cancelled && !leaseLost;
     if (turnEnded) outcome = { message, status: "failed" };

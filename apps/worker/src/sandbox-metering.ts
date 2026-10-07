@@ -12,7 +12,9 @@ const daytonaDefaultResources = { cpu: 1, disk: 3, memory: 1 };
 const heartbeatIntervalMs = 60_000;
 
 export interface SandboxMeter {
-  stop(): Promise<void>;
+  // A waived period is not charged, for work that failed through Responder's
+  // fault.
+  stop(options?: { waived?: boolean }): Promise<void>;
 }
 
 export interface SandboxMeterInput {
@@ -73,12 +75,12 @@ export function startSandboxMeter(
   heartbeat.unref();
   let stopped: Promise<void> | undefined;
   return {
-    stop() {
+    stop(options = {}) {
       stopped ??= (async () => {
         clearInterval(heartbeat);
         const id = await usageId;
         if (!id) return;
-        await dependencies.finish(id).catch((error: unknown) => {
+        await dependencies.finish(id, options).catch((error: unknown) => {
           logMeterError("sandbox_usage_stop_failed", input, error);
         });
       })();

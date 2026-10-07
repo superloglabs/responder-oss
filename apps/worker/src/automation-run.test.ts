@@ -150,6 +150,7 @@ function dependencies() {
       update: vi.fn().mockResolvedValue(undefined),
     },
     updateEvent: vi.fn().mockResolvedValue(undefined),
+    waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(undefined),
     workspaceTools: vi.fn<AutomationRunDependencies["workspaceTools"]>(() => []),
   };
 }
@@ -1469,6 +1470,42 @@ describe("automation run processor", () => {
       failureMessage: "Codex automation harness failed",
       status: "failed",
     }));
+    expect(deps.waiveUsage).toHaveBeenCalledWith({ runId, since: expect.any(Date) });
+  });
+
+  it("does not waive the usage of a turn the allowance stopped", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantAllowanceExhausted.mockResolvedValue(true);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
+  });
+
+  it("still finishes a failed turn when its usage cannot be waived", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    const waiveError = new Error("database unavailable");
+    deps.waiveUsage.mockRejectedValue(waiveError);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(deps.reportException).toHaveBeenCalledWith(waiveError, expect.objectContaining({ requestId: runId }));
   });
   it("stores the transcript and summarizes the result", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
@@ -1487,6 +1524,7 @@ describe("automation run processor", () => {
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
     expect(deps.appendEvent).toHaveBeenCalledWith({
       data: {
         items: [{ kind: "message", observedAt: Date.parse("2026-09-22T19:00:00.000Z"), text: "Fixed the flaky test." }],

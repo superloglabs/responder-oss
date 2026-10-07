@@ -95,6 +95,7 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import { creditWaivedUsage } from "@responder/core/billing/usage-waivers";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -189,6 +190,25 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.failed > 0) {
       await reportWorkerException(
         new Error(`${result.failed} sandbox or agent usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  try {
+    const result = await creditWaivedUsage();
+    if (result.credited > 0 || result.failed > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "waived_usage_credited",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} waived usage records could not be credited`),
         { operation: "worker" },
       ).catch(() => undefined);
     }

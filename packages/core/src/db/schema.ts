@@ -1064,6 +1064,11 @@ export const automationModelUsage = pgTable(
     costMicros: bigint("cost_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    // Set when the run turn that used it failed through Responder's fault, so
+    // it is not charged. `creditedAt` is set once billing reflects that: a
+    // charge already reported was credited back, or none was reported.
+    waivedAt: timestamp("waived_at", { withTimezone: true }),
+    creditedAt: timestamp("credited_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -1078,6 +1083,9 @@ export const automationModelUsage = pgTable(
     index("automation_model_usage_unbilled_idx")
       .on(table.organizationId, table.createdAt)
       .where(sql`${table.billedAt} is null`),
+    index("automation_model_usage_uncredited_idx")
+      .on(table.waivedAt)
+      .where(sql`${table.waivedAt} is not null and ${table.creditedAt} is null`),
     check(
       "automation_model_usage_source_check",
       sql`${table.inferenceSource} in ('responder', 'byok', 'byos')`,
@@ -1125,6 +1133,9 @@ export const sandboxUsage = pgTable(
     chargeMicros: bigint("charge_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    // Waived and credited as for automation model usage.
+    waivedAt: timestamp("waived_at", { withTimezone: true }),
+    creditedAt: timestamp("credited_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1141,6 +1152,9 @@ export const sandboxUsage = pgTable(
     index("sandbox_usage_unbilled_idx")
       .on(table.stoppedAt)
       .where(sql`${table.billedAt} is null`),
+    index("sandbox_usage_uncredited_idx")
+      .on(table.waivedAt)
+      .where(sql`${table.waivedAt} is not null and ${table.creditedAt} is null`),
     check(
       "sandbox_usage_workload_check",
       sql`${table.workload} in ('automation', 'investigation', 'pull_request_review', 'remediation')`,

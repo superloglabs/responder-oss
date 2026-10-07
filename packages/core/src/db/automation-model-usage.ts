@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type {
   AutomationInferenceSource,
   AutomationModelProvider,
@@ -15,6 +15,8 @@ export interface AutomationModelUsageRecord extends AutomationModelUsage {
   organizationId: string;
   provider: AutomationModelProvider;
   runId: string;
+  // The run turn failed through Responder's fault, so it is not charged.
+  waived: boolean;
 }
 
 const usageSelection = {
@@ -29,6 +31,7 @@ const usageSelection = {
   outputTokens: automationModelUsage.outputTokens,
   provider: automationModelUsage.provider,
   runId: automationModelUsage.runId,
+  waived: sql<boolean>`${automationModelUsage.waivedAt} is not null`,
 };
 
 // A pending reservation stops counting after this long. It covers the broker's
@@ -36,7 +39,7 @@ const usageSelection = {
 const reservationLifetimeMs = 15 * 60_000;
 
 export async function recordAutomationModelUsage(
-  input: Omit<AutomationModelUsageRecord, "id"> & { settled: boolean },
+  input: Omit<AutomationModelUsageRecord, "id" | "waived"> & { settled: boolean },
 ): Promise<AutomationModelUsageRecord> {
   const { settled, ...values } = input;
   const now = new Date();
@@ -64,6 +67,61 @@ export async function markAutomationModelUsageBilled(id: string): Promise<void> 
     .update(automationModelUsage)
     .set({ billedAt: new Date() })
     .where(and(eq(automationModelUsage.id, id), isNull(automationModelUsage.billedAt)));
+}
+
+// Settles a waived row without reporting it. A row another settlement
+// already reported stays uncredited, so the credit pass returns its charge.
+export async function markWaivedAutomationModelUsageSettled(id: string): Promise<void> {
+  const now = new Date();
+  await getDatabase()
+    .update(automationModelUsage)
+    .set({ billedAt: now, creditedAt: now })
+    .where(and(eq(automationModelUsage.id, id), isNull(automationModelUsage.billedAt)));
+}
+
+// Waives the Responder-funded requests a run made since `since`.
+export async function waiveAutomationRunModelUsage(
+  runId: string,
+  since: Date,
+): Promise<void> {
+  await getDatabase()
+    .update(automationModelUsage)
+    .set({ waivedAt: new Date() })
+    .where(
+      and(
+        eq(automationModelUsage.runId, runId),
+        eq(automationModelUsage.inferenceSource, "responder"),
+        gte(automationModelUsage.createdAt, since),
+        isNull(automationModelUsage.waivedAt),
+      ),
+    );
+}
+
+// Waived rows that were reported to billing and not yet credited.
+export async function listUncreditedAutomationModelUsage(input: {
+  limit: number;
+  waivedAfter: Date;
+}): Promise<AutomationModelUsageRecord[]> {
+  return getDatabase()
+    .select(usageSelection)
+    .from(automationModelUsage)
+    .where(
+      and(
+        isNotNull(automationModelUsage.waivedAt),
+        isNull(automationModelUsage.creditedAt),
+        isNotNull(automationModelUsage.billedAt),
+        gt(automationModelUsage.waivedAt, input.waivedAfter),
+      ),
+    )
+    .orderBy(asc(automationModelUsage.waivedAt))
+    .limit(input.limit);
+}
+
+export async function markAutomationModelUsageCredited(id: string): Promise<void> {
+  await getDatabase()
+    .update(automationModelUsage)
+    .set({ creditedAt: new Date() })
+    .where(and(eq(automationModelUsage.id, id), isNull(automationModelUsage.creditedAt)));
 }
 
 // Completed rows not yet settled: Responder-funded rows still need billing and

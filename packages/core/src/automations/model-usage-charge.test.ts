@@ -29,12 +29,15 @@ function dependencies() {
       organizationId: "organization-1",
       provider: "openai",
       runId: "run-1",
+      waived: false,
     }) as AutomationModelUsageRecord),
     getPricing: vi.fn().mockResolvedValue({ input: "0.000002", output: "0.00001" }),
     markBilled: vi.fn().mockResolvedValue(undefined),
-    record: vi.fn(async (input: Omit<AutomationModelUsageRecord, "id">) => ({
+    markWaivedSettled: vi.fn().mockResolvedValue(undefined),
+    record: vi.fn(async (input: Omit<AutomationModelUsageRecord, "id" | "waived">) => ({
       ...input,
       id: "usage-1",
+      waived: false,
     })),
     setCost: vi.fn().mockResolvedValue(undefined),
     track: vi.fn().mockResolvedValue(undefined),
