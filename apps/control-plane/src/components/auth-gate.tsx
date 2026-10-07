@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { ArrowRightIcon } from "@phosphor-icons/react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
@@ -19,6 +20,8 @@ import { requestCapabilities } from "../organization-capabilities";
 import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import { OnboardingFrame } from "./onboarding-frame";
+import { onboardingSteps } from "../pages/onboarding-presentation";
 
 interface AuthGateProps {
   children: ReactNode;
@@ -401,8 +404,51 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
     );
   }
 
+  // A member without workspaces starts guided setup by naming one, unless
+  // they came to set up a template. Setup lists the plan step because hosted
+  // installations offer plans.
+  if (!organizations.isPending && !hasOrganizations && !automationSetupReturnPath(window.location)) {
+    return (
+      <OnboardingFrame
+        activeStages={[]}
+        footer={
+          <button
+            className="onboarding__primary"
+            disabled={isSubmitting}
+            form="workspace-create"
+            type="submit"
+          >
+            {isSubmitting ? "Creating workspace…" : "Create workspace"}
+            <ArrowRightIcon aria-hidden="true" size={14} />
+          </button>
+        }
+        step="workspace"
+        steps={onboardingSteps(true)}
+      >
+        <div className="onboarding__intro">
+          <h1>Name your workspace</h1>
+          <p>Usually your company name. Your team will see it.</p>
+        </div>
+        <form className="onboarding__form" id="workspace-create" onSubmit={create}>
+          <label className="onboarding__field">
+            <span>Workspace name</span>
+            <input
+              autoFocus
+              minLength={2}
+              name="organizationName"
+              placeholder="Acme"
+              required
+              type="text"
+            />
+          </label>
+          {error ? <p className="onboarding__error" role="alert">{error}</p> : null}
+        </form>
+      </OnboardingFrame>
+    );
+  }
+
   return (
-    <>
+    <AuthFrame>
       <div className="authIntro">
         <h1>
           {organizations.isPending || hasOrganizations
@@ -448,7 +494,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
           {isSubmitting ? "Please wait…" : "Create workspace"}
         </button>
       </form>
-    </>
+    </AuthFrame>
   );
 }
 
@@ -750,9 +796,7 @@ export function AuthGate({ children }: AuthGateProps) {
     return (
       <>
         <ImpersonationBanner />
-        <AuthFrame>
-          <WorkspaceSetup onReady={session.refetch} />
-        </AuthFrame>
+        <WorkspaceSetup onReady={session.refetch} />
       </>
     );
   }

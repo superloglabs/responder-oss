@@ -26,6 +26,14 @@ function appUrl(requestUrl: string, path: string): string {
   return new URL(path, origin).toString();
 }
 
+// Onboarding continues at its next step after checkout. Other plan changes
+// return to the billing page.
+function planChangeReturnPath(value: unknown): string {
+  return typeof value === "string" && /^\/onboarding\/[a-z]+$/.test(value)
+    ? value
+    : "/settings/billing?status=automation-plan";
+}
+
 function customerData(user: { email: string; name: string }) {
   return { email: user.email, name: user.name };
 }
@@ -113,7 +121,7 @@ export const billingRoutes = new Hono()
       return context.json({ error: "Not found" }, 404);
     }
     const body = (await context.req.json().catch(() => null)) as
-      | { planId?: unknown }
+      | { planId?: unknown; returnTo?: unknown }
       | null;
     const planId = body?.planId;
     if (planId !== "free" && planId !== "resume" && !isAutomationPaidPlanId(planId)) {
@@ -131,7 +139,7 @@ export const billingRoutes = new Hono()
         await changeAutomationPlan(
           tenant.organizationId,
           planId,
-          appUrl(context.req.url, "/settings/billing?status=automation-plan"),
+          appUrl(context.req.url, planChangeReturnPath(body?.returnTo)),
           customerData(tenant.user),
         ),
       );

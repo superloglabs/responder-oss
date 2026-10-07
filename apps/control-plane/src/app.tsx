@@ -11,6 +11,7 @@ import { AutomationDetailPage, AutomationEditRedirect } from "./pages/automation
 import { AutomationRunPage, AutomationTestChatPage } from "./pages/automation-run";
 import { BillingPage } from "./pages/billing";
 import { OAuthAuthorizePage } from "./pages/oauth-authorize";
+import { OnboardingPage } from "./pages/onboarding";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
@@ -115,6 +116,7 @@ export function App() {
           element={<Navigate replace to="/" />}
           path="/invite/:invitationId"
         />
+        <Route element={<OnboardingPage />} path="/onboarding/:step?" />
         <Route element={<AgentsPage />} path="/agents" />
         <Route element={<AutomationsPage />} path="/automations" />
         <Route element={<AutomationCreatePage />} path="/automations/new" />
