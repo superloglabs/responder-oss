@@ -1415,6 +1415,42 @@ describe("automation run processor", () => {
     }));
   });
 
+  it("reports a used-up allowance when the sandbox wraps it with the queued harness failure", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    const harnessFailure = new AutomationHarnessError("Claude automation harness failed", "");
+    deps.runCodex.mockRejectedValue(harnessFailure);
+    deps.grantAllowanceExhausted.mockResolvedValue(true);
+    // The sandbox drains the model broker queue after the turn, and the
+    // harness failure it holds differs from the error the turn raised.
+    const runInSandbox = deps.runInSandbox.getMockImplementation()!;
+    deps.runInSandbox.mockImplementation(async (input) => {
+      try {
+        return await runInSandbox(input);
+      } catch (error) {
+        throw new AggregateError(
+          [error, harnessFailure],
+          "Automation callback and queued model operation failed",
+        );
+      }
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "usage_limit_reached",
+      failureMessage: expect.stringContaining("allowance"),
+      status: "failed",
+    }));
+  });
+
   it("keeps a harness failure when the broker did not refuse for the allowance", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");

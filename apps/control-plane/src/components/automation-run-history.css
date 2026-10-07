@@ -13,6 +13,7 @@
 .automationRuns__status--running { color: #4e58c7; }
 .automationRuns__status--succeeded { color: #38643b; }
 .automationRuns__status--failed { color: #b44545; }
+.automationRuns__status--usage_limit { color: #8a5a00; }
 .automationRuns__cancel { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #777; cursor: pointer; }
 .automationRuns__cancel:hover { background: #f3f3f3; color: #121212; }
 .automationRuns__cancel:disabled { opacity: .5; cursor: default; }

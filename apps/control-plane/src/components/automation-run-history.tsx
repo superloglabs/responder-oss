@@ -7,19 +7,12 @@ import {
   type AutomationRunPage,
   type AutomationRunSummary,
 } from "../automations-api";
+import { automationRunDisplayStatus, automationRunStatusLabels } from "../automation-run-status";
 import { dateGroupLabel } from "../date-presentation";
 import { DataTable } from "../design-system";
 import { providerDisplayName } from "./provider-glyphs";
 import { AutomationRunHistorySkeleton } from "./screen-skeletons";
 import "./automation-run-history.css";
-
-const statusLabels = {
-  cancelled: "Cancelled",
-  failed: "Failed",
-  pending: "Queued",
-  running: "Running",
-  succeeded: "Completed",
-} as const;
 
 function isActive(run: AutomationRunSummary) {
   return run.status === "pending" || run.status === "running";
@@ -140,10 +133,13 @@ export function AutomationRunHistory({ automationId, refreshKey }: { automationI
         {
           header: "Result",
           key: "result",
-          render: (run) => <span className="agentTableRun">
-            <span className={`automationRuns__status automationRuns__status--${run.status}`}><i aria-hidden="true" />{statusLabels[run.status]}</span>
-            <small title={resultDetail(run)}>{resultDetail(run)}</small>
-          </span>,
+          render: (run) => {
+            const status = automationRunDisplayStatus(run);
+            return <span className="agentTableRun">
+              <span className={`automationRuns__status automationRuns__status--${status}`}><i aria-hidden="true" />{automationRunStatusLabels[status]}</span>
+              <small title={resultDetail(run)}>{resultDetail(run)}</small>
+            </span>;
+          },
           width: "18%",
         },
         {
