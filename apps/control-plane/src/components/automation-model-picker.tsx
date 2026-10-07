@@ -17,7 +17,7 @@ const harnesses = [
 type Catalog = { status: "loading" } | { status: "error"; error: string } | { status: "ready"; models: AvailableAutomationModel[]; subscription?: boolean };
 function errorMessage(cause: unknown) { return cause instanceof Error ? cause.message : "Unable to load models."; }
 async function loadCatalog(provider: AutomationModelProvider): Promise<Catalog> {
-  const subscription = provider === "openai" ? chatGPTSubscription(await fetchAutomationCredentials().catch(() => [])) : undefined;
+  const subscription = provider === "openai" ? chatGPTSubscription(await fetchAutomationCredentials()) : undefined;
   if (subscription) return { status: "ready", models: (await fetchAutomationModels(subscription.id)).models, subscription: true };
   return { status: "ready", models: (await fetchIncludedAutomationModels(provider)).models };
 }
@@ -55,7 +55,10 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
       .catch((cause: unknown) => setCatalogs(current => ({ ...current, [provider]: { status: "error", error: errorMessage(cause) } })));
   }
   function chooseModel(provider: AutomationModelProvider, model: AvailableAutomationModel) {
-    const harness = supportsAutomationHarness(provider, configuration.harness) ? configuration.harness
+    // Only Codex runs use the ChatGPT subscription that serves these models.
+    const subscription = catalogs[provider]?.status === "ready" && catalogs[provider].subscription;
+    const harness = subscription ? "codex"
+      : supportsAutomationHarness(provider, configuration.harness) ? configuration.harness
       : provider === "openai" ? "codex" : provider === "anthropic" ? "claude_agent_sdk" : "opencode";
     onChange({ modelProvider: provider, model: model.id, harness });
   }

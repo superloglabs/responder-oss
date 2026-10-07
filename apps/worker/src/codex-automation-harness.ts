@@ -44,19 +44,37 @@ const codexHome = `${automationWorkspaceRoot}/.responder/codex-home`;
 const promptPath = `${automationWorkspaceRoot}/.responder/automation-prompt.txt`;
 // The sandbox API writes only inside the workspace, so the cache is staged
 // here as root and moved into its private directory before any tool runs.
-// Names the ChatGPT refusals the organization can fix itself.
-function subscriptionFailure(output: string, model: string): string {
-  // A ChatGPT account serves fewer models than the included catalog.
-  if (/model is not supported when using Codex with a ChatGPT account/u.test(output))
-    return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
-  if (/auth error code: deactivated_workspace/u.test(output))
-    return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
-  return "Codex automation harness failed";
-}
 const stagedSubscriptionAuthPath = `${automationWorkspaceRoot}/.responder/subscription-auth.json`;
 
 function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
+}
+
+// The error of the turn.failed event that ended the run, if any.
+function turnFailure(output: string): string | null {
+  for (const line of output.split("\n").reverse()) {
+    if (!line.includes("\"turn.failed\"")) continue;
+    let event: { error?: { message?: unknown }; type?: unknown };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type !== "turn.failed") continue;
+    return typeof event.error?.message === "string" ? event.error.message : null;
+  }
+  return null;
+}
+
+// Names the ChatGPT refusals the organization can fix itself.
+function subscriptionFailure(output: string, model: string): string {
+  const failure = turnFailure(output) ?? "";
+  // A ChatGPT account serves fewer models than the included catalog.
+  if (failure.includes("model is not supported when using Codex with a ChatGPT account"))
+    return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
+  if (failure.includes("auth error code: deactivated_workspace"))
+    return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+  return "Codex automation harness failed";
 }
 
 function shellQuote(value: string): string {
