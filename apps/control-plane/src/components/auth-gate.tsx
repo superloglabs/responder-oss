@@ -405,8 +405,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
   }
 
   // A member without workspaces starts guided setup by naming one, unless
-  // they came to set up a template. Setup lists the plan step because hosted
-  // installations offer plans.
+  // they came to set up a template.
   if (!organizations.isPending && !hasOrganizations && !automationSetupReturnPath(window.location)) {
     return (
       <OnboardingFrame
@@ -423,7 +422,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
           </button>
         }
         step="workspace"
-        steps={onboardingSteps(true)}
+        steps={onboardingSteps}
       >
         <div className="onboarding__intro">
           <h1>Name your workspace</h1>

@@ -1,21 +1,18 @@
 import { automationTemplates, type AutomationTemplate } from "./automation-templates";
 
-export type OnboardingStep = "workspace" | "code" | "alerts" | "plan" | "templates";
+export type OnboardingStep = "workspace" | "code" | "alerts" | "usage" | "templates";
 
 export const onboardingStepLabels: Record<OnboardingStep, string> = {
   alerts: "Alerts",
   code: "Code",
-  plan: "Plan",
   templates: "Go live",
+  usage: "Usage",
   workspace: "Workspace",
 };
 
-// The plan step appears only where billing can change the plan.
-export function onboardingSteps(billing: boolean): OnboardingStep[] {
-  return billing
-    ? ["workspace", "code", "alerts", "plan", "templates"]
-    : ["workspace", "code", "alerts", "templates"];
-}
+// Every installation lists the same steps. The usage step offers plans only
+// where billing can change them.
+export const onboardingSteps: readonly OnboardingStep[] = ["workspace", "code", "alerts", "usage", "templates"];
 
 export function onboardingPath(step: Exclude<OnboardingStep, "workspace">): string {
   return `/onboarding/${step}`;
@@ -23,9 +20,27 @@ export function onboardingPath(step: Exclude<OnboardingStep, "workspace">): stri
 
 // Reads the step from the URL. Unknown steps and the workspace step, which
 // is complete once this page loads, open the first step after it.
-export function onboardingStepFromPath(value: string | undefined, steps: readonly OnboardingStep[]): OnboardingStep {
-  const step = steps.find((candidate) => candidate === value);
+export function onboardingStepFromPath(value: string | undefined): Exclude<OnboardingStep, "workspace"> {
+  const step = onboardingSteps.find((candidate) => candidate === value);
   return step && step !== "workspace" ? step : "code";
+}
+
+// Providers with a working connection. Accounts that failed or were revoked
+// stay listed but do not make the provider connected.
+export function connectedProviders(integrations: ReadonlyArray<{ id: string; state: string }>): string[] {
+  return integrations.filter((integration) => integration.state === "connected").map((integration) => integration.id);
+}
+
+export function formatPlanPrice(value: number): string {
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+}
+
+// Upgrades charge a saved payment method now; cheaper plans start when the
+// billing period ends.
+export function planChangeConfirmation(plan: { name: string; price: number }, currentPrice: number): string {
+  return plan.price > currentPrice
+    ? `Switch to ${plan.name} (${formatPlanPrice(plan.price)} / month) now? A saved payment method is charged immediately, prorated for this period.`
+    : `Switch to ${plan.name} (${formatPlanPrice(plan.price)} / month) at the end of this billing period?`;
 }
 
 // Integrations offered on the alerts step, grouped by what they tell the
@@ -97,6 +112,7 @@ export interface BillingPlanSummary {
   nextResetAt: number | null;
   paid: boolean;
   planId: string;
+  planPrice: number;
   plans: Array<{ id: string; included: number; machineHours: number; name: string; price: number }>;
 }
 

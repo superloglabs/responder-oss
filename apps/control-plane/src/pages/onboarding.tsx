@@ -13,11 +13,14 @@ import { homePath } from "../primary-navigation";
 import { useDocumentTitle } from "../use-document-title";
 import { automationTemplateCategoryLabels } from "./automation-templates";
 import {
+  connectedProviders,
+  formatPlanPrice,
   onboardingAlertSources,
   onboardingPath,
   onboardingPlanCards,
   onboardingStepFromPath,
   onboardingSteps,
+  planChangeConfirmation,
   recommendedTemplates,
   templateProviders,
   type BillingPlanSummary,
@@ -30,6 +33,7 @@ interface OnboardingIntegration {
   connectUrl: string | null;
   id: string;
   resourceCount: number;
+  state: string;
 }
 
 interface OnboardingBilling {
@@ -44,7 +48,8 @@ async function fetchIntegrations(signal?: AbortSignal): Promise<OnboardingIntegr
   return ((await response.json()) as { integrations: OnboardingIntegration[] }).integrations;
 }
 
-// Null when this installation cannot change plans, so the step is skipped.
+// Null when this installation cannot change plans, so the usage step offers
+// only the Codex connection.
 async function fetchPlanBilling(): Promise<OnboardingBilling | null> {
   const response = await fetch("/api/billing").catch(() => null);
   if (!response?.ok) return null;
@@ -83,19 +88,20 @@ export function OnboardingPage() {
   const refreshIntegrations = useCallback(async (provider: string, signal?: AbortSignal) => {
     const loaded = await fetchIntegrations(signal);
     setIntegrations(loaded);
-    return loaded.some((integration) => integration.id === provider && integration.accountCount > 0);
+    return connectedProviders(loaded).includes(provider);
   }, []);
 
   if (!capabilities.includes("automations")) return <Navigate replace to={homePath(capabilities)} />;
 
-  const steps = onboardingSteps(Boolean(billing));
-  const step = onboardingStepFromPath(stepParameter, steps);
+  const steps = onboardingSteps;
+  const step = onboardingStepFromPath(stepParameter);
+  if (stepParameter !== step) return <Navigate replace to={onboardingPath(step)} />;
   const index = steps.indexOf(step);
   const next = steps[index + 1] as Exclude<OnboardingStep, "workspace"> | undefined;
   const previous = steps[index - 1];
   const finish = homePath(capabilities);
   const goNext = () => navigate(next ? onboardingPath(next) : finish);
-  const connected = (integrations ?? []).filter((integration) => integration.accountCount > 0).map((integration) => integration.id);
+  const connected = connectedProviders(integrations ?? []);
 
   const secondaryActions = (
     <span className="onboarding__secondary">
@@ -121,7 +127,7 @@ export function OnboardingPage() {
 
   if (step === "code") {
     const github = integrations.find((integration) => integration.id === "github");
-    const githubConnected = Boolean(github && github.accountCount > 0);
+    const githubConnected = connected.includes("github");
     return (
       <OnboardingFrame
         activeStages={["cause", "fix"]}
@@ -158,11 +164,11 @@ export function OnboardingPage() {
         providers: group.providers.flatMap((provider) => {
           const integration = integrations.find((candidate) => candidate.id === provider);
           // Providers this installation has not configured cannot connect.
-          return integration && (integration.connectUrl || integration.accountCount > 0) ? [{ integration, provider }] : [];
+          return integration && (integration.connectUrl || integration.state === "connected") ? [{ integration, provider }] : [];
         }),
       }))
       .filter((group) => group.providers.length > 0);
-    const anyConnected = groups.some((group) => group.providers.some(({ integration }) => integration.accountCount > 0));
+    const anyConnected = groups.some((group) => group.providers.some(({ provider }) => connected.includes(provider)));
     return (
       <OnboardingFrame
         activeStages={["alert"]}
@@ -195,7 +201,7 @@ export function OnboardingPage() {
     );
   }
 
-  if (step === "plan" && billing?.automations) {
+  if (step === "usage" && billing?.automations) {
     return (
       <OnboardingFrame footer={secondaryActions} step={step} steps={steps}>
         <PlanStep
@@ -205,6 +211,25 @@ export function OnboardingPage() {
           returnTo={next ? onboardingPath(next) : finish}
           summary={billing.automations}
         />
+      </OnboardingFrame>
+    );
+  }
+
+  if (step === "usage") {
+    return (
+      <OnboardingFrame
+        footer={<>
+          {secondaryActions}
+          <button className="onboarding__primary" onClick={goNext} type="button">Continue<ArrowRightIcon aria-hidden="true" size={14} /></button>
+        </>}
+        step={step}
+        steps={steps}
+      >
+        <div className="onboarding__intro">
+          <h1>Choose how automations run</h1>
+          <p>If you pay for ChatGPT, automations on the Codex harness can run on that plan. You can also add API keys in <Link to="/settings/models">Models settings</Link>.</p>
+        </div>
+        <CodexConnection billing={false} />
       </OnboardingFrame>
     );
   }
@@ -272,7 +297,7 @@ function ConnectRow({ description, integration, onConnected, provider }: {
 }) {
   const name = providerDisplayName(provider);
   const { connect, connecting, error } = useIntegrationConnect(provider, name, onConnected);
-  const isConnected = Boolean(integration && integration.accountCount > 0);
+  const isConnected = integration?.state === "connected";
   return (
     <div className={`onboardingConnection${isConnected ? " isConnected" : ""}`}>
       <span className="onboardingConnection__logo"><ProviderGlyph decorative provider={provider} /></span>
@@ -302,7 +327,7 @@ function ConnectTile({ integration, onConnected, provider }: {
   const name = providerDisplayName(provider);
   const { connect, connecting, error } = useIntegrationConnect(provider, name, onConnected);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
-  const isConnected = integration.accountCount > 0;
+  const isConnected = integration.state === "connected";
   return (
     <div className={`onboardingTile${isConnected ? " isConnected" : ""}`}>
       <ProviderGlyph decorative provider={provider} />
@@ -334,10 +359,6 @@ function ConnectTile({ integration, onConnected, provider }: {
   );
 }
 
-function dollars(value: number): string {
-  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
-}
-
 function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
   chargesSavedMethod: boolean;
   onContinue: () => void;
@@ -348,13 +369,13 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
   const [changingPlan, setChangingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function choosePlan(planId: string, name: string, price: number) {
-    if (chargesSavedMethod && !window.confirm(`Switch to ${name} (${dollars(price)} / month) now? A saved payment method is charged immediately, prorated for this period.`)) return;
+  async function choosePlan(plan: { id: string; name: string; price: number }) {
+    if (chargesSavedMethod && !window.confirm(planChangeConfirmation(plan, summary.planPrice))) return;
     setError(null);
-    setChangingPlan(planId);
+    setChangingPlan(plan.id);
     try {
       const response = await fetch("/api/billing/automations/plan", {
-        body: JSON.stringify({ planId, returnTo }),
+        body: JSON.stringify({ planId: plan.id, returnTo }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -386,9 +407,9 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
               {card.current ? <span className="onboardingPlan__badge">Current plan</span> : null}
               {card.recommended ? <span className="onboardingPlan__badge onboardingPlan__badge--accent">Recommended</span> : null}
             </header>
-            <p className="onboardingPlan__price">{dollars(card.price)}{card.price > 0 ? <small>/mo</small> : null}</p>
+            <p className="onboardingPlan__price">{formatPlanPrice(card.price)}{card.price > 0 ? <small>/mo</small> : null}</p>
             <ul>
-              <li><SparkleIcon aria-hidden="true" className="onboardingPlan__credit" size={14} weight="fill" /><span><strong>{dollars(card.credit)}</strong> AI usage {card.creditRenews ? "a month" : "to try"}</span></li>
+              <li><SparkleIcon aria-hidden="true" className="onboardingPlan__credit" size={14} weight="fill" /><span><strong>{formatPlanPrice(card.credit)}</strong> AI usage {card.creditRenews ? "a month" : "to try"}</span></li>
               {card.machineHours !== null ? <li><CpuIcon aria-hidden="true" size={14} /><span><strong>{card.machineHours} h</strong> machine time a month</span></li> : null}
             </ul>
             {card.current ? (
@@ -397,7 +418,7 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
               <button
                 className={card.recommended ? "onboarding__primary" : "onboarding__button"}
                 disabled={changingPlan !== null}
-                onClick={() => void choosePlan(card.id, card.name, card.price)}
+                onClick={() => void choosePlan(card)}
                 type="button"
               >
                 {changingPlan === card.id ? "Opening checkout…" : `Get ${card.name}`}
@@ -406,14 +427,14 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
           </article>
         ))}
       </div>
-      <CodexConnection />
+      <CodexConnection billing />
     </>
   );
 }
 
 // A ChatGPT subscription runs Codex automations on that plan instead of the
-// usage credit.
-function CodexConnection() {
+// usage credit or an API key.
+function CodexConnection({ billing }: { billing: boolean }) {
   const [state, setState] = useState<"loading" | "connected" | "idle" | "connecting">("loading");
   useEffect(() => {
     let active = true;
@@ -435,8 +456,10 @@ function CodexConnection() {
       <div className="onboardingCodex__row">
         <span className="onboardingConnection__logo"><OpenAiMark /></span>
         <span className="onboardingConnection__body">
-          <strong>Connect Codex <span className="onboardingPlan__badge">Saves credit</span></strong>
-          <small>Already pay for ChatGPT? Automations on the Codex harness run on your ChatGPT plan, so your credit goes further.</small>
+          <strong>Connect Codex{billing ? <span className="onboardingPlan__badge">Saves credit</span> : null}</strong>
+          <small>{billing
+            ? "Already pay for ChatGPT? Automations on the Codex harness run on your ChatGPT plan, so your credit goes further."
+            : "Automations on the Codex harness run on your ChatGPT plan instead of an API key."}</small>
         </span>
         {action}
       </div>

@@ -16,8 +16,9 @@ export function OnboardingFrame({
   step,
   steps,
 }: {
-  // Stages of the explainer the current step enables. Without it the step
-  // takes the full width.
+  // Shows the explainer beside the step with these stages highlighted. An
+  // empty list shows it with none highlighted; without it the step takes the
+  // full width.
   activeStages?: OnboardingStage[];
   children: ReactNode;
   connected?: readonly string[];

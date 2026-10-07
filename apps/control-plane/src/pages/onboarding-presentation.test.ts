@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { automationTemplates } from "./automation-templates";
 import {
+  connectedProviders,
   onboardingPlanCards,
+  planChangeConfirmation,
   onboardingStepFromPath,
   onboardingSteps,
   recommendedTemplates,
@@ -11,16 +13,37 @@ import {
 const ids = (connected: string[]) => recommendedTemplates(connected).map(({ template }) => template.id);
 
 describe("onboarding steps", () => {
-  it("includes the plan step only when billing is available", () => {
-    expect(onboardingSteps(true)).toEqual(["workspace", "code", "alerts", "plan", "templates"]);
-    expect(onboardingSteps(false)).toEqual(["workspace", "code", "alerts", "templates"]);
+  it("lists the same steps on every installation", () => {
+    expect(onboardingSteps).toEqual(["workspace", "code", "alerts", "usage", "templates"]);
   });
 
   it("opens the code step for unknown steps and the finished workspace step", () => {
-    expect(onboardingStepFromPath("alerts", onboardingSteps(true))).toBe("alerts");
-    expect(onboardingStepFromPath("plan", onboardingSteps(false))).toBe("code");
-    expect(onboardingStepFromPath("workspace", onboardingSteps(true))).toBe("code");
-    expect(onboardingStepFromPath(undefined, onboardingSteps(true))).toBe("code");
+    expect(onboardingStepFromPath("alerts")).toBe("alerts");
+    expect(onboardingStepFromPath("plan")).toBe("code");
+    expect(onboardingStepFromPath("workspace")).toBe("code");
+    expect(onboardingStepFromPath(undefined)).toBe("code");
+  });
+});
+
+describe("connectedProviders", () => {
+  it("counts only providers with a working connection", () => {
+    expect(connectedProviders([
+      { id: "github", state: "connected" },
+      { id: "sentry", state: "available" },
+      { id: "slack", state: "setup_required" },
+    ])).toEqual(["github"]);
+  });
+});
+
+describe("planChangeConfirmation", () => {
+  it("warns that an upgrade charges now", () => {
+    expect(planChangeConfirmation({ name: "Team", price: 200 }, 100))
+      .toBe("Switch to Team ($200 / month) now? A saved payment method is charged immediately, prorated for this period.");
+  });
+
+  it("says a cheaper plan starts at the end of the period", () => {
+    expect(planChangeConfirmation({ name: "Pro", price: 100 }, 200))
+      .toBe("Switch to Pro ($100 / month) at the end of this billing period?");
   });
 });
 
@@ -71,6 +94,7 @@ describe("onboardingPlanCards", () => {
       nextResetAt: null,
       paid: false,
       planId: "free",
+      planPrice: 0,
       plans,
     });
     expect(cards.map((card) => [card.id, card.current, card.recommended])).toEqual([
@@ -89,6 +113,7 @@ describe("onboardingPlanCards", () => {
       nextResetAt: 1,
       paid: true,
       planId: "pro",
+      planPrice: 100,
       plans,
     });
     expect(cards.map((card) => [card.id, card.current, card.recommended])).toEqual([
@@ -104,6 +129,7 @@ describe("onboardingPlanCards", () => {
       nextResetAt: 1,
       paid: false,
       planId: "free",
+      planPrice: 0,
       plans,
     });
     expect(cards.every((card) => card.machineHours === null)).toBe(true);
