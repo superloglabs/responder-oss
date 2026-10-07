@@ -40,6 +40,26 @@ export async function recordPullRequestOrigin(input: PullRequestOwner & {
     });
 }
 
+// Records the first merge GitHub reports for a pull request a thread or run
+// opened. Returns whether such a pull request exists.
+export async function markPullRequestOriginMerged(input: {
+  pullRequestNumber: number;
+  repositoryFullName: string;
+}): Promise<boolean> {
+  const updated = await getDatabase()
+    .update(pullRequestOrigins)
+    .set({
+      mergedAt: sql`coalesce(${pullRequestOrigins.mergedAt}, now())`,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(pullRequestOrigins.repositoryFullName, input.repositoryFullName),
+      eq(pullRequestOrigins.pullRequestNumber, input.pullRequestNumber),
+    ))
+    .returning({ id: pullRequestOrigins.id });
+  return updated.length > 0;
+}
+
 // The pull request, when the given thread or run opened it.
 export async function getOwnedPullRequest(input: PullRequestOwner & {
   pullRequestNumber: number;
