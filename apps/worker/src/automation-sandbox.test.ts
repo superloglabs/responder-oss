@@ -558,7 +558,9 @@ describe("fresh automation sandbox", () => {
 
     await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" } }, dependencies);
 
-    expect(client.resume).toHaveBeenCalledWith({ sandboxId: "sandbox-1" });
+    // The saved state leaves out the API key; the resumed session's file
+    // transfers need it.
+    expect(client.resume).toHaveBeenCalledWith({ apiKey: "daytona-test", sandboxId: "sandbox-1" });
     expect(dependencies.createSession).not.toHaveBeenCalled();
     expect(dependencies.configure).not.toHaveBeenCalled();
     expect(dependencies.prepare).not.toHaveBeenCalled();
