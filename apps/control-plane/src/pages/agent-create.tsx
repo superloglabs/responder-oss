@@ -70,6 +70,7 @@ import {
   contextCategoryDescriptions as CONTEXT_CATEGORY_DESCRIPTIONS,
   contextCategoryOrder as CONTEXT_CATEGORY_ORDER,
   contextProviderMetadata as CONTEXT_PROVIDER_METADATA,
+  contextProviderSearchText,
   providerDisplayName,
 } from "../components/provider-glyphs";
 import {
@@ -1590,8 +1591,12 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     ) {
       return false;
     }
-    const metadata = CONTEXT_PROVIDER_METADATA[integration.id];
-    return `${integration.name} ${integration.description} ${metadata.category} ${metadata.searchTerms}`
+    const searchText = contextProviderSearchText(
+      integration.id,
+      integration.name,
+      integration.description,
+    );
+    return searchText !== null && searchText
       .toLocaleLowerCase()
       .includes(normalizedIntegrationQuery);
   });
