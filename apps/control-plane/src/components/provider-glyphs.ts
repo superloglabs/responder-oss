@@ -4,9 +4,9 @@ export const providerGlyphs = {
   clickstack: { label: "ClickStack", logo: "clickstack" },
   custom_mcp: { label: "Custom MCP", text: "MCP" },
   datadog: { label: "Datadog", logo: "datadog" },
-  dash0: { label: "Dash0", text: "D0" },
+  dash0: { label: "Dash0", logo: "dash0" },
   discord: { label: "Discord", logo: "discord" },
-  posthog: { label: "PostHog", text: "PH" },
+  posthog: { label: "PostHog", logo: "posthog" },
   github: { label: "GitHub", logo: "github" },
   gcp: { label: "Google Cloud", logo: "google" },
   google: { label: "Google", logo: "google" },
@@ -18,7 +18,7 @@ export const providerGlyphs = {
   slack: { label: "Slack", logo: "slack" },
   supabase: { label: "Supabase", logo: "supabase" },
   upstash: { label: "Upstash", logo: "upstash" },
-  vercel: { label: "Vercel", text: "▲" },
+  vercel: { label: "Vercel", logo: "vercel" },
 } as const;
 
 export type ProviderGlyphId = keyof typeof providerGlyphs;
