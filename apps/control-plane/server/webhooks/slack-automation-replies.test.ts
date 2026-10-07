@@ -199,6 +199,7 @@ describe("Slack replies to automation runs", () => {
       eventType: "message",
       teamId: "T123",
       text: "Can you open a PR?",
+      timestamp: "1790000002.000100",
     });
     expect(mocks.queueRun).toHaveBeenCalledWith(expect.objectContaining({
       trigger: expect.objectContaining({

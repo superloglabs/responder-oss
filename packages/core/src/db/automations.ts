@@ -75,6 +75,10 @@ export class AutomationConfigurationError extends Error {
 // ignores the message's author does not watch for it. `authorIds` are the
 // sender's user, bot, and app IDs that Slack sent.
 //
+// "Every message" watches the channel's new messages. A reply in a thread
+// without a run starts one only when it mentions the app, so a thread whose
+// first message an ignored author posted stays quiet until someone asks.
+//
 // While the organization has tag mode on, tag mode keeps the threads it
 // answers in: a message there starts no run. Elsewhere, tag mode answers a
 // message that mentions the app unless a trigger watches for mentions.
@@ -85,6 +89,7 @@ export async function findAutomationsForSlackEvent(input: {
   teamId: string;
   text: string;
   threadTimestamp?: string;
+  timestamp: string;
 }): Promise<Array<{
   automationId: string;
   integrationAccountId: string;
@@ -155,12 +160,13 @@ export async function findAutomationsForSlackEvent(input: {
     if (watching.length === 0) return [];
     const mentioned = input.eventType === "app_mention" ||
       (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`));
+    const threadReply = input.threadTimestamp !== undefined && input.threadTimestamp !== input.timestamp;
     const startsRun = !(row.tagMode && row.tagModeThread) && watching.some((trigger) =>
       trigger.kind === "slack" &&
-      (trigger.eventMode === "both" ||
+      ((trigger.eventMode === "both" && (input.eventType === "app_mention" || !threadReply)) ||
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
         (trigger.eventMode === "every_message" && input.eventType === "message" &&
-          !(mentioned && row.tagMode)))
+          (!threadReply || mentioned) && !(mentioned && row.tagMode)))
     );
     return [{
       automationId: row.automationId,
