@@ -78,6 +78,9 @@ export class AutomationHarnessError extends Error {
   constructor(
     message: string,
     readonly eventStream: string,
+    // The organization can fix the cause itself, such as a refusal from its
+    // own model subscription, so it is not reported as a Responder error.
+    readonly organizationFixable = false,
   ) {
     super(message);
     this.name = "AutomationHarnessError";

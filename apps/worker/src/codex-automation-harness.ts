@@ -67,14 +67,14 @@ function turnFailure(output: string): string | null {
 }
 
 // Names the ChatGPT refusals the organization can fix itself.
-function subscriptionFailure(output: string, model: string): string {
+function subscriptionRefusal(output: string, model: string): string | null {
   const failure = turnFailure(output) ?? "";
   // A ChatGPT account serves fewer models than the included catalog.
   if (failure.includes("model is not supported when using Codex with a ChatGPT account"))
     return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
   if (failure.includes("auth error code: deactivated_workspace"))
     return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
-  return "Codex automation harness failed";
+  return null;
 }
 
 function shellQuote(value: string): string {
@@ -286,8 +286,8 @@ export async function runCodexAutomation(
   }
   // Checked after redaction so a failed run can keep its transcript.
   if (!commandSucceeded(output)) {
-    if (input.model.subscription)
-      throw new AutomationHarnessError(subscriptionFailure(output, input.model.model), output);
+    const refusal = input.model.subscription ? subscriptionRefusal(output, input.model.model) : null;
+    if (refusal) throw new AutomationHarnessError(refusal, output, true);
     throw new AutomationHarnessError("Codex automation harness failed", output);
   }
   return { eventStream: output };

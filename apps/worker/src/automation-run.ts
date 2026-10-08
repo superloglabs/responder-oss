@@ -1051,16 +1051,19 @@ export async function processAutomationRun(
       stopped instanceof AutomationRunTimeoutError;
     // The harness runs in the model broker queue, so its failure also comes
     // back from the queue and arrives wrapped with the error the turn raised.
-    const allowanceExhausted = [error, ...(error instanceof AggregateError ? error.errors : [])]
-      .find((cause): cause is AutomationAllowanceExhaustedError =>
-        cause instanceof AutomationAllowanceExhaustedError);
+    const causes = [error, ...(error instanceof AggregateError ? error.errors : [])];
+    const allowanceExhausted = causes.find((cause): cause is AutomationAllowanceExhaustedError =>
+      cause instanceof AutomationAllowanceExhaustedError);
+    // A refusal the organization can fix is its own failure, not Responder's.
+    const organizationRefusal = causes.find((cause): cause is AutomationHarnessError =>
+      cause instanceof AutomationHarnessError && cause.organizationFixable);
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
       : allowanceExhausted
         ? allowanceExhausted.message
-      : safeInvestigationError(error, environment);
+      : safeInvestigationError(organizationRefusal ?? error, environment);
     // A turn that failed through Responder's fault is not charged. A run
     // that reached its own runtime limit or allowance is. The waiver comes
     // first so a failed status write cannot leave the turn charged.
@@ -1103,7 +1106,7 @@ export async function processAutomationRun(
     turnEnded = !cancelled && !leaseLost;
     if (turnEnded) outcome = { message, status: "failed" };
     await slackCard?.finish("error", message);
-    if (!cancelled && !leaseLost && !allowanceExhausted) {
+    if (!cancelled && !leaseLost && !allowanceExhausted && !organizationRefusal) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",
