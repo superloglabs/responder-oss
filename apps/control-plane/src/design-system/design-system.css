@@ -997,10 +997,36 @@
   font-weight: 500;
 }
 
+.dsAlert__content {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .dsAlert__body {
   margin-top: 3px;
   font-size: 11px;
   line-height: 17px;
+}
+
+.dsAlert__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-self: center;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 620px) {
+  .dsAlert:has(.dsAlert__actions) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 10px;
+  }
+
+  .dsAlert__actions {
+    grid-column: 2;
+    align-self: start;
+  }
 }
 
 .dsAlert--info {

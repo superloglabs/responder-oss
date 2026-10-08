@@ -33,6 +33,7 @@ import {
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkWorkAllowance } from "@responder/core/billing/autumn";
+import { notifyBillingLimitReached } from "@responder/core/billing/notifications";
 import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
@@ -139,6 +140,7 @@ export interface AutomationRunDependencies {
   heartbeatRun: typeof heartbeatAutomationRun;
   loadRepositories: typeof loadCheckedOutRepositories;
   notify: typeof sendAutomationRunNotifications;
+  notifyLimitReached: typeof notifyBillingLimitReached;
   now(): Date;
   postedInSlackThread: typeof automationRunPostedInSlackThread;
   reopenRun: typeof reopenAutomationRun;
@@ -187,6 +189,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   heartbeatRun: heartbeatAutomationRun,
   loadRepositories: loadCheckedOutRepositories,
   notify: sendAutomationRunNotifications,
+  notifyLimitReached: notifyBillingLimitReached,
   now: () => new Date(),
   postedInSlackThread: automationRunPostedInSlackThread,
   reopenRun: reopenAutomationRun,
@@ -732,6 +735,11 @@ export async function processAutomationRun(
     });
     const machinesUseCredit = access.machinesUseCredit;
     if (!access.allowed) {
+      await dependencies.notifyLimitReached(run.organizationId, access.nextResetAt, {
+        usageBased: true,
+      }).catch((error: unknown) => {
+        console.error("Unable to send billing limit notifications", error);
+      });
       throw new AutomationAllowanceExhaustedError(access.exhausted, machinesUseCredit);
     }
     if (!credentialId) {

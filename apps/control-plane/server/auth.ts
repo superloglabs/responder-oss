@@ -31,7 +31,8 @@ import {
   memberAc as organizationMemberAc,
 } from "better-auth/plugins/organization/access";
 import { allowsMarketing } from "./consent-policy.js";
-import { sendEmail, workspaceInvitationEmailBody } from "./email.js";
+import { sendEmail } from "@responder/core/email";
+import { workspaceInvitationEmailBody } from "./email.js";
 import {
   mcpAccessTokenPrefix,
   mcpOAuthPagePath,

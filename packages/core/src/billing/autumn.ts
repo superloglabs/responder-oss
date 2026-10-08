@@ -314,9 +314,9 @@ const LEGACY_AUTOMATION_PLANS = [
 const usageTrackTimeoutMs = 30_000;
 
 // A run may start while at least one cent of the allowance remains.
-const automationMinimumBalanceDollars = 0.01;
+export const automationMinimumBalanceDollars = 0.01;
 // A sandbox may start while at least a minute of machine time remains.
-const minimumMachineHours = 1 / 60;
+export const minimumMachineHours = 1 / 60;
 
 export type AutomationPaidPlanId = (typeof AUTOMATION_PAID_PLANS)[number]["id"];
 export type AutomationPlanId =

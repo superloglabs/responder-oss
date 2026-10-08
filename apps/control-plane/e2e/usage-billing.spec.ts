@@ -143,7 +143,7 @@ test("warns a workspace when its machine hours are used up", async ({ page }) =>
   await mockWorkspace(page, billing({ machineHours: machineHours(0), usageBased: true }));
   await page.goto("/automations");
 
-  await expect(page.getByRole("status").filter({ hasText: "Machine hours used up." })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Machine hours used up" })).toBeVisible();
 });
 
 test("splits used allowance into inference and sandbox compute", async ({ page }) => {
@@ -199,9 +199,23 @@ test("warns a usage-billed workspace when its allowance is used", async ({ page 
   await mockWorkspace(page, billing({ remaining: 0, usageBased: true }));
   await page.goto("/automations");
 
-  await expect(page.getByRole("status").filter({ hasText: "Usage limit reached." })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Usage limit reached" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Upgrade plan" })).toHaveAttribute(
     "href",
     "/settings/billing",
   );
+});
+
+test("shows no banner while a paid plan bills usage past its allowance", async ({ page }) => {
+  const summary = billing({ remaining: 0, usageBased: true });
+  summary.automations.creditOverageAllowed = true;
+  await mockWorkspace(page, summary);
+  const billingLoaded = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/billing"
+  );
+  await page.goto("/automations");
+  await billingLoaded;
+
+  await expect(page.getByRole("heading", { name: "Automations" }).first()).toBeVisible();
+  await expect(page.locator(".billingBanner")).toHaveCount(0);
 });

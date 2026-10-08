@@ -95,6 +95,7 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
   usageWaiverStart,
@@ -168,6 +169,11 @@ async function waiveFailedInvestigationUsage(
 }
 
 let automationUsageBillingPass: Promise<void> | undefined;
+// Usage billed shortly before a restart is checked again by the next worker.
+// Each pass rereads a short overlap, since billing times come from the clocks
+// of several processes.
+const usageNoticeOverlapMs = 2 * 60 * 1_000;
+let usageNoticesCheckedAt = new Date(Date.now() - 10 * 60 * 1_000);
 
 // Runs at most one settlement pass at a time; a slow pass delays the next.
 function settleAutomationUsageBilling(): Promise<void> {
@@ -233,6 +239,25 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.failed > 0) {
       await reportWorkerException(
         new Error(`${result.failed} waived usage records could not be credited`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  // After waived usage is credited, so a refunded balance is not reported as
+  // used up.
+  try {
+    const startedAt = new Date();
+    const result = await sendUsageNotices(
+      new Date(usageNoticesCheckedAt.getTime() - usageNoticeOverlapMs),
+    );
+    usageNoticesCheckedAt = startedAt;
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} organizations could not be checked for usage notices`),
         { operation: "worker" },
       ).catch(() => undefined);
     }

@@ -176,6 +176,17 @@ investigation credits.
   the total.
 - Usage rows are reported with their row ID as the idempotency key. Rows that
   fail are retried for up to a day.
+- After each settlement pass, the worker reads the balances of organizations
+  whose usage was just reported. When a balance that stops work is used up,
+  it sends a notice that new work is paused. Blocked investigations and
+  automation runs send it too. The notice goes by email to workspace owners
+  and admins, by Slack direct message to the person who installed Slack, and
+  to the Slack channels that agents watch. `billing_notification_deliveries`
+  records one notice per destination and billing period. A failed delivery is
+  retried for up to 23 hours, inside Resend's idempotency window; a Slack post
+  retried after an uncertain error may arrive twice. Usage past a balance that
+  the plan bills for is expected and sends nothing.
+- The app shows a banner from the same balances while new work is paused.
 
 Postgres and pg-boss hold investigation, remediation, and follow-up work.
 Delivery may be at least once, so handlers use idempotency keys and state
