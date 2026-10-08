@@ -50,6 +50,33 @@ function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
+// The error of the turn.failed event that ended the run, if any.
+function turnFailure(output: string): string | null {
+  for (const line of output.split("\n").reverse()) {
+    if (!line.includes("\"turn.failed\"")) continue;
+    let event: { error?: { message?: unknown }; type?: unknown };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type !== "turn.failed") continue;
+    return typeof event.error?.message === "string" ? event.error.message : null;
+  }
+  return null;
+}
+
+// Names the ChatGPT refusals the organization can fix itself.
+function subscriptionFailure(output: string, model: string): string {
+  const failure = turnFailure(output) ?? "";
+  // A ChatGPT account serves fewer models than the included catalog.
+  if (failure.includes("model is not supported when using Codex with a ChatGPT account"))
+    return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
+  if (failure.includes("auth error code: deactivated_workspace"))
+    return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+  return "Codex automation harness failed";
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
@@ -258,7 +285,10 @@ export async function runCodexAutomation(
       output = output.replaceAll(secret, "[redacted]");
   }
   // Checked after redaction so a failed run can keep its transcript.
-  if (!commandSucceeded(output))
+  if (!commandSucceeded(output)) {
+    if (input.model.subscription)
+      throw new AutomationHarnessError(subscriptionFailure(output, input.model.model), output);
     throw new AutomationHarnessError("Codex automation harness failed", output);
+  }
   return { eventStream: output };
 }
