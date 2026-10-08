@@ -20,3 +20,17 @@ export function workspaceInvitationEmailBody(args: {
 <p style="color:#888">If you weren't expecting this invitation, you can ignore this email.</p>`,
   };
 }
+
+export function passwordResetEmailBody(args: { resetUrl: string }): {
+  html: string;
+  text: string;
+} {
+  const safeUrl = escapeHtml(args.resetUrl);
+
+  return {
+    text: `Someone asked to reset the password for your Superlog account.\n\nReset password: ${args.resetUrl}\n\nThis link expires in one hour. If you didn't ask for this, you can ignore this email.`,
+    html: `<p>Someone asked to reset the password for your Superlog account.</p>
+<p><a href="${safeUrl}">Reset password</a></p>
+<p style="color:#888">This link expires in one hour. If you didn't ask for this, you can ignore this email.</p>`,
+  };
+}

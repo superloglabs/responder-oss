@@ -11,6 +11,7 @@ import { AutomationDetailPage, AutomationEditRedirect } from "./pages/automation
 import { AutomationRunPage, AutomationTestChatPage } from "./pages/automation-run";
 import { BillingPage } from "./pages/billing";
 import { OAuthAuthorizePage } from "./pages/oauth-authorize";
+import { ResetPasswordPage } from "./pages/reset-password";
 import { OnboardingPage } from "./pages/onboarding";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
@@ -87,6 +88,7 @@ export function App() {
       <Route element={<SubprocessorsPage />} path="/subprocessors" />
       <Route element={<SharedAutomationTemplatePage />} path="/templates/:slug" />
       <Route element={<OAuthAuthorizePage />} path="/oauth/authorize" />
+      <Route element={<ResetPasswordPage />} path="/reset-password" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}

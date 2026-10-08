@@ -32,7 +32,10 @@ import {
 } from "better-auth/plugins/organization/access";
 import { allowsMarketing } from "./consent-policy.js";
 import { sendEmail } from "@responder/core/email";
-import { workspaceInvitationEmailBody } from "./email.js";
+import {
+  passwordResetEmailBody,
+  workspaceInvitationEmailBody,
+} from "./email.js";
 import {
   mcpAccessTokenPrefix,
   mcpOAuthPagePath,
@@ -164,6 +167,13 @@ export function createResponderAuth() {
     }),
     emailAndPassword: {
       enabled: true,
+      resetPasswordTokenExpiresIn: 60 * 60,
+      revokeSessionsOnPasswordReset: true,
+      // Not awaited, so the response time does not reveal whether the
+      // email belongs to an account.
+      sendResetPassword: async ({ token, url, user }) => {
+        void sendPasswordResetEmail({ token, url, userId: user.id, email: user.email });
+      },
     },
     socialProviders: {
       ...(googleClientId && googleClientSecret
@@ -385,6 +395,38 @@ export function createResponderAuth() {
       },
     },
   });
+}
+
+async function sendPasswordResetEmail(args: {
+  email: string;
+  token: string;
+  url: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    const sent = await sendEmail({
+      ...passwordResetEmailBody({ resetUrl: args.url }),
+      idempotencyKey: `password-reset/${args.token}`,
+      subject: "Reset your Superlog password",
+      to: args.email,
+    });
+    if (!sent) return;
+    console.info(
+      JSON.stringify({
+        event: "password_reset_email_delivery_success",
+        userId: args.userId,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        errorCode: error instanceof Error ? error.constructor.name : "unknown",
+        errorMessage: authHandlerErrorMessage(error),
+        event: "password_reset_email_delivery_failed",
+        userId: args.userId,
+      }),
+    );
+  }
 }
 
 // A failed grant leaves the organization usable without the capability, and

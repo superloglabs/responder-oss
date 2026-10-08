@@ -11332,6 +11332,34 @@ body:has(.appShell--scans) {
   height: 18px;
 }
 
+.authPage .authFieldLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.authPage .authForgot {
+  padding: 0;
+  background: transparent;
+  color: #646464;
+  cursor: pointer;
+  font-size: 13px;
+}
+.authPage .authForgot:hover,
+.authPage .authForgot:focus-visible {
+  color: #202020;
+}
+.authPage .authBack {
+  display: block;
+  margin: 20px auto 0;
+}
+.authPage a.authSubmit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .authPage .authIntro .authSwitch {
   margin-top: 8px;
 }
