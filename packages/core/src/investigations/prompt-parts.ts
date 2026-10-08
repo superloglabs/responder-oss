@@ -1,3 +1,6 @@
+/** How to use AWS's managed script runner. Automation runs get it too. */
+export const awsScriptRunnerGuidance = "use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and inspect every nested api_calls result. An outer success status does not mean the nested AWS calls succeeded; retry failed nested calls with corrected operation names.";
+
 /** Versioned guidance; the worker chooses applicable sections and supplies live context. */
 export const defaultInvestigationPromptParts: Record<string, string> = {
   "scanScope": "Proactively survey the connected sources within the requested scan window. Report only concrete problems that are currently active.",
@@ -5,7 +8,7 @@ export const defaultInvestigationPromptParts: Record<string, string> = {
   "aws": "Use the connected read-only AWS tools to inspect relevant infrastructure, configuration, telemetry, and service health before concluding. Connected AWS accounts: {{value1}}. Never request secret values.",
   "awsAlarm": "This investigation was triggered by an AWS alarm forwarded through Slack. Locate the exact CloudWatch alarm by its normalized name and region first. Inspect its current configuration, state history, metric data, affected resource, and relevant logs around the transition. Treat the Slack notification as a pointer, not as proof of root cause.",
   "awsGuides": "Use the following AWS investigation guides when planning service-specific inspection:\n\n{{value1}}",
-  "awsTools": "Prefer the typed aws_inspect_cloudwatch_alarm, aws_inspect_cloudwatch_metric, aws_query_cloudwatch_logs, aws_inspect_sqs_queue, and aws_inspect_lambda_function tools for AWS evidence. If aws___run_script is necessary, use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and inspect every nested api_calls result. An outer success status does not mean the nested AWS calls succeeded; retry failed nested calls with corrected operation names.",
+  "awsTools": `Prefer the typed aws_inspect_cloudwatch_alarm, aws_inspect_cloudwatch_metric, aws_query_cloudwatch_logs, aws_inspect_sqs_queue, and aws_inspect_lambda_function tools for AWS evidence. If aws___run_script is necessary, ${awsScriptRunnerGuidance}`,
   "gcp": "Use the connected read-only Google Cloud Asset Inventory, Logging, and Monitoring tools to inspect relevant resources and telemetry before concluding. Connected GCP projects: {{value1}}. Never request secret values or attempt to change cloud resources.",
   "datadog": "Use the connected Datadog tools to inspect the matching logs and surrounding service activity before concluding.",
   "dash0": "Use the connected read-only Dash0 tools to inspect relevant services, failed checks, logs, metrics, and traces before concluding. Never create or modify Dash0 resources and do not delegate the investigation to Agent0. Connected Dash0 organizations: {{value1}}.",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAxiomReadOnlyTool } from "../../../../packages/core/src/integrations/axiom.js";
+import { rpcMessages } from "./mcp-messages.js";
 
 // Automation runs reach Axiom through the broker with the same read-only tool
 // allowlist as investigations. Calls to other tools are refused, and tool
@@ -30,25 +31,6 @@ const toolListMessageSchema = z.object({
     tools: z.array(z.object({ name: z.string() }).passthrough()),
   }).passthrough(),
 }).passthrough();
-
-// Streamable HTTP servers answer with JSON or with a server-sent event stream
-// that carries the JSON-RPC messages. Media types are case-insensitive, and
-// SSE lines may end with CRLF, LF, or CR.
-function rpcMessages(text: string, contentType: string): unknown[] {
-  if (!contentType.toLowerCase().includes("text/event-stream")) return [JSON.parse(text)];
-  const lines = text.split(/\r\n|\r|\n/u);
-  const messages: unknown[] = [];
-  let data: string[] = [];
-  for (const line of [...lines, ""]) {
-    if (line === "") {
-      if (data.length) messages.push(JSON.parse(data.join("\n")));
-      data = [];
-    } else if (line.startsWith("data:")) {
-      data.push(line.slice(5).replace(/^ /u, ""));
-    }
-  }
-  return messages;
-}
 
 function parsedMessages(text: string, contentType: string): unknown[] | null {
   try {

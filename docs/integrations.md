@@ -503,9 +503,10 @@ updates with `pnpm vercel:generate-api`.
 
 ## AWS
 
-AWS is optional read-only context for investigations. A workspace owner enters
-the 12-digit AWS account ID, reviews the generated CloudFormation stack, and
-verifies the connection after the stack reaches `CREATE_COMPLETE`.
+AWS is optional read-only context for investigations and automations. A
+workspace owner enters the 12-digit AWS account ID, reviews the generated
+CloudFormation stack, and verifies the connection after the stack reaches
+`CREATE_COMPLETE`.
 
 The stack creates a fixed `ResponderInvestigationRole` protected by the
 deployment broker ARN and a unique external ID. It attaches AWS-managed
@@ -528,6 +529,14 @@ tools cover CloudWatch alarm configuration and history, metrics, Logs Insights,
 SQS queue attributes, and Lambda configuration and event source mappings. The
 managed sandboxed script runner remains available for other read-only AWS API
 calls.
+
+Automations can use an AWS connection as context. The worker gives each run
+one server per AWS account, served by the run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>`. The broker assumes the same
+customer role as investigations, signs each request to the managed AWS MCP
+server, lists tools itself, and exposes and accepts calls only to the tools
+investigations allow. The typed CloudWatch, SQS, and Lambda tools and the alarm
+guides are investigation-only.
 
 Production deployments should store the generic template in a private S3
 bucket and configure `AWS_INTEGRATION_TEMPLATE_BUCKET` and

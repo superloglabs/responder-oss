@@ -42,7 +42,7 @@ import { tool } from "@openai/agents";
 import type { RuntimeAwsConnection } from "@responder/core/db/investigations";
 import { isAwsCommercialRegion } from "@responder/core/integrations/aws";
 import { z } from "zod";
-import { createRefreshingAwsCredentialsProvider } from "./aws.js";
+import { createRefreshingAwsCredentialsProvider } from "@responder/core/integrations/aws-mcp";
 
 const MAX_LOG_QUERY_POLLS = 30;
 const LOG_QUERY_POLL_INTERVAL_MS = 1_000;

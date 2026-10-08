@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import { isAutomationContextProvider } from "@responder/core/automations/context-providers";
 import { gcpMcpServices } from "@responder/core/integrations/gcp";
+import { awsScriptRunnerGuidance } from "@responder/core/investigations/prompt-parts";
 import {
   appendAutomationRunEvent,
   automationRunCancellationRequested,
@@ -234,6 +235,10 @@ function automationBrokerBaseUrl(environment: NodeJS.ProcessEnv): string {
   return url.toString().replace(/\/$/u, "");
 }
 
+function contextServerName(connection: { id: string; provider: string }): string {
+  return `${connection.provider}_${connection.id.replaceAll("-", "")}`;
+}
+
 // A Slack connection that only triggers the automation still gets a server
 // when Slack started the run, so the agent can work in that thread.
 function automationContextServers(
@@ -253,7 +258,7 @@ function automationContextServers(
   );
   return [...new Map(served.map((connection) => [connection.id, connection])).values()]
     .flatMap((connection) => {
-      const name = `${connection.provider}_${connection.id.replaceAll("-", "")}`;
+      const name = contextServerName(connection);
       const url = new URL(`${encodeURIComponent(connection.id)}/`, broker);
       // A Google Cloud project is served as one broker endpoint per managed
       // Google MCP server.
@@ -387,10 +392,14 @@ function repositoryInstructions(repositories: Array<{ path: string; repository: 
 }
 
 // Google's tools need the project as an argument, so the agent is told which
-// projects its Google Cloud servers can reach.
+// projects its Google Cloud servers can reach. Each AWS account is its own
+// server, so the agent is told which server reaches which account.
 function contextInstructions(
-  connections: Array<{ externalAccountId?: string | null; metadata?: Record<string, unknown>; provider: string; role: string }>,
+  connections: Array<{ externalAccountId?: string | null; id: string; metadata?: Record<string, unknown>; provider: string; role: string }>,
 ): string[] {
+  const awsAccounts = [...new Set(connections
+    .filter((connection) => connection.role === "context" && connection.provider === "aws" && connection.externalAccountId)
+    .map((connection) => `- ${connection.externalAccountId}: the ${contextServerName(connection)} server`))];
   const projects = [...new Set(connections
     .filter((connection) => connection.role === "context" && connection.provider === "gcp" && connection.externalAccountId)
     .map((connection) => {
@@ -400,9 +409,13 @@ function contextInstructions(
         ? `- ${connection.externalAccountId}: parent ${parent}, project number ${projectNumber}`
         : `- ${connection.externalAccountId}: parent ${parent}`;
     }))];
-  if (projects.length === 0) return [];
   return [
-    `Connected Google Cloud projects. The gcp_* tools are read-only and reach only these projects; pass the parent where a tool asks for a parent, project, or scope:\n${projects.join("\n")}`,
+    ...(projects.length > 0
+      ? [`Connected Google Cloud projects. The gcp_* tools are read-only and reach only these projects; pass the parent where a tool asks for a parent, project, or scope:\n${projects.join("\n")}`]
+      : []),
+    ...(awsAccounts.length > 0
+      ? [`Connected AWS accounts. Their tools come from AWS's managed MCP server and can read but not change resources. Use the server of the account you need:\n${awsAccounts.join("\n")}\nIf you use aws___run_script, ${awsScriptRunnerGuidance} Never request secret values.`]
+      : []),
   ];
 }
 

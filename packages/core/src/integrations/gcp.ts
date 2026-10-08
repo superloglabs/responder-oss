@@ -22,6 +22,12 @@ export const GCP_MCP_SERVICES = {
 } as const;
 export type GcpMcpService = keyof typeof GCP_MCP_SERVICES;
 export const gcpMcpServices = Object.keys(GCP_MCP_SERVICES) as GcpMcpService[];
+/** Investigations and automation runs use only tools Google marks read-only. */
+export function isGcpReadOnlyMcpTool(tool: {
+  annotations?: { readOnlyHint?: boolean };
+}): boolean {
+  return tool.annotations?.readOnlyHint === true;
+}
 export const GCP_ACCESS_SCOPES = [
   "https://www.googleapis.com/auth/cloud-platform",
 ] as const;

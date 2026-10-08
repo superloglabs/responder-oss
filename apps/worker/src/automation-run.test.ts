@@ -5,6 +5,7 @@ import type { createAutomationToolHandler } from "./automation-actions.js";
 import { AutomationHarnessError } from "./automation-harness.js";
 import { processAutomationRun, type AutomationRunDependencies } from "./automation-run.js";
 import { ModelCatalogError } from "@responder/core/automations/model-catalog";
+import { awsScriptRunnerGuidance } from "@responder/core/investigations/prompt-parts";
 import type { runCodexAutomation } from "./codex-automation-harness.js";
 
 vi.mock("@responder/core/credentials/encryption", () => ({
@@ -296,6 +297,37 @@ describe("automation run processor", () => {
     expect(prompt).toContain("superlog-494218");
     expect(prompt).toContain("projects/superlog-494218");
     expect(prompt).toContain("297477702017");
+  });
+
+  it("serves each AWS context connection as one server and names its account", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const awsId = "65656565-6565-4565-8565-656565656565";
+    deps.getConnections.mockResolvedValue([
+      {
+        encryptedCredentials: "encrypted-aws",
+        externalAccountId: "123456789012",
+        id: awsId,
+        metadata: {},
+        provider: "aws",
+        role: "context",
+      },
+    ]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    const { contextServers, prompt } = deps.runCodex.mock.calls[0]![1];
+    expect(contextServers).toEqual([{
+      name: "aws_65656565656545658565656565656565",
+      url: `https://responder.example/api/automation-context-broker/v1/${awsId}`,
+    }]);
+    expect(prompt).toContain("- 123456789012: the aws_65656565656545658565656565656565 server");
+    expect(prompt).toContain(`If you use aws___run_script, ${awsScriptRunnerGuidance}`);
   });
 
   it("gives runs the workspace tools in workspaces with simplified navigation", async () => {
