@@ -331,6 +331,7 @@ it("names the model when the ChatGPT subscription does not offer it", async () =
   await expect(run).rejects.toThrow(
     "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.",
   );
+  await expect(run).rejects.toHaveProperty("organizationFixable", true);
 });
 
 it("says so when the ChatGPT workspace behind the subscription is deactivated", async () => {
@@ -358,12 +359,15 @@ it("says so when the ChatGPT workspace behind the subscription is deactivated", 
     materializeEntry: vi.fn().mockResolvedValue(undefined),
   } as unknown as DaytonaSandboxSession;
 
-  await expect(runCodexAutomation(session, {
+  const run = runCodexAutomation(session, {
     ...input,
     model: { ...input.model, subscription: { authJson } },
-  })).rejects.toThrow(
+  });
+
+  await expect(run).rejects.toThrow(
     "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.",
   );
+  await expect(run).rejects.toHaveProperty("organizationFixable", true);
 });
 
 it("names only the refusal that ended the turn", async () => {
@@ -393,10 +397,13 @@ it("names only the refusal that ended the turn", async () => {
     materializeEntry: vi.fn().mockResolvedValue(undefined),
   } as unknown as DaytonaSandboxSession;
 
-  await expect(runCodexAutomation(session, {
+  const run = runCodexAutomation(session, {
     ...input,
     model: { ...input.model, subscription: { authJson } },
-  })).rejects.toThrow(/^Codex automation harness failed$/u);
+  });
+
+  await expect(run).rejects.toThrow(/^Codex automation harness failed$/u);
+  await expect(run).rejects.toHaveProperty("organizationFixable", false);
 });
 
 it("redacts native subscription tokens from persisted harness output", async () => {

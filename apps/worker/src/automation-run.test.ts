@@ -1472,11 +1472,68 @@ describe("automation run processor", () => {
       failureMessage: "Codex automation harness failed",
       status: "failed",
     }));
+    expect(deps.reportException).toHaveBeenCalledWith(
+      expect.any(AutomationHarnessError),
+      expect.objectContaining({ requestId: runId }),
+    );
     expect(deps.waiveUsage).toHaveBeenCalledWith({
       leaseId: claimedRun().leaseId,
       runId,
       since: new Date("2026-09-22T18:59:59.000Z"),
     });
+  });
+
+  it("does not report a refusal the organization can fix to Sentry", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const refusal = "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError(refusal, "", true));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "execution_failed",
+      failureMessage: refusal,
+      status: "failed",
+    }));
+  });
+
+  it("keeps the refusal message when the sandbox wraps it with the queued harness failure", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const refusal = "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.";
+    const harnessFailure = new AutomationHarnessError(refusal, "", true);
+    deps.runCodex.mockRejectedValue(harnessFailure);
+    const runInSandbox = deps.runInSandbox.getMockImplementation()!;
+    deps.runInSandbox.mockImplementation(async (input) => {
+      try {
+        return await runInSandbox(input);
+      } catch (error) {
+        throw new AggregateError(
+          [error, harnessFailure],
+          "Automation callback and queued model operation failed",
+        );
+      }
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureMessage: refusal,
+      status: "failed",
+    }));
   });
 
   it("does not waive the usage of a turn the allowance stopped", async () => {
