@@ -1,12 +1,14 @@
 interface UsageBalance {
   overageAllowed: boolean;
   remaining: number;
+  unlimited?: boolean;
 }
 
 export interface BillingBannerSummary {
   automations?: {
     configured: boolean;
     creditOverageAllowed?: boolean;
+    creditUnlimited?: boolean;
     machineHours?: UsageBalance | null;
     remaining: number;
   } | null;
@@ -35,9 +37,14 @@ export function billingBanner(summary: BillingBannerSummary): BillingBannerKind 
   }
   const usage = summary.automations;
   if (!usage?.configured) return null;
-  if (!usage.creditOverageAllowed && usage.remaining < minimumCreditDollars) return "usage";
+  if (!usage.creditOverageAllowed && !usage.creditUnlimited && usage.remaining < minimumCreditDollars) {
+    return "usage";
+  }
   const machineHours = usage.machineHours;
-  return machineHours && !machineHours.overageAllowed && machineHours.remaining < minimumMachineHours
+  return machineHours &&
+    !machineHours.overageAllowed &&
+    !machineHours.unlimited &&
+    machineHours.remaining < minimumMachineHours
     ? "machine_hours"
     : null;
 }

@@ -30,7 +30,11 @@ export function usageLimitReached(
   summary: AutomationBillingSummary,
 ): (Omit<UsageLimit, "investigations"> & { nextResetAt: number | null }) | null {
   if (!summary.configured) return null;
-  if (!summary.creditOverageAllowed && summary.remaining < automationMinimumBalanceDollars) {
+  if (
+    !summary.creditOverageAllowed &&
+    !summary.creditUnlimited &&
+    summary.remaining < automationMinimumBalanceDollars
+  ) {
     // Plans without machine hours pay for sandbox time from the credit, so
     // every run stops; otherwise runs with the workspace's own key continue.
     const machinesUseCredit = summary.machineHours === null && sandboxTimeIsBilled();
@@ -44,6 +48,7 @@ export function usageLimitReached(
   if (
     machineHours &&
     !machineHours.overageAllowed &&
+    !machineHours.unlimited &&
     machineHours.remaining < minimumMachineHours
   ) {
     return {

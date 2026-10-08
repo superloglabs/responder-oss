@@ -52,6 +52,14 @@ describe("billingBanner", () => {
     }))).toBe("usage");
   });
 
+  it("shows nothing for unlimited balances", () => {
+    expect(billingBanner(usageSummary({
+      creditUnlimited: true,
+      machineHours: { overageAllowed: false, remaining: 0, unlimited: true },
+      remaining: 0,
+    }))).toBeNull();
+  });
+
   it("keeps the investigation credit banner for other workspaces", () => {
     expect(billingBanner({ ...usageSummary(), usageBased: false })).toBe("investigations");
     expect(billingBanner({ ...usageSummary(), payAsYouGo: true, usageBased: false })).toBeNull();

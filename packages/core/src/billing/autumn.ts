@@ -350,6 +350,8 @@ export interface UsageBalanceSummary {
   // Usage past the granted amount is billed instead of stopping work.
   overageAllowed: boolean;
   remaining: number;
+  // The balance never stops work.
+  unlimited: boolean;
   usage: number;
 }
 
@@ -359,6 +361,8 @@ export interface AutomationBillingSummary {
   configured: boolean;
   // Usage past the credit is billed instead of stopping work.
   creditOverageAllowed: boolean;
+  // The credit never stops work.
+  creditUnlimited: boolean;
   enabled: boolean;
   // Null on plans that pay for sandbox time from the usage credit.
   machineHours: UsageBalanceSummary | null;
@@ -452,12 +456,14 @@ function disabledAutomationSummary(configured: boolean, enabled: boolean): Autom
     cancelsAtPeriodEnd: false,
     configured,
     creditOverageAllowed: false,
+    creditUnlimited: false,
     enabled,
     machineHours: {
       granted: AUTOMATION_FREE_MACHINE_HOURS,
       nextResetAt: null,
       overageAllowed: false,
       remaining: AUTOMATION_FREE_MACHINE_HOURS,
+      unlimited: false,
       usage: 0,
     },
     nextResetAt: null,
@@ -480,6 +486,7 @@ function balanceSummary(balance: NonNullable<Customer["balances"][string]>): Usa
     nextResetAt: balance.nextResetAt ?? null,
     overageAllowed: balance.overageAllowed,
     remaining: Math.max(0, balance.remaining),
+    unlimited: balance.unlimited,
     usage: Math.max(0, balance.usage),
   };
 }
@@ -497,6 +504,7 @@ export function summarizeAutomationBillingCustomer(
     cancelsAtPeriodEnd: plan.cancelsAtPeriodEnd,
     configured: true,
     creditOverageAllowed: balance?.overageAllowed ?? false,
+    creditUnlimited: balance?.unlimited ?? false,
     enabled: true,
     machineHours: machineHours ? balanceSummary(machineHours) : null,
     nextResetAt: balance?.nextResetAt ?? null,

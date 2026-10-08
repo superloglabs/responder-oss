@@ -8,12 +8,14 @@ function summary(overrides: Partial<AutomationBillingSummary> = {}): AutomationB
     cancelsAtPeriodEnd: false,
     configured: true,
     creditOverageAllowed: false,
+    creditUnlimited: false,
     enabled: true,
     machineHours: {
       granted: 2,
       nextResetAt: 1_800_000_100,
       overageAllowed: false,
       remaining: 1,
+      unlimited: false,
       usage: 1,
     },
     nextResetAt: null,
@@ -65,6 +67,14 @@ describe("usageLimitReached", () => {
       machineHours: { ...summary().machineHours!, overageAllowed: true, remaining: 0 },
       remaining: 0,
     }))).toEqual({ balance: "usage_credit", modelRunsOnly: true, nextResetAt: null });
+  });
+
+  it("ignores unlimited balances", () => {
+    expect(usageLimitReached(summary({
+      creditUnlimited: true,
+      machineHours: { ...summary().machineHours!, remaining: 0, unlimited: true },
+      remaining: 0,
+    }))).toBeNull();
   });
 
   it("ignores a workspace without configured billing", () => {
