@@ -25,6 +25,12 @@ describe("billingBanner", () => {
     expect(billingBanner(usageSummary())).toBeNull();
   });
 
+  it("shows nothing when billing is off or usage billing is not set up", () => {
+    expect(billingBanner({ ...usageSummary({ remaining: 0 }), enabled: false })).toBeNull();
+    expect(billingBanner({ ...usageSummary(), automations: null })).toBeNull();
+    expect(billingBanner(usageSummary({ configured: false, remaining: 0 }))).toBeNull();
+  });
+
   it("shows a banner when a balance without overage is used up", () => {
     expect(billingBanner(usageSummary({ remaining: 0 }))).toBe("usage");
     expect(billingBanner(usageSummary({

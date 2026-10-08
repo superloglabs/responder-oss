@@ -737,7 +737,10 @@ export async function processAutomationRun(
     });
     const machinesUseCredit = access.machinesUseCredit;
     if (!access.allowed) {
+      // If the lookup fails, the notice names only automation runs rather
+      // than not going out.
       await dependencies.hasCapability(run.organizationId, "simplified_navigation")
+        .catch(() => false)
         .then((investigations) => dependencies.notifyLimitReached(run.organizationId, access.nextResetAt, {
           refreshSlackChannels: (organizationId) => refreshSlackChannelResources(organizationId),
           usage: usageLimitFromAllowance(access, investigations),

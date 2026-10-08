@@ -2,7 +2,7 @@ import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
 import {
   listConnectedIntegrationAccountCredentials,
-  replaceIntegrationResources,
+  replaceIntegrationResourcesIfCredentialsMatch,
 } from "../db/integrations.js";
 
 const slackChannelsResponseSchema = z.object({
@@ -74,7 +74,8 @@ export async function listSlackChannels(accessToken: string) {
 }
 
 // Replaces the cached channels of each connected Slack account, including
-// whether the bot is a member of each.
+// whether the bot is a member of each. An account reconnected while Slack is
+// queried keeps the channels listed with its new token.
 export async function refreshSlackChannelResources(
   organizationId: string,
   listChannels: typeof listSlackChannels = listSlackChannels,
@@ -92,11 +93,14 @@ export async function refreshSlackChannelResources(
         ),
       );
       const channels = await listChannels(credentials.accessToken);
-      await replaceIntegrationResources(
-        account.id,
-        "slack_channel",
-        channels,
-      );
+      await replaceIntegrationResourcesIfCredentialsMatch({
+        encryptedCredentials: account.encryptedCredentials!,
+        integrationAccountId: account.id,
+        kind: "slack_channel",
+        organizationId,
+        provider: "slack",
+        resources: channels,
+      });
     }),
   );
 }

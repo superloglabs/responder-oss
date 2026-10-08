@@ -95,6 +95,7 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -169,11 +170,11 @@ async function waiveFailedInvestigationUsage(
 }
 
 let automationUsageBillingPass: Promise<void> | undefined;
-// Usage billed shortly before a restart is checked again by the next worker.
 // Each pass rereads a short overlap, since billing times come from the clocks
-// of several processes.
+// of several processes. A new worker first checks the whole retry window, so
+// a check that was still failing when the last worker stopped is not lost.
 const usageNoticeOverlapMs = 2 * 60 * 1_000;
-let usageNoticesCheckedAt = new Date(Date.now() - 10 * 60 * 1_000);
+let usageNoticesCheckedAt = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
 // Organizations whose last check failed, checked again on the next pass even
 // without further usage.
 let usageNoticeRetries: string[] = [];
