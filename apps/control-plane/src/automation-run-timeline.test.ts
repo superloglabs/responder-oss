@@ -63,6 +63,20 @@ describe("automationRunTimeline", () => {
     expect(entries.at(-1)).toMatchObject({ kind: "notice", text: "Skipped the Slack notification: Duplicate of OPS-42." });
   });
 
+  it("shows the Slack posts and reactions an example run did not send", () => {
+    const entries = automationRunTimeline(run([
+      { data: { adding: true, name: "eyes" }, type: "slack_reaction_previewed" },
+      { data: { buttons: ["Open a pull request"], channel: "#ops", details: ["Stack trace"], text: "Checkout fails for guests." }, type: "slack_message_previewed" },
+      { data: { channel: "C1", inThread: true, text: "On it." }, type: "slack_message_previewed" },
+    ], { trigger: { attributes: { example: true }, provider: "slack", sourceUrl: null, title: "Checkout is down" } }));
+
+    expect(entries.slice(1)).toEqual([
+      { key: "1", kind: "notice", text: "Would add the :eyes: reaction in Slack." },
+      { buttons: ["Open a pull request"], channel: "#ops", details: ["Stack trace"], inThread: false, key: "2", kind: "slackPreview", text: "Checkout fails for guests." },
+      { buttons: [], channel: "C1", details: [], inThread: true, key: "3", kind: "slackPreview", text: "On it." },
+    ]);
+  });
+
   it("shows a review on GitHub and the commit the run pushed for it", () => {
     const entries = automationRunTimeline(run([
       { data: { authorId: "greptile-apps[bot]", authorName: "greptile-apps[bot]", source: "github", text: "New test always fails." }, type: "user_message" },

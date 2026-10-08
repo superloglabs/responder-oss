@@ -368,6 +368,60 @@ export async function getOrganizationIntegrationAccount(input: {
   return rows[0] ?? null;
 }
 
+// A connected account of the organization, with the provider's ID for it.
+export async function getConnectedOrganizationIntegrationAccount(input: {
+  integrationAccountId: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+}) {
+  const rows = await getDatabase()
+    .select({
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      externalAccountId: integrationAccounts.externalAccountId,
+      metadata: integrationAccounts.metadata,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+// The names of a connection's channels or projects, by external ID.
+export async function getIntegrationResourceNames(input: {
+  externalIds: string[];
+  integrationAccountId: string;
+  kind: IntegrationResourceKind;
+  organizationId: string;
+}): Promise<Map<string, string>> {
+  if (input.externalIds.length === 0) return new Map();
+  const rows = await getDatabase()
+    .select({
+      displayName: integrationResources.displayName,
+      externalId: integrationResources.externalId,
+    })
+    .from(integrationResources)
+    .innerJoin(
+      integrationAccounts,
+      eq(integrationAccounts.id, integrationResources.integrationAccountId),
+    )
+    .where(
+      and(
+        eq(integrationResources.integrationAccountId, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationResources.kind, input.kind),
+        inArray(integrationResources.externalId, input.externalIds),
+      ),
+    );
+  return new Map(rows.map((row) => [row.externalId, row.displayName]));
+}
+
 export async function getConnectedIntegrationAccountCredential(input: {
   integrationAccountId: string;
   provider: IntegrationProvider;

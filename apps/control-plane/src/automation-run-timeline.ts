@@ -6,6 +6,7 @@ import type {
   AutomationTranscriptTool,
   AutomationUserMessageEventData,
 } from "../../../packages/core/src/automations/transcript";
+import { slackMessagePreviewedEvent, slackReactionPreviewedEvent } from "../../../packages/core/src/automations/example-run";
 import type { AutomationRunDetail } from "./automations-api";
 import { providerDisplayName } from "./components/provider-glyphs";
 
@@ -28,6 +29,8 @@ export type AutomationRunEntry =
   | { key: string; kind: "pullRequest"; number: string | null; repository: string | null; title: string | null; url: string }
   | { identifier: string | null; key: string; kind: "linearIssue"; title: string | null; url: string }
   | { key: string; kind: "notice"; text: string }
+  // A Slack post that an example run showed instead of sending.
+  | { buttons: string[]; channel: string; details: string[]; inThread: boolean; key: string; kind: "slackPreview"; text: string }
   | { key: string; kind: "failure"; text: string };
 
 function isTranscript(data: unknown): data is AutomationTranscriptEventData {
@@ -41,6 +44,11 @@ function isUserMessage(data: unknown): data is AutomationUserMessageEventData {
 function stringField(data: Record<string, unknown> | null, key: string): string | null {
   const value = data?.[key];
   return typeof value === "string" && value ? value : null;
+}
+
+function stringList(data: Record<string, unknown> | null, key: string): string[] {
+  const value = data?.[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
 }
 
 // Orders a run's events as a chat. A test chat opens with the member's
@@ -113,6 +121,23 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
       } else if (kind === "send_slack_message") {
         entries.push({ key, kind: "notice", text: "Sent a Slack message." });
       }
+    } else if (event.type === slackMessagePreviewedEvent) {
+      const text = stringField(event.data, "text");
+      if (text) {
+        entries.push({
+          buttons: stringList(event.data, "buttons"),
+          channel: stringField(event.data, "channel") ?? "Slack",
+          details: stringList(event.data, "details"),
+          inThread: event.data?.inThread === true,
+          key,
+          kind: "slackPreview",
+          text,
+        });
+      }
+    } else if (event.type === slackReactionPreviewedEvent) {
+      const name = stringField(event.data, "name");
+      const verb = event.data?.adding === false ? "remove" : "add";
+      entries.push({ key, kind: "notice", text: name ? `Would ${verb} the :${name}: reaction in Slack.` : `Would ${verb} a Slack reaction.` });
     } else if (event.type === "notification_skipped") {
       const reason = stringField(event.data, "reason");
       entries.push({ key, kind: "notice", text: reason ? `Skipped the Slack notification: ${reason}` : "Skipped the Slack notification." });

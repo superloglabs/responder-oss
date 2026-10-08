@@ -131,6 +131,56 @@ const subagentRun = {
   ],
 };
 
+const exampleRunId = "77777777-7777-4777-8777-777777777777";
+const pastIssue = {
+  integrationAccountId: "22222222-2222-4222-8222-222222222222",
+  issueId: "2840",
+  kind: "sentry",
+  level: "error",
+  occurredAt: minutesAgo(90),
+  projectName: "responder-web",
+  shortId: "RESP-2840",
+  title: "TypeError: Cannot read properties of undefined (reading 'cart')",
+};
+const pastMessage = {
+  authorName: "Grace Hopper",
+  channelId: "C123",
+  channelName: "alerts",
+  integrationAccountId: "33333333-3333-4333-8333-333333333333",
+  kind: "slack",
+  occurredAt: minutesAgo(60 * 26),
+  timestamp: "1790000000.000100",
+  title: "Checkout is returning 500s for guest users",
+};
+
+const exampleRun = {
+  ...completedRun,
+  id: exampleRunId,
+  number: 129,
+  resultSummary: null,
+  trigger: {
+    attributes: { action: "created", example: true, projectName: "responder-web", shortId: "RESP-2840" },
+    provider: "sentry",
+    sourceUrl: "https://sentry.example/issues/2840",
+    title: `RESP-2840: ${pastIssue.title}`,
+  },
+  events: [
+    { createdAt: minutesAgo(3), data: {}, id: 20, type: "run_started" },
+    { createdAt: minutesAgo(2), data: { items: [
+      { kind: "message", text: "I'll find where the cart is read before it loads." },
+      ...tools(["read", "src/checkout/cart.ts"], ["query", "get_issue", { provider: "sentry" }]),
+      { kind: "message", text: "The cart is read before the session restores it. I'll report it to #ops." },
+    ], truncated: false }, id: 21, type: "transcript" },
+    { createdAt: minutesAgo(1), data: {
+      buttons: ["Open a pull request", "Ignore"],
+      channel: "#ops",
+      details: ["`src/checkout/cart.ts:42` reads `session.cart` before `restoreSession()` resolves."],
+      text: "*RESP-2840: cart is undefined on checkout*\nGuests who refresh during checkout hit this. The fix is to wait for the session before reading the cart.",
+    }, id: 22, type: "slack_message_previewed" },
+    { createdAt: minutesAgo(1), data: null, id: 23, type: "run_succeeded" },
+  ],
+};
+
 async function mockApi(page: Page, overrides: { run?: Record<string, unknown> } = {}) {
   const requests: Array<{ body: unknown; path: string }> = [];
   await page.context().route("**/api/**", async (route) => {
@@ -149,7 +199,12 @@ async function mockApi(page: Page, overrides: { run?: Record<string, unknown> } 
     if (path === "/api/billing") return route.fulfill({ json: { configured: false, enabled: false } });
     if (path === "/api/automations/options") return route.fulfill({ json: { accounts: [], resources: [], repositories: [], credentials: [], secrets: [] } });
     if (path === `/api/automations/${automationId}`) return route.fulfill({ json: { automation } });
-    if (path === `/api/automations/${automationId}/runs` && method === "POST") return route.fulfill({ status: 202, json: { duplicate: false, runId: chatRunId } });
+    if (path === `/api/automations/${automationId}/examples`) return route.fulfill({ json: { examples: [pastIssue, pastMessage] } });
+    if (path === `/api/automations/${automationId}/runs` && method === "POST") {
+      const example = (route.request().postDataJSON() as { example?: unknown } | null)?.example;
+      return route.fulfill({ status: 202, json: { duplicate: false, runId: example ? exampleRunId : chatRunId } });
+    }
+    if (path === `/api/automations/runs/${exampleRunId}`) return route.fulfill({ json: { run: exampleRun } });
     if (path === `/api/automations/${automationId}/runs`) return route.fulfill({ json: { page: 1, pageSize: 10, total: 1, runs: [{
       completedAt: completedRun.completedAt, createdAt: completedRun.createdAt, failureCategory: null, failureMessage: null, id: runId,
       inferenceUsage: null, number: 127, resultSummary: "PR #248 opened", startedAt: completedRun.startedAt, status: "succeeded",
@@ -316,4 +371,28 @@ test("opens a run from the run history", async ({ page }) => {
   await page.getByRole("cell", { name: "Today" }).click();
   await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/runs/${runId}$`));
   await expect(page.getByRole("heading", { name: "Payment webhook timeout" })).toBeVisible();
+});
+
+test("starts an example run on a past event and shows its Slack post without sending it", async ({ page }, testInfo) => {
+  const requests = await mockApi(page);
+  await page.setViewportSize({ width: 1728, height: 997 });
+  await page.goto(`/automations/${automationId}/test`);
+
+  const pastEvents = page.getByRole("region", { name: "Try a past event" });
+  await expect(pastEvents.getByRole("button")).toHaveCount(2);
+  await expect(pastEvents.getByRole("button").first()).toContainText("RESP-2840 · responder-web");
+  await expect(pastEvents.getByRole("button").last()).toContainText("#alerts · Grace Hopper");
+  await page.screenshot({ path: testInfo.outputPath("automation-test-past-events.png"), fullPage: true });
+
+  await pastEvents.getByRole("button", { name: /TypeError/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/runs/${exampleRunId}$`));
+  expect(requests.find((request) => request.path === `/api/automations/${automationId}/runs`)?.body).toEqual({
+    example: { integrationAccountId: pastIssue.integrationAccountId, issueId: "2840", kind: "sentry" },
+  });
+  await expect(page.getByRole("article", { name: "Trigger" })).toContainText("Sentry · New issue · RESP-2840 · Example");
+  const preview = page.getByRole("article", { name: "Slack post to #ops, not sent" });
+  await expect(preview).toContainText("Not sent · example run");
+  await expect(preview).toContainText("Open a pull request");
+  await expect(preview).toContainText("restoreSession()");
+  await page.screenshot({ path: testInfo.outputPath("automation-example-run.png"), fullPage: true });
 });

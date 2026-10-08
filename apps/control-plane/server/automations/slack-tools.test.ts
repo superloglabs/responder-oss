@@ -197,6 +197,40 @@ describe("automation Slack tools", () => {
     expect(deps.removeReaction).toHaveBeenCalledOnce();
   });
 
+  it("shows an example run's posts and reactions on the run page instead of sending them", async () => {
+    const deps = dependencies();
+    const exampleClaim = claim({
+      trigger: { ...slackTrigger, attributes: { ...slackTrigger.attributes, example: true } },
+    });
+
+    const reply = await call(exampleClaim, deps, "slack_post_message", {
+      channel_id: "C999",
+      text: "Looking into it",
+      thread_ts: "100.000001",
+    });
+    const post = await call(exampleClaim, deps, "slack_post_message", {
+      buttons: [{ label: "Open a pull request" }],
+      channel_id: "C123",
+      text: "Checkout fails for guests",
+    });
+    const reaction = await call(exampleClaim, deps, "slack_add_reaction", {
+      channel_id: "C999",
+      name: "eyes",
+      timestamp: "100.000005",
+    });
+
+    expect([reply, post, reaction].some((result) => result.isError)).toBe(false);
+    expect(JSON.parse(reply.content[0]!.text)).toMatchObject({ channelId: "C999", note: expect.stringContaining("example run") });
+    expect(deps.postMessage).not.toHaveBeenCalled();
+    expect(deps.addReaction).not.toHaveBeenCalled();
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
+    expect(deps.appendEvent.mock.calls.map(([event]) => event)).toEqual([
+      { data: { channel: "C999", inThread: true, text: "Looking into it" }, runId, type: "slack_message_previewed" },
+      { data: { buttons: ["Open a pull request"], channel: "#incidents", inThread: false, text: "Checkout fails for guests" }, runId, type: "slack_message_previewed" },
+      { data: { adding: true, name: "eyes" }, runId, type: "slack_reaction_previewed" },
+    ]);
+  });
+
   it("ignores a Slack trigger from another workspace", () => {
     const other = claim({
       roles: ["trigger"],

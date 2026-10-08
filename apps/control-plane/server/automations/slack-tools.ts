@@ -9,6 +9,11 @@ import {
 } from "../../../../packages/core/src/db/automations.js";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  isExampleAutomationRun,
+  slackMessagePreviewedEvent,
+  slackReactionPreviewedEvent,
+} from "../../../../packages/core/src/automations/example-run.js";
+import {
   automationButtonsBlock,
   automationButtonsInputSchema,
   automationButtonsSchema,
@@ -323,6 +328,8 @@ function tokenFrom(
   return typeof value === "string" && value ? value : null;
 }
 
+const exampleNote = "This is an example run on a past event, so this is shown on the run page instead of sent to Slack.";
+
 const notAllowed = failure("This Slack channel or thread is not available to this automation.");
 
 async function runTool(
@@ -405,6 +412,19 @@ async function runTool(
     if (buttons.length > 0 && text.length > maxSectionTextLength) {
       return failure(`A message with buttons holds at most ${maxSectionTextLength.toLocaleString("en-US")} characters of text. Shorten it, or post the details in the thread.`);
     }
+    if (isExampleAutomationRun(claim.trigger)) {
+      await dependencies.appendEvent({
+        data: {
+          ...(buttons.length > 0 ? { buttons: buttons.map((button) => button.label) } : {}),
+          channel: scope.channels.has(channelId) ? `#${scope.channels.get(channelId)}` : channelId,
+          inThread: threadTimestamp !== undefined,
+          text,
+        },
+        runId: claim.runId,
+        type: slackMessagePreviewedEvent,
+      });
+      return success({ channelId, note: exampleNote, ...(threadTimestamp ? { threadTimestamp } : {}) });
+    }
     const result = await recordedWrite({
       claim,
       dependencies,
@@ -455,6 +475,14 @@ async function runTool(
       (scope.thread.timestamp === timestamp || scope.thread.threadTimestamp === timestamp);
     if (!scope.channels.has(channelId) && !triggerMessage) return notAllowed;
     const adding = name === "slack_add_reaction";
+    if (isExampleAutomationRun(claim.trigger)) {
+      await dependencies.appendEvent({
+        data: { adding, name: reaction },
+        runId: claim.runId,
+        type: slackReactionPreviewedEvent,
+      });
+      return success({ channelId, name: reaction, note: exampleNote, timestamp });
+    }
     await recordedWrite({
       claim,
       dependencies,

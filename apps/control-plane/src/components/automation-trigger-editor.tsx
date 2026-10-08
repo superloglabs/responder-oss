@@ -1,8 +1,8 @@
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
-import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { ClockCounterClockwiseIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
 import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
-import { defaultScheduleTrigger } from "../automation-configuration";
+import { defaultScheduleTrigger, isTriggerComplete } from "../automation-configuration";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
@@ -61,7 +61,23 @@ function AxiomTriggerFields({ accountId }: { accountId: string }) {
 // Most automations need one or two triggers; the server accepts up to ten.
 export const maxAutomationTriggers = 10;
 
-function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefresh, fieldsRef }: {
+// Starts an example run on a past Slack message or Sentry issue. `saves`
+// says whether trying first saves a new automation.
+export interface PastEventTrial {
+  onTry: () => void;
+  pending: boolean;
+  saves: boolean;
+}
+
+function PastEventButton({ kind, trial }: { kind: "sentry" | "slack"; trial: PastEventTrial }) {
+  const event = kind === "slack" ? "message" : "issue";
+  return <button className="automationTrigger__tryPast" disabled={trial.pending} onClick={trial.onTry} type="button">
+    <ClockCounterClockwiseIcon size={14} />
+    {trial.pending ? "Opening…" : trial.saves ? `Save and try on a past ${event}` : `Try on a past ${event}`}
+  </button>;
+}
+
+function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefresh, fieldsRef, pastEventTrial }: {
   options: AutomationOptions | null;
   trigger: AutomationTrigger;
   onChange: (trigger: AutomationTrigger) => void;
@@ -69,6 +85,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
   onConnected: (kind: ConnectedTriggerKind, signal: AbortSignal) => Promise<boolean>;
   onRefresh: (kind: ConnectedTriggerKind) => Promise<void>;
   fieldsRef?: RefObject<HTMLDivElement | null>;
+  pastEventTrial?: PastEventTrial;
 }) {
   const schedule = trigger.kind === "schedule" ? trigger : null;
   const connected = trigger.kind === "schedule" ? null : trigger;
@@ -120,13 +137,15 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
       {connected.kind === "sentry" && account ? <SentryEnvironmentPicker key={connected.integrationAccountId} accountId={connected.integrationAccountId} excluded={connected.excludedEnvironments ?? []} onChange={(excludedEnvironments) => onChange({ ...connected, excludedEnvironments })} /> : null}
       {connected.kind === "slack" && account && connected.channelIds.length > 0 ? <SlackAuthorPickers key={connected.integrationAccountId} accountId={connected.integrationAccountId} channelIds={connected.channelIds} ignored={connected.ignoredAuthors ?? []} included={connected.includedAuthors ?? []} onIgnoredChange={(ignoredAuthors) => onChange({ ...connected, ignoredAuthors })} onIncludedChange={(includedAuthors) => onChange({ ...connected, includedAuthors })} /> : null}
       {connected.kind === "discord" ? <AutomationTriggerConnect key={connected.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
+      {(connected.kind === "slack" || connected.kind === "sentry") && account && pastEventTrial && isTriggerComplete(connected) ? <PastEventButton kind={connected.kind} trial={pastEventTrial} /> : null}
     </div>}
   </div>;
 }
 
 // Edits an automation's triggers. Each trigger starts a run on its own.
-export function AutomationTriggerEditor({ options, triggers, onChange, open, onOpenChange, onConnected, onRefresh }: {
+export function AutomationTriggerEditor({ options, triggers, onChange, open, onOpenChange, onConnected, onRefresh, pastEventTrial }: {
   options: AutomationOptions | null;
+  pastEventTrial?: PastEventTrial;
   onRefresh: (kind: ConnectedTriggerKind) => Promise<void>;
   onConnected: (kind: ConnectedTriggerKind, signal: AbortSignal) => Promise<boolean>;
   triggers: AutomationTrigger[];
@@ -195,6 +214,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
       onRefresh={onRefresh}
       onRemove={() => { onChange(triggers.filter((_, position) => position !== index)); requestAnimationFrame(() => buttonRef.current?.focus()); }}
       options={options}
+      pastEventTrial={pastEventTrial}
       trigger={trigger}
     />)}
     <div className="automationTrigger__chooser">

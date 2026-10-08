@@ -34,10 +34,13 @@ import {
 import {
   cancelAutomationRun,
   fetchAutomation,
+  fetchAutomationExamples,
   fetchAutomationRun,
   runAutomation,
+  runAutomationExample,
   sendAutomationRunMessage,
   type AutomationDetail,
+  type AutomationExampleEvent,
   type AutomationRunDetail,
   type AutomationRunStatus,
 } from "../automations-api";
@@ -85,6 +88,11 @@ function RunHeader({ automationId, automationName, current, status, title }: {
 }
 
 function triggerMeta(run: AutomationRunDetail): string[] {
+  const meta = providerTriggerMeta(run);
+  return run.trigger.attributes.example === true ? [...meta, "Example"] : meta;
+}
+
+function providerTriggerMeta(run: AutomationRunDetail): string[] {
   const { attributes, provider } = run.trigger;
   if (provider === "manual") return ["Manual run"];
   if (provider === "sentry") {
@@ -263,6 +271,22 @@ function LinearIssueCard({ entry }: { entry: Extract<AutomationRunEntry, { kind:
   </article>;
 }
 
+// A post that an example run showed here instead of sending to Slack. Its
+// details would follow as replies in the post's thread.
+function SlackPreviewCard({ entry }: { entry: Extract<AutomationRunEntry, { kind: "slackPreview" }> }) {
+  return <article aria-label={`Slack post to ${entry.channel}, not sent`} className="automationRun__card automationRun__slackPreview">
+    <header>
+      <ProviderGlyph decorative provider="slack" />
+      <span>{entry.inThread ? `Reply in a ${entry.channel} thread` : `Post to ${entry.channel}`}</span>
+      <span className="automationCreate__spacer" />
+      <small>Not sent · example run</small>
+    </header>
+    <div className="automationRun__message"><Markdown components={markdownComponents}>{entry.text}</Markdown></div>
+    {entry.buttons.length > 0 ? <div className="automationRun__previewButtons">{entry.buttons.map((label) => <span key={label}>{label}</span>)}</div> : null}
+    {entry.details.map((detail, index) => <div className="automationRun__message automationRun__previewReply" key={index}><Markdown components={markdownComponents}>{detail}</Markdown></div>)}
+  </article>;
+}
+
 function Entry({ animate, entry, live, run }: { animate: boolean; entry: AutomationRunEntry; live: boolean; run: AutomationRunDetail }) {
   switch (entry.kind) {
     case "trigger":
@@ -280,6 +304,8 @@ function Entry({ animate, entry, live, run }: { animate: boolean; entry: Automat
       return <PullRequestCard entry={entry} />;
     case "linearIssue":
       return <LinearIssueCard entry={entry} />;
+    case "slackPreview":
+      return <SlackPreviewCard entry={entry} />;
     case "notice":
       return <p className="automationRun__notice">{entry.text}</p>;
     case "failure":
@@ -457,7 +483,80 @@ function AutomationRunContent({ automationId, runId }: { automationId: string; r
   </AppShell>;
 }
 
-// An empty chat that starts a manual run with the member's first message.
+function exampleKey(example: AutomationExampleEvent): string {
+  return example.kind === "slack"
+    ? `slack:${example.integrationAccountId}:${example.channelId}:${example.timestamp}`
+    : `sentry:${example.integrationAccountId}:${example.issueId}`;
+}
+
+function exampleSource(example: AutomationExampleEvent): string {
+  return example.kind === "slack"
+    ? [example.channelName ? `#${example.channelName}` : null, example.authorName].filter(Boolean).join(" · ")
+    : [example.shortId, example.projectName].filter(Boolean).join(" · ");
+}
+
+// Past Slack messages and Sentry issues the automation's triggers watch. Picking
+// one starts an example run on it.
+function PastEvents({ automationId, disabledReason, onError, onStart }: {
+  automationId: string;
+  disabledReason: string | null;
+  onError: (message: string | null) => void;
+  onStart: (example: AutomationExampleEvent) => Promise<void>;
+}) {
+  const [examples, setExamples] = useState<AutomationExampleEvent[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [starting, setStarting] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchAutomationExamples(automationId, controller.signal).then((loaded) => {
+      setExamples(loaded);
+      setLoadError(null);
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setLoadError(errorMessage(cause, "Unable to load past events"));
+    });
+    return () => controller.abort();
+  }, [automationId, attempt]);
+
+  async function start(example: AutomationExampleEvent) {
+    setStarting(exampleKey(example));
+    onError(null);
+    await onStart(example);
+    setStarting(null);
+  }
+
+  return <section aria-labelledby="automation-past-events" className="automationRun__pastEvents">
+    <header>
+      <h2 id="automation-past-events">Try a past event</h2>
+      <p>The agent gets the event as if it just happened. Its Slack posts show here instead of being sent. Other actions, like opening pull requests, are real.</p>
+    </header>
+    {loadError
+      ? <div className="automationRun__pastEventsEmpty" role="alert"><span>{loadError}</span><button className="automationCreate__secondary" onClick={() => { setLoadError(null); setAttempt((value) => value + 1); }} type="button">Retry</button></div>
+      : examples === null
+        ? <p className="automationRun__pastEventsEmpty" role="status">Loading past events…</p>
+        : examples.length === 0
+          ? <p className="automationRun__pastEventsEmpty">No recent messages or issues found for this automation's triggers.</p>
+          : <ul className="automationRun__pastEventList">
+              {examples.map((example) => {
+                const key = exampleKey(example);
+                return <li key={key}>
+                  <button disabled={disabledReason !== null || starting !== null} onClick={() => void start(example)} title={disabledReason ?? undefined} type="button">
+                    <ProviderGlyph decorative provider={example.kind} />
+                    <span className="automationRun__pastEventText">
+                      <strong>{example.title}</strong>
+                      <small>{exampleSource(example)}</small>
+                    </span>
+                    <small className="automationRun__pastEventTime">{starting === key ? "Starting…" : example.occurredAt ? relativeTime(example.occurredAt) : null}</small>
+                  </button>
+                </li>;
+              })}
+            </ul>}
+  </section>;
+}
+
+// An empty chat that starts a manual run with the member's first message, or
+// an example run on a past event the automation's triggers watch.
 export function AutomationTestChatPage() {
   const { automationId } = useParams();
   const navigate = useNavigate();
@@ -499,16 +598,29 @@ export function AutomationTestChatPage() {
     }
   }
 
+  async function startExample(example: AutomationExampleEvent) {
+    try {
+      const { runId } = await runAutomationExample(automation!.id, example);
+      navigate(`/automations/${automation!.id}/runs/${runId}`, { replace: true });
+    } catch (cause) {
+      setError(errorMessage(cause, "Unable to start the example run"));
+    }
+  }
+
+  const disabledReason = automation.enabled ? null : "Turn the automation on to test it.";
+  const watchesPastEvents = automation.configuration.triggers.some((trigger) => trigger.kind === "slack" || trigger.kind === "sentry");
+
   return <AppShell active="automations" redesigned density="create">
     <div className="automationCreate automationRun">
       <RunHeader automationId={automation.id} automationName={automation.name} current="Test chat" title="Test chat" />
       <section aria-label="Run transcript" className="automationRun__transcript automationRun__transcript--empty">
         <p>Send a message to start a test run. The agent treats it as the trigger event and works with this automation's instructions, repositories and connectors.</p>
+        {watchesPastEvents ? <PastEvents automationId={automation.id} disabledReason={disabledReason} onError={setError} onStart={startExample} /> : null}
       </section>
       {error ? <p className="formError" role="alert">{error}</p> : null}
       <Composer
         autoFocus
-        disabledReason={automation.enabled ? null : "Turn the automation on to test it."}
+        disabledReason={disabledReason}
         onSend={start}
         placeholder="Describe a test event or give the agent a task…"
       />

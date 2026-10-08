@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   modelCatalog: vi.fn(),
   queueFollowUp: vi.fn(),
   queueRun: vi.fn(),
+  exampleTrigger: vi.fn(),
+  listExamples: vi.fn(),
   tenant: vi.fn().mockResolvedValue({
     ok: true,
     organizationId: "15151515-1515-4515-8515-151515151515",
@@ -95,6 +97,23 @@ vi.mock("./queue.js", () => ({
   queueAutomationRun: mocks.queueRun,
   queueAutomationRunFollowUp: mocks.queueFollowUp,
 }));
+vi.mock("./example-events.js", async () => {
+  const { z } = await import("zod");
+  class AutomationExampleError extends Error {
+    constructor(message: string, readonly status: 404 | 502) {
+      super(message);
+    }
+  }
+  return {
+    AutomationExampleError,
+    automationExampleSchema: z.discriminatedUnion("kind", [
+      z.object({ channelId: z.string(), integrationAccountId: z.uuid(), kind: z.literal("slack"), timestamp: z.string() }),
+      z.object({ integrationAccountId: z.uuid(), issueId: z.string(), kind: z.literal("sentry") }),
+    ]),
+    exampleAutomationTrigger: mocks.exampleTrigger,
+    listAutomationExampleEvents: mocks.listExamples,
+  };
+});
 
 vi.mock(
   "../../../../packages/core/src/automations/model-catalog.js",
@@ -219,6 +238,64 @@ describe("automation control-plane routes", () => {
     });
     expect(empty.status).toBe(400);
     expect(mocks.queueRun).toHaveBeenCalledOnce();
+  });
+
+  it("lists past events for the automation's triggers", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    const triggers = [{ kind: "sentry", projectIds: ["7"] }];
+    mocks.getAutomation.mockResolvedValue({ configuration: { triggers }, id: automationId });
+    mocks.listExamples.mockResolvedValue([{ issueId: "42", kind: "sentry", title: "TypeError" }]);
+
+    const response = await app.request(`/api/automations/${automationId}/examples`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ examples: [{ issueId: "42", kind: "sentry", title: "TypeError" }] });
+    expect(mocks.listExamples).toHaveBeenCalledWith(organizationId, triggers);
+  });
+
+  it("starts an example run on a past event with the trigger a live run would get", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    const triggers = [{ channelIds: ["C1"], kind: "slack" }];
+    const example = {
+      channelId: "C1",
+      integrationAccountId: "41414141-4141-4141-8141-414141414141",
+      kind: "slack",
+      timestamp: "1700000000.000100",
+    };
+    const trigger = { attributes: { example: true }, body: "Checkout is down", externalEventId: "example:1", provider: "slack", title: "Checkout is down" };
+    mocks.getAutomation.mockResolvedValue({ configuration: { triggers }, id: automationId });
+    mocks.exampleTrigger.mockResolvedValue(trigger);
+    mocks.queueRun.mockResolvedValue({ duplicate: false, runId: "run-1" });
+
+    const response = await app.request(`/api/automations/${automationId}/runs`, {
+      body: JSON.stringify({ example }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.exampleTrigger).toHaveBeenCalledWith(organizationId, triggers, example);
+    expect(mocks.queueRun).toHaveBeenCalledWith({ automationId, trigger });
+  });
+
+  it("rejects an example run on an event the automation cannot replay", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.getAutomation.mockResolvedValue({ configuration: { triggers: [] }, id: automationId });
+    const { AutomationExampleError } = await import("./example-events.js");
+    mocks.exampleTrigger.mockRejectedValue(new AutomationExampleError("Slack message not found", 404));
+    const start = (example: unknown) => app.request(`/api/automations/${automationId}/runs`, {
+      body: JSON.stringify({ example }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    const missing = await start({ channelId: "C1", integrationAccountId: "41414141-4141-4141-8141-414141414141", kind: "slack", timestamp: "1.2" });
+    const invalid = await start({ kind: "discord" });
+
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "Slack message not found" });
+    expect(invalid.status).toBe(400);
+    expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 
   it("queues a follow-up for a finished run in the active organization", async () => {

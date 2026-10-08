@@ -105,3 +105,24 @@
 .automationRun__composerActions { display: flex; justify-content: flex-end; gap: 10px; }
 .automationRun :is(a, button):focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
 .automationRun__triggerMeta > .automationTriggerIcon--schedule { flex: 0 0 auto; color: #666; }
+
+.automationRun__slackPreview { display: flex; flex-direction: column; gap: 10px; width: min(740px, 100%); padding: 14px 16px; outline-style: dashed; }
+.automationRun__slackPreview header { display: flex; align-items: center; gap: 8px; color: #666; font-size: 12px; line-height: 18px; }
+.automationRun__slackPreview header > .providerGlyph, .automationRun__slackPreview header > .providerGlyph > svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.automationRun__previewButtons { display: flex; flex-wrap: wrap; gap: 6px; }
+.automationRun__previewButtons span { padding: 3px 9px; border: 1px solid #ddd; border-radius: 6px; color: #202020; font-size: 12px; line-height: 18px; }
+.automationRun__previewReply { padding-left: 12px; border-left: 2px solid #e3e3e3; }
+
+.automationRun__pastEvents { display: flex; flex-direction: column; gap: 12px; max-width: 740px; }
+.automationRun__pastEvents h2 { margin: 0; color: #202020; font-size: 13px; font-weight: 500; line-height: 21px; }
+.automationRun__pastEvents header p { margin: 2px 0 0; }
+.automationRun__pastEventsEmpty { display: flex; align-items: center; gap: 12px; color: #666; }
+.automationRun__pastEventList { display: flex; flex-direction: column; margin: 0; padding: 4px; border-radius: 12px; background: #fff; outline: .5px solid #e3e3e3; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d; list-style: none; }
+.automationRun__pastEventList button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.automationRun__pastEventList button:hover:not(:disabled), .automationRun__pastEventList button:focus-visible { background: #f6f6f6; }
+.automationRun__pastEventList button:disabled { cursor: default; opacity: .6; }
+.automationRun__pastEventList .providerGlyph, .automationRun__pastEventList .providerGlyph > svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.automationRun__pastEventText { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.automationRun__pastEventText strong { overflow: hidden; color: #202020; font-weight: 400; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.automationRun__pastEventText small, .automationRun__pastEventTime { color: #666; font-size: 12px; line-height: 18px; }
+.automationRun__pastEventTime { flex-shrink: 0; }
