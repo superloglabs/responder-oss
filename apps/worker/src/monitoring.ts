@@ -152,22 +152,22 @@ function errorForMonitoring(
 }
 
 // An AggregateError's message names only the operation; the errors it holds
-// say what failed.
+// say what failed. Sentry replaces anything nested more than three levels
+// into an event's contexts with "[Object]", so each error is one string
+// directly under the context.
 function aggregatedErrorsForMonitoring(
   value: unknown,
   secrets: readonly string[],
-): { message: string; name: string }[] {
-  if (!(value instanceof AggregateError)) return [];
-  return value.errors.slice(0, 10).map((item: unknown) => {
+): Record<string, string> {
+  if (!(value instanceof AggregateError)) return {};
+  return Object.fromEntries(value.errors.slice(0, 10).map((item: unknown, index) => {
     const error = asError(item);
-    return {
-      message: error
-        ? redactString(error.message, secrets).slice(0, 2_000) ||
-          "Worker operation failed"
-        : "Non-Error exception",
-      name: error?.name ?? typeof item,
-    };
-  });
+    const message = error
+      ? redactString(error.message, secrets).slice(0, 2_000) ||
+        "Worker operation failed"
+      : "Non-Error exception";
+    return [`error_${index + 1}`, `${error?.name ?? typeof item}: ${message}`];
+  }));
 }
 
 function scrubWorkerSentryEvent(
@@ -252,8 +252,8 @@ export async function reportWorkerException(
       }
       const secrets = eventSecrets(eventScrubbingEnvironment);
       const aggregatedErrors = aggregatedErrorsForMonitoring(error, secrets);
-      if (aggregatedErrors.length > 0) {
-        scope.setContext("aggregated_errors", { errors: aggregatedErrors });
+      if (Object.keys(aggregatedErrors).length > 0) {
+        scope.setContext("aggregated_errors", aggregatedErrors);
       }
       Sentry.captureException(errorForMonitoring(error, secrets));
     });
