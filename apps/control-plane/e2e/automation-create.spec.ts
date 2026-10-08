@@ -388,7 +388,9 @@ test("searches channels by name or ID, selects multiple, and refreshes the list"
 
 test("includes and ignores Slack authors chosen from who posted in the selected channels", async ({ page }, testInfo) => {
   let requested: string[] = [];
+  let requests = 0;
   await page.route("**/api/automations/slack/*/authors?*", (route) => {
+    requests += 1;
     requested = new URL(route.request().url()).searchParams.getAll("channel");
     return route.fulfill({ json: { authors: [
       { id: "A-DEVIN", kind: "app", name: "Devin" },
@@ -416,6 +418,9 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await expect(ignore).toContainText("No one");
   await ignore.click();
   await page.getByRole("checkbox", { name: "Devin (app)", exact: true }).check();
+  // Both pickers share one list of authors. React's development mode loads
+  // it twice.
+  expect(requests).toBe(2);
   await page.getByRole("checkbox", { name: "Qovery (app)", exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors-picker.png"), fullPage: true });
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");

@@ -8,7 +8,7 @@ import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
 import { SentryEnvironmentPicker } from "./sentry-environment-picker";
-import { SlackAuthorPicker } from "./slack-author-picker";
+import { SlackAuthorPickers } from "./slack-author-picker";
 import { movedElsewhereInApp } from "./popover-dismiss";
 import { providerDisplayName } from "./provider-glyphs";
 import { triggerTitle } from "../pages/automation-list-presentation";
@@ -104,10 +104,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     <div className="automationTrigger__fields" ref={fieldsRef}>
       <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label={connected.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(connected.kind === "sentry" ? { ...connected, projectIds: ids } : { ...connected, channelIds: ids })} onRefresh={connected.kind === "discord" ? undefined : () => onRefresh(connected.kind)} />
       {connected.kind === "sentry" && account ? <SentryEnvironmentPicker key={connected.integrationAccountId} accountId={connected.integrationAccountId} excluded={connected.excludedEnvironments ?? []} onChange={(excludedEnvironments) => onChange({ ...connected, excludedEnvironments })} /> : null}
-      {connected.kind === "slack" && account && connected.channelIds.length > 0 ? <>
-        <SlackAuthorPicker key={`included:${connected.integrationAccountId}`} accountId={connected.integrationAccountId} channelIds={connected.channelIds} none="Everyone" selected={connected.includedAuthors ?? []} title="Only messages from" onChange={(includedAuthors) => onChange({ ...connected, includedAuthors })} />
-        <SlackAuthorPicker key={`ignored:${connected.integrationAccountId}`} accountId={connected.integrationAccountId} channelIds={connected.channelIds} none="No one" selected={connected.ignoredAuthors ?? []} title="Ignore messages from" onChange={(ignoredAuthors) => onChange({ ...connected, ignoredAuthors })} />
-      </> : null}
+      {connected.kind === "slack" && account && connected.channelIds.length > 0 ? <SlackAuthorPickers key={connected.integrationAccountId} accountId={connected.integrationAccountId} channelIds={connected.channelIds} ignored={connected.ignoredAuthors ?? []} included={connected.includedAuthors ?? []} onIgnoredChange={(ignoredAuthors) => onChange({ ...connected, ignoredAuthors })} onIncludedChange={(includedAuthors) => onChange({ ...connected, includedAuthors })} /> : null}
       {connected.kind === "discord" ? <AutomationTriggerConnect key={connected.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
     </div>
   </div>;
