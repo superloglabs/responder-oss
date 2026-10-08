@@ -2928,12 +2928,13 @@ describe("integration callback routing", () => {
       authorizationUrl: "https://us.posthog.com/oauth/authorize",
       oauth: { codeVerifier: "pkce-verifier" },
     });
-    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
 
     const response = await app.request(
       "/api/integrations/posthog/start?returnTo=%2Fagents%2Fnew",
     );
 
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
       "https://us.posthog.com/oauth/authorize",
@@ -3000,6 +3001,74 @@ describe("integration callback routing", () => {
       "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
     );
 
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=posthog&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(finishCustomMcpOAuth).toHaveBeenCalledWith({
+      authorizationCode: "oauth-code",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oauth: expect.objectContaining({
+          tokens: expect.objectContaining({ access_token: "oauth-access-token" }),
+        }),
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "PostHog",
+        provider: "posthog",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("finishes PostHog OAuth from expiring flow credentials without a pending account", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "pending-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(14);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(getOrganizationIntegrationAccount).not.toHaveBeenCalled();
+    expect(decryptCredentials).toHaveBeenCalledWith("pending-credentials");
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
       "https://responder.example/agents/new" +

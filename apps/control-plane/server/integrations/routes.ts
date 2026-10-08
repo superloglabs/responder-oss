@@ -1,3 +1,4 @@
+import { chatConnectionRoutes } from "./chat-connection.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -718,7 +719,280 @@ async function retrySentrySetup(organizationId: string): Promise<{
   }
 }
 
+export async function startIntegrationConnection(input: {
+  provider: string;
+  organizationId: string;
+  user: { id: string };
+  returnTo?: string;
+  mode?: string;
+}): Promise<Response> {
+  const tenant = input;
+  const parsedProvider = providerSchema.safeParse(input.provider);
+  if (!parsedProvider.success) {
+    return Response.json({ error: "Unknown integration provider" }, { status: 404 });
+  }
+
+  const definition = getIntegrationDefinition(parsedProvider.data);
+  if (!definition?.implemented) {
+    return Response.json({ error: "Integration is not available yet" }, { status: 501 });
+  }
+
+  if (
+    parsedProvider.data === "discord" &&
+    !(await organizationHasCapability(tenant.organizationId, "automations"))
+  ) {
+    return Response.json({ error: "Unknown integration provider" }, { status: 404 });
+  }
+  if (!integrationIsConfigured(definition)) {
+    return Response.json({ error: "Integration application is not configured" }, { status: 503 });
+  }
+  if (
+    parsedProvider.data === "aws" ||
+    parsedProvider.data === "datadog" ||
+    parsedProvider.data === "dash0" ||
+    parsedProvider.data === "grafana" ||
+    parsedProvider.data === "clickstack" ||
+    parsedProvider.data === "upstash" ||
+    parsedProvider.data === "langfuse" ||
+    parsedProvider.data === "supabase"
+  ) {
+    return Response.json({ error: `Use the ${definition.name} connection endpoint` }, { status: 405 });
+  }
+  if (parsedProvider.data === "custom_mcp") {
+    return Response.json({ error: "Use the custom MCP connection endpoint" }, { status: 405 });
+  }
+  if (parsedProvider.data === "sentry") {
+    try {
+      const retriedAccount = await retrySentrySetup(tenant.organizationId);
+      if (retriedAccount) {
+        await captureAnalyticsEvent({
+          distinctId: tenant.user.id,
+          event: "integration connected",
+          organizationId: tenant.organizationId,
+          properties: {
+            integration_account_id: retriedAccount.accountId,
+            provider: "sentry",
+            resource_count: retriedAccount.resourceCount,
+          },
+        });
+        return Response.redirect(
+          settingsRedirect(
+            input.returnTo ?? "/settings",
+            "sentry",
+            "connected",
+          ),
+        );
+      }
+    } catch (error) {
+      logCallbackError("Sentry retry", error);
+    }
+  }
+  if (parsedProvider.data === "gcp") {
+    try {
+      const pkce = createGcpPkce();
+      const gcpState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "gcp",
+        codeVerifier: pkce.codeVerifier,
+        returnTo: input.returnTo,
+        routingUrl: integrationCallbackUrl("gcp"),
+      });
+      return Response.redirect(
+        gcpAuthorizeUrl({
+          codeChallenge: pkce.codeChallenge,
+          redirectUri: integrationCallbackUrl("gcp"),
+          state: gcpState,
+        }),
+      );
+    } catch (error) {
+      logCallbackError("GCP", error, {
+        organizationId: tenant.organizationId,
+        stage: "start",
+      });
+      return Response.redirect(
+        settingsRedirect(
+          input.returnTo ?? "/settings",
+          "gcp",
+          "error",
+          "connection_failed",
+        ),
+      );
+    }
+  }
+  if (parsedProvider.data === "linear") {
+    try {
+      const pkce = createLinearPkce();
+      const linearState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "linear",
+        codeVerifier: pkce.codeVerifier,
+        returnTo: input.returnTo,
+        routingUrl: integrationCallbackUrl("linear"),
+      });
+      return Response.redirect(
+        linearAuthorizeUrl({
+          codeChallenge: pkce.codeChallenge,
+          redirectUri: integrationCallbackUrl("linear"),
+          state: linearState,
+        }),
+      );
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return Response.redirect(
+        settingsRedirect(
+          input.returnTo ?? "/settings",
+          "linear",
+          "error",
+          "connection_failed",
+        ),
+      );
+    }
+  }
+  if (parsedProvider.data === "axiom") {
+    let accountId: string | undefined;
+    let preserveExistingAccount = false;
+    try {
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId: AXIOM_MCP_URL,
+        organizationId: tenant.organizationId,
+        provider: "axiom",
+      });
+      preserveExistingAccount = Boolean(existing);
+      accountId =
+        existing?.id ??
+        (await upsertIntegrationAccount({
+          organizationId: tenant.organizationId,
+          provider: "axiom",
+          externalAccountId: AXIOM_MCP_URL,
+          displayName: "Axiom",
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: AXIOM_MCP_URL,
+            oauth: {},
+          }),
+          credentialKeyVersion: 1,
+          metadata: { authType: "oauth", mcpUrl: AXIOM_MCP_URL },
+          status: "pending",
+        }));
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "axiom",
+        codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
+        returnTo: input.returnTo,
+        routingUrl: integrationCallbackUrl("axiom"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl: AXIOM_MCP_URL,
+        redirectUrl: integrationCallbackUrl("axiom"),
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: {
+          encryptedCredentials: encryptCredentials({
+            authType: "oauth",
+            mcpUrl: AXIOM_MCP_URL,
+            oauth: oauthResult.oauth,
+          }),
+        },
+        organizationId: tenant.organizationId,
+        provider: "axiom",
+        state: connectionState,
+        userId: tenant.user.id,
+      });
+      if (!updated) throw new Error("The Axiom OAuth state was not updated");
+      return Response.redirect(oauthResult.authorizationUrl);
+    } catch (error) {
+      logCustomMcpError("connect", error, accountId);
+      if (accountId && !preserveExistingAccount) {
+        await setIntegrationAccountStatus(accountId, "error").catch(
+          () => undefined,
+        );
+      }
+      return Response.redirect(
+        settingsRedirect(
+          input.returnTo ?? "/settings",
+          "axiom",
+          "error",
+          "connection_failed",
+        ),
+      );
+    }
+  }
+  if (parsedProvider.data === "posthog") {
+    try {
+      // Keep incomplete OAuth credentials in the expiring flow, not an account.
+      // Replacing or expiring the flow therefore leaves no pending accounts.
+      const externalAccountId = randomUUID();
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "posthog",
+        codeVerifier: JSON.stringify({ externalAccountId }),
+        returnTo: input.returnTo,
+        routingUrl: integrationCallbackUrl("posthog"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl: POSTHOG_MCP_URL,
+        redirectUrl: integrationCallbackUrl("posthog"),
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: { encryptedCredentials: encryptCredentials({
+          authType: "oauth", mcpUrl: POSTHOG_MCP_URL, oauth: oauthResult.oauth,
+        }) },
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "posthog",
+        state: connectionState,
+      });
+      if (!updated) throw new Error("The PostHog OAuth state was superseded");
+      return Response.redirect(oauthResult.authorizationUrl);
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return Response.redirect(settingsRedirect(input.returnTo ?? "/settings", "posthog", "error", "connection_failed"));
+    }
+  }
+  const state = await createIntegrationConnectionState({
+    organizationId: tenant.organizationId,
+    userId: tenant.user.id,
+    provider: parsedProvider.data,
+    returnTo: input.returnTo,
+    routingUrl:
+      parsedProvider.data === "github" ||
+      parsedProvider.data === "discord" ||
+      parsedProvider.data === "sentry" ||
+      parsedProvider.data === "vercel"
+        ? integrationCallbackUrl(parsedProvider.data)
+        : undefined,
+  });
+
+  if (parsedProvider.data === "slack") {
+    return Response.redirect(slackAuthorizeUrl(state));
+  }
+  if (parsedProvider.data === "discord") {
+    return Response.redirect(discordAuthorizeUrl(state));
+  }
+  if (parsedProvider.data === "sentry") {
+    return Response.redirect(sentryInstallUrl(state));
+  }
+  if (parsedProvider.data === "github") {
+    if (input.mode === "install") {
+      return Response.redirect(githubInstallUrl(state));
+    }
+    return Response.redirect(githubAuthorizeUrl(state));
+  }
+  if (parsedProvider.data === "vercel") {
+    return Response.redirect(vercelInstallUrl(state));
+  }
+
+  return Response.json({ error: "Integration is not available yet" }, { status: 501 });
+}
+
 export const integrationRoutes = new Hono()
+  .route("/chat", chatConnectionRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -918,305 +1192,14 @@ export const integrationRoutes = new Hono()
     return context.json({ accounts: checkedAccounts });
   })
   .get("/:provider/start", async (context) => {
-    const parsedProvider = providerSchema.safeParse(context.req.param("provider"));
-    if (!parsedProvider.success) {
-      return context.json({ error: "Unknown integration provider" }, 404);
-    }
-
-    const definition = getIntegrationDefinition(parsedProvider.data);
-    if (!definition?.implemented) {
-      return context.json({ error: "Integration is not available yet" }, 501);
-    }
-
     const tenant = await getActiveTenant(context.req.raw.headers);
-    if (tenant.ok === false) {
-      return context.json({ error: tenant.error }, tenant.status);
-    }
-    if (
-      parsedProvider.data === "discord" &&
-      !(await organizationHasCapability(tenant.organizationId, "automations"))
-    ) {
-      return context.json({ error: "Unknown integration provider" }, 404);
-    }
-    if (!integrationIsConfigured(definition)) {
-      return context.json({ error: "Integration application is not configured" }, 503);
-    }
-    if (
-      parsedProvider.data === "aws" ||
-      parsedProvider.data === "datadog" ||
-      parsedProvider.data === "dash0" ||
-      parsedProvider.data === "grafana" ||
-      parsedProvider.data === "clickstack" ||
-      parsedProvider.data === "upstash" ||
-      parsedProvider.data === "langfuse" ||
-      parsedProvider.data === "supabase"
-    ) {
-      return context.json(
-        { error: `Use the ${definition.name} connection endpoint` },
-        405,
-      );
-    }
-    if (parsedProvider.data === "custom_mcp") {
-      return context.json(
-        { error: "Use the custom MCP connection endpoint" },
-        405,
-      );
-    }
-    if (parsedProvider.data === "sentry") {
-      try {
-        const retriedAccount = await retrySentrySetup(tenant.organizationId);
-        if (retriedAccount) {
-          await captureAnalyticsEvent({
-            distinctId: tenant.user.id,
-            event: "integration connected",
-            organizationId: tenant.organizationId,
-            properties: {
-              integration_account_id: retriedAccount.accountId,
-              provider: "sentry",
-              resource_count: retriedAccount.resourceCount,
-            },
-          });
-          return context.redirect(
-            settingsRedirect(
-              context.req.query("returnTo") ?? "/settings",
-              "sentry",
-              "connected",
-            ),
-          );
-        }
-      } catch (error) {
-        logCallbackError("Sentry retry", error);
-      }
-    }
-    if (parsedProvider.data === "gcp") {
-      try {
-        const pkce = createGcpPkce();
-        const gcpState = await createIntegrationConnectionState({
-          organizationId: tenant.organizationId,
-          userId: tenant.user.id,
-          provider: "gcp",
-          codeVerifier: pkce.codeVerifier,
-          returnTo: context.req.query("returnTo"),
-          routingUrl: integrationCallbackUrl("gcp"),
-        });
-        return context.redirect(
-          gcpAuthorizeUrl({
-            codeChallenge: pkce.codeChallenge,
-            redirectUri: integrationCallbackUrl("gcp"),
-            state: gcpState,
-          }),
-        );
-      } catch (error) {
-        logCallbackError("GCP", error, {
-          organizationId: tenant.organizationId,
-          stage: "start",
-        });
-        return context.redirect(
-          settingsRedirect(
-            context.req.query("returnTo") ?? "/settings",
-            "gcp",
-            "error",
-            "connection_failed",
-          ),
-        );
-      }
-    }
-    if (parsedProvider.data === "linear") {
-      try {
-        const pkce = createLinearPkce();
-        const linearState = await createIntegrationConnectionState({
-          organizationId: tenant.organizationId,
-          userId: tenant.user.id,
-          provider: "linear",
-          codeVerifier: pkce.codeVerifier,
-          returnTo: context.req.query("returnTo"),
-          routingUrl: integrationCallbackUrl("linear"),
-        });
-        return context.redirect(
-          linearAuthorizeUrl({
-            codeChallenge: pkce.codeChallenge,
-            redirectUri: integrationCallbackUrl("linear"),
-            state: linearState,
-          }),
-        );
-      } catch (error) {
-        logCustomMcpError("connect", error);
-        return context.redirect(
-          settingsRedirect(
-            context.req.query("returnTo") ?? "/settings",
-            "linear",
-            "error",
-            "connection_failed",
-          ),
-        );
-      }
-    }
-    if (parsedProvider.data === "axiom") {
-      let accountId: string | undefined;
-      let preserveExistingAccount = false;
-      try {
-        const existing = await getOrganizationIntegrationAccountByExternalId({
-          externalAccountId: AXIOM_MCP_URL,
-          organizationId: tenant.organizationId,
-          provider: "axiom",
-        });
-        preserveExistingAccount = Boolean(existing);
-        accountId =
-          existing?.id ??
-          (await upsertIntegrationAccount({
-            organizationId: tenant.organizationId,
-            provider: "axiom",
-            externalAccountId: AXIOM_MCP_URL,
-            displayName: "Axiom",
-            encryptedCredentials: encryptCredentials({
-              authType: "oauth",
-              mcpUrl: AXIOM_MCP_URL,
-              oauth: {},
-            }),
-            credentialKeyVersion: 1,
-            metadata: { authType: "oauth", mcpUrl: AXIOM_MCP_URL },
-            status: "pending",
-          }));
-        const connectionState = await createIntegrationConnectionState({
-          organizationId: tenant.organizationId,
-          userId: tenant.user.id,
-          provider: "axiom",
-          codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
-          returnTo: context.req.query("returnTo"),
-          routingUrl: integrationCallbackUrl("axiom"),
-        });
-        const oauthResult = await beginCustomMcpOAuth({
-          connectionState,
-          mcpUrl: AXIOM_MCP_URL,
-          redirectUrl: integrationCallbackUrl("axiom"),
-        });
-        const updated = await updateIntegrationConnectionStateMetadata({
-          metadata: {
-            encryptedCredentials: encryptCredentials({
-              authType: "oauth",
-              mcpUrl: AXIOM_MCP_URL,
-              oauth: oauthResult.oauth,
-            }),
-          },
-          organizationId: tenant.organizationId,
-          provider: "axiom",
-          state: connectionState,
-          userId: tenant.user.id,
-        });
-        if (!updated) throw new Error("The Axiom OAuth state was not updated");
-        return context.redirect(oauthResult.authorizationUrl);
-      } catch (error) {
-        logCustomMcpError("connect", error, accountId);
-        if (accountId && !preserveExistingAccount) {
-          await setIntegrationAccountStatus(accountId, "error").catch(
-            () => undefined,
-          );
-        }
-        return context.redirect(
-          settingsRedirect(
-            context.req.query("returnTo") ?? "/settings",
-            "axiom",
-            "error",
-            "connection_failed",
-          ),
-        );
-      }
-    }
-    if (parsedProvider.data === "posthog") {
-      let accountId: string | undefined;
-      try {
-        const externalAccountId = randomUUID();
-        accountId = await upsertIntegrationAccount({
-          organizationId: tenant.organizationId,
-          provider: "posthog",
-          externalAccountId,
-          displayName: "PostHog",
-          encryptedCredentials: encryptCredentials({
-            authType: "oauth",
-            mcpUrl: POSTHOG_MCP_URL,
-            oauth: {},
-          }),
-          credentialKeyVersion: 1,
-          metadata: { authType: "oauth", mcpUrl: POSTHOG_MCP_URL },
-          status: "pending",
-        });
-        const connectionState = await createIntegrationConnectionState({
-          organizationId: tenant.organizationId,
-          userId: tenant.user.id,
-          provider: "posthog",
-          codeVerifier: JSON.stringify({ accountId, externalAccountId }),
-          returnTo: context.req.query("returnTo"),
-          routingUrl: integrationCallbackUrl("posthog"),
-        });
-        const oauthResult = await beginCustomMcpOAuth({
-          connectionState,
-          mcpUrl: POSTHOG_MCP_URL,
-          redirectUrl: integrationCallbackUrl("posthog"),
-        });
-        const updated = await updateIntegrationAccountCredentials({
-          encryptedCredentials: encryptCredentials({
-            authType: "oauth",
-            mcpUrl: POSTHOG_MCP_URL,
-            oauth: oauthResult.oauth,
-          }),
-          integrationAccountId: accountId,
-          organizationId: tenant.organizationId,
-          provider: "posthog",
-          status: "pending",
-        });
-        if (!updated) throw new Error("The pending PostHog connection was not updated");
-        return context.redirect(oauthResult.authorizationUrl);
-      } catch (error) {
-        if (accountId) {
-          await setIntegrationAccountStatus(accountId, "error").catch(
-            () => undefined,
-          );
-        }
-        logCustomMcpError("connect", error, accountId);
-        return context.redirect(
-          settingsRedirect(
-            context.req.query("returnTo") ?? "/settings",
-            "posthog",
-            "error",
-            "connection_failed",
-          ),
-        );
-      }
-    }
-    const state = await createIntegrationConnectionState({
-      organizationId: tenant.organizationId,
-      userId: tenant.user.id,
-      provider: parsedProvider.data,
+    if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
+    return startIntegrationConnection({
+      ...tenant,
+      provider: context.req.param("provider"),
       returnTo: context.req.query("returnTo"),
-      routingUrl:
-        parsedProvider.data === "github" ||
-        parsedProvider.data === "discord" ||
-        parsedProvider.data === "sentry" ||
-        parsedProvider.data === "vercel"
-          ? integrationCallbackUrl(parsedProvider.data)
-          : undefined,
+      mode: context.req.query("mode"),
     });
-
-    if (parsedProvider.data === "slack") {
-      return context.redirect(slackAuthorizeUrl(state));
-    }
-    if (parsedProvider.data === "discord") {
-      return context.redirect(discordAuthorizeUrl(state));
-    }
-    if (parsedProvider.data === "sentry") {
-      return context.redirect(sentryInstallUrl(state));
-    }
-    if (parsedProvider.data === "github") {
-      if (context.req.query("mode") === "install") {
-        return context.redirect(githubInstallUrl(state));
-      }
-      return context.redirect(githubAuthorizeUrl(state));
-    }
-    if (parsedProvider.data === "vercel") {
-      return context.redirect(vercelInstallUrl(state));
-    }
-
-    return context.json({ error: "Integration is not available yet" }, 501);
   })
   .post("/aws/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
@@ -2131,20 +2114,27 @@ export const integrationRoutes = new Hono()
         );
       }
       const callbackState = z
-        .object({ accountId: z.uuid(), externalAccountId: z.uuid() })
+        .object({ accountId: z.uuid().optional(), externalAccountId: z.uuid() })
         .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
       accountId = callbackState.accountId;
       const authorizationCode = z.string().min(1).parse(context.req.query("code"));
-      const account = await getOrganizationIntegrationAccount({
-        integrationAccountId: accountId,
-        organizationId: connectionState.organizationId,
-        provider: "posthog",
-      });
-      if (!account?.encryptedCredentials || account.status !== "pending") {
-        throw new Error("The pending PostHog connection was not found");
+      let encryptedCredentials: string;
+      if (accountId) {
+        // Complete links issued before flow-scoped credential storage.
+        const account = await getOrganizationIntegrationAccount({
+          integrationAccountId: accountId,
+          organizationId: connectionState.organizationId,
+          provider: "posthog",
+        });
+        if (!account?.encryptedCredentials || account.status !== "pending") {
+          throw new Error("The pending PostHog connection was not found");
+        }
+        encryptedCredentials = account.encryptedCredentials;
+      } else {
+        encryptedCredentials = pendingConnectionCredentialsSchema.parse(connectionState.metadata).encryptedCredentials;
       }
       const credentials = parsePostHogCredentials(
-        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
       const oauth = await finishCustomMcpOAuth({
         authorizationCode,
@@ -2172,9 +2162,10 @@ export const integrationRoutes = new Hono()
         },
         status: "connected",
       });
-      if (connectedAccountId !== accountId) {
+      if (accountId && connectedAccountId !== accountId) {
         throw new Error("The PostHog connection changed during OAuth");
       }
+      accountId = connectedAccountId;
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",

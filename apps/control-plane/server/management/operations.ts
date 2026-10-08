@@ -1,3 +1,4 @@
+import { integrationConnectionOperations } from "./integration-connections.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -244,6 +245,7 @@ function modelCatalogFailure(error: unknown): ManagementError {
 }
 
 export const managementOperations: ManagementOperation[] = [
+  ...integrationConnectionOperations,
   defineOperation({
     description:
       "Returns the workspace the API key belongs to, its enabled features, and the member the key acts as.",
@@ -328,7 +330,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Lists connected integrations, the repositories they give access to, and their resources, such as Slack channels and Sentry projects. Use these IDs in automation and tag mode settings. Connect new integrations in the app.",
+      "Lists connected integrations, the repositories they give access to, and their resources, such as Slack channels and Sentry projects. Use these IDs in automation and tag mode settings. Use list_available_integrations and start_integration_connection to connect a provider from chat.",
     effect: "read",
     input: empty,
     method: "GET",
