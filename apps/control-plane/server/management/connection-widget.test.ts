@@ -3,22 +3,32 @@ import { describe, expect, it, vi } from "vitest";
 import { connectionWidgetHtml } from "./connection-widget.js";
 
 function mount(integrations: { provider: string }[] = [], failFollowUp = false, expiresAt: string | null = null) {
-  const elements = Object.fromEntries(["title", "status", "connect", "check"].map(id => [id, {
-    textContent: "", disabled: false, hidden: false, onclick: async () => {},
+  const elements = Object.fromEntries(["card", "title", "status", "connect", "check"].map(id => [id, {
+    getBoundingClientRect: () => ({ height: 74 }), textContent: "", disabled: false, hidden: false, onclick: async () => {},
   }]));
   const callTool = vi.fn(async () => ({ structuredContent: { integrations } }));
   const sendFollowUpMessage = vi.fn(async () => { if (failFollowUp) throw Error("unavailable"); });
   const openExternal = vi.fn(async () => {});
   const openai = { toolOutput: { provider: "slack", url: "https://slack.com/oauth/v2/authorize", handoffUrl: "https://superlog.sh/api/integrations/chat/open?token=opaque", status: "awaiting_consent", expiresAt }, callTool, sendFollowUpMessage, openExternal, setWidgetState: vi.fn() };
+  const postMessage=vi.fn();
+  const handlers=new Map<string, (event: unknown) => void>();
+  const parent={ postMessage };
   runInNewContext(connectionWidgetHtml.split("<script>")[1]!.split("</script>")[0]!, {
-    window: { openai, parent: { postMessage: vi.fn() }, addEventListener: vi.fn() },
+    window: { openai, parent, addEventListener: (name: string, handler: (event: unknown) => void) => handlers.set(name, handler) },
     document: { getElementById: (id: string) => elements[id], addEventListener: vi.fn() },
     setTimeout: vi.fn(() => 1), clearTimeout: vi.fn(),
   });
-  return { elements, callTool, sendFollowUpMessage, openExternal };
+  return { elements, callTool, sendFollowUpMessage, openExternal, postMessage, handlers, parent };
 }
 
 describe("connection card", () => {
+  it("reports content height after host initialization and hides routine manual checks", async () => {
+    const card=mount();
+    const request=card.postMessage.mock.calls[0]![0];
+    card.handlers.get("message")!({ source: card.parent, data: {jsonrpc: "2.0", id: request.id, result: {}} });
+    await vi.waitFor(() => expect(card.postMessage).toHaveBeenCalledWith({jsonrpc: "2.0", method: "ui/notifications/size-changed", params: {height: 74}}, "*"));
+    expect(card.elements.check.hidden).toBe(true);
+  });
   it("does not open expired consent links", async () => {
     const card = mount([], false, new Date(Date.now()-1000).toISOString());
     await card.elements.connect.onclick();
@@ -33,7 +43,7 @@ describe("connection card", () => {
     await card.elements.check.onclick();
     await vi.waitFor(() => expect(card.callTool).toHaveBeenCalled());
     expect(card.sendFollowUpMessage).not.toHaveBeenCalled();
-    expect(card.elements.status.textContent).toContain("Waiting for authorization");
+    expect(card.elements.status.textContent).toContain("Waiting for approval");
   });
   it("continues only once when the required provider is verified", async () => {
     const card = mount([{ provider: "slack" }]);

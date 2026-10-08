@@ -1,3 +1,4 @@
+import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIntegrationConnectionState } from "../../../../packages/core/src/db/integrations.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
@@ -21,6 +22,15 @@ const caller: ManagementContext = {
 const start = integrationConnectionOperations.find((item) => item.name === "start_integration_connection")!;
 const list = integrationConnectionOperations.find((item) => item.name === "list_available_integrations")!;
 
+function consentUrl(body: Record<string, unknown>) {
+  expect(body.url).toBe(body.handoffUrl);
+  const handoff = new URL(body.url as string);
+  expect(handoff.origin).toBe("https://superlog.example");
+  expect(handoff.pathname).toBe("/api/integrations/chat/open");
+  const envelope = decryptCredentials<{ authorizationUrl: string }>(handoff.searchParams.get("token")!);
+  return new URL(envelope.authorizationUrl);
+}
+
 describe("connections from chat", () => {
   beforeEach(() => {
     for (const key of ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET",
@@ -40,7 +50,7 @@ describe("connections from chat", () => {
     });
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ provider: "slack", status: "awaiting_consent", connectionType: "oauth" });
-    const url = new URL(result.body.url as string);
+    const url = consentUrl(result.body);
     expect(url.origin).toBe("https://slack.com");
     expect(url.searchParams.get("state")).toBe("private-state");
     expect(createIntegrationConnectionState).toHaveBeenCalledWith(expect.objectContaining({
@@ -54,7 +64,7 @@ describe("connections from chat", () => {
   it("uses GitHub installation consent so repository access can be selected", async () => {
     const result = await executeOperation(start, caller, { provider: "github" });
     expect(result.status).toBe(200);
-    const url = new URL(result.body.url as string);
+    const url = consentUrl(result.body);
     expect(url.origin).toBe("https://github.com");
     expect(url.pathname).toContain("/installations/new");
     expect(url.searchParams.get("state")).toBe("private-state");
@@ -63,7 +73,7 @@ describe("connections from chat", () => {
   it("retains PKCE when starting Linear from chat", async () => {
     const result = await executeOperation(start, caller, { provider: "linear" });
     expect(result.status).toBe(200);
-    const url = new URL(result.body.url as string);
+    const url = consentUrl(result.body);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(createIntegrationConnectionState).toHaveBeenCalledWith(expect.objectContaining({
       organizationId: caller.organizationId, userId: caller.user.id,
