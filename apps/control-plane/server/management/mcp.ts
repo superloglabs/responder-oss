@@ -1,8 +1,11 @@
+import { connectionWidgetHtml, connectionWidgetUri } from "./connection-widget.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -39,14 +42,33 @@ export function mcpTool(operation: ManagementOperation): Tool {
     inputSchema: jsonSchema(operation.input, "input") as Tool["inputSchema"],
     name: operation.name,
     title: operation.summary,
+    ...(operation.name === "start_integration_connection" ? { _meta: {
+      ui: { resourceUri: connectionWidgetUri },
+      "openai/outputTemplate": connectionWidgetUri,
+      "openai/widgetAccessible": true,
+    } } : operation.name === "list_integrations" ? { _meta: { "openai/widgetAccessible": true } } : {}),
   };
 }
 
 export function createManagementMcpServer(context: ManagementContext): Server {
   const server = new Server(
     { name: "superlog", title: "Superlog", version: "1.0.0" },
-    { capabilities: { tools: {} }, instructions },
+    { capabilities: { tools: {}, resources: {} }, instructions },
   );
+  server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: [{
+    uri: connectionWidgetUri, name: "Integration connection", mimeType: "text/html;profile=mcp-app",
+  }] }));
+  server.setRequestHandler(ReadResourceRequestSchema, (request) => {
+    if (request.params.uri !== connectionWidgetUri) throw new Error("Unknown resource");
+    return { contents: [{ uri: connectionWidgetUri, mimeType: "text/html;profile=mcp-app", text: connectionWidgetHtml,
+      _meta: {
+        ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } },
+        "openai/ui": { availableDisplayModes: ["inline"], preferredDisplayMode: "inline" },
+        "openai/widgetDescription": "A small integration consent card. It verifies connection and asks the conversation to continue after the user connects.",
+        "openai/widgetCSP": { redirect_domains: [new URL(controlPlaneBaseUrl()).origin] },
+      },
+    }] };
+  });
   const operations = new Map(
     mcpOperations.map((operation) => [operation.name, operation]),
   );
@@ -70,6 +92,7 @@ export function createManagementMcpServer(context: ManagementContext): Server {
       );
       return {
         content: [{ text: JSON.stringify(result.body), type: "text" }],
+        ...(result.status < 400 ? { structuredContent: result.body } : {}),
         ...(result.status >= 400 ? { isError: true } : {}),
       };
     },

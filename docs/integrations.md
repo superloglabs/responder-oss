@@ -15,7 +15,7 @@ Use `list_available_integrations` to discover configured providers, then
 are `GET /api/v1/integrations/available` and `POST /api/v1/integrations/connect`.
 
 Slack, GitHub, Sentry, Discord, Vercel, Linear, Google Cloud, Axiom, and PostHog
-return a provider consent URL. The person opens that link, approves access, and
+return a provider consent URL (Discord also requires the workspace automations capability). Sentry may recover an existing installation and return `connected` without another consent prompt. The person opens that link, approves access, and
 returns to chat. The browser must be signed into the same Superlog user and
 workspace that authorized the MCP client; callback identity checks are unchanged.
 Links expire after ten minutes, and requesting a new link invalidates the previous
@@ -609,3 +609,5 @@ worktree without restarting it:
 pnpm tunnel:claim
 pnpm tunnel:release
 ```
+
+The connection tool also supplies an inline connection card. It opens a signed handoff to provider consent, checks `list_integrations`, and requests a continuation only after the provider appears connected. Hosts that support conversation return addresses pass one to the handoff; successful consent then returns to that conversation. Other hosts show a focused completion page. Automatic continuation requires an active card and host support; plain MCP clients can check `list_integrations` on the next turn. Return addresses are restricted to supported chat origins and bound to the requesting user, workspace, and expiring connection ticket.

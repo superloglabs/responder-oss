@@ -1,3 +1,4 @@
+import { chatConnectionRoutes } from "./chat-connection.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -1018,6 +1019,7 @@ export async function startIntegrationConnection(input: {
 }
 
 export const integrationRoutes = new Hono()
+  .route("/chat", chatConnectionRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {

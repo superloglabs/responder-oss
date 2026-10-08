@@ -26,6 +26,8 @@ describe("connections from chat", () => {
     for (const key of ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET",
       "GITHUB_APP_ID", "GITHUB_APP_SLUG", "GITHUB_APP_PRIVATE_KEY", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET",
       "LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"]) vi.stubEnv(key, "configured");
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 9).toString("base64"));
+    vi.stubEnv("SLACK_CLIENT_SECRET", "private-slack-secret");
     vi.stubEnv("BETTER_AUTH_URL", "https://superlog.example");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://superlog.example");
   });
@@ -42,10 +44,11 @@ describe("connections from chat", () => {
     expect(url.origin).toBe("https://slack.com");
     expect(url.searchParams.get("state")).toBe("private-state");
     expect(createIntegrationConnectionState).toHaveBeenCalledWith(expect.objectContaining({
-      organizationId: caller.organizationId, userId: caller.user.id, provider: "slack", returnTo: undefined,
+      organizationId: caller.organizationId, userId: caller.user.id, provider: "slack", returnTo: expect.stringContaining("/api/integrations/chat/complete?ticket="),
     }));
-    expect(Date.parse(result.body.expiresAt as string)).toBeGreaterThan(Date.now());
-    expect(JSON.stringify(result.body)).not.toContain("SLACK_CLIENT_SECRET");
+    expect(Date.parse(result.body.expiresAt as string) - Date.now()).toBeGreaterThan(590_000);
+    expect(Date.parse(result.body.expiresAt as string) - Date.now()).toBeLessThanOrEqual(600_000);
+    expect(JSON.stringify(result.body)).not.toContain("private-slack-secret");
   });
 
   it("uses GitHub installation consent so repository access can be selected", async () => {

@@ -1,3 +1,4 @@
+import { createChatConnectionTicket, chatConnectionHandoffUrl } from "../integrations/chat-connection.js";
 import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { integrationCatalog, integrationIsConfigured, productIntegrationIds } from "../integrations/catalog.js";
@@ -40,7 +41,7 @@ export const integrationConnectionOperations = [
     name: "start_integration_connection",
     openWorld: true,
     summary: "Get an integration consent link",
-    description: "Starts a connection for the authenticated workspace and returns a short-lived provider consent link. Present the returned URL as a clickable link, let the user approve it, then call list_integrations to verify; refresh_integrations reloads Slack channels or GitHub repositories. Links are personal and expire in ten minutes; do not fetch, log, or share them with others. The browser must be signed into the same Superlog user and workspace. Providers needing credentials or extra setup return a secure setup link instead: never ask for secrets in chat. Starting a connection does not mean it is connected.",
+    description: "Starts a connection for the authenticated workspace and returns a short-lived provider consent link. The inline connection card opens consent and checks completion when supported. Otherwise present the returned URL as a clickable link. After approval call list_integrations to verify; refresh_integrations reloads Slack channels or GitHub repositories. Links are personal and expire in ten minutes; do not fetch, log, or share them with others. The browser must be signed into the same Superlog user and workspace. Providers needing credentials or extra setup return a secure setup link instead: never ask for secrets in chat. Starting a connection does not mean it is connected.",
     method: "POST",
     path: "/integrations/connect",
     tag: "Integrations",
@@ -49,7 +50,7 @@ export const integrationConnectionOperations = [
     output: z.object({
       provider, connectionType,
       status: z.enum(["awaiting_consent", "setup_required", "connected"]),
-      url: z.url(), expiresAt: z.iso.datetime().nullable(), instructions: z.string(),
+      url: z.url(), handoffUrl: z.url().optional(), expiresAt: z.iso.datetime().nullable(), instructions: z.string(),
     }),
     async run(context, input) {
       const definition = integrationCatalog.find((item) => item.id === input.provider)!;
@@ -69,9 +70,10 @@ export const integrationConnectionOperations = [
         };
       }
       const expiresAt = new Date(Date.now() + 10 * 60 * 1_000).toISOString();
+      const ticket = createChatConnectionTicket({ organizationId: context.organizationId, userId: context.user.id, provider: input.provider });
       const response = await startIntegrationConnection({
         organizationId: context.organizationId, user: context.user,
-        provider: input.provider, mode: input.provider === "github" ? "install" : undefined,
+        provider: input.provider, returnTo: ticket.returnTo, mode: input.provider === "github" ? "install" : undefined,
       });
       const location = response.headers.get("location");
       if (!location) {
@@ -85,7 +87,7 @@ export const integrationConnectionOperations = [
       return {
         provider: input.provider, connectionType: "oauth" as const,
         status: local ? "connected" as const : "awaiting_consent" as const,
-        url: url.href, expiresAt: local ? null : expiresAt,
+        url: url.href, handoffUrl: local ? undefined : chatConnectionHandoffUrl(ticket.token, url.href), expiresAt: local ? null : expiresAt,
         instructions: local
           ? "The existing connection was recovered. Call list_integrations to verify its resources."
           : `Open this link to approve ${definition.name} access. Use the browser signed into the same Superlog account and workspace. Return to this chat afterward; call list_integrations to check completion.`,
