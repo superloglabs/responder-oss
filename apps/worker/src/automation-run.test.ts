@@ -456,6 +456,21 @@ describe("automation run processor", () => {
       );
     });
 
+    it("leaves the thread of an example run's past message alone", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      const run = slackStartedRun();
+      deps.claimRun.mockResolvedValue({ ...run, triggerInput: { ...run.triggerInput, attributes: { ...run.triggerInput.attributes, example: true } } });
+      deps.getConnections.mockResolvedValue([slackConnection]);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex).toHaveBeenCalledOnce();
+      expect(deps.slackCard.post).not.toHaveBeenCalled();
+      expect(deps.postedInSlackThread).not.toHaveBeenCalled();
+    });
+
     it("marks the card stopped when the run fails", async () => {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
@@ -722,6 +737,33 @@ describe("automation run processor", () => {
         }),
       }));
       expect(deps.notify).not.toHaveBeenCalled();
+    });
+
+    it("shows an example run's report on the run page instead of notifying", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      const run = scheduledRun();
+      deps.claimRun.mockResolvedValue({ ...run, triggerInput: { ...run.triggerInput, attributes: { example: true } } });
+      deps.runCodex.mockImplementation(async () => {
+        await deps.createToolHandler.mock.calls.at(-1)![0].notifications!.preview!({
+          buttons: [],
+          channel: "#ops",
+          details: [],
+          text: "Checkout fails for guests.",
+        });
+        throw new AutomationHarnessError("Codex automation harness failed", "");
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.notify).not.toHaveBeenCalled();
+      const previewed = deps.appendEvent.mock.calls.filter(([event]) => event.type === "slack_message_previewed");
+      expect(previewed).toEqual([[{
+        data: { buttons: [], channel: "#ops", details: [], text: "Checkout fails for guests." },
+        runId,
+        type: "slack_message_previewed",
+      }]]);
     });
 
     it("posts nothing when the agent skips the notification", async () => {

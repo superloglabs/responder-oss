@@ -13,6 +13,7 @@ import {
   findSlackThreadAutomationRun,
   getAutomationRunSlackButtons,
   recordSlackMessageAuthor,
+  type AutomationTriggerInput,
 } from "../../../../packages/core/src/db/automations.js";
 import {
   claimSlackDirectMessageWelcome,
@@ -72,7 +73,7 @@ const slackUrlVerificationSchema = z.object({
   challenge: z.string().min(1),
 });
 
-const slackMessageSchema = z.object({
+export const slackMessageSchema = z.object({
   type: z.enum(["message", "app_mention"]),
   channel: z.string().min(1),
   // "im" for a direct message to the app.
@@ -269,12 +270,48 @@ export function isSupportedSlackMessageSubtype(
   );
 }
 
-function slackMessageTitle(body: string): string {
+export function slackMessageTitle(body: string): string {
   const firstLine = body
     .split("\n")
     .map((line) => line.trim())
     .find(Boolean);
   return (firstLine ?? "Slack channel alert").slice(0, 500);
+}
+
+// What an automation run started by the message receives. An example run on
+// a past message receives the same.
+export function slackAutomationTrigger(input: {
+  author: SlackEventAuthor | null;
+  body: string;
+  channelId: string;
+  externalEventId: string;
+  mentioned: boolean;
+  teamId: string;
+  threadTimestamp?: string;
+  timestamp: string;
+}): AutomationTriggerInput {
+  const { author } = input;
+  return {
+    attributes: {
+      ...(author
+        ? {
+            authorId: author.id,
+            ...(author.name ? { authorName: author.name } : {}),
+            authorType: author.kind,
+          }
+        : {}),
+      channelId: input.channelId,
+      mentioned: input.mentioned,
+      teamId: input.teamId,
+      threadTimestamp: input.threadTimestamp ?? input.timestamp,
+      timestamp: input.timestamp,
+    },
+    body: input.body,
+    externalEventId: input.externalEventId,
+    provider: "slack",
+    sourceUrl: `https://slack.com/archives/${input.channelId}/p${input.timestamp.replace(".", "")}`,
+    title: slackMessageTitle(input.body),
+  };
 }
 
 export interface SlackEventAuthor {
@@ -1406,27 +1443,16 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       if (!match.startsRun) return;
       await queueAutomationRun({
         automationId: match.automationId,
-        trigger: {
-          attributes: {
-            ...(author
-              ? {
-                  authorId: author.id,
-                  ...(author.name ? { authorName: author.name } : {}),
-                  authorType: author.kind,
-                }
-              : {}),
-            channelId: event.channel,
-            mentioned: match.mentioned,
-            teamId: callback.data.team_id,
-            threadTimestamp: event.thread_ts ?? event.ts,
-            timestamp: event.ts,
-          },
+        trigger: slackAutomationTrigger({
+          author,
           body,
+          channelId: event.channel,
           externalEventId: `${callback.data.event_id}:${match.automationId}`,
-          provider: "slack",
-          sourceUrl: `https://slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`,
-          title: slackMessageTitle(body),
-        },
+          mentioned: match.mentioned,
+          teamId: callback.data.team_id,
+          threadTimestamp: event.thread_ts,
+          timestamp: event.ts,
+        }),
       });
       if (match.mentioned) automationThreadOrganizations.add(match.organizationId);
     }),

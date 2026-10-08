@@ -1347,6 +1347,9 @@ export async function findSlackThreadAutomationRun(input: {
       sql`${automationRuns.triggerInput}->'attributes'->>'teamId' = ${input.teamId}`,
       sql`${automationRuns.triggerInput}->'attributes'->>'channelId' = ${input.channelId}`,
       sql`${automationRuns.triggerInput}->'attributes'->>'threadTimestamp' = ${input.threadTimestamp}`,
+      // An example run replays an old message without posting in its thread,
+      // so replies there are not for it.
+      sql`${automationRuns.triggerInput}->'attributes'->'example' is distinct from 'true'::jsonb`,
     ))
     .orderBy(desc(automationRuns.createdAt))
     .limit(1);

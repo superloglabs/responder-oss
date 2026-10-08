@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import { isAutomationContextProvider } from "@responder/core/automations/context-providers";
+import { isExampleAutomationRun, slackMessagePreviewedEvent } from "@responder/core/automations/example-run";
 import { gcpMcpServices } from "@responder/core/integrations/gcp";
 import {
   appendAutomationRunEvent,
@@ -533,6 +534,8 @@ async function startSlackCard(
   button: AutomationSlackButtonPress | null,
 ): Promise<AutomationSlackCard | null> {
   if (!firstTurn && !button && !slackReplyTurn(conversation)) return null;
+  // An example run leaves the past message's thread as it was.
+  if (isExampleAutomationRun(run.triggerInput)) return null;
   const onError = (error: unknown) => console.error(JSON.stringify({
     errorCode: error instanceof Error ? error.name : typeof error,
     event: "automation_slack_card_failed",
@@ -637,6 +640,8 @@ export async function processAutomationRun(
   let grantId: string | undefined;
   let subscriptionSecret: SubscriptionRunSecret | undefined;
   let slackCard: AutomationSlackCard | null = null;
+  // An example run's Slack posts are shown on the run page, not sent.
+  const example = isExampleAutomationRun(run.triggerInput);
   // The newest event this turn's prompt includes, once it is read. A reply
   // stored after it arrived while the turn ran.
   let answeredThrough: number | undefined;
@@ -887,6 +892,9 @@ export async function processAutomationRun(
                       await recordEvent(dependencies, run.runId, "notification_skipped", { reason });
                     },
                     organizationId: run.organizationId,
+                    ...(example
+                      ? { preview: (message) => recordEvent(dependencies, run.runId, slackMessagePreviewedEvent, message) }
+                      : {}),
                     runUrl: automationRunUrl({ ...run, environment }),
                     ...(pressed ? { threadTimestamp: pressed.threadTimestamp } : {}),
                   },
@@ -1178,7 +1186,7 @@ export async function processAutomationRun(
   const unreported = outcome?.status === "succeeded"
     ? notificationSkipped ? [] : reportTo.filter((notification) => !agentNotified.has(notificationKey(notification)))
     : reportTo;
-  if (outcome && unreported.length > 0) {
+  if (outcome && unreported.length > 0 && !example) {
     await dependencies.notify({
       automationId: run.automationId,
       automationName: run.automationName,

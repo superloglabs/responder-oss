@@ -109,6 +109,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [unsavedReason, setUnsavedReason] = useState<string | null>(null);
   const [startingRun, setStartingRun] = useState(false);
+  const [openingTest, setOpeningTest] = useState(false);
   const [runsRefreshKey, setRunsRefreshKey] = useState(0);
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -288,6 +289,12 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    await create("history");
+  }
+
+  // Saves a new automation and opens its run history, or its test page to try
+  // it on a past event.
+  async function create(next: "history" | "test") {
     if (automationId) return;
     const incomplete = incompleteReason(configuration);
     if (incomplete) {
@@ -302,7 +309,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     setError(null);
     try {
       const id = await saveAutomation(undefined, { configuration, description, enabled, name }, isSharedTemplate(template) ? template.slug : undefined);
-      navigate(`/automations/${id}`);
+      navigate(next === "test" ? `/automations/${id}/test` : `/automations/${id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save automation");
       setSaving(false);
@@ -337,6 +344,17 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         setError(cause instanceof Error ? cause.message : "Unable to update automation status");
       }
     });
+  }
+
+  // The test page reads the saved automation, so pending saves finish first.
+  async function tryPastEvent() {
+    if (!automationId) {
+      await create("test");
+      return;
+    }
+    setOpeningTest(true);
+    await saveQueue.current;
+    navigate(`/automations/${automationId}/test`);
   }
 
   async function startRun() {
@@ -408,7 +426,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         <form className="automationCreate__form" hidden={activeTab !== "settings"} id="automation-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="automation-triggers" ref={triggerSectionRef}>
             <h2 id="automation-triggers">Triggers</h2>
-            <AutomationTriggerEditor options={options} triggers={configuration.triggers} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
+            <AutomationTriggerEditor options={options} pastEventTrial={{ onTry: () => void tryPastEvent(), pending: saving || openingTest, saves: !automationId }} triggers={configuration.triggers} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
               const endpoint = kind === "slack" ? "/api/agents/options/refresh/slack" : "/api/integrations/sentry/check";
               const response = await fetch(endpoint, { method: "POST" });
               if (!response.ok) throw new Error("Could not refresh trigger resources");

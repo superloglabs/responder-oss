@@ -178,6 +178,8 @@ export function createAutomationToolHandler(input: {
     onPosted(notification: AutomationNotification): void;
     onSkipped(reason: string): Promise<void>;
     organizationId: string;
+    // An example run records each post here instead of sending it.
+    preview?: (message: { buttons: string[]; channel: string; details: string[]; text: string }) => Promise<void>;
     runUrl: string | null;
     // Posts as replies in this thread, for a turn that answers a button.
     threadTimestamp?: string;
@@ -201,6 +203,24 @@ export function createAutomationToolHandler(input: {
     const parsed = notificationSchema.safeParse(args);
     if (!parsed.success) return toolError("Invalid tool arguments");
     const { buttons } = parsed.data;
+    if (target.preview) {
+      const previewed: string[] = [];
+      for (const notification of target.notifications) {
+        const channel = channelName(notification);
+        await target.preview({
+          buttons: buttons.map((button) => button.label),
+          channel,
+          details: parsed.data.details,
+          text: parsed.data.text,
+        });
+        target.onPosted(notification);
+        previewed.push(channel);
+      }
+      return toolText({
+        note: "This is an example run on a past event, so the post is shown on the run page instead of sent to Slack.",
+        previewed,
+      });
+    }
     const threadTimestamp = target.threadTimestamp;
     const kind = "send_slack_message";
     const message = agentNotificationMessage(parsed.data.text, target.runUrl);

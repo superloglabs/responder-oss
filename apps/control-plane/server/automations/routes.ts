@@ -45,6 +45,12 @@ import {
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
+import {
+  AutomationExampleError,
+  automationExampleSchema,
+  exampleAutomationTrigger,
+  listAutomationExampleEvents,
+} from "./example-events.js";
 import { listSentryEnvironments } from "../integrations/sentry.js";
 import {
   getFreshSentryCredentials,
@@ -56,6 +62,7 @@ const automationEnabledSchema = z.object({ enabled: z.boolean() });
 const runMessageSchema = z.object({
   message: z.string().trim().min(1).max(automationUserMessageMaxLength),
 });
+const exampleRunSchema = z.object({ example: automationExampleSchema });
 const slackAuthorChannelsSchema = z.array(z.string().min(1).max(255)).max(50);
 const runPageSize = 10;
 const runPageSchema = z.coerce.number().int().min(1).max(10_000).catch(1);
@@ -585,6 +592,27 @@ export const automationRoutes = new Hono()
       ? context.json({ shared: false })
       : context.json({ error: "Automation is not shared" }, 404);
   })
+  .get("/:automationId/examples", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automation = await getAutomation(
+      access.tenant.organizationId,
+      context.req.param("automationId"),
+    );
+    if (!automation) return context.json({ error: "Automation not found" }, 404);
+    context.header("Cache-Control", "no-store");
+    try {
+      return context.json({
+        examples: await listAutomationExampleEvents(
+          access.tenant.organizationId,
+          automation.configuration.triggers,
+        ),
+      });
+    } catch (error) {
+      if (error instanceof AutomationExampleError) return context.json({ error: error.message }, error.status);
+      throw error;
+    }
+  })
   .get("/:automationId/runs", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
@@ -604,18 +632,35 @@ export const automationRoutes = new Hono()
       context.req.param("automationId"),
     );
     if (!automation) return context.json({ error: "Automation not found" }, 404);
-    // A body with a message starts a test chat; no body is a plain manual run.
+    // A body with a message starts a test chat, and one with an example
+    // replays a past event; no body is a plain manual run.
     const body: unknown = await context.req.json().catch(() => null);
-    const chat = body === null ? null : runMessageSchema.safeParse(body);
+    const isExample = typeof body === "object" && body !== null && "example" in body;
+    const example = isExample ? exampleRunSchema.safeParse(body) : null;
+    if (example && !example.success) return context.json({ error: "Choose a past event" }, 400);
+    const chat = body === null || example ? null : runMessageSchema.safeParse(body);
     if (chat && !chat.success) return context.json({ error: "Write a message to send" }, 400);
-    const { user } = access.tenant;
+    const { organizationId, user } = access.tenant;
+    let exampleTrigger: Awaited<ReturnType<typeof exampleAutomationTrigger>> | undefined;
+    if (example) {
+      try {
+        exampleTrigger = await exampleAutomationTrigger(
+          organizationId,
+          automation.configuration.triggers,
+          example.data.example,
+        );
+      } catch (error) {
+        if (error instanceof AutomationExampleError) return context.json({ error: error.message }, error.status);
+        throw error;
+      }
+    }
     try {
       const run = await queueAutomationRun({
         automationId: automation.id,
         ...(chat
           ? { message: { authorId: user.id, authorName: user.name, text: chat.data.message } }
           : {}),
-        trigger: chat
+        trigger: exampleTrigger ?? (chat
           ? {
               body: chat.data.message,
               externalEventId: `manual:${randomUUID()}`,
@@ -627,7 +672,7 @@ export const automationRoutes = new Hono()
               externalEventId: `manual:${randomUUID()}`,
               provider: "manual",
               title: "Manual run",
-            },
+            }),
       });
       return context.json(run, run.duplicate ? 200 : 202);
     } catch (error) {

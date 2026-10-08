@@ -425,6 +425,30 @@ describe("automation notification tool", () => {
     expect(onPosted).toHaveBeenLastCalledWith(second);
   });
 
+  it("shows an example run's report on the run page instead of posting it", async () => {
+    const deps = dependencies();
+    const onPosted = vi.fn();
+    const preview = vi.fn().mockResolvedValue(undefined);
+    const { handle, onAction } = handler(deps, { notifications: { ...target(onPosted), preview } });
+
+    const result = await handle({
+      arguments: { buttons: [{ label: "Open a pull request" }], details: ["The stack trace."], text: "Checkout fails for guests." },
+      name: "post_notification",
+    });
+
+    expect(resultText(result)).toMatchObject({ previewed: ["#ops"] });
+    expect(preview).toHaveBeenCalledWith({
+      buttons: ["Open a pull request"],
+      channel: "#ops",
+      details: ["The stack trace."],
+      text: "Checkout fails for guests.",
+    });
+    expect(onPosted).toHaveBeenCalledWith(notification);
+    expect(deps.postNotification).not.toHaveBeenCalled();
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
   it("lets the agent skip the notification with a reason", async () => {
     const deps = dependencies();
     const onSkipped = vi.fn().mockResolvedValue(undefined);

@@ -300,6 +300,53 @@ export function runAutomation(id: string, message?: string) {
   );
 }
 
+// A past Slack message or Sentry issue that the automation's triggers watch.
+export type AutomationExampleEvent =
+  | {
+      authorName: string | null;
+      channelId: string;
+      channelName: string | null;
+      integrationAccountId: string;
+      kind: "slack";
+      occurredAt: string;
+      timestamp: string;
+      title: string;
+    }
+  | {
+      integrationAccountId: string;
+      issueId: string;
+      kind: "sentry";
+      level: string | null;
+      occurredAt: string | null;
+      projectName: string | null;
+      shortId: string | null;
+      title: string;
+    };
+
+export async function fetchAutomationExamples(id: string, signal?: AbortSignal): Promise<AutomationExampleEvent[]> {
+  const response = await automationJson<{ examples?: AutomationExampleEvent[] }>(
+    `/api/automations/${encodeURIComponent(id)}/examples`,
+    { signal },
+  );
+  return response.examples ?? [];
+}
+
+// Starts an example run on a past event. Its Slack posts are shown on the run
+// page instead of sent.
+export function runAutomationExample(id: string, event: AutomationExampleEvent) {
+  const example = event.kind === "slack"
+    ? { channelId: event.channelId, integrationAccountId: event.integrationAccountId, kind: event.kind, timestamp: event.timestamp }
+    : { integrationAccountId: event.integrationAccountId, issueId: event.issueId, kind: event.kind };
+  return automationJson<{ duplicate: boolean; runId: string }>(
+    `/api/automations/${encodeURIComponent(id)}/runs`,
+    {
+      body: JSON.stringify({ example }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    },
+  );
+}
+
 export async function fetchAutomationRun(runId: string): Promise<AutomationRunDetail> {
   const response = await automationJson<{ run: AutomationRunDetail }>(
     `/api/automations/runs/${encodeURIComponent(runId)}`,

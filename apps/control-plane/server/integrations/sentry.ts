@@ -20,6 +20,7 @@ export class SentryApiError extends Error {
       | "environments"
       | "event"
       | "installation"
+      | "issues"
       | "projects",
   ) {
     super(message);
@@ -262,6 +263,53 @@ export async function listSentryEnvironments(
   return z.array(sentryEnvironmentSchema).parse(await response.json())
     .map((environment) => environment.name)
     .filter(Boolean);
+}
+
+async function readSentryIssues(url: URL, accessToken: string, message: string): Promise<unknown> {
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+    signal: AbortSignal.timeout(SENTRY_REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new SentryApiError(message, response.status, "issues");
+  return response.json();
+}
+
+// The projects' unresolved issues, most recently seen first. Each is shaped
+// like the issue in an issue webhook.
+export async function listSentryIssues(input: {
+  accessToken: string;
+  limit: number;
+  organizationSlug: string;
+  projectIds: string[];
+}): Promise<unknown> {
+  const url = new URL(
+    `/api/0/organizations/${encodeURIComponent(input.organizationSlug)}/issues/`,
+    "https://sentry.io",
+  );
+  for (const projectId of input.projectIds) url.searchParams.append("project", projectId);
+  url.searchParams.set("query", "is:unresolved");
+  url.searchParams.set("sort", "date");
+  url.searchParams.set("statsPeriod", "30d");
+  url.searchParams.set("limit", String(input.limit));
+  return readSentryIssues(url, input.accessToken, "Unable to list Sentry issues");
+}
+
+export async function getSentryIssue(input: {
+  accessToken: string;
+  issueId: string;
+  organizationSlug: string;
+}): Promise<unknown> {
+  return readSentryIssues(
+    new URL(
+      `/api/0/organizations/${encodeURIComponent(input.organizationSlug)}/issues/${encodeURIComponent(input.issueId)}/`,
+      "https://sentry.io",
+    ),
+    input.accessToken,
+    "Unable to read Sentry issue",
+  );
 }
 
 const sentryEventSchema = z.object({

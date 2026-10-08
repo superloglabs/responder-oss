@@ -11,8 +11,9 @@ import {
   getSentryOrganizationSlug,
 } from "../integrations/sentry-credentials.js";
 import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
+import type { AutomationTriggerInput } from "../../../../packages/core/src/db/automations.js";
 
-const sentryIssueSchema = z
+export const sentryIssueSchema = z
   .object({
     id: z.union([z.string(), z.number()]).transform(String),
     shortId: z.string().optional(),
@@ -77,7 +78,7 @@ export function verifySentrySignature(input: {
 }
 
 type SentryIssue = z.infer<typeof sentryIssueSchema>;
-type SentryIssueAction = z.infer<typeof sentryIssueWebhookSchema>["action"];
+export type SentryIssueAction = z.infer<typeof sentryIssueWebhookSchema>["action"];
 
 export function sentryIssueBody(
   issue: SentryIssue,
@@ -107,6 +108,34 @@ export function sentryIssueBody(
     null,
     2,
   ).slice(0, 100_000);
+}
+
+// What an automation run started by the issue receives. An example run on a
+// past issue receives the same.
+export function sentryAutomationTrigger(input: {
+  action: SentryIssueAction;
+  environment?: string | null;
+  externalEventId: string;
+  installationId: string;
+  issue: SentryIssue;
+}): AutomationTriggerInput {
+  const { environment, issue } = input;
+  return {
+    attributes: {
+      action: input.action,
+      installationId: input.installationId,
+      issueId: issue.id,
+      projectId: issue.project.id,
+      projectName: issue.project.name ?? null,
+      projectSlug: issue.project.slug ?? null,
+      ...(environment === undefined ? {} : { environment }),
+    },
+    body: sentryIssueBody(issue, environment),
+    externalEventId: input.externalEventId,
+    provider: "sentry",
+    sourceUrl: issue.web_url ?? issue.permalink,
+    title: `${issue.shortId ?? issue.id}: ${issue.title}`.slice(0, 500),
+  };
 }
 
 async function forwardSentryIssue(input: {
@@ -314,24 +343,15 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
   const queueAutomation = (automationId: string, environment?: string | null) =>
     queueAutomationRun({
       automationId,
-      trigger: {
-        attributes: {
-          action,
-          installationId,
-          issueId: issue.id,
-          projectId: issue.project.id,
-          projectName: issue.project.name ?? null,
-          projectSlug: issue.project.slug ?? null,
-          ...(environment === undefined ? {} : { environment }),
-        },
-        body: sentryIssueBody(issue, environment),
+      trigger: sentryAutomationTrigger({
+        action,
+        environment,
         externalEventId: action === "created"
           ? `${installationId}:${issue.id}:${automationId}`
           : `${installationId}:${issue.id}:${action}:${automationOccurrence}:${automationId}`,
-        provider: "sentry",
-        sourceUrl: issue.web_url ?? issue.permalink,
-        title: `${issue.shortId ?? issue.id}: ${issue.title}`.slice(0, 500),
-      },
+        installationId,
+        issue,
+      }),
     });
   const filteredAutomations = automationMatches.filter((match) =>
     match.excludedEnvironments.length > 0
