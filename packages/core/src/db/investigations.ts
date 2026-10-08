@@ -3477,6 +3477,42 @@ export async function getSlackInvestigationSessionRuntime(sessionId: string) {
   return rows[0] ?? null;
 }
 
+export interface SlackThreadSessionTurn {
+  // The Slack message the turn answered.
+  messageTimestamp?: string;
+  // The trace card and replies the turn posted in the thread.
+  postedTimestamps: string[];
+}
+
+// The other turns of a Slack thread session, so a turn can tell which thread
+// messages the agent has already seen.
+export async function getSlackThreadSessionTurns(input: {
+  investigationId: string;
+  sessionId: string;
+}): Promise<SlackThreadSessionTurn[]> {
+  const rows = await getDatabase()
+    .select({
+      input: investigations.input,
+      slackMessageTimestamp: investigations.slackMessageTimestamp,
+      slackThreadSnapshot: investigations.slackThreadSnapshot,
+    })
+    .from(investigations)
+    .where(and(
+      eq(investigations.slackInvestigationSessionId, input.sessionId),
+      ne(investigations.id, input.investigationId),
+    ));
+  return rows.map((row) => {
+    const messageTimestamp = row.input.attributes?.timestamp;
+    return {
+      ...(typeof messageTimestamp === "string" ? { messageTimestamp } : {}),
+      postedTimestamps: [
+        row.slackMessageTimestamp,
+        ...(row.slackThreadSnapshot?.replies ?? []).map((reply) => reply.slackTimestamp),
+      ].filter((timestamp): timestamp is string => Boolean(timestamp)),
+    };
+  });
+}
+
 export async function completeSlackThreadInvestigationTurn(input: {
   investigationId: string;
   sessionId: string;

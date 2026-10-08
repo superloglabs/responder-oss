@@ -114,6 +114,12 @@ Configure a distributed Slack app with:
 Connecting Slack turns tag mode on with its starting settings, unless the
 workspace has already saved tag mode settings.
 
+A mention in a thread reads the thread's earlier messages with the bot token,
+so a request such as "look at this" refers to the alert above it. A later
+mention in the same thread reads only the messages posted since the previous
+turn, minus the replies tag mode posted itself. When Slack refuses the read,
+the turn answers from the mention alone.
+
 A direct message to the app works like a mention. Tag mode answers in the
 message's thread, and a reply in that thread continues the same conversation.
 A new message starts a new conversation. When tag mode is off, the app replies
