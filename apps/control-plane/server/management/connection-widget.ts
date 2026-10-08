@@ -2,14 +2,16 @@ export const connectionWidgetUri = "ui://superlog/integration-connection.html";
 
 export const connectionWidgetHtml = String.raw`<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>:root{color-scheme:light dark}body{font:14px/1.5 system-ui;margin:0;padding:18px;color:var(--text-primary,inherit)}h2{font-size:17px;margin:0 0 6px}p{margin:0 0 14px;opacity:.8}button{font:inherit;border:0;border-radius:8px;padding:9px 14px;background:#245de1;color:white;cursor:pointer}button:disabled{opacity:.5;cursor:default}#check{background:transparent;color:inherit;border:1px solid #8886;margin-left:6px}button:focus-visible{outline:2px solid #699cff;outline-offset:3px}</style>
-<h2 id="title">Connect your integration</h2><p id="status" role="status" aria-live="polite">Preparing your connection…</p>
-<button id="connect" disabled>Connect</button><button id="check" hidden>Check connection</button>
+<style>
+:root{color-scheme:light dark;font-family:var(--font-sans,system-ui,sans-serif);color:var(--color-text-primary,light-dark(#202123,#ececec))}
+*{box-sizing:border-box}body{margin:0}main{display:flex;align-items:center;gap:20px;padding:16px}section{flex:1;min-width:0}h2{font-size:14px;line-height:20px;font-weight:600;margin:0 0 3px}p{font-size:13px;line-height:19px;color:var(--color-text-secondary,light-dark(#62666b,#b0b4b8));margin:0}nav{display:flex;gap:8px;flex-shrink:0}button{font-family:inherit;font-weight:500;font-size:13px;line-height:20px;white-space:nowrap;border:1px solid transparent;border-radius:8px;padding:7px 12px;background:var(--color-text-primary,light-dark(#202123,#ececec));color:var(--color-background-primary,light-dark(#fff,#202123));cursor:pointer}button:disabled{opacity:.55;cursor:default}#check{background:transparent;color:inherit;border-color:var(--color-border-primary,light-dark(#ddd,#555))}button:focus-visible{outline:2px solid #3888ff;outline-offset:3px}[hidden]{display:none!important}@media(max-width:380px){main{align-items:flex-start;flex-direction:column;gap:12px}nav{flex-wrap:wrap}}
+</style>
+<main id="card"><section><h2 id="title">Connect your integration</h2><p id="status" role="status" aria-live="polite">Preparing connection…</p></section><nav aria-label="Connection actions"><button id="connect" disabled>Connect</button><button id="check" hidden>Try again</button></nav></main>
 <script>
 (() => {
   const title = document.getElementById('title'), status = document.getElementById('status');
   const connect = document.getElementById('connect'), check = document.getElementById('check');
-  const pending = new Map(); let next = 1, data, timer, checking = false, active = false, sent = false, ready = false;
+  const pending = new Map(); let next = 1, data, timer, checking = false, checkFailed = false, active = false, sent = false, ready = false;
   const names = {slack:'Slack',github:'GitHub',gcp:'Google Cloud',posthog:'PostHog',sentry:'Sentry',linear:'Linear',discord:'Discord',vercel:'Vercel',axiom:'Axiom'};
   function request(method, params) {
     const id = next++;
@@ -35,11 +37,13 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
     if (saved?.connection === (data.handoffUrl || data.url)) {active = saved.active === true;sent = saved.sent === true;}
     title.textContent = 'Connect ' + (names[data.provider] || data.provider);
     status.textContent = data.connectionType === 'secure_setup'
-      ? 'Complete secure setup, then return here. Keep credentials out of chat.'
-      : 'Approve access in the next window. We’ll check the connection and continue setup here.';
+      ? 'Finish setup securely in Superlog.'
+      : 'Choose your workspace and approve access.';
     connect.textContent = data.connectionType === 'secure_setup' ? 'Open secure setup' : 'Connect ' + (names[data.provider] || data.provider);
     connect.disabled = false;
-    check.hidden = false;
+    check.hidden = !checkFailed;
+    if(checkFailed)status.textContent="Couldn’t verify access. Try again.";
+    connect.hidden = false;
     if (sent) {status.textContent='Connected. Continue in the conversation.';connect.hidden=true;check.hidden=true;}
     else if (data.status === 'connected') {active=true;checkConnection();}
     else if (active) schedule();
@@ -69,12 +73,13 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
       const result=parse(window.openai?.callTool
         ? await window.openai.callTool('list_integrations',{})
         : await request('tools/call',{name:'list_integrations',arguments:{}}));
+      checkFailed=false;check.hidden=true;
       if(result.integrations?.some(account => account.provider === data.provider)) {
         active=false;clearTimeout(timer);connect.hidden=true;
         status.textContent='Connected successfully.';
         await followUp();
-      } else status.textContent='Waiting for authorization. Complete it in the other window, then return here.';
-    } catch {status.textContent='Couldn’t check the connection yet. Try Check connection again.';active=false;}
+      } else status.textContent='Waiting for approval…';
+    } catch {status.textContent='Couldn’t verify access. Try again.';active=false;checkFailed=true;check.hidden=false;}
     finally {checking=false;check.disabled=false;schedule();}
   }
   connect.onclick=async()=>{
@@ -88,9 +93,9 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
       // endpoint. Never append that address to the provider's consent URL.
       if(window.openai?.openExternal) await window.openai.openExternal({href:data.handoffUrl || data.url});
       else await request('ui/open-link',{url:data.handoffUrl || data.url});
-      status.textContent='Approve access in the other window. We’ll continue when the connection is ready.';
+      status.textContent='Waiting for approval…';
       schedule();
-    } catch {active=false;persist();status.textContent='Couldn’t open authorization. Use the connection link in the conversation.';}
+    } catch {active=false;persist();status.textContent='Couldn’t open authorization. Try Connect again.';}
   };
   check.onclick=()=>{active=true;persist();return checkConnection();};
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible' && active)checkConnection();});
@@ -102,9 +107,15 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
     if(message.method==='ui/notifications/tool-result')render(parse(message.params));
   });
   window.addEventListener('openai:set_globals',()=>render(window.openai?.toolOutput));
+  function resize() {
+    const height=Math.ceil(document.getElementById('card').getBoundingClientRect().height);
+    window.openai?.notifyIntrinsicHeight?.();
+    if(ready)window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height}},'*');
+  }
+  if(typeof ResizeObserver!=='undefined')new ResizeObserver(resize).observe(document.getElementById('card'));
   render(window.openai?.toolOutput);
   request('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'Superlog connection',version:'1.0.0'},appCapabilities:{}})
-    .then(()=>{ready=true;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}},'*');})
+    .then(()=>{ready=true;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}},'*');resize();})
     .catch(()=>{});
 })();
 </script></html>`;

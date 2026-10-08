@@ -41,7 +41,7 @@ export const integrationConnectionOperations = [
     name: "start_integration_connection",
     openWorld: true,
     summary: "Get an integration consent link",
-    description: "Starts a connection for the authenticated workspace and returns a short-lived provider consent link. The inline connection card opens consent and checks completion when supported. Otherwise present the returned URL as a clickable link. After approval call list_integrations to verify; refresh_integrations reloads Slack channels or GitHub repositories. Links are personal and expire in ten minutes; do not fetch, log, or share them with others. The browser must be signed into the same Superlog user and workspace. Providers needing credentials or extra setup return a secure setup link instead: never ask for secrets in chat. Starting a connection does not mean it is connected.",
+    description: "Starts a connection for the authenticated workspace and returns a short-lived provider consent link. The inline connection card opens consent and checks completion when supported. Do not repeat a consent link in the accompanying chat text when the card is shown. Only when no card is available, present the exact returned URL as a clickable link; never construct or shorten it. After approval call list_integrations to verify; refresh_integrations reloads Slack channels or GitHub repositories. Links are personal and expire in ten minutes; do not fetch, log, or share them with others. The browser must be signed into the same Superlog user and workspace. Providers needing credentials or extra setup return a secure setup link instead: never ask for secrets in chat. Starting a connection does not mean it is connected.",
     method: "POST",
     path: "/integrations/connect",
     tag: "Integrations",
@@ -84,13 +84,14 @@ export const integrationConnectionOperations = [
       if (local && url.searchParams.get("status") !== "connected") {
         throw new ManagementError(502, "Unable to start this connection. Please try again.", "integration_connection_failed");
       }
+      const connectionUrl = local ? url.href : chatConnectionHandoffUrl(ticket.token, url.href);
       return {
         provider: input.provider, connectionType: "oauth" as const,
         status: local ? "connected" as const : "awaiting_consent" as const,
-        url: url.href, handoffUrl: local ? undefined : chatConnectionHandoffUrl(ticket.token, url.href), expiresAt: local ? null : expiresAt,
+        url: connectionUrl, handoffUrl: local ? undefined : connectionUrl, expiresAt: local ? null : expiresAt,
         instructions: local
           ? "The existing connection was recovered. Call list_integrations to verify its resources."
-          : `Open this link to approve ${definition.name} access. Use the browser signed into the same Superlog account and workspace. Return to this chat afterward; call list_integrations to check completion.`,
+          : `The connection card handles ${definition.name} authorization. Do not add a second link or repeat its instructions in chat. If the host cannot display the card, use the exact returned url without modifying it. Use the same Superlog account and workspace in the browser; verify completion with list_integrations.`,
       };
     },
   }),
