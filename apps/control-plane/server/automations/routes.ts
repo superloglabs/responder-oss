@@ -225,6 +225,7 @@ export const automationRoutes = new Hono()
       ...options,
       accounts: options.accounts.filter((account) =>
         [
+          "aws",
           "axiom",
           "discord",
           "github",

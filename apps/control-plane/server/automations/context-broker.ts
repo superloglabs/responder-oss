@@ -14,6 +14,7 @@ import {
 } from "../../../../packages/core/src/credentials/encryption.js";
 import { withIntegrationAccountCredentialLease } from "../../../../packages/core/src/db/integrations.js";
 import { freshSentryCredentials } from "../../../../packages/core/src/db/investigations.js";
+import { awsConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/aws.js";
 import { parseAxiomCredentials } from "../../../../packages/core/src/integrations/axiom.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
@@ -22,23 +23,26 @@ import {
   safeCustomMcpFetch,
   type CustomMcpCredentials,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
-import {
-  GCP_MCP_SERVICES,
-  gcpConnectionCredentialsSchema,
-} from "../../../../packages/core/src/integrations/gcp.js";
+import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
 import {
   linearAccessTokenNeedsRefresh,
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
 } from "../../../../packages/core/src/integrations/linear.js";
 import { integrationCallbackUrl } from "../integrations/urls.js";
+import {
+  awsContextCredentials,
+  awsContextServer,
+  type AwsContextDependencies,
+} from "./aws-context.js";
 import { axiomContextDecision, filterAxiomToolList } from "./axiom-context.js";
 import {
   gcpAuthHeaders,
-  gcpContextDecision,
+  gcpContextServer,
   type GcpContextDependencies,
   isGcpMcpService,
 } from "./gcp-context.js";
+import { managedMcpDecision, type ManagedMcpServer } from "./managed-mcp-context.js";
 import {
   callLinearTool,
   defaultLinearToolDependencies,
@@ -65,6 +69,7 @@ const requestSchema = z.object({
 type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
+  aws: Pick<AwsContextDependencies, "credentials" | "now">;
   freshSentryCredentials: typeof freshSentryCredentials;
   gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
   linear: LinearToolDependencies;
@@ -77,6 +82,7 @@ interface ContextBrokerDependencies {
 }
 
 const defaultDependencies: ContextBrokerDependencies = {
+  aws: { credentials: awsContextCredentials, now: Date.now },
   freshSentryCredentials,
   gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
   linear: defaultLinearToolDependencies,
@@ -220,6 +226,35 @@ async function providerTarget(
   return null;
 }
 
+// AWS and Google Cloud are reached through their managed MCP servers, which
+// the broker filters to read-only tools.
+function managedContextServer(
+  claim: AutomationContextBrokerClaim,
+  service: string | undefined,
+  dependencies: ContextBrokerDependencies,
+): ManagedMcpServer | null {
+  if (!claim.account.encryptedCredentials) return null;
+  const credentials = decryptCredentials<Record<string, unknown>>(
+    claim.account.encryptedCredentials,
+  );
+  if (claim.account.provider === "aws") {
+    return awsContextServer({
+      accountId: claim.account.id,
+      connection: awsConnectionCredentialsSchema.parse(credentials),
+      dependencies: { ...dependencies.aws, fetch: dependencies.providerFetch },
+    });
+  }
+  if (claim.account.provider === "gcp" && isGcpMcpService(service)) {
+    return gcpContextServer({
+      accountId: claim.account.id,
+      connection: gcpConnectionCredentialsSchema.parse(credentials),
+      dependencies: { ...dependencies.gcp, fetch: dependencies.providerFetch },
+      service,
+    });
+  }
+  return null;
+}
+
 async function linearAccessToken(
   claim: AutomationContextBrokerClaim,
   dependencies: ContextBrokerDependencies,
@@ -355,7 +390,11 @@ async function proxyMcpRequest(input: {
   dependencies: ContextBrokerDependencies;
   rawBody: string;
   request: Request;
-  target: { headers: Headers; url: string };
+  target: {
+    fetch?: (input: string, init: RequestInit) => Promise<Response>;
+    headers: Headers;
+    url: string;
+  };
 }): Promise<Response> {
   for (const header of [
     "accept",
@@ -366,7 +405,8 @@ async function proxyMcpRequest(input: {
     const value = input.request.headers.get(header);
     if (value) input.target.headers.set(header, value);
   }
-  const response = await input.dependencies.providerFetch(input.target.url, {
+  const fetch = input.target.fetch ?? input.dependencies.providerFetch;
+  const response = await fetch(input.target.url, {
     body: input.rawBody,
     headers: input.target.headers,
     method: "POST",
@@ -441,23 +481,18 @@ export function createAutomationContextBrokerRoutes(
       if (claim.account.provider === "linear") {
         return await linearResponse(claim, parsed.data, dependencies);
       }
-      if (claim.account.provider === "gcp") {
-        if (!isGcpMcpService(service)) {
+      if (claim.account.provider === "aws" || claim.account.provider === "gcp") {
+        if (claim.account.provider === "gcp" && !isGcpMcpService(service)) {
           return context.json(rpcError(parsed.data.id, -32601, "Unknown Google Cloud service"), 404);
         }
-        if (!claim.account.encryptedCredentials) {
+        const server = managedContextServer(claim, service, dependencies);
+        if (!server) {
           return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
         }
-        const connection = gcpConnectionCredentialsSchema.parse(
-          decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
-        );
-        const decision = await gcpContextDecision({
-          accountId: claim.account.id,
-          connection,
-          dependencies: { ...dependencies.gcp, fetch: dependencies.providerFetch },
+        const decision = await managedMcpDecision({
           method: parsed.data.method,
           params: parsed.data.params,
-          service,
+          server,
           signal: context.req.raw.signal,
         });
         if (decision.kind === "list") {
@@ -474,8 +509,9 @@ export function createAutomationContextBrokerRoutes(
           rawBody,
           request: context.req.raw,
           target: {
-            headers: await dependencies.gcp.authHeaders(connection),
-            url: GCP_MCP_SERVICES[service],
+            fetch: server.fetch,
+            headers: await server.headers(),
+            url: server.url,
           },
         });
       }

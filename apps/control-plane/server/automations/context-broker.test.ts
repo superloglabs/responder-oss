@@ -41,6 +41,15 @@ function claim(provider: string, credentials: Record<string, unknown>) {
 
 function appFor(activeClaim: ReturnType<typeof claim> | null) {
   const dependencies = {
+    aws: {
+      credentials: vi.fn(() => async () => ({
+        accessKeyId: "AKIATESTACCESSKEY",
+        expiration: new Date(Date.now() + 3_600_000),
+        secretAccessKey: "aws-secret-access-key",
+        sessionToken: "aws-session-token",
+      })),
+      now: () => Date.now(),
+    },
     gcp: {
       authHeaders: vi.fn(async () => new Headers({
         authorization: "Bearer google-federated-token",
@@ -143,6 +152,41 @@ function fakeGoogleMcp() {
           ...(body.method === "initialize" ? { "mcp-session-id": "google-session" } : {}),
         },
       },
+    );
+  });
+}
+
+function awsClaim(externalIdSuffix: string) {
+  return claim("aws", {
+    accountId: "123456789012",
+    externalId: `responder_${externalIdSuffix.padEnd(40, "x")}`,
+    roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+  });
+}
+
+// The managed AWS MCP server marks some tools read-only. The script runner is
+// unmarked but allowed, because the read-only role limits it.
+function fakeAwsMcp() {
+  return vi.fn(async (_url: string | URL, init: RequestInit) => {
+    const body = JSON.parse(new TextDecoder().decode(init.body as Uint8Array)) as { id?: string; method: string };
+    if (body.method === "notifications/initialized") {
+      return new Response(null, { status: 202 });
+    }
+    const result = body.method === "initialize"
+      ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+      : body.method === "tools/list"
+        ? {
+            tools: [
+              { annotations: { readOnlyHint: true }, name: "aws___search_documentation" },
+              { name: "aws___run_script" },
+              { annotations: { readOnlyHint: false }, name: "aws___call_aws" },
+              { name: "aws___get_presigned_url" },
+            ],
+          }
+        : { content: [{ text: "queue depth 42", type: "text" }] };
+    return Response.json(
+      { id: body.id, jsonrpc: "2.0", result },
+      { headers: body.method === "initialize" ? { "mcp-session-id": "aws-session" } : {} },
     );
   });
 }
@@ -336,6 +380,112 @@ describe("automation context broker", () => {
       );
 
       expect(response.status).toBe(404);
+      expect(dependencies.providerFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("AWS", () => {
+    const awsEndpoint = "https://aws-mcp.us-east-1.api.aws/mcp";
+    const signature = /^AWS4-HMAC-SHA256 Credential=AKIATESTACCESSKEY\/\d{8}\/us-east-1\/aws-mcp\/aws4_request, /u;
+
+    it("lists only the tools investigations allow, signed with the role session", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(awsClaim("list"));
+      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 7, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { id: number; result: { tools: Array<{ name: string }> } };
+      expect(body.id).toBe(7);
+      expect(body.result.tools.map((tool) => tool.name)).toEqual([
+        "aws___search_documentation",
+        "aws___run_script",
+      ]);
+      expect(dependencies.aws.credentials).toHaveBeenCalledWith(accountId, expect.objectContaining({
+        roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+      }));
+      const calls = dependencies.providerFetch.mock.calls as Array<[URL, RequestInit]>;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [url, init] of calls) {
+        expect(url.toString()).toBe(awsEndpoint);
+        expect(new Headers(init.headers).get("authorization")).toMatch(signature);
+        expect(new Headers(init.headers).get("x-amz-security-token")).toBe("aws-session-token");
+      }
+      expect(new Headers(calls.at(-1)![1].headers).get("mcp-session-id")).toBe("aws-session");
+      expect(JSON.stringify(body)).not.toContain("aws-session-token");
+    });
+
+    it("refuses tools investigations do not allow without calling AWS", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(awsClaim("refuse"));
+      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+
+      for (const name of ["aws___call_aws", "aws___get_presigned_url", "not_a_tool"]) {
+        const response = await app.request(
+          `/api/automation-context-broker/v1/${accountId}`,
+          rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name } }),
+        );
+        expect(response.status).toBe(400);
+      }
+      const calls = dependencies.providerFetch.mock.calls as Array<[URL, RequestInit]>;
+      expect(calls.some(([, init]) =>
+        new TextDecoder().decode(init.body as Uint8Array).includes("tools/call"))).toBe(false);
+    });
+
+    it("forwards allowed tool calls signed with the role session", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(awsClaim("forward"));
+      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        {
+          ...rpcRequest({
+            id: 3,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { arguments: { script: "print(1)" }, name: "aws___run_script" },
+          }),
+          headers: {
+            ...rpcRequest({}).headers,
+            accept: "application/json, text/event-stream",
+            "mcp-session-id": "run-session",
+          },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toContain("queue depth 42");
+      expect(text).not.toContain("aws-session-token");
+      const [url, init] = (dependencies.providerFetch.mock.calls as Array<[URL, RequestInit]>).at(-1)!;
+      expect(url.toString()).toBe(awsEndpoint);
+      expect(new TextDecoder().decode(init.body as Uint8Array)).toContain("aws___run_script");
+      const headers = new Headers(init.headers);
+      expect(headers.get("authorization")).toMatch(signature);
+      expect(headers.get("mcp-session-id")).toBe("run-session");
+    });
+
+    it("rejects service paths and methods outside the tool surface", async () => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+      const { app, dependencies } = appFor(awsClaim("reject"));
+      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+
+      const servicePath = await app.request(
+        `/api/automation-context-broker/v1/${accountId}/logging`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const resources = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "resources/list" }),
+      );
+
+      expect(servicePath.status).toBe(404);
+      expect(resources.status).toBe(404);
       expect(dependencies.providerFetch).not.toHaveBeenCalled();
     });
   });

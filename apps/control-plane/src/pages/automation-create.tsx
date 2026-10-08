@@ -15,6 +15,7 @@ import { automationTriggersNotify, defaultAutomationModelSettings } from "../../
 import { BookOpenTextIcon, ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import { automationConnectorProviders, type AutomationConnectorProvider } from "../components/automation-connectors";
+import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
@@ -87,7 +88,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const description = initialAutomation?.description ?? template?.description ?? "";
   const [enabled, setEnabled] = useState(initialAutomation?.enabled ?? true);
   const [configuration, setConfiguration] = useState<AutomationConfiguration>(initialAutomation?.configuration ?? { ...defaultConfiguration, prompt: "" });
-  const [connectDialog, setConnectDialog] = useState<{ provider: "datadog" | "custom_mcp" | "gcp"; connectUrl: string } | null>(null);
+  const [connectDialog, setConnectDialog] = useState<{ provider: "aws" | "datadog" | "custom_mcp" | "gcp"; connectUrl: string } | null>(null);
   // Google Cloud returns here to pick a project and finishes the connection in
   // its dialog. Read before the restored draft cleans the URL.
   const [gcpSelectionState, setGcpSelectionState] = useState(() => currentProjectSelectionState("gcp"));
@@ -254,8 +255,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     return () => window.removeEventListener("focus", refresh);
   }, []);
 
-  // Connects in this tab. OAuth providers redirect; Datadog and custom MCP
-  // collect credentials in a dialog first. Both return to this page.
+  // Connects in this tab. OAuth providers redirect; AWS, Datadog, Google
+  // Cloud, and custom MCP start in a dialog. All return to this page.
   async function connectConnector(provider: AutomationConnectorProvider) {
     setError(null);
     try {
@@ -265,7 +266,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
       saveAutomationDraft({ automationId, name, configuration, ...(isSharedTemplate(template) ? { sharedTemplate: template } : { templateId: template?.id }), githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
-      if (provider === "datadog" || provider === "custom_mcp" || provider === "gcp") {
+      if (provider === "aws" || provider === "datadog" || provider === "custom_mcp" || provider === "gcp") {
         setConnectDialog({ provider, connectUrl });
         return;
       }
@@ -478,6 +479,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         </form>
       </div>
       {automationId && sharing ? <AutomationShareDialog automationId={automationId} onClose={() => setSharing(false)} /> : null}
+      <AwsConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "aws"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <DatadogConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "datadog"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <CustomMcpConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "custom_mcp"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <GcpConnectionDialog
