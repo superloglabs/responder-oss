@@ -672,6 +672,10 @@ describe("management MCP server", () => {
     }
     expect(body.result.tools.find((tool) => tool.name === "list_automations")?.annotations)
       .toMatchObject({ destructiveHint: false, readOnlyHint: true });
+    for (const name of ["update_automation", "cancel_automation_run", "update_tag_mode"]) {
+      expect(body.result.tools.find((tool) => tool.name === name)?.annotations)
+        .toMatchObject({ destructiveHint: true, readOnlyHint: false });
+    }
     expect(body.result.tools.find((tool) => tool.name === "revoke_api_key")?.annotations)
       .toMatchObject({ destructiveHint: true, readOnlyHint: false });
   });
