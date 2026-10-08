@@ -386,9 +386,11 @@ test("searches channels by name or ID, selects multiple, and refreshes the list"
   await page.screenshot({ path: testInfo.outputPath("automation-event-card.png"), fullPage: true });
 });
 
-test("ignores Slack authors chosen from who posted in the selected channels", async ({ page }, testInfo) => {
+test("includes and ignores Slack authors chosen from who posted in the selected channels", async ({ page }, testInfo) => {
   let requested: string[] = [];
+  let requests = 0;
   await page.route("**/api/automations/slack/*/authors?*", (route) => {
+    requests += 1;
     requested = new URL(route.request().url()).searchParams.getAll("channel");
     return route.fulfill({ json: { authors: [
       { id: "A-DEVIN", kind: "app", name: "Devin" },
@@ -405,11 +407,20 @@ test("ignores Slack authors chosen from who posted in the selected channels", as
   await page.getByRole("button", { name: "Channel", exact: true }).click();
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  const include = page.getByRole("button", { name: "Only messages from", exact: true });
+  await expect(include).toContainText("Everyone");
+  await include.click();
+  await expect.poll(() => requested).toEqual(["C123"]);
+  await page.getByRole("checkbox", { name: "Ada", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
+  await expect(include).toContainText("Ada");
   const ignore = page.getByRole("button", { name: "Ignore messages from", exact: true });
   await expect(ignore).toContainText("No one");
   await ignore.click();
-  await expect.poll(() => requested).toEqual(["C123"]);
   await page.getByRole("checkbox", { name: "Devin (app)", exact: true }).check();
+  // Both pickers share one list of authors, which React's development mode
+  // may load twice.
+  expect(requests).toBeLessThanOrEqual(2);
   await page.getByRole("checkbox", { name: "Qovery (app)", exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors-picker.png"), fullPage: true });
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
@@ -429,7 +440,7 @@ test("ignores Slack authors chosen from who posted in the selected channels", as
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ configuration: {
-    triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], kind: "slack" }],
+    triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], includedAuthors: [{ id: "U-ADA", name: "Ada" }], kind: "slack" }],
   } });
 });
 

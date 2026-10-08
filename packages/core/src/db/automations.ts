@@ -77,13 +77,19 @@ export class AutomationConfigurationError extends Error {
 //
 // "Every message" watches the channel's new messages. A reply in a thread
 // without a run starts one only when it mentions the app, so a thread whose
-// first message an ignored author posted stays quiet until someone asks.
+// first message an ignored author posted stays quiet until someone asks. A
+// reply also sent to the channel, as Sentry posts a regression, is a new
+// message there.
+//
+// A trigger with included authors starts a run only on their messages.
 //
 // While the organization has tag mode on, tag mode keeps the threads it
 // answers in: a message there starts no run. Elsewhere, tag mode answers a
 // message that mentions the app unless a trigger watches for mentions.
 export async function findAutomationsForSlackEvent(input: {
   authorIds: string[];
+  // Whether the message is a thread reply also sent to the channel.
+  broadcast?: boolean;
   channelId: string;
   eventType: "app_mention" | "message";
   teamId: string;
@@ -160,9 +166,11 @@ export async function findAutomationsForSlackEvent(input: {
     if (watching.length === 0) return [];
     const mentioned = input.eventType === "app_mention" ||
       (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`));
-    const threadReply = input.threadTimestamp !== undefined && input.threadTimestamp !== input.timestamp;
+    const threadReply = input.threadTimestamp !== undefined && input.threadTimestamp !== input.timestamp &&
+      !input.broadcast;
     const startsRun = !(row.tagMode && row.tagModeThread) && watching.some((trigger) =>
       trigger.kind === "slack" &&
+      (!trigger.includedAuthors || trigger.includedAuthors.some((author) => input.authorIds.includes(author.id))) &&
       ((trigger.eventMode === "both" && (input.eventType === "app_mention" || !threadReply)) ||
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
         (trigger.eventMode === "every_message" && input.eventType === "message" &&

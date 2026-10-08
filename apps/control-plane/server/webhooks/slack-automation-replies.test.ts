@@ -176,6 +176,33 @@ describe("Slack replies to automation runs", () => {
     expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 
+  it("starts a new run for an app's message also sent to the channel in a thread that has a run", async () => {
+    const regression = {
+      bot_id: "B123",
+      bot_profile: { app_id: "A123", name: "Sentry" },
+      subtype: "thread_broadcast",
+      text: "[responder-prod] AutomationHarnessError https://acme.sentry.io/issues/1/",
+      thread_ts: "1790000000.000100",
+    };
+
+    await deliver(regression);
+
+    expect(mocks.findAutomations).toHaveBeenCalledWith(expect.objectContaining({ broadcast: true }));
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(mocks.queueRun).toHaveBeenCalledWith(expect.objectContaining({
+      automationId,
+      trigger: expect.objectContaining({
+        attributes: expect.objectContaining({ threadTimestamp: "1790000000.000100", timestamp: "1790000002.000100" }),
+      }),
+    }));
+
+    // An automation the message does not start on leaves it alone.
+    mocks.queueRun.mockClear();
+    mocks.findAutomations.mockResolvedValue([{ ...match, startsRun: false }]);
+    await deliver(regression);
+    expect(mocks.queueRun).not.toHaveBeenCalled();
+  });
+
   it("starts a run for another app's message in a thread without one", async () => {
     mocks.findThreadRun.mockResolvedValue(null);
 
@@ -195,6 +222,7 @@ describe("Slack replies to automation runs", () => {
 
     expect(mocks.findAutomations).toHaveBeenCalledWith({
       authorIds: ["U999", "B123", "A123"],
+      broadcast: false,
       channelId: "C123",
       eventType: "message",
       teamId: "T123",
