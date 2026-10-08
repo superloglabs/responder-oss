@@ -2,15 +2,24 @@ import { type FormEvent, useState } from "react";
 import { authClient } from "../auth-client";
 import { authErrorCode } from "../auth-error-code";
 import { AuthFrame } from "../components/auth-gate";
+import { takeResetPasswordToken } from "../reset-password-token";
 import { useDocumentTitle } from "../use-document-title";
+
+// Cached so the token survives the address change across repeated renders.
+let pendingToken: string | null | undefined;
+
+function resetPasswordToken(): string | null {
+  pendingToken ??= takeResetPasswordToken(window.location.href, (url) =>
+    window.history.replaceState(window.history.state, "", url),
+  );
+  return pendingToken;
+}
 
 // The reset email links to Better Auth, which checks the token and returns
 // here with either `token` or `error=INVALID_TOKEN`.
 export function ResetPasswordPage() {
   useDocumentTitle("Reset password");
-  const [token] = useState(() =>
-    new URLSearchParams(window.location.search).get("token"),
-  );
+  const [token] = useState(resetPasswordToken);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDone, setIsDone] = useState(false);
@@ -24,7 +33,9 @@ export function ResetPasswordPage() {
     const newPassword = String(
       new FormData(event.currentTarget).get("password") ?? "",
     );
-    const result = await authClient.resetPassword({ newPassword, token });
+    const result = await authClient
+      .resetPassword({ newPassword, token })
+      .catch(() => ({ error: { code: "network_error", message: undefined } }));
     setIsSubmitting(false);
     if (result.error) {
       console.error(
@@ -112,7 +123,11 @@ export function ResetPasswordPage() {
             </button>
           </span>
         </div>
-        {error ? <p className="authError">{error}</p> : null}
+        {error ? (
+          <p className="authError" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button
           className="button button--primary authSubmit"
           disabled={isSubmitting}

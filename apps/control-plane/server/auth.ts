@@ -404,12 +404,13 @@ async function sendPasswordResetEmail(args: {
   userId: string;
 }): Promise<void> {
   try {
-    await sendEmail({
+    const sent = await sendEmail({
       ...passwordResetEmailBody({ resetUrl: args.url }),
       idempotencyKey: `password-reset/${args.token}`,
       subject: "Reset your Superlog password",
       to: args.email,
     });
+    if (!sent) return;
     console.info(
       JSON.stringify({
         event: "password_reset_email_delivery_success",

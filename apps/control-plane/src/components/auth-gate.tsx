@@ -359,10 +359,9 @@ function PasswordResetRequest({ onBack }: { onBack: () => void }) {
     setError(null);
     setIsSubmitting(true);
     const email = String(new FormData(event.currentTarget).get("email") ?? "");
-    const result = await authClient.requestPasswordReset({
-      email,
-      redirectTo: "/reset-password",
-    });
+    const result = await authClient
+      .requestPasswordReset({ email, redirectTo: "/reset-password" })
+      .catch(() => ({ error: { code: "network_error", message: undefined } }));
     setIsSubmitting(false);
     if (result.error) {
       console.error(
@@ -413,7 +412,11 @@ function PasswordResetRequest({ onBack }: { onBack: () => void }) {
             type="email"
           />
         </label>
-        {error ? <p className="authError">{error}</p> : null}
+        {error ? (
+          <p className="authError" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button
           className="button button--primary authSubmit"
           disabled={isSubmitting}
