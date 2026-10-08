@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { sharedAutomationTemplateSlugSchema } from "../../../../packages/core/src/automations/shared-template.js";
 import { getSharedAutomationTemplate } from "../../../../packages/core/src/db/shared-automation-templates.js";
+import { escapeHtml } from "../../../../packages/core/src/email.js";
 
 // Public, unauthenticated reads of shared automation templates. The slug is
 // the only key; a stopped share returns not found.
@@ -17,14 +18,6 @@ export const sharedAutomationTemplateRoutes = new Hono().get(
       : context.json({ error: "Template not found" }, 404);
   },
 );
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
 
 // Link previews in Slack, X, and similar apps read the HTML head without
 // running scripts, so the template's title and description are rendered into

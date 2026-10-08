@@ -95,6 +95,8 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
+import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
   usageWaiverStart,
@@ -168,6 +170,14 @@ async function waiveFailedInvestigationUsage(
 }
 
 let automationUsageBillingPass: Promise<void> | undefined;
+// Each pass rereads a short overlap, since billing times come from the clocks
+// of several processes. A new worker first checks the whole retry window, so
+// a check that was still failing when the last worker stopped is not lost.
+const usageNoticeOverlapMs = 2 * 60 * 1_000;
+let usageNoticesCheckedAt = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
+// Organizations whose last check failed, checked again on the next pass even
+// without further usage.
+let usageNoticeRetries: string[] = [];
 
 // Runs at most one settlement pass at a time; a slow pass delays the next.
 function settleAutomationUsageBilling(): Promise<void> {
@@ -233,6 +243,29 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.failed > 0) {
       await reportWorkerException(
         new Error(`${result.failed} waived usage records could not be credited`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  // After waived usage is credited, so a refunded balance is not reported as
+  // used up.
+  try {
+    const startedAt = new Date();
+    const result = await sendUsageNotices(
+      new Date(usageNoticesCheckedAt.getTime() - usageNoticeOverlapMs),
+      usageNoticeRetries,
+    );
+    usageNoticesCheckedAt = startedAt;
+    usageNoticeRetries = result.failedOrganizationIds;
+    if (result.failedOrganizationIds.length > 0) {
+      await reportWorkerException(
+        new Error(
+          `${result.failedOrganizationIds.length} organizations could not be checked for usage notices`,
+        ),
         { operation: "worker" },
       ).catch(() => undefined);
     }

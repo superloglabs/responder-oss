@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { integrationCallbackUrl } from "./urls.js";
 
+export { listSlackChannels } from "../../../../packages/core/src/integrations/slack-channels.js";
+
 const slackOAuthResponseSchema = z.object({
   ok: z.literal(true),
   access_token: z.string().min(1),
@@ -25,22 +27,6 @@ const slackOAuthResponseSchema = z.object({
     token_type: z.string().min(1),
     scope: z.string(),
   }),
-});
-
-const slackChannelsResponseSchema = z.object({
-  ok: z.literal(true),
-  channels: z.array(
-    z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      is_archived: z.boolean().optional().default(false),
-      is_member: z.boolean().optional().default(false),
-      is_private: z.boolean().optional().default(false),
-    }),
-  ),
-  response_metadata: z
-    .object({ next_cursor: z.string().optional().default("") })
-    .optional(),
 });
 
 const SLACK_BOT_SCOPES = [
@@ -115,54 +101,6 @@ export async function exchangeSlackCode(code: string) {
   }
 
   return slackOAuthResponseSchema.parse(payload);
-}
-
-export async function listSlackChannels(accessToken: string) {
-  const channels: Array<{
-    externalId: string;
-    displayName: string;
-    metadata: Record<string, unknown>;
-  }> = [];
-  let cursor = "";
-
-  do {
-    const url = new URL("https://slack.com/api/conversations.list");
-    url.searchParams.set("types", "public_channel,private_channel");
-    url.searchParams.set("exclude_archived", "true");
-    url.searchParams.set("limit", "200");
-    if (cursor) url.searchParams.set("cursor", cursor);
-
-    const response = await fetch(url, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    const payload = await response.json();
-    if (
-      !response.ok ||
-      !payload ||
-      typeof payload !== "object" ||
-      !("ok" in payload) ||
-      payload.ok !== true
-    ) {
-      throw new Error("Unable to list Slack channels");
-    }
-
-    const page = slackChannelsResponseSchema.parse(payload);
-    channels.push(
-      ...page.channels
-        .filter((channel) => !channel.is_archived)
-        .map((channel) => ({
-          externalId: channel.id,
-          displayName: channel.name,
-          metadata: {
-            isMember: channel.is_member,
-            isPrivate: channel.is_private,
-          },
-        })),
-    );
-    cursor = page.response_metadata?.next_cursor ?? "";
-  } while (cursor);
-
-  return channels;
 }
 
 export async function joinSlackChannel(

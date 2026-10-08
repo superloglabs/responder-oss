@@ -14,6 +14,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -1081,6 +1082,7 @@ export const automationModelUsage = pgTable(
       table.organizationId,
       table.createdAt,
     ),
+    index("automation_model_usage_billed_idx").on(table.billedAt),
     index("automation_model_usage_unbilled_idx")
       .on(table.organizationId, table.createdAt)
       .where(sql`${table.billedAt} is null`),
@@ -1155,6 +1157,7 @@ export const sandboxUsage = pgTable(
     index("sandbox_usage_open_idx")
       .on(table.heartbeatAt)
       .where(sql`${table.stoppedAt} is null`),
+    index("sandbox_usage_billed_idx").on(table.billedAt),
     index("sandbox_usage_unbilled_idx")
       .on(table.stoppedAt)
       .where(sql`${table.billedAt} is null`),
@@ -1231,6 +1234,7 @@ export const agentModelUsage = pgTable(
       table.organizationId,
       table.createdAt,
     ),
+    index("agent_model_usage_billed_idx").on(table.billedAt),
     index("agent_model_usage_unbilled_idx")
       .on(table.createdAt)
       .where(sql`${table.billedAt} is null`),
@@ -1936,12 +1940,15 @@ export const billingNotificationDeliveries = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
+    // Null for email, which is not sent through an integration.
     integrationAccountId: uuid("integration_account_id")
-      .notNull()
       .references(() => integrationAccounts.id, { onDelete: "cascade" }),
     periodKey: text("period_key").notNull(),
     kind: text("kind").notNull(),
     destination: text("destination").notNull(),
+    // Usage-billed notices are retried by the worker; investigation credit
+    // notices by the next blocked investigation, since their wording differs.
+    usageBased: boolean("usage_based").notNull().default(false),
     status: text("status").notNull().default("pending"),
     attemptCount: integer("attempt_count").notNull().default(0),
     lastError: text("last_error"),
@@ -1949,16 +1956,22 @@ export const billingNotificationDeliveries = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("billing_notification_delivery_target_idx").on(
-      table.organizationId,
-      table.periodKey,
-      table.integrationAccountId,
-      table.kind,
-      table.destination,
-    ),
+    unique("billing_notification_delivery_target_key")
+      .on(
+        table.organizationId,
+        table.periodKey,
+        table.integrationAccountId,
+        table.kind,
+        table.destination,
+      )
+      .nullsNotDistinct(),
     index("billing_notification_delivery_status_idx").on(
       table.organizationId,
       table.status,
+    ),
+    index("billing_notification_delivery_retry_idx").on(
+      table.status,
+      table.createdAt,
     ),
   ],
 );

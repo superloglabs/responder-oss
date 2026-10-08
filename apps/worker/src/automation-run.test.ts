@@ -78,6 +78,7 @@ function dependencies() {
       machinesUseCredit: false,
       nextResetAt: null,
     }),
+    notifyLimitReached: vi.fn().mockResolvedValue(undefined),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -843,7 +844,7 @@ describe("automation run processor", () => {
         allowed: false,
         exhausted: "usage_credit",
         machinesUseCredit: false,
-        nextResetAt: null,
+        nextResetAt: 1_800_000_000,
       });
 
       await processAutomationRun("job-1", job, process.env, deps);
@@ -852,6 +853,15 @@ describe("automation run processor", () => {
       expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
         outcome: expect.objectContaining({ status: "failed" }),
       }));
+      expect(deps.notifyLimitReached).toHaveBeenCalledWith(
+        organizationId,
+        1_800_000_000,
+        {
+          refreshSlackChannels: expect.any(Function),
+          usage: { balance: "usage_credit", investigations: false, modelRunsOnly: true },
+          usageBased: true,
+        },
+      );
     });
 
     const buttonPress = (press: { channelId: string; integrationAccountId: string }) => ({

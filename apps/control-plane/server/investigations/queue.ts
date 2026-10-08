@@ -109,6 +109,7 @@ export async function queueInvestigation(
         access.nextResetAt,
         {
           refreshSlackChannels: refreshSlackChannelResources,
+          usage: access.usageLimit,
           usageBased: access.usageBased,
         },
       ).catch((error: unknown) => {
@@ -196,6 +197,7 @@ export async function queueSlackThreadInvestigation(
         access.nextResetAt,
         {
           refreshSlackChannels: refreshSlackChannelResources,
+          usage: access.usageLimit,
           usageBased: access.usageBased,
         },
       ).catch(() => undefined);
@@ -294,6 +296,7 @@ export async function queueInvestigationRetry(input: {
         reservation.nextResetAt,
         {
           refreshSlackChannels: refreshSlackChannelResources,
+          usage: reservation.usageLimit,
           usageBased: reservation.usageBased,
         },
       ).catch((error: unknown) => {

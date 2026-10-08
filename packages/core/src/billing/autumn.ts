@@ -314,9 +314,9 @@ const LEGACY_AUTOMATION_PLANS = [
 const usageTrackTimeoutMs = 30_000;
 
 // A run may start while at least one cent of the allowance remains.
-const automationMinimumBalanceDollars = 0.01;
+export const automationMinimumBalanceDollars = 0.01;
 // A sandbox may start while at least a minute of machine time remains.
-const minimumMachineHours = 1 / 60;
+export const minimumMachineHours = 1 / 60;
 
 export type AutomationPaidPlanId = (typeof AUTOMATION_PAID_PLANS)[number]["id"];
 export type AutomationPlanId =
@@ -350,6 +350,8 @@ export interface UsageBalanceSummary {
   // Usage past the granted amount is billed instead of stopping work.
   overageAllowed: boolean;
   remaining: number;
+  // The balance never stops work.
+  unlimited: boolean;
   usage: number;
 }
 
@@ -359,6 +361,8 @@ export interface AutomationBillingSummary {
   configured: boolean;
   // Usage past the credit is billed instead of stopping work.
   creditOverageAllowed: boolean;
+  // The credit never stops work.
+  creditUnlimited: boolean;
   enabled: boolean;
   // Null on plans that pay for sandbox time from the usage credit.
   machineHours: UsageBalanceSummary | null;
@@ -452,12 +456,14 @@ function disabledAutomationSummary(configured: boolean, enabled: boolean): Autom
     cancelsAtPeriodEnd: false,
     configured,
     creditOverageAllowed: false,
+    creditUnlimited: false,
     enabled,
     machineHours: {
       granted: AUTOMATION_FREE_MACHINE_HOURS,
       nextResetAt: null,
       overageAllowed: false,
       remaining: AUTOMATION_FREE_MACHINE_HOURS,
+      unlimited: false,
       usage: 0,
     },
     nextResetAt: null,
@@ -480,6 +486,7 @@ function balanceSummary(balance: NonNullable<Customer["balances"][string]>): Usa
     nextResetAt: balance.nextResetAt ?? null,
     overageAllowed: balance.overageAllowed,
     remaining: Math.max(0, balance.remaining),
+    unlimited: balance.unlimited,
     usage: Math.max(0, balance.usage),
   };
 }
@@ -497,6 +504,7 @@ export function summarizeAutomationBillingCustomer(
     cancelsAtPeriodEnd: plan.cancelsAtPeriodEnd,
     configured: true,
     creditOverageAllowed: balance?.overageAllowed ?? false,
+    creditUnlimited: balance?.unlimited ?? false,
     enabled: true,
     machineHours: machineHours ? balanceSummary(machineHours) : null,
     nextResetAt: balance?.nextResetAt ?? null,
@@ -596,6 +604,16 @@ export async function checkWorkAllowance(
   const credit = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
   const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
   const machinesUseCredit = !machineHours && sandboxTimeIsBilled();
+  // Machine hours first: when both balances are used up, the workspace's own
+  // model key would not let work start either.
+  if (machineHours && !balanceAllows(machineHours, minimumMachineHours)) {
+    return {
+      allowed: false,
+      exhausted: "machine_hours",
+      machinesUseCredit,
+      nextResetAt: machineHours.nextResetAt ?? null,
+    };
+  }
   if (
     (options.responderModels || machinesUseCredit) &&
     !(credit && balanceAllows(credit, automationMinimumBalanceDollars))
@@ -605,14 +623,6 @@ export async function checkWorkAllowance(
       exhausted: "usage_credit",
       machinesUseCredit,
       nextResetAt: credit?.nextResetAt ?? null,
-    };
-  }
-  if (machineHours && !balanceAllows(machineHours, minimumMachineHours)) {
-    return {
-      allowed: false,
-      exhausted: "machine_hours",
-      machinesUseCredit,
-      nextResetAt: machineHours.nextResetAt ?? null,
     };
   }
   return { ...open, machinesUseCredit };
