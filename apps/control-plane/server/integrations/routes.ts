@@ -922,28 +922,15 @@ export async function startIntegrationConnection(input: {
     }
   }
   if (parsedProvider.data === "posthog") {
-    let accountId: string | undefined;
     try {
+      // Keep incomplete OAuth credentials in the expiring flow, not an account.
+      // Replacing or expiring the flow therefore leaves no pending accounts.
       const externalAccountId = randomUUID();
-      accountId = await upsertIntegrationAccount({
-        organizationId: tenant.organizationId,
-        provider: "posthog",
-        externalAccountId,
-        displayName: "PostHog",
-        encryptedCredentials: encryptCredentials({
-          authType: "oauth",
-          mcpUrl: POSTHOG_MCP_URL,
-          oauth: {},
-        }),
-        credentialKeyVersion: 1,
-        metadata: { authType: "oauth", mcpUrl: POSTHOG_MCP_URL },
-        status: "pending",
-      });
       const connectionState = await createIntegrationConnectionState({
         organizationId: tenant.organizationId,
         userId: tenant.user.id,
         provider: "posthog",
-        codeVerifier: JSON.stringify({ accountId, externalAccountId }),
+        codeVerifier: JSON.stringify({ externalAccountId }),
         returnTo: input.returnTo,
         routingUrl: integrationCallbackUrl("posthog"),
       });
@@ -952,34 +939,20 @@ export async function startIntegrationConnection(input: {
         mcpUrl: POSTHOG_MCP_URL,
         redirectUrl: integrationCallbackUrl("posthog"),
       });
-      const updated = await updateIntegrationAccountCredentials({
-        encryptedCredentials: encryptCredentials({
-          authType: "oauth",
-          mcpUrl: POSTHOG_MCP_URL,
-          oauth: oauthResult.oauth,
-        }),
-        integrationAccountId: accountId,
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: { encryptedCredentials: encryptCredentials({
+          authType: "oauth", mcpUrl: POSTHOG_MCP_URL, oauth: oauthResult.oauth,
+        }) },
         organizationId: tenant.organizationId,
+        userId: tenant.user.id,
         provider: "posthog",
-        status: "pending",
+        state: connectionState,
       });
-      if (!updated) throw new Error("The pending PostHog connection was not updated");
+      if (!updated) throw new Error("The PostHog OAuth state was superseded");
       return Response.redirect(oauthResult.authorizationUrl);
     } catch (error) {
-      if (accountId) {
-        await setIntegrationAccountStatus(accountId, "error").catch(
-          () => undefined,
-        );
-      }
-      logCustomMcpError("connect", error, accountId);
-      return Response.redirect(
-        settingsRedirect(
-          input.returnTo ?? "/settings",
-          "posthog",
-          "error",
-          "connection_failed",
-        ),
-      );
+      logCustomMcpError("connect", error);
+      return Response.redirect(settingsRedirect(input.returnTo ?? "/settings", "posthog", "error", "connection_failed"));
     }
   }
   const state = await createIntegrationConnectionState({
@@ -2141,20 +2114,27 @@ export const integrationRoutes = new Hono()
         );
       }
       const callbackState = z
-        .object({ accountId: z.uuid(), externalAccountId: z.uuid() })
+        .object({ accountId: z.uuid().optional(), externalAccountId: z.uuid() })
         .parse(JSON.parse(connectionState.codeVerifier ?? "null"));
       accountId = callbackState.accountId;
       const authorizationCode = z.string().min(1).parse(context.req.query("code"));
-      const account = await getOrganizationIntegrationAccount({
-        integrationAccountId: accountId,
-        organizationId: connectionState.organizationId,
-        provider: "posthog",
-      });
-      if (!account?.encryptedCredentials || account.status !== "pending") {
-        throw new Error("The pending PostHog connection was not found");
+      let encryptedCredentials: string;
+      if (accountId) {
+        // Complete links issued before flow-scoped credential storage.
+        const account = await getOrganizationIntegrationAccount({
+          integrationAccountId: accountId,
+          organizationId: connectionState.organizationId,
+          provider: "posthog",
+        });
+        if (!account?.encryptedCredentials || account.status !== "pending") {
+          throw new Error("The pending PostHog connection was not found");
+        }
+        encryptedCredentials = account.encryptedCredentials;
+      } else {
+        encryptedCredentials = pendingConnectionCredentialsSchema.parse(connectionState.metadata).encryptedCredentials;
       }
       const credentials = parsePostHogCredentials(
-        decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
       const oauth = await finishCustomMcpOAuth({
         authorizationCode,
@@ -2182,9 +2162,10 @@ export const integrationRoutes = new Hono()
         },
         status: "connected",
       });
-      if (connectedAccountId !== accountId) {
+      if (accountId && connectedAccountId !== accountId) {
         throw new Error("The PostHog connection changed during OAuth");
       }
+      accountId = connectedAccountId;
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",

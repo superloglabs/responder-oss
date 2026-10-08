@@ -65,7 +65,7 @@ describe("chat connection return", () => {
 
   it("rejects a different user, tampered handoff, and expired ticket", async () => {
     const { handoff, ticket } = await open();
-    vi.mocked(getActiveTenant).mockResolvedValueOnce({ ok: false, status: 401, error: "Unauthorized" });
+    vi.mocked(getActiveTenant).mockResolvedValueOnce({ ok: true, organizationId, role: "member", user: { id: "33333333-3333-4333-8333-333333333333", name: "Other", email: "other@example.com" } });
     expect((await app.request(handoff)).status).toBe(403);
     handoff.searchParams.set("token", "tampered");
     expect((await app.request(handoff)).status).toBe(400);

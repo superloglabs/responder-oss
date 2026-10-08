@@ -78,6 +78,10 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
     finally {checking=false;check.disabled=false;schedule();}
   }
   connect.onclick=async()=>{
+    if(data.expiresAt && Date.now()>=Date.parse(data.expiresAt)) {
+      active=false;clearTimeout(timer);persist();connect.disabled=true;
+      status.textContent='This link has expired. Ask the chat for a fresh connection link.';return;
+    }
     active=true;persist();
     try {
       // The host appends a trusted conversation return address to our handoff

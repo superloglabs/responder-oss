@@ -14,8 +14,10 @@ Use `list_available_integrations` to discover configured providers, then
 `start_integration_connection` with the selected `provider`. The REST equivalents
 are `GET /api/v1/integrations/available` and `POST /api/v1/integrations/connect`.
 
-Slack, GitHub, Sentry, Discord, Vercel, Linear, Google Cloud, Axiom, and PostHog
-return a provider consent URL (Discord also requires the workspace automations capability). Sentry may recover an existing installation and return `connected` without another consent prompt. The person opens that link, approves access, and
+Slack, GitHub, Sentry, Discord (only in workspaces with the `automations` capability),
+Vercel, Linear, Google Cloud, Axiom, and PostHog normally return a provider consent
+URL. Sentry may recover an existing installation and return `connected` without
+another consent prompt. The person opens the consent link, approves access, and
 returns to chat. The browser must be signed into the same Superlog user and
 workspace that authorized the MCP client; callback identity checks are unchanged.
 Links expire after ten minutes, and requesting a new link invalidates the previous
