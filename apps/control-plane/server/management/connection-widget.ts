@@ -11,7 +11,7 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
 (() => {
   const title = document.getElementById('title'), status = document.getElementById('status');
   const connect = document.getElementById('connect'), check = document.getElementById('check');
-  const pending = new Map(); let next = 1, data, timer, checking = false, active = false, sent = false, ready = false;
+  const pending = new Map(); let next = 1, data, timer, checking = false, checkFailed = false, active = false, sent = false, ready = false;
   const names = {slack:'Slack',github:'GitHub',gcp:'Google Cloud',posthog:'PostHog',sentry:'Sentry',linear:'Linear',discord:'Discord',vercel:'Vercel',axiom:'Axiom'};
   function request(method, params) {
     const id = next++;
@@ -41,7 +41,8 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
       : 'Choose your workspace and approve access.';
     connect.textContent = data.connectionType === 'secure_setup' ? 'Open secure setup' : 'Connect ' + (names[data.provider] || data.provider);
     connect.disabled = false;
-    check.hidden = true;
+    check.hidden = !checkFailed;
+    if(checkFailed)status.textContent="Couldn’t verify access. Try again.";
     connect.hidden = false;
     if (sent) {status.textContent='Connected. Continue in the conversation.';connect.hidden=true;check.hidden=true;}
     else if (data.status === 'connected') {active=true;checkConnection();}
@@ -72,12 +73,13 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
       const result=parse(window.openai?.callTool
         ? await window.openai.callTool('list_integrations',{})
         : await request('tools/call',{name:'list_integrations',arguments:{}}));
+      checkFailed=false;check.hidden=true;
       if(result.integrations?.some(account => account.provider === data.provider)) {
         active=false;clearTimeout(timer);connect.hidden=true;
         status.textContent='Connected successfully.';
         await followUp();
       } else status.textContent='Waiting for approval…';
-    } catch {status.textContent='Couldn’t verify access. Try again.';active=false;check.hidden=false;}
+    } catch {status.textContent='Couldn’t verify access. Try again.';active=false;checkFailed=true;check.hidden=false;}
     finally {checking=false;check.disabled=false;schedule();}
   }
   connect.onclick=async()=>{

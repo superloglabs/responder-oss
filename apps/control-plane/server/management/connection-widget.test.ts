@@ -22,6 +22,17 @@ function mount(integrations: { provider: string }[] = [], failFollowUp = false, 
 }
 
 describe("connection card", () => {
+  it("keeps retry available across host updates and clears it after a successful check", async () => {
+    const card=mount();
+    card.callTool.mockRejectedValueOnce(new Error("temporary failure"));
+    await card.elements.check.onclick();
+    expect(card.elements.check.hidden).toBe(false);
+    card.handlers.get("openai:set_globals")!({});
+    expect(card.elements.check.hidden).toBe(false);
+    await card.elements.check.onclick();
+    expect(card.elements.check.hidden).toBe(true);
+    expect(card.elements.status.textContent).toContain("Waiting for approval");
+  });
   it("reports content height after host initialization and hides routine manual checks", async () => {
     const card=mount();
     const request=card.postMessage.mock.calls[0]![0];
