@@ -64,8 +64,8 @@ export interface ManagementOperation<
   name: string;
   output: Output;
   path: string;
-  // Read-only operations change nothing. Destructive ones remove access or
-  // data that cannot be restored through the API.
+  // Read-only operations change nothing. Destructive ones replace existing
+  // configuration, remove access or data, or stop work that cannot be resumed.
   effect: "destructive" | "read" | "write";
   input: Input;
   requiresAutomations?: true;

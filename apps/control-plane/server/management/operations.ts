@@ -482,7 +482,7 @@ export const managementOperations: ManagementOperation[] = [
   defineOperation({
     description:
       "Changes an automation. Send only what changes. In `configuration`, each field you send replaces the current value, and fields you leave out are kept. Changing only `enabled` turns the automation on or off without saving a new version.",
-    effect: "write",
+    effect: "destructive",
     input: z.object({
       automationId,
       configuration: automationConfigurationChangesSchema.optional(),
@@ -631,7 +631,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description: "Asks an active run to stop. The run ends as `cancelled`.",
-    effect: "write",
+    effect: "destructive",
     input: z.object({ runId }),
     method: "POST",
     name: "cancel_automation_run",
@@ -710,7 +710,7 @@ export const managementOperations: ManagementOperation[] = [
   defineOperation({
     description:
       "Changes tag mode. Send only what changes; each list you send replaces the current selection. The first change starts tag mode on, with every connected context integration. Tag mode needs a Slack connection.",
-    effect: "write",
+    effect: "destructive",
     input: tagModeChangesSchema,
     method: "PATCH",
     name: "update_tag_mode",
