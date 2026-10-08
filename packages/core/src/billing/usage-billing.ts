@@ -12,7 +12,7 @@ import {
   type AgentModelUsageRecord,
 } from "../db/agent-model-usage.js";
 import { organizationHasCapability } from "../db/organization-capabilities.js";
-import type { AgentRequestUsage } from "../db/schema.js";
+import type { AgentRequestUsage, SandboxUsageBalance } from "../db/schema.js";
 import {
   closeStaleSandboxUsage,
   listUnbilledSandboxUsage,
@@ -53,7 +53,7 @@ const defaultSandboxDependencies: SandboxSettlementDependencies = {
   usesMachineHours: organizationUsesMachineHours,
 };
 
-function sandboxUsageSeconds(row: SandboxUsageRecord): number {
+export function sandboxUsageSeconds(row: SandboxUsageRecord): number {
   return Math.max(0, (row.stoppedAt.getTime() - row.startedAt.getTime()) / 1_000);
 }
 
@@ -68,6 +68,7 @@ export function sandboxUsageChargeMicros(row: SandboxUsageRecord): number {
 // hours on plans that include them, otherwise as a charge to the usage
 // credit. Both use the same idempotency key, and Autumn's keys apply across
 // features, so a retry after a plan change cannot report the period to both.
+// The balance is stored so a later credit returns the charge there.
 // Failures leave the row unsettled for the worker to retry.
 export async function settleSandboxUsage(
   row: SandboxUsageRecord,
@@ -75,6 +76,7 @@ export async function settleSandboxUsage(
 ): Promise<void> {
   const chargeMicros = row.chargeMicros ?? sandboxUsageChargeMicros(row);
   if (row.chargeMicros === null) await dependencies.setCharge(row.id, chargeMicros);
+  let balance: SandboxUsageBalance | null = null;
   if (row.billable && billingIsEnabled()) {
     const report = {
       idempotencyKey: `sandbox-usage:${row.id}`,
@@ -83,11 +85,13 @@ export async function settleSandboxUsage(
     };
     if (await dependencies.usesMachineHours(row.organizationId)) {
       await dependencies.trackMachineHours({ ...report, hours: sandboxUsageSeconds(row) / 3_600 });
+      balance = "machine_hours";
     } else {
       await dependencies.track({ ...report, chargeMicros });
+      balance = "usage_credit";
     }
   }
-  await dependencies.markBilled(row.id);
+  await dependencies.markBilled(row.id, balance);
 }
 
 // Closes a sandbox period and settles it. A period another process already

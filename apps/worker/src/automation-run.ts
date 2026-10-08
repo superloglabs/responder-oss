@@ -33,6 +33,7 @@ import {
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkWorkAllowance } from "@responder/core/billing/autumn";
+import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
@@ -156,6 +157,8 @@ export interface AutomationRunDependencies {
   createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
+  usageWaiverStart: typeof usageWaiverStart;
+  waiveUsage: typeof waiveAutomationRunUsage;
   workspaceTools: typeof workspaceToolSpecs;
 }
 
@@ -203,6 +206,8 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
+  usageWaiverStart,
+  waiveUsage: waiveAutomationRunUsage,
   workspaceTools: workspaceToolSpecs,
 };
 
@@ -615,6 +620,8 @@ export async function processAutomationRun(
 ): Promise<{ runId: string }> {
   const run = await dependencies.claimRun(payload.runId);
   if (!run) return { runId: payload.runId };
+  // Usage recorded from here on belongs to this turn.
+  const turnStartedAt = await dependencies.usageWaiverStart();
 
   await recordEvent(dependencies, run.runId, "run_started", {
     harness: run.harness,
@@ -1054,6 +1061,22 @@ export async function processAutomationRun(
       : allowanceExhausted
         ? allowanceExhausted.message
       : safeInvestigationError(error, environment);
+    // A turn that failed through Responder's fault is not charged. A run
+    // that reached its own runtime limit or allowance is. The waiver comes
+    // first so a failed status write cannot leave the turn charged.
+    if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
+      await dependencies.waiveUsage({
+        leaseId: run.leaseId,
+        runId: run.runId,
+        since: turnStartedAt,
+      }).catch((waiveError) =>
+        dependencies.reportException(waiveError, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
+    }
     if (!leaseLost) {
       await dependencies.setStatus({
         ...(cancelled

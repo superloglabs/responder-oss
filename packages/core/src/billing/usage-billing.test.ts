@@ -94,7 +94,7 @@ describe("usage billing", () => {
       organizationId: "organization-1",
       properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
     });
-    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1", "usage_credit");
   });
 
   it("reports sandbox time as machine hours on plans that include them", async () => {
@@ -111,7 +111,7 @@ describe("usage billing", () => {
       properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
     });
     expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1", "machine_hours");
   });
 
   it("leaves a sandbox period unbilled when its plan cannot be looked up", async () => {
@@ -132,7 +132,7 @@ describe("usage billing", () => {
 
     expect(deps.setCharge).toHaveBeenCalledWith("sandbox-usage-1", 16_860);
     expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1", null);
   });
 
   it("does not report usage when billing is disabled", async () => {
@@ -142,7 +142,7 @@ describe("usage billing", () => {
     await settleSandboxUsage(sandboxRow(), deps);
 
     expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).toHaveBeenCalledOnce();
+    expect(deps.markBilled).toHaveBeenCalledExactlyOnceWith("sandbox-usage-1", null);
   });
 
   it("leaves a sandbox period unbilled when reporting fails", async () => {

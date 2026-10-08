@@ -95,6 +95,11 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import {
+  creditWaivedUsage,
+  usageWaiverStart,
+  waiveJobUsage,
+} from "@responder/core/billing/usage-waivers";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -140,6 +145,26 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
       () => undefined,
     );
   }
+}
+
+// An investigation recorded as failed is not charged. A waiver that fails is
+// reported and leaves it charged.
+async function waiveFailedInvestigationUsage(
+  payload: { config: { organizationId: string }; investigationId: string },
+  jobId: string,
+  since: Date,
+): Promise<void> {
+  await waiveJobUsage({
+    since,
+    workload: "investigation",
+    workloadId: payload.investigationId,
+  }).catch((error: unknown) =>
+    reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId,
+      operation: "investigation",
+      organizationId: payload.config.organizationId,
+    }).catch(() => undefined));
 }
 
 let automationUsageBillingPass: Promise<void> | undefined;
@@ -189,6 +214,25 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.failed > 0) {
       await reportWorkerException(
         new Error(`${result.failed} sandbox or agent usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  try {
+    const result = await creditWaivedUsage();
+    if (result.credited > 0 || result.failed > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "waived_usage_credited",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} waived usage records could not be credited`),
         { operation: "worker" },
       ).catch(() => undefined);
     }
@@ -553,6 +597,7 @@ await boss.work(
     let lastSlackProgressAt = 0;
     let slackTraceItems: SlackInvestigationTraceItem[] = [];
     const assistant = isSlackAssistantRequest(payload.request);
+    const usageSince = await usageWaiverStart();
     try {
       const result = await runInvestigationAgent(
         payload,
@@ -611,6 +656,9 @@ await boss.work(
         payload.investigationId,
         message,
       );
+      if (investigationFailed) {
+        await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+      }
       if (investigationFailed && linear) {
         await linear.fail().catch(() => undefined);
       } else if (investigationFailed) {
@@ -688,6 +736,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
   let lastSlackProgressAt = 0;
   let slackProgressFailureReported = false;
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
+  const usageSince = await usageWaiverStart();
 
   try {
     if (
@@ -891,6 +940,9 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
       payload.investigationId,
       message,
     );
+    if (investigationFailed) {
+      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+    }
     await failInvestigationReplayRequest(payload.investigationId, message);
     await failPendingInvestigationPullRequests(
       payload.investigationId,

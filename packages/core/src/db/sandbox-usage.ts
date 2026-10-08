@@ -1,6 +1,10 @@
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
-import { sandboxUsage, type SandboxUsageWorkload } from "./schema.js";
+import {
+  sandboxUsage,
+  type SandboxUsageBalance,
+  type SandboxUsageWorkload,
+} from "./schema.js";
 
 export interface SandboxUsageRecord {
   billable: boolean;
@@ -95,10 +99,15 @@ export async function setSandboxUsageCharge(id: string, chargeMicros: number): P
     .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.chargeMicros)));
 }
 
-export async function markSandboxUsageBilled(id: string): Promise<void> {
+// `balance` is the balance the period was reported to, or null when it was
+// not reported.
+export async function markSandboxUsageBilled(
+  id: string,
+  balance: SandboxUsageBalance | null,
+): Promise<void> {
   await getDatabase()
     .update(sandboxUsage)
-    .set({ billedAt: new Date() })
+    .set({ billedAt: new Date(), billedBalance: balance })
     .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.billedAt)));
 }
 

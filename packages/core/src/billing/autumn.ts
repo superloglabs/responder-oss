@@ -660,7 +660,7 @@ async function trackUsage(input: {
 }): Promise<void> {
   if (!billingIsEnabled()) return;
   const client = requireAutumnClient();
-  if (input.value <= 0) return;
+  if (input.value === 0) return;
   try {
     await client.track(
       {
@@ -688,12 +688,32 @@ export async function trackUsageCharge(input: {
   organizationId: string;
   properties: Record<string, string>;
 }): Promise<void> {
+  if (input.chargeMicros <= 0) return;
   await trackUsage({
     featureId: AUTOMATION_INFERENCE_FEATURE_ID,
     idempotencyKey: input.idempotencyKey,
     organizationId: input.organizationId,
     properties: input.properties,
     value: input.chargeMicros / 1_000_000,
+  });
+}
+
+// Returns a reported charge to the usage credit. Autumn adds a negative
+// value back to the balance. The idempotency key must differ from the
+// charge's key and be stable for the credited record.
+export async function creditUsageCharge(input: {
+  chargeMicros: number;
+  idempotencyKey: string;
+  organizationId: string;
+  properties: Record<string, string>;
+}): Promise<void> {
+  if (input.chargeMicros <= 0) return;
+  await trackUsage({
+    featureId: AUTOMATION_INFERENCE_FEATURE_ID,
+    idempotencyKey: input.idempotencyKey,
+    organizationId: input.organizationId,
+    properties: input.properties,
+    value: -input.chargeMicros / 1_000_000,
   });
 }
 
@@ -705,12 +725,31 @@ export async function trackMachineHours(input: {
   organizationId: string;
   properties: Record<string, string>;
 }): Promise<void> {
+  if (input.hours <= 0) return;
   await trackUsage({
     featureId: MACHINE_HOURS_FEATURE_ID,
     idempotencyKey: input.idempotencyKey,
     organizationId: input.organizationId,
     properties: input.properties,
     value: input.hours,
+  });
+}
+
+// Returns reported sandbox time to the machine hours balance, with the same
+// idempotency rule as usage credits.
+export async function creditMachineHours(input: {
+  hours: number;
+  idempotencyKey: string;
+  organizationId: string;
+  properties: Record<string, string>;
+}): Promise<void> {
+  if (input.hours <= 0) return;
+  await trackUsage({
+    featureId: MACHINE_HOURS_FEATURE_ID,
+    idempotencyKey: input.idempotencyKey,
+    organizationId: input.organizationId,
+    properties: input.properties,
+    value: -input.hours,
   });
 }
 
