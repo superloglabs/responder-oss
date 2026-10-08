@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
-import {
-  getSlackThreadSessionTurns,
-  type SlackThreadSessionTurn,
-} from "@responder/core/db/investigations";
+import { getSlackThreadSessionContext } from "@responder/core/db/investigations";
 import { getSlackInvestigationLiveContext } from "@responder/core/db/issues";
 import {
   readSlackThread,
@@ -18,7 +15,10 @@ const slackCredentialsSchema = z.object({
 });
 
 const threadPageLimit = 200;
-const maximumThreadPages = 5;
+// Slack returns a thread oldest first, so the read pages to its end. This
+// bounds a runaway thread at 10,000 messages.
+const maximumThreadPages = 50;
+const threadReadTimeoutMs = 15_000;
 export const maximumThreadContextMessages = 50;
 export const maximumThreadContextLength = 30_000;
 
@@ -33,27 +33,19 @@ function isBefore(left: string, right: string): boolean {
   return slackTimestampValue(left) < slackTimestampValue(right);
 }
 
-// The thread messages before the current one that no earlier turn of the
-// session answered or posted. A later turn sees only what arrived since the
-// previous turn.
+// The thread messages before the current one that the session has not seen:
+// after the newest message a finished turn read, and not posted by the
+// session itself.
 export function unseenSlackThreadMessages(input: {
   currentTimestamp: string;
   messages: SlackHistoryMessage[];
-  turns: SlackThreadSessionTurn[];
+  postedTimestamps: string[];
+  readThrough: string | null;
 }): SlackHistoryMessage[] {
-  const posted = new Set(input.turns.flatMap((turn) => turn.postedTimestamps));
-  const answered = input.turns
-    .map((turn) => turn.messageTimestamp)
-    .filter((timestamp): timestamp is string =>
-      Boolean(timestamp) && isBefore(timestamp!, input.currentTimestamp)
-    )
-    .reduce<string | null>(
-      (latest, timestamp) => !latest || isBefore(latest, timestamp) ? timestamp : latest,
-      null,
-    );
+  const posted = new Set(input.postedTimestamps);
   return input.messages.filter((message) =>
     isBefore(message.timestamp, input.currentTimestamp) &&
-    (!answered || isBefore(answered, message.timestamp)) &&
+    (!input.readThrough || isBefore(input.readThrough, message.timestamp)) &&
     !posted.has(message.timestamp)
   );
 }
@@ -74,9 +66,11 @@ function formatMessage(message: SlackHistoryMessage): string {
 }
 
 // Keeps the thread's first message, which is usually the alert, and as many of
-// the newest messages as fit.
+// the newest messages as fit. `omitted` counts messages already dropped from
+// the middle of the thread before formatting.
 export function formatSlackThreadContext(input: {
   messages: SlackHistoryMessage[];
+  omitted?: number;
   threadTimestamp: string;
 }): string | null {
   if (input.messages.length === 0) return null;
@@ -95,7 +89,7 @@ export function formatSlackThreadContext(input: {
     kept.unshift(line);
     length += line.length;
   }
-  const omitted = candidates.length - kept.length;
+  const omitted = (input.omitted ?? 0) + candidates.length - kept.length;
   return [
     "# Earlier messages in this Slack thread",
     "",
@@ -109,32 +103,48 @@ export function formatSlackThreadContext(input: {
 
 export interface SlackThreadContextDependencies {
   getLiveContext: typeof getSlackInvestigationLiveContext;
-  getTurns: typeof getSlackThreadSessionTurns;
+  getSessionContext: typeof getSlackThreadSessionContext;
   readThread: typeof readSlackThread;
 }
 
 const defaultDependencies: SlackThreadContextDependencies = {
   getLiveContext: getSlackInvestigationLiveContext,
-  getTurns: getSlackThreadSessionTurns,
+  getSessionContext: getSlackThreadSessionContext,
   readThread: readSlackThread,
 };
 
-// Returns null for a message that starts its thread, or when the thread cannot
-// be read. The turn then answers from the message alone.
+export interface SlackThreadContext {
+  // The earlier messages to put before the request, if any are new.
+  context: string | null;
+  // The message the turn has read the thread up to. The session stores it
+  // when the turn finishes, so a failed read is read again next turn.
+  readThrough: string;
+}
+
+// Returns null when the thread cannot be read; the turn then answers from the
+// message alone.
 export async function loadSlackThreadContext(
   input: { investigationId: string; sessionId: string },
   dependencies: SlackThreadContextDependencies = defaultDependencies,
-): Promise<string | null> {
+): Promise<SlackThreadContext | null> {
   try {
     const context = await dependencies.getLiveContext(input.investigationId);
     const currentTimestamp = context?.source.reactionTimestamp;
-    if (!context || !currentTimestamp || currentTimestamp === context.source.threadTimestamp) {
-      return null;
+    if (!context || !currentTimestamp) return null;
+    const { threadTimestamp } = context.source;
+    if (currentTimestamp === threadTimestamp) {
+      return { context: null, readThrough: currentTimestamp };
     }
     const { accessToken } = slackCredentialsSchema.parse(
       decryptCredentials<Record<string, unknown>>(context.source.encryptedCredentials),
     );
-    const messages: SlackHistoryMessage[] = [];
+    const session = await dependencies.getSessionContext(input);
+    const signal = AbortSignal.timeout(threadReadTimeoutMs);
+    // Holds the thread's first message and a window of the newest ones, so a
+    // long thread is never held in memory whole.
+    let parent: SlackHistoryMessage | null = null;
+    let newest: SlackHistoryMessage[] = [];
+    let omitted = 0;
     let cursor: string | undefined;
     for (let page = 0; page < maximumThreadPages; page += 1) {
       const result = await dependencies.readThread({
@@ -142,17 +152,36 @@ export async function loadSlackThreadContext(
         channelId: context.source.channelId,
         cursor,
         limit: threadPageLimit,
-        threadTimestamp: context.source.threadTimestamp,
+        signal,
+        threadTimestamp,
       });
-      messages.push(...result.messages);
+      for (const message of unseenSlackThreadMessages({
+        currentTimestamp,
+        messages: result.messages,
+        postedTimestamps: session.postedTimestamps,
+        readThrough: session.readThrough,
+      })) {
+        if (!parent && newest.length === 0 && message.timestamp === threadTimestamp) {
+          parent = message;
+        } else {
+          newest.push(message);
+        }
+      }
+      if (newest.length > maximumThreadContextMessages) {
+        omitted += newest.length - maximumThreadContextMessages;
+        newest = newest.slice(-maximumThreadContextMessages);
+      }
       cursor = result.nextCursor;
       if (!cursor) break;
     }
-    const turns = await dependencies.getTurns(input);
-    return formatSlackThreadContext({
-      messages: unseenSlackThreadMessages({ currentTimestamp, messages, turns }),
-      threadTimestamp: context.source.threadTimestamp,
-    });
+    return {
+      context: formatSlackThreadContext({
+        messages: parent ? [parent, ...newest] : newest,
+        omitted,
+        threadTimestamp,
+      }),
+      readThrough: currentTimestamp,
+    };
   } catch (error) {
     console.error(JSON.stringify({
       errorCode: error instanceof Error ? error.name : typeof error,

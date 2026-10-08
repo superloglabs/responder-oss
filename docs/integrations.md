@@ -115,10 +115,13 @@ Connecting Slack turns tag mode on with its starting settings, unless the
 workspace has already saved tag mode settings.
 
 A mention in a thread reads the thread's earlier messages with the bot token,
-so a request such as "look at this" refers to the alert above it. A later
-mention in the same thread reads only the messages posted since the previous
-turn, minus the replies tag mode posted itself. When Slack refuses the read,
-the turn answers from the mention alone.
+so a request such as "look at this" refers to the alert above it. The turn
+gets at most 50 of those messages and 30,000 characters: the thread's first
+message and the newest replies, with a note of how many were left out. A later
+mention in the same thread reads only the messages posted since the last turn
+that read the thread, minus the replies tag mode posted itself. When Slack
+refuses the read or takes longer than 15 seconds, the turn answers from the
+mention alone, and the next mention reads those messages again.
 
 A direct message to the app works like a mention. Tag mode answers in the
 message's thread, and a reply in that thread continues the same conversation.

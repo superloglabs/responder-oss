@@ -3477,40 +3477,42 @@ export async function getSlackInvestigationSessionRuntime(sessionId: string) {
   return rows[0] ?? null;
 }
 
-export interface SlackThreadSessionTurn {
-  // The Slack message the turn answered.
-  messageTimestamp?: string;
-  // The trace card and replies the turn posted in the thread.
+export interface SlackThreadSessionContext {
+  // The trace cards and replies the session's other turns posted.
   postedTimestamps: string[];
+  // The newest thread message a finished turn read, if any.
+  readThrough: string | null;
 }
 
-// The other turns of a Slack thread session, so a turn can tell which thread
-// messages the agent has already seen.
-export async function getSlackThreadSessionTurns(input: {
+// What a turn needs to tell which thread messages the session has not seen.
+export async function getSlackThreadSessionContext(input: {
   investigationId: string;
   sessionId: string;
-}): Promise<SlackThreadSessionTurn[]> {
-  const rows = await getDatabase()
-    .select({
-      input: investigations.input,
-      slackMessageTimestamp: investigations.slackMessageTimestamp,
-      slackThreadSnapshot: investigations.slackThreadSnapshot,
-    })
-    .from(investigations)
-    .where(and(
-      eq(investigations.slackInvestigationSessionId, input.sessionId),
-      ne(investigations.id, input.investigationId),
-    ));
-  return rows.map((row) => {
-    const messageTimestamp = row.input.attributes?.timestamp;
-    return {
-      ...(typeof messageTimestamp === "string" ? { messageTimestamp } : {}),
-      postedTimestamps: [
-        row.slackMessageTimestamp,
-        ...(row.slackThreadSnapshot?.replies ?? []).map((reply) => reply.slackTimestamp),
-      ].filter((timestamp): timestamp is string => Boolean(timestamp)),
-    };
-  });
+}): Promise<SlackThreadSessionContext> {
+  const [sessions, turns] = await Promise.all([
+    getDatabase()
+      .select({ readThrough: slackInvestigationSessions.threadContextTimestamp })
+      .from(slackInvestigationSessions)
+      .where(eq(slackInvestigationSessions.id, input.sessionId))
+      .limit(1),
+    getDatabase()
+      .select({
+        slackMessageTimestamp: investigations.slackMessageTimestamp,
+        slackThreadSnapshot: investigations.slackThreadSnapshot,
+      })
+      .from(investigations)
+      .where(and(
+        eq(investigations.slackInvestigationSessionId, input.sessionId),
+        ne(investigations.id, input.investigationId),
+      )),
+  ]);
+  return {
+    postedTimestamps: turns.flatMap((turn) => [
+      turn.slackMessageTimestamp,
+      ...(turn.slackThreadSnapshot?.replies ?? []).map((reply) => reply.slackTimestamp),
+    ]).filter((timestamp): timestamp is string => Boolean(timestamp)),
+    readThrough: sessions[0]?.readThrough ?? null,
+  };
 }
 
 export async function completeSlackThreadInvestigationTurn(input: {
@@ -3519,6 +3521,8 @@ export async function completeSlackThreadInvestigationTurn(input: {
   reportMarkdown: string;
   sandboxSessionState: Record<string, unknown>;
   previousResponseId?: string;
+  // Set when the turn read the thread up to this message.
+  threadContextTimestamp?: string;
 }): Promise<void> {
   await getDatabase().transaction(async (tx) => {
     const sessions = await tx
@@ -3526,6 +3530,9 @@ export async function completeSlackThreadInvestigationTurn(input: {
       .set({
         sandboxSessionState: input.sandboxSessionState,
         previousResponseId: input.previousResponseId ?? null,
+        ...(input.threadContextTimestamp
+          ? { threadContextTimestamp: input.threadContextTimestamp }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(slackInvestigationSessions.id, input.sessionId))

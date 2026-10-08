@@ -3,6 +3,7 @@ import type { SlackHistoryMessage } from "@responder/core/integrations/slack-his
 import {
   formatSlackThreadContext,
   loadSlackThreadContext,
+  maximumThreadContextLength,
   maximumThreadContextMessages,
   unseenSlackThreadMessages,
   type SlackThreadContextDependencies,
@@ -65,38 +66,36 @@ describe("unseen Slack thread messages", () => {
     expect(unseenSlackThreadMessages({
       currentTimestamp: firstTag.timestamp,
       messages: thread,
-      turns: [],
+      postedTimestamps: [],
+      readThrough: null,
     })).toEqual([alert, triage, regression]);
   });
 
-  it("gives a later turn only what arrived since the previous turn, minus its own posts", () => {
+  it("gives a later turn only what arrived since the thread was read, minus the session's posts", () => {
     expect(unseenSlackThreadMessages({
       currentTimestamp: secondTag.timestamp,
       messages: thread,
-      turns: [{
-        messageTimestamp: firstTag.timestamp,
-        postedTimestamps: [firstTrace.timestamp, firstAnswer.timestamp],
-      }],
+      postedTimestamps: [firstTrace.timestamp, firstAnswer.timestamp],
+      readThrough: firstTag.timestamp,
     })).toEqual([]);
   });
 
-  it("keeps another app's messages posted since the previous turn", () => {
+  it("keeps another app's messages posted since the thread was read", () => {
     expect(unseenSlackThreadMessages({
       currentTimestamp: secondTag.timestamp,
       messages: [...thread.slice(0, 6), { ...regression, timestamp: "1791474080.000001" }, secondTag],
-      turns: [{
-        messageTimestamp: firstTag.timestamp,
-        postedTimestamps: [firstTrace.timestamp, firstAnswer.timestamp],
-      }],
+      postedTimestamps: [firstTrace.timestamp, firstAnswer.timestamp],
+      readThrough: firstTag.timestamp,
     }).map((message) => message.timestamp)).toEqual(["1791474080.000001"]);
   });
 
-  it("ignores a turn queued after the current message", () => {
+  it("gives the whole thread again when no turn has read it", () => {
     expect(unseenSlackThreadMessages({
-      currentTimestamp: firstTag.timestamp,
+      currentTimestamp: secondTag.timestamp,
       messages: thread,
-      turns: [{ messageTimestamp: secondTag.timestamp, postedTimestamps: [] }],
-    })).toEqual([alert, triage, regression]);
+      postedTimestamps: [firstTrace.timestamp, firstAnswer.timestamp],
+      readThrough: null,
+    })).toEqual([alert, triage, regression, firstTag]);
   });
 
   it("orders timestamps by their microseconds", () => {
@@ -106,7 +105,8 @@ describe("unseen Slack thread messages", () => {
         { text: "before", timestamp: "1791474067.000009" },
         { text: "after", timestamp: "1791474067.000011" },
       ],
-      turns: [],
+      postedTimestamps: [],
+      readThrough: null,
     }).map((message) => message.text)).toEqual(["before"]);
   });
 });
@@ -148,6 +148,24 @@ describe("Slack thread context", () => {
     expect(context).toContain("reply 6\n");
     expect(context.endsWith(`reply ${maximumThreadContextMessages + 4}`)).toBe(true);
   });
+
+  it("keeps the newest replies within the character limit", () => {
+    const replies = Array.from({ length: 10 }, (_, index) => ({
+      text: `${index}`.repeat(4_000),
+      timestamp: `1791474100.${String(index).padStart(6, "0")}`,
+      userId: "U1",
+    }));
+    const context = formatSlackThreadContext({
+      messages: [alert, ...replies],
+      threadTimestamp: alert.timestamp,
+    })!;
+    const kept = replies.filter((reply) => context.includes(reply.text));
+
+    expect(context.length).toBeLessThan(maximumThreadContextLength + 1_000);
+    expect(context).toContain("Sentry: [responder-prod]");
+    expect(kept).toEqual(replies.slice(-7));
+    expect(context).toContain("(3 more messages omitted)");
+  });
 });
 
 describe("loading Slack thread context", () => {
@@ -164,16 +182,16 @@ describe("loading Slack thread context", () => {
           threadTimestamp: alert.timestamp,
         },
       }),
-      getTurns: vi.fn().mockResolvedValue([]),
+      getSessionContext: vi.fn().mockResolvedValue({ postedTimestamps: [], readThrough: null }),
       readThread: vi.fn().mockResolvedValue({ channelId: "C0BQ2BZUVK6", messages: thread }),
       ...overrides,
     } as SlackThreadContextDependencies;
   }
 
-  it("reads the tag's thread with the workspace's bot token", async () => {
+  it("reads the tag's thread with the workspace's bot token, within a time limit", async () => {
     const loaded = dependencies();
 
-    const context = await loadSlackThreadContext(
+    const result = await loadSlackThreadContext(
       { investigationId: "investigation-1", sessionId: "session-1" },
       loaded,
     );
@@ -183,32 +201,44 @@ describe("loading Slack thread context", () => {
       channelId: "C0BQ2BZUVK6",
       cursor: undefined,
       limit: 200,
+      signal: expect.any(AbortSignal),
       threadTimestamp: alert.timestamp,
     });
-    expect(loaded.getTurns).toHaveBeenCalledWith({
+    expect(loaded.getSessionContext).toHaveBeenCalledWith({
       investigationId: "investigation-1",
       sessionId: "session-1",
     });
-    expect(context).toContain("AutomationHarnessError regressed");
-    expect(context).not.toContain("wtf");
+    expect(result?.readThrough).toBe(firstTag.timestamp);
+    expect(result?.context).toContain("AutomationHarnessError regressed");
+    expect(result?.context).not.toContain("wtf");
   });
 
-  it("follows the thread's pages", async () => {
+  it("pages to the end of a long thread and keeps its first message and newest replies", async () => {
+    const page = (start: number) => Array.from({ length: 200 }, (_, index) => ({
+      text: `reply ${start + index}`,
+      timestamp: `1791000000.${String(start + index).padStart(6, "0")}`,
+      userId: "U1",
+    }));
     const readThread = vi.fn()
-      .mockResolvedValueOnce({ channelId: "C1", messages: [alert], nextCursor: "next" })
-      .mockResolvedValueOnce({ channelId: "C1", messages: [triage] });
+      .mockResolvedValueOnce({ channelId: "C1", messages: [alert, ...page(0)], nextCursor: "2" })
+      .mockResolvedValueOnce({ channelId: "C1", messages: page(200), nextCursor: "3" })
+      .mockResolvedValueOnce({ channelId: "C1", messages: [...page(400), firstTag] });
 
-    const context = await loadSlackThreadContext(
+    const result = await loadSlackThreadContext(
       { investigationId: "investigation-1", sessionId: "session-1" },
       dependencies({ readThread }),
     );
 
-    expect(readThread).toHaveBeenCalledTimes(2);
-    expect(readThread.mock.calls[1]![0]).toMatchObject({ cursor: "next" });
-    expect(context).toContain("Sev-3");
+    expect(readThread).toHaveBeenCalledTimes(3);
+    expect(readThread.mock.calls[2]![0]).toMatchObject({ cursor: "3" });
+    expect(result?.context).toContain("Sentry: [responder-prod]");
+    expect(result?.context).toContain(`(${600 - maximumThreadContextMessages + 1} more messages omitted)`);
+    expect(result?.context).not.toContain("reply 550\n");
+    expect(result?.context).toContain("reply 551\n");
+    expect(result?.context?.endsWith("reply 599")).toBe(true);
   });
 
-  it("skips a tag that starts its own thread", async () => {
+  it("marks a tag that starts its own thread as read without calling Slack", async () => {
     const loaded = dependencies({
       getLiveContext: vi.fn().mockResolvedValue({
         source: {
@@ -224,11 +254,11 @@ describe("loading Slack thread context", () => {
     await expect(loadSlackThreadContext(
       { investigationId: "investigation-1", sessionId: "session-1" },
       loaded,
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ context: null, readThrough: alert.timestamp });
     expect(loaded.readThread).not.toHaveBeenCalled();
   });
 
-  it("answers from the message alone when Slack refuses the read", async () => {
+  it("answers from the message alone and keeps the boundary when Slack refuses the read", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(loadSlackThreadContext(

@@ -676,6 +676,7 @@ await boss.work(
         reportMarkdown: result.report,
         sandboxSessionState: result.sandboxSessionState,
         previousResponseId: result.previousResponseId,
+        threadContextTimestamp: result.threadContextTimestamp,
       });
       if (linear) {
         await linear.respond(result.report);

@@ -1391,6 +1391,9 @@ export const slackInvestigationSessions = pgTable(
       Record<string, unknown>
     >(),
     previousResponseId: text("previous_response_id"),
+    // The newest thread message a finished turn read; later turns read the
+    // thread from here.
+    threadContextTimestamp: text("thread_context_timestamp"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

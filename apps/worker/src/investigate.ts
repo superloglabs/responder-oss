@@ -707,6 +707,7 @@ export async function runInvestigationAgent(
   report: string;
   previousResponseId?: string;
   sandboxSessionState?: Record<string, unknown>;
+  threadContextTimestamp?: string;
   updatedIssueIds?: string[];
 }> {
   const threadMode = job.kind === "slack_thread_investigation";
@@ -749,7 +750,7 @@ export async function runInvestigationAgent(
   const initialMessage = initialInvestigationMessage(
     investigationInput,
     new Date(),
-    threadContext,
+    threadContext?.context ?? null,
   );
   await writeTrace(traceEvent("session.started"));
   await writeTrace(initialMessage.traceEvent);
@@ -1282,6 +1283,7 @@ export async function runInvestigationAgent(
         ...(result.lastResponseId
           ? { previousResponseId: result.lastResponseId }
           : {}),
+        ...(threadContext ? { threadContextTimestamp: threadContext.readThrough } : {}),
       };
     }
     return {
