@@ -34,6 +34,7 @@ import {
   ProductUpdateArticlePage,
   SecurityPage,
   SubprocessorsPage,
+  SupportPage,
   TeamPage,
   TermsPage,
 } from "./edition-pages";
@@ -86,6 +87,7 @@ export function App() {
       <Route element={<DpaPage />} path="/dpa" />
       <Route element={<SecurityPage />} path="/security" />
       <Route element={<SubprocessorsPage />} path="/subprocessors" />
+      <Route element={<SupportPage />} path="/support" />
       <Route element={<SharedAutomationTemplatePage />} path="/templates/:slug" />
       <Route element={<OAuthAuthorizePage />} path="/oauth/authorize" />
       <Route element={<ResetPasswordPage />} path="/reset-password" />
