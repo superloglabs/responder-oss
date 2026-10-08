@@ -1,4 +1,4 @@
-import { and, eq, gt, gte } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import { getDatabase } from "../db/client.js";
 import {
   agentModelUsage,
@@ -15,6 +15,7 @@ import {
   type AutomationBillingSummary,
 } from "./autumn.js";
 import {
+  BILLING_NOTICE_RETRY_AFTER_MS,
   BILLING_NOTICE_RETRY_WINDOW_MS,
   notifyBillingLimitReached,
 } from "./notifications.js";
@@ -41,13 +42,14 @@ export function usageLimitReached(
 }
 
 // Organizations whose billable usage was reported to billing since `since`,
-// and usage-billed organizations with a failed notice that may still be
-// retried. The second group keeps a failed notice from being lost when no
-// further usage is billed. Organizations on investigation credits are left to
-// their next blocked investigation, which retries with the credit wording.
+// and usage-billed organizations with a failed or abandoned notice that may
+// still be retried. The second group keeps such a notice from being lost when
+// no further usage is billed. Organizations on investigation credits are left
+// to their next blocked investigation, which retries with the credit wording.
 export async function organizationsToCheckForUsageNotices(since: Date): Promise<string[]> {
   const db = getDatabase();
   const retryAfter = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
+  const staleBefore = new Date(Date.now() - BILLING_NOTICE_RETRY_AFTER_MS);
   const [models, sandboxes, agents, failedNotices] = await Promise.all([
     db
       .selectDistinct({ organizationId: automationModelUsage.organizationId })
@@ -79,8 +81,9 @@ export async function organizationsToCheckForUsageNotices(since: Date): Promise<
       )
       .where(
         and(
-          eq(billingNotificationDeliveries.status, "failed"),
+          inArray(billingNotificationDeliveries.status, ["failed", "pending"]),
           gt(billingNotificationDeliveries.createdAt, retryAfter),
+          lt(billingNotificationDeliveries.updatedAt, staleBefore),
         ),
       ),
   ]);
@@ -104,15 +107,18 @@ const defaultDependencies: UsageNoticeDependencies = {
 };
 
 // Reads the balances of every organization whose usage was billed since
-// `since` and tells those that ran out. Each destination receives the notice
-// once per period, so checking an organization again is harmless.
+// `since`, plus `retry`, and tells those that ran out. Organizations whose
+// check failed are returned so the caller can pass them back as `retry`.
+// Each destination receives the notice once per period, so checking an
+// organization again is harmless.
 export async function sendUsageNotices(
   since: Date,
+  retry: string[] = [],
   dependencies: UsageNoticeDependencies = defaultDependencies,
-): Promise<{ checked: number; failed: number; notified: number }> {
-  const result = { checked: 0, failed: 0, notified: 0 };
+): Promise<{ checked: number; failedOrganizationIds: string[]; notified: number }> {
+  const result = { checked: 0, failedOrganizationIds: [] as string[], notified: 0 };
   if (!billingIsEnabled()) return result;
-  const organizationIds = await dependencies.listOrganizations(since);
+  const organizationIds = new Set([...(await dependencies.listOrganizations(since)), ...retry]);
   for (const organizationId of organizationIds) {
     result.checked += 1;
     try {
@@ -121,7 +127,7 @@ export async function sendUsageNotices(
       await dependencies.notify(organizationId, limit.nextResetAt, { usageBased: true });
       result.notified += 1;
     } catch (error) {
-      result.failed += 1;
+      result.failedOrganizationIds.push(organizationId);
       console.error(JSON.stringify({
         error: error instanceof Error ? error.message : String(error),
         event: "usage_notice_failed",

@@ -12,7 +12,8 @@ import {
 } from "../db/schema.js";
 import { escapeHtml, sendEmail } from "../email.js";
 
-const RETRY_STALE_AFTER_MS = 5 * 60 * 1_000;
+// A failed or abandoned delivery waits this long before it is tried again.
+export const BILLING_NOTICE_RETRY_AFTER_MS = 5 * 60 * 1_000;
 // Resend keeps idempotency keys for 24 hours, so a delivery that failed after
 // an uncertain response is retried only inside that window.
 export const BILLING_NOTICE_RETRY_WINDOW_MS = 23 * 60 * 60 * 1_000;
@@ -288,7 +289,7 @@ async function claimDelivery(
     .returning({ id: billingNotificationDeliveries.id });
   if (inserted[0]) return inserted[0].id;
 
-  const staleBefore = new Date(Date.now() - RETRY_STALE_AFTER_MS);
+  const staleBefore = new Date(Date.now() - BILLING_NOTICE_RETRY_AFTER_MS);
   const retryAfter = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
   const claimed = await db
     .update(billingNotificationDeliveries)

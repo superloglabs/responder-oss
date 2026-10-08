@@ -182,9 +182,11 @@ investigation credits.
   automation runs send it too. The notice goes by email to workspace owners
   and admins, by Slack direct message to the person who installed Slack, and
   to the Slack channels that agents watch. `billing_notification_deliveries`
-  records one notice per destination and billing period. A failed delivery is
-  retried for up to 23 hours, inside Resend's idempotency window; a Slack post
-  retried after an uncertain error may arrive twice. Usage past a balance that
+  records one notice per destination and billing period. A failed or
+  abandoned delivery is retried every five minutes for up to 23 hours, inside
+  Resend's idempotency window; a Slack post retried after an uncertain error
+  may arrive twice. An organization whose balance check fails is checked again
+  on the next pass. Usage past a balance that
   the plan bills for is expected and sends nothing.
 - The app shows a banner from the same balances while new work is paused.
 

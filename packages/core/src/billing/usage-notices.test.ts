@@ -86,19 +86,38 @@ describe("sendUsageNotices", () => {
     const notify = vi.fn().mockResolvedValue(undefined);
 
     await expect(
-      sendUsageNotices(since, { getSummary, listOrganizations, notify }),
-    ).resolves.toEqual({ checked: 3, failed: 1, notified: 1 });
+      sendUsageNotices(since, [], { getSummary, listOrganizations, notify }),
+    ).resolves.toEqual({ checked: 3, failedOrganizationIds: ["org-down"], notified: 1 });
 
     expect(listOrganizations).toHaveBeenCalledWith(since);
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith("org-out", null, { usageBased: true });
   });
 
+  it("checks organizations whose last check failed without new usage", async () => {
+    const listOrganizations = vi.fn().mockResolvedValue(["org-out"]);
+    const checked: string[] = [];
+    const getSummary = vi.fn(async (organizationId: string) => {
+      checked.push(organizationId);
+      return summary({ remaining: 0 });
+    });
+    const notify = vi.fn().mockResolvedValue(undefined);
+
+    await sendUsageNotices(new Date(), ["org-retry", "org-out"], {
+      getSummary,
+      listOrganizations,
+      notify,
+    });
+
+    expect(checked).toEqual(["org-out", "org-retry"]);
+    expect(notify).toHaveBeenCalledWith("org-retry", null, { usageBased: true });
+  });
+
   it("does nothing when billing is disabled", async () => {
     vi.stubEnv("BILLING_ENABLED", "false");
     const listOrganizations = vi.fn();
 
-    await sendUsageNotices(new Date(), {
+    await sendUsageNotices(new Date(), [], {
       getSummary: vi.fn(),
       listOrganizations,
       notify: vi.fn(),

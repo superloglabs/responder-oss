@@ -174,6 +174,9 @@ let automationUsageBillingPass: Promise<void> | undefined;
 // of several processes.
 const usageNoticeOverlapMs = 2 * 60 * 1_000;
 let usageNoticesCheckedAt = new Date(Date.now() - 10 * 60 * 1_000);
+// Organizations whose last check failed, checked again on the next pass even
+// without further usage.
+let usageNoticeRetries: string[] = [];
 
 // Runs at most one settlement pass at a time; a slow pass delays the next.
 function settleAutomationUsageBilling(): Promise<void> {
@@ -253,11 +256,15 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     const startedAt = new Date();
     const result = await sendUsageNotices(
       new Date(usageNoticesCheckedAt.getTime() - usageNoticeOverlapMs),
+      usageNoticeRetries,
     );
     usageNoticesCheckedAt = startedAt;
-    if (result.failed > 0) {
+    usageNoticeRetries = result.failedOrganizationIds;
+    if (result.failedOrganizationIds.length > 0) {
       await reportWorkerException(
-        new Error(`${result.failed} organizations could not be checked for usage notices`),
+        new Error(
+          `${result.failedOrganizationIds.length} organizations could not be checked for usage notices`,
+        ),
         { operation: "worker" },
       ).catch(() => undefined);
     }
