@@ -16,7 +16,16 @@ import { getUsageBreakdown } from "../../../../packages/core/src/db/usage-breakd
 import { sandboxTimeIsBilled } from "../../../../packages/core/src/billing/usage-charges.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
-import { getActiveTenant } from "../tenant.js";
+import { createRateLimiter } from "../rate-limit.js";
+import { getActiveTenant, type ActiveTenantResult } from "../tenant.js";
+
+type ActiveTenant = Extract<ActiveTenantResult, { ok: true }>;
+
+// The app reads billing on page loads and a one-minute banner refresh.
+export const BILLING_REQUESTS_PER_MINUTE = 30;
+// Every summary costs several Autumn calls. Requests for one workspace within
+// this window share one load.
+export const BILLING_SUMMARY_TTL_MS = 10_000;
 
 function appUrl(requestUrl: string, path: string): string {
   const configuredOrigin = process.env.BETTER_AUTH_URL;
@@ -38,63 +47,121 @@ function customerData(user: { email: string; name: string }) {
   return { email: user.email, name: user.name };
 }
 
-export const billingRoutes = new Hono()
-  .get("/", async (context) => {
+async function loadBillingSummary(tenant: ActiveTenant) {
+  const data = customerData(tenant.user);
+  const [usageBased, automationsEnabled] = await Promise.all([
+    organizationUsesUsageBilling(tenant.organizationId),
+    organizationHasCapability(tenant.organizationId, "automations"),
+  ]);
+  const [summary, automations] = await Promise.all([
+    getBillingSummary(tenant.organizationId, data),
+    usageBased
+      ? getAutomationBillingSummary(tenant.organizationId, data)
+      : automationsEnabled
+        // Investigation billing stays available if automation billing fails.
+        ? getAutomationBillingSummary(tenant.organizationId, data)
+          .catch((error: unknown) => {
+            console.error("Unable to load automation billing summary", error);
+            return null;
+          })
+        : null,
+  ]);
+  // The page still shows the allowance if the breakdown cannot load.
+  const breakdown = automations
+    ? await getUsageBreakdown(tenant.organizationId, usagePeriodStart(automations))
+      .catch((error: unknown) => {
+        console.error("Unable to load usage breakdown", error);
+        return null;
+      })
+    : null;
+  return {
+    ...summary,
+    automations: automations && {
+      ...automations,
+      breakdown: breakdown && {
+        inference: breakdown.inferenceMicros / 1_000_000,
+        sandbox: breakdown.sandboxMicros / 1_000_000,
+      },
+      // Plans with machine hours meter sandbox time there instead.
+      sandboxTimeBilled: sandboxTimeIsBilled() && automations.machineHours === null,
+    },
+    usageBased,
+  };
+}
+
+type BillingSummaryResponse = Awaited<ReturnType<typeof loadBillingSummary>>;
+
+// A load in progress has no expiry. The window starts when it finishes.
+const summaries = new Map<
+  string,
+  { expiresAt: number; summary: Promise<BillingSummaryResponse> }
+>();
+
+function cachedBillingSummary(tenant: ActiveTenant): Promise<BillingSummaryResponse> {
+  const now = Date.now();
+  for (const [organizationId, entry] of summaries) {
+    if (entry.expiresAt <= now) summaries.delete(organizationId);
+  }
+  const cached = summaries.get(tenant.organizationId);
+  if (cached) return cached.summary;
+
+  const summary = loadBillingSummary(tenant);
+  const entry = { expiresAt: Number.POSITIVE_INFINITY, summary };
+  summaries.set(tenant.organizationId, entry);
+  summary.then(
+    () => {
+      entry.expiresAt = Date.now() + BILLING_SUMMARY_TTL_MS;
+    },
+    () => {
+      // A failed load is retried on the next request.
+      if (summaries.get(tenant.organizationId) === entry) {
+        summaries.delete(tenant.organizationId);
+      }
+    },
+  );
+  return summary;
+}
+
+const billingRequests = createRateLimiter({
+  limit: BILLING_REQUESTS_PER_MINUTE,
+  windowMs: 60_000,
+});
+
+export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
+  .use("*", async (context, next) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);
     }
-
+    const limit = billingRequests.take(tenant.user.id);
+    if (!limit.allowed) {
+      // One line per member and window, however many requests are refused.
+      if (limit.firstRefusal) {
+        console.warn(
+          JSON.stringify({
+            event: "billing_rate_limited",
+            organizationId: tenant.organizationId,
+            pathname: context.req.path,
+            userId: tenant.user.id,
+          }),
+        );
+      }
+      context.header("retry-after", String(limit.retryAfterSeconds));
+      return context.json({ error: "Too many requests" }, 429);
+    }
+    context.set("tenant", tenant);
+    await next();
+  })
+  .get("/", async (context) => {
     try {
-      const data = customerData(tenant.user);
-      const [usageBased, automationsEnabled] = await Promise.all([
-        organizationUsesUsageBilling(tenant.organizationId),
-        organizationHasCapability(tenant.organizationId, "automations"),
-      ]);
-      const [summary, automations] = await Promise.all([
-        getBillingSummary(tenant.organizationId, data),
-        usageBased
-          ? getAutomationBillingSummary(tenant.organizationId, data)
-          : automationsEnabled
-            // Investigation billing stays available if automation billing fails.
-            ? getAutomationBillingSummary(tenant.organizationId, data)
-              .catch((error: unknown) => {
-                console.error("Unable to load automation billing summary", error);
-                return null;
-              })
-            : null,
-      ]);
-      // The page still shows the allowance if the breakdown cannot load.
-      const breakdown = automations
-        ? await getUsageBreakdown(tenant.organizationId, usagePeriodStart(automations))
-          .catch((error: unknown) => {
-            console.error("Unable to load usage breakdown", error);
-            return null;
-          })
-        : null;
-      return context.json({
-        ...summary,
-        automations: automations && {
-          ...automations,
-          breakdown: breakdown && {
-            inference: breakdown.inferenceMicros / 1_000_000,
-            sandbox: breakdown.sandboxMicros / 1_000_000,
-          },
-          // Plans with machine hours meter sandbox time there instead.
-          sandboxTimeBilled: sandboxTimeIsBilled() && automations.machineHours === null,
-        },
-        usageBased,
-      });
+      return context.json(await cachedBillingSummary(context.get("tenant")));
     } catch (error) {
       console.error("Unable to load billing summary", error);
       return context.json({ error: "Unable to load billing" }, 502);
     }
   })
   .post("/checkout", async (context) => {
-    const tenant = await getActiveTenant(context.req.raw.headers);
-    if (tenant.ok === false) {
-      return context.json({ error: tenant.error }, tenant.status);
-    }
+    const tenant = context.get("tenant");
 
     try {
       const url = await createPayAsYouGoCheckout(
@@ -102,6 +169,8 @@ export const billingRoutes = new Hono()
         appUrl(context.req.url, "/settings/billing?status=success"),
         customerData(tenant.user),
       );
+      // The page reads billing again when the person returns from checkout.
+      summaries.delete(tenant.organizationId);
       return context.json({ url });
     } catch (error) {
       console.error("Unable to create billing checkout", error);
@@ -109,10 +178,7 @@ export const billingRoutes = new Hono()
     }
   })
   .post("/automations/plan", async (context) => {
-    const tenant = await getActiveTenant(context.req.raw.headers);
-    if (tenant.ok === false) {
-      return context.json({ error: tenant.error }, tenant.status);
-    }
+    const tenant = context.get("tenant");
     const [automationsEnabled, usageBased] = await Promise.all([
       organizationHasCapability(tenant.organizationId, "automations"),
       organizationUsesUsageBilling(tenant.organizationId),
@@ -133,32 +199,31 @@ export const billingRoutes = new Hono()
         await (planId === "free" ? cancelAutomationPlan : resumeAutomationPlan)(
           tenant.organizationId,
         );
+        summaries.delete(tenant.organizationId);
         return context.json({ url: null });
       }
-      return context.json(
-        await changeAutomationPlan(
-          tenant.organizationId,
-          planId,
-          appUrl(context.req.url, planChangeReturnPath(body?.returnTo)),
-          customerData(tenant.user),
-        ),
+      const result = await changeAutomationPlan(
+        tenant.organizationId,
+        planId,
+        appUrl(context.req.url, planChangeReturnPath(body?.returnTo)),
+        customerData(tenant.user),
       );
+      summaries.delete(tenant.organizationId);
+      return context.json(result);
     } catch (error) {
       console.error("Unable to change automation plan", error);
       return context.json({ error: "Unable to change the automation plan" }, 502);
     }
   })
   .post("/portal", async (context) => {
-    const tenant = await getActiveTenant(context.req.raw.headers);
-    if (tenant.ok === false) {
-      return context.json({ error: tenant.error }, tenant.status);
-    }
+    const tenant = context.get("tenant");
 
     try {
       const url = await createBillingPortal(
         tenant.organizationId,
         appUrl(context.req.url, "/settings/billing"),
       );
+      summaries.delete(tenant.organizationId);
       return context.json({ url });
     } catch (error) {
       console.error("Unable to create billing portal", error);
