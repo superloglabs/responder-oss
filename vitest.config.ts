@@ -15,10 +15,10 @@ const exclude = [
 ];
 
 // Loading a fresh module graph for every file is most of the suite's runtime.
-// Only files that replace modules or globals need that isolation; the rest
-// share one module cache per worker.
+// Only files that replace modules or globals, or start the process-wide Sentry
+// client, need that isolation; the rest share one module cache per worker.
 const isolationPattern =
-  /\bvi\.(mock|doMock|unmock|resetModules|stubGlobal|stubEnv)\(/;
+  /\bvi\.(mock|doMock|unmock|resetModules|stubGlobal|stubEnv)\(|\bSentry\.init\(/;
 const isolatedFiles = globSync(include, {
   cwd: import.meta.dirname,
   exclude,
