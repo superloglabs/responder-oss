@@ -41,9 +41,9 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     ignoredAuthors: slackAuthorsSchema("Ignored authors")
       .describe("Slack people and apps whose messages do not start or continue a run."),
     // When set, only messages from these people and apps start a run. Replies
-    // in a run's thread still reach it.
+    // in a run's thread that mention the app still reach it.
     includedAuthors: slackAuthorsSchema("Included authors")
-      .describe("The only Slack people and apps whose messages start a run. Replies in a run's thread still continue it."),
+      .describe("The only Slack people and apps whose messages start a run. Replies in a run's thread that mention the app still continue it."),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("slack"),
   }).describe("Runs on Slack messages in the selected channels."),

@@ -93,8 +93,11 @@ describe("Slack replies to automation runs", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends a person's reply in the run's thread to that run", async () => {
+  it("sends a person's reply that mentions the app in the run's thread to that run", async () => {
+    mocks.findAutomations.mockResolvedValue([{ ...match, mentioned: true }]);
+
     const response = await deliver({
+      text: "<@UBOT> Can you open a PR?",
       thread_ts: "1790000000.000100",
       user: "U123",
       user_profile: { display_name: "Ada", real_name: "Ada Lovelace" },
@@ -113,19 +116,69 @@ describe("Slack replies to automation runs", () => {
         authorName: "Ada",
         externalEventId: "C123:1790000002.000100",
         source: "slack",
-        text: "Can you open a PR?",
+        text: "<@UBOT> Can you open a PR?",
       },
       runId,
     });
     expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 
-  it("continues a mention-only automation's run from a reply without a mention", async () => {
-    mocks.findAutomations.mockResolvedValue([{ ...match, startsRun: false }]);
+  it("continues a mention-only automation's run from a reply that mentions the app", async () => {
+    mocks.findAutomations.mockResolvedValue([{ ...match, mentioned: true, startsRun: false }]);
 
-    await deliver({ thread_ts: "1790000000.000100", user: "U123" });
+    await deliver({ text: "<@UBOT> Can you open a PR?", thread_ts: "1790000000.000100", user: "U123" });
 
     expect(mocks.queueReply).toHaveBeenCalledWith(expect.objectContaining({ runId }));
+    expect(mocks.queueRun).not.toHaveBeenCalled();
+  });
+
+  it("leaves a reply that does not mention the app to the people in the thread", async () => {
+    mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await deliver({
+      text: "<@U456> are you on it? Is it recurring?",
+      thread_ts: "1790000000.000100",
+      user: "U123",
+    });
+    await deliver({ text: "It is not recurring. I am on a fix", thread_ts: "1790000000.000100", user: "U456" });
+
+    expect(response.status).toBe(200);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(mocks.queueRun).not.toHaveBeenCalled();
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+    const ignored = info.mock.calls
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)
+      .filter((line) => line.event === "slack_automation_reply_ignored");
+    expect(ignored).toEqual([
+      { automationId, event: "slack_automation_reply_ignored", eventId: "Ev1", reason: "not_mentioned", runId },
+      { automationId, event: "slack_automation_reply_ignored", eventId: "Ev1", reason: "not_mentioned", runId },
+    ]);
+  });
+
+  it("starts a new run for a person's reply also sent to the channel that does not mention the app", async () => {
+    const reply = {
+      subtype: "thread_broadcast",
+      text: "<@U456> are you on it?",
+      thread_ts: "1790000000.000100",
+      user: "U123",
+    };
+
+    await deliver(reply);
+
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(mocks.queueRun).toHaveBeenCalledWith(expect.objectContaining({
+      automationId,
+      trigger: expect.objectContaining({
+        attributes: expect.objectContaining({ mentioned: false, threadTimestamp: "1790000000.000100" }),
+      }),
+    }));
+
+    // An automation the message does not start on leaves it alone.
+    mocks.queueRun.mockClear();
+    mocks.findAutomations.mockResolvedValue([{ ...match, startsRun: false }]);
+    await deliver(reply);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
     expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 
@@ -270,6 +323,7 @@ describe("Slack replies to automation runs", () => {
 
   it("leaves a mention in the run's thread to the run, not to tag mode", async () => {
     mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    mocks.findAutomations.mockResolvedValue([{ ...match, mentioned: true }]);
     const mention = { text: "<@UBOT> Can you open a PR?", thread_ts: "1790000000.000100", user: "U123" };
 
     await deliver(mention);
@@ -281,6 +335,7 @@ describe("Slack replies to automation runs", () => {
 
   it("starts tag mode when the reply cannot reach the run", async () => {
     mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    mocks.findAutomations.mockResolvedValue([{ ...match, mentioned: true }]);
     mocks.queueReply.mockRejectedValue(new Error("Automation worker is unavailable"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
