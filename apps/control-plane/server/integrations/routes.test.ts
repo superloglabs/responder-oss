@@ -3068,6 +3068,7 @@ describe("integration callback routing", () => {
     );
 
     expect(getOrganizationIntegrationAccount).not.toHaveBeenCalled();
+    expect(decryptCredentials).toHaveBeenCalledWith("pending-credentials");
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
       "https://responder.example/agents/new" +
