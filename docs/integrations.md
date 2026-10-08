@@ -8,6 +8,29 @@ Customer installations and refreshable credentials are tenant-scoped in
 Postgres and encrypted before storage. Configure the same base64-encoded
 32-byte `CREDENTIAL_ENCRYPTION_KEY` for the control plane and worker.
 
+## Connect from MCP or the management API
+
+Use `list_available_integrations` to discover configured providers, then
+`start_integration_connection` with the selected `provider`. The REST equivalents
+are `GET /api/v1/integrations/available` and `POST /api/v1/integrations/connect`.
+
+Slack, GitHub, Sentry, Discord, Vercel, Linear, Google Cloud, Axiom, and PostHog
+return a provider consent URL. The person opens that link, approves access, and
+returns to chat. The browser must be signed into the same Superlog user and
+workspace that authorized the MCP client; callback identity checks are unchanged.
+Links expire after ten minutes, and requesting a new link invalidates the previous
+flow for that user, workspace, and provider. Do not log or share the URLs.
+
+After consent, call `list_integrations` to verify the connected account and select
+resources. Use `refresh_integrations` to reload Slack channels or GitHub
+repositories when needed. Google Cloud may also need project selection and setup
+in the provider callback flow. A returned URL is not proof of a connection.
+
+Providers with additional configuration or credential entry return
+`connectionType: secure_setup` and a setup link instead of a consent URL. Never
+collect their API keys or other secrets in the conversation. Provider application
+credentials remain server configuration, not tool arguments.
+
 ## Linear
 
 Create a Responder-owned Linear OAuth app. Responder requests the `read`,

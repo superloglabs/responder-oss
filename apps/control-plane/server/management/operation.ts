@@ -58,6 +58,7 @@ export interface ManagementOperation<
   // Hides the operation from MCP clients when it handles values that should
   // not pass through a model, such as provider API keys.
   mcp?: false;
+  openWorld?: boolean;
   method: "DELETE" | "GET" | "PATCH" | "POST";
   // The MCP tool name and OpenAPI operation ID.
   name: string;

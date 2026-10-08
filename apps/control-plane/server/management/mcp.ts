@@ -18,7 +18,7 @@ import type { ManagementContext, ManagementOperation } from "./operation.js";
 import { managementOperations } from "./operations.js";
 
 const instructions =
-  "These tools read and change one Superlog workspace: automations and their runs, tag mode, model access, and workspace secrets. Call list_integrations before creating or changing an automation or tag mode, and use the IDs it returns. Make only the changes the user asks for, then say exactly what changed. Integrations are connected by a person in the Superlog app. Members, billing, new API keys, and secret values are managed in the app.";
+  "These tools read and change one Superlog workspace: automations and their runs, tag mode, model access, and workspace secrets. Call list_integrations before creating or changing an automation or tag mode, and use the IDs it returns. Make only the changes the user asks for, then say exactly what changed. Use list_available_integrations and start_integration_connection to give the person a consent link directly in chat. They approve access in their browser; afterward use list_integrations to verify connection and select resources. Never collect integration credentials in chat. Members, billing, new API keys, and secret values are managed in the app.";
 
 // Operations that take a secret value are left out so it never passes
 // through a model.
@@ -31,7 +31,7 @@ export function mcpTool(operation: ManagementOperation): Tool {
     annotations: {
       destructiveHint: operation.effect === "destructive",
       idempotentHint: operation.effect === "read",
-      openWorldHint: false,
+      openWorldHint: operation.openWorld ?? false,
       readOnlyHint: operation.effect === "read",
       title: operation.summary,
     },
