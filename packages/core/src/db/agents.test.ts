@@ -313,24 +313,40 @@ describe("tag mode saves", () => {
     return database;
   }
 
+  const startingTagMode = {
+    configuration: {
+      contextAccountIds: [],
+      contextResourceIds: [],
+      enabled: true,
+      instructions: "Answer the request.",
+      model: "instance/default",
+      repositoryIds: [],
+      secretIds: [],
+    },
+    createOnly: true,
+    organizationId: "workspace-1",
+    userId: "user-1",
+  };
+
   it("leaves saved tag mode alone when only creating it", async () => {
     const database = returnSelects([[{ id: "slack-account" }], [{ id: "tag-mode" }]]);
 
-    await saveSlackThreadModeConfiguration({
-      configuration: {
-        contextAccountIds: [],
-        contextResourceIds: [],
-        enabled: true,
-        instructions: "Answer the request.",
-        model: "instance/default",
-        repositoryIds: [],
-        secretIds: [],
-      },
-      createOnly: true,
-      organizationId: "workspace-1",
-      userId: "user-1",
-    });
+    await saveSlackThreadModeConfiguration(startingTagMode);
 
     expect(database.transaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps tag mode another save created first", async () => {
+    const database = returnSelects([
+      [{ id: "slack-account" }],
+      [],
+      [{ id: "slack-account", metadata: {}, provider: "slack", status: "connected" }],
+    ]);
+    database.transaction.mockRejectedValue(new Error("Failed query", {
+      cause: { code: "23505", constraint: "agents_organization_slack_thread_idx" },
+    }));
+
+    await expect(saveSlackThreadModeConfiguration(startingTagMode)).resolves.toBeUndefined();
+    expect(database.transaction).toHaveBeenCalledOnce();
   });
 });

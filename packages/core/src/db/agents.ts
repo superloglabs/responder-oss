@@ -1148,8 +1148,24 @@ export async function getSlackThreadModeActor(
   return versions[0]?.createdBy ?? getOldestOrganizationOwner(organizationId);
 }
 
-// With createOnly, saved tag mode is left as is. The per-workspace unique
-// index stops a concurrent first save from creating a second one.
+// Drizzle wraps the Postgres error, so the violation is on its cause.
+function isSlackThreadModeConflict(error: unknown): boolean {
+  for (let current = error; current; current = (current as { cause?: unknown }).cause) {
+    if (typeof current !== "object") break;
+    if (
+      "code" in current &&
+      current.code === "23505" &&
+      "constraint" in current &&
+      current.constraint === "agents_organization_slack_thread_idx"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// With createOnly, tag mode that is already saved, or that another save
+// creates first, is left as is.
 export async function saveSlackThreadModeConfiguration(input: {
   organizationId: string;
   userId: string;
@@ -1219,12 +1235,17 @@ export async function saveSlackThreadModeConfiguration(input: {
     });
     return;
   }
-  await createAgent({
-    organizationId: input.organizationId,
-    userId: input.userId,
-    configuration,
-    purpose: "slack_thread",
-  });
+  try {
+    await createAgent({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      configuration,
+      purpose: "slack_thread",
+    });
+  } catch (error) {
+    if (input.createOnly && isSlackThreadModeConflict(error)) return;
+    throw error;
+  }
 }
 
 // Connecting Slack turns tag mode on with its starting settings. A workspace
