@@ -11,6 +11,8 @@ import { AutomationDetailPage, AutomationEditRedirect } from "./pages/automation
 import { AutomationRunPage, AutomationTestChatPage } from "./pages/automation-run";
 import { BillingPage } from "./pages/billing";
 import { OAuthAuthorizePage } from "./pages/oauth-authorize";
+import { ResetPasswordPage } from "./pages/reset-password";
+import { OnboardingPage } from "./pages/onboarding";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
@@ -32,6 +34,7 @@ import {
   ProductUpdateArticlePage,
   SecurityPage,
   SubprocessorsPage,
+  SupportPage,
   TeamPage,
   TermsPage,
 } from "./edition-pages";
@@ -84,8 +87,10 @@ export function App() {
       <Route element={<DpaPage />} path="/dpa" />
       <Route element={<SecurityPage />} path="/security" />
       <Route element={<SubprocessorsPage />} path="/subprocessors" />
+      <Route element={<SupportPage />} path="/support" />
       <Route element={<SharedAutomationTemplatePage />} path="/templates/:slug" />
       <Route element={<OAuthAuthorizePage />} path="/oauth/authorize" />
+      <Route element={<ResetPasswordPage />} path="/reset-password" />
       <Route
         element={<BlogArticlePage />}
         path={blogArticlePath}
@@ -115,6 +120,7 @@ export function App() {
           element={<Navigate replace to="/" />}
           path="/invite/:invitationId"
         />
+        <Route element={<OnboardingPage />} path="/onboarding/:step?" />
         <Route element={<AgentsPage />} path="/agents" />
         <Route element={<AutomationsPage />} path="/automations" />
         <Route element={<AutomationCreatePage />} path="/automations/new" />

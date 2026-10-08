@@ -78,6 +78,7 @@ function dependencies() {
       machinesUseCredit: false,
       nextResetAt: null,
     }),
+    notifyLimitReached: vi.fn().mockResolvedValue(undefined),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -150,6 +151,9 @@ function dependencies() {
       update: vi.fn().mockResolvedValue(undefined),
     },
     updateEvent: vi.fn().mockResolvedValue(undefined),
+    usageWaiverStart: vi.fn<AutomationRunDependencies["usageWaiverStart"]>()
+      .mockResolvedValue(new Date("2026-09-22T18:59:59.000Z")),
+    waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(true),
     workspaceTools: vi.fn<AutomationRunDependencies["workspaceTools"]>(() => []),
   };
 }
@@ -840,7 +844,7 @@ describe("automation run processor", () => {
         allowed: false,
         exhausted: "usage_credit",
         machinesUseCredit: false,
-        nextResetAt: null,
+        nextResetAt: 1_800_000_000,
       });
 
       await processAutomationRun("job-1", job, process.env, deps);
@@ -849,6 +853,15 @@ describe("automation run processor", () => {
       expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
         outcome: expect.objectContaining({ status: "failed" }),
       }));
+      expect(deps.notifyLimitReached).toHaveBeenCalledWith(
+        organizationId,
+        1_800_000_000,
+        {
+          refreshSlackChannels: expect.any(Function),
+          usage: { balance: "usage_credit", investigations: false, modelRunsOnly: true },
+          usageBased: true,
+        },
+      );
     });
 
     const buttonPress = (press: { channelId: string; integrationAccountId: string }) => ({
@@ -1415,6 +1428,42 @@ describe("automation run processor", () => {
     }));
   });
 
+  it("reports a used-up allowance when the sandbox wraps it with the queued harness failure", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    const harnessFailure = new AutomationHarnessError("Claude automation harness failed", "");
+    deps.runCodex.mockRejectedValue(harnessFailure);
+    deps.grantAllowanceExhausted.mockResolvedValue(true);
+    // The sandbox drains the model broker queue after the turn, and the
+    // harness failure it holds differs from the error the turn raised.
+    const runInSandbox = deps.runInSandbox.getMockImplementation()!;
+    deps.runInSandbox.mockImplementation(async (input) => {
+      try {
+        return await runInSandbox(input);
+      } catch (error) {
+        throw new AggregateError(
+          [error, harnessFailure],
+          "Automation callback and queued model operation failed",
+        );
+      }
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "usage_limit_reached",
+      failureMessage: expect.stringContaining("allowance"),
+      status: "failed",
+    }));
+  });
+
   it("keeps a harness failure when the broker did not refuse for the allowance", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
@@ -1433,6 +1482,119 @@ describe("automation run processor", () => {
       failureMessage: "Codex automation harness failed",
       status: "failed",
     }));
+    expect(deps.reportException).toHaveBeenCalledWith(
+      expect.any(AutomationHarnessError),
+      expect.objectContaining({ requestId: runId }),
+    );
+    expect(deps.waiveUsage).toHaveBeenCalledWith({
+      leaseId: claimedRun().leaseId,
+      runId,
+      since: new Date("2026-09-22T18:59:59.000Z"),
+    });
+  });
+
+  it("does not report a refusal the organization can fix to Sentry", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const refusal = "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError(refusal, "", true));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "execution_failed",
+      failureMessage: refusal,
+      status: "failed",
+    }));
+  });
+
+  it("keeps the refusal message when the sandbox wraps it with the queued harness failure", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const refusal = "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.";
+    const harnessFailure = new AutomationHarnessError(refusal, "", true);
+    deps.runCodex.mockRejectedValue(harnessFailure);
+    const runInSandbox = deps.runInSandbox.getMockImplementation()!;
+    deps.runInSandbox.mockImplementation(async (input) => {
+      try {
+        return await runInSandbox(input);
+      } catch (error) {
+        throw new AggregateError(
+          [error, harnessFailure],
+          "Automation callback and queued model operation failed",
+        );
+      }
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.reportException).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureMessage: refusal,
+      status: "failed",
+    }));
+  });
+
+  it("does not waive the usage of a turn the allowance stopped", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantAllowanceExhausted.mockResolvedValue(true);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
+  });
+
+  it("waives a failed turn's usage before recording its status", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.setStatus.mockRejectedValue(new Error("database unavailable"));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps).catch(() => undefined);
+
+    expect(deps.waiveUsage).toHaveBeenCalledOnce();
+  });
+
+  it("still finishes a failed turn when its usage cannot be waived", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    const waiveError = new Error("database unavailable");
+    deps.waiveUsage.mockRejectedValue(waiveError);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(deps.reportException).toHaveBeenCalledWith(waiveError, expect.objectContaining({ requestId: runId }));
   });
   it("stores the transcript and summarizes the result", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
@@ -1451,6 +1613,7 @@ describe("automation run processor", () => {
 
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
     expect(deps.appendEvent).toHaveBeenCalledWith({
       data: {
         items: [{ kind: "message", observedAt: Date.parse("2026-09-22T19:00:00.000Z"), text: "Fixed the flaky test." }],

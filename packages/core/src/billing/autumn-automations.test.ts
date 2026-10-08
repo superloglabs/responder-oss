@@ -17,6 +17,8 @@ vi.mock("autumn-js", () => ({
 const {
   checkUsageAllowance,
   checkWorkAllowance,
+  creditMachineHours,
+  creditUsageCharge,
   organizationUsesMachineHours,
   summarizeAutomationBillingCustomer,
   trackAutomationInferenceUsage,
@@ -220,6 +222,16 @@ describe("automation billing", () => {
       });
   });
 
+  it("reports machine hours when both balances are used up", async () => {
+    client.customers.getOrCreate.mockResolvedValue(customer(freePlan, {
+      responder_automation_inference: balance({ granted: 5, remaining: 0 }),
+      responder_machine_hours: balance({ remaining: 0, usage: 2 }),
+    }));
+
+    await expect(checkWorkAllowance("organization-1", { responderModels: true }))
+      .resolves.toMatchObject({ allowed: false, exhausted: "machine_hours" });
+  });
+
   it("stops work at the machine hours cap unless the plan bills extra hours", async () => {
     const exhausted = balance({ remaining: 0, usage: 2 });
     client.customers.getOrCreate.mockResolvedValueOnce(customer(freePlan, {
@@ -274,6 +286,46 @@ describe("automation billing", () => {
       },
       {
         headers: { "Idempotency-Key": "sandbox-hours:usage-1" },
+        timeoutMs: 30_000,
+      },
+    );
+  });
+
+  it("credits a charge and machine hours back as negative usage", async () => {
+    await creditUsageCharge({
+      chargeMicros: 12_345,
+      idempotencyKey: "automation-usage-credit:usage-1",
+      organizationId: "organization-1",
+      properties: { model: "gpt-5.4", runId: "run-1" },
+    });
+    await creditMachineHours({
+      hours: 0.25,
+      idempotencyKey: "sandbox-usage-credit:usage-2",
+      organizationId: "organization-1",
+      properties: { kind: "sandbox" },
+    });
+
+    expect(client.track).toHaveBeenCalledWith(
+      {
+        customerId: "organization-1",
+        featureId: "responder_automation_inference",
+        properties: { model: "gpt-5.4", runId: "run-1" },
+        value: -0.012345,
+      },
+      {
+        headers: { "Idempotency-Key": "automation-usage-credit:usage-1" },
+        timeoutMs: 30_000,
+      },
+    );
+    expect(client.track).toHaveBeenCalledWith(
+      {
+        customerId: "organization-1",
+        featureId: "responder_machine_hours",
+        properties: { kind: "sandbox" },
+        value: -0.25,
+      },
+      {
+        headers: { "Idempotency-Key": "sandbox-usage-credit:usage-2" },
         timeoutMs: 30_000,
       },
     );

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const subscriptionCliVersion = "0.155.1";
+export const subscriptionCliVersion = "0.161.0";
 // This is the official client's file-based credential cache, not an API key.
 // Only the managed client may create or refresh it.
 const nativeAuthSchema = z.object({

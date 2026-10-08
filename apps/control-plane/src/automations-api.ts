@@ -11,6 +11,7 @@ export type AutomationTrigger =
       channelIds: string[];
       eventMode: "mentions" | "every_message" | "both";
       ignoredAuthors?: SlackAuthor[];
+      includedAuthors?: SlackAuthor[];
       integrationAccountId: string;
       kind: "slack";
     }
@@ -20,6 +21,10 @@ export type AutomationTrigger =
       integrationAccountId: string;
       kind: "sentry";
       projectIds: string[];
+    }
+  | {
+      integrationAccountId: string;
+      kind: "axiom";
     }
   | {
       channelIds: string[];
@@ -47,7 +52,7 @@ export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
-// Where a scheduled or Sentry-triggered automation posts each finished run.
+// Where a scheduled, Sentry, or Axiom automation posts each finished run.
 export interface AutomationNotification {
   channelId: string;
   integrationAccountId: string;

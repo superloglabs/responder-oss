@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { ArrowRightIcon } from "@phosphor-icons/react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
@@ -19,6 +20,8 @@ import { requestCapabilities } from "../organization-capabilities";
 import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import { OnboardingFrame } from "./onboarding-frame";
+import { onboardingSteps } from "../pages/onboarding-presentation";
 
 interface AuthGateProps {
   children: ReactNode;
@@ -52,6 +55,7 @@ export function SignIn({
     () => settingUpTemplate || new URLSearchParams(window.location.search).has("signup"),
   );
   const [showPassword, setShowPassword] = useState(false);
+  const [isRequestingReset, setIsRequestingReset] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [socialProvider, setSocialProvider] = useState<
     "github" | "google" | null
@@ -189,6 +193,17 @@ export function SignIn({
     }
   }
 
+  if (isRequestingReset) {
+    return (
+      <PasswordResetRequest
+        onBack={() => {
+          setError(null);
+          setIsRequestingReset(false);
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <div className="authIntro">
@@ -266,7 +281,22 @@ export function SignIn({
           />
         </label>
         <div className="authField">
-          <label htmlFor="auth-password">Enter your password</label>
+          <span className="authFieldLabel">
+            <label htmlFor="auth-password">Enter your password</label>
+            {isCreatingAccount ? null : (
+              <button
+                className="authForgot"
+                disabled={isSubmitting}
+                onClick={() => {
+                  setError(null);
+                  setIsRequestingReset(true);
+                }}
+                type="button"
+              >
+                Forgot password?
+              </button>
+            )}
+          </span>
           <span className="authPassword">
             <input
               id="auth-password"
@@ -315,6 +345,94 @@ export function SignIn({
         By {isCreatingAccount ? "creating an account" : "signing in"}, you agree to the <a href="/tos">Terms of Service</a> and{" "}
         <a href="/privacy">Privacy Policy</a>.
       </p>
+    </>
+  );
+}
+
+function PasswordResetRequest({ onBack }: { onBack: () => void }) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    const email = String(new FormData(event.currentTarget).get("email") ?? "");
+    const result = await authClient
+      .requestPasswordReset({ email, redirectTo: "/reset-password" })
+      .catch(() => ({ error: { code: "network_error", message: undefined } }));
+    setIsSubmitting(false);
+    if (result.error) {
+      console.error(
+        JSON.stringify({
+          event: "password_reset_request_failed",
+          errorCode: authErrorCode(result.error),
+        }),
+      );
+      setError(result.error.message ?? "Could not send the reset link");
+      return;
+    }
+    console.info(JSON.stringify({ event: "password_reset_request_success" }));
+    setSentTo(email);
+  }
+
+  if (sentTo) {
+    return (
+      <>
+        <div className="authIntro">
+          <h1>Check your email</h1>
+          <p>
+            If {sentTo} has a Superlog account, we sent it a link to reset the
+            password. The link expires in one hour.
+          </p>
+        </div>
+        <button className="authSwitch authBack" onClick={onBack} type="button">
+          Back to sign in
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="authIntro">
+        <h1>Reset your password</h1>
+        <p>Enter your account email and we’ll send you a reset link.</p>
+      </div>
+      <form className="authForm" onSubmit={submit}>
+        <label className="authField">
+          <span>Email</span>
+          <input
+            autoComplete="email"
+            autoFocus
+            name="email"
+            placeholder="you@company.com"
+            required
+            type="email"
+          />
+        </label>
+        {error ? (
+          <p className="authError" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <button
+          className="button button--primary authSubmit"
+          disabled={isSubmitting}
+          type="submit"
+        >
+          {isSubmitting ? "Please wait…" : "Send reset link"}
+        </button>
+      </form>
+      <button
+        className="authSwitch authBack"
+        disabled={isSubmitting}
+        onClick={onBack}
+        type="button"
+      >
+        Back to sign in
+      </button>
     </>
   );
 }
@@ -401,8 +519,50 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
     );
   }
 
+  // A member without workspaces starts guided setup by naming one, unless
+  // they came to set up a template.
+  if (!organizations.isPending && !hasOrganizations && !automationSetupReturnPath(window.location)) {
+    return (
+      <OnboardingFrame
+        activeStages={[]}
+        footer={
+          <button
+            className="onboarding__primary"
+            disabled={isSubmitting}
+            form="workspace-create"
+            type="submit"
+          >
+            {isSubmitting ? "Creating workspace…" : "Create workspace"}
+            <ArrowRightIcon aria-hidden="true" size={14} />
+          </button>
+        }
+        step="workspace"
+        steps={onboardingSteps}
+      >
+        <div className="onboarding__intro">
+          <h1>Name your workspace</h1>
+          <p>Usually your company name. Your team will see it.</p>
+        </div>
+        <form className="onboarding__form" id="workspace-create" onSubmit={create}>
+          <label className="onboarding__field">
+            <span>Workspace name</span>
+            <input
+              autoFocus
+              minLength={2}
+              name="organizationName"
+              placeholder="Acme"
+              required
+              type="text"
+            />
+          </label>
+          {error ? <p className="onboarding__error" role="alert">{error}</p> : null}
+        </form>
+      </OnboardingFrame>
+    );
+  }
+
   return (
-    <>
+    <AuthFrame>
       <div className="authIntro">
         <h1>
           {organizations.isPending || hasOrganizations
@@ -448,7 +608,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
           {isSubmitting ? "Please wait…" : "Create workspace"}
         </button>
       </form>
-    </>
+    </AuthFrame>
   );
 }
 
@@ -750,9 +910,7 @@ export function AuthGate({ children }: AuthGateProps) {
     return (
       <>
         <ImpersonationBanner />
-        <AuthFrame>
-          <WorkspaceSetup onReady={session.refetch} />
-        </AuthFrame>
+        <WorkspaceSetup onReady={session.refetch} />
       </>
     );
   }

@@ -86,20 +86,14 @@ describe("worker error monitoring", () => {
       { operation: "automation" },
     );
 
+    // Sentry cuts contexts at three levels, so each error is one string
+    // directly under the context.
     expect(sentryMocks.scope.setContext).toHaveBeenCalledWith(
       "aggregated_errors",
       {
-        errors: [
-          {
-            message: "Failed to create and start sandbox within 60 seconds",
-            name: "Error",
-          },
-          {
-            message: "Sandbox is starting (key [redacted])",
-            name: "DaytonaConflictError",
-          },
-          { message: "Worker operation failed", name: "Error" },
-        ],
+        error_1: "Error: Failed to create and start sandbox within 60 seconds",
+        error_2: "DaytonaConflictError: Sandbox is starting (key [redacted])",
+        error_3: "Error: Worker operation failed",
       },
     );
   });

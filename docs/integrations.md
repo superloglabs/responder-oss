@@ -8,6 +8,31 @@ Customer installations and refreshable credentials are tenant-scoped in
 Postgres and encrypted before storage. Configure the same base64-encoded
 32-byte `CREDENTIAL_ENCRYPTION_KEY` for the control plane and worker.
 
+## Connect from MCP or the management API
+
+Use `list_available_integrations` to discover configured providers, then
+`start_integration_connection` with the selected `provider`. The REST equivalents
+are `GET /api/v1/integrations/available` and `POST /api/v1/integrations/connect`.
+
+Slack, GitHub, Sentry, Discord (only in workspaces with the `automations` capability),
+Vercel, Linear, Google Cloud, Axiom, and PostHog normally return a provider consent
+URL. Sentry may recover an existing installation and return `connected` without
+another consent prompt. The person opens the consent link, approves access, and
+returns to chat. The browser must be signed into the same Superlog user and
+workspace that authorized the MCP client; callback identity checks are unchanged.
+Links expire after ten minutes, and requesting a new link invalidates the previous
+flow for that user, workspace, and provider. Do not log or share the URLs.
+
+After consent, call `list_integrations` to verify the connected account and select
+resources. Use `refresh_integrations` to reload Slack channels or GitHub
+repositories when needed. Google Cloud may also need project selection and setup
+in the provider callback flow. A returned URL is not proof of a connection.
+
+Providers with additional configuration or credential entry return
+`connectionType: secure_setup` and a setup link instead of a consent URL. Never
+collect their API keys or other secrets in the conversation. Provider application
+credentials remain server configuration, not tool arguments.
+
 ## Linear
 
 Create a Responder-owned Linear OAuth app. Responder requests the `read`,
@@ -85,6 +110,9 @@ Configure a distributed Slack app with:
   from it
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
+
+Connecting Slack turns tag mode on with its starting settings, unless the
+workspace has already saved tag mode settings.
 
 A direct message to the app works like a mention. Tag mode answers in the
 message's thread, and a reply in that thread continues the same conversation.
@@ -329,9 +357,28 @@ Responder stores the OAuth session encrypted, refreshes it outside the sandbox,
 and exposes only an explicit allowlist of read-only Axiom tools to investigation
 runs. Dashboard, monitor, and notifier mutation tools are blocked.
 
-Axiom is investigation context rather than an alert source. Use a watched Slack
-channel as the agent input, then add Axiom under Context so the investigation can
-query relevant logs, traces, metrics, dashboards, and monitor history.
+Agents use Axiom as investigation context. Use a watched Slack channel as the
+agent input, then add Axiom under Context so the investigation can query
+relevant logs, traces, metrics, dashboards, and monitor history.
+
+Automations can use Axiom both ways. As a connector, the run reaches Axiom
+through the run-scoped context broker, which refreshes the OAuth session and
+lists and accepts calls only to the same read-only tool allowlist. As a
+trigger, an Axiom monitor alert starts the automation. Each Axiom connection
+has its own webhook:
+
+```text
+<public>/api/webhooks/axiom/<connection>
+```
+
+The trigger card's **Set up Axiom notifier** shows the URL, an `Authorization`
+header value, and a body template to paste into an Axiom **Custom webhook**
+notifier. Add that notifier to the monitors that should start runs. The header
+secret is derived per connection from `CREDENTIAL_ENCRYPTION_KEY`, so it
+survives OAuth refreshes; reconnecting Axiom as a new connection, or rotating
+that key, changes it. Responder starts a run for `Open` alerts and ignores
+`Closed` ones. A retried delivery with the same body does not start a second
+run. Axiom-triggered automations report to their notification channels.
 
 The hosted Axiom MCP endpoint routes query results through US infrastructure.
 Review Axiom's data-routing and query-cost controls before enabling it for
@@ -586,3 +633,5 @@ worktree without restarting it:
 pnpm tunnel:claim
 pnpm tunnel:release
 ```
+
+The connection tool also supplies an inline connection card. It opens a signed handoff to provider consent, checks `list_integrations`, and requests a continuation only after the provider appears connected. Hosts that support conversation return addresses pass one to the handoff; successful consent then returns to that conversation. Other hosts show a focused completion page. Automatic continuation requires an active card and host support; plain MCP clients can check `list_integrations` on the next turn. Return addresses are restricted to supported chat origins and bound to the requesting user, workspace, and expiring connection ticket.

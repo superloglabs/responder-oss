@@ -297,6 +297,115 @@ it("uses managed ChatGPT inference without writing the login back, and removes t
   );
 });
 
+it("names the model when the ChatGPT subscription does not offer it", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const refusal = JSON.stringify({
+    type: "turn.failed",
+    error: { message: JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error", message: "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account." } }) },
+  });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${refusal}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  const run = runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  });
+
+  await expect(run).rejects.toBeInstanceOf(AutomationHarnessError);
+  await expect(run).rejects.toThrow(
+    "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.",
+  );
+  await expect(run).rejects.toHaveProperty("organizationFixable", true);
+});
+
+it("says so when the ChatGPT workspace behind the subscription is deactivated", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const refusal = JSON.stringify({
+    type: "turn.failed",
+    error: { message: "unexpected status 402 Payment Required: Payment Required, url: https://chatgpt.com/backend-api/codex/responses, auth error: 402, auth error code: deactivated_workspace" },
+  });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${refusal}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  const run = runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  });
+
+  await expect(run).rejects.toThrow(
+    "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.",
+  );
+  await expect(run).rejects.toHaveProperty("organizationFixable", true);
+});
+
+it("names only the refusal that ended the turn", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  // The agent read a log that quotes a refusal; the turn failed for another reason.
+  const quoted = JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "The log says: model is not supported when using Codex with a ChatGPT account" },
+  });
+  const failed = JSON.stringify({ type: "turn.failed", error: { message: "stream disconnected before completion" } });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${quoted}\n${failed}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  const run = runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  });
+
+  await expect(run).rejects.toThrow(/^Codex automation harness failed$/u);
+  await expect(run).rejects.toHaveProperty("organizationFixable", false);
+});
+
 it("redacts native subscription tokens from persisted harness output", async () => {
   const authJson = JSON.stringify({
     tokens: {

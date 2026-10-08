@@ -61,9 +61,9 @@ describe("homePath", () => {
 });
 
 describe("newWorkspacePath", () => {
-  it("opens the automation form when the workspace has automations", () => {
-    expect(newWorkspacePath(["automations", "simplified_navigation"])).toBe("/automations/new");
-    expect(newWorkspacePath(["automations"])).toBe("/automations/new");
+  it("opens guided setup when the workspace has automations", () => {
+    expect(newWorkspacePath(["automations", "simplified_navigation"])).toBe("/onboarding/code");
+    expect(newWorkspacePath(["automations"])).toBe("/onboarding/code");
   });
 
   it("opens the agent form without automations", () => {

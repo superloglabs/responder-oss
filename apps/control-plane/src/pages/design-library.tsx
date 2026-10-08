@@ -327,6 +327,13 @@ export function DesignLibraryPage() {
             <Alert title="Changes saved" tone="success">The agent configuration is live.</Alert>
             <Alert title="Integration needs attention" tone="warning">Reconnect Datadog to resume investigations.</Alert>
             <Alert title="Could not create pull request" tone="danger">Check repository access and try again.</Alert>
+            <Alert
+              actions={<Button size="small" variant="primary">Upgrade plan</Button>}
+              title="Usage limit reached"
+              tone="warning"
+            >
+              New runs are paused until the allowance resets or the plan is upgraded.
+            </Alert>
           </Panel>
           <Panel padding="none">
             <EmptyState

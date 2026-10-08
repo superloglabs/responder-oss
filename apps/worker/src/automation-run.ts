@@ -33,6 +33,10 @@ import {
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkWorkAllowance } from "@responder/core/billing/autumn";
+import { notifyBillingLimitReached } from "@responder/core/billing/notifications";
+import { usageLimitFromAllowance } from "@responder/core/billing/usage-limit";
+import { refreshSlackChannelResources } from "@responder/core/integrations/slack-channels";
+import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
@@ -138,6 +142,7 @@ export interface AutomationRunDependencies {
   heartbeatRun: typeof heartbeatAutomationRun;
   loadRepositories: typeof loadCheckedOutRepositories;
   notify: typeof sendAutomationRunNotifications;
+  notifyLimitReached: typeof notifyBillingLimitReached;
   now(): Date;
   postedInSlackThread: typeof automationRunPostedInSlackThread;
   reopenRun: typeof reopenAutomationRun;
@@ -156,6 +161,8 @@ export interface AutomationRunDependencies {
   createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
+  usageWaiverStart: typeof usageWaiverStart;
+  waiveUsage: typeof waiveAutomationRunUsage;
   workspaceTools: typeof workspaceToolSpecs;
 }
 
@@ -184,6 +191,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   heartbeatRun: heartbeatAutomationRun,
   loadRepositories: loadCheckedOutRepositories,
   notify: sendAutomationRunNotifications,
+  notifyLimitReached: notifyBillingLimitReached,
   now: () => new Date(),
   postedInSlackThread: automationRunPostedInSlackThread,
   reopenRun: reopenAutomationRun,
@@ -203,6 +211,8 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
+  usageWaiverStart,
+  waiveUsage: waiveAutomationRunUsage,
   workspaceTools: workspaceToolSpecs,
 };
 
@@ -615,6 +625,8 @@ export async function processAutomationRun(
 ): Promise<{ runId: string }> {
   const run = await dependencies.claimRun(payload.runId);
   if (!run) return { runId: payload.runId };
+  // Usage recorded from here on belongs to this turn.
+  const turnStartedAt = await dependencies.usageWaiverStart();
 
   await recordEvent(dependencies, run.runId, "run_started", {
     harness: run.harness,
@@ -725,6 +737,17 @@ export async function processAutomationRun(
     });
     const machinesUseCredit = access.machinesUseCredit;
     if (!access.allowed) {
+      // If the lookup fails, the notice names only automation runs rather
+      // than not going out.
+      await dependencies.hasCapability(run.organizationId, "simplified_navigation")
+        .catch(() => false)
+        .then((investigations) => dependencies.notifyLimitReached(run.organizationId, access.nextResetAt, {
+          refreshSlackChannels: (organizationId) => refreshSlackChannelResources(organizationId),
+          usage: usageLimitFromAllowance(access, investigations),
+          usageBased: true,
+        })).catch((error: unknown) => {
+        console.error("Unable to send billing limit notifications", error);
+      });
       throw new AutomationAllowanceExhaustedError(access.exhausted, machinesUseCredit);
     }
     if (!credentialId) {
@@ -1042,14 +1065,37 @@ export async function processAutomationRun(
       stopped instanceof AutomationRunCancelledError;
     const timedOut = error instanceof AutomationRunTimeoutError ||
       stopped instanceof AutomationRunTimeoutError;
-    const allowanceExhausted = error instanceof AutomationAllowanceExhaustedError;
+    // The harness runs in the model broker queue, so its failure also comes
+    // back from the queue and arrives wrapped with the error the turn raised.
+    const causes = [error, ...(error instanceof AggregateError ? error.errors : [])];
+    const allowanceExhausted = causes.find((cause): cause is AutomationAllowanceExhaustedError =>
+      cause instanceof AutomationAllowanceExhaustedError);
+    // A refusal the organization can fix is its own failure, not Responder's.
+    const organizationRefusal = causes.find((cause): cause is AutomationHarnessError =>
+      cause instanceof AutomationHarnessError && cause.organizationFixable);
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
         ? "Automation run exceeded its configured runtime limit"
       : allowanceExhausted
-        ? error.message
-      : safeInvestigationError(error, environment);
+        ? allowanceExhausted.message
+      : safeInvestigationError(organizationRefusal ?? error, environment);
+    // A turn that failed through Responder's fault is not charged. A run
+    // that reached its own runtime limit or allowance is. The waiver comes
+    // first so a failed status write cannot leave the turn charged.
+    if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
+      await dependencies.waiveUsage({
+        leaseId: run.leaseId,
+        runId: run.runId,
+        since: turnStartedAt,
+      }).catch((waiveError) =>
+        dependencies.reportException(waiveError, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
+    }
     if (!leaseLost) {
       await dependencies.setStatus({
         ...(cancelled
@@ -1076,7 +1122,7 @@ export async function processAutomationRun(
     turnEnded = !cancelled && !leaseLost;
     if (turnEnded) outcome = { message, status: "failed" };
     await slackCard?.finish("error", message);
-    if (!cancelled && !leaseLost && !allowanceExhausted) {
+    if (!cancelled && !leaseLost && !allowanceExhausted && !organizationRefusal) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",

@@ -12,7 +12,7 @@ import {
   listConnectedIntegrationAccounts,
   listConnectedIntegrationAccountCredentials,
   replaceRepositories,
-  replaceIntegrationResources,
+  replaceIntegrationResourcesIfCredentialsMatch,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
   getInvestigationDetail,
@@ -54,7 +54,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   listConnectedIntegrationAccountCredentials: vi.fn(),
   markSlackChannelJoined: vi.fn(),
   replaceRepositories: vi.fn(),
-  replaceIntegrationResources: vi.fn(),
+  replaceIntegrationResourcesIfCredentialsMatch: vi.fn(),
 }));
 vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
   getInvestigationDetail: vi.fn(),
@@ -610,16 +610,24 @@ describe("Slack channel option refresh", () => {
     expect(listSlackChannels).toHaveBeenCalledTimes(2);
     expect(listSlackChannels).toHaveBeenCalledWith("token-1");
     expect(listSlackChannels).toHaveBeenCalledWith("token-2");
-    expect(replaceIntegrationResources).toHaveBeenCalledWith(
-      "slack-account-1",
-      "slack_channel",
-      [expect.objectContaining({ externalId: "C123" })],
-    );
-    expect(replaceIntegrationResources).toHaveBeenCalledWith(
-      "slack-account-2",
-      "slack_channel",
-      [expect.objectContaining({ externalId: "C456" })],
-    );
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith({
+      encryptedCredentials: "encrypted-1",
+      integrationAccountId: "slack-account-1",
+      kind: "slack_channel",
+      markConnected: false,
+      organizationId: "10000000-0000-4000-8000-000000000000",
+      provider: "slack",
+      resources: [expect.objectContaining({ externalId: "C123" })],
+    });
+    expect(replaceIntegrationResourcesIfCredentialsMatch).toHaveBeenCalledWith({
+      encryptedCredentials: "encrypted-2",
+      integrationAccountId: "slack-account-2",
+      kind: "slack_channel",
+      markConnected: false,
+      organizationId: "10000000-0000-4000-8000-000000000000",
+      provider: "slack",
+      resources: [expect.objectContaining({ externalId: "C456" })],
+    });
   });
 
   it("returns a retryable error without replacing resources when Slack fails", async () => {
@@ -649,7 +657,7 @@ describe("Slack channel option refresh", () => {
       error: "Unable to refresh Slack channels",
       code: "slack_refresh_failed",
     });
-    expect(replaceIntegrationResources).not.toHaveBeenCalled();
+    expect(replaceIntegrationResourcesIfCredentialsMatch).not.toHaveBeenCalled();
     expect(listAgentOptions).not.toHaveBeenCalled();
   });
 });

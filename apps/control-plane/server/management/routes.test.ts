@@ -543,6 +543,21 @@ describe("management MCP server", () => {
     mocks.capability.mockResolvedValue(true);
   }
 
+  it("serves the connection card referenced by the tool and restricts return origins", async () => {
+    signedIn();
+    const tools = await (await mcp({ id: 1, jsonrpc: "2.0", method: "tools/list" })).json();
+    const start = tools.result.tools.find((tool: { name: string }) => tool.name === "start_integration_connection");
+    const uri = start._meta.ui.resourceUri;
+    const resource = await (await mcp({ id: 2, jsonrpc: "2.0", method: "resources/read", params: { uri } })).json();
+    expect(resource.result.contents[0]).toMatchObject({
+      uri, mimeType: "text/html;profile=mcp-app",
+      _meta: { "openai/widgetCSP": { redirect_domains: ["http://localhost:3000"] } },
+    });
+    expect(resource.result.contents[0].text).toContain("checkConnection");
+    const unknown = await (await mcp({ id: 3, jsonrpc: "2.0", method: "resources/read", params: { uri: "file:///etc/passwd" } })).json();
+    expect(unknown.error).toBeDefined();
+  });
+
   it("requires an API key or OAuth access token and points clients to OAuth", async () => {
     mocks.authenticate.mockResolvedValue(null);
 

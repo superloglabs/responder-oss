@@ -706,6 +706,9 @@ export async function replaceIntegrationResourcesIfCredentialsMatch(input: {
   encryptedCredentials: string;
   integrationAccountId: string;
   kind: IntegrationResourceKind;
+  // Mark the account connected after the sync. Background refreshes leave
+  // the status alone so they cannot clear an error set meanwhile.
+  markConnected?: boolean;
   organizationId: string;
   provider: IntegrationProvider;
   resources: SyncedIntegrationResource[];
@@ -767,10 +770,12 @@ export async function replaceIntegrationResourcesIfCredentialsMatch(input: {
         });
     }
 
-    await tx
-      .update(integrationAccounts)
-      .set({ status: "connected", updatedAt: new Date() })
-      .where(eq(integrationAccounts.id, input.integrationAccountId));
+    if (input.markConnected ?? true) {
+      await tx
+        .update(integrationAccounts)
+        .set({ status: "connected", updatedAt: new Date() })
+        .where(eq(integrationAccounts.id, input.integrationAccountId));
+    }
     return true;
   });
 }

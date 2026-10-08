@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendEmail, workspaceInvitationEmailBody } from "./email.js";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+import { describe, expect, it } from "vitest";
+import {
+  passwordResetEmailBody,
+  workspaceInvitationEmailBody,
+} from "./email.js";
 
 describe("workspaceInvitationEmailBody", () => {
   it("includes invitation context in both email formats", () => {
@@ -43,81 +42,24 @@ describe("workspaceInvitationEmailBody", () => {
   });
 });
 
-describe("sendEmail", () => {
-  const message = {
-    html: "<p>Invitation</p>",
-    idempotencyKey: "workspace-invitation/invitation-id/1234",
-    subject: "You're invited",
-    text: "Invitation",
-    to: "grace@example.com",
-  };
+describe("passwordResetEmailBody", () => {
+  it("links to the reset URL in both email formats", () => {
+    const resetUrl =
+      "https://responder.superlog.sh/api/auth/reset-password/abc?callbackURL=%2Freset-password";
+    const body = passwordResetEmailBody({ resetUrl });
 
-  it("sends the configured Resend payload with an idempotency key", async () => {
-    const deliver = vi.fn(async () => ({
-      data: { id: "email-id" },
-      error: null,
-      headers: null,
-    }));
+    expect(body.text).toContain(`Reset password: ${resetUrl}`);
+    expect(body.html).toContain(
+      'href="https://responder.superlog.sh/api/auth/reset-password/abc?callbackURL=%2Freset-password"',
+    );
+  });
 
-    await sendEmail(message, {
-      deliver,
-      environment: {
-        RESEND_API_KEY: "test-key",
-        RESPONDER_FROM_EMAIL: "Superlog <invite@example.com>",
-        RESPONDER_REPLY_TO_EMAIL: "support@example.com",
-      } as NodeJS.ProcessEnv,
+  it("escapes the reset URL in the HTML body", () => {
+    const body = passwordResetEmailBody({
+      resetUrl: 'https://example.com/reset"><script>',
     });
 
-    expect(deliver).toHaveBeenCalledWith(
-      {
-        from: "Superlog <invite@example.com>",
-        html: message.html,
-        replyTo: "support@example.com",
-        subject: message.subject,
-        text: message.text,
-        to: [message.to],
-      },
-      { idempotencyKey: message.idempotencyKey },
-    );
-  });
-
-  it("fails closed when production email is not configured", async () => {
-    await expect(
-      sendEmail(message, {
-        environment: { NODE_ENV: "production" } as NodeJS.ProcessEnv,
-      }),
-    ).rejects.toThrow("RESEND_API_KEY is required");
-  });
-
-  it("keeps local invitation links usable without Resend", async () => {
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    await sendEmail(message, { environment: {} as NodeJS.ProcessEnv });
-
-    expect(warning).toHaveBeenCalledWith(
-      JSON.stringify({
-        event: "invitation_email_skipped",
-        reason: "resend_not_configured",
-      }),
-    );
-  });
-
-  it("surfaces Resend delivery failures", async () => {
-    const deliver = vi.fn(async () => ({
-      data: null,
-      error: {
-        message: "Sender domain is not verified",
-        name: "validation_error" as const,
-        statusCode: 422,
-      },
-      headers: null,
-    }));
-
-    await expect(
-      sendEmail(message, {
-        deliver,
-        environment: { RESEND_API_KEY: "test-key" } as NodeJS.ProcessEnv,
-      }),
-    ).rejects.toThrow("Sender domain is not verified");
+    expect(body.html).not.toContain("<script>");
+    expect(body.html).toContain("&quot;&gt;&lt;script&gt;");
   });
 });

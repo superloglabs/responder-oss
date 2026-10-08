@@ -2449,29 +2449,23 @@ button:disabled {
 }
 
 .billingBanner {
-  min-height: 58px;
   margin-bottom: -20px;
-  padding: 10px 12px 10px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  border: 1px solid #695624;
-  border-radius: 7px;
-  background: #17140b;
-  color: #cfc49f;
-  font-size: 12px;
-  line-height: 18px;
 }
 
-.billingBanner strong {
-  color: #eee4bc;
-  font-weight: 600;
+/* Matches workspace cards and tables rather than a floating alert. The
+   workspace shell is always light. */
+.appShell--workspace .dsAlert.billingBanner {
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow:
+    0 0 0 0.5px #00000014,
+    0 1px 2px #0000000d,
+    0 2px 4px #00000005;
 }
 
-.billingBanner .button {
-  min-height: 34px;
-  flex: 0 0 auto;
+.appShell--workspace .dsAlert.billingBanner::after {
+  content: none;
 }
 
 .pageHeading {
@@ -5878,8 +5872,21 @@ button:disabled {
   outline: none;
 }
 
+.siteDialog__field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0d0d0d;
+  color: var(--foreground);
+  font: 12px/1.5 var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  outline: none;
+  resize: vertical;
+}
+
 .siteDialog__field input:focus,
-.siteDialog__field select:focus {
+.siteDialog__field select:focus,
+.siteDialog__field textarea:focus {
   border-color: var(--border-logo);
 }
 
@@ -9601,8 +9608,6 @@ a.issueLine:focus-visible {
 
   .billingBanner {
     margin-bottom: 0;
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .brand span {
@@ -10136,7 +10141,8 @@ a.issueLine:focus-visible {
 :root[data-color-theme="light"] .siteDialog__instructions,
 :root[data-color-theme="light"] .siteDialog__site,
 :root[data-color-theme="light"] .siteDialog__field input,
-:root[data-color-theme="light"] .siteDialog__field select {
+:root[data-color-theme="light"] .siteDialog__field select,
+:root[data-color-theme="light"] .siteDialog__field textarea {
   background: var(--ds-surface-raised);
 }
 
@@ -11339,6 +11345,34 @@ body:has(.appShell--scans) {
 .authPage .authPassword svg {
   width: 18px;
   height: 18px;
+}
+
+.authPage .authFieldLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.authPage .authForgot {
+  padding: 0;
+  background: transparent;
+  color: #646464;
+  cursor: pointer;
+  font-size: 13px;
+}
+.authPage .authForgot:hover,
+.authPage .authForgot:focus-visible {
+  color: #202020;
+}
+.authPage .authBack {
+  display: block;
+  margin: 20px auto 0;
+}
+.authPage a.authSubmit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .authPage .authIntro .authSwitch {

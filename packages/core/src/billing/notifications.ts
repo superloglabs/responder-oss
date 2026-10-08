@@ -1,5 +1,6 @@
 import { decryptCredentials } from "../credentials/encryption.js";
-import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { member, organization, user } from "../db/auth-schema.js";
 import { getDatabase } from "../db/client.js";
 import {
   agentConfigVersions,
@@ -9,8 +10,14 @@ import {
   integrationResources,
   type AgentTriggerConfig,
 } from "../db/schema.js";
+import { escapeHtml, sendEmail } from "../email.js";
+import type { UsageLimit } from "./usage-limit.js";
 
-const RETRY_STALE_AFTER_MS = 5 * 60 * 1_000;
+// A failed or abandoned delivery waits this long before it is tried again.
+export const BILLING_NOTICE_RETRY_AFTER_MS = 5 * 60 * 1_000;
+// Resend keeps idempotency keys for 24 hours, so a delivery that failed after
+// an uncertain response is retried only inside that window.
+export const BILLING_NOTICE_RETRY_WINDOW_MS = 23 * 60 * 60 * 1_000;
 
 interface SlackAccount {
   accessToken: string;
@@ -24,6 +31,13 @@ interface SlackDestination {
   kind: "channel" | "installer_dm";
 }
 
+interface EmailDestination {
+  address: string;
+  kind: "email";
+}
+
+type Destination = EmailDestination | SlackDestination;
+
 function billingUrl(): string | null {
   const configuredUrl = process.env.CONTROL_PLANE_URL ?? process.env.BETTER_AUTH_URL;
   if (!configuredUrl) return null;
@@ -34,17 +48,64 @@ function billingUrl(): string | null {
   }
 }
 
-export function billingLimitMessage(url = billingUrl(), usageBased = false): string {
-  if (usageBased) {
-    const action = url
-      ? ` Upgrade the plan to resume now: ${url}`
-      : " Upgrade the plan in Responder Billing to resume now.";
-    return `Responder has paused new investigations because this workspace used its included usage for this billing period. Work already in progress finishes, and new investigations resume when the allowance resets.${action}`;
+const unknownUsageLimit: UsageLimit = {
+  balance: null,
+  investigations: true,
+  modelRunsOnly: false,
+};
+
+function limitSentence(usage: UsageLimit | null): string {
+  if (!usage) {
+    return "Superlog has paused new investigations because this workspace used all 50 included investigations this month.";
   }
+  const runs = usage.modelRunsOnly
+    ? "automation runs that use Superlog's models"
+    : "automation runs";
+  const paused = usage.investigations ? `new investigations and ${runs}` : `new ${runs}`;
+  const balance = usage.balance === "usage_credit"
+    ? "included usage credit"
+    : usage.balance === "machine_hours"
+      ? "included machine hours"
+      : "included usage";
+  return `Superlog has paused ${paused} because this workspace used its ${balance} for this billing period. Work already in progress finishes, and new work resumes when the allowance resets.`;
+}
+
+function limitAction(usageBased: boolean, url: string | null): string {
+  if (usageBased) {
+    return url
+      ? `Upgrade the plan to resume now: ${url}`
+      : "Upgrade the plan in Superlog Billing to resume now.";
+  }
+  return url
+    ? `Enable pay as you go ($1.50 per investigation) to resume: ${url}`
+    : "Enable pay as you go ($1.50 per investigation) in Superlog Billing to resume.";
+}
+
+// A null usage limit is the investigation credit notice.
+export function billingLimitMessage(
+  url = billingUrl(),
+  usage: UsageLimit | null = null,
+): string {
+  return `${limitSentence(usage)} ${limitAction(usage !== null, url)}`;
+}
+
+export function billingLimitEmail(
+  organizationName: string,
+  usage: UsageLimit | null,
+  url = billingUrl(),
+): { html: string; subject: string; text: string } {
+  const usageBased = usage !== null;
+  const sentence = limitSentence(usage);
   const action = url
-    ? ` Enable pay as you go ($1.50 per investigation) to resume: ${url}`
-    : " Enable pay as you go ($1.50 per investigation) in Responder Billing to resume.";
-  return `Responder has paused new investigations because this workspace used all 50 included investigations this month.${action}`;
+    ? `<p><a href="${escapeHtml(url)}">${usageBased ? "Upgrade the plan" : "Enable pay as you go"}</a></p>`
+    : `<p>${escapeHtml(limitAction(usageBased, null))}</p>`;
+  return {
+    html: `<p>Workspace: <strong>${escapeHtml(organizationName)}</strong></p>
+<p>${escapeHtml(sentence)}</p>
+${action}`,
+    subject: `Superlog paused new work in ${organizationName}`,
+    text: `Workspace: ${organizationName}\n\n${sentence}\n\n${limitAction(usageBased, url)}`,
+  };
 }
 
 async function slackAccounts(organizationId: string): Promise<SlackAccount[]> {
@@ -65,9 +126,19 @@ async function slackAccounts(organizationId: string): Promise<SlackAccount[]> {
 
   return rows.flatMap((row) => {
     if (!row.encryptedCredentials) return [];
-    const credentials = decryptCredentials<Record<string, unknown>>(
-      row.encryptedCredentials,
-    );
+    // An unreadable Slack account must not stop email and other accounts.
+    let credentials: Record<string, unknown>;
+    try {
+      credentials = decryptCredentials<Record<string, unknown>>(row.encryptedCredentials);
+    } catch (error) {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "billing_notice_slack_account_unreadable",
+        integrationAccountId: row.id,
+        organizationId,
+      }));
+      return [];
+    }
     if (typeof credentials.accessToken !== "string") return [];
     return [{
       accessToken: credentials.accessToken,
@@ -108,28 +179,26 @@ export function watchedChannelIds(
   return configuredChannelIds.filter((channelId) => members.has(channelId));
 }
 
-async function notificationDestinations(
+async function watchedChannelDestinations(
   organizationId: string,
+  accounts: SlackAccount[],
 ): Promise<SlackDestination[]> {
-  const [accounts, triggerRows] = await Promise.all([
-    slackAccounts(organizationId),
-    getDatabase()
-      .select({
-        trigger: agentConfigVersions.trigger,
-        triggerConfig: agentConfigVersions.triggerConfig,
-      })
-      .from(agents)
-      .innerJoin(
-        agentConfigVersions,
-        eq(agentConfigVersions.id, agents.activeVersionId),
-      )
-      .where(
-        and(
-          eq(agents.organizationId, organizationId),
-          eq(agents.enabled, true),
-        ),
+  const triggerRows = await getDatabase()
+    .select({
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agents)
+    .innerJoin(
+      agentConfigVersions,
+      eq(agentConfigVersions.id, agents.activeVersionId),
+    )
+    .where(
+      and(
+        eq(agents.organizationId, organizationId),
+        eq(agents.enabled, true),
       ),
-  ]);
+    );
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const resourceRows = accounts.length === 0
     ? []
@@ -159,7 +228,6 @@ async function notificationDestinations(
     ]);
   }
   const destinations = new Map<string, SlackDestination>();
-
   for (const row of triggerRows) {
     if (row.trigger !== "slack_channel" && row.trigger !== "slack_mention") {
       continue;
@@ -173,46 +241,79 @@ async function notificationDestinations(
       memberChannels.get(account.id) ?? [],
     );
     for (const channel of watchedChannels) {
-      destinations.set(`${account.id}:channel:${channel}`, {
+      destinations.set(`${account.id}:${channel}`, {
         account,
         channel,
         kind: "channel",
       });
     }
   }
-
-  for (const account of accounts) {
-    if (!account.installerUserId) continue;
-    destinations.set(`${account.id}:installer_dm:${account.installerUserId}`, {
-      account,
-      channel: account.installerUserId,
-      kind: "installer_dm",
-    });
-  }
-
   return [...destinations.values()];
+}
+
+// Workspace owners and admins can change the plan, so they receive email.
+async function emailDestinations(organizationId: string): Promise<EmailDestination[]> {
+  const rows = await getDatabase()
+    .select({ email: user.email })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(
+      and(
+        eq(member.organizationId, organizationId),
+        inArray(member.role, ["owner", "admin"]),
+      ),
+    );
+  const addresses = new Set(rows.map((row) => row.email.trim().toLowerCase()));
+  return [...addresses].map((address) => ({ address, kind: "email" }));
+}
+
+async function notificationDestinations(
+  organizationId: string,
+): Promise<Destination[]> {
+  const accounts = await slackAccounts(organizationId);
+  const [channels, emails] = await Promise.all([
+    watchedChannelDestinations(organizationId, accounts),
+    emailDestinations(organizationId),
+  ]);
+  const directMessages = accounts.flatMap((account): SlackDestination[] =>
+    account.installerUserId
+      ? [{ account, channel: account.installerUserId, kind: "installer_dm" }]
+      : [],
+  );
+  return [...channels, ...directMessages, ...emails];
+}
+
+function deliveryTarget(destination: Destination): {
+  destination: string;
+  integrationAccountId: string | null;
+  kind: string;
+} {
+  return destination.kind === "email"
+    ? { destination: destination.address, integrationAccountId: null, kind: "email" }
+    : {
+        destination: destination.channel,
+        integrationAccountId: destination.account.id,
+        kind: destination.kind,
+      };
 }
 
 async function claimDelivery(
   organizationId: string,
   periodKey: string,
-  destination: SlackDestination,
+  destination: Destination,
+  usageBased: boolean,
 ): Promise<string | null> {
   const db = getDatabase();
+  const target = deliveryTarget(destination);
   const inserted = await db
     .insert(billingNotificationDeliveries)
-    .values({
-      organizationId,
-      integrationAccountId: destination.account.id,
-      periodKey,
-      kind: destination.kind,
-      destination: destination.channel,
-    })
+    .values({ organizationId, periodKey, usageBased, ...target })
     .onConflictDoNothing()
     .returning({ id: billingNotificationDeliveries.id });
   if (inserted[0]) return inserted[0].id;
 
-  const staleBefore = new Date(Date.now() - RETRY_STALE_AFTER_MS);
+  const staleBefore = new Date(Date.now() - BILLING_NOTICE_RETRY_AFTER_MS);
+  const retryAfter = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
   const claimed = await db
     .update(billingNotificationDeliveries)
     .set({ status: "pending", lastError: null, updatedAt: new Date() })
@@ -220,19 +321,16 @@ async function claimDelivery(
       and(
         eq(billingNotificationDeliveries.organizationId, organizationId),
         eq(billingNotificationDeliveries.periodKey, periodKey),
-        eq(
-          billingNotificationDeliveries.integrationAccountId,
-          destination.account.id,
-        ),
-        eq(billingNotificationDeliveries.kind, destination.kind),
-        eq(billingNotificationDeliveries.destination, destination.channel),
-        or(
-          eq(billingNotificationDeliveries.status, "failed"),
-          and(
-            eq(billingNotificationDeliveries.status, "pending"),
-            lt(billingNotificationDeliveries.updatedAt, staleBefore),
-          ),
-        ),
+        target.integrationAccountId
+          ? eq(billingNotificationDeliveries.integrationAccountId, target.integrationAccountId)
+          : isNull(billingNotificationDeliveries.integrationAccountId),
+        eq(billingNotificationDeliveries.kind, target.kind),
+        eq(billingNotificationDeliveries.destination, target.destination),
+        gt(billingNotificationDeliveries.createdAt, retryAfter),
+        // A failed delivery waits as long as an abandoned claim before it is
+        // tried again, so repeated blocked work does not retry it each time.
+        inArray(billingNotificationDeliveries.status, ["failed", "pending"]),
+        lt(billingNotificationDeliveries.updatedAt, staleBefore),
       ),
     )
     .returning({ id: billingNotificationDeliveries.id });
@@ -271,21 +369,40 @@ async function postSlackMessage(
   }
 }
 
+async function organizationName(organizationId: string): Promise<string> {
+  const rows = await getDatabase()
+    .select({ name: organization.name })
+    .from(organization)
+    .where(eq(organization.id, organizationId))
+    .limit(1);
+  return rows[0]?.name ?? "Your workspace";
+}
+
 async function deliverNotification(
   organizationId: string,
   periodKey: string,
-  destination: SlackDestination,
-  usageBased: boolean,
+  destination: Destination,
+  usage: UsageLimit | null,
+  name: () => Promise<string>,
 ): Promise<void> {
-  const deliveryId = await claimDelivery(organizationId, periodKey, destination);
+  const deliveryId = await claimDelivery(organizationId, periodKey, destination, usage !== null);
   if (!deliveryId) return;
 
   try {
-    await postSlackMessage(
-      destination.account.accessToken,
-      destination.channel,
-      billingLimitMessage(undefined, usageBased),
-    );
+    if (destination.kind === "email") {
+      const sent = await sendEmail({
+        ...billingLimitEmail(await name(), usage),
+        idempotencyKey: `billing-notice/${deliveryId}`,
+        to: destination.address,
+      });
+      if (!sent) throw new Error("Email is not configured");
+    } else {
+      await postSlackMessage(
+        destination.account.accessToken,
+        destination.channel,
+        billingLimitMessage(undefined, usage),
+      );
+    }
     await getDatabase()
       .update(billingNotificationDeliveries)
       .set({
@@ -296,12 +413,20 @@ async function deliverNotification(
       })
       .where(eq(billingNotificationDeliveries.id, deliveryId));
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown delivery error";
+    console.error(JSON.stringify({
+      deliveryId,
+      error: message,
+      event: "billing_notice_delivery_failed",
+      kind: destination.kind,
+      organizationId,
+    }));
     await getDatabase()
       .update(billingNotificationDeliveries)
       .set({
         status: "failed",
         attemptCount: sql`${billingNotificationDeliveries.attemptCount} + 1`,
-        lastError: error instanceof Error ? error.message : "Unknown Slack error",
+        lastError: message,
         updatedAt: new Date(),
       })
       .where(eq(billingNotificationDeliveries.id, deliveryId));
@@ -325,40 +450,46 @@ async function hasDeliveriesForPeriod(
   return rows.length > 0;
 }
 
+// Each destination receives the notice once per billing period.
+export function billingLimitPeriodKey(
+  nextResetAt: number | null,
+  now = new Date(),
+): string {
+  return nextResetAt
+    ? `reset:${nextResetAt}`
+    : `month:${now.toISOString().slice(0, 7)}`;
+}
+
 export async function notifyBillingLimitReached(
   organizationId: string,
   nextResetAt: number | null,
   options: {
     refreshSlackChannels?: (organizationId: string) => Promise<void>;
+    // The balance and work, when known; defaults to all new work.
+    usage?: UsageLimit | null;
     usageBased?: boolean;
   } = {},
 ): Promise<void> {
-  const periodKey = nextResetAt
-    ? `reset:${nextResetAt}`
-    : `month:${new Date().toISOString().slice(0, 7)}`;
+  const periodKey = billingLimitPeriodKey(nextResetAt);
+  const usage = options.usageBased ? (options.usage ?? unknownUsageLimit) : null;
   // Channel membership is cached, so refresh it once before the first notice
-  // of a period rather than on every blocked investigation. If the refresh
-  // fails, send nothing so the next blocked investigation retries both.
+  // of a period rather than on every blocked investigation.
   if (
     options.refreshSlackChannels &&
     !(await hasDeliveriesForPeriod(organizationId, periodKey))
   ) {
-    try {
-      await options.refreshSlackChannels(organizationId);
-    } catch (error) {
+    // A failed refresh falls back to the cached channels, so email and
+    // direct messages still go out.
+    await options.refreshSlackChannels(organizationId).catch((error: unknown) => {
       console.error("Unable to refresh Slack channels for billing notices", error);
-      return;
-    }
+    });
   }
   const destinations = await notificationDestinations(organizationId);
+  let name: Promise<string> | undefined;
+  const lookupName = () => (name ??= organizationName(organizationId));
   await Promise.all(
     destinations.map((destination) =>
-      deliverNotification(
-        organizationId,
-        periodKey,
-        destination,
-        options.usageBased ?? false,
-      ),
+      deliverNotification(organizationId, periodKey, destination, usage, lookupName),
     ),
   );
 }

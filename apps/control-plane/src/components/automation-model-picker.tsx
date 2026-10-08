@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
-import { fetchIncludedAutomationModels, type AvailableAutomationModel, type AutomationConfiguration, type AutomationModelProvider } from "../automations-api";
+import { fetchAutomationCredentials, fetchAutomationModels, fetchIncludedAutomationModels, type AvailableAutomationModel, type AutomationConfiguration, type AutomationModelProvider } from "../automations-api";
+import { chatGPTSubscription } from "../chatgpt-subscription";
 import { automationModelProviders, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
 import { cn } from "@/lib/utils";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
@@ -13,11 +14,17 @@ const harnesses = [
   { id: "claude_agent_sdk" as const, name: "Anthropic", description: "Anthropic agent harness" },
   { id: "opencode" as const, name: "OpenCode", description: "OpenCode agent harness" },
 ];
-type Catalog = { status: "loading" } | { status: "error"; error: string } | { status: "ready"; models: AvailableAutomationModel[] };
+type Catalog = { status: "loading" } | { status: "error"; error: string } | { status: "ready"; models: AvailableAutomationModel[]; subscription?: boolean };
 function errorMessage(cause: unknown) { return cause instanceof Error ? cause.message : "Unable to load models."; }
+async function loadCatalog(provider: AutomationModelProvider): Promise<Catalog> {
+  const subscription = provider === "openai" ? chatGPTSubscription(await fetchAutomationCredentials()) : undefined;
+  if (subscription) return { status: "ready", models: (await fetchAutomationModels(subscription.id)).models, subscription: true };
+  return { status: "ready", models: (await fetchIncludedAutomationModels(provider)).models };
+}
 // Choosing a model needs no connection: runs use the organization's own key or
 // subscription for the provider when one is connected, and included usage
-// otherwise. Each provider's models open in a submenu beside it.
+// otherwise. With a ChatGPT subscription, OpenAI lists the models it serves.
+// Each provider's models open in a submenu beside it.
 export function AutomationModelPicker({ configuration, onChange, requestedOpen }: {
   configuration: AutomationConfiguration;
   onChange: (patch: Partial<AutomationConfiguration>) => void;
@@ -35,24 +42,30 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
   useEffect(() => {
     let active = true;
     for (const { id } of automationModelProviders) {
-      fetchIncludedAutomationModels(id)
-        .then(result => { if (active) setCatalogs(current => ({ ...current, [id]: { status: "ready", models: result.models } })); })
+      loadCatalog(id)
+        .then(catalog => { if (active) setCatalogs(current => ({ ...current, [id]: catalog })); })
         .catch((cause: unknown) => { if (active) setCatalogs(current => ({ ...current, [id]: { status: "error", error: errorMessage(cause) } })); });
     }
     return () => { active = false; };
   }, []);
   function retry(provider: AutomationModelProvider) {
     setCatalogs(current => ({ ...current, [provider]: { status: "loading" } }));
-    fetchIncludedAutomationModels(provider)
-      .then(result => setCatalogs(current => ({ ...current, [provider]: { status: "ready", models: result.models } })))
+    loadCatalog(provider)
+      .then(catalog => setCatalogs(current => ({ ...current, [provider]: catalog })))
       .catch((cause: unknown) => setCatalogs(current => ({ ...current, [provider]: { status: "error", error: errorMessage(cause) } })));
   }
   function chooseModel(provider: AutomationModelProvider, model: AvailableAutomationModel) {
-    const harness = supportsAutomationHarness(provider, configuration.harness) ? configuration.harness
+    // Only Codex runs use the ChatGPT subscription that serves these models.
+    const subscription = catalogs[provider]?.status === "ready" && catalogs[provider].subscription;
+    const harness = subscription ? "codex"
+      : supportsAutomationHarness(provider, configuration.harness) ? configuration.harness
       : provider === "openai" ? "codex" : provider === "anthropic" ? "claude_agent_sdk" : "opencode";
     onChange({ modelProvider: provider, model: model.id, harness });
   }
   const selectedModel = configuration.model ? `${configuration.modelProvider}/${configuration.model}` : "";
+  // The subscription's models run only on Codex, so the other harnesses are hidden.
+  const providerCatalog = catalogs[configuration.modelProvider];
+  const subscriptionModels = providerCatalog?.status === "ready" && providerCatalog.subscription === true;
   return <div className="automationModel">
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
@@ -74,7 +87,7 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
                   <CommandList>
                     {catalog?.status === "ready" ? <>
                       <CommandEmpty>No models found.</CommandEmpty>
-                      <CommandGroup>
+                      <CommandGroup heading={catalog.subscription ? "Your ChatGPT subscription" : undefined}>
                         {catalog.models.map(model => <CommandItem key={model.id} value={`${provider.id}/${model.id}`} keywords={[model.name]} onSelect={() => { chooseModel(provider.id, model); setOpen(false); }}>
                           {model.name}
                           <CheckIcon className={cn("ml-auto", selectedModel === `${provider.id}/${model.id}` ? "opacity-100" : "opacity-0")} />
@@ -99,7 +112,7 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
         <DropdownMenuLabel className="font-normal text-muted-foreground">Harnesses for {configuration.model}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup value={configuration.harness} onValueChange={value => onChange({ harness: value as AutomationConfiguration["harness"] })}>
-          {harnesses.filter(item => supportsAutomationHarness(configuration.modelProvider, item.id)).map(item => <DropdownMenuRadioItem key={item.id} value={item.id}>
+          {harnesses.filter(item => supportsAutomationHarness(configuration.modelProvider, item.id) && (!subscriptionModels || item.id === "codex")).map(item => <DropdownMenuRadioItem key={item.id} value={item.id}>
             <div className="flex flex-col"><span>{item.name}</span><span className="text-xs text-muted-foreground">{item.description}</span></div>
           </DropdownMenuRadioItem>)}
         </DropdownMenuRadioGroup>

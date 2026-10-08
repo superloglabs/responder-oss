@@ -9,6 +9,8 @@ describe("shared automation template presentation", () => {
       .toBe("When Sentry reports a new issue or a regression in a project you choose");
     expect(sharedTriggerDescription({ eventTypes: ["regression"], integrationAccountId: "", kind: "sentry", projectIds: [] }))
       .toBe("When Sentry reports a regression in a project you choose");
+    expect(sharedTriggerDescription({ integrationAccountId: "", kind: "axiom" }))
+      .toBe("When an Axiom monitor sends an alert to its Responder notifier");
     expect(sharedTriggerDescription({ channelIds: [], integrationAccountId: "", kind: "discord" }))
       .toBe("When someone runs /automate in a Discord channel you choose");
     expect(sharedTriggerDescription({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }))

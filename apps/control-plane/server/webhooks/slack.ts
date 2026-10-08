@@ -1312,13 +1312,17 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   }
 
   const author = slackEventAuthor(event);
+  // A thread reply also sent to the channel, as Sentry posts a regression.
+  const broadcast = event.subtype === "thread_broadcast";
   const automationMatches = await findAutomationsForSlackEvent({
     authorIds: author?.ids ?? [],
+    broadcast,
     channelId: event.channel,
     eventType: event.type,
     teamId: callback.data.team_id,
     text: rawMessageBody,
     threadTimestamp: event.thread_ts,
+    timestamp: event.ts,
   });
   if (author) {
     // The trigger editor offers the people and apps seen here as authors to
@@ -1384,15 +1388,19 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
             return;
           }
           // Another app answering in the thread, such as another agent,
-          // would start a run that answers it back, and so on.
+          // would start a run that answers it back, and so on. An app's
+          // message also sent to the channel is a new alert, so it starts a
+          // run of its own in the thread.
           automationThreadOrganizations.add(run.organizationId);
-          console.info(JSON.stringify({
-            automationId: match.automationId,
-            event: "slack_automation_app_reply_ignored",
-            eventId: callback.data.event_id,
-            runId: run.id,
-          }));
-          return;
+          if (!(broadcast && match.startsRun)) {
+            console.info(JSON.stringify({
+              automationId: match.automationId,
+              event: "slack_automation_app_reply_ignored",
+              eventId: callback.data.event_id,
+              runId: run.id,
+            }));
+            return;
+          }
         }
       }
       if (!match.startsRun) return;

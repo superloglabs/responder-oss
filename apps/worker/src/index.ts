@@ -95,6 +95,13 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
+import { sendUsageNotices } from "@responder/core/billing/usage-notices";
+import {
+  creditWaivedUsage,
+  usageWaiverStart,
+  waiveJobUsage,
+} from "@responder/core/billing/usage-waivers";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -142,7 +149,35 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
   }
 }
 
+// An investigation recorded as failed is not charged. A waiver that fails is
+// reported and leaves it charged.
+async function waiveFailedInvestigationUsage(
+  payload: { config: { organizationId: string }; investigationId: string },
+  jobId: string,
+  since: Date,
+): Promise<void> {
+  await waiveJobUsage({
+    since,
+    workload: "investigation",
+    workloadId: payload.investigationId,
+  }).catch((error: unknown) =>
+    reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId,
+      operation: "investigation",
+      organizationId: payload.config.organizationId,
+    }).catch(() => undefined));
+}
+
 let automationUsageBillingPass: Promise<void> | undefined;
+// Each pass rereads a short overlap, since billing times come from the clocks
+// of several processes. A new worker first checks the whole retry window, so
+// a check that was still failing when the last worker stopped is not lost.
+const usageNoticeOverlapMs = 2 * 60 * 1_000;
+let usageNoticesCheckedAt = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
+// Organizations whose last check failed, checked again on the next pass even
+// without further usage.
+let usageNoticeRetries: string[] = [];
 
 // Runs at most one settlement pass at a time; a slow pass delays the next.
 function settleAutomationUsageBilling(): Promise<void> {
@@ -189,6 +224,48 @@ async function runAutomationUsageBillingPass(): Promise<void> {
     if (result.failed > 0) {
       await reportWorkerException(
         new Error(`${result.failed} sandbox or agent usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  try {
+    const result = await creditWaivedUsage();
+    if (result.credited > 0 || result.failed > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "waived_usage_credited",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} waived usage records could not be credited`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  // After waived usage is credited, so a refunded balance is not reported as
+  // used up.
+  try {
+    const startedAt = new Date();
+    const result = await sendUsageNotices(
+      new Date(usageNoticesCheckedAt.getTime() - usageNoticeOverlapMs),
+      usageNoticeRetries,
+    );
+    usageNoticesCheckedAt = startedAt;
+    usageNoticeRetries = result.failedOrganizationIds;
+    if (result.failedOrganizationIds.length > 0) {
+      await reportWorkerException(
+        new Error(
+          `${result.failedOrganizationIds.length} organizations could not be checked for usage notices`,
+        ),
         { operation: "worker" },
       ).catch(() => undefined);
     }
@@ -553,6 +630,7 @@ await boss.work(
     let lastSlackProgressAt = 0;
     let slackTraceItems: SlackInvestigationTraceItem[] = [];
     const assistant = isSlackAssistantRequest(payload.request);
+    const usageSince = await usageWaiverStart();
     try {
       const result = await runInvestigationAgent(
         payload,
@@ -611,6 +689,9 @@ await boss.work(
         payload.investigationId,
         message,
       );
+      if (investigationFailed) {
+        await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+      }
       if (investigationFailed && linear) {
         await linear.fail().catch(() => undefined);
       } else if (investigationFailed) {
@@ -688,6 +769,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
   let lastSlackProgressAt = 0;
   let slackProgressFailureReported = false;
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
+  const usageSince = await usageWaiverStart();
 
   try {
     if (
@@ -891,6 +973,9 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
       payload.investigationId,
       message,
     );
+    if (investigationFailed) {
+      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+    }
     await failInvestigationReplayRequest(payload.investigationId, message);
     await failPendingInvestigationPullRequests(
       payload.investigationId,

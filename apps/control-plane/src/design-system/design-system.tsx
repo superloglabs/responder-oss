@@ -754,11 +754,14 @@ export function Tabs<Value extends string>({
 }
 
 export interface AlertProps extends HTMLAttributes<HTMLDivElement> {
+  // Buttons or links shown at the end of the alert.
+  actions?: ReactNode;
   title: string;
   tone?: "neutral" | "info" | "success" | "warning" | "danger";
 }
 
 export function Alert({
+  actions,
   children,
   className,
   title,
@@ -778,10 +781,11 @@ export function Alert({
       {...props}
     >
       <span aria-hidden="true" className="dsAlert__indicator" />
-      <div>
+      <div className="dsAlert__content">
         <strong>{title}</strong>
         {children ? <div className="dsAlert__body">{children}</div> : null}
       </div>
+      {actions ? <div className="dsAlert__actions">{actions}</div> : null}
     </div>
   );
 }

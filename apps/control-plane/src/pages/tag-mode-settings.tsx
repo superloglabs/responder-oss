@@ -184,10 +184,14 @@ export function TagModeSettingsPage() {
         if (cancelled) return;
         setOptions(loadedOptions);
         setIntegrations(loadedIntegrations);
-        const loaded = loadedConfiguration ?? defaultSlackThreadModeConfiguration({
-          instructions: tagModeInvestigationInstructions,
-          options: loadedOptions,
-        });
+        // Unsaved tag mode isn't running yet, so it shows as off.
+        const loaded = loadedConfiguration ?? {
+          ...defaultSlackThreadModeConfiguration({
+            instructions: tagModeInvestigationInstructions,
+            options: loadedOptions,
+          }),
+          enabled: false,
+        };
         const available = availableTagModeConfiguration(
           assistant && customTagModeInstructions(loaded.instructions) === null
             ? { ...loaded, instructions: tagModeAssistantInstructions }

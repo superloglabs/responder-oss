@@ -34,6 +34,9 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
   const triggerAccountAvailable = options.accounts.some((account) =>
     account.id === trigger.integrationAccountId && account.provider === trigger.kind
   );
+  if (trigger.kind === "axiom") {
+    return { ...trigger, integrationAccountId: triggerAccountAvailable ? trigger.integrationAccountId : "" };
+  }
   const resourceKind = trigger.kind === "sentry" ? "sentry_project" : trigger.kind === "discord" ? "discord_channel" : "slack_channel";
   const resourceIds = new Set(options.resources
     .filter((resource) => triggerAccountAvailable && resource.integrationAccountId === trigger.integrationAccountId && resource.kind === resourceKind)
@@ -48,6 +51,7 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
 export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   if (trigger.kind === "schedule") return true;
   if (!trigger.integrationAccountId) return false;
+  if (trigger.kind === "axiom") return true;
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;
 }
 

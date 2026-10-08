@@ -40,6 +40,7 @@ export function triggerEventLabel(trigger: AutomationListTrigger): string {
     if (trigger.eventTypes.length > 1) return "New issue or regression";
     return trigger.eventTypes[0] === "regression" ? "Issue regression" : "New issue";
   }
+  if (trigger.kind === "axiom") return "Monitor alert";
   return "Command in channel";
 }
 
@@ -63,5 +64,6 @@ export function triggerTitle(trigger: AutomationListTrigger): string {
     if (trigger.eventTypes.length === 2) return "Sentry new issue or regression";
     return trigger.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue";
   }
+  if (trigger.kind === "axiom") return "Axiom monitor alert";
   return trigger.kind === "discord" ? "Discord automation command" : "Schedule";
 }

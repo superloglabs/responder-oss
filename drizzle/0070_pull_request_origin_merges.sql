@@ -1,0 +1,1 @@
+ALTER TABLE "pull_request_origins" ADD COLUMN "merged_at" timestamp with time zone;

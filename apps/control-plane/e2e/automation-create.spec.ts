@@ -103,7 +103,7 @@ test("chooses and configures Sentry inline with only supported options", async (
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
-  await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(4);
+  await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(5);
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).focus();
   await page.screenshot({ path: testInfo.outputPath("automation-choose-trigger.png"), fullPage: true });
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
@@ -126,6 +126,38 @@ test("chooses and configures Sentry inline with only supported options", async (
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
 });
 
+
+test("chooses an Axiom trigger and shows the notifier setup", async ({ page }, testInfo) => {
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: [{ id: accountId, provider: "axiom", displayName: "Axiom" }],
+    resources: [],
+    repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [], skills: [],
+  } }));
+  await page.route(`**/api/integrations/axiom/${accountId}/webhook-config`, (route) => route.fulfill({ json: {
+    authorization: "Bearer axiom-secret",
+    bodyTemplate: '{"action":{{printf "%q" .Action}}}',
+    webhookUrl: `https://responder.example/api/webhooks/axiom/${accountId}`,
+  } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Axiom", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Monitor alert", exact: true }).click();
+  await expect(page.getByText("Axiom monitor alert")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up Axiom notifier" })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("automation-axiom-trigger.png"), fullPage: true });
+  await page.getByRole("button", { name: "Set up Axiom notifier" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add the Responder notifier" });
+  await expect(dialog.getByLabel("Webhook URL")).toHaveValue(`https://responder.example/api/webhooks/axiom/${accountId}`);
+  await expect(dialog.getByLabel("Authorization header value")).toHaveValue("Bearer axiom-secret");
+  await expect(dialog.getByLabel("Body")).toHaveValue('{"action":{{printf "%q" .Action}}}');
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Set up Axiom notifier" }).click();
+  await page.screenshot({ path: testInfo.outputPath("automation-axiom-notifier.png"), fullPage: true });
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toHaveCount(0);
+});
 
 test("searches events and navigates the provider flyout with the keyboard", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1728, height: 997 });
@@ -386,9 +418,11 @@ test("searches channels by name or ID, selects multiple, and refreshes the list"
   await page.screenshot({ path: testInfo.outputPath("automation-event-card.png"), fullPage: true });
 });
 
-test("ignores Slack authors chosen from who posted in the selected channels", async ({ page }, testInfo) => {
+test("includes and ignores Slack authors chosen from who posted in the selected channels", async ({ page }, testInfo) => {
   let requested: string[] = [];
+  let requests = 0;
   await page.route("**/api/automations/slack/*/authors?*", (route) => {
+    requests += 1;
     requested = new URL(route.request().url()).searchParams.getAll("channel");
     return route.fulfill({ json: { authors: [
       { id: "A-DEVIN", kind: "app", name: "Devin" },
@@ -405,11 +439,20 @@ test("ignores Slack authors chosen from who posted in the selected channels", as
   await page.getByRole("button", { name: "Channel", exact: true }).click();
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  const include = page.getByRole("button", { name: "Only messages from", exact: true });
+  await expect(include).toContainText("Everyone");
+  await include.click();
+  await expect.poll(() => requested).toEqual(["C123"]);
+  await page.getByRole("checkbox", { name: "Ada", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
+  await expect(include).toContainText("Ada");
   const ignore = page.getByRole("button", { name: "Ignore messages from", exact: true });
   await expect(ignore).toContainText("No one");
   await ignore.click();
-  await expect.poll(() => requested).toEqual(["C123"]);
   await page.getByRole("checkbox", { name: "Devin (app)", exact: true }).check();
+  // Both pickers share one list of authors, which React's development mode
+  // may load twice.
+  expect(requests).toBeLessThanOrEqual(2);
   await page.getByRole("checkbox", { name: "Qovery (app)", exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors-picker.png"), fullPage: true });
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
@@ -429,7 +472,7 @@ test("ignores Slack authors chosen from who posted in the selected channels", as
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ configuration: {
-    triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], kind: "slack" }],
+    triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], includedAuthors: [{ id: "U-ADA", name: "Ada" }], kind: "slack" }],
   } });
 });
 
@@ -648,9 +691,9 @@ test("starts an automation from a template on the automation list", async ({ pag
   await expect(templates.getByRole("link").first()).toContainText("Answer community questions");
   await page.screenshot({ path: testInfo.outputPath("automation-templates-suggested.png"), fullPage: true });
   await templates.getByRole("radio", { name: "All", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(12);
+  await expect(templates.getByRole("link")).toHaveCount(13);
   await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(4);
+  await expect(templates.getByRole("link")).toHaveCount(5);
   await templates.getByRole("radio", { name: "Scans", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(5);
   await expect(templates.getByText("Schedule · Every hour")).toBeVisible();

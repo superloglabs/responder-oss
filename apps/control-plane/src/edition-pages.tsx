@@ -45,6 +45,10 @@ export function SubprocessorsPage() {
   return <Navigate replace to="/app" />;
 }
 
+export function SupportPage() {
+  return <Navigate replace to="/app" />;
+}
+
 export function EnterprisePage() {
   return <Navigate replace to="/app" />;
 }

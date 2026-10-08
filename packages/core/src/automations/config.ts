@@ -21,6 +21,13 @@ export const automationInferenceSourceSchema = z.enum([
 const externalResourceIdSchema = z.string().trim().min(1).max(255);
 const integrationAccountIdSchema = z.uuid();
 const uniqueIds = (ids: string[]) => new Set(ids).size === ids.length;
+const slackAuthorsSchema = (label: string) => z.array(z.object({
+  id: externalResourceIdSchema
+    .describe("Slack user ID, such as U0123456789, or app ID, such as A0123456789."),
+  name: z.string().trim().min(1).max(255),
+})).max(100)
+  .refine((authors) => uniqueIds(authors.map((author) => author.id)), `${label} must be unique`)
+  .optional();
 
 export const automationTriggerSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -28,17 +35,15 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       .refine(uniqueIds, "Channel IDs must be unique")
       .describe("Slack channel IDs, such as C0123456789."),
     eventMode: z.enum(["mentions", "every_message", "both"])
-      .describe("Run when the app is mentioned, on every new message, or both."),
+      .describe("Run when the app is mentioned, on every new message, or both. A thread reply starts a run only when it mentions the app or is also sent to the channel."),
     // Messages from these people and apps neither start a run nor reach a
     // run as replies. The name is what the trigger editor shows.
-    ignoredAuthors: z.array(z.object({
-      id: externalResourceIdSchema
-        .describe("Slack user ID, such as U0123456789, or app ID, such as A0123456789."),
-      name: z.string().trim().min(1).max(255),
-    })).max(100)
-      .refine((authors) => uniqueIds(authors.map((author) => author.id)), "Ignored authors must be unique")
-      .optional()
+    ignoredAuthors: slackAuthorsSchema("Ignored authors")
       .describe("Slack people and apps whose messages do not start or continue a run."),
+    // When set, only messages from these people and apps start a run. Replies
+    // in a run's thread still reach it.
+    includedAuthors: slackAuthorsSchema("Included authors")
+      .describe("The only Slack people and apps whose messages start a run. Replies in a run's thread still continue it."),
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("slack"),
   }).describe("Runs on Slack messages in the selected channels."),
@@ -58,6 +63,10 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       .describe("Sentry project IDs."),
   }).describe("Runs on new or regressed Sentry issues in the selected projects."),
   z.object({
+    integrationAccountId: integrationAccountIdSchema,
+    kind: z.literal("axiom"),
+  }).describe("Runs when an Axiom monitor sends an alert to the connection's webhook."),
+  z.object({
     channelIds: z.array(externalResourceIdSchema).min(1).max(50)
       .refine(uniqueIds, "Channel IDs must be unique")
       .describe("Discord channel IDs."),
@@ -76,7 +85,7 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   }).describe("Runs on the hour, or at a local time each day or week."),
 ]);
 
-// Where a scheduled or Sentry-triggered automation reports each finished run.
+// Where a scheduled, Sentry, or Axiom automation reports each finished run.
 // Slack only for now.
 export const automationNotificationSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -86,10 +95,13 @@ export const automationNotificationSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-// Slack and Discord runs answer where their event came from. Scheduled and
-// Sentry runs have no reply thread, so they report to notification channels.
+// Slack and Discord runs answer where their event came from. Scheduled,
+// Sentry, and Axiom runs have no reply thread, so they report to notification
+// channels.
 export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigger["kind"] }>): boolean {
-  return triggers.some((trigger) => trigger.kind === "schedule" || trigger.kind === "sentry");
+  return triggers.some((trigger) =>
+    trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "axiom"
+  );
 }
 
 export const automationConfigurationSchema = z
@@ -140,7 +152,7 @@ export const automationConfigurationSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Notifications are only available for scheduled and Sentry automations",
+        message: "Notifications are only available for scheduled, Sentry, and Axiom automations",
         path: ["notifications"],
       });
     }

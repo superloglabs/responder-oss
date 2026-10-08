@@ -55,6 +55,8 @@ import {
   linearAuthorizeUrl,
 } from "../../../../packages/core/src/integrations/linear.js";
 import { langfuseProject } from "./langfuse.js";
+import { exchangeSlackCode, listSlackChannels } from "./slack.js";
+import { startDefaultSlackThreadMode } from "../../../../packages/core/src/db/agents.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
@@ -64,6 +66,7 @@ import {
 
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   disableAgentsWithUnavailableRepositories: vi.fn(),
+  startDefaultSlackThreadMode: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
@@ -178,6 +181,12 @@ vi.mock("../investigations/queue.js", () => ({
 
 vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
+}));
+
+vi.mock("./slack.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./slack.js")>()),
+  exchangeSlackCode: vi.fn(),
+  listSlackChannels: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
@@ -613,6 +622,68 @@ describe("integration callback routing", () => {
       returnTo: undefined,
       routingUrl: "https://responder.example/api/integrations/vercel/callback",
     });
+  });
+
+  function connectSlack() {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: {},
+    });
+    vi.mocked(exchangeSlackCode).mockResolvedValue({
+      access_token: "xoxb-token",
+      app_id: "A123",
+      authed_user: {
+        access_token: "xoxp-token",
+        id: "U123",
+        scope: "search:read",
+        token_type: "user",
+      },
+      bot_user_id: "B123",
+      scope: "app_mentions:read,chat:write",
+      team: { id: "T123", name: "Acme" },
+      token_type: "bot",
+    } as never);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(listSlackChannels).mockResolvedValue([]);
+    return app.request(
+      "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
+    );
+  }
+
+  it("turns tag mode on when Slack connects", async () => {
+    vi.mocked(startDefaultSlackThreadMode).mockResolvedValue();
+
+    const response = await connectSlack();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("status=connected");
+    expect(startDefaultSlackThreadMode).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+    });
+  });
+
+  it("keeps Slack connected when tag mode can't start", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(startDefaultSlackThreadMode).mockRejectedValue(new Error("boom"));
+
+    const response = await connectSlack();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("status=connected");
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      error: "boom",
+      event: "integration_callback_failed",
+      provider: "slack tag mode",
+    }));
   });
 
   it("stores a Vercel installation and synchronizes its projects", async () => {
@@ -2928,12 +2999,13 @@ describe("integration callback routing", () => {
       authorizationUrl: "https://us.posthog.com/oauth/authorize",
       oauth: { codeVerifier: "pkce-verifier" },
     });
-    vi.mocked(updateIntegrationAccountCredentials).mockResolvedValue(true);
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
 
     const response = await app.request(
       "/api/integrations/posthog/start?returnTo=%2Fagents%2Fnew",
     );
 
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
       "https://us.posthog.com/oauth/authorize",
@@ -3000,6 +3072,74 @@ describe("integration callback routing", () => {
       "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
     );
 
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/agents/new" +
+        "?integration=posthog&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(finishCustomMcpOAuth).toHaveBeenCalledWith({
+      authorizationCode: "oauth-code",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oauth: expect.objectContaining({
+          tokens: expect.objectContaining({ access_token: "oauth-access-token" }),
+        }),
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "PostHog",
+        provider: "posthog",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("finishes PostHog OAuth from expiring flow credentials without a pending account", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/agents/new",
+      codeVerifier: JSON.stringify({
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedCredentials: "pending-credentials",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: POSTHOG_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(14);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(getOrganizationIntegrationAccount).not.toHaveBeenCalled();
+    expect(decryptCredentials).toHaveBeenCalledWith("pending-credentials");
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
       "https://responder.example/agents/new" +

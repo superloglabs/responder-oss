@@ -75,16 +75,27 @@ export class AutomationConfigurationError extends Error {
 // ignores the message's author does not watch for it. `authorIds` are the
 // sender's user, bot, and app IDs that Slack sent.
 //
+// "Every message" watches the channel's new messages. A reply in a thread
+// without a run starts one only when it mentions the app, so a thread whose
+// first message an ignored author posted stays quiet until someone asks. A
+// reply also sent to the channel, as Sentry posts a regression, is a new
+// message there.
+//
+// A trigger with included authors starts a run only on their messages.
+//
 // While the organization has tag mode on, tag mode keeps the threads it
 // answers in: a message there starts no run. Elsewhere, tag mode answers a
 // message that mentions the app unless a trigger watches for mentions.
 export async function findAutomationsForSlackEvent(input: {
   authorIds: string[];
+  // Whether the message is a thread reply also sent to the channel.
+  broadcast?: boolean;
   channelId: string;
   eventType: "app_mention" | "message";
   teamId: string;
   text: string;
   threadTimestamp?: string;
+  timestamp: string;
 }): Promise<Array<{
   automationId: string;
   integrationAccountId: string;
@@ -155,12 +166,15 @@ export async function findAutomationsForSlackEvent(input: {
     if (watching.length === 0) return [];
     const mentioned = input.eventType === "app_mention" ||
       (typeof botUserId === "string" && input.text.includes(`<@${botUserId}>`));
+    const threadReply = input.threadTimestamp !== undefined && input.threadTimestamp !== input.timestamp &&
+      !input.broadcast;
     const startsRun = !(row.tagMode && row.tagModeThread) && watching.some((trigger) =>
       trigger.kind === "slack" &&
-      (trigger.eventMode === "both" ||
+      (!trigger.includedAuthors || trigger.includedAuthors.some((author) => input.authorIds.includes(author.id))) &&
+      ((trigger.eventMode === "both" && (input.eventType === "app_mention" || !threadReply)) ||
         (trigger.eventMode === "mentions" && input.eventType === "app_mention") ||
         (trigger.eventMode === "every_message" && input.eventType === "message" &&
-          !(mentioned && row.tagMode)))
+          (!threadReply || mentioned) && !(mentioned && row.tagMode)))
     );
     return [{
       automationId: row.automationId,
@@ -362,6 +376,50 @@ export async function findAutomationsForDiscordCommand(input: {
   );
 }
 
+// Enabled automations with an Axiom trigger on the connection that received
+// the alert.
+export async function findAutomationsForAxiomAlert(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  const rows = await getDatabase()
+    .select({
+      automationId: automations.id,
+      triggers: automationVersions.triggers,
+    })
+    .from(automations)
+    .innerJoin(
+      organizationCapabilities,
+      and(
+        eq(organizationCapabilities.organizationId, automations.organizationId),
+        eq(organizationCapabilities.capability, "automations"),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automations.activeVersionId),
+    )
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.id, integrationAccountId),
+        eq(integrationAccounts.organizationId, automations.organizationId),
+        eq(integrationAccounts.provider, "axiom"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(eq(automations.enabled, true));
+
+  return rows.flatMap((row) =>
+    row.triggers.some((trigger) =>
+      trigger.kind === "axiom" &&
+      trigger.integrationAccountId === integrationAccountId
+    )
+      ? [{ automationId: row.automationId }]
+      : []
+  );
+}
+
 type AutomationScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
 
 export function scheduleExternalEventId(scheduledFor: Date): string {
@@ -482,6 +540,9 @@ async function validateConfigurationResources(
         "integration_not_found",
       );
     }
+    // Axiom alerts arrive at the connection's webhook, so there is no
+    // resource to choose.
+    if (trigger.kind === "axiom") continue;
     const triggerResource = trigger.kind === "sentry"
       ? {
           externalIds: trigger.projectIds,
@@ -1450,7 +1511,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "discord" | "manual" | "schedule" | "sentry" | "slack";
+  provider: "axiom" | "discord" | "manual" | "schedule" | "sentry" | "slack";
   sourceUrl?: string;
   title: string;
 }
