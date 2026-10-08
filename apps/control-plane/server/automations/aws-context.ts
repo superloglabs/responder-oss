@@ -4,6 +4,7 @@ import {
   type AwsTemporaryCredentials,
 } from "../../../../packages/core/src/integrations/aws.js";
 import {
+  AWS_MCP_REQUEST_TIMEOUT_MS,
   createAwsMcpFetch,
   createRefreshingAwsCredentialsProvider,
   isAwsReadOnlyMcpTool,
@@ -23,6 +24,16 @@ export interface AwsContextDependencies {
   ) => () => Promise<AwsTemporaryCredentials>;
   fetch: (input: string | URL, init: RequestInit) => Promise<Response>;
   now: () => number;
+}
+
+// The endpoint is fixed, so requests skip the custom MCP address checks. They
+// get the same time limit as investigations.
+export function awsContextFetch(input: string | URL, init: RequestInit): Promise<Response> {
+  const timeout = AbortSignal.timeout(AWS_MCP_REQUEST_TIMEOUT_MS);
+  return fetch(input, {
+    ...init,
+    signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+  });
 }
 
 const credentialProviders = new Map<string, () => Promise<AwsTemporaryCredentials>>();

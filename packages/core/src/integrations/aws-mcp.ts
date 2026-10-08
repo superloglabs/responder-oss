@@ -11,6 +11,7 @@ import {
 // same read-only tool surface and the same customer role.
 
 const AWS_CREDENTIAL_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
+export const AWS_MCP_REQUEST_TIMEOUT_MS = 60_000;
 const AWS_MCP_IAM_GUARDED_TOOLS = new Set([
   "aws___get_tasks",
   "aws___run_script",

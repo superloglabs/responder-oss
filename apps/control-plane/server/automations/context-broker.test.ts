@@ -48,6 +48,7 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
         secretAccessKey: "aws-secret-access-key",
         sessionToken: "aws-session-token",
       })),
+      fetch: vi.fn(),
       now: () => Date.now(),
     },
     gcp: {
@@ -179,6 +180,7 @@ function fakeAwsMcp() {
             tools: [
               { annotations: { readOnlyHint: true }, name: "aws___search_documentation" },
               { name: "aws___run_script" },
+              { annotations: { readOnlyHint: false }, name: "aws___get_tasks" },
               { annotations: { readOnlyHint: false }, name: "aws___call_aws" },
               { name: "aws___get_presigned_url" },
             ],
@@ -391,7 +393,7 @@ describe("automation context broker", () => {
     it("lists only the tools investigations allow, signed with the role session", async () => {
       vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
       const { app, dependencies } = appFor(awsClaim("list"));
-      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+      dependencies.aws.fetch.mockImplementation(fakeAwsMcp());
 
       const response = await app.request(
         `/api/automation-context-broker/v1/${accountId}`,
@@ -404,11 +406,12 @@ describe("automation context broker", () => {
       expect(body.result.tools.map((tool) => tool.name)).toEqual([
         "aws___search_documentation",
         "aws___run_script",
+        "aws___get_tasks",
       ]);
       expect(dependencies.aws.credentials).toHaveBeenCalledWith(accountId, expect.objectContaining({
         roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
       }));
-      const calls = dependencies.providerFetch.mock.calls as Array<[URL, RequestInit]>;
+      const calls = dependencies.aws.fetch.mock.calls as Array<[URL, RequestInit]>;
       expect(calls.length).toBeGreaterThan(0);
       for (const [url, init] of calls) {
         expect(url.toString()).toBe(awsEndpoint);
@@ -422,7 +425,7 @@ describe("automation context broker", () => {
     it("refuses tools investigations do not allow without calling AWS", async () => {
       vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
       const { app, dependencies } = appFor(awsClaim("refuse"));
-      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+      dependencies.aws.fetch.mockImplementation(fakeAwsMcp());
 
       for (const name of ["aws___call_aws", "aws___get_presigned_url", "not_a_tool"]) {
         const response = await app.request(
@@ -431,7 +434,7 @@ describe("automation context broker", () => {
         );
         expect(response.status).toBe(400);
       }
-      const calls = dependencies.providerFetch.mock.calls as Array<[URL, RequestInit]>;
+      const calls = dependencies.aws.fetch.mock.calls as Array<[URL, RequestInit]>;
       expect(calls.some(([, init]) =>
         new TextDecoder().decode(init.body as Uint8Array).includes("tools/call"))).toBe(false);
     });
@@ -439,7 +442,7 @@ describe("automation context broker", () => {
     it("forwards allowed tool calls signed with the role session", async () => {
       vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
       const { app, dependencies } = appFor(awsClaim("forward"));
-      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+      dependencies.aws.fetch.mockImplementation(fakeAwsMcp());
 
       const response = await app.request(
         `/api/automation-context-broker/v1/${accountId}`,
@@ -462,7 +465,7 @@ describe("automation context broker", () => {
       const text = await response.text();
       expect(text).toContain("queue depth 42");
       expect(text).not.toContain("aws-session-token");
-      const [url, init] = (dependencies.providerFetch.mock.calls as Array<[URL, RequestInit]>).at(-1)!;
+      const [url, init] = (dependencies.aws.fetch.mock.calls as Array<[URL, RequestInit]>).at(-1)!;
       expect(url.toString()).toBe(awsEndpoint);
       expect(new TextDecoder().decode(init.body as Uint8Array)).toContain("aws___run_script");
       const headers = new Headers(init.headers);
@@ -473,7 +476,7 @@ describe("automation context broker", () => {
     it("rejects service paths and methods outside the tool surface", async () => {
       vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
       const { app, dependencies } = appFor(awsClaim("reject"));
-      dependencies.providerFetch.mockImplementation(fakeAwsMcp());
+      dependencies.aws.fetch.mockImplementation(fakeAwsMcp());
 
       const servicePath = await app.request(
         `/api/automation-context-broker/v1/${accountId}/logging`,
@@ -486,7 +489,7 @@ describe("automation context broker", () => {
 
       expect(servicePath.status).toBe(404);
       expect(resources.status).toBe(404);
-      expect(dependencies.providerFetch).not.toHaveBeenCalled();
+      expect(dependencies.aws.fetch).not.toHaveBeenCalled();
     });
   });
 

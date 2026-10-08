@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { AwsTemporaryCredentials } from "./aws.js";
 import {
@@ -87,5 +88,9 @@ describe("AWS MCP request signing", () => {
     );
     expect(headers.get("x-amz-security-token")).toBe("session-token");
     expect(headers.get("x-amz-date")).toMatch(/^\d{8}T\d{6}Z$/u);
+    expect(headers.get("x-amz-content-sha256")).toBe(
+      createHash("sha256").update("{\"jsonrpc\":\"2.0\"}").digest("hex"),
+    );
+    expect(headers.get("authorization")).toMatch(/SignedHeaders=[^,]*x-amz-content-sha256/u);
   });
 });

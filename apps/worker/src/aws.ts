@@ -2,6 +2,7 @@ import { MCPServerStreamableHttp } from "@openai/agents";
 import type { RuntimeAwsConnection } from "@responder/core/db/investigations";
 import { AWS_MANAGED_MCP_ENDPOINT } from "@responder/core/integrations/aws";
 import {
+  AWS_MCP_REQUEST_TIMEOUT_MS,
   createAwsMcpFetch,
   createRefreshingAwsCredentialsProvider,
   isAwsReadOnlyMcpTool,
@@ -115,7 +116,7 @@ export async function createAwsMcpServer(
     clientSessionTimeoutSeconds: 300,
     fetch: signedFetch,
     name: `aws-${connection.accountId}`,
-    timeout: 60_000,
+    timeout: AWS_MCP_REQUEST_TIMEOUT_MS,
     toolFilter: awsReadOnlyToolFilter,
     url: AWS_MANAGED_MCP_ENDPOINT,
     useStructuredContent: true,

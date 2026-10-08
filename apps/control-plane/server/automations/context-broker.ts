@@ -32,6 +32,7 @@ import {
 import { integrationCallbackUrl } from "../integrations/urls.js";
 import {
   awsContextCredentials,
+  awsContextFetch,
   awsContextServer,
   type AwsContextDependencies,
 } from "./aws-context.js";
@@ -69,7 +70,7 @@ const requestSchema = z.object({
 type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
-  aws: Pick<AwsContextDependencies, "credentials" | "now">;
+  aws: AwsContextDependencies;
   freshSentryCredentials: typeof freshSentryCredentials;
   gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
   linear: LinearToolDependencies;
@@ -82,7 +83,7 @@ interface ContextBrokerDependencies {
 }
 
 const defaultDependencies: ContextBrokerDependencies = {
-  aws: { credentials: awsContextCredentials, now: Date.now },
+  aws: { credentials: awsContextCredentials, fetch: awsContextFetch, now: Date.now },
   freshSentryCredentials,
   gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
   linear: defaultLinearToolDependencies,
@@ -241,7 +242,7 @@ function managedContextServer(
     return awsContextServer({
       accountId: claim.account.id,
       connection: awsConnectionCredentialsSchema.parse(credentials),
-      dependencies: { ...dependencies.aws, fetch: dependencies.providerFetch },
+      dependencies: dependencies.aws,
     });
   }
   if (claim.account.provider === "gcp" && isGcpMcpService(service)) {
@@ -493,8 +494,8 @@ export function createAutomationContextBrokerRoutes(
           method: parsed.data.method,
           params: parsed.data.params,
           server,
-          signal: context.req.raw.signal,
         });
+        if (decision.kind === "accept") return new Response(null, { status: 202 });
         if (decision.kind === "list") {
           return context.json(rpcResult(parsed.data.id, { tools: decision.tools }));
         }

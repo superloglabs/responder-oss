@@ -5,6 +5,7 @@ import type { createAutomationToolHandler } from "./automation-actions.js";
 import { AutomationHarnessError } from "./automation-harness.js";
 import { processAutomationRun, type AutomationRunDependencies } from "./automation-run.js";
 import { ModelCatalogError } from "@responder/core/automations/model-catalog";
+import { awsScriptRunnerGuidance } from "@responder/core/investigations/prompt-parts";
 import type { runCodexAutomation } from "./codex-automation-harness.js";
 
 vi.mock("@responder/core/credentials/encryption", () => ({
@@ -326,7 +327,7 @@ describe("automation run processor", () => {
       url: `https://responder.example/api/automation-context-broker/v1/${awsId}`,
     }]);
     expect(prompt).toContain("- 123456789012: the aws_65656565656545658565656565656565 server");
-    expect(prompt).toContain("aws___run_script");
+    expect(prompt).toContain(`If you use aws___run_script, ${awsScriptRunnerGuidance}`);
   });
 
   it("gives runs the workspace tools in workspaces with simplified navigation", async () => {

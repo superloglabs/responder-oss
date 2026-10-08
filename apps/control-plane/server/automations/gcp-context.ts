@@ -3,6 +3,7 @@ import {
   GCP_MCP_SERVICES,
   type GcpConnectionCredentials,
   type GcpMcpService,
+  isGcpReadOnlyMcpTool,
 } from "../../../../packages/core/src/integrations/gcp.js";
 import type { ManagedMcpServer } from "./managed-mcp-context.js";
 
@@ -56,7 +57,7 @@ export function gcpContextServer(input: {
     cacheKey: `gcp:${input.accountId}:${input.connection.sessionName}:${input.service}`,
     fetch: input.dependencies.fetch,
     headers: () => input.dependencies.authHeaders(input.connection),
-    isAllowed: (tool) => tool.annotations?.readOnlyHint === true,
+    isAllowed: isGcpReadOnlyMcpTool,
     label: "Google Cloud MCP",
     now: input.dependencies.now,
     url: GCP_MCP_SERVICES[input.service],

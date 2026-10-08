@@ -3,14 +3,16 @@ import type { RuntimeGcpConnection } from "@responder/core/db/investigations";
 import {
   createGcpAuthClient,
   GCP_MCP_SERVICES,
+  isGcpReadOnlyMcpTool,
 } from "@responder/core/integrations/gcp";
 
 export function gcpReadOnlyToolFilter(
   _context: unknown,
   tool: unknown,
 ): Promise<boolean> {
-  const candidate = tool as { annotations?: { readOnlyHint?: boolean } };
-  return Promise.resolve(candidate.annotations?.readOnlyHint === true);
+  return Promise.resolve(isGcpReadOnlyMcpTool(
+    tool as { annotations?: { readOnlyHint?: boolean } },
+  ));
 }
 
 export function createGcpMcpServers(

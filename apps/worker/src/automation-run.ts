@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import { isAutomationContextProvider } from "@responder/core/automations/context-providers";
 import { gcpMcpServices } from "@responder/core/integrations/gcp";
+import { awsScriptRunnerGuidance } from "@responder/core/investigations/prompt-parts";
 import {
   appendAutomationRunEvent,
   automationRunCancellationRequested,
@@ -413,7 +414,7 @@ function contextInstructions(
       ? [`Connected Google Cloud projects. The gcp_* tools are read-only and reach only these projects; pass the parent where a tool asks for a parent, project, or scope:\n${projects.join("\n")}`]
       : []),
     ...(awsAccounts.length > 0
-      ? [`Connected AWS accounts. Their tools come from AWS's managed MCP server and can read but not change resources. Use the server of the account you need:\n${awsAccounts.join("\n")}\nWhen you use aws___run_script, use top-level await instead of asyncio.run, use exact PascalCase AWS API operation names, and check every nested api_calls result: an outer success status does not mean the nested AWS calls succeeded. Never request secret values.`]
+      ? [`Connected AWS accounts. Their tools come from AWS's managed MCP server and can read but not change resources. Use the server of the account you need:\n${awsAccounts.join("\n")}\nIf you use aws___run_script, ${awsScriptRunnerGuidance} Never request secret values.`]
       : []),
   ];
 }
