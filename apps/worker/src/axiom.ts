@@ -1,24 +1,9 @@
 import { MCPServerStreamableHttp } from "@openai/agents";
 import type { RuntimeAxiomConnection } from "@responder/core/db/investigations";
+import { isAxiomReadOnlyTool } from "@responder/core/integrations/axiom";
 import { safeCustomMcpFetch } from "@responder/core/integrations/custom-mcp";
 
-export const AXIOM_READ_ONLY_MCP_TOOLS = [
-  "checkMonitors",
-  "exportDashboard",
-  "getDashboard",
-  "getDatasetSchema",
-  "getMetricTagValues",
-  "getMonitorHistory",
-  "getSavedQueries",
-  "listDashboards",
-  "listDatasets",
-  "listMetricTags",
-  "listMetrics",
-  "listNotifiers",
-  "queryApl",
-  "queryMetrics",
-  "searchMetrics",
-] as const;
+export { AXIOM_READ_ONLY_MCP_TOOLS } from "@responder/core/integrations/axiom";
 
 export function axiomReadOnlyToolFilter(
   _context: unknown,
@@ -26,8 +11,7 @@ export function axiomReadOnlyToolFilter(
 ): Promise<boolean> {
   const name = (tool as { name?: unknown }).name;
   return Promise.resolve(
-    typeof name === "string" &&
-      (AXIOM_READ_ONLY_MCP_TOOLS as readonly string[]).includes(name),
+    typeof name === "string" && isAxiomReadOnlyTool(name),
   );
 }
 

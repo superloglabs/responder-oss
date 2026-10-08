@@ -34,6 +34,15 @@ export function dash0WebhookUrl(integrationAccountId: string): string {
   ).toString();
 }
 
+export function axiomWebhookUrl(integrationAccountId: string): string {
+  const callbackBaseUrl =
+    process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
+  return new URL(
+    `/api/webhooks/axiom/${encodeURIComponent(integrationAccountId)}`,
+    callbackBaseUrl,
+  ).toString();
+}
+
 export function settingsRedirect(
   returnTo: string,
   provider: string,

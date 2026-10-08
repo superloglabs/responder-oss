@@ -90,6 +90,7 @@ function triggerMeta(run: AutomationRunDetail): string[] {
   if (provider === "sentry") {
     return ["Sentry", attributes.action === "created" ? "New issue" : "Regression", typeof attributes.shortId === "string" ? attributes.shortId : null].filter((value): value is string => Boolean(value));
   }
+  if (provider === "axiom") return ["Axiom", "Monitor alert"];
   if (provider === "discord") return ["Discord", typeof attributes.username === "string" ? `@${attributes.username}` : "Command"];
   if (provider === "slack") return ["Slack", "Message"];
   if (provider === "schedule") {

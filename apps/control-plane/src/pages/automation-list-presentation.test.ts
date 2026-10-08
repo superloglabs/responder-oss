@@ -23,6 +23,7 @@ describe("automation list presentation", () => {
     expect(triggerEventLabel({ eventTypes: ["regression"], integrationAccountId: "a", kind: "sentry", projectIds: [] })).toBe("Issue regression");
     expect(triggerEventLabel({ eventTypes: ["new_issue", "regression"], integrationAccountId: "a", kind: "sentry", projectIds: [] })).toBe("New issue or regression");
     expect(triggerEventLabel({ channelIds: [], integrationAccountId: "a", kind: "discord" })).toBe("Command in channel");
+    expect(triggerEventLabel({ integrationAccountId: "a", kind: "axiom" })).toBe("Monitor alert");
     expect(triggerEventLabel({ frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("Mondays at 09:00");
   });
 

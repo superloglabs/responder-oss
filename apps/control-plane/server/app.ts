@@ -26,6 +26,7 @@ import { queueInvestigation } from "./investigations/queue.js";
 import { getActiveTenant } from "./tenant.js";
 import { githubWebhookRoutes } from "./webhooks/github.js";
 import { sentryWebhookRoutes } from "./webhooks/sentry.js";
+import { axiomWebhookRoutes } from "./webhooks/axiom.js";
 import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 import { discordWebhookRoutes } from "./webhooks/discord.js";
@@ -444,6 +445,7 @@ export const app = instrumentedApp
   .route("/api/webhooks/github", githubWebhookRoutes)
   .route("/api/webhooks/sentry", sentryWebhookRoutes)
   .route("/api/webhooks/dash0", dash0WebhookRoutes)
+  .route("/api/webhooks/axiom", axiomWebhookRoutes)
   .route("/api/webhooks/slack", slackWebhookRoutes)
   .route("/api/webhooks/discord", discordWebhookRoutes)
   .route("/api/webhooks/linear", linearWebhookRoutes)

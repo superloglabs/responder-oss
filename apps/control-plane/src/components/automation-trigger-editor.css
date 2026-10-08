@@ -45,6 +45,8 @@
 .automationTrigger__connectionCopy p { margin: 0; color: #666; font-size: 12px; line-height: 18px; }
 .automationTrigger__connectionActions { display: flex; align-items: center; gap: 8px; }
 .automationTrigger__connectAction { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.automationTrigger__axiom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; width: 100%; }
+.automationTrigger__axiom > p { margin: 0; }
 .automationTrigger__connectError { max-width: 280px; margin: 0; color: #b42318; font-size: 12px; line-height: 18px; }
 .automationConnectionComplete { max-width: 480px; margin: 64px auto; padding: 24px; color: var(--foreground); font-family: var(--ds-font-sans); }
 .automationConnectionComplete h1 { font-size: 18px; }

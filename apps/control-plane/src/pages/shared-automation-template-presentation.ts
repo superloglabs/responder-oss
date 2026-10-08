@@ -15,6 +15,7 @@ export function sharedTriggerDescription(trigger: AutomationTrigger): string {
       : trigger.eventTypes[0] === "regression" ? "a regression" : "a new issue";
     return `When Sentry reports ${events} in a project you choose`;
   }
+  if (trigger.kind === "axiom") return "When an Axiom monitor you choose sends an alert";
   if (trigger.kind === "discord") return "When someone runs /automate in a Discord channel you choose";
   return `${scheduleLabel(trigger)}, in your time zone`;
 }

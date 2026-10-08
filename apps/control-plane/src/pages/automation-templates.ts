@@ -130,6 +130,21 @@ export const automationTemplates: AutomationTemplate[] = [
   },
   {
     category: "bug_triage",
+    connectors: ["axiom", "github"],
+    description: "When an Axiom monitor alerts, query the logs and traces around it, find the cause in your code, and post a summary to Slack.",
+    id: "investigate-axiom-alerts",
+    name: "Investigate Axiom monitor alerts",
+    prompt: [
+      "An Axiom monitor started alerting. The trigger payload has the monitor ID, its message, and the query window.",
+      "Use the Axiom tools to read the monitor and query the datasets it watches around the query window.",
+      "Find what changed: a deploy, a dependency, a traffic change, or a code path in the selected repositories.",
+      "Post a short message with what is failing, who is affected, the likely cause, and the APL queries you used.",
+      "If the alert is noise, such as a threshold that is too tight, say so in one line and suggest a better threshold.",
+    ].join("\n"),
+    triggers: [{ integrationAccountId: "", kind: "axiom" }],
+  },
+  {
+    category: "bug_triage",
     connectors: ["github"],
     description: "When a bug is posted in your bugs channel, reproduce it, open a pull request with a regression test, and reply with the link.",
     id: "fix-slack-bug-reports",
@@ -266,7 +281,9 @@ export function applyAutomationTemplate(configuration: AutomationConfiguration, 
   return { ...configuration, contextAccountIds, prompt: template.prompt, triggers };
 }
 
-const triggerResources: Record<ConnectedAutomationTrigger["kind"], string> = {
+// Axiom alerts arrive at the connection's webhook, so there is nothing to choose.
+const triggerResources: Record<ConnectedAutomationTrigger["kind"], string | null> = {
+  axiom: null,
   discord: "a Discord channel",
   sentry: "a Sentry project",
   slack: "a Slack channel",
@@ -274,7 +291,7 @@ const triggerResources: Record<ConnectedAutomationTrigger["kind"], string> = {
 
 // What the user still chooses after applying a template, for the page notice.
 export function automationTemplateMissingFields(template: Pick<AutomationTemplateContent, "triggers">): string {
-  const resources = [...new Set(template.triggers.flatMap((trigger) => trigger.kind === "schedule" ? [] : [triggerResources[trigger.kind]]))];
+  const resources = [...new Set(template.triggers.flatMap((trigger) => trigger.kind === "schedule" ? [] : [triggerResources[trigger.kind] ?? []].flat()))];
   const fields = [...resources, "a repository"];
   return fields.length > 2 ? `${fields.slice(0, -1).join(", ")}, and a repository` : fields.join(" and ");
 }

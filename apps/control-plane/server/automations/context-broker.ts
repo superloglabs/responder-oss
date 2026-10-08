@@ -14,6 +14,7 @@ import {
 } from "../../../../packages/core/src/credentials/encryption.js";
 import { withIntegrationAccountCredentialLease } from "../../../../packages/core/src/db/integrations.js";
 import { freshSentryCredentials } from "../../../../packages/core/src/db/investigations.js";
+import { parseAxiomCredentials } from "../../../../packages/core/src/integrations/axiom.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
   parseCustomMcpCredentials,
@@ -31,6 +32,7 @@ import {
   refreshLinearOAuthCredentials,
 } from "../../../../packages/core/src/integrations/linear.js";
 import { integrationCallbackUrl } from "../integrations/urls.js";
+import { axiomContextDecision, filterAxiomToolList } from "./axiom-context.js";
 import {
   gcpAuthHeaders,
   gcpContextDecision,
@@ -150,6 +152,36 @@ async function providerTarget(
     return {
       headers: new Headers({ authorization: `Sentry-Bearer ${sentry.accessToken}` }),
       url: url.toString(),
+    };
+  }
+  if (claim.account.provider === "axiom") {
+    const parsed = await dependencies.withCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: claim.account.id,
+      operation: async (encryptedCredentials) => {
+        const current = parseAxiomCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await dependencies.refreshCustomMcp({
+          mcpUrl: current.mcpUrl,
+          oauth: current.oauth,
+          redirectUrl: integrationCallbackUrl("axiom"),
+        });
+        if (oauth === current.oauth) return { value: current };
+        const updated = { ...current, oauth };
+        return {
+          encryptedCredentials: encryptCredentials(updated),
+          value: updated,
+        };
+      },
+      organizationId: claim.organizationId,
+      provider: "axiom",
+    });
+    const accessToken = parsed?.oauth.tokens?.access_token;
+    if (!parsed || typeof accessToken !== "string") return null;
+    return {
+      headers: new Headers({ authorization: `Bearer ${accessToken}` }),
+      url: parsed.mcpUrl,
     };
   }
   if (claim.account.provider === "custom_mcp") {
@@ -447,9 +479,26 @@ export function createAutomationContextBrokerRoutes(
           },
         });
       }
+      if (claim.account.provider === "axiom") {
+        const decision = axiomContextDecision(parsed.data);
+        if (decision.kind === "reject") {
+          return context.json(
+            rpcError(parsed.data.id, decision.code, decision.message),
+            decision.status,
+          );
+        }
+      }
       const target = await providerTarget(claim, dependencies);
       if (!target) {
         return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+      }
+      if (claim.account.provider === "axiom" && parsed.data.method === "tools/list") {
+        return await filterAxiomToolList(await proxyMcpRequest({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          target,
+        }));
       }
       return await proxyMcpRequest({
         dependencies,
