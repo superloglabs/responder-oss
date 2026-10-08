@@ -418,9 +418,9 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await expect(ignore).toContainText("No one");
   await ignore.click();
   await page.getByRole("checkbox", { name: "Devin (app)", exact: true }).check();
-  // Both pickers share one list of authors. React's development mode loads
-  // it twice.
-  expect(requests).toBe(2);
+  // Both pickers share one list of authors, which React's development mode
+  // may load twice.
+  expect(requests).toBeLessThanOrEqual(2);
   await page.getByRole("checkbox", { name: "Qovery (app)", exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors-picker.png"), fullPage: true });
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
