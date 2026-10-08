@@ -30,20 +30,8 @@ export function usageLimitReached(
   summary: AutomationBillingSummary,
 ): (Omit<UsageLimit, "investigations"> & { nextResetAt: number | null }) | null {
   if (!summary.configured) return null;
-  if (
-    !summary.creditOverageAllowed &&
-    !summary.creditUnlimited &&
-    summary.remaining < automationMinimumBalanceDollars
-  ) {
-    // Plans without machine hours pay for sandbox time from the credit, so
-    // every run stops; otherwise runs with the workspace's own key continue.
-    const machinesUseCredit = summary.machineHours === null && sandboxTimeIsBilled();
-    return {
-      balance: "usage_credit",
-      modelRunsOnly: !machinesUseCredit,
-      nextResetAt: summary.nextResetAt,
-    };
-  }
+  // Machine hours first, as in checkWorkAllowance: used-up hours stop every
+  // run, whatever the credit.
   const machineHours = summary.machineHours;
   if (
     machineHours &&
@@ -55,6 +43,20 @@ export function usageLimitReached(
       balance: "machine_hours",
       modelRunsOnly: false,
       nextResetAt: machineHours.nextResetAt,
+    };
+  }
+  if (
+    !summary.creditOverageAllowed &&
+    !summary.creditUnlimited &&
+    summary.remaining < automationMinimumBalanceDollars
+  ) {
+    // Plans without machine hours pay for sandbox time from the credit, so
+    // every run stops; otherwise runs with the workspace's own key continue.
+    const machinesUseCredit = machineHours === null && sandboxTimeIsBilled();
+    return {
+      balance: "usage_credit",
+      modelRunsOnly: !machinesUseCredit,
+      nextResetAt: summary.nextResetAt,
     };
   }
   return null;

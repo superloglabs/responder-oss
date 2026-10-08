@@ -37,14 +37,17 @@ export function billingBanner(summary: BillingBannerSummary): BillingBannerKind 
   }
   const usage = summary.automations;
   if (!usage?.configured) return null;
-  if (!usage.creditOverageAllowed && !usage.creditUnlimited && usage.remaining < minimumCreditDollars) {
-    return "usage";
-  }
+  // Machine hours first, as in the work allowance check.
   const machineHours = usage.machineHours;
-  return machineHours &&
+  if (
+    machineHours &&
     !machineHours.overageAllowed &&
     !machineHours.unlimited &&
     machineHours.remaining < minimumMachineHours
-    ? "machine_hours"
+  ) {
+    return "machine_hours";
+  }
+  return !usage.creditOverageAllowed && !usage.creditUnlimited && usage.remaining < minimumCreditDollars
+    ? "usage"
     : null;
 }

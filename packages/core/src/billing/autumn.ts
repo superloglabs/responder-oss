@@ -604,6 +604,16 @@ export async function checkWorkAllowance(
   const credit = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
   const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
   const machinesUseCredit = !machineHours && sandboxTimeIsBilled();
+  // Machine hours first: when both balances are used up, the workspace's own
+  // model key would not let work start either.
+  if (machineHours && !balanceAllows(machineHours, minimumMachineHours)) {
+    return {
+      allowed: false,
+      exhausted: "machine_hours",
+      machinesUseCredit,
+      nextResetAt: machineHours.nextResetAt ?? null,
+    };
+  }
   if (
     (options.responderModels || machinesUseCredit) &&
     !(credit && balanceAllows(credit, automationMinimumBalanceDollars))
@@ -613,14 +623,6 @@ export async function checkWorkAllowance(
       exhausted: "usage_credit",
       machinesUseCredit,
       nextResetAt: credit?.nextResetAt ?? null,
-    };
-  }
-  if (machineHours && !balanceAllows(machineHours, minimumMachineHours)) {
-    return {
-      allowed: false,
-      exhausted: "machine_hours",
-      machinesUseCredit,
-      nextResetAt: machineHours.nextResetAt ?? null,
     };
   }
   return { ...open, machinesUseCredit };

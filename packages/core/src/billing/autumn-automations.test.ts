@@ -222,6 +222,16 @@ describe("automation billing", () => {
       });
   });
 
+  it("reports machine hours when both balances are used up", async () => {
+    client.customers.getOrCreate.mockResolvedValue(customer(freePlan, {
+      responder_automation_inference: balance({ granted: 5, remaining: 0 }),
+      responder_machine_hours: balance({ remaining: 0, usage: 2 }),
+    }));
+
+    await expect(checkWorkAllowance("organization-1", { responderModels: true }))
+      .resolves.toMatchObject({ allowed: false, exhausted: "machine_hours" });
+  });
+
   it("stops work at the machine hours cap unless the plan bills extra hours", async () => {
     const exhausted = balance({ remaining: 0, usage: 2 });
     client.customers.getOrCreate.mockResolvedValueOnce(customer(freePlan, {

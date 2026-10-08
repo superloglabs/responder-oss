@@ -69,6 +69,13 @@ describe("usageLimitReached", () => {
     }))).toEqual({ balance: "usage_credit", modelRunsOnly: true, nextResetAt: null });
   });
 
+  it("reports machine hours when both balances are used up", () => {
+    expect(usageLimitReached(summary({
+      machineHours: { ...summary().machineHours!, remaining: 0 },
+      remaining: 0,
+    }))).toEqual({ balance: "machine_hours", modelRunsOnly: false, nextResetAt: 1_800_000_100 });
+  });
+
   it("ignores unlimited balances", () => {
     expect(usageLimitReached(summary({
       creditUnlimited: true,
