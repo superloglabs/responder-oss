@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UncreditedUsage } from "../db/usage-waivers.js";
-import { creditWaivedUsage, waiveAutomationRunUsage, waiveJobUsage } from "./usage-waivers.js";
+import {
+  creditWaivedUsage,
+  usageWaiverStart,
+  waiveAutomationRunUsage,
+  waiveJobUsage,
+} from "./usage-waivers.js";
 
 function usage(overrides: Partial<UncreditedUsage> = {}): UncreditedUsage {
   return {
@@ -31,6 +36,15 @@ function dependencies() {
 describe("usage waivers", () => {
   beforeEach(() => vi.stubEnv("BILLING_ENABLED", "true"));
   afterEach(() => vi.unstubAllEnvs());
+
+  it("starts a waiver at the database's time, or this process's when it cannot answer", async () => {
+    const databaseTime = new Date("2026-10-07T11:00:00.000Z");
+    await expect(usageWaiverStart(vi.fn().mockResolvedValue(databaseTime))).resolves.toBe(databaseTime);
+
+    const before = Date.now();
+    const fallback = await usageWaiverStart(vi.fn().mockRejectedValue(new Error("offline")));
+    expect(fallback.getTime()).toBeGreaterThanOrEqual(before);
+  });
 
   it("retries a run turn's waiver through a short database outage", async () => {
     const input = {

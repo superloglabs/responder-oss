@@ -150,6 +150,8 @@ function dependencies() {
       update: vi.fn().mockResolvedValue(undefined),
     },
     updateEvent: vi.fn().mockResolvedValue(undefined),
+    usageWaiverStart: vi.fn<AutomationRunDependencies["usageWaiverStart"]>()
+      .mockResolvedValue(new Date("2026-09-22T18:59:59.000Z")),
     waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(true),
     workspaceTools: vi.fn<AutomationRunDependencies["workspaceTools"]>(() => []),
   };
@@ -1473,7 +1475,7 @@ describe("automation run processor", () => {
     expect(deps.waiveUsage).toHaveBeenCalledWith({
       leaseId: claimedRun().leaseId,
       runId,
-      since: deps.now(),
+      since: new Date("2026-09-22T18:59:59.000Z"),
     });
   });
 

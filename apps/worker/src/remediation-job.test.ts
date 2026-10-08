@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RemediationJob } from "@responder/core/jobs";
+import { UsageAllowanceExhaustedError } from "./agent-usage.js";
 import { processRemediationJob } from "./remediation-job.js";
 
 const payload: RemediationJob = {
@@ -32,6 +33,8 @@ const payload: RemediationJob = {
 };
 
 const waiveUsage = vi.fn().mockResolvedValue(undefined);
+const usageSince = new Date("2026-08-17T12:00:00.000Z");
+const usageWaiverStart = vi.fn().mockResolvedValue(usageSince);
 
 describe("remediation job terminal state", () => {
   afterEach(() => {
@@ -53,6 +56,7 @@ describe("remediation job terminal state", () => {
       processRemediationJob("job-id", payload, {}, {
         failRequest,
         reportException,
+        usageWaiverStart,
         waiveUsage,
         runRemediation: vi.fn().mockRejectedValue(remediationError),
       }),
@@ -98,13 +102,14 @@ describe("remediation job terminal state", () => {
       processRemediationJob("job-id", payload, {}, {
         failRequest,
         reportException,
+        usageWaiverStart,
         waiveUsage,
         runRemediation: vi.fn().mockRejectedValue(new Error("diff failed")),
       }),
     ).resolves.toEqual({ requestId: payload.remediationRequestId });
 
     expect(waiveUsage).toHaveBeenCalledWith({
-      since: expect.any(Date),
+      since: usageSince,
       workload: "remediation",
       workloadId: payload.remediationRequestId,
     });
@@ -112,6 +117,20 @@ describe("remediation job terminal state", () => {
       requestId: payload.remediationRequestId,
     }));
     expect(failRequest).toHaveBeenCalledWith(payload.remediationRequestId, "diff failed");
+  });
+
+  it("keeps the usage of work the allowance stopped charged", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await processRemediationJob("job-id", payload, {}, {
+      failRequest: vi.fn().mockResolvedValue(undefined),
+      reportException: vi.fn().mockResolvedValue(undefined),
+      usageWaiverStart,
+      waiveUsage,
+      runRemediation: vi.fn().mockRejectedValue(new UsageAllowanceExhaustedError()),
+    });
+
+    expect(waiveUsage).not.toHaveBeenCalled();
   });
 
   it("fails the queue job when the terminal database write is unavailable", async () => {
@@ -125,6 +144,7 @@ describe("remediation job terminal state", () => {
       processRemediationJob("job-id", payload, {}, {
         failRequest: vi.fn().mockRejectedValue(databaseError),
         reportException,
+        usageWaiverStart,
         waiveUsage,
         runRemediation: vi.fn().mockRejectedValue(new Error("diff failed")),
       }),
@@ -150,6 +170,7 @@ describe("remediation job terminal state", () => {
       processRemediationJob("job-id", payload, {}, {
         failRequest,
         reportException,
+        usageWaiverStart,
         waiveUsage,
         runRemediation: vi.fn().mockResolvedValue("https://example.com/pull/1"),
       }),

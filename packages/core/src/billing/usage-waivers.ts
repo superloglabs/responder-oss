@@ -2,6 +2,7 @@ import {
   listUncreditedUsage,
   markUsageCreditAttempted,
   markUsageCredited,
+  usageClockNow,
   waiveAutomationRunUsage as waiveAutomationRunUsageRows,
   waiveJobUsage as waiveJobUsageRows,
   type UncreditedUsage,
@@ -26,6 +27,15 @@ async function withRetry<T>(attempt: () => Promise<T>, delaysMs: number[]): Prom
     }
   }
   return attempt();
+}
+
+// The start time for a later waiver of work starting now, from the database
+// clock that usage times use. Falls back to this process's clock when the
+// database cannot answer.
+export async function usageWaiverStart(
+  clock: typeof usageClockNow = usageClockNow,
+): Promise<Date> {
+  return clock().catch(() => new Date());
 }
 
 // Waives the usage of an automation run turn that started at `since`. Does

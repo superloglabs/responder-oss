@@ -95,7 +95,11 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
-import { creditWaivedUsage, waiveJobUsage } from "@responder/core/billing/usage-waivers";
+import {
+  creditWaivedUsage,
+  usageWaiverStart,
+  waiveJobUsage,
+} from "@responder/core/billing/usage-waivers";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -593,7 +597,7 @@ await boss.work(
     let lastSlackProgressAt = 0;
     let slackTraceItems: SlackInvestigationTraceItem[] = [];
     const assistant = isSlackAssistantRequest(payload.request);
-    const usageSince = new Date();
+    const usageSince = await usageWaiverStart();
     try {
       const result = await runInvestigationAgent(
         payload,
@@ -730,7 +734,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
   let lastSlackProgressAt = 0;
   let slackProgressFailureReported = false;
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
-  const usageSince = new Date();
+  const usageSince = await usageWaiverStart();
 
   try {
     if (

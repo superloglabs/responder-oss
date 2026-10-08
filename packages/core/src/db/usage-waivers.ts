@@ -25,6 +25,15 @@ export interface UncreditedUsage {
   properties: Record<string, string>;
 }
 
+// The database's current time. Usage times come from the database clock, so
+// a waiver's start time must too.
+export async function usageClockNow(): Promise<Date> {
+  const result = await getDatabase().execute<{ now: Date | string }>(sql`select now() as now`);
+  const now = result.rows[0]?.now;
+  if (now === undefined) throw new Error("The database did not return its time");
+  return new Date(now);
+}
+
 // Waives the Responder-funded requests and sandbox time an automation run
 // used since `since`, while the caller still holds the run's lease, so a
 // worker that lost the run cannot waive the turn that replaced it. Returns
