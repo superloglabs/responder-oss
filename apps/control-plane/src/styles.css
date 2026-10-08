@@ -6265,7 +6265,8 @@ button:disabled {
   font-weight: 600;
 }
 
-.providerMark--linear svg {
+.providerMark--linear svg,
+.providerMark--vercel svg {
   width: 15px;
   height: 15px;
 }

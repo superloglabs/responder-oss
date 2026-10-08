@@ -297,10 +297,58 @@ function LangfuseLogo() {
   );
 }
 
+function Dash0Logo() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path
+        d="M0 4.421c4.883 0 8.842 3.393 8.842 7.579S4.883 19.579 0 19.579zm16.421 0C20.608 4.421 24 7.814 24 12s-3.392 7.579-7.579 7.579S8.842 16.186 8.842 12s3.393-7.579 7.579-7.579"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function PosthogLogo() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="providerGlyph__logo"
+      focusable="false"
+      viewBox="0 0 52 28"
+    >
+      <path
+        d="M10.74 7.16 4.54.8A2.66 2.66 0 0 0 0 2.66V7.5l10.74 11.18zM9.19 28h1.55v-9.32L0 7.5v10.73zM0 25.41A2.6 2.6 0 0 0 2.58 28H9.2L0 18.23z"
+        fill="#1d4aff"
+      />
+      <path
+        d="M10.74 2.66v4.5l11.22 11.52V7.63L15.3.8a2.66 2.66 0 0 0-4.56 1.86M10.74 28h8.96l-8.96-9.32zm0-20.84v11.52L19.7 28h2.26v-9.32z"
+        fill="#f54e00"
+      />
+      <path
+        d="M21.96 2.67v4.96l11.3 11.6h.02V7.75L26.63.85a2.8 2.8 0 0 0-2-.85 2.67 2.67 0 0 0-2.67 2.67m0 4.96v11.05L31.03 28h2.25v-8.75zm0 20.37h9.07l-9.07-9.32z"
+        fill="#f9bd2b"
+      />
+      <path
+        d="M51.66 25.22A1.9 1.9 0 0 0 50 23.33l-.34-.04c-1-.13-1.94-.6-2.65-1.33L33.28 7.75V28H49a2.66 2.66 0 0 0 2.67-2.67zM39.2 23.54h-.09a1.78 1.78 0 1 1 .1 0"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function VercelLogo() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path d="m12 1.608 12 20.784H0Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 const providerLogos = {
   aws: AwsLogo,
   axiom: AxiomLogo,
   clickstack: ClickStackLogo,
+  dash0: Dash0Logo,
   datadog: DatadogLogo,
   discord: DiscordLogo,
   github: GithubLogo,
@@ -308,10 +356,12 @@ const providerLogos = {
   grafana: GrafanaLogo,
   langfuse: LangfuseLogo,
   linear: LinearLogo,
+  posthog: PosthogLogo,
   sentry: SentryLogo,
   slack: SlackLogo,
   supabase: SupabaseLogo,
   upstash: UpstashLogo,
+  vercel: VercelLogo,
 } as const;
 
 function ProviderGlyphContent({ provider }: { provider: ProviderGlyphId }) {

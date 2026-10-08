@@ -15,13 +15,16 @@ describe("ProviderGlyph", () => {
   it.each([
     ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],
+    ["dash0", "Dash0", "D0"],
     ["datadog", "Datadog", "DD"],
     ["discord", "Discord", "DC"],
     ["github", "GitHub", "GH"],
     ["grafana", "Grafana", "GF"],
     ["linear", "Linear", "LI"],
+    ["posthog", "PostHog", "PH"],
     ["sentry", "Sentry", "SE"],
     ["slack", "Slack", "SL"],
+    ["vercel", "Vercel", "▲"],
   ] as const)(
     "renders the %s logo and announces the provider",
     (provider, label, text) => {
@@ -60,6 +63,17 @@ describe("ProviderGlyph", () => {
     expect(markup).toContain('class="providerGlyph__logo"');
     expect(markup).toContain("#00E9A3");
     expect(markup).not.toContain(">UP</span>");
+  });
+
+  it("renders the official PostHog mark in its brand colors", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "posthog" }),
+    );
+
+    expect(markup).toContain('class="providerGlyph__logo"');
+    expect(markup).toContain("#1d4aff");
+    expect(markup).toContain("#f54e00");
+    expect(markup).toContain("#f9bd2b");
   });
 
   it("keeps a text glyph for custom MCP servers", () => {
