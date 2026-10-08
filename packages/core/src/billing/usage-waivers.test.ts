@@ -134,15 +134,16 @@ describe("usage waivers", () => {
     expect(deps.markCredited).toHaveBeenCalledWith("sandbox", "sandbox-usage-1");
   });
 
-  it("marks usage credited without reporting when billing is disabled", async () => {
+  it("leaves waived usage uncredited while billing is disabled", async () => {
     vi.stubEnv("BILLING_ENABLED", "false");
     const deps = dependencies();
     deps.list.mockResolvedValue([usage()]);
 
-    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 0 });
+    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 0, failed: 0 });
 
+    expect(deps.list).not.toHaveBeenCalled();
     expect(deps.creditCharge).not.toHaveBeenCalled();
-    expect(deps.markCredited).toHaveBeenCalledWith("automation_model", "usage-1");
+    expect(deps.markCredited).not.toHaveBeenCalled();
   });
 
   it("records failed credits so the next pass tries newer ones first", async () => {

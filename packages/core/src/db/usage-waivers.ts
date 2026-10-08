@@ -108,7 +108,8 @@ export async function waiveJobUsage(input: {
 
 // Waived usage that was settled and not yet credited, waived after
 // `waivedAfter`. Never-attempted rows come first so rows that keep failing
-// cannot starve newer ones.
+// cannot starve newer ones, and the kinds alternate so failures of one kind
+// cannot starve the others.
 export async function listUncreditedUsage(input: {
   limit: number;
   waivedAfter: Date;
@@ -178,8 +179,8 @@ export async function listUncreditedUsage(input: {
       )
       .limit(input.limit),
   ]);
-  return [
-    ...automationRows.map((row): UncreditedUsage => ({
+  const kinds = [
+    automationRows.map((row): UncreditedUsage => ({
       balance: "usage_credit",
       chargeMicros: row.chargeMicros,
       hours: 0,
@@ -188,7 +189,7 @@ export async function listUncreditedUsage(input: {
       organizationId: row.organizationId,
       properties: { model: row.model, runId: row.runId },
     })),
-    ...agentRows.map((row): UncreditedUsage => ({
+    agentRows.map((row): UncreditedUsage => ({
       balance: "usage_credit",
       chargeMicros: row.chargeMicros,
       hours: 0,
@@ -202,7 +203,7 @@ export async function listUncreditedUsage(input: {
         workloadId: row.workloadId,
       },
     })),
-    ...sandboxRows.map((row): UncreditedUsage => ({
+    sandboxRows.map((row): UncreditedUsage => ({
       balance: row.balance,
       chargeMicros: row.chargeMicros,
       hours: Math.max(0, Number(row.seconds)) / 3_600,
@@ -212,6 +213,14 @@ export async function listUncreditedUsage(input: {
       properties: { kind: "sandbox", workload: row.workload, workloadId: row.workloadId },
     })),
   ];
+  const usage: UncreditedUsage[] = [];
+  for (let index = 0; index < input.limit; index += 1) {
+    for (const rows of kinds) {
+      const row = rows[index];
+      if (row) usage.push(row);
+    }
+  }
+  return usage;
 }
 
 const usageTables = {

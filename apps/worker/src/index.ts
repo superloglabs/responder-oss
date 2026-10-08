@@ -147,8 +147,8 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
   }
 }
 
-// A failed investigation is not charged. A waiver that fails is reported and
-// leaves it charged.
+// An investigation recorded as failed is not charged. A waiver that fails is
+// reported and leaves it charged.
 async function waiveFailedInvestigationUsage(
   payload: { config: { organizationId: string }; investigationId: string },
   jobId: string,
@@ -645,7 +645,6 @@ await boss.work(
       }
       return { investigationId: payload.investigationId };
     } catch (error) {
-      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
       const message = safeInvestigationError(error);
       await reportWorkerException(error, {
         investigationId: payload.investigationId,
@@ -657,6 +656,9 @@ await boss.work(
         payload.investigationId,
         message,
       );
+      if (investigationFailed) {
+        await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+      }
       if (investigationFailed && linear) {
         await linear.fail().catch(() => undefined);
       } else if (investigationFailed) {
@@ -927,7 +929,6 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
     );
     return { investigationId: payload.investigationId };
   } catch (error) {
-    await waiveFailedInvestigationUsage(payload, job.id, usageSince);
     const message = safeInvestigationError(error);
     await reportWorkerException(error, {
       investigationId: payload.investigationId,
@@ -939,6 +940,9 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
       payload.investigationId,
       message,
     );
+    if (investigationFailed) {
+      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+    }
     await failInvestigationReplayRequest(payload.investigationId, message);
     await failPendingInvestigationPullRequests(
       payload.investigationId,

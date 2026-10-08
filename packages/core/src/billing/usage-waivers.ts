@@ -79,7 +79,7 @@ interface CreditDependencies {
 }
 
 async function creditUsage(usage: UncreditedUsage, dependencies: CreditDependencies): Promise<void> {
-  if (billingIsEnabled() && usage.balance !== null) {
+  if (usage.balance !== null) {
     const credit = {
       idempotencyKey: `${creditKeyPrefixes[usage.kind]}:${usage.id}`,
       organizationId: usage.organizationId,
@@ -102,7 +102,7 @@ const retryWindowMs = 23 * 60 * 60_000;
 const passDeadlineMs = 10 * 60_000;
 
 // Credits waived usage that has been settled. Failed credits are retried by
-// the next pass.
+// the next pass. While billing is disabled, waived usage stays uncredited.
 export async function creditWaivedUsage(
   dependencies: CreditDependencies & {
     list: typeof listUncreditedUsage;
@@ -117,6 +117,7 @@ export async function creditWaivedUsage(
     now: Date.now,
   },
 ): Promise<{ credited: number; failed: number }> {
+  if (!billingIsEnabled()) return { credited: 0, failed: 0 };
   const now = dependencies.now();
   const usage = await dependencies.list({
     limit: 200,
