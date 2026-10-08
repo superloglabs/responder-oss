@@ -102,7 +102,7 @@ describe("automation run queue", () => {
   it("fails a reopened run whose reply cannot be queued", async () => {
     db.addAutomationRunReply.mockResolvedValue(true);
     db.reopenAutomationRun.mockResolvedValue("organization-2");
-    send.mockRejectedValue(new Error("queue down"));
+    send.mockRejectedValueOnce(new Error("queue down"));
 
     await expect(queueAutomationRunReply({
       message: { ...message, externalEventId: "C1:1.4" },
@@ -121,7 +121,7 @@ describe("automation run queue", () => {
       organizationId: "organization-1",
       runId: "run-3",
     });
-    send.mockRejectedValue(new Error("queue down"));
+    send.mockRejectedValueOnce(new Error("queue down"));
 
     await expect(queueAutomationRun({
       automationId: "automation-1",
