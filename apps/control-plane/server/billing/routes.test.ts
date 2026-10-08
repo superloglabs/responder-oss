@@ -1,9 +1,15 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BILLING_REQUESTS_PER_MINUTE, billingRoutes } from "./routes.js";
+import {
+  BILLING_REQUESTS_PER_MINUTE,
+  BILLING_SUMMARY_TTL_MS,
+  billingRoutes,
+} from "./routes.js";
 
 const mocks = vi.hoisted(() => ({
   changeAutomationPlan: vi.fn(),
+  createBillingPortal: vi.fn(),
+  createPayAsYouGoCheckout: vi.fn(),
   getBillingSummary: vi.fn(),
   organizationHasCapability: vi.fn(),
   tenant: vi.fn(),
@@ -13,8 +19,8 @@ vi.mock("../tenant.js", () => ({ getActiveTenant: mocks.tenant }));
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
   cancelAutomationPlan: vi.fn(),
   changeAutomationPlan: mocks.changeAutomationPlan,
-  createBillingPortal: vi.fn(),
-  createPayAsYouGoCheckout: vi.fn(),
+  createBillingPortal: mocks.createBillingPortal,
+  createPayAsYouGoCheckout: mocks.createPayAsYouGoCheckout,
   getAutomationBillingSummary: vi.fn(),
   getBillingSummary: mocks.getBillingSummary,
   isAutomationPaidPlanId: (value: unknown) => value === "automation_pro",
@@ -53,6 +59,7 @@ function signIn() {
 
 describe("billing routes", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     vi.restoreAllMocks();
     mocks.organizationHasCapability.mockResolvedValue(false);
@@ -69,6 +76,54 @@ describe("billing routes", () => {
     expect(responses.map((response) => response.status)).toEqual(Array(20).fill(200));
     expect(await responses[0]?.json()).toEqual({ ...summary, automations: null, usageBased: false });
     expect(mocks.getBillingSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps sharing a load that takes longer than the cache window", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    signIn();
+    let finish: (value: typeof summary) => void = () => undefined;
+    mocks.getBillingSummary.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+
+    const first = app.request("/api/billing");
+    await vi.waitFor(() => expect(mocks.getBillingSummary).toHaveBeenCalledTimes(1));
+    vi.advanceTimersByTime(BILLING_SUMMARY_TTL_MS + 1_000);
+    const second = app.request("/api/billing");
+    finish(summary);
+
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    expect(mocks.getBillingSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads again after the summary has been ready for the cache window", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    signIn();
+    mocks.getBillingSummary.mockResolvedValue(summary);
+
+    await app.request("/api/billing");
+    vi.advanceTimersByTime(BILLING_SUMMARY_TTL_MS);
+    await app.request("/api/billing");
+
+    expect(mocks.getBillingSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads again after a checkout or portal session starts", async () => {
+    signIn();
+    mocks.getBillingSummary.mockResolvedValue(summary);
+    mocks.createPayAsYouGoCheckout.mockResolvedValue("https://checkout.example.com");
+    mocks.createBillingPortal.mockResolvedValue("https://portal.example.com");
+
+    await app.request("/api/billing");
+    await app.request("/api/billing/checkout", { method: "POST" });
+    await app.request("/api/billing");
+    await app.request("/api/billing/portal", { method: "POST" });
+    await app.request("/api/billing");
+
+    expect(mocks.getBillingSummary).toHaveBeenCalledTimes(3);
   });
 
   it("loads again after a failed summary", async () => {
@@ -104,13 +159,17 @@ describe("billing routes", () => {
   it("limits how often a member can call billing", async () => {
     signIn();
     mocks.getBillingSummary.mockResolvedValue(summary);
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     for (let count = 0; count < BILLING_REQUESTS_PER_MINUTE; count += 1) {
       expect((await app.request("/api/billing")).status).toBe(200);
     }
     const limited = await app.request("/api/billing");
+    await app.request("/api/billing");
+    await app.request("/api/billing");
 
+    // One log line per window, however many requests are refused.
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(await limited.json()).toEqual({ error: "Too many requests" });

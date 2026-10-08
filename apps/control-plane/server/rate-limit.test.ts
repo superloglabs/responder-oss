@@ -9,7 +9,12 @@ describe("rate limiter", () => {
     expect(limiter.take("user")).toEqual({ allowed: true });
     expect(limiter.take("user")).toEqual({ allowed: true });
     time = 15_000;
-    expect(limiter.take("user")).toEqual({ allowed: false, retryAfterSeconds: 45 });
+    expect(limiter.take("user")).toEqual({
+      allowed: false,
+      firstRefusal: true,
+      retryAfterSeconds: 45,
+    });
+    expect(limiter.take("user")).toMatchObject({ allowed: false, firstRefusal: false });
 
     time = 60_000;
     expect(limiter.take("user")).toEqual({ allowed: true });

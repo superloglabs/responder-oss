@@ -91,6 +91,7 @@ async function loadBillingSummary(tenant: ActiveTenant) {
 
 type BillingSummaryResponse = Awaited<ReturnType<typeof loadBillingSummary>>;
 
+// A load in progress has no expiry. The window starts when it finishes.
 const summaries = new Map<
   string,
   { expiresAt: number; summary: Promise<BillingSummaryResponse> }
@@ -105,14 +106,19 @@ function cachedBillingSummary(tenant: ActiveTenant): Promise<BillingSummaryRespo
   if (cached) return cached.summary;
 
   const summary = loadBillingSummary(tenant);
-  const entry = { expiresAt: now + BILLING_SUMMARY_TTL_MS, summary };
+  const entry = { expiresAt: Number.POSITIVE_INFINITY, summary };
   summaries.set(tenant.organizationId, entry);
-  // A failed load is retried on the next request.
-  summary.catch(() => {
-    if (summaries.get(tenant.organizationId) === entry) {
-      summaries.delete(tenant.organizationId);
-    }
-  });
+  summary.then(
+    () => {
+      entry.expiresAt = Date.now() + BILLING_SUMMARY_TTL_MS;
+    },
+    () => {
+      // A failed load is retried on the next request.
+      if (summaries.get(tenant.organizationId) === entry) {
+        summaries.delete(tenant.organizationId);
+      }
+    },
+  );
   return summary;
 }
 
@@ -129,14 +135,17 @@ export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
     }
     const limit = billingRequests.take(tenant.user.id);
     if (!limit.allowed) {
-      console.warn(
-        JSON.stringify({
-          event: "billing_rate_limited",
-          organizationId: tenant.organizationId,
-          pathname: context.req.path,
-          userId: tenant.user.id,
-        }),
-      );
+      // One line per member and window, however many requests are refused.
+      if (limit.firstRefusal) {
+        console.warn(
+          JSON.stringify({
+            event: "billing_rate_limited",
+            organizationId: tenant.organizationId,
+            pathname: context.req.path,
+            userId: tenant.user.id,
+          }),
+        );
+      }
       context.header("retry-after", String(limit.retryAfterSeconds));
       return context.json({ error: "Too many requests" }, 429);
     }
@@ -160,6 +169,8 @@ export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
         appUrl(context.req.url, "/settings/billing?status=success"),
         customerData(tenant.user),
       );
+      // The page reads billing again when the person returns from checkout.
+      summaries.delete(tenant.organizationId);
       return context.json({ url });
     } catch (error) {
       console.error("Unable to create billing checkout", error);
@@ -212,6 +223,7 @@ export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
         tenant.organizationId,
         appUrl(context.req.url, "/settings/billing"),
       );
+      summaries.delete(tenant.organizationId);
       return context.json({ url });
     } catch (error) {
       console.error("Unable to create billing portal", error);
