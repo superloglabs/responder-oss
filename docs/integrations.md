@@ -142,6 +142,9 @@ connection as a connector to give runs search, channel history, and posting in
 its channels. The same applies to other triggers: a Sentry connection gives
 Sentry tools only when it is also a connector.
 
+A person's reply in a run's thread continues the run only when it mentions the
+app. Other replies are left to the people in the thread.
+
 An automation's agent can add up to five buttons to a Slack message it posts,
 through `post_notification` or `slack_post_message`. Each button carries the
 run ID, and the run's action attempt for the message records the button labels

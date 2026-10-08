@@ -1346,7 +1346,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     );
   }
   // A person replying in a thread that an automation is working in continues
-  // that run.
+  // that run when the reply mentions the app.
   const reply = event.thread_ts && author?.kind === "person"
     ? {
         authorId: author.id,
@@ -1373,6 +1373,19 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         // A redelivery of the message that started this run is not a reply;
         // starting the run again finds it as a duplicate.
         if (run && run.triggerTimestamp !== event.ts) {
+          // People talk to each other in the thread, so a reply that does not
+          // mention the app is left to them.
+          if (reply && !match.mentioned) {
+            automationThreadOrganizations.add(run.organizationId);
+            console.info(JSON.stringify({
+              automationId: match.automationId,
+              event: "slack_automation_reply_ignored",
+              eventId: callback.data.event_id,
+              reason: "not_mentioned",
+              runId: run.id,
+            }));
+            return;
+          }
           if (reply) {
             // A reply that fails to queue leaves the run failed, so the
             // organization's agents may still answer it.
