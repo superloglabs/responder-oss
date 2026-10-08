@@ -15,6 +15,8 @@ const connectionType = z.enum(["oauth", "secure_setup"]);
 export const integrationConnectionOperations = [
   defineOperation({
     name: "list_available_integrations",
+    // Reads the fixed local catalog and configuration, without contacting providers.
+    openWorld: false,
     summary: "Find integrations to connect",
     description: "Lists available providers and whether they support a direct consent link or require secure setup. Ask which integrations the user's goal needs, then call start_integration_connection for one provider at a time. This lists capabilities, not connected accounts; use list_integrations to check connections.",
     method: "GET",

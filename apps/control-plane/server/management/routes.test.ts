@@ -666,7 +666,7 @@ describe("management MCP server", () => {
     for (const name of ["refresh_integrations", "list_sentry_environments", "create_automation", "update_automation", "start_automation_run", "send_automation_run_message", "update_tag_mode", "list_included_models", "test_model_credential", "list_model_credential_models", "start_integration_connection"]) {
       expect(body.result.tools.find((tool) => tool.name === name)?.annotations.openWorldHint).toBe(true);
     }
-    for (const name of ["get_workspace", "list_integrations", "get_automation", "list_automations"]) {
+    for (const name of ["get_workspace", "list_integrations", "get_automation", "list_automations", "list_available_integrations"]) {
       expect(body.result.tools.find((tool) => tool.name === name)?.annotations)
         .toMatchObject({ openWorldHint: false, readOnlyHint: true, destructiveHint: false });
     }
