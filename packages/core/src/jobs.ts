@@ -23,6 +23,10 @@ export const remediationQueue = "responder-remediations-v2";
 // this queue has no per-automation ordering and one busy automation never
 // holds back another run.
 export const automationRunQueue = "responder-automation-runs-v2";
+// A run waits on its sandbox for most of its life, so one worker holds
+// several. A burst of alerts from one workspace queued behind two slots held
+// every other workspace's runs for up to half an hour.
+export const automationRunLocalConcurrency = 8;
 // Per-automation strict FIFO queue. Remove it and its drain after 2026-10-03,
 // when pg-boss's seven-day retention guarantees no job can remain.
 export const legacyAutomationRunQueue = "responder-automation-runs-v1";

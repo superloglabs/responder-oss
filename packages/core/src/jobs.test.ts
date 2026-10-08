@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  automationRunLocalConcurrency,
   automationRunQueue,
   createJobBoss,
   investigationJobSchema,
@@ -19,6 +20,10 @@ import {
 describe("background jobs", () => {
   it("allows two investigations to run concurrently on each worker", () => {
     expect(investigationLocalConcurrency).toBe(2);
+  });
+
+  it("allows eight automation runs to run concurrently on each worker", () => {
+    expect(automationRunLocalConcurrency).toBe(8);
   });
 
   it("migrates queued legacy investigations without reclassifying active work", async () => {

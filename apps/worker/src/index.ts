@@ -1,5 +1,6 @@
 import {
   automationRunJobSchema,
+  automationRunLocalConcurrency,
   automationRunQueue,
   createJobBoss,
   gcpProjectSetupJobSchema,
@@ -548,7 +549,7 @@ const automationRunHandler = async ([job]: Array<{ data: unknown; id: string }>)
   return processAutomationRun(job.id, payload, process.env, automationRunDependencies);
 };
 await migrateLegacyAutomationRunJobs(boss);
-await boss.work(automationRunQueue, { localConcurrency: 2 }, automationRunHandler);
+await boss.work(automationRunQueue, { localConcurrency: automationRunLocalConcurrency }, automationRunHandler);
 // Drains jobs sent by control-plane tasks that predate the unordered queue.
 await boss.work(legacyAutomationRunQueue, { localConcurrency: 1 }, automationRunHandler);
 await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
