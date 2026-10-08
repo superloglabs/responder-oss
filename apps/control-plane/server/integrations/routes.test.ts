@@ -671,7 +671,7 @@ describe("integration callback routing", () => {
   });
 
   it("keeps Slack connected when tag mode can't start", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(startDefaultSlackThreadMode).mockRejectedValue(new Error("boom"));
 
     const response = await connectSlack();
@@ -679,6 +679,11 @@ describe("integration callback routing", () => {
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toContain("status=connected");
     expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      error: "boom",
+      event: "integration_callback_failed",
+      provider: "slack tag mode",
+    }));
   });
 
   it("stores a Vercel installation and synchronizes its projects", async () => {

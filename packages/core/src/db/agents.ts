@@ -1148,10 +1148,13 @@ export async function getSlackThreadModeActor(
   return versions[0]?.createdBy ?? getOldestOrganizationOwner(organizationId);
 }
 
+// With createOnly, saved tag mode is left as is. The per-workspace unique
+// index stops a concurrent first save from creating a second one.
 export async function saveSlackThreadModeConfiguration(input: {
   organizationId: string;
   userId: string;
   configuration: SlackThreadModeConfiguration;
+  createOnly?: boolean;
 }): Promise<void> {
   const db = getDatabase();
   const slackAccounts = await db
@@ -1206,6 +1209,7 @@ export async function saveSlackThreadModeConfiguration(input: {
     .limit(1);
 
   if (existing[0]) {
+    if (input.createOnly) return;
     await updateAgent({
       agentId: existing[0].id,
       organizationId: input.organizationId,
@@ -1236,6 +1240,7 @@ export async function startDefaultSlackThreadMode(input: {
   ]);
   await saveSlackThreadModeConfiguration({
     ...input,
+    createOnly: true,
     configuration: defaultSlackThreadModeConfiguration({
       instructions: assistant
         ? tagModeAssistantInstructions
