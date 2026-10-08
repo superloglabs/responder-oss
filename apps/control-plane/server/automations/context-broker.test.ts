@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { createAutomationContextBrokerRoutes } from "./context-broker.js";
 
@@ -431,6 +431,118 @@ describe("automation context broker", () => {
     expect(new Headers(request.headers).get("authorization")).toBe(
       "Bearer fresh-oauth-token",
     );
+  });
+
+  describe("Axiom", () => {
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    function axiomClaim() {
+      return claim("axiom", {
+        authType: "oauth",
+        mcpUrl: "https://mcp.axiom.co/mcp",
+        oauth: {
+          tokens: {
+            access_token: "expired-axiom-token",
+            refresh_token: "axiom-refresh-token",
+          },
+        },
+      });
+    }
+
+    it("lists only read-only Axiom tools with a refreshed token", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+      const result = { tools: [{ name: "queryApl" }, { name: "updateMonitor" }, { name: "listDatasets" }] };
+      dependencies.providerFetch.mockResolvedValue(new Response(
+        `event: message\ndata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\n\n`,
+        { headers: { "content-type": "text/event-stream", "mcp-session-id": "axiom-session" } },
+      ));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("mcp-session-id")).toBe("axiom-session");
+      expect(await response.json()).toEqual({
+        id: 1,
+        jsonrpc: "2.0",
+        result: { tools: [{ name: "queryApl" }, { name: "listDatasets" }] },
+      });
+      expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
+        mcpUrl: "https://mcp.axiom.co/mcp",
+      }));
+      const [url, request] = dependencies.providerFetch.mock.calls[0]! as [string, RequestInit];
+      expect(url).toBe("https://mcp.axiom.co/mcp");
+      expect(new Headers(request.headers).get("authorization")).toBe("Bearer fresh-oauth-token");
+    });
+
+    it("filters listings sent with an uppercase media type and CR line endings", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+      const result = { tools: [{ name: "queryApl" }, { name: "deleteMonitor" }] };
+      dependencies.providerFetch.mockResolvedValue(new Response(
+        `event: message\rdata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\r\r`,
+        { headers: { "content-type": "Text/Event-Stream" } },
+      ));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ result: { tools: [{ name: "queryApl" }] } });
+    });
+
+    it("refuses a successful listing it cannot read instead of passing it through", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+      dependencies.providerFetch.mockResolvedValue(new Response(
+        "data: not json\n\n{\"tools\":[{\"name\":\"deleteMonitor\"}]}",
+        { headers: { "content-type": "text/event-stream" } },
+      ));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 7, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(502);
+      const body = await response.text();
+      expect(JSON.parse(body)).toMatchObject({ error: { code: -32603 }, id: 7 });
+      expect(body).not.toContain("deleteMonitor");
+    });
+
+    it("refuses Axiom tools outside the read-only allowlist without calling Axiom", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 2, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name: "deleteMonitor" } }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: -32602 } });
+      expect(dependencies.providerFetch).not.toHaveBeenCalled();
+      expect(dependencies.refreshCustomMcp).not.toHaveBeenCalled();
+    });
+
+    it("forwards read-only Axiom tool calls", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+      dependencies.providerFetch.mockResolvedValue(new Response(
+        JSON.stringify({ id: 3, jsonrpc: "2.0", result: { content: [{ text: "rows", type: "text" }] } }),
+        { headers: { "content-type": "application/json" } },
+      ));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 3, jsonrpc: "2.0", method: "tools/call", params: { arguments: { apl: "['logs'] | take 1" }, name: "queryApl" } }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ result: { content: [{ text: "rows" }] } });
+    });
   });
 
   it("serves Linear's read tools and create_issue with a refreshed token", async () => {

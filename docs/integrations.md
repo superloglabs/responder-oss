@@ -354,9 +354,28 @@ Responder stores the OAuth session encrypted, refreshes it outside the sandbox,
 and exposes only an explicit allowlist of read-only Axiom tools to investigation
 runs. Dashboard, monitor, and notifier mutation tools are blocked.
 
-Axiom is investigation context rather than an alert source. Use a watched Slack
-channel as the agent input, then add Axiom under Context so the investigation can
-query relevant logs, traces, metrics, dashboards, and monitor history.
+Agents use Axiom as investigation context. Use a watched Slack channel as the
+agent input, then add Axiom under Context so the investigation can query
+relevant logs, traces, metrics, dashboards, and monitor history.
+
+Automations can use Axiom both ways. As a connector, the run reaches Axiom
+through the run-scoped context broker, which refreshes the OAuth session and
+lists and accepts calls only to the same read-only tool allowlist. As a
+trigger, an Axiom monitor alert starts the automation. Each Axiom connection
+has its own webhook:
+
+```text
+<public>/api/webhooks/axiom/<connection>
+```
+
+The trigger card's **Set up Axiom notifier** shows the URL, an `Authorization`
+header value, and a body template to paste into an Axiom **Custom webhook**
+notifier. Add that notifier to the monitors that should start runs. The header
+secret is derived per connection from `CREDENTIAL_ENCRYPTION_KEY`, so it
+survives OAuth refreshes; reconnecting Axiom as a new connection, or rotating
+that key, changes it. Responder starts a run for `Open` alerts and ignores
+`Closed` ones. A retried delivery with the same body does not start a second
+run. Axiom-triggered automations report to their notification channels.
 
 The hosted Axiom MCP endpoint routes query results through US infrastructure.
 Review Axiom's data-routing and query-cost controls before enabling it for

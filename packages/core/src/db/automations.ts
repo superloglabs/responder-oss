@@ -376,6 +376,50 @@ export async function findAutomationsForDiscordCommand(input: {
   );
 }
 
+// Enabled automations with an Axiom trigger on the connection that received
+// the alert.
+export async function findAutomationsForAxiomAlert(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  const rows = await getDatabase()
+    .select({
+      automationId: automations.id,
+      triggers: automationVersions.triggers,
+    })
+    .from(automations)
+    .innerJoin(
+      organizationCapabilities,
+      and(
+        eq(organizationCapabilities.organizationId, automations.organizationId),
+        eq(organizationCapabilities.capability, "automations"),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automations.activeVersionId),
+    )
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.id, integrationAccountId),
+        eq(integrationAccounts.organizationId, automations.organizationId),
+        eq(integrationAccounts.provider, "axiom"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(eq(automations.enabled, true));
+
+  return rows.flatMap((row) =>
+    row.triggers.some((trigger) =>
+      trigger.kind === "axiom" &&
+      trigger.integrationAccountId === integrationAccountId
+    )
+      ? [{ automationId: row.automationId }]
+      : []
+  );
+}
+
 type AutomationScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
 
 export function scheduleExternalEventId(scheduledFor: Date): string {
@@ -496,6 +540,9 @@ async function validateConfigurationResources(
         "integration_not_found",
       );
     }
+    // Axiom alerts arrive at the connection's webhook, so there is no
+    // resource to choose.
+    if (trigger.kind === "axiom") continue;
     const triggerResource = trigger.kind === "sentry"
       ? {
           externalIds: trigger.projectIds,
@@ -1464,7 +1511,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "discord" | "manual" | "schedule" | "sentry" | "slack";
+  provider: "axiom" | "discord" | "manual" | "schedule" | "sentry" | "slack";
   sourceUrl?: string;
   title: string;
 }

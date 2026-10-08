@@ -103,7 +103,7 @@ test("chooses and configures Sentry inline with only supported options", async (
   await page.setViewportSize({ width: 1728, height: 997 });
   await page.goto("/automations/new");
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
-  await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(4);
+  await expect(page.locator(".automationTrigger__providerOption")).toHaveCount(5);
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).focus();
   await page.screenshot({ path: testInfo.outputPath("automation-choose-trigger.png"), fullPage: true });
   await page.getByRole("menuitem", { name: "Sentry", exact: true }).click();
@@ -126,6 +126,38 @@ test("chooses and configures Sentry inline with only supported options", async (
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
 });
 
+
+test("chooses an Axiom trigger and shows the notifier setup", async ({ page }, testInfo) => {
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: [{ id: accountId, provider: "axiom", displayName: "Axiom" }],
+    resources: [],
+    repositories: [{ id: repositoryId, fullName: "acme/api" }], credentials: [], secrets: [], skills: [],
+  } }));
+  await page.route(`**/api/integrations/axiom/${accountId}/webhook-config`, (route) => route.fulfill({ json: {
+    authorization: "Bearer axiom-secret",
+    bodyTemplate: '{"action":{{printf "%q" .Action}}}',
+    webhookUrl: `https://responder.example/api/webhooks/axiom/${accountId}`,
+  } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/automations/new");
+  await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Axiom", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Monitor alert", exact: true }).click();
+  await expect(page.getByText("Axiom monitor alert")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up Axiom notifier" })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("automation-axiom-trigger.png"), fullPage: true });
+  await page.getByRole("button", { name: "Set up Axiom notifier" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add the Responder notifier" });
+  await expect(dialog.getByLabel("Webhook URL")).toHaveValue(`https://responder.example/api/webhooks/axiom/${accountId}`);
+  await expect(dialog.getByLabel("Authorization header value")).toHaveValue("Bearer axiom-secret");
+  await expect(dialog.getByLabel("Body")).toHaveValue('{"action":{{printf "%q" .Action}}}');
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Set up Axiom notifier" }).click();
+  await page.screenshot({ path: testInfo.outputPath("automation-axiom-notifier.png"), fullPage: true });
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toHaveCount(0);
+});
 
 test("searches events and navigates the provider flyout with the keyboard", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1728, height: 997 });
@@ -659,9 +691,9 @@ test("starts an automation from a template on the automation list", async ({ pag
   await expect(templates.getByRole("link").first()).toContainText("Answer community questions");
   await page.screenshot({ path: testInfo.outputPath("automation-templates-suggested.png"), fullPage: true });
   await templates.getByRole("radio", { name: "All", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(12);
+  await expect(templates.getByRole("link")).toHaveCount(13);
   await templates.getByRole("radio", { name: "Bug triage", exact: true }).click();
-  await expect(templates.getByRole("link")).toHaveCount(4);
+  await expect(templates.getByRole("link")).toHaveCount(5);
   await templates.getByRole("radio", { name: "Scans", exact: true }).click();
   await expect(templates.getByRole("link")).toHaveCount(5);
   await expect(templates.getByText("Schedule · Every hour")).toBeVisible();

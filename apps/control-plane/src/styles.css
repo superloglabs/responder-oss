@@ -5872,8 +5872,21 @@ button:disabled {
   outline: none;
 }
 
+.siteDialog__field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0d0d0d;
+  color: var(--foreground);
+  font: 12px/1.5 var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  outline: none;
+  resize: vertical;
+}
+
 .siteDialog__field input:focus,
-.siteDialog__field select:focus {
+.siteDialog__field select:focus,
+.siteDialog__field textarea:focus {
   border-color: var(--border-logo);
 }
 
@@ -10127,7 +10140,8 @@ a.issueLine:focus-visible {
 :root[data-color-theme="light"] .siteDialog__instructions,
 :root[data-color-theme="light"] .siteDialog__site,
 :root[data-color-theme="light"] .siteDialog__field input,
-:root[data-color-theme="light"] .siteDialog__field select {
+:root[data-color-theme="light"] .siteDialog__field select,
+:root[data-color-theme="light"] .siteDialog__field textarea {
   background: var(--ds-surface-raised);
 }
 

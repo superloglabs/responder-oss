@@ -1,6 +1,7 @@
 // Providers whose connections an automation run can use as context through
 // the run-scoped context broker. GitHub is separate: it supplies repositories.
 export const automationContextProviders = [
+  "axiom",
   "custom_mcp",
   "datadog",
   "gcp",

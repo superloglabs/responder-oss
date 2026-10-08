@@ -63,6 +63,8 @@ describe("isTriggerComplete", () => {
     expect(isTriggerComplete({ channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(true);
     expect(isTriggerComplete({ channelIds: [], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(false);
     expect(isTriggerComplete({ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: ["web"] })).toBe(false);
+    expect(isTriggerComplete({ integrationAccountId: "axiom", kind: "axiom" })).toBe(true);
+    expect(isTriggerComplete({ integrationAccountId: "", kind: "axiom" })).toBe(false);
   });
 });
 

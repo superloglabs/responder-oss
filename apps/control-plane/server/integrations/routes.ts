@@ -88,6 +88,8 @@ import {
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
   AXIOM_MCP_URL,
+  AXIOM_WEBHOOK_BODY_TEMPLATE,
+  axiomWebhookSecret,
   parseAxiomCredentials,
 } from "../../../../packages/core/src/integrations/axiom.js";
 import {
@@ -144,6 +146,7 @@ import {
   vercelInstallUrl,
 } from "./vercel.js";
 import {
+  axiomWebhookUrl,
   dash0WebhookUrl,
   integrationCallbackUrl,
   settingsRedirect,
@@ -1816,6 +1819,32 @@ export const integrationRoutes = new Hono()
       logCustomMcpError("webhook-config", error, accountId.data);
       return context.json({ error: "Unable to load Dash0 webhook setup" }, 500);
     }
+  })
+  // Where an Axiom custom webhook notifier sends monitor alerts so they can
+  // start automations.
+  .get("/axiom/:accountId/webhook-config", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("accountId"));
+    if (!accountId.success) {
+      return context.json({ error: "Axiom connection not found" }, 404);
+    }
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "axiom",
+    });
+    if (account?.status !== "connected") {
+      return context.json({ error: "Axiom connection not found" }, 404);
+    }
+    context.header("cache-control", "no-store");
+    return context.json({
+      authorization: `Bearer ${axiomWebhookSecret(accountId.data)}`,
+      bodyTemplate: AXIOM_WEBHOOK_BODY_TEMPLATE,
+      webhookUrl: axiomWebhookUrl(accountId.data),
+    });
   })
   .post("/grafana/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
