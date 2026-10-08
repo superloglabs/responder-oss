@@ -52,7 +52,7 @@ export function mcpTool(operation: ManagementOperation): Tool {
 
 export function createManagementMcpServer(context: ManagementContext): Server {
   const server = new Server(
-    { name: "superlog", title: "Superlog", version: "1.0.0" },
+    { name: "superlog", title: "Superlog", version: "1.0.0", icons: [{ src: new URL("/superlog-silver-icon.png", controlPlaneBaseUrl()).href, mimeType: "image/png", sizes: ["1400x1400"] }] },
     { capabilities: { tools: {}, resources: {} }, instructions },
   );
   server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: [{
@@ -60,12 +60,12 @@ export function createManagementMcpServer(context: ManagementContext): Server {
   }] }));
   server.setRequestHandler(ReadResourceRequestSchema, (request) => {
     if (request.params.uri !== connectionWidgetUri) throw new Error("Unknown resource");
-    return { contents: [{ uri: connectionWidgetUri, mimeType: "text/html;profile=mcp-app", text: connectionWidgetHtml,
+    return { contents: [{ uri: connectionWidgetUri, mimeType: "text/html;profile=mcp-app", text: connectionWidgetHtml.replace("__SUPERLOG_LOGO_URL__", new URL("/superlog-silver-icon.png", controlPlaneBaseUrl()).href),
       _meta: {
-        ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } },
+        ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [new URL(controlPlaneBaseUrl()).origin] } },
         "openai/ui": { availableDisplayModes: ["inline"], preferredDisplayMode: "inline" },
         "openai/widgetDescription": "A small integration consent card. It verifies connection and asks the conversation to continue after the user connects.",
-        "openai/widgetCSP": { redirect_domains: [new URL(controlPlaneBaseUrl()).origin] },
+        "openai/widgetCSP": { resource_domains: [new URL(controlPlaneBaseUrl()).origin], redirect_domains: [new URL(controlPlaneBaseUrl()).origin] },
       },
     }] };
   });
