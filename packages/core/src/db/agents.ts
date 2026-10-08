@@ -1,12 +1,16 @@
 import { and, desc, eq, exists, inArray, or } from "drizzle-orm";
 import {
   contextIntegrationProviders,
+  defaultSlackThreadModeConfiguration,
+  tagModeAssistantInstructions,
+  tagModeInvestigationInstructions,
   type AgentConfiguration,
   type SlackThreadModeConfiguration,
 } from "../agents/config.js";
 import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
+import { organizationHasCapability } from "./organization-capabilities.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agentConfigVersions,
@@ -1144,10 +1148,29 @@ export async function getSlackThreadModeActor(
   return versions[0]?.createdBy ?? getOldestOrganizationOwner(organizationId);
 }
 
+// Drizzle wraps the Postgres error, so the violation is on its cause.
+function isSlackThreadModeConflict(error: unknown): boolean {
+  for (let current = error; current; current = (current as { cause?: unknown }).cause) {
+    if (typeof current !== "object") break;
+    if (
+      "code" in current &&
+      current.code === "23505" &&
+      "constraint" in current &&
+      current.constraint === "agents_organization_slack_thread_idx"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// With createOnly, tag mode that is already saved, or that another save
+// creates first, is left as is.
 export async function saveSlackThreadModeConfiguration(input: {
   organizationId: string;
   userId: string;
   configuration: SlackThreadModeConfiguration;
+  createOnly?: boolean;
 }): Promise<void> {
   const db = getDatabase();
   const slackAccounts = await db
@@ -1202,6 +1225,7 @@ export async function saveSlackThreadModeConfiguration(input: {
     .limit(1);
 
   if (existing[0]) {
+    if (input.createOnly) return;
     await updateAgent({
       agentId: existing[0].id,
       organizationId: input.organizationId,
@@ -1211,10 +1235,38 @@ export async function saveSlackThreadModeConfiguration(input: {
     });
     return;
   }
-  await createAgent({
-    organizationId: input.organizationId,
-    userId: input.userId,
-    configuration,
-    purpose: "slack_thread",
+  try {
+    await createAgent({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      configuration,
+      purpose: "slack_thread",
+    });
+  } catch (error) {
+    if (input.createOnly && isSlackThreadModeConflict(error)) return;
+    throw error;
+  }
+}
+
+// Connecting Slack turns tag mode on with its starting settings. A workspace
+// that already saved tag mode keeps its settings.
+export async function startDefaultSlackThreadMode(input: {
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  if (await getSlackThreadModeConfiguration(input.organizationId)) return;
+  const [options, assistant] = await Promise.all([
+    listAgentOptions(input.organizationId),
+    organizationHasCapability(input.organizationId, "simplified_navigation"),
+  ]);
+  await saveSlackThreadModeConfiguration({
+    ...input,
+    createOnly: true,
+    configuration: defaultSlackThreadModeConfiguration({
+      instructions: assistant
+        ? tagModeAssistantInstructions
+        : tagModeInvestigationInstructions,
+      options,
+    }),
   });
 }

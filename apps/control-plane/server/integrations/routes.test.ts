@@ -55,6 +55,8 @@ import {
   linearAuthorizeUrl,
 } from "../../../../packages/core/src/integrations/linear.js";
 import { langfuseProject } from "./langfuse.js";
+import { exchangeSlackCode, listSlackChannels } from "./slack.js";
+import { startDefaultSlackThreadMode } from "../../../../packages/core/src/db/agents.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
@@ -64,6 +66,7 @@ import {
 
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   disableAgentsWithUnavailableRepositories: vi.fn(),
+  startDefaultSlackThreadMode: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
@@ -178,6 +181,12 @@ vi.mock("../investigations/queue.js", () => ({
 
 vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
+}));
+
+vi.mock("./slack.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./slack.js")>()),
+  exchangeSlackCode: vi.fn(),
+  listSlackChannels: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
@@ -613,6 +622,68 @@ describe("integration callback routing", () => {
       returnTo: undefined,
       routingUrl: "https://responder.example/api/integrations/vercel/callback",
     });
+  });
+
+  function connectSlack() {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: {},
+    });
+    vi.mocked(exchangeSlackCode).mockResolvedValue({
+      access_token: "xoxb-token",
+      app_id: "A123",
+      authed_user: {
+        access_token: "xoxp-token",
+        id: "U123",
+        scope: "search:read",
+        token_type: "user",
+      },
+      bot_user_id: "B123",
+      scope: "app_mentions:read,chat:write",
+      team: { id: "T123", name: "Acme" },
+      token_type: "bot",
+    } as never);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.mocked(listSlackChannels).mockResolvedValue([]);
+    return app.request(
+      "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
+    );
+  }
+
+  it("turns tag mode on when Slack connects", async () => {
+    vi.mocked(startDefaultSlackThreadMode).mockResolvedValue();
+
+    const response = await connectSlack();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("status=connected");
+    expect(startDefaultSlackThreadMode).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+    });
+  });
+
+  it("keeps Slack connected when tag mode can't start", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(startDefaultSlackThreadMode).mockRejectedValue(new Error("boom"));
+
+    const response = await connectSlack();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("status=connected");
+    expect(setIntegrationAccountStatus).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      error: "boom",
+      event: "integration_callback_failed",
+      provider: "slack tag mode",
+    }));
   });
 
   it("stores a Vercel installation and synchronizes its projects", async () => {

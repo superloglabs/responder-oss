@@ -27,7 +27,10 @@ import {
   updateIntegrationConnectionStateMetadata,
   upsertIntegrationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
-import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
+import {
+  disableAgentsWithUnavailableRepositories,
+  startDefaultSlackThreadMode,
+} from "../../../../packages/core/src/db/agents.js";
 import {
   beginCustomMcpOAuth,
   callCustomMcpTool,
@@ -3640,6 +3643,14 @@ export const integrationRoutes = new Hono()
       });
       const channels = await listSlackChannels(installation.access_token);
       await replaceIntegrationResources(accountId, "slack_channel", channels);
+      // Slack stays connected when tag mode can't start; it can be turned on
+      // from its settings.
+      await startDefaultSlackThreadMode({
+        organizationId: connectionState.organizationId,
+        userId: connectionState.userId,
+      }).catch((error: unknown) => {
+        logCallbackError("Slack tag mode", error);
+      });
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",
