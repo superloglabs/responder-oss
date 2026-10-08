@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { billingEnabled as loadBillingEnabled } from "../billing-api";
 
 export type SettingsSection =
   | "api-keys"
@@ -24,16 +25,9 @@ export function SettingsTabs({
 
   useEffect(() => {
     let mounted = true;
-    void fetch("/api/billing")
-      .then(async (response) => {
-        if (!response.ok) return false;
-        const summary = (await response.json()) as { enabled?: boolean };
-        return summary.enabled === true;
-      })
-      .catch(() => false)
-      .then((enabled) => {
-        if (mounted) setBillingEnabled(enabled);
-      });
+    void loadBillingEnabled().then((enabled) => {
+      if (mounted) setBillingEnabled(enabled);
+    });
     return () => {
       mounted = false;
     };
