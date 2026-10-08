@@ -97,6 +97,7 @@ export async function refreshSlackChannelResources(
         encryptedCredentials: account.encryptedCredentials!,
         integrationAccountId: account.id,
         kind: "slack_channel",
+        markConnected: false,
         organizationId,
         provider: "slack",
         resources: channels,

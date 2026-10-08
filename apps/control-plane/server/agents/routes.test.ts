@@ -54,7 +54,6 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   listConnectedIntegrationAccountCredentials: vi.fn(),
   markSlackChannelJoined: vi.fn(),
   replaceRepositories: vi.fn(),
-  replaceIntegrationResources: vi.fn(),
   replaceIntegrationResourcesIfCredentialsMatch: vi.fn(),
 }));
 vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
@@ -615,6 +614,7 @@ describe("Slack channel option refresh", () => {
       encryptedCredentials: "encrypted-1",
       integrationAccountId: "slack-account-1",
       kind: "slack_channel",
+      markConnected: false,
       organizationId: "10000000-0000-4000-8000-000000000000",
       provider: "slack",
       resources: [expect.objectContaining({ externalId: "C123" })],
@@ -623,6 +623,7 @@ describe("Slack channel option refresh", () => {
       encryptedCredentials: "encrypted-2",
       integrationAccountId: "slack-account-2",
       kind: "slack_channel",
+      markConnected: false,
       organizationId: "10000000-0000-4000-8000-000000000000",
       provider: "slack",
       resources: [expect.objectContaining({ externalId: "C456" })],
