@@ -111,6 +111,9 @@ Configure a distributed Slack app with:
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
 
+Connecting Slack turns tag mode on with its starting settings, unless the
+workspace has already saved tag mode settings.
+
 A direct message to the app works like a mention. Tag mode answers in the
 message's thread, and a reply in that thread continues the same conversation.
 A new message starts a new conversation. When tag mode is off, the app replies

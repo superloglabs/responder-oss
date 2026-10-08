@@ -45,7 +45,7 @@ describe("agent configuration", () => {
     expect(parsed).not.toHaveProperty("createLinearTickets");
   });
 
-  it("starts tag mode with every connected context integration and Vercel project", () => {
+  it("starts tag mode on with every connected context integration and Vercel project", () => {
     const configuration = defaultSlackThreadModeConfiguration({
       instructions: "Investigate the request.",
       options: {
@@ -64,7 +64,7 @@ describe("agent configuration", () => {
     });
 
     expect(configuration).toEqual({
-      enabled: false,
+      enabled: true,
       model: "instance/default",
       instructions: "Investigate the request.",
       repositoryIds: [],

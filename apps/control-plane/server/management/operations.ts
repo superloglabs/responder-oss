@@ -703,7 +703,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Changes tag mode. Send only what changes; each list you send replaces the current selection. The first change starts from every connected context integration. Tag mode needs a Slack connection.",
+      "Changes tag mode. Send only what changes; each list you send replaces the current selection. The first change starts tag mode on, with every connected context integration. Tag mode needs a Slack connection.",
     effect: "write",
     input: tagModeChangesSchema,
     method: "PATCH",

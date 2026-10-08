@@ -182,7 +182,7 @@ export const contextIntegrationProviders = [
   "linear",
 ] as const;
 
-// Tag mode that has never been saved starts with every connected context
+// Tag mode that has never been saved starts on, with every connected context
 // integration and every Vercel project, up to the configuration limits.
 // Over the account limit, each provider keeps one account before any keeps a
 // second. Repositories and secrets are still chosen by hand.
@@ -224,7 +224,7 @@ export function defaultSlackThreadModeConfiguration(input: {
     .map((resource) => resource.id)
     .slice(0, 100);
   return {
-    enabled: false,
+    enabled: true,
     model: "instance/default",
     instructions: input.instructions,
     repositoryIds: [],

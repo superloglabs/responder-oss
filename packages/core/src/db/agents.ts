@@ -1,12 +1,16 @@
 import { and, desc, eq, exists, inArray, or } from "drizzle-orm";
 import {
   contextIntegrationProviders,
+  defaultSlackThreadModeConfiguration,
+  tagModeAssistantInstructions,
+  tagModeInvestigationInstructions,
   type AgentConfiguration,
   type SlackThreadModeConfiguration,
 } from "../agents/config.js";
 import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
+import { organizationHasCapability } from "./organization-capabilities.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agentConfigVersions,
@@ -1216,5 +1220,27 @@ export async function saveSlackThreadModeConfiguration(input: {
     userId: input.userId,
     configuration,
     purpose: "slack_thread",
+  });
+}
+
+// Connecting Slack turns tag mode on with its starting settings. A workspace
+// that already saved tag mode keeps its settings.
+export async function startDefaultSlackThreadMode(input: {
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  if (await getSlackThreadModeConfiguration(input.organizationId)) return;
+  const [options, assistant] = await Promise.all([
+    listAgentOptions(input.organizationId),
+    organizationHasCapability(input.organizationId, "simplified_navigation"),
+  ]);
+  await saveSlackThreadModeConfiguration({
+    ...input,
+    configuration: defaultSlackThreadModeConfiguration({
+      instructions: assistant
+        ? tagModeAssistantInstructions
+        : tagModeInvestigationInstructions,
+      options,
+    }),
   });
 }
