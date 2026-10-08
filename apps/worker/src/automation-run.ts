@@ -149,7 +149,7 @@ export interface AutomationRunDependencies {
   reopenRun: typeof reopenAutomationRun;
   reportException: typeof reportWorkerException;
   // Queues the next turn of a run; the worker's job queue provides it.
-  requeueRun(runId: string): Promise<void>;
+  requeueRun(run: { organizationId: string; runId: string }): Promise<void>;
   revokeGrant: typeof revokeAutomationModelBrokerGrant;
   runCodex: typeof runCodexAutomation;
   runClaude: typeof runClaudeAutomation;
@@ -1238,7 +1238,7 @@ async function answerNewMessages(
     return;
   }
   try {
-    await dependencies.requeueRun(run.runId);
+    await dependencies.requeueRun({ organizationId: run.organizationId, runId: run.runId });
   } catch (error) {
     await dependencies.setStatus({
       failureCategory: "queue_unavailable",

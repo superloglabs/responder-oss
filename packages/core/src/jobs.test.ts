@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  automationRunGroupConcurrency,
+  automationRunJobOptions,
   automationRunLocalConcurrency,
   automationRunQueue,
   createJobBoss,
@@ -24,6 +26,13 @@ describe("background jobs", () => {
 
   it("allows eight automation runs to run concurrently on each worker", () => {
     expect(automationRunLocalConcurrency).toBe(8);
+  });
+
+  it("keeps one workspace's automation runs to half the slots", () => {
+    expect(automationRunGroupConcurrency * 2).toBe(automationRunLocalConcurrency);
+    expect(automationRunJobOptions("organization-1")).toEqual({
+      group: { id: "organization-1" },
+    });
   });
 
   it("migrates queued legacy investigations without reclassifying active work", async () => {

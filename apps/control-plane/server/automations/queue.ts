@@ -9,6 +9,7 @@ import {
 } from "../../../../packages/core/src/db/automations.js";
 import type { AutomationUserMessageEventData } from "../../../../packages/core/src/automations/transcript.js";
 import {
+  automationRunJobOptions,
   automationRunQueue,
   createJobBoss,
   prepareWorkerQueues,
@@ -55,12 +56,15 @@ async function getBoss() {
   }
 }
 
-async function sendAutomationRunJob(runId: string): Promise<string> {
+async function sendAutomationRunJob(run: {
+  organizationId: string;
+  runId: string;
+}): Promise<string> {
   const jobId = await (await getBoss()).send(automationRunQueue, {
     kind: "automation_run",
     queuedAt: new Date().toISOString(),
-    runId,
-  });
+    runId: run.runId,
+  }, automationRunJobOptions(run.organizationId));
   if (!jobId) throw new Error("Automation run job was not created");
   return jobId;
 }
@@ -74,7 +78,7 @@ export async function queueAutomationRun(input: {
   if (!run.created) return { duplicate: true, runId: run.runId };
 
   try {
-    const jobId = await sendAutomationRunJob(run.runId);
+    const jobId = await sendAutomationRunJob(run);
     return { duplicate: false, jobId, runId: run.runId };
   } catch (error) {
     await abandonPendingAutomationRun(run.runId);
@@ -92,7 +96,7 @@ export async function queueAutomationRunFollowUp(input: {
   const run = await continueAutomationRun(input);
   if (!run) return null;
   try {
-    return { jobId: await sendAutomationRunJob(input.runId) };
+    return { jobId: await sendAutomationRunJob(input) };
   } catch (error) {
     await setAutomationRunStatus({
       failureCategory: "queue_unavailable",
@@ -111,9 +115,10 @@ export async function queueAutomationRunReply(input: {
   runId: string;
 }): Promise<"duplicate" | "queued" | "waiting"> {
   if (!(await addAutomationRunReply(input))) return "duplicate";
-  if (!(await reopenAutomationRun(input.runId))) return "waiting";
+  const organizationId = await reopenAutomationRun(input.runId);
+  if (!organizationId) return "waiting";
   try {
-    await sendAutomationRunJob(input.runId);
+    await sendAutomationRunJob({ organizationId, runId: input.runId });
     return "queued";
   } catch (error) {
     await setAutomationRunStatus({

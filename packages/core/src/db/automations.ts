@@ -1426,7 +1426,11 @@ export async function getAutomationRunSlackButtons(input: {
 // Only one caller can reopen a run, so only that caller queues its job. With
 // a lease, it reopens only if no turn has claimed or reopened the run since
 // the turn holding that lease finished.
-export async function reopenAutomationRun(runId: string, leaseId?: string): Promise<boolean> {
+// Returns the run's organization, or null when the run cannot be reopened.
+export async function reopenAutomationRun(
+  runId: string,
+  leaseId?: string,
+): Promise<string | null> {
   const rows = await getDatabase()
     .update(automationRuns)
     .set(reopenedRun())
@@ -1434,8 +1438,8 @@ export async function reopenAutomationRun(runId: string, leaseId?: string): Prom
       reopenableRun(runId),
       ...(leaseId ? [eq(automationRuns.leaseId, leaseId)] : []),
     ))
-    .returning({ id: automationRuns.id });
-  return rows.length > 0;
+    .returning({ organizationId: automationRuns.organizationId });
+  return rows[0]?.organizationId ?? null;
 }
 
 // Whether any turn of the run has finished. A turn retried after its worker
@@ -1521,7 +1525,7 @@ export async function beginAutomationRun(input: {
   // A test chat's first message, shown in the run transcript.
   message?: AutomationUserMessageEventData;
   trigger: AutomationTriggerInput;
-}): Promise<{ created: boolean; runId: string }> {
+}): Promise<{ created: boolean; organizationId: string; runId: string }> {
   return getDatabase().transaction(async (tx) => {
     const rows = await tx
       .select({
@@ -1584,7 +1588,7 @@ export async function beginAutomationRun(input: {
           type: "user_message",
         });
       }
-      return { created: true, runId };
+      return { created: true, organizationId: automation.organizationId, runId };
     }
 
     await tx.delete(automationRuns).where(eq(automationRuns.id, runId));
@@ -1603,7 +1607,11 @@ export async function beginAutomationRun(input: {
       )
       .limit(1);
     if (!existing[0]) throw new Error("Unable to resolve automation trigger");
-    return { created: false, runId: existing[0].runId };
+    return {
+      created: false,
+      organizationId: automation.organizationId,
+      runId: existing[0].runId,
+    };
   });
 }
 
