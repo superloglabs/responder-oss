@@ -9,7 +9,6 @@ import {
   listUnbilledAutomationModelUsage,
   markAutomationModelUsageBilled,
   markAutomationModelUsageBillingAttempted,
-  markWaivedAutomationModelUsageSettled,
   purgeAbandonedResponderModelUsage,
   recordAutomationModelUsage,
   releaseResponderModelUsage,
@@ -31,7 +30,6 @@ import type { AutomationModelUsage } from "./model-usage.js";
 interface SettlementDependencies {
   getPricing: typeof getAIGatewayModelPricing;
   markBilled: typeof markAutomationModelUsageBilled;
-  markWaivedSettled: typeof markWaivedAutomationModelUsageSettled;
   record: typeof recordAutomationModelUsage;
   setCost: typeof setAutomationModelUsageCost;
   track: typeof trackAutomationInferenceUsage;
@@ -40,7 +38,6 @@ interface SettlementDependencies {
 const defaultDependencies: SettlementDependencies = {
   getPricing: getAIGatewayModelPricing,
   markBilled: markAutomationModelUsageBilled,
-  markWaivedSettled: markWaivedAutomationModelUsageSettled,
   record: recordAutomationModelUsage,
   setCost: setAutomationModelUsageCost,
   track: trackAutomationInferenceUsage,
@@ -62,8 +59,8 @@ async function usageCostMicros(
 }
 
 // Prices a stored request if needed and reports Responder-funded usage to
-// billing. Organization-funded and waived rows only need a price. Failures
-// leave the row unsettled for the worker to retry.
+// billing. Organization-funded rows only need a price. Failures leave the row
+// unsettled for the worker to retry.
 export async function settleAutomationModelUsage(
   row: AutomationModelUsageRecord,
   dependencies: SettlementDependencies = defaultDependencies,
@@ -84,10 +81,6 @@ export async function settleAutomationModelUsage(
   }
   if (row.inferenceSource !== "responder") {
     await dependencies.markBilled(row.id);
-    return;
-  }
-  if (row.waived) {
-    await dependencies.markWaivedSettled(row.id);
     return;
   }
   await dependencies.track({

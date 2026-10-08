@@ -1,45 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AutomationModelUsageRecord } from "../db/automation-model-usage.js";
-import type { SandboxUsageRecord } from "../db/sandbox-usage.js";
-import { creditWaivedUsage, waiveAutomationRunUsage } from "./usage-waivers.js";
+import type { UncreditedUsage } from "../db/usage-waivers.js";
+import { creditWaivedUsage, waiveAutomationRunUsage, waiveJobUsage } from "./usage-waivers.js";
 
-vi.mock("./usage-pricing.js", () => ({
-  inferenceChargeMicros: (costMicros: number) => costMicros,
-  sandboxChargeMicros: (_resources: unknown, seconds: number) => seconds * 10,
-}));
-
-function modelRow(overrides: Partial<AutomationModelUsageRecord> = {}): AutomationModelUsageRecord {
+function usage(overrides: Partial<UncreditedUsage> = {}): UncreditedUsage {
   return {
-    cacheWriteTokens: 0,
-    cachedInputTokens: 0,
-    costMicros: 3_000,
+    balance: "usage_credit",
+    chargeMicros: 3_000,
+    hours: 0,
     id: "usage-1",
-    inferenceSource: "responder",
-    inputTokens: 1_000,
-    model: "gpt-5.4",
+    kind: "automation_model",
     organizationId: "organization-1",
-    outputTokens: 100,
-    provider: "openai",
-    runId: "run-1",
-    waived: true,
-    ...overrides,
-  };
-}
-
-function sandboxRow(overrides: Partial<SandboxUsageRecord> = {}): SandboxUsageRecord {
-  return {
-    billable: true,
-    chargeMicros: 6_000,
-    cpu: 2,
-    diskGiB: 10,
-    id: "sandbox-usage-1",
-    memoryGiB: 4,
-    organizationId: "organization-1",
-    startedAt: new Date("2026-10-07T10:00:00.000Z"),
-    stoppedAt: new Date("2026-10-07T10:30:00.000Z"),
-    waived: true,
-    workload: "automation",
-    workloadId: "run-1",
+    properties: { model: "gpt-5.4", runId: "run-1" },
     ...overrides,
   };
 }
@@ -50,12 +21,10 @@ function dependencies() {
   return {
     creditCharge: vi.fn().mockResolvedValue(undefined),
     creditMachineHours: vi.fn().mockResolvedValue(undefined),
-    listModelUsage: vi.fn().mockResolvedValue([] as AutomationModelUsageRecord[]),
-    listSandboxUsage: vi.fn().mockResolvedValue([] as SandboxUsageRecord[]),
-    markModelUsageCredited: vi.fn().mockResolvedValue(undefined),
-    markSandboxUsageCredited: vi.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockResolvedValue([] as UncreditedUsage[]),
+    markAttempted: vi.fn().mockResolvedValue(undefined),
+    markCredited: vi.fn().mockResolvedValue(undefined),
     now: vi.fn(() => now),
-    usesMachineHours: vi.fn().mockResolvedValue(false),
   };
 }
 
@@ -63,28 +32,57 @@ describe("usage waivers", () => {
   beforeEach(() => vi.stubEnv("BILLING_ENABLED", "true"));
   afterEach(() => vi.unstubAllEnvs());
 
-  it("waives a run's model requests and sandbox time since its turn started", async () => {
-    const since = new Date("2026-10-07T11:00:00.000Z");
-    const waiveModelUsage = vi.fn().mockResolvedValue(undefined);
-    const waiveSandboxUsage = vi.fn().mockResolvedValue(undefined);
+  it("retries a run turn's waiver through a short database outage", async () => {
+    const input = {
+      leaseId: "lease-1",
+      runId: "run-1",
+      since: new Date("2026-10-07T11:00:00.000Z"),
+    };
+    const waive = vi.fn()
+      .mockRejectedValueOnce(new Error("connection reset"))
+      .mockResolvedValue(true);
 
-    await waiveAutomationRunUsage({ runId: "run-1", since }, { waiveModelUsage, waiveSandboxUsage });
+    await expect(waiveAutomationRunUsage(input, { retryDelaysMs: [0, 0], waive }))
+      .resolves.toBe(true);
 
-    expect(waiveModelUsage).toHaveBeenCalledWith("run-1", since);
-    expect(waiveSandboxUsage).toHaveBeenCalledWith({
-      since,
-      workload: "automation",
-      workloadId: "run-1",
-    });
+    expect(waive).toHaveBeenCalledTimes(2);
+    expect(waive).toHaveBeenCalledWith(input);
   });
 
-  it("credits reported model usage back to the usage credit", async () => {
+  it("reports a job waiver that keeps failing", async () => {
+    const waive = vi.fn().mockRejectedValue(new Error("database unavailable"));
+
+    await expect(waiveJobUsage({
+      since: new Date("2026-10-07T11:00:00.000Z"),
+      workload: "investigation",
+      workloadId: "investigation-1",
+    }, { retryDelaysMs: [0, 0], waive })).rejects.toThrow("database unavailable");
+
+    expect(waive).toHaveBeenCalledTimes(3);
+  });
+
+  it("credits each charge back to the balance it was reported to", async () => {
     const deps = dependencies();
-    deps.listModelUsage.mockResolvedValue([modelRow()]);
+    deps.list.mockResolvedValue([
+      usage(),
+      usage({
+        id: "agent-usage-1",
+        kind: "agent_model",
+        properties: { kind: "inference", model: "gpt-5.4", workload: "investigation", workloadId: "investigation-1" },
+      }),
+      usage({
+        balance: "machine_hours",
+        chargeMicros: 6_000,
+        hours: 0.5,
+        id: "sandbox-usage-1",
+        kind: "sandbox",
+        properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
+      }),
+    ]);
 
-    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 0 });
+    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 3, failed: 0 });
 
-    expect(deps.listModelUsage).toHaveBeenCalledWith({
+    expect(deps.list).toHaveBeenCalledWith({
       limit: 200,
       waivedAfter: new Date(now - 23 * 60 * 60_000),
     });
@@ -94,64 +92,66 @@ describe("usage waivers", () => {
       organizationId: "organization-1",
       properties: { model: "gpt-5.4", runId: "run-1" },
     });
-    expect(deps.markModelUsageCredited).toHaveBeenCalledWith("usage-1");
-  });
-
-  it("credits reported sandbox time to the balance the plan charges", async () => {
-    const deps = dependencies();
-    deps.listSandboxUsage.mockResolvedValue([
-      sandboxRow(),
-      sandboxRow({ id: "sandbox-usage-2", organizationId: "organization-2" }),
-    ]);
-    deps.usesMachineHours.mockImplementation(async (organizationId: string) =>
-      organizationId === "organization-2");
-
-    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 2, failed: 0 });
-
-    expect(deps.creditCharge).toHaveBeenCalledWith(expect.objectContaining({
-      chargeMicros: 6_000,
-      idempotencyKey: "sandbox-usage-credit:sandbox-usage-1",
-    }));
-    expect(deps.creditMachineHours).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.creditCharge).toHaveBeenCalledWith({
+      chargeMicros: 3_000,
+      idempotencyKey: "agent-model-usage-credit:agent-usage-1",
+      organizationId: "organization-1",
+      properties: { kind: "inference", model: "gpt-5.4", workload: "investigation", workloadId: "investigation-1" },
+    });
+    expect(deps.creditMachineHours).toHaveBeenCalledExactlyOnceWith({
       hours: 0.5,
-      idempotencyKey: "sandbox-usage-credit:sandbox-usage-2",
-      organizationId: "organization-2",
-    }));
-    expect(deps.markSandboxUsageCredited).toHaveBeenCalledTimes(2);
+      idempotencyKey: "sandbox-usage-credit:sandbox-usage-1",
+      organizationId: "organization-1",
+      properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
+    });
+    expect(deps.markCredited).toHaveBeenCalledWith("automation_model", "usage-1");
+    expect(deps.markCredited).toHaveBeenCalledWith("agent_model", "agent-usage-1");
+    expect(deps.markCredited).toHaveBeenCalledWith("sandbox", "sandbox-usage-1");
   });
 
-  it("leaves a failed credit for the next pass", async () => {
+  it("marks usage that was settled without a charge credited without reporting it", async () => {
     const deps = dependencies();
-    deps.listModelUsage.mockResolvedValue([modelRow(), modelRow({ id: "usage-2" })]);
-    deps.creditCharge.mockRejectedValueOnce(new Error("Autumn is unavailable"));
+    deps.list.mockResolvedValue([usage({ balance: null, id: "sandbox-usage-1", kind: "sandbox" })]);
 
-    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 1 });
+    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 0 });
 
-    expect(deps.markModelUsageCredited).toHaveBeenCalledExactlyOnceWith("usage-2");
+    expect(deps.creditCharge).not.toHaveBeenCalled();
+    expect(deps.creditMachineHours).not.toHaveBeenCalled();
+    expect(deps.markCredited).toHaveBeenCalledWith("sandbox", "sandbox-usage-1");
   });
 
   it("marks usage credited without reporting when billing is disabled", async () => {
     vi.stubEnv("BILLING_ENABLED", "false");
     const deps = dependencies();
-    deps.listModelUsage.mockResolvedValue([modelRow()]);
-    deps.listSandboxUsage.mockResolvedValue([sandboxRow()]);
+    deps.list.mockResolvedValue([usage()]);
 
-    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 2, failed: 0 });
+    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 0 });
 
     expect(deps.creditCharge).not.toHaveBeenCalled();
-    expect(deps.usesMachineHours).not.toHaveBeenCalled();
-    expect(deps.markModelUsageCredited).toHaveBeenCalledWith("usage-1");
-    expect(deps.markSandboxUsageCredited).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markCredited).toHaveBeenCalledWith("automation_model", "usage-1");
+  });
+
+  it("records failed credits so the next pass tries newer ones first", async () => {
+    const deps = dependencies();
+    const failing = usage();
+    deps.list.mockResolvedValue([failing, usage({ id: "usage-2" })]);
+    deps.creditCharge.mockRejectedValueOnce(new Error("Autumn is unavailable"));
+
+    await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 1 });
+
+    expect(deps.markCredited).toHaveBeenCalledExactlyOnceWith("automation_model", "usage-2");
+    expect(deps.markAttempted).toHaveBeenCalledWith([failing]);
   });
 
   it("stops crediting once a pass reaches its deadline", async () => {
     const deps = dependencies();
-    deps.listModelUsage.mockResolvedValue([modelRow(), modelRow({ id: "usage-2" })]);
+    deps.list.mockResolvedValue([usage(), usage({ id: "usage-2" })]);
     deps.now
       .mockReturnValueOnce(now)
       .mockReturnValueOnce(now)
       .mockReturnValue(now + 10 * 60_000);
 
     await expect(creditWaivedUsage(deps)).resolves.toEqual({ credited: 1, failed: 0 });
+    expect(deps.markAttempted).not.toHaveBeenCalled();
   });
 });

@@ -38,6 +38,7 @@ export async function getUsageBreakdown(
           eq(agentModelUsage.organizationId, organizationId),
           eq(agentModelUsage.billable, true),
           gte(agentModelUsage.billedAt, since),
+          isNull(agentModelUsage.waivedAt),
         ),
       ),
     database

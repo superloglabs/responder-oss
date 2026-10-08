@@ -1064,11 +1064,12 @@ export const automationModelUsage = pgTable(
     costMicros: bigint("cost_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
-    // Set when the run turn that used it failed through Responder's fault, so
-    // it is not charged. `creditedAt` is set once billing reflects that: a
-    // charge already reported was credited back, or none was reported.
+    // Set when the run turn that used it failed through Responder's fault.
+    // Waived usage is still settled as usual, and the credit pass then
+    // returns the charge and sets `creditedAt`.
     waivedAt: timestamp("waived_at", { withTimezone: true }),
     creditedAt: timestamp("credited_at", { withTimezone: true }),
+    creditAttemptedAt: timestamp("credit_attempted_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -1110,6 +1111,8 @@ export const sandboxUsageWorkloadValues = [
 
 export type SandboxUsageWorkload = (typeof sandboxUsageWorkloadValues)[number];
 
+export type SandboxUsageBalance = "machine_hours" | "usage_credit";
+
 // One row per period a sandbox runs, from start or resume until it is paused
 // or deleted. The worker renews `heartbeat_at` while the sandbox runs, so a
 // period left open by a worker exit is closed at its last heartbeat. Rows
@@ -1133,9 +1136,12 @@ export const sandboxUsage = pgTable(
     chargeMicros: bigint("charge_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    // The balance the period was reported to, so a credit returns it there.
+    billedBalance: text("billed_balance").$type<SandboxUsageBalance>(),
     // Waived and credited as for automation model usage.
     waivedAt: timestamp("waived_at", { withTimezone: true }),
     creditedAt: timestamp("credited_at", { withTimezone: true }),
+    creditAttemptedAt: timestamp("credit_attempted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1158,6 +1164,10 @@ export const sandboxUsage = pgTable(
     check(
       "sandbox_usage_workload_check",
       sql`${table.workload} in ('automation', 'investigation', 'pull_request_review', 'remediation')`,
+    ),
+    check(
+      "sandbox_usage_billed_balance_check",
+      sql`${table.billedBalance} is null or ${table.billedBalance} in ('machine_hours', 'usage_credit')`,
     ),
     check(
       "sandbox_usage_resources_check",
@@ -1207,6 +1217,10 @@ export const agentModelUsage = pgTable(
     chargeMicros: bigint("charge_micros", { mode: "number" }),
     billedAt: timestamp("billed_at", { withTimezone: true }),
     billingAttemptedAt: timestamp("billing_attempted_at", { withTimezone: true }),
+    // Waived and credited as for automation model usage.
+    waivedAt: timestamp("waived_at", { withTimezone: true }),
+    creditedAt: timestamp("credited_at", { withTimezone: true }),
+    creditAttemptedAt: timestamp("credit_attempted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1220,6 +1234,9 @@ export const agentModelUsage = pgTable(
     index("agent_model_usage_unbilled_idx")
       .on(table.createdAt)
       .where(sql`${table.billedAt} is null`),
+    index("agent_model_usage_uncredited_idx")
+      .on(table.waivedAt)
+      .where(sql`${table.waivedAt} is not null and ${table.creditedAt} is null`),
     check(
       "agent_model_usage_workload_check",
       sql`${table.workload} in ('investigation', 'pull_request_review')`,

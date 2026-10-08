@@ -95,7 +95,7 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
-import { creditWaivedUsage } from "@responder/core/billing/usage-waivers";
+import { creditWaivedUsage, waiveJobUsage } from "@responder/core/billing/usage-waivers";
 
 loadResponderSecrets();
 initializeErrorMonitoring();
@@ -141,6 +141,26 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
       () => undefined,
     );
   }
+}
+
+// A failed investigation is not charged. A waiver that fails is reported and
+// leaves it charged.
+async function waiveFailedInvestigationUsage(
+  payload: { config: { organizationId: string }; investigationId: string },
+  jobId: string,
+  since: Date,
+): Promise<void> {
+  await waiveJobUsage({
+    since,
+    workload: "investigation",
+    workloadId: payload.investigationId,
+  }).catch((error: unknown) =>
+    reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId,
+      operation: "investigation",
+      organizationId: payload.config.organizationId,
+    }).catch(() => undefined));
 }
 
 let automationUsageBillingPass: Promise<void> | undefined;
@@ -573,6 +593,7 @@ await boss.work(
     let lastSlackProgressAt = 0;
     let slackTraceItems: SlackInvestigationTraceItem[] = [];
     const assistant = isSlackAssistantRequest(payload.request);
+    const usageSince = new Date();
     try {
       const result = await runInvestigationAgent(
         payload,
@@ -620,6 +641,7 @@ await boss.work(
       }
       return { investigationId: payload.investigationId };
     } catch (error) {
+      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
       const message = safeInvestigationError(error);
       await reportWorkerException(error, {
         investigationId: payload.investigationId,
@@ -708,6 +730,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
   let lastSlackProgressAt = 0;
   let slackProgressFailureReported = false;
   let slackTraceItems: SlackInvestigationTraceItem[] = [];
+  const usageSince = new Date();
 
   try {
     if (
@@ -900,6 +923,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
     );
     return { investigationId: payload.investigationId };
   } catch (error) {
+    await waiveFailedInvestigationUsage(payload, job.id, usageSince);
     const message = safeInvestigationError(error);
     await reportWorkerException(error, {
       investigationId: payload.investigationId,

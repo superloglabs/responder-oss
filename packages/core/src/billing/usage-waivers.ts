@@ -1,104 +1,87 @@
 import {
-  listUncreditedAutomationModelUsage,
-  markAutomationModelUsageCredited,
-  waiveAutomationRunModelUsage,
-  type AutomationModelUsageRecord,
-} from "../db/automation-model-usage.js";
-import {
-  listUncreditedSandboxUsage,
-  markSandboxUsageCredited,
-  waiveSandboxUsage,
-  type SandboxUsageRecord,
-} from "../db/sandbox-usage.js";
-import {
-  billingIsEnabled,
-  creditMachineHours,
-  creditUsageCharge,
-  organizationUsesMachineHours,
-} from "./autumn.js";
-import { sandboxUsageChargeMicros, sandboxUsageSeconds } from "./usage-billing.js";
+  listUncreditedUsage,
+  markUsageCreditAttempted,
+  markUsageCredited,
+  waiveAutomationRunUsage as waiveAutomationRunUsageRows,
+  waiveJobUsage as waiveJobUsageRows,
+  type UncreditedUsage,
+  type WaivedUsageKind,
+} from "../db/usage-waivers.js";
+import { billingIsEnabled, creditMachineHours, creditUsageCharge } from "./autumn.js";
 
-// Responder does not charge for a run turn that failed through its own fault.
-// The turn's usage is waived: usage not yet reported is settled without a
-// charge, and usage already reported is credited back.
+// Responder does not charge for work that failed through its own fault. The
+// work's usage is waived: it is settled as usual, and each charge reported for
+// it is then credited back to the balance it was reported to.
+
+// A failed waiver leaves the work charged, so it is retried through short
+// database outages.
+const waiverRetryDelaysMs = [1_000, 5_000, 15_000];
+
+async function withRetry<T>(attempt: () => Promise<T>, delaysMs: number[]): Promise<T> {
+  for (const delayMs of delaysMs) {
+    try {
+      return await attempt();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return attempt();
+}
+
+// Waives the usage of an automation run turn that started at `since`. Does
+// nothing when the caller no longer holds the run's lease.
+export async function waiveAutomationRunUsage(
+  input: { leaseId: string; runId: string; since: Date },
+  dependencies: { retryDelaysMs?: number[]; waive: typeof waiveAutomationRunUsageRows } = {
+    waive: waiveAutomationRunUsageRows,
+  },
+): Promise<boolean> {
+  return withRetry(
+    () => dependencies.waive(input),
+    dependencies.retryDelaysMs ?? waiverRetryDelaysMs,
+  );
+}
+
+// Waives the usage of an investigation or pull request job attempt that
+// started at `since`.
+export async function waiveJobUsage(
+  input: { since: Date; workload: "investigation" | "remediation"; workloadId: string },
+  dependencies: { retryDelaysMs?: number[]; waive: typeof waiveJobUsageRows } = {
+    waive: waiveJobUsageRows,
+  },
+): Promise<void> {
+  await withRetry(
+    () => dependencies.waive(input),
+    dependencies.retryDelaysMs ?? waiverRetryDelaysMs,
+  );
+}
+
+const creditKeyPrefixes: Record<WaivedUsageKind, string> = {
+  agent_model: "agent-model-usage-credit",
+  automation_model: "automation-usage-credit",
+  sandbox: "sandbox-usage-credit",
+};
 
 interface CreditDependencies {
   creditCharge: typeof creditUsageCharge;
   creditMachineHours: typeof creditMachineHours;
-  markModelUsageCredited: typeof markAutomationModelUsageCredited;
-  markSandboxUsageCredited: typeof markSandboxUsageCredited;
-  usesMachineHours: typeof organizationUsesMachineHours;
+  markCredited: typeof markUsageCredited;
 }
 
-const defaultCreditDependencies: CreditDependencies = {
-  creditCharge: creditUsageCharge,
-  creditMachineHours,
-  markModelUsageCredited: markAutomationModelUsageCredited,
-  markSandboxUsageCredited,
-  usesMachineHours: organizationUsesMachineHours,
-};
-
-async function creditModelUsage(
-  row: AutomationModelUsageRecord,
-  dependencies: CreditDependencies,
-): Promise<void> {
-  if (row.costMicros !== null && billingIsEnabled()) {
-    await dependencies.creditCharge({
-      chargeMicros: row.costMicros,
-      idempotencyKey: `automation-usage-credit:${row.id}`,
-      organizationId: row.organizationId,
-      properties: { model: row.model, runId: row.runId },
-    });
-  }
-  await dependencies.markModelUsageCredited(row.id);
-}
-
-// Credits the balance the period was reported to under the organization's
-// current plan, which is the balance it was charged to unless the plan
-// changed in between.
-async function creditSandboxUsage(
-  row: SandboxUsageRecord,
-  dependencies: CreditDependencies,
-): Promise<void> {
-  if (billingIsEnabled()) {
+async function creditUsage(usage: UncreditedUsage, dependencies: CreditDependencies): Promise<void> {
+  if (billingIsEnabled() && usage.balance !== null) {
     const credit = {
-      idempotencyKey: `sandbox-usage-credit:${row.id}`,
-      organizationId: row.organizationId,
-      properties: { kind: "sandbox", workload: row.workload, workloadId: row.workloadId },
+      idempotencyKey: `${creditKeyPrefixes[usage.kind]}:${usage.id}`,
+      organizationId: usage.organizationId,
+      properties: usage.properties,
     };
-    if (await dependencies.usesMachineHours(row.organizationId)) {
-      await dependencies.creditMachineHours({ ...credit, hours: sandboxUsageSeconds(row) / 3_600 });
-    } else {
-      await dependencies.creditCharge({
-        ...credit,
-        chargeMicros: row.chargeMicros ?? sandboxUsageChargeMicros(row),
-      });
+    if (usage.balance === "machine_hours") {
+      await dependencies.creditMachineHours({ ...credit, hours: usage.hours });
+    } else if (usage.chargeMicros !== null) {
+      await dependencies.creditCharge({ ...credit, chargeMicros: usage.chargeMicros });
     }
   }
-  await dependencies.markSandboxUsageCredited(row.id);
-}
-
-// Waives the model requests and sandbox time an automation run used since
-// its turn started. Usage already reported is credited by the next credit
-// pass.
-export async function waiveAutomationRunUsage(
-  input: { runId: string; since: Date },
-  dependencies: {
-    waiveModelUsage: typeof waiveAutomationRunModelUsage;
-    waiveSandboxUsage: typeof waiveSandboxUsage;
-  } = {
-    waiveModelUsage: waiveAutomationRunModelUsage,
-    waiveSandboxUsage,
-  },
-): Promise<void> {
-  await Promise.all([
-    dependencies.waiveModelUsage(input.runId, input.since),
-    dependencies.waiveSandboxUsage({
-      since: input.since,
-      workload: "automation",
-      workloadId: input.runId,
-    }),
-  ]);
+  await dependencies.markCredited(usage.kind, usage.id);
 }
 
 // Autumn keeps idempotency keys for 24 hours, so only retry credits younger
@@ -108,38 +91,36 @@ const retryWindowMs = 23 * 60 * 60_000;
 // the retry window before it is credited.
 const passDeadlineMs = 10 * 60_000;
 
-// Credits waived usage that was already reported to billing, including
-// charges a concurrent settlement reported after the usage was waived.
+// Credits waived usage that has been settled. Failed credits are retried by
+// the next pass.
 export async function creditWaivedUsage(
   dependencies: CreditDependencies & {
-    listModelUsage: typeof listUncreditedAutomationModelUsage;
-    listSandboxUsage: typeof listUncreditedSandboxUsage;
+    list: typeof listUncreditedUsage;
+    markAttempted: typeof markUsageCreditAttempted;
     now: () => number;
   } = {
-    ...defaultCreditDependencies,
-    listModelUsage: listUncreditedAutomationModelUsage,
-    listSandboxUsage: listUncreditedSandboxUsage,
+    creditCharge: creditUsageCharge,
+    creditMachineHours,
+    list: listUncreditedUsage,
+    markAttempted: markUsageCreditAttempted,
+    markCredited: markUsageCredited,
     now: Date.now,
   },
 ): Promise<{ credited: number; failed: number }> {
   const now = dependencies.now();
-  const waivedAfter = new Date(now - retryWindowMs);
-  const [modelRows, sandboxRows] = await Promise.all([
-    dependencies.listModelUsage({ limit: 200, waivedAfter }),
-    dependencies.listSandboxUsage({ limit: 200, waivedAfter }),
-  ]);
-  const credits = [
-    ...modelRows.map((row) => () => creditModelUsage(row, dependencies)),
-    ...sandboxRows.map((row) => () => creditSandboxUsage(row, dependencies)),
-  ];
+  const usage = await dependencies.list({
+    limit: 200,
+    waivedAfter: new Date(now - retryWindowMs),
+  });
   let credited = 0;
-  let failed = 0;
-  for (const credit of credits) {
+  const failed: UncreditedUsage[] = [];
+  for (const row of usage) {
     if (dependencies.now() >= now + passDeadlineMs) break;
-    await credit().then(
+    await creditUsage(row, dependencies).then(
       () => { credited += 1; },
-      () => { failed += 1; },
+      () => { failed.push(row); },
     );
   }
-  return { credited, failed };
+  if (failed.length > 0) await dependencies.markAttempted(failed);
+  return { credited, failed: failed.length };
 }

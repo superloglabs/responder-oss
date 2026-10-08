@@ -12,13 +12,12 @@ import {
   type AgentModelUsageRecord,
 } from "../db/agent-model-usage.js";
 import { organizationHasCapability } from "../db/organization-capabilities.js";
-import type { AgentRequestUsage } from "../db/schema.js";
+import type { AgentRequestUsage, SandboxUsageBalance } from "../db/schema.js";
 import {
   closeStaleSandboxUsage,
   listUnbilledSandboxUsage,
   markSandboxUsageBilled,
   markSandboxUsageBillingAttempted,
-  markWaivedSandboxUsageSettled,
   setSandboxUsageCharge,
   stopSandboxUsage,
   type SandboxUsageRecord,
@@ -40,7 +39,6 @@ export function organizationUsesUsageBilling(organizationId: string): Promise<bo
 
 interface SandboxSettlementDependencies {
   markBilled: typeof markSandboxUsageBilled;
-  markWaivedSettled: typeof markWaivedSandboxUsageSettled;
   setCharge: typeof setSandboxUsageCharge;
   track: typeof trackUsageCharge;
   trackMachineHours: typeof trackMachineHours;
@@ -49,7 +47,6 @@ interface SandboxSettlementDependencies {
 
 const defaultSandboxDependencies: SandboxSettlementDependencies = {
   markBilled: markSandboxUsageBilled,
-  markWaivedSettled: markWaivedSandboxUsageSettled,
   setCharge: setSandboxUsageCharge,
   track: trackUsageCharge,
   trackMachineHours,
@@ -67,10 +64,11 @@ export function sandboxUsageChargeMicros(row: SandboxUsageRecord): number {
   );
 }
 
-// Prices a stopped sandbox period and reports billable periods that were not
-// waived: as machine hours on plans that include them, otherwise as a charge
-// to the usage credit. Both use the same idempotency key, and Autumn's keys apply across
+// Prices a stopped sandbox period and reports billable periods: as machine
+// hours on plans that include them, otherwise as a charge to the usage
+// credit. Both use the same idempotency key, and Autumn's keys apply across
 // features, so a retry after a plan change cannot report the period to both.
+// The balance is stored so a later credit returns the charge there.
 // Failures leave the row unsettled for the worker to retry.
 export async function settleSandboxUsage(
   row: SandboxUsageRecord,
@@ -78,10 +76,7 @@ export async function settleSandboxUsage(
 ): Promise<void> {
   const chargeMicros = row.chargeMicros ?? sandboxUsageChargeMicros(row);
   if (row.chargeMicros === null) await dependencies.setCharge(row.id, chargeMicros);
-  if (row.waived) {
-    await dependencies.markWaivedSettled(row.id);
-    return;
-  }
+  let balance: SandboxUsageBalance | null = null;
   if (row.billable && billingIsEnabled()) {
     const report = {
       idempotencyKey: `sandbox-usage:${row.id}`,
@@ -90,24 +85,25 @@ export async function settleSandboxUsage(
     };
     if (await dependencies.usesMachineHours(row.organizationId)) {
       await dependencies.trackMachineHours({ ...report, hours: sandboxUsageSeconds(row) / 3_600 });
+      balance = "machine_hours";
     } else {
       await dependencies.track({ ...report, chargeMicros });
+      balance = "usage_credit";
     }
   }
-  await dependencies.markBilled(row.id);
+  await dependencies.markBilled(row.id, balance);
 }
 
 // Closes a sandbox period and settles it. A period another process already
 // closed is settled by the retry pass instead.
 export async function finishSandboxUsage(
   id: string,
-  options: { waived?: boolean } = {},
   dependencies: SandboxSettlementDependencies & { stop: typeof stopSandboxUsage } = {
     ...defaultSandboxDependencies,
     stop: stopSandboxUsage,
   },
 ): Promise<void> {
-  const row = await dependencies.stop(id, options);
+  const row = await dependencies.stop(id);
   if (row) await settleSandboxUsage(row, dependencies);
 }
 

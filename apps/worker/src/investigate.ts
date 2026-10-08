@@ -925,8 +925,6 @@ export async function runInvestigationAgent(
   let session: DaytonaSandboxSession | null = null;
   let meter: SandboxMeter | null = null;
   let modelUsage: Usage | undefined;
-  // A failed investigation is not charged.
-  let failed = false;
 
   try {
     await Promise.all(
@@ -1280,7 +1278,6 @@ export async function runInvestigationAgent(
         : {}),
     };
   } catch (error) {
-    failed = true;
     await writeTrace(
       traceEvent("session.failed", {
         error: safeInvestigationError(error, environment),
@@ -1303,9 +1300,9 @@ export async function runInvestigationAgent(
         }
       }
     } finally {
-      await meter?.stop({ waived: failed });
+      await meter?.stop();
       await recordAgentRunUsage({
-        billable: usageBillable && !failed,
+        billable: usageBillable,
         model: config.model,
         organizationId: job.config.organizationId,
         usage: modelUsage,

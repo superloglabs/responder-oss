@@ -194,8 +194,6 @@ export async function runProposedRemediation(
   });
   let session: DaytonaSandboxSession | null = null;
   let meter: SandboxMeter | null = null;
-  // Work that does not open the pull request is not charged.
-  let failed = true;
 
   try {
     session = await createDaytonaSandboxSession(client, config, sandboxName);
@@ -247,7 +245,6 @@ export async function runProposedRemediation(
       },
       session,
     );
-    failed = false;
     const createdInput = {
       requestId: request.requestId,
       repositoryFullName: selected.repository.fullName,
@@ -286,6 +283,6 @@ export async function runProposedRemediation(
         requestId: job.remediationRequestId,
       });
     }
-    await meter?.stop({ waived: failed });
+    await meter?.stop();
   }
 }

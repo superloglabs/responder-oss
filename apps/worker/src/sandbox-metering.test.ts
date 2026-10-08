@@ -44,15 +44,7 @@ describe("sandbox meter", () => {
       workloadId: "investigation-1",
     });
     expect(deps.heartbeat).toHaveBeenCalledTimes(2);
-    expect(deps.finish).toHaveBeenCalledWith("usage-1", {});
-  });
-
-  it("stops a period as waived for work that failed", async () => {
-    const deps = dependencies();
-
-    await startSandboxMeter(input, deps).stop({ waived: true });
-
-    expect(deps.finish).toHaveBeenCalledWith("usage-1", { waived: true });
+    expect(deps.finish).toHaveBeenCalledWith("usage-1");
   });
 
   it("stops once and renews nothing after stopping", async () => {

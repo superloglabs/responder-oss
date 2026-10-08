@@ -1,6 +1,10 @@
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
-import { sandboxUsage, type SandboxUsageWorkload } from "./schema.js";
+import {
+  sandboxUsage,
+  type SandboxUsageBalance,
+  type SandboxUsageWorkload,
+} from "./schema.js";
 
 export interface SandboxUsageRecord {
   billable: boolean;
@@ -12,8 +16,6 @@ export interface SandboxUsageRecord {
   organizationId: string;
   startedAt: Date;
   stoppedAt: Date;
-  // The run turn failed through Responder's fault, so it is not charged.
-  waived: boolean;
   workload: SandboxUsageWorkload;
   workloadId: string;
 }
@@ -28,7 +30,6 @@ const usageSelection = {
   organizationId: sandboxUsage.organizationId,
   startedAt: sandboxUsage.startedAt,
   stoppedAt: sandboxUsage.stoppedAt,
-  waived: sql<boolean>`${sandboxUsage.waivedAt} is not null`,
   workload: sandboxUsage.workload,
   workloadId: sandboxUsage.workloadId,
 };
@@ -68,18 +69,11 @@ export async function heartbeatSandboxUsage(id: string): Promise<void> {
 }
 
 // Returns null when the period was already closed, for example by the stale
-// period sweep after a long database outage. A waived period is not charged.
-export async function stopSandboxUsage(
-  id: string,
-  options: { waived?: boolean } = {},
-): Promise<SandboxUsageRecord | null> {
+// period sweep after a long database outage.
+export async function stopSandboxUsage(id: string): Promise<SandboxUsageRecord | null> {
   const rows = await getDatabase()
     .update(sandboxUsage)
-    .set({
-      heartbeatAt: sql`now()`,
-      stoppedAt: sql`now()`,
-      ...(options.waived ? { waivedAt: sql`now()` } : {}),
-    })
+    .set({ heartbeatAt: sql`now()`, stoppedAt: sql`now()` })
     .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.stoppedAt)))
     .returning(usageSelection);
   return rows[0] ? stoppedRecord(rows[0]) : null;
@@ -105,65 +99,16 @@ export async function setSandboxUsageCharge(id: string, chargeMicros: number): P
     .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.chargeMicros)));
 }
 
-export async function markSandboxUsageBilled(id: string): Promise<void> {
+// `balance` is the balance the period was reported to, or null when it was
+// not reported.
+export async function markSandboxUsageBilled(
+  id: string,
+  balance: SandboxUsageBalance | null,
+): Promise<void> {
   await getDatabase()
     .update(sandboxUsage)
-    .set({ billedAt: new Date() })
+    .set({ billedAt: new Date(), billedBalance: balance })
     .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.billedAt)));
-}
-
-// Settles a waived period without reporting it. A period another settlement
-// already reported stays uncredited, so the credit pass returns its charge.
-export async function markWaivedSandboxUsageSettled(id: string): Promise<void> {
-  await getDatabase()
-    .update(sandboxUsage)
-    .set({ billedAt: sql`now()`, creditedAt: sql`now()` })
-    .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.billedAt)));
-}
-
-// Waives the billable periods a workload started since `since`, including one
-// still running.
-export async function waiveSandboxUsage(input: {
-  since: Date;
-  workload: SandboxUsageWorkload;
-  workloadId: string;
-}): Promise<void> {
-  await getDatabase()
-    .update(sandboxUsage)
-    .set({ waivedAt: sql`now()` })
-    .where(and(
-      eq(sandboxUsage.workload, input.workload),
-      eq(sandboxUsage.workloadId, input.workloadId),
-      eq(sandboxUsage.billable, true),
-      gte(sandboxUsage.startedAt, input.since),
-      isNull(sandboxUsage.waivedAt),
-    ));
-}
-
-// Waived periods that were reported to billing and not yet credited.
-export async function listUncreditedSandboxUsage(input: {
-  limit: number;
-  waivedAfter: Date;
-}): Promise<SandboxUsageRecord[]> {
-  const rows = await getDatabase()
-    .select(usageSelection)
-    .from(sandboxUsage)
-    .where(and(
-      isNotNull(sandboxUsage.waivedAt),
-      isNull(sandboxUsage.creditedAt),
-      isNotNull(sandboxUsage.billedAt),
-      gt(sandboxUsage.waivedAt, input.waivedAfter),
-    ))
-    .orderBy(asc(sandboxUsage.waivedAt))
-    .limit(input.limit);
-  return rows.map(stoppedRecord);
-}
-
-export async function markSandboxUsageCredited(id: string): Promise<void> {
-  await getDatabase()
-    .update(sandboxUsage)
-    .set({ creditedAt: sql`now()` })
-    .where(and(eq(sandboxUsage.id, id), isNull(sandboxUsage.creditedAt)));
 }
 
 // Stopped periods not yet settled. Never-attempted rows come first so rows

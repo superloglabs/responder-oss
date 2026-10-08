@@ -1059,6 +1059,22 @@ export async function processAutomationRun(
       : allowanceExhausted
         ? allowanceExhausted.message
       : safeInvestigationError(error, environment);
+    // A turn that failed through Responder's fault is not charged. A run
+    // that reached its own runtime limit or allowance is. The waiver comes
+    // first so a failed status write cannot leave the turn charged.
+    if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
+      await dependencies.waiveUsage({
+        leaseId: run.leaseId,
+        runId: run.runId,
+        since: turnStartedAt,
+      }).catch((waiveError) =>
+        dependencies.reportException(waiveError, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
+    }
     if (!leaseLost) {
       await dependencies.setStatus({
         ...(cancelled
@@ -1081,17 +1097,6 @@ export async function processAutomationRun(
         cancelled ? "run_cancelled" : "run_failed",
         cancelled ? undefined : { message },
       );
-    }
-    // A turn that failed through Responder's fault is not charged. A run
-    // that reached its own runtime limit or allowance is.
-    if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
-      await dependencies.waiveUsage({ runId: run.runId, since: turnStartedAt }).catch((waiveError) =>
-        dependencies.reportException(waiveError, {
-          jobId,
-          operation: "automation",
-          organizationId: run.organizationId,
-          requestId: run.runId,
-        }).catch(() => undefined));
     }
     turnEnded = !cancelled && !leaseLost;
     if (turnEnded) outcome = { message, status: "failed" };

@@ -150,7 +150,7 @@ function dependencies() {
       update: vi.fn().mockResolvedValue(undefined),
     },
     updateEvent: vi.fn().mockResolvedValue(undefined),
-    waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(undefined),
+    waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(true),
     workspaceTools: vi.fn<AutomationRunDependencies["workspaceTools"]>(() => []),
   };
 }
@@ -1470,7 +1470,11 @@ describe("automation run processor", () => {
       failureMessage: "Codex automation harness failed",
       status: "failed",
     }));
-    expect(deps.waiveUsage).toHaveBeenCalledWith({ runId, since: expect.any(Date) });
+    expect(deps.waiveUsage).toHaveBeenCalledWith({
+      leaseId: claimedRun().leaseId,
+      runId,
+      since: deps.now(),
+    });
   });
 
   it("does not waive the usage of a turn the allowance stopped", async () => {
@@ -1488,6 +1492,22 @@ describe("automation run processor", () => {
     }, process.env, deps);
 
     expect(deps.waiveUsage).not.toHaveBeenCalled();
+  });
+
+  it("waives a failed turn's usage before recording its status", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.setStatus.mockRejectedValue(new Error("database unavailable"));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps).catch(() => undefined);
+
+    expect(deps.waiveUsage).toHaveBeenCalledOnce();
   });
 
   it("still finishes a failed turn when its usage cannot be waived", async () => {

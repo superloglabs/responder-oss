@@ -1,3 +1,4 @@
+import { waiveJobUsage } from "@responder/core/billing/usage-waivers";
 import { failIssuePullRequest } from "@responder/core/db/pull-requests";
 import { UsageAllowanceExhaustedError } from "./agent-usage.js";
 import { failSuggestionPullRequest } from "@responder/core/db/suggestion-pull-requests";
@@ -13,6 +14,7 @@ interface RemediationJobDependencies {
   reportException: typeof reportWorkerException;
   refreshSlack?: typeof refreshIssuePullRequestSlackMessages;
   runRemediation: typeof runProposedRemediation;
+  waiveUsage: typeof waiveJobUsage;
 }
 
 const defaultDependencies: RemediationJobDependencies = {
@@ -21,6 +23,7 @@ const defaultDependencies: RemediationJobDependencies = {
   reportException: reportWorkerException,
   refreshSlack: refreshIssuePullRequestSlackMessages,
   runRemediation: runProposedRemediation,
+  waiveUsage: waiveJobUsage,
 };
 
 export async function processRemediationJob(
@@ -29,9 +32,24 @@ export async function processRemediationJob(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: RemediationJobDependencies = defaultDependencies,
 ): Promise<{ requestId: string }> {
+  const usageSince = new Date();
   try {
     await dependencies.runRemediation(payload, environment);
   } catch (error) {
+    // Pull request work that failed is not charged. A waiver that fails is
+    // reported and leaves it charged.
+    await dependencies.waiveUsage({
+      since: usageSince,
+      workload: "remediation",
+      workloadId: payload.remediationRequestId,
+    }).catch((waiveError: unknown) =>
+      Promise.resolve().then(() => dependencies.reportException(waiveError, {
+        investigationId: payload.investigationId,
+        jobId,
+        operation: "remediation",
+        organizationId: payload.config.organizationId,
+        requestId: payload.remediationRequestId,
+      })).catch(() => undefined));
     const message = safeInvestigationError(error, environment);
     console.error(
       JSON.stringify({

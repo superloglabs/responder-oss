@@ -5,7 +5,6 @@ import type {
   listUnbilledAutomationModelUsage,
   markAutomationModelUsageBilled,
   markAutomationModelUsageBillingAttempted,
-  markWaivedAutomationModelUsageSettled,
   purgeAbandonedResponderModelUsage,
   recordAutomationModelUsage,
   reserveResponderModelUsage,
@@ -50,7 +49,6 @@ function usageRecord(
     organizationId: "organization-1",
     provider: "openai",
     runId: "run-1",
-    waived: false,
   };
 }
 
@@ -66,15 +64,12 @@ function dependencies() {
       .mockResolvedValue(undefined),
     markBilled: vi.fn<typeof markAutomationModelUsageBilled>()
       .mockResolvedValue(undefined),
-    markWaivedSettled: vi.fn<typeof markWaivedAutomationModelUsageSettled>()
-      .mockResolvedValue(undefined),
     now: () => Date.parse("2026-09-24T12:00:00.000Z"),
     purgeAbandoned: vi.fn<typeof purgeAbandonedResponderModelUsage>()
       .mockResolvedValue(0),
     record: vi.fn<typeof recordAutomationModelUsage>(async (input) => ({
       ...input,
       id: "usage-1",
-      waived: false,
     })),
     setCost: vi.fn<typeof setAutomationModelUsageCost>().mockResolvedValue(undefined),
     track: vi.fn<typeof trackAutomationInferenceUsage>().mockResolvedValue(undefined),
@@ -208,20 +203,6 @@ describe("automation model usage billing", () => {
     }));
     expect(deps.markBilled).toHaveBeenCalledWith("usage-1");
     expect(deps.markBilled).toHaveBeenCalledWith("usage-2");
-  });
-
-  it("settles a waived row without reporting it", async () => {
-    vi.stubEnv("BILLING_ENABLED", "true");
-    const deps = dependencies();
-    deps.list.mockResolvedValue([{ ...usageRecord("usage-1", 3_000), waived: true }]);
-
-    await expect(settleUnbilledAutomationModelUsage(deps)).resolves.toMatchObject({
-      failed: 0,
-      settled: 1,
-    });
-    expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).not.toHaveBeenCalled();
-    expect(deps.markWaivedSettled).toHaveBeenCalledWith("usage-1");
   });
 
   it("retries unbilled rows only inside the idempotency window", async () => {

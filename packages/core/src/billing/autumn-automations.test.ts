@@ -296,19 +296,28 @@ describe("automation billing", () => {
     });
 
     expect(client.track).toHaveBeenCalledWith(
-      expect.objectContaining({
+      {
+        customerId: "organization-1",
         featureId: "responder_automation_inference",
+        properties: { model: "gpt-5.4", runId: "run-1" },
         value: -0.012345,
-      }),
-      expect.objectContaining({
+      },
+      {
         headers: { "Idempotency-Key": "automation-usage-credit:usage-1" },
-      }),
+        timeoutMs: 30_000,
+      },
     );
     expect(client.track).toHaveBeenCalledWith(
-      expect.objectContaining({ featureId: "responder_machine_hours", value: -0.25 }),
-      expect.objectContaining({
+      {
+        customerId: "organization-1",
+        featureId: "responder_machine_hours",
+        properties: { kind: "sandbox" },
+        value: -0.25,
+      },
+      {
         headers: { "Idempotency-Key": "sandbox-usage-credit:usage-2" },
-      }),
+        timeoutMs: 30_000,
+      },
     );
   });
 

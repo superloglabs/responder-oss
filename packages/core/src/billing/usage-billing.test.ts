@@ -36,7 +36,6 @@ function sandboxRow(overrides: Partial<SandboxUsageRecord> = {}): SandboxUsageRe
     organizationId: "organization-1",
     startedAt: new Date("2026-09-29T10:00:00.000Z"),
     stoppedAt: new Date("2026-09-29T10:10:00.000Z"),
-    waived: false,
     workload: "automation",
     workloadId: "run-1",
     ...overrides,
@@ -70,7 +69,6 @@ function dependencies() {
       id: "agent-usage-1",
     })),
     markBilled: vi.fn().mockResolvedValue(undefined),
-    markWaivedSettled: vi.fn().mockResolvedValue(undefined),
     setCharge: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(async () => sandboxRow()),
     track: vi.fn<typeof trackUsageCharge>().mockResolvedValue(undefined),
@@ -96,7 +94,7 @@ describe("usage billing", () => {
       organizationId: "organization-1",
       properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
     });
-    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1", "usage_credit");
   });
 
   it("reports sandbox time as machine hours on plans that include them", async () => {
@@ -113,7 +111,7 @@ describe("usage billing", () => {
       properties: { kind: "sandbox", workload: "automation", workloadId: "run-1" },
     });
     expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1", "machine_hours");
   });
 
   it("leaves a sandbox period unbilled when its plan cannot be looked up", async () => {
@@ -134,20 +132,7 @@ describe("usage billing", () => {
 
     expect(deps.setCharge).toHaveBeenCalledWith("sandbox-usage-1", 16_860);
     expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1");
-  });
-
-  it("prices a waived sandbox period and settles it without reporting it", async () => {
-    const deps = dependencies();
-    deps.usesMachineHours.mockResolvedValue(true);
-
-    await settleSandboxUsage(sandboxRow({ waived: true }), deps);
-
-    expect(deps.setCharge).toHaveBeenCalledWith("sandbox-usage-1", 16_860);
-    expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.trackMachineHours).not.toHaveBeenCalled();
-    expect(deps.markBilled).not.toHaveBeenCalled();
-    expect(deps.markWaivedSettled).toHaveBeenCalledWith("sandbox-usage-1");
+    expect(deps.markBilled).toHaveBeenCalledWith("sandbox-usage-1", null);
   });
 
   it("does not report usage when billing is disabled", async () => {
@@ -157,7 +142,7 @@ describe("usage billing", () => {
     await settleSandboxUsage(sandboxRow(), deps);
 
     expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markBilled).toHaveBeenCalledOnce();
+    expect(deps.markBilled).toHaveBeenCalledExactlyOnceWith("sandbox-usage-1", null);
   });
 
   it("leaves a sandbox period unbilled when reporting fails", async () => {
@@ -169,22 +154,11 @@ describe("usage billing", () => {
     expect(deps.markBilled).not.toHaveBeenCalled();
   });
 
-  it("stops a waived period as waived", async () => {
-    const deps = dependencies();
-    deps.stop.mockResolvedValue(sandboxRow({ waived: true }));
-
-    await finishSandboxUsage("sandbox-usage-1", { waived: true }, deps);
-
-    expect(deps.stop).toHaveBeenCalledWith("sandbox-usage-1", { waived: true });
-    expect(deps.track).not.toHaveBeenCalled();
-    expect(deps.markWaivedSettled).toHaveBeenCalledWith("sandbox-usage-1");
-  });
-
   it("settles nothing when another process already closed the period", async () => {
     const deps = dependencies();
     deps.stop.mockResolvedValue(null as unknown as SandboxUsageRecord);
 
-    await finishSandboxUsage("sandbox-usage-1", {}, deps);
+    await finishSandboxUsage("sandbox-usage-1", deps);
 
     expect(deps.track).not.toHaveBeenCalled();
   });
