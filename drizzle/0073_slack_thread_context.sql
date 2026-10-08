@@ -1,0 +1,1 @@
+ALTER TABLE "slack_investigation_sessions" ADD COLUMN "thread_context_timestamp" text;

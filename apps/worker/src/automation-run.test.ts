@@ -1021,7 +1021,7 @@ describe("automation run processor", () => {
       expect(deps.hasNewMessages).toHaveBeenCalledWith({ afterEventId: 7, runId });
       // Only while no other turn has claimed or reopened the run since.
       expect(deps.reopenRun).toHaveBeenCalledWith(runId, "71717171-7171-4171-8171-717171717170");
-      expect(deps.requeueRun).toHaveBeenCalledWith(runId);
+      expect(deps.requeueRun).toHaveBeenCalledWith({ organizationId, runId });
       // The run finished this turn before it was reopened.
       expect(deps.setStatus.mock.invocationCallOrder[0]).toBeLessThan(
         deps.reopenRun.mock.invocationCallOrder[0]!,

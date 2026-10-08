@@ -1,5 +1,8 @@
 import {
+  automationRunGroupConcurrency,
+  automationRunJobOptions,
   automationRunJobSchema,
+  automationRunLocalConcurrency,
   automationRunQueue,
   createJobBoss,
   gcpProjectSetupJobSchema,
@@ -534,12 +537,12 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, async ([job]) => {
 });
 const automationRunDependencies = {
   ...defaultAutomationRunDependencies,
-  requeueRun: async (runId: string) => {
+  requeueRun: async (run: { organizationId: string; runId: string }) => {
     const queued = await boss.send(automationRunQueue, {
       kind: "automation_run",
       queuedAt: new Date().toISOString(),
-      runId,
-    });
+      runId: run.runId,
+    }, automationRunJobOptions(run.organizationId));
     if (!queued) throw new Error("Automation run job was not created");
   },
 };
@@ -548,7 +551,14 @@ const automationRunHandler = async ([job]: Array<{ data: unknown; id: string }>)
   return processAutomationRun(job.id, payload, process.env, automationRunDependencies);
 };
 await migrateLegacyAutomationRunJobs(boss);
-await boss.work(automationRunQueue, { localConcurrency: 2 }, automationRunHandler);
+await boss.work(
+  automationRunQueue,
+  {
+    groupConcurrency: automationRunGroupConcurrency,
+    localConcurrency: automationRunLocalConcurrency,
+  },
+  automationRunHandler,
+);
 // Drains jobs sent by control-plane tasks that predate the unordered queue.
 await boss.work(legacyAutomationRunQueue, { localConcurrency: 1 }, automationRunHandler);
 await boss.work(linearTicketQueue, { localConcurrency: 2 }, async ([job]) => {
@@ -666,6 +676,7 @@ await boss.work(
         reportMarkdown: result.report,
         sandboxSessionState: result.sandboxSessionState,
         previousResponseId: result.previousResponseId,
+        threadContextTimestamp: result.threadContextTimestamp,
       });
       if (linear) {
         await linear.respond(result.report);

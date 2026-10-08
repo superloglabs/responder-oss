@@ -58,6 +58,7 @@ import {
   loadAwsAlarmSkillContext,
 } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
+import { loadSlackThreadContext } from "./slack-thread-context.js";
 import { createGcpMcpServers } from "./gcp.js";
 import { createAxiomMcpServer } from "./axiom.js";
 import { createDatadogMcpServer } from "./datadog.js";
@@ -671,8 +672,11 @@ export function investigationInstructions(input: {
 export function initialInvestigationMessage(
   input: InvestigationInput,
   at = new Date(),
+  threadContext: string | null = null,
 ): { message: string; traceEvent: InvestigationTraceEvent } {
-  const message = investigationPrompt(input);
+  const message = [threadContext, investigationPrompt(input)]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
   return {
     message,
     traceEvent: traceEvent("message.received", { message }, at),
@@ -703,6 +707,7 @@ export async function runInvestigationAgent(
   report: string;
   previousResponseId?: string;
   sandboxSessionState?: Record<string, unknown>;
+  threadContextTimestamp?: string;
   updatedIssueIds?: string[];
 }> {
   const threadMode = job.kind === "slack_thread_investigation";
@@ -736,7 +741,17 @@ export async function runInvestigationAgent(
       throw error;
     }
   };
-  const initialMessage = initialInvestigationMessage(investigationInput);
+  const threadContext = threadMode && investigationInput.provider === "slack"
+    ? await loadSlackThreadContext({
+        investigationId: job.investigationId,
+        sessionId: job.slackInvestigationSessionId,
+      })
+    : null;
+  const initialMessage = initialInvestigationMessage(
+    investigationInput,
+    new Date(),
+    threadContext?.context ?? null,
+  );
   await writeTrace(traceEvent("session.started"));
   await writeTrace(initialMessage.traceEvent);
 
@@ -1268,6 +1283,7 @@ export async function runInvestigationAgent(
         ...(result.lastResponseId
           ? { previousResponseId: result.lastResponseId }
           : {}),
+        ...(threadContext ? { threadContextTimestamp: threadContext.readThrough } : {}),
       };
     }
     return {
