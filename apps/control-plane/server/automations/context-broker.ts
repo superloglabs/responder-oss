@@ -498,7 +498,7 @@ export function createAutomationContextBrokerRoutes(
           rawBody,
           request: context.req.raw,
           target,
-        }));
+        }), parsed.data.id);
       }
       return await proxyMcpRequest({
         dependencies,

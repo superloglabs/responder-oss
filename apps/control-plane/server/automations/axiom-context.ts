@@ -64,7 +64,10 @@ const rpcErrorMessageSchema = z.object({ error: z.unknown() }).passthrough();
 // failed request or a JSON-RPC error passes through. A successful answer that
 // holds no readable listing is refused, so an unfiltered list never reaches
 // the run.
-export async function filterAxiomToolList(response: Response): Promise<Response> {
+export async function filterAxiomToolList(
+  response: Response,
+  requestId: string | number | undefined,
+): Promise<Response> {
   const text = await response.text();
   const headers = new Headers(response.headers);
   const messages = parsedMessages(text, headers.get("content-type") ?? "");
@@ -77,7 +80,7 @@ export async function filterAxiomToolList(response: Response): Promise<Response>
       return new Response(text, { headers, status: response.status });
     }
     return Response.json(
-      { error: { code: -32603, message: "Context provider request failed" }, id: null, jsonrpc: "2.0" },
+      { error: { code: -32603, message: "Context provider request failed" }, id: requestId ?? null, jsonrpc: "2.0" },
       { headers: { "cache-control": "no-store" }, status: 502 },
     );
   }

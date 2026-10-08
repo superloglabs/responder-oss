@@ -492,6 +492,7 @@ describe("automation context broker", () => {
         rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
       );
 
+      expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ result: { tools: [{ name: "queryApl" }] } });
     });
 
@@ -504,11 +505,13 @@ describe("automation context broker", () => {
 
       const response = await app.request(
         `/api/automation-context-broker/v1/${accountId}`,
-        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+        rpcRequest({ id: 7, jsonrpc: "2.0", method: "tools/list" }),
       );
 
       expect(response.status).toBe(502);
-      expect(await response.text()).not.toContain("deleteMonitor");
+      const body = await response.text();
+      expect(JSON.parse(body)).toMatchObject({ error: { code: -32603 }, id: 7 });
+      expect(body).not.toContain("deleteMonitor");
     });
 
     it("refuses Axiom tools outside the read-only allowlist without calling Axiom", async () => {
