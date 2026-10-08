@@ -4,13 +4,16 @@ import { AutomationResourcePicker } from "./automation-resource-picker";
 
 type ListedAuthor = SlackAuthor & { kind: "app" | "person" };
 
-// Chooses the people and apps whose messages a Slack trigger ignores. It
-// offers whoever posted in the selected channels since they were watched.
-export function SlackAuthorPicker({ accountId, channelIds, ignored, onChange }: {
+// Chooses Slack people and apps for a trigger: the only ones whose messages
+// start a run, or the ones it ignores. It offers whoever posted in the
+// selected channels since they were watched. `none` names an empty selection.
+export function SlackAuthorPicker({ accountId, channelIds, none, selected, title, onChange }: {
   accountId: string;
   channelIds: string[];
-  ignored: SlackAuthor[];
-  onChange: (ignored: SlackAuthor[] | undefined) => void;
+  none: string;
+  selected: SlackAuthor[];
+  title: string;
+  onChange: (selected: SlackAuthor[] | undefined) => void;
 }) {
   // Each list is kept with the selection it was loaded for, so a response
   // for channels that are no longer selected is never shown.
@@ -31,7 +34,7 @@ export function SlackAuthorPicker({ accountId, channelIds, ignored, onChange }: 
   }, [selection]);
   const authors = loaded?.selection === selection ? loaded.authors : [];
   const choices: Array<SlackAuthor | ListedAuthor> = [
-    ...ignored.filter((author) => !authors.some((item) => item.id === author.id)),
+    ...selected.filter((author) => !authors.some((item) => item.id === author.id)),
     ...authors,
   ];
   return <AutomationResourcePicker
@@ -45,9 +48,9 @@ export function SlackAuthorPicker({ accountId, channelIds, ignored, onChange }: 
       displayName: "kind" in author && author.kind === "app" ? `${author.name} (app)` : author.name,
       externalId: author.id,
     }))}
-    selected={ignored.map((author) => author.id)}
-    summary={ignored.length === 0 ? "No one" : undefined}
-    title="Ignore messages from"
+    selected={selected.map((author) => author.id)}
+    summary={selected.length === 0 ? none : undefined}
+    title={title}
     onChange={(ids) => {
       const next = choices.filter((author) => ids.includes(author.id)).map(({ id, name }) => ({ id, name }));
       onChange(next.length ? next : undefined);

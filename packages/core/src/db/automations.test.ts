@@ -163,6 +163,56 @@ describe("trigger matching", () => {
       .resolves.toEqual(["mentions", "both"]);
   });
 
+  it("starts a run on a thread reply also sent to the channel", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const automation = (automationId: string, eventMode: "both" | "every_message" | "mentions", ignoredAuthors?: Array<{ id: string; name: string }>) => ({
+      accountId,
+      accountMetadata: metadata,
+      automationId,
+      organizationId: "organization",
+      tagMode: false,
+      tagModeThread: false,
+      triggers: [{ ...slack, eventMode, ignoredAuthors }],
+    });
+    const rows = [
+      automation("messages", "every_message"),
+      automation("mentions", "mentions"),
+      automation("both", "both"),
+      automation("ignoring", "every_message", [{ id: "A-SENTRY", name: "Sentry" }]),
+    ];
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows]));
+
+    // Sentry posts a regression in the issue's thread and to the channel.
+    const matches = await findAutomationsForSlackEvent({
+      authorIds: ["B-SENTRY", "A-SENTRY"],
+      broadcast: true,
+      channelId: "C1",
+      eventType: "message",
+      teamId: "T1",
+      text: "AutomationHarnessError State: Regressed",
+      threadTimestamp: "1790000000.000100",
+      timestamp: "1790000000.000200",
+    });
+    expect(matches.filter((match) => match.startsRun).map((match) => match.automationId)).toEqual(["messages", "both"]);
+    expect(matches.map((match) => match.automationId)).toEqual(["messages", "mentions", "both"]);
+  });
+
+  it("starts a run only on messages from a trigger's included authors", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const including = { ...slack, eventMode: "both", includedAuthors: [{ id: "A-SENTRY", name: "Sentry" }] } as const;
+    const rows = [{ accountId, accountMetadata: metadata, automationId: "including", triggers: [including] }];
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows]));
+
+    await expect(findAutomationsForSlackEvent({ authorIds: ["B-SENTRY", "A-SENTRY"], channelId: "C1", eventType: "message", teamId: "T1", text: "New issue", timestamp: "1790000000.000100" }))
+      .resolves.toEqual([{ automationId: "including", integrationAccountId: accountId, mentioned: false, startsRun: true }]);
+    // Anyone else, even with a mention, starts nothing, but a reply from them
+    // in a run's thread still reaches the run.
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "message", teamId: "T1", text: "Checkout is down", timestamp: "1790000000.000100" }))
+      .resolves.toEqual([{ automationId: "including", integrationAccountId: accountId, mentioned: false, startsRun: false }]);
+    await expect(findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "app_mention", teamId: "T1", text: "<@U-BOT> look", timestamp: "1790000000.000100" }))
+      .resolves.toEqual([{ automationId: "including", integrationAccountId: accountId, mentioned: true, startsRun: false }]);
+  });
+
   it("leaves mentions and tag mode's threads to tag mode", async () => {
     const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
     const automation = (automationId: string, eventMode: "both" | "every_message" | "mentions", tagModeThread = false) => ({
