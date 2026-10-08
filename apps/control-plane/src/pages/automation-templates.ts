@@ -131,14 +131,14 @@ export const automationTemplates: AutomationTemplate[] = [
   {
     category: "bug_triage",
     connectors: ["axiom", "github"],
-    description: "When an Axiom monitor alerts, query the logs and traces around it, find the cause in your code, and post a summary to Slack.",
+    description: "When an Axiom monitor alerts, query the logs and traces around it and find the cause in your code.",
     id: "investigate-axiom-alerts",
     name: "Investigate Axiom monitor alerts",
     prompt: [
       "An Axiom monitor started alerting. The trigger payload has the monitor ID, its message, and the query window.",
       "Use the Axiom tools to read the monitor and query the datasets it watches around the query window.",
       "Find what changed: a deploy, a dependency, a traffic change, or a code path in the selected repositories.",
-      "Post a short message with what is failing, who is affected, the likely cause, and the APL queries you used.",
+      "Report what is failing, who is affected, the likely cause, and the APL queries you used.",
       "If the alert is noise, such as a threshold that is too tight, say so in one line and suggest a better threshold.",
     ].join("\n"),
     triggers: [{ integrationAccountId: "", kind: "axiom" }],

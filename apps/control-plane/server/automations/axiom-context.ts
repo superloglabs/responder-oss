@@ -32,37 +32,55 @@ const toolListMessageSchema = z.object({
 }).passthrough();
 
 // Streamable HTTP servers answer with JSON or with a server-sent event stream
-// that carries the JSON-RPC messages.
+// that carries the JSON-RPC messages. Media types are case-insensitive, and
+// SSE lines may end with CRLF, LF, or CR.
 function rpcMessages(text: string, contentType: string): unknown[] {
-  if (!contentType.includes("text/event-stream")) return [JSON.parse(text)];
-  return text.split(/\r?\n\r?\n/u).flatMap((event) => {
-    const data = event
-      .split(/\r?\n/u)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-      .join("\n");
-    return data ? [JSON.parse(data) as unknown] : [];
-  });
+  if (!contentType.toLowerCase().includes("text/event-stream")) return [JSON.parse(text)];
+  const lines = text.split(/\r\n|\r|\n/u);
+  const messages: unknown[] = [];
+  let data: string[] = [];
+  for (const line of [...lines, ""]) {
+    if (line === "") {
+      if (data.length) messages.push(JSON.parse(data.join("\n")));
+      data = [];
+    } else if (line.startsWith("data:")) {
+      data.push(line.slice(5).replace(/^ /u, ""));
+    }
+  }
+  return messages;
 }
 
-function parsedMessages(text: string, contentType: string): unknown[] {
+function parsedMessages(text: string, contentType: string): unknown[] | null {
   try {
     return rpcMessages(text, contentType);
   } catch {
-    return [];
+    return null;
   }
 }
 
-// Keeps only allowlisted tools in Axiom's answer to tools/list, as JSON. An
-// answer without a tool listing, such as an error, passes through unchanged.
+const rpcErrorMessageSchema = z.object({ error: z.unknown() }).passthrough();
+
+// Keeps only allowlisted tools in Axiom's answer to tools/list, as JSON. A
+// failed request or a JSON-RPC error passes through. A successful answer that
+// holds no readable listing is refused, so an unfiltered list never reaches
+// the run.
 export async function filterAxiomToolList(response: Response): Promise<Response> {
   const text = await response.text();
-  const contentType = response.headers.get("content-type") ?? "";
   const headers = new Headers(response.headers);
-  const listing = parsedMessages(text, contentType)
-    .map((message) => toolListMessageSchema.safeParse(message))
+  const messages = parsedMessages(text, headers.get("content-type") ?? "");
+  const listing = messages
+    ?.map((message) => toolListMessageSchema.safeParse(message))
     .find((parsed) => parsed.success);
-  if (!listing?.data) return new Response(text, { headers, status: response.status });
+  if (!listing?.data) {
+    const rpcFailure = messages?.some((message) => rpcErrorMessageSchema.safeParse(message).success);
+    if (!response.ok || rpcFailure) {
+      return new Response(text, { headers, status: response.status });
+    }
+    return Response.json(
+      { error: { code: -32603, message: "Context provider request failed" }, id: null, jsonrpc: "2.0" },
+      { headers: { "cache-control": "no-store" }, status: 502 },
+    );
+  }
   headers.set("content-type", "application/json");
   return new Response(JSON.stringify({
     ...listing.data,

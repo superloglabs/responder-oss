@@ -55,13 +55,27 @@ export function AxiomWebhookDialog({
     };
   }, [accountId, open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, open]);
+
   if (!open) return null;
 
   const activeConfiguration = configuration?.accountId === accountId ? configuration : null;
   const activeError = error?.accountId === accountId ? error.message : null;
 
+  // The values stay visible in the fields when the clipboard is unavailable.
   async function copy(label: string, value: string) {
-    await navigator.clipboard.writeText(value);
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      return;
+    }
     setCopied(label);
     window.setTimeout(() => setCopied(null), 1_500);
   }

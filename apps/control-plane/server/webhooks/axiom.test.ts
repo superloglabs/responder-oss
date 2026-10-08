@@ -94,6 +94,21 @@ describe("Axiom webhooks", () => {
     expect(calls[2]!.trigger.externalEventId).toBe(calls[0]!.trigger.externalEventId);
   });
 
+  it("identifies an alert by its content, not by how the body is formatted", async () => {
+    vi.mocked(findAutomationsForAxiomAlert).mockResolvedValue([
+      { automationId: "20000000-0000-4000-8000-000000000000" },
+    ]);
+    vi.mocked(queueAutomationRun).mockResolvedValue({ duplicate: false, runId: "run" });
+
+    await deliver(alert());
+    await deliver(JSON.stringify(alert(), null, 2));
+    await deliver({ ...alert(), event: { ...alert().event, groupValues: ["payments"] } });
+
+    const ids = vi.mocked(queueAutomationRun).mock.calls.map(([input]) => input.trigger.externalEventId);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
   it("names an untitled alert after its monitor", async () => {
     vi.mocked(findAutomationsForAxiomAlert).mockResolvedValue([
       { automationId: "20000000-0000-4000-8000-000000000000" },

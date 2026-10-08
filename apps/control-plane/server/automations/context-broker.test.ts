@@ -479,6 +479,38 @@ describe("automation context broker", () => {
       expect(new Headers(request.headers).get("authorization")).toBe("Bearer fresh-oauth-token");
     });
 
+    it("filters listings sent with an uppercase media type and CR line endings", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+      const result = { tools: [{ name: "queryApl" }, { name: "deleteMonitor" }] };
+      dependencies.providerFetch.mockResolvedValue(new Response(
+        `event: message\rdata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\r\r`,
+        { headers: { "content-type": "Text/Event-Stream" } },
+      ));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(await response.json()).toMatchObject({ result: { tools: [{ name: "queryApl" }] } });
+    });
+
+    it("refuses a successful listing it cannot read instead of passing it through", async () => {
+      const { app, dependencies } = appFor(axiomClaim());
+      dependencies.providerFetch.mockResolvedValue(new Response(
+        "data: not json\n\n{\"tools\":[{\"name\":\"deleteMonitor\"}]}",
+        { headers: { "content-type": "text/event-stream" } },
+      ));
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(502);
+      expect(await response.text()).not.toContain("deleteMonitor");
+    });
+
     it("refuses Axiom tools outside the read-only allowlist without calling Axiom", async () => {
       const { app, dependencies } = appFor(axiomClaim());
 

@@ -112,8 +112,16 @@ export const axiomWebhookRoutes = new Hono().post("/:accountId", async (context)
   }
 
   const { event } = parsed.data;
-  // Axiom sends the same body again when it retries a delivery.
-  const occurrence = createHash("sha256").update(rawBody, "utf8").digest("hex");
+  // One alert is one monitor, group, and evaluation window, or one matched
+  // event. A retry of the same alert gets the same ID however its body is
+  // formatted.
+  const occurrence = createHash("sha256").update(JSON.stringify([
+    event.groupValues ?? null,
+    event.matchedEvent ?? null,
+    event.queryStartTime ?? null,
+    event.queryEndTime ?? null,
+    event.timestamp ?? null,
+  ]), "utf8").digest("hex");
   console.info(
     JSON.stringify({
       event: "axiom_webhook_received",

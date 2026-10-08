@@ -57,9 +57,13 @@ export function axiomWebhookSecret(
   encodedKey = process.env.CREDENTIAL_ENCRYPTION_KEY,
 ): string {
   if (!encodedKey) throw new Error("CREDENTIAL_ENCRYPTION_KEY is required");
+  const key = Buffer.from(encodedKey, "base64");
+  if (key.length !== 32) {
+    throw new Error("CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
+  }
   return Buffer.from(hkdfSync(
     "sha256",
-    Buffer.from(encodedKey, "base64"),
+    key,
     Buffer.alloc(0),
     `responder:axiom-webhook:${integrationAccountId}`,
     32,

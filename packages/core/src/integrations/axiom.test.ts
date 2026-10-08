@@ -50,7 +50,9 @@ describe("axiomWebhookSecret", () => {
     expect(axiomWebhookSecret(accountId, Buffer.alloc(32, 2).toString("base64"))).not.toBe(secret);
   });
 
-  it("requires the credential key", () => {
+  it("requires a 32-byte credential key", () => {
     expect(() => axiomWebhookSecret(accountId, "")).toThrow("CREDENTIAL_ENCRYPTION_KEY is required");
+    expect(() => axiomWebhookSecret(accountId, Buffer.alloc(16, 1).toString("base64")))
+      .toThrow("CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
   });
 });

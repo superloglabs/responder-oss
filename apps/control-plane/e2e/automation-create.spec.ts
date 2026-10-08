@@ -149,7 +149,11 @@ test("chooses an Axiom trigger and shows the notifier setup", async ({ page }, t
   await page.getByRole("button", { name: "Set up Axiom notifier" }).click();
   const dialog = page.getByRole("dialog", { name: "Add the Responder notifier" });
   await expect(dialog.getByLabel("Webhook URL")).toHaveValue(`https://responder.example/api/webhooks/axiom/${accountId}`);
+  await expect(dialog.getByLabel("Authorization header value")).toHaveValue("Bearer axiom-secret");
   await expect(dialog.getByLabel("Body")).toHaveValue('{"action":{{printf "%q" .Action}}}');
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Set up Axiom notifier" }).click();
   await page.screenshot({ path: testInfo.outputPath("automation-axiom-notifier.png"), fullPage: true });
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toHaveCount(0);
