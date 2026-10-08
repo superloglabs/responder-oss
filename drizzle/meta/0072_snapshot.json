@@ -1,5 +1,5 @@
 {
-  "id": "900887f5-1609-4222-a037-2703c9edaa9e",
+  "id": "f12b19b8-6f2b-4000-a9f5-3d55ae667ab0",
   "prevId": "4375ee60-c4e5-4fb4-928e-6da5a0a9c932",
   "version": "7",
   "dialect": "postgresql",
@@ -4027,6 +4027,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "usage_based": {
+          "name": "usage_based",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "status": {
           "name": "status",

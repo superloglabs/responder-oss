@@ -48,7 +48,7 @@ describe("billing limit notification channel refresh", () => {
     expect(refreshSlackChannels).not.toHaveBeenCalled();
   });
 
-  it("defers notices until a channel refresh succeeds", async () => {
+  it("falls back to cached channels when a refresh fails", async () => {
     databaseDouble([]);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -58,6 +58,6 @@ describe("billing limit notification channel refresh", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(vi.mocked(getDatabase)().select).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getDatabase)().select).toHaveBeenCalledTimes(4);
   });
 });

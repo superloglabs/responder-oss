@@ -1946,6 +1946,9 @@ export const billingNotificationDeliveries = pgTable(
     periodKey: text("period_key").notNull(),
     kind: text("kind").notNull(),
     destination: text("destination").notNull(),
+    // Usage-billed notices are retried by the worker; investigation credit
+    // notices by the next blocked investigation, since their wording differs.
+    usageBased: boolean("usage_based").notNull().default(false),
     status: text("status").notNull().default("pending"),
     attemptCount: integer("attempt_count").notNull().default(0),
     lastError: text("last_error"),

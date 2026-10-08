@@ -273,6 +273,8 @@ describe("investigation queue", () => {
     mocks.organizationUsesUsageBilling.mockResolvedValue(true);
     mocks.checkWorkAllowance.mockResolvedValue({
       allowed: false,
+      exhausted: "machine_hours",
+      machinesUseCredit: false,
       nextResetAt: 1_800_000_000,
     });
 
@@ -285,7 +287,11 @@ describe("investigation queue", () => {
     expect(mocks.notifyBillingLimitReached).toHaveBeenCalledWith(
       created.config.organizationId,
       1_800_000_000,
-      { refreshSlackChannels: expect.any(Function), usageBased: true },
+      {
+        refreshSlackChannels: expect.any(Function),
+        usage: { balance: "machine_hours", investigations: true, modelRunsOnly: false },
+        usageBased: true,
+      },
     );
     expect(mocks.bossSend).not.toHaveBeenCalled();
   });

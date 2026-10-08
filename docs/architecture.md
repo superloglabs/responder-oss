@@ -178,7 +178,7 @@ investigation credits.
   fail are retried for up to a day.
 - After each settlement pass, the worker reads the balances of organizations
   whose usage was just reported. When a balance that stops work is used up,
-  it sends a notice that new work is paused. Blocked investigations and
+  it sends a notice naming the new work that balance stops. Blocked investigations and
   automation runs send it too. The notice goes by email to workspace owners
   and admins, by Slack direct message to the person who installed Slack, and
   to the Slack channels that agents watch. `billing_notification_deliveries`
@@ -186,7 +186,8 @@ investigation credits.
   abandoned delivery is retried every five minutes for up to 23 hours, inside
   Resend's idempotency window; a Slack post retried after an uncertain error
   may arrive twice. An organization whose balance check fails is checked again
-  on the next pass. Usage past a balance that
+  on the next pass. Watched channel membership is refreshed before the first
+  notice of a period; if that fails, the cached membership is used. Usage past a balance that
   the plan bills for is expected and sends nothing.
 - The app shows a banner from the same balances while new work is paused.
 

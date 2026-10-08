@@ -856,7 +856,11 @@ describe("automation run processor", () => {
       expect(deps.notifyLimitReached).toHaveBeenCalledWith(
         organizationId,
         1_800_000_000,
-        { usageBased: true },
+        {
+          refreshSlackChannels: expect.any(Function),
+          usage: { balance: "usage_credit", investigations: false, modelRunsOnly: true },
+          usageBased: true,
+        },
       );
     });
 

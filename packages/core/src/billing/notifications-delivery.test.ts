@@ -101,6 +101,7 @@ describe("billing notice delivery", () => {
         kind: "installer_dm",
         organizationId,
         periodKey: "reset:1800000000",
+        usageBased: true,
       },
       {
         destination: "ada@example.com",
@@ -108,6 +109,7 @@ describe("billing notice delivery", () => {
         kind: "email",
         organizationId,
         periodKey: "reset:1800000000",
+        usageBased: true,
       },
       {
         destination: "grace@example.com",
@@ -115,6 +117,7 @@ describe("billing notice delivery", () => {
         kind: "email",
         organizationId,
         periodKey: "reset:1800000000",
+        usageBased: true,
       },
     ]);
     expect(fetch).toHaveBeenCalledTimes(1);

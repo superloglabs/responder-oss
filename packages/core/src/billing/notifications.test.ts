@@ -5,6 +5,7 @@ import {
   billingLimitPeriodKey,
   watchedChannelIds,
 } from "./notifications.js";
+import { usageLimitFromAllowance } from "./usage-limit.js";
 
 describe("billing limit notifications", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -16,9 +17,30 @@ describe("billing limit notifications", () => {
   });
 
   it("tells a usage-billed workspace to upgrade its plan", () => {
-    expect(billingLimitMessage("https://responder.example/settings/billing", true)).toBe(
-      "Superlog has paused new investigations and automation runs because this workspace used its included usage for this billing period. Work already in progress finishes, and new work resumes when the allowance resets. Upgrade the plan to resume now: https://responder.example/settings/billing",
+    expect(billingLimitMessage("https://responder.example/settings/billing", {
+      balance: "machine_hours",
+      investigations: true,
+      modelRunsOnly: false,
+    })).toBe(
+      "Superlog has paused new investigations and automation runs because this workspace used its included machine hours for this billing period. Work already in progress finishes, and new work resumes when the allowance resets. Upgrade the plan to resume now: https://responder.example/settings/billing",
     );
+  });
+
+  it("names only the work a spent usage credit stops", () => {
+    expect(billingLimitMessage(null, {
+      balance: "usage_credit",
+      investigations: false,
+      modelRunsOnly: true,
+    })).toBe(
+      "Superlog has paused new automation runs that use Superlog's models because this workspace used its included usage credit for this billing period. Work already in progress finishes, and new work resumes when the allowance resets. Upgrade the plan in Superlog Billing to resume now.",
+    );
+  });
+
+  it("derives the stopped work from a work allowance", () => {
+    expect(usageLimitFromAllowance({ exhausted: "usage_credit", machinesUseCredit: false }, true))
+      .toEqual({ balance: "usage_credit", investigations: true, modelRunsOnly: true });
+    expect(usageLimitFromAllowance({ exhausted: "usage_credit", machinesUseCredit: true }, false))
+      .toEqual({ balance: "usage_credit", investigations: false, modelRunsOnly: false });
   });
 
   it("links to billing inside workspace settings", () => {
@@ -32,7 +54,7 @@ describe("billing limit notifications", () => {
   it("names the workspace in the email and escapes it", () => {
     const email = billingLimitEmail(
       "<Acme>",
-      true,
+      { balance: null, investigations: true, modelRunsOnly: false },
       "https://responder.example/settings/billing",
     );
 

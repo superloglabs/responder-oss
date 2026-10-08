@@ -4,7 +4,6 @@ import {
   agentModelUsage,
   automationModelUsage,
   billingNotificationDeliveries,
-  organizationCapabilities,
   sandboxUsage,
 } from "../db/schema.js";
 import {
@@ -14,21 +13,32 @@ import {
   minimumMachineHours,
   type AutomationBillingSummary,
 } from "./autumn.js";
+import { refreshSlackChannelResources } from "../integrations/slack-channels.js";
 import {
   BILLING_NOTICE_RETRY_AFTER_MS,
   BILLING_NOTICE_RETRY_WINDOW_MS,
   notifyBillingLimitReached,
 } from "./notifications.js";
+import type { UsageLimit } from "./usage-limit.js";
+import { organizationUsesUsageBilling } from "./usage-billing.js";
+import { sandboxTimeIsBilled } from "./usage-charges.js";
 
-// When a balance that stops work is used up, the reset time of that balance.
-// A balance whose plan bills usage past it does not stop work and is not
-// reported.
+// When a balance that stops work is used up, that balance, the automation
+// runs it stops, and its reset time. A balance whose plan bills usage past it
+// does not stop work and is not reported.
 export function usageLimitReached(
   summary: AutomationBillingSummary,
-): { nextResetAt: number | null } | null {
+): (Omit<UsageLimit, "investigations"> & { nextResetAt: number | null }) | null {
   if (!summary.configured) return null;
   if (!summary.creditOverageAllowed && summary.remaining < automationMinimumBalanceDollars) {
-    return { nextResetAt: summary.nextResetAt };
+    // Plans without machine hours pay for sandbox time from the credit, so
+    // every run stops; otherwise runs with the workspace's own key continue.
+    const machinesUseCredit = summary.machineHours === null && sandboxTimeIsBilled();
+    return {
+      balance: "usage_credit",
+      modelRunsOnly: !machinesUseCredit,
+      nextResetAt: summary.nextResetAt,
+    };
   }
   const machineHours = summary.machineHours;
   if (
@@ -36,16 +46,20 @@ export function usageLimitReached(
     !machineHours.overageAllowed &&
     machineHours.remaining < minimumMachineHours
   ) {
-    return { nextResetAt: machineHours.nextResetAt };
+    return {
+      balance: "machine_hours",
+      modelRunsOnly: false,
+      nextResetAt: machineHours.nextResetAt,
+    };
   }
   return null;
 }
 
 // Organizations whose billable usage was reported to billing since `since`,
-// and usage-billed organizations with a failed or abandoned notice that may
-// still be retried. The second group keeps such a notice from being lost when
-// no further usage is billed. Organizations on investigation credits are left
-// to their next blocked investigation, which retries with the credit wording.
+// and those with a failed or abandoned usage notice that may still be
+// retried. The second group keeps such a notice from being lost when no
+// further usage is billed. Investigation credit notices are left to the next
+// blocked investigation, which retries them with the credit wording.
 export async function organizationsToCheckForUsageNotices(since: Date): Promise<string[]> {
   const db = getDatabase();
   const retryAfter = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
@@ -71,16 +85,9 @@ export async function organizationsToCheckForUsageNotices(since: Date): Promise<
     db
       .selectDistinct({ organizationId: billingNotificationDeliveries.organizationId })
       .from(billingNotificationDeliveries)
-      .innerJoin(
-        organizationCapabilities,
-        and(
-          eq(organizationCapabilities.organizationId, billingNotificationDeliveries.organizationId),
-          eq(organizationCapabilities.capability, "simplified_navigation"),
-          eq(organizationCapabilities.enabled, true),
-        ),
-      )
       .where(
         and(
+          eq(billingNotificationDeliveries.usageBased, true),
           inArray(billingNotificationDeliveries.status, ["failed", "pending"]),
           gt(billingNotificationDeliveries.createdAt, retryAfter),
           lt(billingNotificationDeliveries.updatedAt, staleBefore),
@@ -98,12 +105,16 @@ interface UsageNoticeDependencies {
   getSummary: (organizationId: string) => Promise<AutomationBillingSummary>;
   listOrganizations: (since: Date) => Promise<string[]>;
   notify: typeof notifyBillingLimitReached;
+  refreshSlackChannels?: (organizationId: string) => Promise<void>;
+  usesUsageBilling: (organizationId: string) => Promise<boolean>;
 }
 
 const defaultDependencies: UsageNoticeDependencies = {
   getSummary: (organizationId) => getAutomationBillingSummary(organizationId),
   listOrganizations: organizationsToCheckForUsageNotices,
   notify: notifyBillingLimitReached,
+  refreshSlackChannels: (organizationId) => refreshSlackChannelResources(organizationId),
+  usesUsageBilling: organizationUsesUsageBilling,
 };
 
 // Reads the balances of every organization whose usage was billed since
@@ -124,7 +135,13 @@ export async function sendUsageNotices(
     try {
       const limit = usageLimitReached(await dependencies.getSummary(organizationId));
       if (!limit) continue;
-      await dependencies.notify(organizationId, limit.nextResetAt, { usageBased: true });
+      const { nextResetAt, ...stopped } = limit;
+      await dependencies.notify(organizationId, nextResetAt, {
+        refreshSlackChannels: dependencies.refreshSlackChannels,
+        // Investigations stop only where they are paid from usage.
+        usage: { ...stopped, investigations: await dependencies.usesUsageBilling(organizationId) },
+        usageBased: true,
+      });
       result.notified += 1;
     } catch (error) {
       result.failedOrganizationIds.push(organizationId);

@@ -34,6 +34,8 @@ import {
 } from "@responder/core/db/automation-model-broker";
 import { checkWorkAllowance } from "@responder/core/billing/autumn";
 import { notifyBillingLimitReached } from "@responder/core/billing/notifications";
+import { usageLimitFromAllowance } from "@responder/core/billing/usage-limit";
+import { refreshSlackChannelResources } from "@responder/core/integrations/slack-channels";
 import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
@@ -735,9 +737,12 @@ export async function processAutomationRun(
     });
     const machinesUseCredit = access.machinesUseCredit;
     if (!access.allowed) {
-      await dependencies.notifyLimitReached(run.organizationId, access.nextResetAt, {
-        usageBased: true,
-      }).catch((error: unknown) => {
+      await dependencies.hasCapability(run.organizationId, "simplified_navigation")
+        .then((investigations) => dependencies.notifyLimitReached(run.organizationId, access.nextResetAt, {
+          refreshSlackChannels: (organizationId) => refreshSlackChannelResources(organizationId),
+          usage: usageLimitFromAllowance(access, investigations),
+          usageBased: true,
+        })).catch((error: unknown) => {
         console.error("Unable to send billing limit notifications", error);
       });
       throw new AutomationAllowanceExhaustedError(access.exhausted, machinesUseCredit);

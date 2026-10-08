@@ -37,10 +37,14 @@ describe("usageLimitReached", () => {
   });
 
   it("reports a used-up credit or machine hours with that balance's reset", () => {
-    expect(usageLimitReached(summary({ remaining: 0.004 }))).toEqual({ nextResetAt: null });
+    expect(usageLimitReached(summary({ remaining: 0.004 }))).toEqual({
+      balance: "usage_credit",
+      modelRunsOnly: true,
+      nextResetAt: null,
+    });
     expect(usageLimitReached(summary({
       machineHours: { ...summary().machineHours!, remaining: 0.01 },
-    }))).toEqual({ nextResetAt: 1_800_000_100 });
+    }))).toEqual({ balance: "machine_hours", modelRunsOnly: false, nextResetAt: 1_800_000_100 });
   });
 
   it("ignores usage past a balance the plan bills for", () => {
@@ -56,11 +60,11 @@ describe("usageLimitReached", () => {
       creditOverageAllowed: true,
       machineHours: { ...summary().machineHours!, remaining: 0 },
       remaining: 0,
-    }))).toEqual({ nextResetAt: 1_800_000_100 });
+    }))).toEqual({ balance: "machine_hours", modelRunsOnly: false, nextResetAt: 1_800_000_100 });
     expect(usageLimitReached(summary({
       machineHours: { ...summary().machineHours!, overageAllowed: true, remaining: 0 },
       remaining: 0,
-    }))).toEqual({ nextResetAt: null });
+    }))).toEqual({ balance: "usage_credit", modelRunsOnly: true, nextResetAt: null });
   });
 
   it("ignores a workspace without configured billing", () => {
@@ -86,12 +90,16 @@ describe("sendUsageNotices", () => {
     const notify = vi.fn().mockResolvedValue(undefined);
 
     await expect(
-      sendUsageNotices(since, [], { getSummary, listOrganizations, notify }),
+      sendUsageNotices(since, [], { getSummary, listOrganizations, notify, usesUsageBilling: vi.fn().mockResolvedValue(true) }),
     ).resolves.toEqual({ checked: 3, failedOrganizationIds: ["org-down"], notified: 1 });
 
     expect(listOrganizations).toHaveBeenCalledWith(since);
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("org-out", null, { usageBased: true });
+    expect(notify).toHaveBeenCalledWith("org-out", null, {
+      refreshSlackChannels: undefined,
+      usage: { balance: "usage_credit", investigations: true, modelRunsOnly: true },
+      usageBased: true,
+    });
   });
 
   it("checks organizations whose last check failed without new usage", async () => {
@@ -107,10 +115,15 @@ describe("sendUsageNotices", () => {
       getSummary,
       listOrganizations,
       notify,
+      usesUsageBilling: vi.fn().mockResolvedValue(false),
     });
 
     expect(checked).toEqual(["org-out", "org-retry"]);
-    expect(notify).toHaveBeenCalledWith("org-retry", null, { usageBased: true });
+    expect(notify).toHaveBeenCalledWith("org-retry", null, {
+      refreshSlackChannels: undefined,
+      usage: { balance: "usage_credit", investigations: false, modelRunsOnly: true },
+      usageBased: true,
+    });
   });
 
   it("does nothing when billing is disabled", async () => {
@@ -121,6 +134,7 @@ describe("sendUsageNotices", () => {
       getSummary: vi.fn(),
       listOrganizations,
       notify: vi.fn(),
+      usesUsageBilling: vi.fn(),
     });
 
     expect(listOrganizations).not.toHaveBeenCalled();

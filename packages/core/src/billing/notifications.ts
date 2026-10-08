@@ -11,6 +11,7 @@ import {
   type AgentTriggerConfig,
 } from "../db/schema.js";
 import { escapeHtml, sendEmail } from "../email.js";
+import type { UsageLimit } from "./usage-limit.js";
 
 // A failed or abandoned delivery waits this long before it is tried again.
 export const BILLING_NOTICE_RETRY_AFTER_MS = 5 * 60 * 1_000;
@@ -47,10 +48,26 @@ function billingUrl(): string | null {
   }
 }
 
-function limitSentence(usageBased: boolean): string {
-  return usageBased
-    ? "Superlog has paused new investigations and automation runs because this workspace used its included usage for this billing period. Work already in progress finishes, and new work resumes when the allowance resets."
-    : "Superlog has paused new investigations because this workspace used all 50 included investigations this month.";
+const unknownUsageLimit: UsageLimit = {
+  balance: null,
+  investigations: true,
+  modelRunsOnly: false,
+};
+
+function limitSentence(usage: UsageLimit | null): string {
+  if (!usage) {
+    return "Superlog has paused new investigations because this workspace used all 50 included investigations this month.";
+  }
+  const runs = usage.modelRunsOnly
+    ? "automation runs that use Superlog's models"
+    : "automation runs";
+  const paused = usage.investigations ? `new investigations and ${runs}` : `new ${runs}`;
+  const balance = usage.balance === "usage_credit"
+    ? "included usage credit"
+    : usage.balance === "machine_hours"
+      ? "included machine hours"
+      : "included usage";
+  return `Superlog has paused ${paused} because this workspace used its ${balance} for this billing period. Work already in progress finishes, and new work resumes when the allowance resets.`;
 }
 
 function limitAction(usageBased: boolean, url: string | null): string {
@@ -64,16 +81,21 @@ function limitAction(usageBased: boolean, url: string | null): string {
     : "Enable pay as you go ($1.50 per investigation) in Superlog Billing to resume.";
 }
 
-export function billingLimitMessage(url = billingUrl(), usageBased = false): string {
-  return `${limitSentence(usageBased)} ${limitAction(usageBased, url)}`;
+// A null usage limit is the investigation credit notice.
+export function billingLimitMessage(
+  url = billingUrl(),
+  usage: UsageLimit | null = null,
+): string {
+  return `${limitSentence(usage)} ${limitAction(usage !== null, url)}`;
 }
 
 export function billingLimitEmail(
   organizationName: string,
-  usageBased: boolean,
+  usage: UsageLimit | null,
   url = billingUrl(),
 ): { html: string; subject: string; text: string } {
-  const sentence = limitSentence(usageBased);
+  const usageBased = usage !== null;
+  const sentence = limitSentence(usage);
   const action = url
     ? `<p><a href="${escapeHtml(url)}">${usageBased ? "Upgrade the plan" : "Enable pay as you go"}</a></p>`
     : `<p>${escapeHtml(limitAction(usageBased, null))}</p>`;
@@ -279,12 +301,13 @@ async function claimDelivery(
   organizationId: string,
   periodKey: string,
   destination: Destination,
+  usageBased: boolean,
 ): Promise<string | null> {
   const db = getDatabase();
   const target = deliveryTarget(destination);
   const inserted = await db
     .insert(billingNotificationDeliveries)
-    .values({ organizationId, periodKey, ...target })
+    .values({ organizationId, periodKey, usageBased, ...target })
     .onConflictDoNothing()
     .returning({ id: billingNotificationDeliveries.id });
   if (inserted[0]) return inserted[0].id;
@@ -359,16 +382,16 @@ async function deliverNotification(
   organizationId: string,
   periodKey: string,
   destination: Destination,
-  usageBased: boolean,
+  usage: UsageLimit | null,
   name: () => Promise<string>,
 ): Promise<void> {
-  const deliveryId = await claimDelivery(organizationId, periodKey, destination);
+  const deliveryId = await claimDelivery(organizationId, periodKey, destination, usage !== null);
   if (!deliveryId) return;
 
   try {
     if (destination.kind === "email") {
       const sent = await sendEmail({
-        ...billingLimitEmail(await name(), usageBased),
+        ...billingLimitEmail(await name(), usage),
         idempotencyKey: `billing-notice/${deliveryId}`,
         to: destination.address,
       });
@@ -377,7 +400,7 @@ async function deliverNotification(
       await postSlackMessage(
         destination.account.accessToken,
         destination.channel,
-        billingLimitMessage(undefined, usageBased),
+        billingLimitMessage(undefined, usage),
       );
     }
     await getDatabase()
@@ -442,31 +465,31 @@ export async function notifyBillingLimitReached(
   nextResetAt: number | null,
   options: {
     refreshSlackChannels?: (organizationId: string) => Promise<void>;
+    // The balance and work, when known; defaults to all new work.
+    usage?: UsageLimit | null;
     usageBased?: boolean;
   } = {},
 ): Promise<void> {
   const periodKey = billingLimitPeriodKey(nextResetAt);
-  const usageBased = options.usageBased ?? false;
+  const usage = options.usageBased ? (options.usage ?? unknownUsageLimit) : null;
   // Channel membership is cached, so refresh it once before the first notice
-  // of a period rather than on every blocked investigation. If the refresh
-  // fails, send nothing so the next blocked investigation retries both.
+  // of a period rather than on every blocked investigation.
   if (
     options.refreshSlackChannels &&
     !(await hasDeliveriesForPeriod(organizationId, periodKey))
   ) {
-    try {
-      await options.refreshSlackChannels(organizationId);
-    } catch (error) {
+    // A failed refresh falls back to the cached channels, so email and
+    // direct messages still go out.
+    await options.refreshSlackChannels(organizationId).catch((error: unknown) => {
       console.error("Unable to refresh Slack channels for billing notices", error);
-      return;
-    }
+    });
   }
   const destinations = await notificationDestinations(organizationId);
   let name: Promise<string> | undefined;
   const lookupName = () => (name ??= organizationName(organizationId));
   await Promise.all(
     destinations.map((destination) =>
-      deliverNotification(organizationId, periodKey, destination, usageBased, lookupName),
+      deliverNotification(organizationId, periodKey, destination, usage, lookupName),
     ),
   );
 }
