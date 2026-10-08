@@ -134,6 +134,7 @@ describe("Slack replies to automation runs", () => {
 
   it("leaves a reply that does not mention the app to the people in the thread", async () => {
     mocks.findAgents.mockResolvedValue([tagModeAgent]);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     const response = await deliver({
       text: "<@U456> are you on it? Is it recurring?",
@@ -146,6 +147,39 @@ describe("Slack replies to automation runs", () => {
     expect(mocks.queueReply).not.toHaveBeenCalled();
     expect(mocks.queueRun).not.toHaveBeenCalled();
     expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+    const ignored = info.mock.calls
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)
+      .filter((line) => line.event === "slack_automation_reply_ignored");
+    expect(ignored).toEqual([
+      { automationId, event: "slack_automation_reply_ignored", eventId: "Ev1", reason: "not_mentioned", runId },
+      { automationId, event: "slack_automation_reply_ignored", eventId: "Ev1", reason: "not_mentioned", runId },
+    ]);
+  });
+
+  it("starts a new run for a person's reply also sent to the channel that does not mention the app", async () => {
+    const reply = {
+      subtype: "thread_broadcast",
+      text: "<@U456> are you on it?",
+      thread_ts: "1790000000.000100",
+      user: "U123",
+    };
+
+    await deliver(reply);
+
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(mocks.queueRun).toHaveBeenCalledWith(expect.objectContaining({
+      automationId,
+      trigger: expect.objectContaining({
+        attributes: expect.objectContaining({ mentioned: false, threadTimestamp: "1790000000.000100" }),
+      }),
+    }));
+
+    // An automation the message does not start on leaves it alone.
+    mocks.queueRun.mockClear();
+    mocks.findAutomations.mockResolvedValue([{ ...match, startsRun: false }]);
+    await deliver(reply);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(mocks.queueRun).not.toHaveBeenCalled();
   });
 
   it("does not start a run for a message the automation does not start on", async () => {

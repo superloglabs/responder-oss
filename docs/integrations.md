@@ -143,7 +143,8 @@ its channels. The same applies to other triggers: a Sentry connection gives
 Sentry tools only when it is also a connector.
 
 A person's reply in a run's thread continues the run only when it mentions the
-app. Other replies are left to the people in the thread.
+app. Other replies are left to the people in the thread, except a reply also
+sent to the channel, which is a new message and can start a run of its own.
 
 An automation's agent can add up to five buttons to a Slack message it posts,
 through `post_notification` or `slack_post_message`. Each button carries the

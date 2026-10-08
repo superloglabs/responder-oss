@@ -1373,20 +1373,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         // A redelivery of the message that started this run is not a reply;
         // starting the run again finds it as a duplicate.
         if (run && run.triggerTimestamp !== event.ts) {
-          // People talk to each other in the thread, so a reply that does not
-          // mention the app is left to them.
-          if (reply && !match.mentioned) {
-            automationThreadOrganizations.add(run.organizationId);
-            console.info(JSON.stringify({
-              automationId: match.automationId,
-              event: "slack_automation_reply_ignored",
-              eventId: callback.data.event_id,
-              reason: "not_mentioned",
-              runId: run.id,
-            }));
-            return;
-          }
-          if (reply) {
+          if (reply && match.mentioned) {
             // A reply that fails to queue leaves the run failed, so the
             // organization's agents may still answer it.
             const outcome = await queueAutomationRunReply({ message: reply, runId: run.id });
@@ -1400,17 +1387,20 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
             }));
             return;
           }
-          // Another app answering in the thread, such as another agent,
-          // would start a run that answers it back, and so on. An app's
-          // message also sent to the channel is a new alert, so it starts a
-          // run of its own in the thread.
+          // People talk to each other in the thread, so a person's reply that
+          // does not mention the app is left to them. Another app answering
+          // in the thread, such as another agent, would start a run that
+          // answers it back, and so on. A message also sent to the channel is
+          // a new message, so it starts a run of its own in the thread.
           automationThreadOrganizations.add(run.organizationId);
           if (!(broadcast && match.startsRun)) {
             console.info(JSON.stringify({
               automationId: match.automationId,
-              event: "slack_automation_app_reply_ignored",
               eventId: callback.data.event_id,
               runId: run.id,
+              ...(reply
+                ? { event: "slack_automation_reply_ignored", reason: "not_mentioned" }
+                : { event: "slack_automation_app_reply_ignored" }),
             }));
             return;
           }
