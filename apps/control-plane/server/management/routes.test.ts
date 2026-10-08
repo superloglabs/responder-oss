@@ -656,7 +656,20 @@ describe("management MCP server", () => {
     expect(names).not.toContain("create_secret");
     expect(names).not.toContain("create_model_credential");
     expect(names).not.toContain("rotate_model_credential");
-    for (const tool of body.result.tools) expect(tool.inputSchema.type).toBe("object");
+    for (const tool of body.result.tools) {
+      expect(tool.inputSchema.type).toBe("object");
+      for (const hint of ["readOnlyHint", "destructiveHint", "openWorldHint"]) {
+        expect(typeof tool.annotations[hint]).toBe("boolean");
+      }
+    }
+    // Clients must not treat provider calls or externally acting workflows as closed-world.
+    for (const name of ["refresh_integrations", "list_sentry_environments", "create_automation", "update_automation", "start_automation_run", "send_automation_run_message", "update_tag_mode", "list_included_models", "test_model_credential", "list_model_credential_models", "start_integration_connection"]) {
+      expect(body.result.tools.find((tool) => tool.name === name)?.annotations.openWorldHint).toBe(true);
+    }
+    for (const name of ["get_workspace", "list_integrations", "get_automation", "list_automations"]) {
+      expect(body.result.tools.find((tool) => tool.name === name)?.annotations)
+        .toMatchObject({ openWorldHint: false, readOnlyHint: true, destructiveHint: false });
+    }
     expect(body.result.tools.find((tool) => tool.name === "list_automations")?.annotations)
       .toMatchObject({ destructiveHint: false, readOnlyHint: true });
     expect(body.result.tools.find((tool) => tool.name === "revoke_api_key")?.annotations)
