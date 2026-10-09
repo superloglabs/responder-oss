@@ -18,7 +18,7 @@ export const integrationConnectionOperations = [
     // Reads the fixed local catalog and configuration, without contacting providers.
     openWorld: false,
     summary: "Find integrations to connect",
-    description: "Lists available providers and whether they support a direct consent link or require secure setup. Ask which integrations the user's goal needs, then call start_integration_connection for one provider at a time. This lists capabilities, not connected accounts; use list_integrations to check connections.",
+    description: "Lists the integrations this server can connect and whether each one uses a provider consent link or secure setup in Superlog. It does not show which integrations are connected.",
     method: "GET",
     path: "/integrations/available",
     tag: "Integrations",
@@ -43,7 +43,7 @@ export const integrationConnectionOperations = [
     name: "start_integration_connection",
     openWorld: true,
     summary: "Get an integration consent link",
-    description: "Starts a connection for the authenticated workspace and returns a short-lived provider consent link. The inline connection card opens consent and checks completion when supported. Do not repeat a consent link in the accompanying chat text when the card is shown. Only when no card is available, present the exact returned URL as a clickable link; never construct or shorten it. After approval call list_integrations to verify; refresh_integrations reloads Slack channels or GitHub repositories. Links are personal and expire in ten minutes; do not fetch, log, or share them with others. The browser must be signed into the same Superlog user and workspace. Providers needing credentials or extra setup return a secure setup link instead: never ask for secrets in chat. Starting a connection does not mean it is connected.",
+    description: "Starts connecting one integration to the workspace. Returns a provider consent link, or a secure setup link in Superlog for integrations that need credentials or extra setup. The link is personal to the signed-in person and workspace and expires after ten minutes. The integration is connected only after the person approves access in a browser signed in to the same Superlog account and workspace.",
     method: "POST",
     path: "/integrations/connect",
     tag: "Integrations",

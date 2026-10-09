@@ -147,18 +147,18 @@ export const automationConfigurationOutputSchema = z
 const describedConfigurationShape = {
   ...configurationShape,
   contextAccountIds: configurationShape.contextAccountIds
-    .describe("Integration account IDs the agent can read from, besides GitHub. See `GET /integrations`."),
+    .describe("Integration account IDs the agent can read from, besides GitHub, as returned when listing integrations."),
   notifications: configurationShape.notifications
     .describe("Slack channels that receive the result of each scheduled, Sentry, or Axiom run."),
   prompt: configurationShape.prompt.describe("The agent instructions."),
   repositoryIds: configurationShape.repositoryIds
-    .describe("Repositories checked out in the sandbox. See `GET /integrations`."),
+    .describe("Repositories checked out in the sandbox, as returned when listing integrations."),
   skillIds: configurationShape.skillIds
     .describe("Workspace skills written to the sandbox for the agent to read. Skills are managed on the Skills page."),
   triggers: configurationShape.triggers
     .describe("What starts a run. Each trigger starts runs on its own."),
   workspaceSecretIds: configurationShape.workspaceSecretIds
-    .describe("Workspace secrets available to the agent. See `GET /secrets`."),
+    .describe("Workspace secrets available to the agent, as returned when listing secrets."),
 };
 
 function withDefault<Schema extends z.ZodType>(

@@ -248,7 +248,7 @@ export const managementOperations: ManagementOperation[] = [
   ...integrationConnectionOperations,
   defineOperation({
     description:
-      "Returns the workspace the API key belongs to, its enabled features, and the member the key acts as.",
+      "Returns the workspace, its enabled features, and the member the caller acts as.",
     effect: "read",
     input: empty,
     method: "GET",
@@ -330,7 +330,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Lists connected integrations, the repositories they give access to, and their resources, such as Slack channels and Sentry projects. Use these IDs in automation and tag mode settings. Use list_available_integrations and start_integration_connection to connect a provider from chat.",
+      "Lists connected integrations, the repositories they give access to, and their resources, such as Slack channels and Sentry projects. Automation and tag mode settings refer to these IDs.",
     effect: "read",
     input: empty,
     method: "GET",
@@ -450,7 +450,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Creates an automation. Get repository, integration, and resource IDs from `GET /integrations` and secret IDs from `GET /secrets`. Model settings you leave out use the defaults.",
+      "Creates an automation. Repository, integration, and resource IDs come from the workspace's integrations, and secret IDs from its secrets. Model settings you leave out use the defaults.",
     effect: "write",
     input: z.object({
       configuration: automationConfigurationInputSchema,
