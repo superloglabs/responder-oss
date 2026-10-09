@@ -5,9 +5,10 @@ import { slackPhrasesError, slackPhrasesFromText } from "../automation-configura
 // The text is kept as typed and sent when the field loses focus, as the
 // automation saves each change. Phrases set from outside, such as the saved
 // ones a failed save restores, replace the text.
-export function SlackPhraseField({ autoFocus = false, phrases, onChange }: {
+export function SlackPhraseField({ autoFocus = false, phrases, onBlur, onChange }: {
   autoFocus?: boolean;
   phrases: string[];
+  onBlur?: () => void;
   onChange: (phrases: string[] | undefined) => void;
 }) {
   const inputId = useId();
@@ -24,6 +25,7 @@ export function SlackPhraseField({ autoFocus = false, phrases, onChange }: {
     <textarea aria-describedby={hintId} aria-invalid={error !== null} autoCapitalize="off" autoComplete="off" autoFocus={autoFocus} className="automationTrigger__input automationTrigger__input--phrases" id={inputId} onBlur={() => {
       const next = slackPhrasesFromText(text);
       if ((next ?? []).join("\n") !== phrases.join("\n")) onChange(next);
+      onBlur?.();
     }} onChange={(event) => setText(event.target.value)} placeholder={"^Resolved:\ndeploy (started|finished)"} rows={3} spellCheck={false} value={text} />
     <span aria-live="polite" className={error ? "automationTrigger__hint automationTrigger__hint--error" : "automationTrigger__hint"} id={hintId}>{error ?? "One regular expression per line, case-insensitive. Matching messages do not start or continue a run."}</span>
   </div>;

@@ -8,11 +8,12 @@ type ListedAuthor = SlackAuthor & { kind: "app" | "person" };
 // runs, the ones it ignores, or both. The lists offer whoever posted in the
 // selected channels since they were watched, loaded once for both. A list
 // the member just added opens.
-export function SlackAuthorPickers({ accountId, channelIds, ignored, included, opened, showIgnored, showIncluded, onIgnoredChange, onIncludedChange }: {
+export function SlackAuthorPickers({ accountId, channelIds, ignored, included, onClose, opened, showIgnored, showIncluded, onIgnoredChange, onIncludedChange }: {
   accountId: string;
   channelIds: string[];
   ignored: SlackAuthor[];
   included: SlackAuthor[];
+  onClose?: () => void;
   opened?: "ignored" | "included";
   showIgnored: boolean;
   showIncluded: boolean;
@@ -67,6 +68,7 @@ export function SlackAuthorPickers({ accountId, channelIds, ignored, included, o
         const next = choices.filter((author) => ids.includes(author.id)).map(({ id, name }) => ({ id, name }));
         onChange(next.length ? next : undefined);
       }}
+      onClose={onClose}
       onRefresh={refresh}
     />;
   }

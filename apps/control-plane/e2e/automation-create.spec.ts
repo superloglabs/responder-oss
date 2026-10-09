@@ -511,6 +511,45 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   } });
 });
 
+test("opens a Slack filter only when it is added and keeps filters with their trigger", async ({ page }) => {
+  await page.route("**/api/automations/slack/*/authors?*", (route) => route.fulfill({ json: { authors: [{ id: "U-ADA", kind: "person", name: "Ada" }] } }));
+  await page.goto("/automations/new");
+  const addSlack = async (event: string) => {
+    await page.getByRole("button", { name: /^Add (another )?trigger$/ }).click();
+    await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
+    await page.getByRole("menuitem", { name: event, exact: true }).click();
+  };
+  const cards = page.locator(".automationTrigger__card");
+  const filter = (name: string) => page.getByRole("menuitem", { name });
+  await addSlack("New message in channel");
+  await addSlack("App mentioned");
+  await cards.first().getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  await cards.first().getByRole("button", { name: "Message filters", exact: true }).click();
+  await filter("Ignore messages from").click();
+  await expect(page.getByRole("dialog", { name: "Choose authors" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
+
+  // Choosing channels again does not reopen the filter added before.
+  await cards.first().getByRole("button", { name: "Channel", exact: true }).click();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).uncheck();
+  await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
+  await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
+  await expect(cards.first().getByRole("button", { name: "Ignore messages from", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Choose authors" })).toHaveCount(0);
+
+  // Removing the first trigger does not hand its filters to the second.
+  await cards.first().getByRole("button", { name: "Message filters", exact: true }).click();
+  await filter("Ignore messages matching").click();
+  await expect(cards.first().getByRole("textbox", { name: "Ignore messages matching", exact: true })).toBeFocused();
+  await cards.first().getByRole("button", { name: "Remove Slack trigger" }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("Slack app mentioned");
+  await expect(cards.first().getByRole("textbox", { name: "Ignore messages matching", exact: true })).toHaveCount(0);
+  await expect(cards.first().getByRole("button", { name: "Ignore messages from", exact: true })).toHaveCount(0);
+});
+
 test("says when the Slack authors could not load", async ({ page }) => {
   await page.route("**/api/automations/slack/*/authors?*", (route) => route.fulfill({ status: 502, json: { error: "Unavailable" } }));
   await page.goto("/automations/new");

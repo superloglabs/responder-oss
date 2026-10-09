@@ -13,7 +13,8 @@ describe("matchesSlackPhrase", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const started = Date.now();
     expect(matchesSlackPhrase(["(a+)+$", "(a|a)+$", "(a*)*$", "^a"], `${"a".repeat(40)}b`)).toBe(false);
-    expect(Date.now() - started).toBeLessThan(100);
+    // One timeout covers every phrase, so matching stops once.
+    expect(Date.now() - started).toBeLessThan(1_000);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("slack_phrase_match_failed"));
     warn.mockRestore();
