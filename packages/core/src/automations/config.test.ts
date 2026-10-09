@@ -143,6 +143,17 @@ describe("automation configuration", () => {
     ).toThrow();
   });
 
+  it("accepts Slack ignored phrases only when each is a valid regular expression", () => {
+    const withPhrases = (ignoredPhrases: string[]) => ({
+      ...baseConfiguration,
+      triggers: [{ ...baseConfiguration.triggers[0], ignoredPhrases }],
+    });
+    expect(automationConfigurationSchema.safeParse(withPhrases(["^Resolved:", "deploy (started|finished)"])).success).toBe(true);
+    expect(() => automationConfigurationSchema.parse(withPhrases(["(unclosed"]))).toThrow("Enter a valid regular expression");
+    expect(() => automationConfigurationSchema.parse(withPhrases([" "]))).toThrow("Enter a valid regular expression");
+    expect(() => automationConfigurationSchema.parse(withPhrases(["resolved", "resolved"]))).toThrow("Ignored phrases must be unique");
+  });
+
   it("rejects duplicate linked resources before persistence", () => {
     const repositoryId = baseConfiguration.repositoryIds[0];
     expect(() => automationConfigurationSchema.parse({

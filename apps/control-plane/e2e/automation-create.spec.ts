@@ -459,6 +459,12 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
   await expect(ignore).toContainText("Devin (app), Qovery (app)");
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors.png"), fullPage: true });
+  const phrases = page.getByRole("textbox", { name: "Ignore messages matching", exact: true });
+  await phrases.fill("^Resolved:\n(unclosed");
+  await expect(page.getByText('"(unclosed" is not a valid regular expression.')).toBeVisible();
+  await phrases.fill("^Resolved:\n\ndeploy (started|finished)\n");
+  await expect(phrases).toHaveAttribute("aria-invalid", "false");
+  await page.screenshot({ path: testInfo.outputPath("automation-ignore-phrases.png"), fullPage: true });
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Triage the alert.");
   await page.getByRole("button", { name: "Choose model", exact: true }).click();
   await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
@@ -473,7 +479,7 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saved).toMatchObject({ configuration: {
-    triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], includedAuthors: [{ id: "U-ADA", name: "Ada" }], kind: "slack" }],
+    triggers: [{ channelIds: ["C123"], ignoredAuthors: [{ id: "A-DEVIN", name: "Devin" }, { id: "A-QOVERY", name: "Qovery" }], ignoredPhrases: ["^Resolved:", "deploy (started|finished)"], includedAuthors: [{ id: "U-ADA", name: "Ada" }], kind: "slack" }],
   } });
 });
 

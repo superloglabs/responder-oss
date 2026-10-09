@@ -11,6 +11,7 @@ export type AutomationTrigger =
       channelIds: string[];
       eventMode: "mentions" | "every_message" | "both";
       ignoredAuthors?: SlackAuthor[];
+      ignoredPhrases?: string[];
       includedAuthors?: SlackAuthor[];
       integrationAccountId: string;
       kind: "slack";

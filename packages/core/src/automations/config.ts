@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { automationModelProviders, supportsAutomationHarness } from "./model-providers.js";
 import { isValidCron, isValidTimeZone, maxCronLength } from "./schedule.js";
+import { maxSlackPhraseLength, maxSlackPhrases, slackPhraseError } from "./slack-phrases.js";
 
 export const automationHarnessSchema = z.enum([
   "codex",
@@ -40,6 +41,14 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     // run as replies. The name is what the trigger editor shows.
     ignoredAuthors: slackAuthorsSchema("Ignored authors")
       .describe("Slack people and apps whose messages do not start or continue a run."),
+    // Messages whose text matches any of these neither start a run nor reach
+    // a run as replies.
+    ignoredPhrases: z.array(
+      z.string().min(1).max(maxSlackPhraseLength)
+        .refine((phrase) => slackPhraseError(phrase) === null, "Enter a valid regular expression"),
+    ).max(maxSlackPhrases)
+      .refine(uniqueIds, "Ignored phrases must be unique").optional()
+      .describe("Case-insensitive regular expressions. Messages whose text matches any of them do not start or continue a run."),
     // When set, only messages from these people and apps start a run. Replies
     // in a run's thread that mention the app still reach it.
     includedAuthors: slackAuthorsSchema("Included authors")

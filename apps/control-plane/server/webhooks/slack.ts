@@ -331,6 +331,19 @@ export function isResolvedSlackAlert(body: string): boolean {
   return /^(?:✅|:white_check_mark:)\s*/iu.test(slackMessageTitle(body));
 }
 
+// Axiom posts a monitor's recovery as its own message, such as "Resolved: Checkout
+// errors", with a link to the monitor.
+export function isAxiomMonitorResolution(input: {
+  body: string;
+  isAppMessage: boolean;
+  senderName?: string;
+}): boolean {
+  if (!input.isAppMessage) return false;
+  const fromAxiom = /\baxiom\b/iu.test(input.senderName ?? "") ||
+    /https:\/\/app\.axiom\.co\/[^>\s]*\/monitors\//iu.test(input.body);
+  return fromAxiom && /^\**resolved:/iu.test(slackMessageTitle(input.body));
+}
+
 export function isSlackErrorRecap(body: string): boolean {
   const title = slackMessageTitle(body)
     .replace(/^\*+|\*+$/gu, "")
@@ -1288,14 +1301,22 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       username: event.username,
     })
     : null;
-  const ignoreReason = alertProvider
-    ? slackAlertIgnoreReason({
-      alertProvider,
-      body,
-      senderName,
-      subtype: event.subtype,
-    })
-    : null;
+  // Axiom resolutions are skipped whichever provider the message reads as.
+  const axiomResolution = event.type === "message" && isAxiomMonitorResolution({
+    body,
+    isAppMessage: Boolean(event.app_id || event.bot_profile?.app_id || event.bot_id),
+    senderName,
+  });
+  const ignoreReason = axiomResolution
+    ? "resolved_alert"
+    : alertProvider
+      ? slackAlertIgnoreReason({
+        alertProvider,
+        body,
+        senderName,
+        subtype: event.subtype,
+      })
+      : null;
   if (ignoreReason) {
     console.info(
       JSON.stringify({

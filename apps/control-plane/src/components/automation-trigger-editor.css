@@ -60,6 +60,8 @@
 .automationTrigger .automationTriggerIcon--schedule { flex-shrink: 0; color: #666; }
 .automationTrigger__scheduleField { display: flex; flex-direction: column; gap: 8px; width: 180px; max-width: 100%; }
 .automationTrigger__scheduleField--cron { width: 320px; }
+.automationTrigger__scheduleField--phrases { width: 100%; }
+.automationTrigger__input--phrases { min-height: 62px; resize: vertical; }
 .automationTrigger__input { width: 100%; min-height: 26px; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: 12px/18px "JetBrains Mono", ui-monospace, monospace; }
 .automationTrigger__input[aria-invalid="true"] { border-color: #b42318; }
 .automationTrigger__hint--error { color: #b42318; }
