@@ -623,6 +623,9 @@ export const workspaceSkillSecrets = pgTable(
 export const organizationCapabilityValues = [
   "automations",
   "simplified_navigation",
+  "telemetry",
+  "dashboards",
+  "alerts",
 ] as const;
 
 export type OrganizationCapability = (typeof organizationCapabilityValues)[number];
@@ -648,6 +651,24 @@ export const organizationCapabilities = pgTable(
   (table) => [
     primaryKey({ columns: [table.organizationId, table.capability] }),
   ],
+);
+
+// A workspace reads OpenTelemetry data stored under these project IDs. The
+// IDs come from the ingest pipeline, which tags every record with
+// `superlog.project_id`, so one project belongs to at most one workspace.
+export const telemetryProjects = pgTable(
+  "telemetry_projects",
+  {
+    projectId: uuid("project_id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("telemetry_projects_organization_idx").on(table.organizationId)],
 );
 
 export const modelSubscriptionConnections = pgTable("model_subscription_connections", {
