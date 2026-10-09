@@ -30,7 +30,7 @@ export function shareableAutomationTriggers(
     if (trigger.kind === "axiom") {
       return { integrationAccountId: "", kind: "axiom" };
     }
-    return { frequency: trigger.frequency, hour: trigger.hour, kind: "schedule", timezone: "UTC", weekday: trigger.weekday };
+    return { ...(trigger.frequency === "custom" ? { cron: trigger.cron } : {}), frequency: trigger.frequency, hour: trigger.hour, kind: "schedule", timezone: "UTC", weekday: trigger.weekday };
   });
 }
 

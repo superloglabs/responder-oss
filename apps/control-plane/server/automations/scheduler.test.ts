@@ -39,6 +39,25 @@ describe("automation scheduler", () => {
     });
   });
 
+  it("records the cron expression of a custom schedule", async () => {
+    const custom = { cron: "0 9 * * 1-5", frequency: "custom", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 } as const;
+    vi.mocked(findDueScheduledAutomations).mockResolvedValue([{ automationId: "automation-1", scheduledFor, trigger: custom }]);
+    vi.mocked(queueAutomationRun).mockResolvedValue({ duplicate: false, jobId: "job-1", runId: "run-1" });
+
+    await runDueScheduledAutomations(new Date("2026-09-21T08:00:30.000Z"));
+
+    expect(queueAutomationRun).toHaveBeenCalledWith({
+      automationId: "automation-1",
+      trigger: {
+        attributes: { cron: "0 9 * * 1-5", frequency: "custom", scheduledFor: scheduledFor.toISOString(), timezone: "Europe/London" },
+        body: `Scheduled run: Cron 0 9 * * 1-5 (Europe/London). This run is for ${scheduledFor.toISOString()}.`,
+        externalEventId: `schedule:${scheduledFor.toISOString()}`,
+        provider: "schedule",
+        title: "Scheduled run",
+      },
+    });
+  });
+
   it("keeps queueing other automations when one fails", async () => {
     vi.mocked(findDueScheduledAutomations).mockResolvedValue([
       { automationId: "automation-1", scheduledFor, trigger },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, sentryEnvironmentChoices } from "./automation-configuration";
+import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, sentryEnvironmentChoices } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -60,6 +60,8 @@ describe("availableAutomationConfiguration", () => {
 describe("isTriggerComplete", () => {
   it("requires a connection and a channel or project for connected triggers", () => {
     expect(isTriggerComplete({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(true);
+    expect(isTriggerComplete({ cron: "0 9 * * 1-5", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(true);
+    expect(isTriggerComplete({ cron: "0 9 * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(false);
     expect(isTriggerComplete({ channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(true);
     expect(isTriggerComplete({ channelIds: [], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(false);
     expect(isTriggerComplete({ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: ["web"] })).toBe(false);
@@ -87,5 +89,14 @@ describe("moveItem", () => {
     expect(moveItem(["a", "b", "c"], "a", 1)).toEqual(["b", "a", "c"]);
     expect(moveItem(["a", "b"], "a", 9)).toEqual(["b", "a"]);
     expect(moveItem(["a", "b"], "z", 0)).toEqual(["a", "b"]);
+  });
+});
+
+describe("scheduleCron", () => {
+  it("writes the current timing as a cron expression", () => {
+    expect(scheduleCron({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("0 * * * *");
+    expect(scheduleCron({ frequency: "daily", hour: 7, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("0 7 * * *");
+    expect(scheduleCron({ frequency: "weekly", hour: 18, kind: "schedule", timezone: "UTC", weekday: 5 })).toBe("0 18 * * 5");
+    expect(scheduleCron({ cron: "*/30 * * * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("*/30 * * * *");
   });
 });

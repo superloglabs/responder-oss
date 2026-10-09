@@ -7,6 +7,7 @@ let drain: Promise<void> | undefined;
 let poller: NodeJS.Timeout | undefined;
 
 const frequencyTitles = {
+  custom: "Scheduled run",
   daily: "Daily run",
   hourly: "Hourly run",
   weekly: "Weekly run",
@@ -22,6 +23,7 @@ export async function runDueScheduledAutomations(now = new Date()): Promise<void
         automationId,
         trigger: {
           attributes: {
+            ...(trigger.frequency === "custom" ? { cron: trigger.cron } : {}),
             frequency: trigger.frequency,
             scheduledFor: scheduledFor.toISOString(),
             timezone: trigger.timezone,

@@ -874,4 +874,36 @@ test.describe("scheduled automations", () => {
     await page.getByRole("button", { name: "Remove Schedule trigger" }).click();
     await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeFocused();
   });
+
+  test("sets a custom cron schedule", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1728, height: 997 });
+    await page.goto("/automations/new");
+    await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Custom cron", exact: true }).click();
+    const cron = page.getByRole("textbox", { name: "Cron expression" });
+    await expect(page.getByRole("combobox", { name: "Frequency" })).toHaveValue("custom");
+    await expect(cron).toHaveValue("0 9 * * 1-5");
+    await expect(page.getByText("Minute, hour, day of month, month, day of week, in Europe/London.")).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Time" })).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("automation-create-custom-cron.png"), fullPage: true });
+
+    await cron.fill("0 9 * *");
+    await expect(cron).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("Use five fields: minute, hour, day of month, month, day of week.")).toBeVisible();
+
+    // Switching from a preset starts from its timing.
+    await page.getByRole("combobox", { name: "Frequency" }).selectOption("weekly");
+    await page.getByRole("combobox", { name: "Day" }).selectOption({ label: "Friday" });
+    await page.getByRole("combobox", { name: "Time" }).selectOption({ label: "16:00" });
+    await page.getByRole("button", { name: "Remove Schedule trigger" }).click();
+    await page.getByRole("button", { name: "Add trigger", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Every week", exact: true }).click();
+    await page.getByRole("combobox", { name: "Day" }).selectOption({ label: "Friday" });
+    await page.getByRole("combobox", { name: "Time" }).selectOption({ label: "16:00" });
+    await page.getByRole("combobox", { name: "Frequency" }).selectOption("custom");
+    await expect(cron).toHaveValue("0 16 * * 5");
+    await expect(cron).toHaveAttribute("aria-invalid", "false");
+  });
 });

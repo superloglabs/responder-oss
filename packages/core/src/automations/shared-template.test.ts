@@ -23,8 +23,10 @@ describe("shared automation templates", () => {
   it("keeps schedule timing without the owner's time zone", () => {
     expect(shareableAutomationTriggers([
       { frequency: "weekly", hour: 9, kind: "schedule", timezone: "Europe/Paris", weekday: 1 },
+      { cron: "0 9 * * 1-5", frequency: "custom", hour: 9, kind: "schedule", timezone: "Europe/Paris", weekday: 1 },
     ])).toEqual([
       { frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 },
+      { cron: "0 9 * * 1-5", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 },
     ]);
   });
 

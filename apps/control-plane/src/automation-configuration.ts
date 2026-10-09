@@ -1,13 +1,29 @@
 import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
-import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+import { isValidCron, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
-// New schedules run at 09:00, on Mondays when weekly, in the member's time zone.
-export function defaultScheduleTrigger(frequency: AutomationScheduleFrequency, timezone = browserTimeZone()): Extract<AutomationTrigger, { kind: "schedule" }> {
-  return { frequency, hour: 9, kind: "schedule", timezone, weekday: 1 };
+type ScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
+
+// New schedules run at 09:00, on Mondays when weekly and on weekdays when
+// custom, in the member's time zone.
+export function defaultScheduleTrigger(frequency: AutomationScheduleFrequency, timezone = browserTimeZone()): ScheduleTrigger {
+  const trigger: ScheduleTrigger = { frequency, hour: 9, kind: "schedule", timezone, weekday: 1 };
+  return frequency === "custom" ? { ...trigger, cron: "0 9 * * 1-5" } : trigger;
+}
+
+// The cron expression for a schedule's current timing, so switching to a
+// custom schedule starts from what the member already chose.
+export function scheduleCron(trigger: ScheduleTrigger): string {
+  if (trigger.frequency === "custom") return trigger.cron ?? "";
+  if (trigger.frequency === "hourly") return "0 * * * *";
+  return `0 ${trigger.hour} * * ${trigger.frequency === "weekly" ? trigger.weekday : "*"}`;
+}
+
+export function isScheduleComplete(trigger: ScheduleTrigger): boolean {
+  return trigger.frequency !== "custom" || isValidCron(trigger.cron ?? "");
 }
 
 // Saved automation settings can reference connections, trigger resources,
@@ -49,7 +65,7 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
 
 // Returns whether a trigger has everything the server needs to accept it.
 export function isTriggerComplete(trigger: AutomationTrigger): boolean {
-  if (trigger.kind === "schedule") return true;
+  if (trigger.kind === "schedule") return isScheduleComplete(trigger);
   if (!trigger.integrationAccountId) return false;
   if (trigger.kind === "axiom") return true;
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;

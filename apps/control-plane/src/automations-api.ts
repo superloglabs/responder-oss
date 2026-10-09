@@ -32,6 +32,7 @@ export type AutomationTrigger =
       kind: "discord";
     }
   | {
+      cron?: string;
       frequency: AutomationScheduleFrequency;
       hour: number;
       kind: "schedule";

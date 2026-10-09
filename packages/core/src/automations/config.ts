@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { automationModelProviders, supportsAutomationHarness } from "./model-providers.js";
-import { isValidTimeZone } from "./schedule.js";
+import { isValidCron, isValidTimeZone } from "./schedule.js";
 
 export const automationHarnessSchema = z.enum([
   "codex",
@@ -74,7 +74,9 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("discord"),
   }).describe("Runs when someone uses `/automate` in the selected Discord channels."),
   z.object({
-    frequency: z.enum(["hourly", "daily", "weekly"]),
+    cron: z.string().trim().max(120).optional()
+      .describe("Cron expression for custom runs, such as `0 9 * * 1-5`: minute, hour, day of month, month, and day of week, in the time zone."),
+    frequency: z.enum(["hourly", "daily", "weekly", "custom"]),
     hour: z.number().int().min(0).max(23)
       .describe("Local hour for daily and weekly runs, 0 to 23."),
     kind: z.literal("schedule"),
@@ -82,7 +84,10 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       .describe("IANA time zone, such as Europe/Paris."),
     weekday: z.number().int().min(0).max(6)
       .describe("Local day for weekly runs. 0 is Sunday."),
-  }).describe("Runs on the hour, or at a local time each day or week."),
+  }).refine(
+    (trigger) => trigger.frequency !== "custom" || isValidCron(trigger.cron ?? ""),
+    { message: "Enter a valid cron expression", path: ["cron"] },
+  ).describe("Runs on the hour, at a local time each day or week, or on a custom cron expression."),
 ]);
 
 // Where a scheduled, Sentry, or Axiom automation reports each finished run.

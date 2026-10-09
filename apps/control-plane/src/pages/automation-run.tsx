@@ -94,6 +94,7 @@ function triggerMeta(run: AutomationRunDetail): string[] {
   if (provider === "discord") return ["Discord", typeof attributes.username === "string" ? `@${attributes.username}` : "Command"];
   if (provider === "slack") return ["Slack", "Message"];
   if (provider === "schedule") {
+    if (attributes.frequency === "custom") return ["Schedule", typeof attributes.cron === "string" ? `Cron ${attributes.cron}` : "Custom"];
     const frequency = attributes.frequency === "hourly" ? "Hourly" : attributes.frequency === "daily" ? "Daily" : "Weekly";
     return ["Schedule", frequency];
   }
