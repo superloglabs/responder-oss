@@ -567,6 +567,25 @@ describe("fresh automation sandbox", () => {
     expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, true);
   });
 
+  it("sets up again a sandbox that Daytona recreated with the ready marker", async () => {
+    const { client, dependencies, session } = harness();
+    // Recreation restores the files written through the manifest, the
+    // ready marker among them, in a sandbox with a new ID.
+    Object.assign(session, { close: vi.fn(), pathExists: vi.fn().mockResolvedValue(true) });
+    session.state.sandboxId = "sandbox-2";
+    Object.assign(client, {
+      deserializeSessionState: vi.fn(async (state: unknown) => state),
+      resume: vi.fn().mockResolvedValue(session),
+      serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-2" }),
+    });
+
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" } }, dependencies);
+
+    expect(dependencies.createSession).not.toHaveBeenCalled();
+    expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440);
+    expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, false);
+  });
+
   it("records a paused sandbox's secrets and keeps them when a resumed turn needs the same", async () => {
     const secrets = [
       { daytonaSecretName: "dtn_status", environmentVariable: "STATUS_TOKEN" },
