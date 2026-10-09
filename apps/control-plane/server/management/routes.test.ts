@@ -680,6 +680,24 @@ describe("management MCP server", () => {
       .toMatchObject({ destructiveHint: true, readOnlyHint: false });
   });
 
+  // Directory policy: tool descriptions describe the tool only. Guidance on
+  // which tools to call, and how to behave, belongs in the server instructions.
+  it("keeps tool descriptions free of other tools and endpoints", async () => {
+    signedIn();
+
+    const response = await mcp({ id: 2, jsonrpc: "2.0", method: "tools/list" });
+    const { result } = await response.json() as {
+      result: { tools: Array<{ description: string; inputSchema: unknown; name: string }> };
+    };
+    const names = result.tools.map((tool) => tool.name);
+
+    for (const tool of result.tools) {
+      const text = JSON.stringify([tool.description, tool.inputSchema]);
+      for (const name of names) expect(text, tool.name).not.toMatch(new RegExp(`\\b${name}\\b`));
+      expect(text, tool.name).not.toMatch(/\b(?:GET|POST|PATCH|DELETE) \//);
+    }
+  });
+
   it("runs a tool as the key's member", async () => {
     signedIn();
     mocks.listAutomations.mockResolvedValue([]);
