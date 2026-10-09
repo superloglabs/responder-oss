@@ -83,8 +83,9 @@ export function usageChart(history: UsageHistory, metric: UsageMetric): UsageCha
     totals.set(point.source, (totals.get(point.source) ?? 0) + point[metric]);
   }
   const ranked = rankUsageSources(history);
-  // Keep every source when they fit; otherwise fold the smallest into Other.
-  const kept = ranked.length > usageSeriesSlots + 1 ? ranked.slice(0, usageSeriesSlots) : ranked;
+  // Keep every source when they fit; otherwise fold the smallest into Other,
+  // which has its own color.
+  const kept = ranked.length > usageSeriesSlots ? ranked.slice(0, usageSeriesSlots) : ranked;
   const keptKeys = new Set(kept.map((key) => key));
   const series: UsageSeries[] = kept.map((key, index) => ({
     key,
@@ -147,10 +148,10 @@ export function formatUsage(metric: UsageMetric, value: number): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} h`;
 }
 
-// Axis ticks drop the cents and minutes that row values keep.
+// Ticks are round steps, so they show only the digits the step needs, down
+// to a millionth for sub-cent charts.
 export function formatUsageTick(metric: UsageMetric, value: number): string {
-  const digits = value !== 0 && Math.abs(value) < 1 ? 2 : value < 10 && !Number.isInteger(value) ? 1 : 0;
-  const number = value.toLocaleString(undefined, { maximumFractionDigits: digits });
+  const number = value.toLocaleString(undefined, { maximumFractionDigits: 6 });
   return metric === "aiCharge" ? `$${number}` : `${number} h`;
 }
 

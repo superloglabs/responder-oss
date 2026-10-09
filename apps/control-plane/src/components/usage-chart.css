@@ -9,7 +9,6 @@
   --usage-series-6: #008300;
   --usage-series-7: #4a3aa7;
   --usage-series-8: #8f8f8a;
-  --usage-chart-surface: var(--usage-surface, #fff);
   --usage-chart-grid: #ececec;
   --usage-chart-text: var(--issues-text, #1a1a1a);
   --usage-chart-muted: #6b6b6b;

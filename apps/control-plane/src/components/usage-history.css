@@ -97,7 +97,7 @@
 
 .usageCard__header p {
   margin: 0;
-  color: #777;
+  color: #666;
   font-size: 12px;
   line-height: 16px;
 }
@@ -115,8 +115,4 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.billingUsageHistory .usageChart {
-  --usage-surface: var(--ds-surface-base);
 }

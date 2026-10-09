@@ -250,4 +250,8 @@ test("charts usage by automation and tag mode", async ({ page }) => {
 
   await page.locator(".usageChart__column").nth(2).hover();
   await expect(page.locator(".usageChart__tooltip")).toContainText("Tag mode$2.25");
+
+  await page.getByRole("radio", { name: "AI usage" }).press("ArrowLeft");
+  await expect(page.getByRole("radio", { name: "Machine hours" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "Machine hours" })).toBeFocused();
 });

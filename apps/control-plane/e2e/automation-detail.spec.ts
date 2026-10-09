@@ -94,7 +94,8 @@ test.beforeEach(async ({ context }) => {
     }
     if (path === `/api/automations/${automationId}/usage`) return route.fulfill({ json: {
       days: ["2026-10-08", "2026-10-09"],
-      points: [{ aiCharge: Number(url.searchParams.get("days")) / 10, day: "2026-10-09", machineHours: 1.25, source: automationId }],
+      // Totals follow the range so a range change shows in both cards.
+      points: [{ aiCharge: Number(url.searchParams.get("days")) / 10, day: "2026-10-09", machineHours: Number(url.searchParams.get("days")) / 24, source: automationId }],
       sources: { [automationId]: { automationId, kind: "automation", name: "Investigate production errors" } },
     } });
     if (path.startsWith("/api/automations/included-models/")) return route.fulfill({ json: { models: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }] } });
@@ -149,7 +150,13 @@ test("shows an automation's machine hours and AI usage on its own tab", async ({
   await expect(ai.locator(".usageCard__header strong")).toHaveText("$3.00");
 
   await page.getByRole("radio", { name: "7 days" }).click();
+  await expect(hours.locator(".usageCard__header strong")).toHaveText("0.3 h");
   await expect(ai.locator(".usageCard__header strong")).toHaveText("$0.70");
+
+  // The range moves with the arrow keys from the selected option.
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("radio", { name: "30 days" })).toBeFocused();
+  await expect(hours.locator(".usageCard__header strong")).toHaveText("1.3 h");
   await expect(page.locator(".usageChart__legend")).toHaveCount(0);
 });
 

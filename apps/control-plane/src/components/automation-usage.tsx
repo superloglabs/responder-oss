@@ -29,7 +29,7 @@ export function AutomationUsage({ automationId }: { automationId: string }) {
             note="Superlog model usage. Runs with your own API key or ChatGPT subscription are not charged here."
           />
         </div>
-      ) : !error ? <p className="usageHistory__loading">Loading usage…</p> : null}
+      ) : !error ? <p className="usageHistory__loading" role="status">Loading usage…</p> : null}
     </div>
   );
 }

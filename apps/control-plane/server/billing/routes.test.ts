@@ -37,9 +37,9 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 vi.mock("../../../../packages/core/src/db/usage-breakdown.js", () => ({
   getUsageBreakdown: vi.fn(),
 }));
-vi.mock("../../../../packages/core/src/db/usage-history.js", () => ({
+vi.mock("../../../../packages/core/src/db/usage-history.js", async (original) => ({
+  ...(await original<typeof import("../../../../packages/core/src/db/usage-history.js")>()),
   getUsageHistory: mocks.getUsageHistory,
-  parseUsageHistoryDays: (value: string | undefined) => value === "7" ? 7 : 30,
 }));
 vi.mock("../../../../packages/core/src/billing/usage-charges.js", () => ({
   sandboxTimeIsBilled: () => false,

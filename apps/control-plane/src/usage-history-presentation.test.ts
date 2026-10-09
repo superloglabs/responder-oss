@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatUsage,
+  formatUsageTick,
   rankUsageSources,
   usageAxisTicks,
   usageChart,
@@ -54,6 +55,20 @@ describe("usageChart", () => {
     expect(rankUsageSources(data)).toEqual(["tag_mode", "automation-1", "pull_requests"]);
   });
 
+  it("keeps the Other color for Other when there are exactly eight sources", () => {
+    const points = Array.from({ length: 8 }, (_, index) => ({
+      aiCharge: 8 - index,
+      day: "2026-10-09",
+      machineHours: 8 - index,
+      source: `automation-${index + 1}`,
+    }));
+
+    const chart = usageChart(history(points, 8), "aiCharge");
+
+    expect(chart.series).toHaveLength(8);
+    expect(chart.series.at(-1)).toEqual({ key: "other", label: "Other", slot: 8, total: 1 });
+  });
+
   it("folds sources past the color slots into Other", () => {
     const points = Array.from({ length: 10 }, (_, index) => ({
       aiCharge: 10 - index,
@@ -80,6 +95,13 @@ describe("usageChart", () => {
 });
 
 describe("usage formatting", () => {
+  it("labels sub-cent axis ticks with the digits they need", () => {
+    expect(usageAxisTicks(0.0035).map((tick) => formatUsageTick("aiCharge", tick)))
+      .toEqual(["$0", "$0.001", "$0.002", "$0.003", "$0.004"]);
+    expect(formatUsageTick("machineHours", 1.5)).toBe("1.5 h");
+    expect(formatUsageTick("aiCharge", 20)).toBe("$20");
+  });
+
   it("picks round axis steps that cover the tallest day", () => {
     expect(usageAxisTicks(0)).toEqual([0]);
     expect(usageAxisTicks(7.3)).toEqual([0, 2, 4, 6, 8]);

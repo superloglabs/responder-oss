@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from "react";
 import {
   formatUsage,
   usageChart,
@@ -14,21 +15,43 @@ const usageRangeOptions: Array<{ label: string; value: UsageHistoryDays }> = [
   { label: "90 days", value: 90 },
 ];
 
-export function UsageRangeControl({
+// A single-choice group following the radio group pattern: Tab reaches the
+// selected option and the arrow keys, Home, and End change the selection.
+export function UsageChoiceGroup<Value extends string | number>({
+  label,
   onChange,
+  options,
   value,
 }: {
-  onChange: (value: UsageHistoryDays) => void;
-  value: UsageHistoryDays;
+  label: string;
+  onChange: (value: Value) => void;
+  options: Array<{ label: string; value: Value }>;
+  value: Value;
 }) {
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const current = options.findIndex((option) => option.value === value);
+    const last = options.length - 1;
+    const next =
+      event.key === "ArrowLeft" || event.key === "ArrowUp" ? (current <= 0 ? last : current - 1)
+        : event.key === "ArrowRight" || event.key === "ArrowDown" ? (current >= last ? 0 : current + 1)
+          : event.key === "Home" ? 0
+            : event.key === "End" ? last
+              : null;
+    const option = next === null ? undefined : options[next];
+    if (!option) return;
+    event.preventDefault();
+    onChange(option.value);
+    event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=radio]")[next ?? 0]?.focus();
+  }
   return (
-    <div aria-label="Time range" className="usageRange" role="radiogroup">
-      {usageRangeOptions.map((option) => (
+    <div aria-label={label} className="usageRange" onKeyDown={onKeyDown} role="radiogroup">
+      {options.map((option) => (
         <button
           aria-checked={option.value === value}
           key={option.value}
           onClick={() => onChange(option.value)}
           role="radio"
+          tabIndex={option.value === value ? 0 : -1}
           type="button"
         >
           {option.label}
@@ -36,6 +59,16 @@ export function UsageRangeControl({
       ))}
     </div>
   );
+}
+
+export function UsageRangeControl({
+  onChange,
+  value,
+}: {
+  onChange: (value: UsageHistoryDays) => void;
+  value: UsageHistoryDays;
+}) {
+  return <UsageChoiceGroup label="Time range" onChange={onChange} options={usageRangeOptions} value={value} />;
 }
 
 // One metric of one automation, as a headline total over a daily chart.
