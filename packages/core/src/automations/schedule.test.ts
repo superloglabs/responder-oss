@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { automationTriggerSchema } from "./config.js";
-import { dueScheduleSlot, isValidCron, isValidTimeZone, latestScheduleSlot, parseCron, scheduleLabel, type AutomationSchedule } from "./schedule.js";
+import { cronProblem, dueScheduleSlot, isValidCron, isValidTimeZone, latestScheduleSlot, parseCron, scheduleLabel, type AutomationSchedule } from "./schedule.js";
 
 const schedule = (overrides: Partial<AutomationSchedule>): AutomationSchedule => ({
   frequency: "weekly",
@@ -87,6 +87,15 @@ describe("automation schedule", () => {
     expect(isValidCron(`0 9 * * ${"1,".repeat(130)}1`)).toBe(false);
     // February 30 never occurs.
     expect(isValidCron("0 0 30 2 *")).toBe(false);
+  });
+
+  it("reports why a cron expression is invalid", () => {
+    expect(cronProblem("0 9 * * 1-5")).toBeNull();
+    expect(cronProblem(`0 9 * * ${"1,".repeat(130)}1`)).toBe("too_long");
+    expect(cronProblem("0 9 * *")).toBe("field_count");
+    expect(cronProblem("60 9 * * *")).toBe("value");
+    expect(cronProblem("0 9 * * fri-mon")).toBe("value");
+    expect(cronProblem("0 0 30 2 *")).toBe("never_runs");
   });
 
   it("runs on either day field when both are restricted", () => {

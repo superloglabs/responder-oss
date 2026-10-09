@@ -100,10 +100,12 @@ function parseCronField(field: string, min: number, max: number, names?: string[
   return values;
 }
 
-export function parseCron(expression: string): CronFields | null {
-  if (expression.trim().length > maxCronLength) return null;
+export type CronProblem = "field_count" | "never_runs" | "too_long" | "value";
+
+function readCron(expression: string): CronFields | CronProblem {
+  if (expression.trim().length > maxCronLength) return "too_long";
   const fields = expression.trim().split(/\s+/u);
-  if (fields.length !== 5) return null;
+  if (fields.length !== 5) return "field_count";
   const [minuteField = "", hourField = "", dayField = "", monthField = "", weekdayField = ""] = fields;
   const minutes = parseCronField(minuteField, 0, 59);
   const hours = parseCronField(hourField, 0, 23);
@@ -111,17 +113,28 @@ export function parseCron(expression: string): CronFields | null {
   const months = parseCronField(monthField, 1, 12, monthNames);
   // 7 is also Sunday.
   const weekdayValues = parseCronField(weekdayField, 0, 7, weekdayNames);
-  if (!minutes || !hours || !days || !months || !weekdayValues) return null;
+  if (!minutes || !hours || !days || !months || !weekdayValues) return "value";
   const weekdays = new Set([...weekdayValues].map((weekday) => weekday % 7));
   const daysRestricted = !dayField.startsWith("*");
   const weekdaysRestricted = !weekdayField.startsWith("*");
   // Reject dates that never occur, such as February 30.
-  if (daysRestricted && !weekdaysRestricted && ![...months].some((month) => [...days].some((day) => day <= (monthLengths[month - 1] ?? 0)))) return null;
+  if (daysRestricted && !weekdaysRestricted && ![...months].some((month) => [...days].some((day) => day <= (monthLengths[month - 1] ?? 0)))) return "never_runs";
   return { days, daysRestricted, hours, minutes, months, weekdays, weekdaysRestricted };
 }
 
+export function parseCron(expression: string): CronFields | null {
+  const cron = readCron(expression);
+  return typeof cron === "string" ? null : cron;
+}
+
+// Why an expression is not a valid cron schedule, or null when it is.
+export function cronProblem(expression: string): CronProblem | null {
+  const cron = readCron(expression);
+  return typeof cron === "string" ? cron : null;
+}
+
 export function isValidCron(expression: string): boolean {
-  return parseCron(expression) !== null;
+  return cronProblem(expression) === null;
 }
 
 function matchesCron(cron: CronFields, local: LocalTime): boolean {

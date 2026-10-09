@@ -118,6 +118,8 @@ describe("scheduleCronError", () => {
     expect(scheduleCronError(custom(`${everyMinute} * * * *`))).toBeNull();
     expect(scheduleCronError(custom(`0 9 * * ${"1,".repeat(130)}1`))).toBe("Use 255 characters or fewer.");
     expect(scheduleCronError(custom("0 9 * *"))).toBe("Use five fields: minute, hour, day of month, month, day of week.");
+    expect(scheduleCronError(custom("0 24 * * *"))).toBe("Use minute 0-59, hour 0-23, day 1-31, month 1-12, and day of week 0-7.");
+    expect(scheduleCronError(custom("0 0 30 2 *"))).toBe("This date never occurs.");
     expect(scheduleCronError({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBeNull();
   });
 });

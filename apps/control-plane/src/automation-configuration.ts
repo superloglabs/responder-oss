@@ -1,5 +1,5 @@
 import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
-import { isValidCron, maxCronLength, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+import { cronProblem, maxCronLength, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -31,12 +31,18 @@ export function withScheduleFrequency(trigger: ScheduleTrigger, frequency: Autom
   return preset;
 }
 
+const cronProblemMessages = {
+  field_count: "Use five fields: minute, hour, day of month, month, day of week.",
+  never_runs: "This date never occurs.",
+  too_long: `Use ${maxCronLength} characters or fewer.`,
+  value: "Use minute 0-59, hour 0-23, day 1-31, month 1-12, and day of week 0-7.",
+} as const;
+
 // Why a custom schedule's expression cannot be saved, or null when it can.
 export function scheduleCronError(trigger: ScheduleTrigger): string | null {
   if (trigger.frequency !== "custom") return null;
-  const cron = trigger.cron?.trim() ?? "";
-  if (cron.length > maxCronLength) return `Use ${maxCronLength} characters or fewer.`;
-  return isValidCron(cron) ? null : "Use five fields: minute, hour, day of month, month, day of week.";
+  const problem = cronProblem(trigger.cron ?? "");
+  return problem ? cronProblemMessages[problem] : null;
 }
 
 export function isScheduleComplete(trigger: ScheduleTrigger): boolean {
