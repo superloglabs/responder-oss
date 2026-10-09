@@ -1,7 +1,8 @@
 import { useRef } from "react";
-import { DotsThreeIcon } from "@phosphor-icons/react";
+import { CheckIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import { slackTriggerFilters, type SlackTriggerFilter } from "../automation-configuration";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { IconButton } from "../design-system";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 
 const slackFilterLabels: Record<SlackTriggerFilter, string> = {
   ignoredAuthors: "Ignore messages from",
@@ -21,7 +22,9 @@ export function SlackFilterMenu({ hasChannels, shown, onToggle }: {
   const added = useRef<SlackTriggerFilter | null>(null);
   return <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <button aria-label="Message filters" className="automationCreate__iconButton" type="button"><DotsThreeIcon size={16} weight="bold" /></button>
+      <IconButton aria-label="Message filters" size="small" variant="ghost">
+        <DotsThreeIcon size={16} weight="bold" />
+      </IconButton>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" onCloseAutoFocus={(event) => {
       if (!added.current) return;
@@ -29,15 +32,20 @@ export function SlackFilterMenu({ hasChannels, shown, onToggle }: {
       onToggle(added.current, true);
       added.current = null;
     }}>
-      {slackTriggerFilters.map((filter) => <DropdownMenuCheckboxItem
-        checked={shown.includes(filter)}
-        disabled={filter !== "ignoredPhrases" && !hasChannels && !shown.includes(filter)}
-        key={filter}
-        onCheckedChange={(checked) => {
-          if (checked) added.current = filter;
-          else onToggle(filter, false);
-        }}
-      >{slackFilterLabels[filter]}</DropdownMenuCheckboxItem>)}
+      {slackTriggerFilters.map((filter) => {
+        const active = shown.includes(filter);
+        return <DropdownMenuItem
+          disabled={filter !== "ignoredPhrases" && !hasChannels && !active}
+          key={filter}
+          onSelect={() => {
+            if (active) onToggle(filter, false);
+            else added.current = filter;
+          }}
+        >
+          {slackFilterLabels[filter]}
+          {active ? <CheckIcon aria-label="On" className="ml-auto" size={14} /> : null}
+        </DropdownMenuItem>;
+      })}
     </DropdownMenuContent>
   </DropdownMenu>;
 }

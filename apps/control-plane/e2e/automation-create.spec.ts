@@ -438,7 +438,7 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await page.getByRole("menuitem", { name: "New message in channel", exact: true }).click();
   // A new Slack trigger shows only its channels. Author filters wait for one.
   const filters = page.getByRole("button", { name: "Message filters", exact: true });
-  const filter = (name: string) => page.getByRole("menuitemcheckbox", { name, exact: true });
+  const filter = (name: string) => page.getByRole("menuitem", { name });
   await expect(page.getByRole("button", { name: "Only messages from", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ignore messages from", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Ignore messages matching", exact: true })).toHaveCount(0);
@@ -482,6 +482,9 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await expect(page.getByText('"(unclosed" is not a valid regular expression.')).toBeVisible();
   // Removing a filter from the menu hides it and clears it.
   await filters.click();
+  await expect(filter("Ignore messages matching")).toHaveAccessibleName("Ignore messages matching On");
+  await page.getByRole("menu").evaluate((menu) => Promise.all(menu.getAnimations().map((animation) => animation.finished)));
+  await page.screenshot({ path: testInfo.outputPath("automation-slack-filter-menu-active.png"), fullPage: true });
   await filter("Ignore messages matching").click();
   await expect(phrases).toHaveCount(0);
   await filters.click();
@@ -518,7 +521,7 @@ test("says when the Slack authors could not load", async ({ page }) => {
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
   await page.getByRole("button", { name: "Message filters", exact: true }).click();
-  await page.getByRole("menuitemcheckbox", { name: "Ignore messages from", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Ignore messages from" }).click();
   await expect(page.getByText("Could not load authors. Refresh to try again.")).toBeVisible();
 });
 
