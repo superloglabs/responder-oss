@@ -137,6 +137,7 @@ describe("getUsageHistory", () => {
     expect(sandbox).toContain('"sandbox_usage"."billable" = $');
     expect(sandbox).toContain('"sandbox_usage"."waived_at" is null');
     expect(sandbox).toContain('coalesce("sandbox_usage"."stopped_at", "sandbox_usage"."heartbeat_at") > $');
+    expect(sandbox).toContain('"sandbox_usage"."started_at" >= $');
     expect(automationModel).toContain('"automation_model_usage"."inference_source" = $');
     expect(automationModel).toContain('"automation_model_usage"."completed_at" is not null');
     expect(automationModel).toContain('"automation_model_usage"."waived_at" is null');

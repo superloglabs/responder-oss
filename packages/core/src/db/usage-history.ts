@@ -60,6 +60,9 @@ function utcDay(column: AnyColumn): SQL<string> {
   return sql<string>`to_char(${column} at time zone 'UTC', 'YYYY-MM-DD')`;
 }
 
+const dayMs = 24 * 60 * 60 * 1_000;
+const maximumSandboxPeriodMs = dayMs;
+
 // Investigations started by the Slack thread agent are tag mode.
 const investigationSource = sql`case when ${agents.purpose} = 'slack_thread' then 'tag_mode' else 'investigations' end`;
 const automationSource = sql`coalesce(${automationRuns.automationId}::text, 'deleted_automation')`;
@@ -99,6 +102,10 @@ export async function getUsageHistory(input: {
     .leftJoin(agents, eq(agents.id, investigations.agentId))
     .where(and(
       eq(sandboxUsage.organizationId, input.organizationId),
+      // Bounds the (organization_id, started_at) index scan. Sandbox periods
+      // last minutes: an automation run stops within an hour, and a period
+      // whose worker stops renewing it is closed at its last heartbeat.
+      gte(sandboxUsage.startedAt, new Date(since.getTime() - maximumSandboxPeriodMs)),
       gt(sandboxEnd, since),
       eq(sandboxUsage.billable, true),
       isNull(sandboxUsage.waivedAt),
@@ -196,8 +203,6 @@ export async function getUsageHistory(input: {
     sources: usageSources([...points.values()], names),
   };
 }
-
-const dayMs = 24 * 60 * 60 * 1_000;
 
 // Splits a sandbox period at UTC midnights into hours per day, dropping any
 // part before `since`.
