@@ -22,6 +22,15 @@ export function scheduleCron(trigger: ScheduleTrigger): string {
   return `0 ${trigger.hour} * * ${trigger.frequency === "weekly" ? trigger.weekday : "*"}`;
 }
 
+// Leaving a custom schedule drops its expression, so choosing custom again
+// converts the preset timing the member set since.
+export function withScheduleFrequency(trigger: ScheduleTrigger, frequency: AutomationScheduleFrequency): ScheduleTrigger {
+  if (frequency === "custom") return { ...trigger, cron: trigger.frequency === "custom" ? trigger.cron : scheduleCron(trigger), frequency };
+  const preset: ScheduleTrigger = { ...trigger, frequency };
+  delete preset.cron;
+  return preset;
+}
+
 export function isScheduleComplete(trigger: ScheduleTrigger): boolean {
   return trigger.frequency !== "custom" || isValidCron(trigger.cron ?? "");
 }

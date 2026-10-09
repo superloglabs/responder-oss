@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, sentryEnvironmentChoices } from "./automation-configuration";
+import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, sentryEnvironmentChoices, withScheduleFrequency } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -98,5 +98,14 @@ describe("scheduleCron", () => {
     expect(scheduleCron({ frequency: "daily", hour: 7, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("0 7 * * *");
     expect(scheduleCron({ frequency: "weekly", hour: 18, kind: "schedule", timezone: "UTC", weekday: 5 })).toBe("0 18 * * 5");
     expect(scheduleCron({ cron: "*/30 * * * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("*/30 * * * *");
+  });
+});
+
+describe("withScheduleFrequency", () => {
+  it("converts the current preset timing each time a schedule becomes custom", () => {
+    const custom = { cron: "0 */6 * * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 } as const;
+    const daily = withScheduleFrequency(custom, "daily");
+    expect(daily).toEqual({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 });
+    expect(withScheduleFrequency({ ...daily, hour: 14 }, "custom")).toMatchObject({ cron: "0 14 * * *", frequency: "custom" });
   });
 });

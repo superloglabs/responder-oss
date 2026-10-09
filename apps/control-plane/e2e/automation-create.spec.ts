@@ -25,6 +25,7 @@ test.beforeEach(async ({ context }) => {
       credentials: [{ id: credentialId, provider: "openai", label: "Team key", lastFour: "1234", status: "active" }],
       secrets: [], skills: [],
     } });
+    if (path === "/api/automations/credentials") return route.fulfill({ json: { credentials: [] } });
     if (/\/credentials\/[^/]+\/models$/.test(path)) return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
     if (path === "/api/automations/included-models/openai") return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
     if (path.startsWith("/api/automations/included-models/")) return route.fulfill({ json: { models: [{ id: "included-model", name: "Included Model" }] } });
@@ -905,5 +906,37 @@ test.describe("scheduled automations", () => {
     await page.getByRole("combobox", { name: "Frequency" }).selectOption("custom");
     await expect(cron).toHaveValue("0 16 * * 5");
     await expect(cron).toHaveAttribute("aria-invalid", "false");
+
+    // Leaving custom drops the expression, so returning converts the preset again.
+    await cron.fill("*/30 9-17 * * 1-5");
+    await page.getByRole("combobox", { name: "Frequency" }).selectOption("daily");
+    await page.getByRole("combobox", { name: "Time" }).selectOption({ label: "07:00" });
+    await page.getByRole("combobox", { name: "Frequency" }).selectOption("custom");
+    await expect(cron).toHaveValue("0 7 * * *");
+
+    await page.getByRole("textbox", { name: "Agent instructions" }).fill("Check the error budget.");
+    await page.getByRole("button", { name: "Add repository", exact: true }).click();
+    await page.getByRole("option", { name: "acme/api" }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Choose model", exact: true }).click();
+    await page.getByRole("menuitem", { name: "OpenAI", exact: true }).click();
+    await page.getByRole("option", { name: "GPT-5.4" }).click();
+    let saved: Record<string, unknown> | undefined;
+    await page.route("**/api/automations", async (route) => {
+      saved = route.request().postDataJSON();
+      await route.fulfill({ status: 400, json: { error: "Please try again" } });
+    });
+    await cron.fill("0 9 * *");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Enter a valid cron expression for each custom schedule.")).toBeVisible();
+    expect(saved).toBeUndefined();
+
+    await cron.fill("*/30 9-17 * * 1-5");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => saved).toMatchObject({
+      configuration: {
+        triggers: [{ cron: "*/30 9-17 * * 1-5", frequency: "custom", hour: 7, kind: "schedule", timezone: "Europe/London", weekday: 5 }],
+      },
+    });
   });
 });

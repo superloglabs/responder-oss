@@ -83,6 +83,7 @@ describe("automation schedule", () => {
     expect(isValidCron("5-1 * * * *")).toBe(false);
     expect(isValidCron("*/0 * * * *")).toBe(false);
     expect(isValidCron("@daily")).toBe(false);
+    expect(isValidCron(`0 9 * * ${"1,".repeat(60)}1`)).toBe(false);
     // February 30 never occurs.
     expect(isValidCron("0 0 30 2 *")).toBe(false);
   });

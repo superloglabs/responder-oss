@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { automationModelProviders, supportsAutomationHarness } from "./model-providers.js";
-import { isValidCron, isValidTimeZone } from "./schedule.js";
+import { isValidCron, isValidTimeZone, maxCronLength } from "./schedule.js";
 
 export const automationHarnessSchema = z.enum([
   "codex",
@@ -74,7 +74,7 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("discord"),
   }).describe("Runs when someone uses `/automate` in the selected Discord channels."),
   z.object({
-    cron: z.string().trim().max(120).optional()
+    cron: z.string().trim().max(maxCronLength).optional()
       .describe("Cron expression for custom runs, such as `0 9 * * 1-5`: minute, hour, day of month, month, and day of week, in the time zone."),
     frequency: z.enum(["hourly", "daily", "weekly", "custom"]),
     hour: z.number().int().min(0).max(23)

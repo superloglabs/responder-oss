@@ -66,6 +66,7 @@ interface CronFields {
   weekdaysRestricted: boolean;
 }
 
+export const maxCronLength = 120;
 const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const weekdayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 // February counts 29 days so a schedule for February 29 is accepted.
@@ -100,6 +101,7 @@ function parseCronField(field: string, min: number, max: number, names?: string[
 }
 
 export function parseCron(expression: string): CronFields | null {
+  if (expression.trim().length > maxCronLength) return null;
   const fields = expression.trim().split(/\s+/u);
   if (fields.length !== 5) return null;
   const [minuteField = "", hourField = "", dayField = "", monthField = "", weekdayField = ""] = fields;
