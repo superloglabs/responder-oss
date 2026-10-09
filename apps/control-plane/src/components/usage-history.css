@@ -1,0 +1,122 @@
+.usageHistory {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.usageHistory[aria-busy="true"] .usageHistory__cards { opacity: .6; }
+
+.usageHistory__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.usageHistory__toolbar p,
+.usageHistory__loading {
+  margin: 0;
+  color: #666;
+}
+
+.usageHistory__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  transition: opacity 140ms ease;
+}
+
+.usageRange {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.usageRange button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #666;
+  font: inherit;
+  cursor: pointer;
+}
+
+.usageRange button:hover { color: #202020; }
+
+.usageRange button[aria-checked="true"] {
+  background: #fff;
+  color: #202020;
+  box-shadow: 0 1px 3px #00000014;
+}
+
+.usageRange button:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 1px;
+}
+
+.usageCard {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* The header takes the slack so charts in a row line up. */
+.usageCard__header {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usageCard__header h2 {
+  margin: 0;
+  color: #666;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.usageCard__header strong {
+  color: #121212;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 32px;
+  letter-spacing: -0.02em;
+}
+
+.usageCard__header p {
+  margin: 0;
+  color: #777;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.billingUsageHistory {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.billingUsageHistory__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.billingUsageHistory .usageChart {
+  --usage-surface: var(--ds-surface-base);
+}

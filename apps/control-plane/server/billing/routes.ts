@@ -13,6 +13,10 @@ import {
   usagePeriodStart,
 } from "../../../../packages/core/src/billing/usage-billing.js";
 import { getUsageBreakdown } from "../../../../packages/core/src/db/usage-breakdown.js";
+import {
+  getUsageHistory,
+  parseUsageHistoryDays,
+} from "../../../../packages/core/src/db/usage-history.js";
 import { sandboxTimeIsBilled } from "../../../../packages/core/src/billing/usage-charges.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
@@ -158,6 +162,25 @@ export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
     } catch (error) {
       console.error("Unable to load billing summary", error);
       return context.json({ error: "Unable to load billing" }, 502);
+    }
+  })
+  .get("/usage", async (context) => {
+    const tenant = context.get("tenant");
+    const [automationsEnabled, usageBased] = await Promise.all([
+      organizationHasCapability(tenant.organizationId, "automations"),
+      organizationUsesUsageBilling(tenant.organizationId),
+    ]);
+    if (!automationsEnabled && !usageBased) {
+      return context.json({ error: "Not found" }, 404);
+    }
+    try {
+      return context.json(await getUsageHistory({
+        days: parseUsageHistoryDays(context.req.query("days")),
+        organizationId: tenant.organizationId,
+      }));
+    } catch (error) {
+      console.error("Unable to load usage history", error);
+      return context.json({ error: "Unable to load usage" }, 502);
     }
   })
   .post("/checkout", async (context) => {

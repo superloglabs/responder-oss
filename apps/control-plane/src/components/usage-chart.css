@@ -1,0 +1,208 @@
+/* Categorical slots, checked for color-vision separation on the light
+   workspace surface. Slot 8 is "Other". */
+.usageChart {
+  --usage-series-1: #2a78d6;
+  --usage-series-2: #eb6834;
+  --usage-series-3: #1baf7a;
+  --usage-series-4: #eda100;
+  --usage-series-5: #e87ba4;
+  --usage-series-6: #008300;
+  --usage-series-7: #4a3aa7;
+  --usage-series-8: #8f8f8a;
+  --usage-chart-surface: var(--usage-surface, #fff);
+  --usage-chart-grid: #ececec;
+  --usage-chart-text: var(--issues-text, #1a1a1a);
+  --usage-chart-muted: #6b6b6b;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  min-width: 0;
+  color: var(--usage-chart-text);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.usageChart [data-slot="1"] { background: var(--usage-series-1); }
+.usageChart [data-slot="2"] { background: var(--usage-series-2); }
+.usageChart [data-slot="3"] { background: var(--usage-series-3); }
+.usageChart [data-slot="4"] { background: var(--usage-series-4); }
+.usageChart [data-slot="5"] { background: var(--usage-series-5); }
+.usageChart [data-slot="6"] { background: var(--usage-series-6); }
+.usageChart [data-slot="7"] { background: var(--usage-series-7); }
+.usageChart [data-slot="8"] { background: var(--usage-series-8); }
+
+.usageChart__frame {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 180px auto;
+  column-gap: 10px;
+  row-gap: 8px;
+}
+
+.usageChart__ticks {
+  position: relative;
+  min-width: 32px;
+  color: var(--usage-chart-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.usageChart__ticks span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+
+.usageChart__plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.usageChart__plot:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 4px;
+}
+
+.usageChart__grid {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--usage-chart-grid);
+  pointer-events: none;
+}
+
+.usageChart__column {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  min-width: 0;
+  border-radius: 4px;
+}
+
+.usageChart__column[data-active] {
+  background: color-mix(in srgb, var(--usage-chart-grid) 60%, transparent);
+}
+
+.usageChart__stack {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: 100%;
+  max-width: 24px;
+  min-height: 2px;
+  overflow: hidden;
+  border-radius: 4px 4px 0 0;
+}
+
+.usageChart__segment {
+  flex-basis: 0;
+  min-height: 1px;
+}
+
+.usageChart__days {
+  display: flex;
+  grid-column: 2;
+  gap: 2px;
+  color: var(--usage-chart-muted);
+}
+
+.usageChart__days span {
+  display: flex;
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.usageChart__days span[data-edge="start"] { justify-content: flex-start; }
+.usageChart__days span[data-edge="end"] { justify-content: flex-end; }
+
+.usageChart__tooltip {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px #0000001a;
+  pointer-events: none;
+}
+
+.usageChart__tooltip[data-side="right"] { transform: translateX(12px); }
+.usageChart__tooltip[data-side="left"] { transform: translateX(calc(-100% - 12px)); }
+
+.usageChart__tooltipTotal,
+.usageChart__tooltip li,
+.usageChart__legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.usageChart__tooltipTotal {
+  justify-content: space-between;
+  color: var(--usage-chart-muted);
+}
+
+.usageChart__tooltipTotal strong,
+.usageChart__tooltip li strong,
+.usageChart__legend li strong {
+  color: var(--usage-chart-text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.usageChart__tooltip ul,
+.usageChart__legend {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usageChart__tooltip ul {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usageChart__tooltip li span,
+.usageChart__legend li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageChart__tooltip li span { flex: 1 1 auto; min-width: 0; }
+
+.usageChart__tooltip i,
+.usageChart__legend i {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.usageChart__legend {
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  color: var(--usage-chart-muted);
+}
+
+.usageChart__legend li { min-width: 0; max-width: 100%; }

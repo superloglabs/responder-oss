@@ -109,13 +109,28 @@ async function mockWorkspace(page: Page, summary: ReturnType<typeof billing>) {
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [] } }));
   await page.route("**/api/automations", (route) => route.fulfill({ json: { automations: [] } }));
   await page.route("**/api/billing", (route) => route.fulfill({ json: summary }));
+  await page.route("**/api/billing/usage?**", (route) => route.fulfill({ json: usageHistory }));
 }
+
+const usageHistory = {
+  days: ["2026-10-07", "2026-10-08", "2026-10-09"],
+  points: [
+    { aiCharge: 1.5, day: "2026-10-08", machineHours: 3, source: "automation-1" },
+    { aiCharge: 2.25, day: "2026-10-09", machineHours: 0.5, source: "tag_mode" },
+    { aiCharge: 0.5, day: "2026-10-09", machineHours: 0, source: "pull_requests" },
+  ],
+  sources: {
+    "automation-1": { automationId: "automation-1", kind: "automation", name: "Sentry triage" },
+    pull_requests: { kind: "pull_requests" },
+    tag_mode: { kind: "tag_mode" },
+  },
+};
 
 test("shows only the usage allowance to a usage-billed workspace", async ({ page }) => {
   await mockWorkspace(page, billing({ usageBased: true }));
   await page.goto("/settings/billing");
 
-  await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { exact: true, name: "Usage" })).toBeVisible();
   await expect(page.getByText("Included usage this month")).toBeVisible();
   await expect(page.getByText(/Covers model usage and sandbox time/u)).toBeVisible();
   await expect(page.getByText("Monthly investigations")).toHaveCount(0);
@@ -133,7 +148,7 @@ test("shows usage credit and machine hours on plans that include machine hours",
 
   await expect(page.getByText("Usage credit", { exact: true })).toBeVisible();
   await expect(page.getByText("$4.00 of $5.00 remains. One-time credit.", { exact: false })).toBeVisible();
-  await expect(page.getByText("Machine hours", { exact: true })).toBeVisible();
+  await expect(page.locator(".billingMeter").getByText("Machine hours", { exact: true })).toBeVisible();
   await expect(page.getByText(/1\.5 h of 2\.0 h remain/u)).toBeVisible();
   await expect(page.locator(".billingBreakdown")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Switch to Team" })).toBeVisible();
@@ -183,7 +198,7 @@ test("offers no billing management before a usage-billed workspace pays", async 
   await mockWorkspace(page, billing({ usageBased: true }));
   await page.goto("/settings/billing");
 
-  await expect(page.getByRole("heading", { name: "Usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { exact: true, name: "Usage" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Manage billing" })).toHaveCount(0);
 });
 
@@ -218,4 +233,21 @@ test("shows no banner while a paid plan bills usage past its allowance", async (
 
   await expect(page.getByRole("heading", { name: "Automations" }).first()).toBeVisible();
   await expect(page.locator(".billingBanner")).toHaveCount(0);
+});
+
+test("charts usage by automation and tag mode", async ({ page }) => {
+  await mockWorkspace(page, billing({ usageBased: true }));
+  await page.goto("/settings/billing");
+
+  await expect(page.getByRole("heading", { name: "Usage by source" })).toBeVisible();
+  const legend = page.locator(".usageChart__legend");
+  await expect(legend.getByRole("listitem")).toHaveText(["Sentry triage3 h", "Tag mode0.5 h"]);
+  await expect(page.getByText("Machine hours, last 30 days")).toBeVisible();
+
+  await page.getByRole("radio", { name: "AI usage" }).click();
+  await expect(legend.getByRole("listitem")).toHaveText(["Sentry triage$1.50", "Tag mode$2.25", "Pull requests$0.50"]);
+  await expect(page.locator(".billingUsageHistory header strong")).toHaveText("$4.25");
+
+  await page.locator(".usageChart__column").nth(2).hover();
+  await expect(page.locator(".usageChart__tooltip")).toContainText("Tag mode$2.25");
 });
