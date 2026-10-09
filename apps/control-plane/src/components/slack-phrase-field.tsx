@@ -3,7 +3,8 @@ import { slackPhrasesError, slackPhrasesFromText } from "../automation-configura
 
 // Edits the phrases a Slack trigger ignores, one regular expression per line.
 // The text is kept as typed so blank lines do not vanish mid-edit.
-export function SlackPhraseField({ phrases, onChange }: {
+export function SlackPhraseField({ autoFocus = false, phrases, onChange }: {
+  autoFocus?: boolean;
   phrases: string[];
   onChange: (phrases: string[] | undefined) => void;
 }) {
@@ -13,7 +14,7 @@ export function SlackPhraseField({ phrases, onChange }: {
   const error = slackPhrasesError(slackPhrasesFromText(text));
   return <div className="automationTrigger__scheduleField automationTrigger__scheduleField--phrases">
     <label className="automationTrigger__fieldLabel" htmlFor={inputId}>Ignore messages matching</label>
-    <textarea aria-describedby={hintId} aria-invalid={error !== null} autoCapitalize="off" autoComplete="off" className="automationTrigger__input automationTrigger__input--phrases" id={inputId} onChange={(event) => {
+    <textarea aria-describedby={hintId} autoFocus={autoFocus} aria-invalid={error !== null} autoCapitalize="off" autoComplete="off" className="automationTrigger__input automationTrigger__input--phrases" id={inputId} onChange={(event) => {
       setText(event.target.value);
       onChange(slackPhrasesFromText(event.target.value));
     }} placeholder={"^Resolved:\ndeploy (started|finished)"} rows={3} spellCheck={false} value={text} />

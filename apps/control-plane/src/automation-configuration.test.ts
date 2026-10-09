@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, scheduleCronError, sentryEnvironmentChoices, withScheduleFrequency } from "./automation-configuration";
+import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, scheduleCronError, sentryEnvironmentChoices, slackFiltersInUse, slackPhrasesError, slackPhrasesFromText, withScheduleFrequency } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -121,5 +121,22 @@ describe("scheduleCronError", () => {
     expect(scheduleCronError(custom("0 24 * * *"))).toBe("Use minute 0-59, hour 0-23, day 1-31, month 1-12, and day of week 0-7.");
     expect(scheduleCronError(custom("0 0 30 2 *"))).toBe("This date never occurs.");
     expect(scheduleCronError({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBeNull();
+  });
+});
+
+describe("Slack trigger filters", () => {
+  const slack = { channelIds: ["C1"], eventMode: "mentions" as const, integrationAccountId: "account", kind: "slack" as const };
+
+  it("shows only the filters the trigger sets", () => {
+    expect(slackFiltersInUse(slack)).toEqual([]);
+    expect(slackFiltersInUse({ ...slack, ignoredAuthors: [], ignoredPhrases: ["^Resolved:"], includedAuthors: [{ id: "U1", name: "Ada" }] }))
+      .toEqual(["includedAuthors", "ignoredPhrases"]);
+  });
+
+  it("reads one phrase per line and reports the first invalid one", () => {
+    expect(slackPhrasesFromText(" ^Resolved: \n\n^Resolved:\ndeploy\n")).toEqual(["^Resolved:", "deploy"]);
+    expect(slackPhrasesFromText("\n  \n")).toBeUndefined();
+    expect(slackPhrasesError(undefined)).toBeNull();
+    expect(slackPhrasesError(["ok", "(unclosed"])).toBe('"(unclosed" is not a valid regular expression.');
   });
 });

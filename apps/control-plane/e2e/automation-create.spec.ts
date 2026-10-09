@@ -436,20 +436,35 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await page.getByRole("button", { name: "Add trigger", exact: true }).click();
   await page.getByRole("menuitem", { name: "Slack", exact: true }).click();
   await page.getByRole("menuitem", { name: "New message in channel", exact: true }).click();
+  // A new Slack trigger shows only its channels. Author filters wait for one.
+  const filters = page.getByRole("button", { name: "Message filters", exact: true });
+  const filter = (name: string) => page.getByRole("menuitemcheckbox", { name, exact: true });
+  await expect(page.getByRole("button", { name: "Only messages from", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ignore messages from", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Ignore messages matching", exact: true })).toHaveCount(0);
+  await filters.click();
+  await expect(filter("Only messages from")).toBeDisabled();
+  await expect(filter("Ignore messages matching")).toBeEnabled();
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Channel", exact: true }).click();
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
-  const include = page.getByRole("button", { name: "Only messages from", exact: true });
-  await expect(include).toContainText("Everyone");
-  await include.click();
+  await filters.click();
+  await expect(filter("Only messages from")).toBeEnabled();
+  await page.getByRole("menu").evaluate((menu) => Promise.all(menu.getAnimations().map((animation) => animation.finished)));
+  await page.screenshot({ path: testInfo.outputPath("automation-slack-filter-menu.png"), fullPage: true });
+  // A filter added from the menu opens its list.
+  await filter("Only messages from").click();
+  await expect(page.getByRole("dialog", { name: "Choose authors" })).toBeVisible();
   await expect.poll(() => requested).toEqual(["C123"]);
   await page.getByRole("checkbox", { name: "Ada", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
+  const include = page.getByRole("button", { name: "Only messages from", exact: true });
   await expect(include).toContainText("Ada");
+  await filters.click();
+  await filter("Ignore messages from").click();
   const ignore = page.getByRole("button", { name: "Ignore messages from", exact: true });
   await expect(ignore).toContainText("No one");
-  await ignore.click();
   await page.getByRole("checkbox", { name: "Devin (app)", exact: true }).check();
   // Both pickers share one list of authors, which React's development mode
   // may load twice.
@@ -459,9 +474,19 @@ test("includes and ignores Slack authors chosen from who posted in the selected 
   await page.getByRole("dialog", { name: "Choose authors" }).press("Escape");
   await expect(ignore).toContainText("Devin (app), Qovery (app)");
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-authors.png"), fullPage: true });
+  await filters.click();
+  await filter("Ignore messages matching").click();
   const phrases = page.getByRole("textbox", { name: "Ignore messages matching", exact: true });
+  await expect(phrases).toBeFocused();
   await phrases.fill("^Resolved:\n(unclosed");
   await expect(page.getByText('"(unclosed" is not a valid regular expression.')).toBeVisible();
+  // Removing a filter from the menu hides it and clears it.
+  await filters.click();
+  await filter("Ignore messages matching").click();
+  await expect(phrases).toHaveCount(0);
+  await filters.click();
+  await filter("Ignore messages matching").click();
+  await expect(phrases).toHaveValue("");
   await phrases.fill("^Resolved:\n\ndeploy (started|finished)\n");
   await expect(phrases).toHaveAttribute("aria-invalid", "false");
   await page.screenshot({ path: testInfo.outputPath("automation-ignore-phrases.png"), fullPage: true });
@@ -492,7 +517,8 @@ test("says when the Slack authors could not load", async ({ page }) => {
   await page.getByRole("button", { name: "Channel", exact: true }).click();
   await page.getByRole("checkbox", { name: "#incidents", exact: true }).check();
   await page.getByRole("dialog", { name: "Choose channels" }).press("Escape");
-  await page.getByRole("button", { name: "Ignore messages from", exact: true }).click();
+  await page.getByRole("button", { name: "Message filters", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Ignore messages from", exact: true }).click();
   await expect(page.getByText("Could not load authors. Refresh to try again.")).toBeVisible();
 });
 

@@ -2,7 +2,7 @@ import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
 import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
-import { defaultScheduleTrigger, scheduleCronError, withScheduleFrequency } from "../automation-configuration";
+import { defaultScheduleTrigger, scheduleCronError, slackFiltersInUse, slackTriggerFilters, type SlackTriggerFilter, withScheduleFrequency } from "../automation-configuration";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
@@ -10,6 +10,7 @@ import { AutomationResourcePicker } from "./automation-resource-picker";
 import { AxiomWebhookDialog } from "./axiom-webhook-dialog";
 import { SentryEnvironmentPicker } from "./sentry-environment-picker";
 import { SlackAuthorPickers } from "./slack-author-picker";
+import { SlackFilterMenu } from "./slack-filter-menu";
 import { SlackPhraseField } from "./slack-phrase-field";
 import { movedElsewhereInApp } from "./popover-dismiss";
 import { providerDisplayName } from "./provider-glyphs";
@@ -82,6 +83,19 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
 }) {
   const schedule = trigger.kind === "schedule" ? trigger : null;
   const connected = trigger.kind === "schedule" ? null : trigger;
+  // A Slack trigger shows only its channels until the member adds a filter
+  // from its menu. Filters the trigger sets are always shown.
+  const [addedFilters, setAddedFilters] = useState<SlackTriggerFilter[]>([]);
+  const [justAdded, setJustAdded] = useState<SlackTriggerFilter | null>(null);
+  const slack = connected?.kind === "slack" ? connected : null;
+  const inUse = slack ? slackFiltersInUse(slack) : [];
+  const shownFilters = slackTriggerFilters.filter((filter) => addedFilters.includes(filter) || inUse.includes(filter));
+  function toggleSlackFilter(filter: SlackTriggerFilter, shown: boolean) {
+    if (!slack) return;
+    setAddedFilters((current) => shown ? [...current, filter] : current.filter((item) => item !== filter));
+    setJustAdded(shown ? filter : null);
+    if (!shown) onChange({ ...slack, [filter]: undefined });
+  }
   const accounts = options?.accounts.filter((account) => account.provider === connected?.kind) ?? [];
   const account = accounts.find((item) => item.id === connected?.integrationAccountId);
   const resources = options?.resources.filter((resource) => resource.integrationAccountId === connected?.integrationAccountId && resource.kind === (connected?.kind === "sentry" ? "sentry_project" : connected?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
@@ -121,6 +135,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
         <option value="" disabled>Choose a workspace</option>
         {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
       </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}
+      {slack && account ? <SlackFilterMenu hasChannels={slack.channelIds.length > 0} shown={shownFilters} onToggle={toggleSlackFilter} /> : null}
       {removeTrigger}
     </div>
     {connected.kind === "axiom" ? <div className="automationTrigger__fields" ref={fieldsRef}>
@@ -128,8 +143,8 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     </div> : <div className="automationTrigger__fields" ref={fieldsRef}>
       <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label={connected.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(connected.kind === "sentry" ? { ...connected, projectIds: ids } : { ...connected, channelIds: ids })} onRefresh={connected.kind === "discord" ? undefined : () => onRefresh(connected.kind)} />
       {connected.kind === "sentry" && account ? <SentryEnvironmentPicker key={connected.integrationAccountId} accountId={connected.integrationAccountId} excluded={connected.excludedEnvironments ?? []} onChange={(excludedEnvironments) => onChange({ ...connected, excludedEnvironments })} /> : null}
-      {connected.kind === "slack" && account && connected.channelIds.length > 0 ? <SlackAuthorPickers key={connected.integrationAccountId} accountId={connected.integrationAccountId} channelIds={connected.channelIds} ignored={connected.ignoredAuthors ?? []} included={connected.includedAuthors ?? []} onIgnoredChange={(ignoredAuthors) => onChange({ ...connected, ignoredAuthors })} onIncludedChange={(includedAuthors) => onChange({ ...connected, includedAuthors })} /> : null}
-      {connected.kind === "slack" && account ? <SlackPhraseField key={`phrases:${connected.integrationAccountId}`} phrases={connected.ignoredPhrases ?? []} onChange={(ignoredPhrases) => onChange({ ...connected, ignoredPhrases })} /> : null}
+      {slack && account && slack.channelIds.length > 0 && (shownFilters.includes("includedAuthors") || shownFilters.includes("ignoredAuthors")) ? <SlackAuthorPickers key={slack.integrationAccountId} accountId={slack.integrationAccountId} channelIds={slack.channelIds} ignored={slack.ignoredAuthors ?? []} included={slack.includedAuthors ?? []} opened={justAdded === "includedAuthors" ? "included" : justAdded === "ignoredAuthors" ? "ignored" : undefined} showIgnored={shownFilters.includes("ignoredAuthors")} showIncluded={shownFilters.includes("includedAuthors")} onIgnoredChange={(ignoredAuthors) => onChange({ ...slack, ignoredAuthors })} onIncludedChange={(includedAuthors) => onChange({ ...slack, includedAuthors })} /> : null}
+      {slack && account && shownFilters.includes("ignoredPhrases") ? <SlackPhraseField autoFocus={justAdded === "ignoredPhrases"} key={`phrases:${slack.integrationAccountId}`} phrases={slack.ignoredPhrases ?? []} onChange={(ignoredPhrases) => onChange({ ...slack, ignoredPhrases })} /> : null}
       {connected.kind === "discord" ? <AutomationTriggerConnect key={connected.integrationAccountId} kind="discord" name="Discord" onConnected={onConnected} label="Reconnect to refresh channels" /> : null}
     </div>}
   </div>;

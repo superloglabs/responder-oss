@@ -95,6 +95,16 @@ export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;
 }
 
+type SlackTrigger = Extract<AutomationTrigger, { kind: "slack" }>;
+
+// The filters a Slack trigger's menu adds. Each one the trigger sets is shown.
+export const slackTriggerFilters = ["includedAuthors", "ignoredAuthors", "ignoredPhrases"] as const;
+export type SlackTriggerFilter = typeof slackTriggerFilters[number];
+
+export function slackFiltersInUse(trigger: SlackTrigger): SlackTriggerFilter[] {
+  return slackTriggerFilters.filter((filter) => (trigger[filter]?.length ?? 0) > 0);
+}
+
 // The phrases a Slack trigger ignores, one per line. Blank and repeated lines
 // are dropped.
 export function slackPhrasesFromText(text: string): string[] | undefined {
