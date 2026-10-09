@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn().mockResolvedValue([]),
   analytics: vi.fn(),
   getShare: vi.fn(),
+  getUsageHistory: vi.fn().mockResolvedValue({ days: [], points: [], sources: {} }),
   share: vi.fn(),
   unshare: vi.fn(),
   credential: vi.fn(),
@@ -87,6 +88,10 @@ vi.mock("../../../../packages/core/src/db/shared-automation-templates.js", () =>
   getAutomationShare: mocks.getShare,
   shareAutomation: mocks.share,
   unshareAutomation: mocks.unshare,
+}));
+vi.mock("../../../../packages/core/src/db/usage-history.js", async (original) => ({
+  ...(await original<typeof import("../../../../packages/core/src/db/usage-history.js")>()),
+  getUsageHistory: mocks.getUsageHistory,
 }));
 vi.mock("../../../../packages/core/src/analytics.js", () => ({
   captureAnalyticsEvent: mocks.analytics,
@@ -175,6 +180,21 @@ describe("automation control-plane routes", () => {
     expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(1, organizationId, automationId, { limit: 10, offset: 10 });
     expect(invalid.status).toBe(200);
     expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(2, organizationId, automationId, { limit: 10, offset: 0 });
+  });
+
+  it("reads an automation's usage within the active organization", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+
+    const response = await app.request(`/api/automations/${automationId}/usage?days=90`);
+    const fallback = await app.request(`/api/automations/${automationId}/usage?days=365`);
+    const malformed = await app.request("/api/automations/not-a-uuid/usage");
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUsageHistory).toHaveBeenNthCalledWith(1, { automationId, days: 90, organizationId });
+    expect(fallback.status).toBe(200);
+    expect(mocks.getUsageHistory).toHaveBeenNthCalledWith(2, { automationId, days: 30, organizationId });
+    expect(malformed.status).toBe(404);
+    expect(mocks.getUsageHistory).toHaveBeenCalledTimes(2);
   });
 
   it("starts a test chat with the member's first message", async () => {

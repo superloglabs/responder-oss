@@ -92,6 +92,12 @@ test.beforeEach(async ({ context }) => {
       if (page === "2") return route.fulfill({ json: { page: 2, pageSize: 10, total: 12, runs: [run(2, "succeeded", "Manual run", 3 * 24 * 60, manual), run(1, "succeeded", "Manual run", 4 * 24 * 60, manual)] } });
       return route.fulfill({ status: 400, json: { error: `Unexpected page ${page}` } });
     }
+    if (path === `/api/automations/${automationId}/usage`) return route.fulfill({ json: {
+      days: ["2026-10-08", "2026-10-09"],
+      // Totals follow the range so a range change shows in both cards.
+      points: [{ aiCharge: Number(url.searchParams.get("days")) / 10, day: "2026-10-09", machineHours: Number(url.searchParams.get("days")) / 24, source: automationId }],
+      sources: { [automationId]: { automationId, kind: "automation", name: "Investigate production errors" } },
+    } });
     if (path.startsWith("/api/automations/included-models/")) return route.fulfill({ json: { models: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }] } });
     return route.fulfill({ json: {} });
   });
@@ -102,7 +108,7 @@ test("shows a saved automation and pages its run history", async ({ page }, test
   await page.goto(`/automations/${automationId}/edit`);
   await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/settings$`));
   await expect(page.getByRole("heading", { name: "Investigate production errors" })).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveText(["Run history", "Settings"]);
+  await expect(page.getByRole("tab")).toHaveText(["Run history", "Usage", "Settings"]);
   await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue(automation.configuration.prompt);
@@ -130,6 +136,28 @@ test("shows a saved automation and pages its run history", async ({ page }, test
   await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/settings$`));
   await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue(automation.configuration.prompt);
+});
+
+test("shows an automation's machine hours and AI usage on its own tab", async ({ page }) => {
+  await page.goto(`/automations/${automationId}`);
+  await page.getByRole("tab", { name: "Usage" }).click();
+  await expect(page).toHaveURL(new RegExp(`/automations/${automationId}/usage$`));
+  await expect(page.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
+
+  const hours = page.locator(".usageCard").filter({ has: page.getByRole("heading", { name: "Machine hours" }) });
+  const ai = page.locator(".usageCard").filter({ has: page.getByRole("heading", { name: "AI usage" }) });
+  await expect(hours.locator(".usageCard__header strong")).toHaveText("1.3 h");
+  await expect(ai.locator(".usageCard__header strong")).toHaveText("$3.00");
+
+  await page.getByRole("radio", { name: "7 days" }).click();
+  await expect(hours.locator(".usageCard__header strong")).toHaveText("0.3 h");
+  await expect(ai.locator(".usageCard__header strong")).toHaveText("$0.70");
+
+  // The range moves with the arrow keys from the selected option.
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("radio", { name: "30 days" })).toBeFocused();
+  await expect(hours.locator(".usageCard__header strong")).toHaveText("1.3 h");
+  await expect(page.locator(".usageChart__legend")).toHaveCount(0);
 });
 
 test("opens a saved automation on its run history", async ({ page }) => {

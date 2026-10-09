@@ -42,6 +42,10 @@ import {
   shareAutomation,
   unshareAutomation,
 } from "../../../../packages/core/src/db/shared-automation-templates.js";
+import {
+  getUsageHistory,
+  parseUsageHistoryDays,
+} from "../../../../packages/core/src/db/usage-history.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
@@ -596,6 +600,19 @@ export const automationRoutes = new Hono()
       { limit: runPageSize, offset: (page - 1) * runPageSize },
     );
     return context.json({ ...runs, page, pageSize: runPageSize });
+  })
+  .get("/:automationId/usage", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automationId = context.req.param("automationId");
+    if (!z.uuid().safeParse(automationId).success) {
+      return context.json({ error: "Automation not found" }, 404);
+    }
+    return context.json(await getUsageHistory({
+      automationId,
+      days: parseUsageHistoryDays(context.req.query("days")),
+      organizationId: access.tenant.organizationId,
+    }));
   })
   .post("/:automationId/runs", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

@@ -27,6 +27,7 @@ import { applyAutomationTemplate, automationTemplateMissingFields, findAutomatio
 import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
+import { AutomationUsage } from "../components/automation-usage";
 import { AutomationNotificationEditor } from "../components/automation-notification-editor";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
 import { availableAutomationConfiguration, isScheduleComplete, isTriggerComplete, moveItem } from "../automation-configuration";
@@ -77,9 +78,11 @@ function toggle(list: string[], value: string): string[] {
 export function AutomationCreatePage({ initialAutomation }: { initialAutomation?: AutomationDetail } = {}) {
   const automationId = initialAutomation?.id;
   const editorPath = automationId ? `/automations/${automationId}/settings` : "/automations/new";
-  // A saved automation opens on its run history; settings have their own URL.
+  // A saved automation opens on its run history; settings and usage have
+  // their own URLs.
   const settingsMatch = useMatch("/automations/:automationId/settings");
-  const activeTab = !automationId || settingsMatch ? "settings" : "history";
+  const usageMatch = useMatch("/automations/:automationId/usage");
+  const activeTab = !automationId || settingsMatch ? "settings" : usageMatch ? "usage" : "history";
   const navigate = useNavigate();
   const [options, setOptions] = useState<AutomationOptions | null>(null);
   // A new automation can start from a template chosen on the automation list,
@@ -398,6 +401,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
           </div>
           {automationId ? <div className="automationCreate__tabs" role="tablist" aria-label="Automation sections">
             <button aria-selected={activeTab === "history"} onClick={() => { if (activeTab !== "history") navigate(`/automations/${automationId}`); setRenaming(false); }} role="tab" type="button">Run history</button>
+            <button aria-selected={activeTab === "usage"} onClick={() => { if (activeTab !== "usage") navigate(`/automations/${automationId}/usage`); setRenaming(false); }} role="tab" type="button">Usage</button>
             <button aria-selected={activeTab === "settings"} onClick={() => { if (activeTab !== "settings") navigate(editorPath); }} role="tab" type="button">Settings</button>
           </div> : null}
         </header>
@@ -409,6 +413,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         {error ? <p className="formError" role="alert">{error}</p> : null}
         {unsavedReason && activeTab === "settings" ? <p className="automationCreate__unsaved" role="status">{unsavedReason}</p> : null}
         {automationId && activeTab === "history" ? <AutomationRunHistory automationId={automationId} refreshKey={runsRefreshKey} /> : null}
+        {automationId && activeTab === "usage" ? <AutomationUsage automationId={automationId} /> : null}
         <form className="automationCreate__form" hidden={activeTab !== "settings"} id="automation-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="automation-triggers" ref={triggerSectionRef}>
             <h2 id="automation-triggers">Triggers</h2>

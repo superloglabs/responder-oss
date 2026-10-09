@@ -4,6 +4,7 @@ export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode";
 export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+import type { UsageHistory, UsageHistoryDays } from "./usage-history-presentation";
 export type AutomationRunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type AutomationTrigger =
@@ -391,4 +392,8 @@ export async function shareAutomation(automationId: string): Promise<AutomationS
 
 export function unshareAutomation(automationId: string) {
   return automationJson<{ shared: false }>(`/api/automations/${encodeURIComponent(automationId)}/share`, { method: "DELETE" });
+}
+
+export function fetchAutomationUsage(id: string, days: UsageHistoryDays): Promise<UsageHistory> {
+  return automationJson<UsageHistory>(`/api/automations/${encodeURIComponent(id)}/usage?days=${days}`);
 }

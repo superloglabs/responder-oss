@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createBillingPortal: vi.fn(),
   createPayAsYouGoCheckout: vi.fn(),
   getBillingSummary: vi.fn(),
+  getUsageHistory: vi.fn(),
   organizationHasCapability: vi.fn(),
   tenant: vi.fn(),
 }));
@@ -35,6 +36,10 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 }));
 vi.mock("../../../../packages/core/src/db/usage-breakdown.js", () => ({
   getUsageBreakdown: vi.fn(),
+}));
+vi.mock("../../../../packages/core/src/db/usage-history.js", async (original) => ({
+  ...(await original<typeof import("../../../../packages/core/src/db/usage-history.js")>()),
+  getUsageHistory: mocks.getUsageHistory,
 }));
 vi.mock("../../../../packages/core/src/billing/usage-charges.js", () => ({
   sandboxTimeIsBilled: () => false,
@@ -173,6 +178,31 @@ describe("billing routes", () => {
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(await limited.json()).toEqual({ error: "Too many requests" });
+  });
+
+  it("returns the workspace's usage history for the requested range", async () => {
+    signIn();
+    mocks.organizationHasCapability.mockResolvedValue(true);
+    const history = { days: ["2026-10-09"], points: [], sources: {} };
+    mocks.getUsageHistory.mockResolvedValue(history);
+
+    const response = await app.request("/api/billing/usage?days=7");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(history);
+    expect(mocks.getUsageHistory).toHaveBeenCalledWith({
+      days: 7,
+      organizationId: `workspace-${workspaceCount}`,
+    });
+  });
+
+  it("hides usage history from workspaces without automations or usage billing", async () => {
+    signIn();
+
+    const response = await app.request("/api/billing/usage");
+
+    expect(response.status).toBe(404);
+    expect(mocks.getUsageHistory).not.toHaveBeenCalled();
   });
 
   it("rejects requests without a workspace session", async () => {

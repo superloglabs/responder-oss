@@ -2,7 +2,19 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../components/app-shell";
 import { BillingSkeleton } from "../components/screen-skeletons";
 import { SettingsHeading } from "../components/settings-heading";
+import { UsageChart } from "../components/usage-chart";
+import { UsageChoiceGroup, UsageRangeControl } from "../components/usage-history-view";
+import "../components/usage-history.css";
 import { useDocumentTitle } from "../use-document-title";
+import { useUsageHistory } from "../use-usage-history";
+import {
+  formatUsage,
+  usageChart,
+  usageMetricLabels,
+  type UsageHistory,
+  type UsageHistoryDays,
+  type UsageMetric,
+} from "../usage-history-presentation";
 
 type AutomationPlanId = string;
 
@@ -331,6 +343,55 @@ function AutomationBilling({
   );
 }
 
+async function fetchBillingUsage(days: UsageHistoryDays): Promise<UsageHistory> {
+  const response = await fetch(`/api/billing/usage?days=${days}`);
+  const body = (await response.json().catch(() => null)) as UsageHistory | { error?: string } | null;
+  if (!response.ok) {
+    throw new Error(body && "error" in body && body.error ? body.error : "Unable to load usage");
+  }
+  return body as UsageHistory;
+}
+
+const usageMetricOptions = (["machineHours", "aiCharge"] as const).map((value) => ({
+  label: usageMetricLabels[value],
+  value,
+}));
+
+// Daily usage split by the automation or feature that used it.
+function UsageBySource() {
+  const [days, setDays] = useState<UsageHistoryDays>(30);
+  const [metric, setMetric] = useState<UsageMetric>("machineHours");
+  const { error, history, loadedDays, loading } = useUsageHistory(fetchBillingUsage, days);
+  const chart = history ? usageChart(history, metric) : null;
+  return (
+    <>
+      <h2 className="billingSectionTitle">Usage by source</h2>
+      <article aria-busy={loading} className="billingUsageCard billingUsageHistory">
+        <div className="billingUsageHistory__toolbar">
+          <UsageChoiceGroup label="Metric" onChange={setMetric} options={usageMetricOptions} value={metric} />
+          <UsageRangeControl onChange={setDays} value={days} />
+        </div>
+        {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+        {chart ? (
+          <>
+            <header>
+              <span>{`${usageMetricLabels[metric]}, last ${loadedDays} days`}</span>
+              <strong>{formatUsage(metric, chart.total)}</strong>
+            </header>
+            <UsageChart
+              chart={chart}
+              label={`${usageMetricLabels[metric]} per day by source`}
+              legend
+              metric={metric}
+            />
+            {chart.total === 0 ? <p>No usage in this period.</p> : null}
+          </>
+        ) : !error ? <p role="status">Loading usage…</p> : null}
+      </article>
+    </>
+  );
+}
+
 function resetLabel(timestamp: number | null): string {
   if (!timestamp) return "each month";
   return `on ${new Intl.DateTimeFormat(undefined, {
@@ -523,6 +584,8 @@ export function BillingPage() {
           usageBased={summary.usageBased ?? false}
         />
       ) : null}
+
+      {summary?.enabled && summary.automations ? <UsageBySource /> : null}
     </AppShell>
   );
 }
