@@ -583,6 +583,8 @@ describe("fresh automation sandbox", () => {
 
     expect(dependencies.createSession).not.toHaveBeenCalled();
     expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440);
+    expect(dependencies.prepare).toHaveBeenCalledWith(session);
+    // Not resumed, so the run checks out its repositories again.
     expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, false);
   });
 
