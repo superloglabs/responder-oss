@@ -19,6 +19,7 @@ import type {
 } from "../automations/config.js";
 import { isAutomationContextProvider } from "../automations/context-providers.js";
 import { dueScheduleSlot } from "../automations/schedule.js";
+import { matchesSlackPhrase } from "../automations/slack-phrase-match.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
@@ -72,8 +73,9 @@ export class AutomationConfigurationError extends Error {
 // Every enabled automation with a Slack trigger on the channel. A reply in a
 // run's thread continues that run whatever the trigger's event mode, so
 // `startsRun` says only whether this event starts a new run. A trigger that
-// ignores the message's author does not watch for it. `authorIds` are the
-// sender's user, bot, and app IDs that Slack sent.
+// ignores the message's author or matches one of its ignored phrases does not
+// watch for it. `authorIds` are the sender's user, bot, and app IDs that Slack
+// sent.
 //
 // "Every message" watches the channel's new messages. A reply in a thread
 // without a run starts one only when it mentions the app, so a thread whose
@@ -161,7 +163,8 @@ export async function findAutomationsForSlackEvent(input: {
       trigger.kind === "slack" &&
       trigger.integrationAccountId === row.accountId &&
       trigger.channelIds.includes(input.channelId) &&
-      !trigger.ignoredAuthors?.some((author) => input.authorIds.includes(author.id))
+      !trigger.ignoredAuthors?.some((author) => input.authorIds.includes(author.id)) &&
+      !matchesSlackPhrase(trigger.ignoredPhrases ?? [], input.text)
     );
     if (watching.length === 0) return [];
     const mentioned = input.eventType === "app_mention" ||

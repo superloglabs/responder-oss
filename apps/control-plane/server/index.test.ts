@@ -8,6 +8,7 @@ import {
   sessionCookieFingerprint,
 } from "./app.js";
 import {
+  isAxiomMonitorResolution,
   isResolvedSlackAlert,
   isPostHogInactiveMessage,
   isSentryIssueAlert,
@@ -514,6 +515,24 @@ describe("control-plane API", () => {
     expect(isResolvedSlackAlert('🚨 Alert for "test" - 1 line found')).toBe(
       false,
     );
+  });
+
+  it("recognizes Axiom monitor resolutions", () => {
+    const resolved = [
+      "Resolved: Checkout errors (&gt; 50/min)",
+      "```Current value is below or equal to the threshold value of 50```",
+      "notifications resolved icon",
+      "<https://app.axiom.co/acme/monitors/view/mon_123|View Monitor>",
+    ].join("\n");
+    const triggered = resolved
+      .replace("Resolved:", "Triggered:")
+      .replace("is below or equal to", "of 212 is above");
+    expect(isAxiomMonitorResolution({ body: resolved, isAppMessage: true, senderName: "Axiom" })).toBe(true);
+    expect(isAxiomMonitorResolution({ body: resolved, isAppMessage: true })).toBe(true);
+    expect(isAxiomMonitorResolution({ body: triggered, isAppMessage: true, senderName: "Axiom" })).toBe(false);
+    expect(isAxiomMonitorResolution({ body: resolved, isAppMessage: false })).toBe(false);
+    expect(isAxiomMonitorResolution({ body: "Resolved: checkout latency", isAppMessage: true, senderName: "Grafana" })).toBe(false);
+    expect(isAxiomMonitorResolution({ body: "Resolved: flaky test", isAppMessage: true, senderName: "Nova Axiom" })).toBe(false);
   });
 
   it("accepts Sentry thread broadcasts as alert messages", () => {
@@ -1087,6 +1106,47 @@ describe("control-plane API", () => {
         teamId: "T123",
       }),
     );
+  });
+
+  it("ignores Axiom monitor resolutions before automations see them", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvAxiomResolved",
+      event: {
+        type: "message",
+        subtype: "bot_message",
+        bot_id: "B-AXIOM",
+        bot_profile: { app_id: "A-AXIOM", name: "Axiom" },
+        channel: "C123",
+        ts: "1700000002.000001",
+        text: "Resolved: Checkout errors (&gt; 50/min)\nnotifications resolved icon\n<https://app.axiom.co/acme/monitors/view/mon_123|View Monitor>",
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason: "resolved_alert",
+    });
+    expect(slackWebhookMocks.findAutomationsForSlackEvent).not.toHaveBeenCalled();
+    expect(queueAutomationRun).not.toHaveBeenCalled();
   });
 
   it("ignores aggregate error recap app messages", async () => {

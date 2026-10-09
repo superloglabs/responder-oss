@@ -133,6 +133,23 @@ describe("trigger matching", () => {
       ]);
   });
 
+  it("skips messages that match a trigger's ignored phrases", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const ignoring = { ...slack, eventMode: "every_message", ignoredPhrases: ["^resolved:", "deploy (started|finished)"] } as const;
+    const rows = [
+      { accountId, accountMetadata: metadata, automationId: "ignoring", triggers: [ignoring] },
+      { accountId, accountMetadata: metadata, automationId: "open", triggers: [{ ...slack, eventMode: "every_message" }] },
+    ];
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows, rows, rows]));
+    const automationIds = async (text: string) =>
+      (await findAutomationsForSlackEvent({ authorIds: ["U1"], channelId: "C1", eventType: "message", teamId: "T1", text, timestamp: "1790000000.000100" }))
+        .map((match) => match.automationId);
+
+    await expect(automationIds("Resolved: Checkout errors")).resolves.toEqual(["open"]);
+    await expect(automationIds("Deploy finished for api")).resolves.toEqual(["open"]);
+    await expect(automationIds("Triggered: Checkout errors, not resolved: yet")).resolves.toEqual(["ignoring", "open"]);
+  });
+
   it("starts a run on a thread reply only when it mentions the app", async () => {
     const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
     const automation = (automationId: string, eventMode: "both" | "every_message" | "mentions") => ({

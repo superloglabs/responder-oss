@@ -5,13 +5,18 @@ import { AutomationResourcePicker } from "./automation-resource-picker";
 type ListedAuthor = SlackAuthor & { kind: "app" | "person" };
 
 // Chooses the only people and apps whose messages start a Slack trigger's
-// runs, and the ones it ignores. Both lists offer whoever posted in the
-// selected channels since they were watched, loaded once for both.
-export function SlackAuthorPickers({ accountId, channelIds, ignored, included, onIgnoredChange, onIncludedChange }: {
+// runs, the ones it ignores, or both. The lists offer whoever posted in the
+// selected channels since they were watched, loaded once for both. A list
+// the member just added opens.
+export function SlackAuthorPickers({ accountId, channelIds, ignored, included, onClose, opened, showIgnored, showIncluded, onIgnoredChange, onIncludedChange }: {
   accountId: string;
   channelIds: string[];
   ignored: SlackAuthor[];
   included: SlackAuthor[];
+  onClose?: () => void;
+  opened?: "ignored" | "included";
+  showIgnored: boolean;
+  showIncluded: boolean;
   onIgnoredChange: (ignored: SlackAuthor[] | undefined) => void;
   onIncludedChange: (included: SlackAuthor[] | undefined) => void;
 }) {
@@ -43,12 +48,13 @@ export function SlackAuthorPickers({ accountId, channelIds, ignored, included, o
     const next = await fetchSlackAuthors(accountId, channelIds);
     if (current.current === requested) setLoaded({ authors: next, selection: requested });
   }
-  function picker(title: string, none: string, selected: SlackAuthor[], onChange: (selected: SlackAuthor[] | undefined) => void) {
+  function picker(title: string, none: string, selected: SlackAuthor[], open: boolean, onChange: (selected: SlackAuthor[] | undefined) => void) {
     const choices: Array<SlackAuthor | ListedAuthor> = [
       ...selected.filter((author) => !authors.some((item) => item.id === author.id)),
       ...authors,
     ];
     return <AutomationResourcePicker
+      defaultOpen={open}
       empty={empty}
       label="Author"
       resources={choices.map((author) => ({
@@ -62,11 +68,12 @@ export function SlackAuthorPickers({ accountId, channelIds, ignored, included, o
         const next = choices.filter((author) => ids.includes(author.id)).map(({ id, name }) => ({ id, name }));
         onChange(next.length ? next : undefined);
       }}
+      onClose={onClose}
       onRefresh={refresh}
     />;
   }
   return <>
-    {picker("Only messages from", "Everyone", included, onIncludedChange)}
-    {picker("Ignore messages from", "No one", ignored, onIgnoredChange)}
+    {showIncluded ? picker("Only messages from", "Everyone", included, opened === "included", onIncludedChange) : null}
+    {showIgnored ? picker("Ignore messages from", "No one", ignored, opened === "ignored", onIgnoredChange) : null}
   </>;
 }

@@ -30,7 +30,7 @@ import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationUsage } from "../components/automation-usage";
 import { AutomationNotificationEditor } from "../components/automation-notification-editor";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
-import { availableAutomationConfiguration, isScheduleComplete, isTriggerComplete, moveItem } from "../automation-configuration";
+import { availableAutomationConfiguration, isScheduleComplete, isTriggerComplete, moveItem, slackPhrasesError } from "../automation-configuration";
 import { AutomationRepositoryList } from "../components/automation-repository-list";
 import { AutomationShareDialog } from "../components/automation-share-dialog";
 import "./automation-create.css";
@@ -55,6 +55,9 @@ function incompleteReason(configuration: AutomationConfiguration): { field: "tri
   if (!configuration.triggers.length) return { field: "trigger", message: "Add at least one trigger." };
   if (configuration.triggers.some((trigger) => trigger.kind === "schedule" && !isScheduleComplete(trigger))) {
     return { field: "trigger", message: "Enter a valid cron expression for each custom schedule." };
+  }
+  if (configuration.triggers.some((trigger) => trigger.kind === "slack" && slackPhrasesError(trigger.ignoredPhrases) !== null)) {
+    return { field: "trigger", message: "Fix the ignored phrases so each is a valid regular expression." };
   }
   if (!configuration.triggers.every(isTriggerComplete)) {
     return { field: "trigger", message: "Choose a connection and at least one channel or project for each trigger." };

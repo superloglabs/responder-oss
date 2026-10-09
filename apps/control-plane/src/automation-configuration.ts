@@ -1,5 +1,6 @@
 import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
 import { cronProblem, maxCronLength, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+import { maxSlackPhrases, slackPhraseError } from "../../../packages/core/src/automations/slack-phrases";
 
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -92,6 +93,34 @@ export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   if (!trigger.integrationAccountId) return false;
   if (trigger.kind === "axiom") return true;
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;
+}
+
+type SlackTrigger = Extract<AutomationTrigger, { kind: "slack" }>;
+
+// The filters a Slack trigger's menu adds. Each one the trigger sets is shown.
+export const slackTriggerFilters = ["includedAuthors", "ignoredAuthors", "ignoredPhrases"] as const;
+export type SlackTriggerFilter = typeof slackTriggerFilters[number];
+
+export function slackFiltersInUse(trigger: SlackTrigger): SlackTriggerFilter[] {
+  return slackTriggerFilters.filter((filter) => (trigger[filter]?.length ?? 0) > 0);
+}
+
+// The phrases a Slack trigger ignores, one per line. Spaces can be part of an
+// expression, so lines are kept as typed; blank and repeated lines are dropped.
+export function slackPhrasesFromText(text: string): string[] | undefined {
+  const phrases = [...new Set(text.split("\n").filter((line) => line.trim()))];
+  return phrases.length ? phrases : undefined;
+}
+
+// Why a Slack trigger's ignored phrases cannot be saved, or null when they can.
+export function slackPhrasesError(phrases: string[] | undefined): string | null {
+  if (!phrases) return null;
+  if (phrases.length > maxSlackPhrases) return `Use ${maxSlackPhrases} phrases or fewer.`;
+  for (const phrase of phrases) {
+    const error = slackPhraseError(phrase);
+    if (error) return error;
+  }
+  return null;
 }
 
 // The environments a Sentry trigger offers: those Sentry lists, then any the
