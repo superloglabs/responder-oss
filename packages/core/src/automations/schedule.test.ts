@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { automationTriggerSchema } from "./config.js";
-import { dueScheduleSlot, isValidTimeZone, latestScheduleSlot, scheduleLabel, type AutomationSchedule } from "./schedule.js";
+import { cronProblem, dueScheduleSlot, isValidCron, isValidTimeZone, latestScheduleSlot, parseCron, scheduleLabel, type AutomationSchedule } from "./schedule.js";
 
 const schedule = (overrides: Partial<AutomationSchedule>): AutomationSchedule => ({
   frequency: "weekly",
@@ -47,7 +47,70 @@ describe("automation schedule", () => {
     expect(dueScheduleSlot(weekly, new Date("2026-09-01T00:00:00Z"), new Date("2026-09-21T10:00:00Z"))).toBeNull();
   });
 
+  it("finds the latest custom cron slot in the schedule's time zone", () => {
+    const weekdayMornings = schedule({ cron: "30 9 * * 1-5", frequency: "custom", timezone: "America/New_York" });
+    // Friday 09:30 in New York is 13:30 UTC.
+    expect(latestScheduleSlot(weekdayMornings, new Date("2026-09-25T14:00:00Z"))).toEqual(new Date("2026-09-25T13:30:00Z"));
+    // On Sunday the latest slot is Friday's.
+    expect(latestScheduleSlot(weekdayMornings, new Date("2026-09-27T14:00:00Z"))).toEqual(new Date("2026-09-25T13:30:00Z"));
+    const everyFiveMinutes = schedule({ cron: "*/5 * * * *", frequency: "custom" });
+    expect(latestScheduleSlot(everyFiveMinutes, new Date("2026-09-25T10:42:10Z"))).toEqual(new Date("2026-09-25T10:40:00Z"));
+  });
+
+  it("runs a custom cron slot due within the last hour", () => {
+    const savedAt = new Date("2026-09-25T08:00:00Z");
+    const quarterly = schedule({ cron: "15 */6 1 jan,apr,jul,oct *", frequency: "custom" });
+    expect(dueScheduleSlot(quarterly, savedAt, new Date("2026-10-01T06:20:00Z"))).toEqual(new Date("2026-10-01T06:15:00Z"));
+    expect(dueScheduleSlot(quarterly, savedAt, new Date("2026-10-01T07:15:00Z"))).toBeNull();
+    expect(dueScheduleSlot(quarterly, savedAt, new Date("2026-10-02T06:20:00Z"))).toBeNull();
+    expect(dueScheduleSlot(schedule({ cron: "not cron", frequency: "custom" }), savedAt, new Date("2026-10-01T06:20:00Z"))).toBeNull();
+  });
+
+  it("parses cron expressions", () => {
+    expect(isValidCron("0 9 * * 1-5")).toBe(true);
+    expect(isValidCron("*/15 0-6,22-23 1,15 * sun")).toBe(true);
+    expect(isValidCron("0 0 29 2 *")).toBe(true);
+    expect(isValidCron("0 9 * * 7")).toBe(true);
+    expect(parseCron("0 9 * * 7")?.weekdays).toEqual(new Set([0]));
+    expect(parseCron("5/20 * * * *")?.minutes).toEqual(new Set([5, 25, 45]));
+    expect(isValidCron("0 9 * *")).toBe(false);
+    expect(isValidCron("0 9 * * * *")).toBe(false);
+    expect(isValidCron("60 * * * *")).toBe(false);
+    expect(isValidCron("0 24 * * *")).toBe(false);
+    expect(isValidCron("0 9 0 * *")).toBe(false);
+    expect(isValidCron("0 9 * 13 *")).toBe(false);
+    expect(isValidCron("0 9 * * 8")).toBe(false);
+    expect(isValidCron("5-1 * * * *")).toBe(false);
+    expect(isValidCron("*/0 * * * *")).toBe(false);
+    expect(isValidCron("@daily")).toBe(false);
+    expect(isValidCron(`${Array.from({ length: 60 }, (_, minute) => minute).join(",")} * * * *`)).toBe(true);
+    expect(isValidCron(`0 9 * * ${"1,".repeat(130)}1`)).toBe(false);
+    // February 30 never occurs.
+    expect(isValidCron("0 0 30 2 *")).toBe(false);
+  });
+
+  it("reports why a cron expression is invalid", () => {
+    expect(cronProblem("0 9 * * 1-5")).toBeNull();
+    expect(cronProblem(`0 9 * * ${"1,".repeat(130)}1`)).toBe("too_long");
+    expect(cronProblem("0 9 * *")).toBe("field_count");
+    expect(cronProblem("60 9 * * *")).toBe("value");
+    expect(cronProblem("0 9 * * fri-mon")).toBe("value");
+    expect(cronProblem("0 0 30 2 *")).toBe("never_runs");
+  });
+
+  it("runs on either day field when both are restricted", () => {
+    const firstOrMonday = schedule({ cron: "0 9 1 * mon", frequency: "custom" });
+    // Thursday, October 1.
+    expect(latestScheduleSlot(firstOrMonday, new Date("2026-10-01T10:00:00Z"))).toEqual(new Date("2026-10-01T09:00:00Z"));
+    // Monday, October 5.
+    expect(latestScheduleSlot(firstOrMonday, new Date("2026-10-05T10:00:00Z"))).toEqual(new Date("2026-10-05T09:00:00Z"));
+    // A step on day of month leaves it unrestricted, so only Mondays run.
+    const mondays = schedule({ cron: "0 9 */1 * mon", frequency: "custom" });
+    expect(latestScheduleSlot(mondays, new Date("2026-10-01T10:00:00Z"))).toEqual(new Date("2026-09-28T09:00:00Z"));
+  });
+
   it("describes schedules", () => {
+    expect(scheduleLabel(schedule({ cron: "0 9 * * 1-5", frequency: "custom" }))).toBe("Cron 0 9 * * 1-5");
     expect(scheduleLabel(schedule({ frequency: "hourly" }))).toBe("Every hour");
     expect(scheduleLabel(schedule({ frequency: "daily", hour: 7 }))).toBe("Daily at 07:00");
     expect(scheduleLabel(schedule({}))).toBe("Mondays at 09:00");
@@ -59,5 +122,8 @@ describe("automation schedule", () => {
     expect(automationTriggerSchema.safeParse({ kind: "schedule", ...schedule({}) }).success).toBe(true);
     expect(automationTriggerSchema.safeParse({ kind: "schedule", ...schedule({ timezone: "Mars/Olympus" }) }).success).toBe(false);
     expect(automationTriggerSchema.safeParse({ kind: "schedule", ...schedule({ hour: 24 }) }).success).toBe(false);
+    expect(automationTriggerSchema.safeParse({ kind: "schedule", ...schedule({ cron: "0 9 * * 1-5", frequency: "custom" }) }).success).toBe(true);
+    expect(automationTriggerSchema.safeParse({ kind: "schedule", ...schedule({ cron: "0 9 * *", frequency: "custom" }) }).success).toBe(false);
+    expect(automationTriggerSchema.safeParse({ kind: "schedule", ...schedule({ frequency: "custom" }) }).success).toBe(false);
   });
 });

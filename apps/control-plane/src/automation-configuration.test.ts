@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, sentryEnvironmentChoices } from "./automation-configuration";
+import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, scheduleCronError, sentryEnvironmentChoices, withScheduleFrequency } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -60,6 +60,8 @@ describe("availableAutomationConfiguration", () => {
 describe("isTriggerComplete", () => {
   it("requires a connection and a channel or project for connected triggers", () => {
     expect(isTriggerComplete({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(true);
+    expect(isTriggerComplete({ cron: "0 9 * * 1-5", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(true);
+    expect(isTriggerComplete({ cron: "0 9 * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe(false);
     expect(isTriggerComplete({ channelIds: ["C1"], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(true);
     expect(isTriggerComplete({ channelIds: [], eventMode: "mentions", integrationAccountId: "slack", kind: "slack" })).toBe(false);
     expect(isTriggerComplete({ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: ["web"] })).toBe(false);
@@ -87,5 +89,37 @@ describe("moveItem", () => {
     expect(moveItem(["a", "b", "c"], "a", 1)).toEqual(["b", "a", "c"]);
     expect(moveItem(["a", "b"], "a", 9)).toEqual(["b", "a"]);
     expect(moveItem(["a", "b"], "z", 0)).toEqual(["a", "b"]);
+  });
+});
+
+describe("scheduleCron", () => {
+  it("writes the current timing as a cron expression", () => {
+    expect(scheduleCron({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("0 * * * *");
+    expect(scheduleCron({ frequency: "daily", hour: 7, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("0 7 * * *");
+    expect(scheduleCron({ frequency: "weekly", hour: 18, kind: "schedule", timezone: "UTC", weekday: 5 })).toBe("0 18 * * 5");
+    expect(scheduleCron({ cron: "*/30 * * * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("*/30 * * * *");
+  });
+});
+
+describe("withScheduleFrequency", () => {
+  it("converts the current preset timing each time a schedule becomes custom", () => {
+    const custom = { cron: "0 */6 * * *", frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 } as const;
+    const daily = withScheduleFrequency(custom, "daily");
+    expect(daily).toEqual({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 });
+    expect(withScheduleFrequency({ ...daily, hour: 14 }, "custom")).toMatchObject({ cron: "0 14 * * *", frequency: "custom" });
+  });
+});
+
+describe("scheduleCronError", () => {
+  const custom = (cron: string) => ({ cron, frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 } as const);
+
+  it("explains why a custom expression cannot be saved", () => {
+    const everyMinute = Array.from({ length: 60 }, (_, minute) => minute).join(",");
+    expect(scheduleCronError(custom(`${everyMinute} * * * *`))).toBeNull();
+    expect(scheduleCronError(custom(`0 9 * * ${"1,".repeat(130)}1`))).toBe("Use 255 characters or fewer.");
+    expect(scheduleCronError(custom("0 9 * *"))).toBe("Use five fields: minute, hour, day of month, month, day of week.");
+    expect(scheduleCronError(custom("0 24 * * *"))).toBe("Use minute 0-59, hour 0-23, day 1-31, month 1-12, and day of week 0-7.");
+    expect(scheduleCronError(custom("0 0 30 2 *"))).toBe("This date never occurs.");
+    expect(scheduleCronError({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBeNull();
   });
 });

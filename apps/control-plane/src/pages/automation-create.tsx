@@ -29,7 +29,7 @@ import { AutomationRepositoryPicker } from "../components/automation-repository-
 import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationNotificationEditor } from "../components/automation-notification-editor";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
-import { availableAutomationConfiguration, isTriggerComplete, moveItem } from "../automation-configuration";
+import { availableAutomationConfiguration, isScheduleComplete, isTriggerComplete, moveItem } from "../automation-configuration";
 import { AutomationRepositoryList } from "../components/automation-repository-list";
 import { AutomationShareDialog } from "../components/automation-share-dialog";
 import "./automation-create.css";
@@ -52,6 +52,9 @@ const defaultConfiguration: AutomationConfiguration = {
 // Returns why the configuration cannot be saved yet, or null when it can.
 function incompleteReason(configuration: AutomationConfiguration): { field: "trigger" | "model"; message: string } | null {
   if (!configuration.triggers.length) return { field: "trigger", message: "Add at least one trigger." };
+  if (configuration.triggers.some((trigger) => trigger.kind === "schedule" && !isScheduleComplete(trigger))) {
+    return { field: "trigger", message: "Enter a valid cron expression for each custom schedule." };
+  }
   if (!configuration.triggers.every(isTriggerComplete)) {
     return { field: "trigger", message: "Choose a connection and at least one channel or project for each trigger." };
   }

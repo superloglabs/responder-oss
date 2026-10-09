@@ -1,13 +1,52 @@
 import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
-import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+import { cronProblem, maxCronLength, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
-// New schedules run at 09:00, on Mondays when weekly, in the member's time zone.
-export function defaultScheduleTrigger(frequency: AutomationScheduleFrequency, timezone = browserTimeZone()): Extract<AutomationTrigger, { kind: "schedule" }> {
-  return { frequency, hour: 9, kind: "schedule", timezone, weekday: 1 };
+type ScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
+
+// New schedules run at 09:00, on Mondays when weekly and on weekdays when
+// custom, in the member's time zone.
+export function defaultScheduleTrigger(frequency: AutomationScheduleFrequency, timezone = browserTimeZone()): ScheduleTrigger {
+  const trigger: ScheduleTrigger = { frequency, hour: 9, kind: "schedule", timezone, weekday: 1 };
+  return frequency === "custom" ? { ...trigger, cron: "0 9 * * 1-5" } : trigger;
+}
+
+// The cron expression for a schedule's current timing, so switching to a
+// custom schedule starts from what the member already chose.
+export function scheduleCron(trigger: ScheduleTrigger): string {
+  if (trigger.frequency === "custom") return trigger.cron ?? "";
+  if (trigger.frequency === "hourly") return "0 * * * *";
+  return `0 ${trigger.hour} * * ${trigger.frequency === "weekly" ? trigger.weekday : "*"}`;
+}
+
+// Leaving a custom schedule drops its expression, so choosing custom again
+// converts the preset timing the member set since.
+export function withScheduleFrequency(trigger: ScheduleTrigger, frequency: AutomationScheduleFrequency): ScheduleTrigger {
+  if (frequency === "custom") return { ...trigger, cron: trigger.frequency === "custom" ? trigger.cron : scheduleCron(trigger), frequency };
+  const preset: ScheduleTrigger = { ...trigger, frequency };
+  delete preset.cron;
+  return preset;
+}
+
+const cronProblemMessages = {
+  field_count: "Use five fields: minute, hour, day of month, month, day of week.",
+  never_runs: "This date never occurs.",
+  too_long: `Use ${maxCronLength} characters or fewer.`,
+  value: "Use minute 0-59, hour 0-23, day 1-31, month 1-12, and day of week 0-7.",
+} as const;
+
+// Why a custom schedule's expression cannot be saved, or null when it can.
+export function scheduleCronError(trigger: ScheduleTrigger): string | null {
+  if (trigger.frequency !== "custom") return null;
+  const problem = cronProblem(trigger.cron ?? "");
+  return problem ? cronProblemMessages[problem] : null;
+}
+
+export function isScheduleComplete(trigger: ScheduleTrigger): boolean {
+  return scheduleCronError(trigger) === null;
 }
 
 // Saved automation settings can reference connections, trigger resources,
@@ -49,7 +88,7 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
 
 // Returns whether a trigger has everything the server needs to accept it.
 export function isTriggerComplete(trigger: AutomationTrigger): boolean {
-  if (trigger.kind === "schedule") return true;
+  if (trigger.kind === "schedule") return isScheduleComplete(trigger);
   if (!trigger.integrationAccountId) return false;
   if (trigger.kind === "axiom") return true;
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;

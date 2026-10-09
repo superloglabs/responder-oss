@@ -2,7 +2,7 @@ import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
 import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
-import { defaultScheduleTrigger } from "../automation-configuration";
+import { defaultScheduleTrigger, scheduleCronError, withScheduleFrequency } from "../automation-configuration";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
@@ -23,22 +23,31 @@ const hours = Array.from({ length: 24 }, (_, hour) => hour);
 const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
 
 function ScheduleFields({ trigger, onChange }: { trigger: ScheduleTrigger; onChange: (trigger: ScheduleTrigger) => void }) {
+  const cronInputId = useId();
+  const cronHintId = useId();
+  const cronError = scheduleCronError(trigger);
   return <>
     <label className="automationTrigger__scheduleField">
       <span className="automationTrigger__fieldLabel">Frequency</span>
-      <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, frequency: event.target.value as ScheduleTrigger["frequency"] })} value={trigger.frequency}>
+      <select className="automationTrigger__select" onChange={(event) => onChange(withScheduleFrequency(trigger, event.target.value as ScheduleTrigger["frequency"]))} value={trigger.frequency}>
         <option value="hourly">Every hour</option>
         <option value="daily">Every day</option>
         <option value="weekly">Every week</option>
+        <option value="custom">Custom cron</option>
       </select>
     </label>
+    {trigger.frequency === "custom" ? <div className="automationTrigger__scheduleField automationTrigger__scheduleField--cron">
+      <label className="automationTrigger__fieldLabel" htmlFor={cronInputId}>Cron expression</label>
+      <input aria-describedby={cronHintId} aria-invalid={cronError !== null} autoCapitalize="off" autoComplete="off" className="automationTrigger__input" id={cronInputId} onChange={(event) => onChange({ ...trigger, cron: event.target.value })} placeholder="0 9 * * 1-5" spellCheck={false} value={trigger.cron ?? ""} />
+      <span aria-live="polite" className={cronError ? "automationTrigger__hint automationTrigger__hint--error" : "automationTrigger__hint"} id={cronHintId}>{cronError ?? `Minute, hour, day of month, month, day of week, in ${trigger.timezone}.`}</span>
+    </div> : null}
     {trigger.frequency === "weekly" ? <label className="automationTrigger__scheduleField">
       <span className="automationTrigger__fieldLabel">Day</span>
       <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, weekday: Number(event.target.value) })} value={trigger.weekday}>
         {weekdayOrder.map((weekday) => <option key={weekday} value={weekday}>{scheduleWeekdayName(weekday)}</option>)}
       </select>
     </label> : null}
-    {trigger.frequency !== "hourly" ? <label className="automationTrigger__scheduleField">
+    {trigger.frequency === "daily" || trigger.frequency === "weekly" ? <label className="automationTrigger__scheduleField">
       <span className="automationTrigger__fieldLabel">Time</span>
       <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, hour: Number(event.target.value) })} value={trigger.hour}>
         {hours.map((hour) => <option key={hour} value={hour}>{`${String(hour).padStart(2, "0")}:00`}</option>)}
@@ -163,7 +172,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
     onOpenChange(false);
     focusAdded.current = true;
     if (kind === "schedule") {
-      onChange([...triggers, defaultScheduleTrigger(event === "hourly" || event === "daily" ? event : "weekly")]);
+      onChange([...triggers, defaultScheduleTrigger(event === "hourly" || event === "daily" || event === "custom" ? event : "weekly")]);
       return;
     }
     const account = options?.accounts.find((item) => item.provider === kind);
