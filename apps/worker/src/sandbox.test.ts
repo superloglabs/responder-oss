@@ -14,6 +14,7 @@ import {
   prepareDaytonaSandbox,
   replaceDaytonaSandboxSecrets,
   resumeDaytonaSandbox,
+  resumedSameDaytonaSandbox,
   sandboxDeletedAfterFailedCreation,
   sandboxesLeftAfterFailedCreation,
 } from "./sandbox.js";
@@ -802,6 +803,15 @@ describe("Daytona sandbox resume", () => {
       apiKey: "daytona-key",
       sandboxId: "sandbox-1",
     });
+  });
+});
+
+describe("Daytona resumed sandbox identity", () => {
+  it("tells a resumed sandbox from one Daytona recreated", () => {
+    const session = { state: { sandboxId: "sandbox-2" } } as unknown as Parameters<typeof resumedSameDaytonaSandbox>[0];
+
+    expect(resumedSameDaytonaSandbox(session, { sandboxId: "sandbox-2" })).toBe(true);
+    expect(resumedSameDaytonaSandbox(session, { sandboxId: "sandbox-1" })).toBe(false);
   });
 });
 

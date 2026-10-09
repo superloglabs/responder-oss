@@ -92,6 +92,7 @@ import {
   prepareDaytonaSandbox,
   pauseDaytonaSandbox,
   resumeDaytonaSandbox,
+  resumedSameDaytonaSandbox,
 } from "./sandbox.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 import { agentUsageIsBillable, recordAgentRunUsage } from "./agent-usage.js";
@@ -1003,8 +1004,11 @@ export async function runInvestigationAgent(
       workloadId: job.investigationId,
     });
     const sessionMarker = "/home/daytona/workspace/.responder/thread-session-ready";
+    // A sandbox Daytona recreated has the marker but not the repositories.
     const sessionReady = Boolean(
-      persistedState && await session.pathExists(sessionMarker),
+      persistedState &&
+        resumedSameDaytonaSandbox(session, persistedState) &&
+        await session.pathExists(sessionMarker),
     );
     if (!sessionReady) {
       await configureDaytonaSandboxLifecycle(

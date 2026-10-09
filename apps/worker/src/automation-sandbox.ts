@@ -20,6 +20,7 @@ import {
   prepareDaytonaSandbox,
   replaceDaytonaSandboxSecrets,
   resumeDaytonaSandbox,
+  resumedSameDaytonaSandbox,
   sandboxesLeftAfterFailedCreation,
   type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
@@ -269,8 +270,10 @@ export async function runInFreshAutomationSandbox<T>(
           resumeDaytonaSandbox(client, input.resumeState, input.config),
           input.signal,
         );
-        // Daytona recreates a sandbox it no longer has; that one needs setup.
-        resumed = await session.pathExists(automationSandboxReadyMarker);
+        // A sandbox Daytona recreated has the marker but not the
+        // repositories, so it is set up again.
+        resumed = resumedSameDaytonaSandbox(session, input.resumeState) &&
+          await session.pathExists(automationSandboxReadyMarker);
       } catch (error) {
         input.signal?.throwIfAborted();
         console.error(JSON.stringify({

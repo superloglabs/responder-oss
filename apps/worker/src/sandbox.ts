@@ -508,6 +508,16 @@ export async function resumeDaytonaSandbox(
   return client.resume({ ...state, apiKey: config.daytonaApiKey });
 }
 
+// Daytona's client replaces a sandbox it no longer has with a new one under
+// a new ID, restoring only the files written through the session's manifest.
+// Those include the set-up markers, so only the ID tells the two apart.
+export function resumedSameDaytonaSandbox(
+  session: DaytonaSandboxSession,
+  persistedState: Record<string, unknown>,
+): boolean {
+  return session.state.sandboxId === persistedState.sandboxId;
+}
+
 // A thread sandbox that fails to stop keeps running until Daytona's
 // auto-stop, and the next turn resumes or replaces it. The failure is
 // reported without failing the turn that already has its answer.
