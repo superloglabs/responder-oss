@@ -265,6 +265,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: 3.1111.0
         version: 3.1111.0
+      '@clickhouse/client':
+        specifier: 1.24.0
+        version: 1.24.0
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(supports-color@8.1.1)(zod@4.4.3)
@@ -638,6 +641,10 @@ packages:
   '@clack/prompts@1.8.1':
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
+
+  '@clickhouse/client@1.24.0':
+    resolution: {integrity: sha512-1s/c/Fp9NFOWDJz+Zv363nVKH9ScaraZK6e+f/Ee3kwlt7egThT+KJSdYhd3OVCw+z0MzMktSjK+8Am1I5f/Hg==}
+    engines: {node: '>=20'}
 
   '@daytona/analytics-api-client@0.203.0':
     resolution: {integrity: sha512-sUELDOmSJW73kG8xsEOUVAE+SGAhPIaLThIBJc6Zbp+AnEMObeUNwXFh9r9ATCdYULoDkTVVA8mMqzP46io9LQ==}
@@ -6058,6 +6065,8 @@ snapshots:
       fast-string-width: 3.0.2
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
+
+  '@clickhouse/client@1.24.0': {}
 
   '@daytona/analytics-api-client@0.203.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)':
     dependencies:

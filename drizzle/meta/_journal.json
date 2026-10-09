@@ -519,6 +519,13 @@
       "when": 1791475871029,
       "tag": "0073_slack_thread_context",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1791557598386,
+      "tag": "0074_telemetry_projects",
+      "breakpoints": true
     }
   ]
 }
