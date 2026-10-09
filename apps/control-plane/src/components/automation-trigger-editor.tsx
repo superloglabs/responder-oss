@@ -1,8 +1,8 @@
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
-import { maxCronLength, scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
-import { defaultScheduleTrigger, isScheduleComplete, withScheduleFrequency } from "../automation-configuration";
+import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
+import { defaultScheduleTrigger, scheduleCronError, withScheduleFrequency } from "../automation-configuration";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
@@ -25,7 +25,7 @@ const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
 function ScheduleFields({ trigger, onChange }: { trigger: ScheduleTrigger; onChange: (trigger: ScheduleTrigger) => void }) {
   const cronInputId = useId();
   const cronHintId = useId();
-  const cronInvalid = !isScheduleComplete(trigger);
+  const cronError = scheduleCronError(trigger);
   return <>
     <label className="automationTrigger__scheduleField">
       <span className="automationTrigger__fieldLabel">Frequency</span>
@@ -38,8 +38,8 @@ function ScheduleFields({ trigger, onChange }: { trigger: ScheduleTrigger; onCha
     </label>
     {trigger.frequency === "custom" ? <div className="automationTrigger__scheduleField automationTrigger__scheduleField--cron">
       <label className="automationTrigger__fieldLabel" htmlFor={cronInputId}>Cron expression</label>
-      <input aria-describedby={cronHintId} aria-invalid={cronInvalid} autoCapitalize="off" autoComplete="off" className="automationTrigger__input" id={cronInputId} maxLength={maxCronLength} onChange={(event) => onChange({ ...trigger, cron: event.target.value })} placeholder="0 9 * * 1-5" spellCheck={false} value={trigger.cron ?? ""} />
-      <span aria-live="polite" className={cronInvalid ? "automationTrigger__hint automationTrigger__hint--error" : "automationTrigger__hint"} id={cronHintId}>{cronInvalid ? "Use five fields: minute, hour, day of month, month, day of week." : `Minute, hour, day of month, month, day of week, in ${trigger.timezone}.`}</span>
+      <input aria-describedby={cronHintId} aria-invalid={cronError !== null} autoCapitalize="off" autoComplete="off" className="automationTrigger__input" id={cronInputId} onChange={(event) => onChange({ ...trigger, cron: event.target.value })} placeholder="0 9 * * 1-5" spellCheck={false} value={trigger.cron ?? ""} />
+      <span aria-live="polite" className={cronError ? "automationTrigger__hint automationTrigger__hint--error" : "automationTrigger__hint"} id={cronHintId}>{cronError ?? `Minute, hour, day of month, month, day of week, in ${trigger.timezone}.`}</span>
     </div> : null}
     {trigger.frequency === "weekly" ? <label className="automationTrigger__scheduleField">
       <span className="automationTrigger__fieldLabel">Day</span>

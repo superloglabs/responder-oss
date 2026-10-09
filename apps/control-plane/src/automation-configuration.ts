@@ -1,5 +1,5 @@
 import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
-import { isValidCron, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
+import { isValidCron, maxCronLength, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -31,8 +31,16 @@ export function withScheduleFrequency(trigger: ScheduleTrigger, frequency: Autom
   return preset;
 }
 
+// Why a custom schedule's expression cannot be saved, or null when it can.
+export function scheduleCronError(trigger: ScheduleTrigger): string | null {
+  if (trigger.frequency !== "custom") return null;
+  const cron = trigger.cron?.trim() ?? "";
+  if (cron.length > maxCronLength) return `Use ${maxCronLength} characters or fewer.`;
+  return isValidCron(cron) ? null : "Use five fields: minute, hour, day of month, month, day of week.";
+}
+
 export function isScheduleComplete(trigger: ScheduleTrigger): boolean {
-  return trigger.frequency !== "custom" || isValidCron(trigger.cron ?? "");
+  return scheduleCronError(trigger) === null;
 }
 
 // Saved automation settings can reference connections, trigger resources,

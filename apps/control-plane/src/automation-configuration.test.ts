@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, sentryEnvironmentChoices, withScheduleFrequency } from "./automation-configuration";
+import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, scheduleCronError, sentryEnvironmentChoices, withScheduleFrequency } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -107,5 +107,17 @@ describe("withScheduleFrequency", () => {
     const daily = withScheduleFrequency(custom, "daily");
     expect(daily).toEqual({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 });
     expect(withScheduleFrequency({ ...daily, hour: 14 }, "custom")).toMatchObject({ cron: "0 14 * * *", frequency: "custom" });
+  });
+});
+
+describe("scheduleCronError", () => {
+  const custom = (cron: string) => ({ cron, frequency: "custom", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 } as const);
+
+  it("explains why a custom expression cannot be saved", () => {
+    const everyMinute = Array.from({ length: 60 }, (_, minute) => minute).join(",");
+    expect(scheduleCronError(custom(`${everyMinute} * * * *`))).toBeNull();
+    expect(scheduleCronError(custom(`0 9 * * ${"1,".repeat(130)}1`))).toBe("Use 255 characters or fewer.");
+    expect(scheduleCronError(custom("0 9 * *"))).toBe("Use five fields: minute, hour, day of month, month, day of week.");
+    expect(scheduleCronError({ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBeNull();
   });
 });

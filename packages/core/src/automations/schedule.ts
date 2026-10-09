@@ -66,7 +66,7 @@ interface CronFields {
   weekdaysRestricted: boolean;
 }
 
-export const maxCronLength = 120;
+export const maxCronLength = 255;
 const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const weekdayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 // February counts 29 days so a schedule for February 29 is accepted.
