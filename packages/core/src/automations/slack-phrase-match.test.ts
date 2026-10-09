@@ -9,11 +9,12 @@ describe("matchesSlackPhrase", () => {
     expect(matchesSlackPhrase([], "anything")).toBe(false);
   });
 
-  it("stops a phrase that backtracks past the timeout and checks the rest", () => {
+  it("stops matching that backtracks past one budget for all the phrases", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const started = Date.now();
-    expect(matchesSlackPhrase(["(a+)+$", "^a"], `${"a".repeat(40)}b`)).toBe(true);
-    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(matchesSlackPhrase(["(a+)+$", "(a|a)+$", "(a*)*$", "^a"], `${"a".repeat(40)}b`)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("slack_phrase_match_failed"));
     warn.mockRestore();
   });

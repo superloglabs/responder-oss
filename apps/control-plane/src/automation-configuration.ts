@@ -105,10 +105,10 @@ export function slackFiltersInUse(trigger: SlackTrigger): SlackTriggerFilter[] {
   return slackTriggerFilters.filter((filter) => (trigger[filter]?.length ?? 0) > 0);
 }
 
-// The phrases a Slack trigger ignores, one per line. Blank and repeated lines
-// are dropped.
+// The phrases a Slack trigger ignores, one per line. Spaces can be part of an
+// expression, so lines are kept as typed; blank and repeated lines are dropped.
 export function slackPhrasesFromText(text: string): string[] | undefined {
-  const phrases = [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))];
+  const phrases = [...new Set(text.split("\n").filter((line) => line.trim()))];
   return phrases.length ? phrases : undefined;
 }
 

@@ -339,7 +339,7 @@ export function isAxiomMonitorResolution(input: {
   senderName?: string;
 }): boolean {
   if (!input.isAppMessage) return false;
-  const fromAxiom = /\baxiom\b/iu.test(input.senderName ?? "") ||
+  const fromAxiom = /^axiom$/iu.test(input.senderName?.trim() ?? "") ||
     /https:\/\/app\.axiom\.co\/[^>\s]*\/monitors\//iu.test(input.body);
   return fromAxiom && /^\**resolved:/iu.test(slackMessageTitle(input.body));
 }

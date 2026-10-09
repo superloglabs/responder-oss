@@ -134,7 +134,8 @@ describe("Slack trigger filters", () => {
   });
 
   it("reads one phrase per line and reports the first invalid one", () => {
-    expect(slackPhrasesFromText(" ^Resolved: \n\n^Resolved:\ndeploy\n")).toEqual(["^Resolved:", "deploy"]);
+    // Spaces can be part of an expression, so lines are kept as typed.
+    expect(slackPhrasesFromText("^Resolved: \n\n^Resolved: \n  \ndeploy\n")).toEqual(["^Resolved: ", "deploy"]);
     expect(slackPhrasesFromText("\n  \n")).toBeUndefined();
     expect(slackPhrasesError(undefined)).toBeNull();
     expect(slackPhrasesError(["ok", "(unclosed"])).toBe('"(unclosed" is not a valid regular expression.');

@@ -532,6 +532,7 @@ describe("control-plane API", () => {
     expect(isAxiomMonitorResolution({ body: triggered, isAppMessage: true, senderName: "Axiom" })).toBe(false);
     expect(isAxiomMonitorResolution({ body: resolved, isAppMessage: false })).toBe(false);
     expect(isAxiomMonitorResolution({ body: "Resolved: checkout latency", isAppMessage: true, senderName: "Grafana" })).toBe(false);
+    expect(isAxiomMonitorResolution({ body: "Resolved: flaky test", isAppMessage: true, senderName: "Nova Axiom" })).toBe(false);
   });
 
   it("accepts Sentry thread broadcasts as alert messages", () => {

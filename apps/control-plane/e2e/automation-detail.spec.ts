@@ -195,6 +195,39 @@ test("saves each change to a saved automation immediately", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Remove superloglabs/responder", exact: true })).toBeVisible();
 });
 
+test("restores a Slack trigger's ignored phrases when saving them fails", async ({ page }) => {
+  const slackAccountId = "88888888-8888-4888-8888-888888888888";
+  const saved = { ...automation, configuration: { ...automation.configuration, triggers: [{ channelIds: ["C123"], eventMode: "every_message", ignoredPhrases: ["^Resolved:"], integrationAccountId: slackAccountId, kind: "slack" }] } };
+  await page.route("**/api/automations/options", (route) => route.fulfill({ json: {
+    accounts: [
+      { id: slackAccountId, provider: "slack", displayName: "Engineering" },
+      { id: datadogAccountId, provider: "datadog", displayName: "Datadog" },
+      { id: "github", provider: "github", displayName: "superloglabs" },
+    ],
+    resources: [{ id: "channel", integrationAccountId: slackAccountId, kind: "slack_channel", externalId: "C123", displayName: "#alerts" }],
+    repositories: [{ id: repositoryIds[0], fullName: "superloglabs/responder" }, { id: repositoryIds[1], fullName: "superloglabs/responder-oss" }],
+    credentials: [], secrets: [], skills: [],
+  } }));
+  const saves: Array<{ configuration: { triggers: Array<{ ignoredPhrases?: string[] }> } }> = [];
+  await page.route(`**/api/automations/${automationId}`, async (route) => {
+    if (route.request().method() !== "PUT") return route.fulfill({ json: { automation: saved } });
+    saves.push(route.request().postDataJSON());
+    await route.fulfill({ status: 400, json: { error: "Please try again" } });
+  });
+  await page.goto(`/automations/${automationId}/settings`);
+  const phrases = page.getByRole("textbox", { name: "Ignore messages matching", exact: true });
+  await expect(phrases).toHaveValue("^Resolved:");
+
+  // Typing saves nothing until the field loses focus.
+  await phrases.fill("^Resolved:\ndeploy");
+  expect(saves).toHaveLength(0);
+  await phrases.blur();
+  await expect.poll(() => saves.length).toBe(1);
+  expect(saves[0].configuration.triggers[0].ignoredPhrases).toEqual(["^Resolved:", "deploy"]);
+  await expect(page.getByRole("alert")).toHaveText("Please try again");
+  await expect(phrases).toHaveValue("^Resolved:");
+});
+
 test("reorders repositories and marks the first as the main directory", async ({ page }, testInfo) => {
   const saves: Array<{ configuration: { repositoryIds: string[] } }> = [];
   await page.route(`**/api/automations/${automationId}`, async (route) => {
