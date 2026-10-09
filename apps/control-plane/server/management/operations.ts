@@ -330,7 +330,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Lists connected integrations, the repositories they give access to, and their resources, such as Slack channels and Sentry projects. Automation and tag mode settings refer to these IDs.",
+      "Lists connected integrations, the repositories they give access to, and their resources, such as Slack channels and Sentry projects.",
     effect: "read",
     input: empty,
     method: "GET",
@@ -450,7 +450,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Creates an automation. Repository, integration, and resource IDs come from the workspace's integrations, and secret IDs from its secrets. Model settings you leave out use the defaults.",
+      "Creates an automation. Model settings you leave out use the defaults.",
     effect: "write",
     input: z.object({
       configuration: automationConfigurationInputSchema,

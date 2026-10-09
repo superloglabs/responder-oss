@@ -43,7 +43,7 @@ export const integrationConnectionOperations = [
     name: "start_integration_connection",
     openWorld: true,
     summary: "Get an integration consent link",
-    description: "Starts connecting one integration to the workspace. Returns a provider consent link, or a secure setup link in Superlog for integrations that need credentials or extra setup. The link is personal to the signed-in person and workspace and expires after ten minutes. The integration is connected only after the person approves access in a browser signed in to the same Superlog account and workspace.",
+    description: "Starts connecting one integration to the workspace. For OAuth providers, returns a consent link that is personal to the signed-in person and workspace and expires after ten minutes; the integration is connected after the person approves access in a browser signed in to the same Superlog account and workspace. For integrations that need credentials or extra setup, returns a link to secure setup in Superlog.",
     method: "POST",
     path: "/integrations/connect",
     tag: "Integrations",
