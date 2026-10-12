@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDialogFocusTrap } from "../use-dialog-focus-trap";
 
 const devrevConnectUrl = "/api/integrations/devrev/connect";
 
@@ -20,6 +21,8 @@ export function DevRevConnectionDialog({
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocusTrap(dialogRef, open);
   const cancel = useCallback(() => {
     setToken("");
     setError(null);
@@ -74,6 +77,7 @@ export function DevRevConnectionDialog({
       }}
     >
       <section
+        ref={dialogRef}
         aria-labelledby="devrev-connection-title"
         aria-modal="true"
         className="siteDialog siteDialog--credentials"
@@ -98,7 +102,6 @@ export function DevRevConnectionDialog({
             <span>Personal access token</span>
             <input
               autoComplete="off"
-              autoFocus
               disabled={isSubmitting}
               maxLength={4_096}
               onChange={(event) => setToken(event.target.value)}

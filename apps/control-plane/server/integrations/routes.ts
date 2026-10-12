@@ -1753,17 +1753,28 @@ export const integrationRoutes = new Hono()
       return context.json({ error: "Unable to register the DevRev webhook" }, 502);
     }
 
-    await upsertIntegrationAccount({
-      ...account,
-      credentialKeyVersion: 1,
-      encryptedCredentials: encryptCredentials({
-        authType: "personal_access_token",
-        token,
-        webhookId: webhook.id,
-        webhookSecret: webhook.secret,
-      }),
-      status: "connected",
-    });
+    try {
+      await upsertIntegrationAccount({
+        ...account,
+        credentialKeyVersion: 1,
+        encryptedCredentials: encryptCredentials({
+          authType: "personal_access_token",
+          token,
+          webhookId: webhook.id,
+          webhookSecret: webhook.secret,
+        }),
+        status: "connected",
+      });
+    } catch (error) {
+      // Without its secret stored, the new webhook's deliveries would all be
+      // refused.
+      await deleteDevRevWebhook({ id: webhook.id, token }).catch(() => undefined);
+      if (!existing) {
+        await setIntegrationAccountStatus(accountId, "error").catch(() => undefined);
+      }
+      logCallbackError("DevRev", error, { accountId, organizationId: tenant.organizationId, stage: "save_connection" });
+      return context.json({ error: "Unable to save the DevRev connection" }, 502);
+    }
     // The replaced webhook would otherwise keep sending every ticket.
     if (previous?.webhookId && previous.webhookId !== webhook.id) {
       await deleteDevRevWebhook({ id: previous.webhookId, token: previous.token })

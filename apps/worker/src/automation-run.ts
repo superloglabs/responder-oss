@@ -453,10 +453,13 @@ function slackTriggerInstructions(triggerInput: Record<string, unknown>): string
   ];
 }
 
-// A DevRev run answers on its ticket, so the agent writes its final reply
-// for the team reading it there.
-function devrevTriggerInstructions(triggerInput: Record<string, unknown>): string[] {
-  if (!devrevTicketOf(triggerInput)) return [];
+// A DevRev run answers on its ticket, so the agent writes its first turn's
+// final reply for the team reading it there. Follow-ups stay on the run page.
+function devrevTriggerInstructions(
+  triggerInput: Record<string, unknown>,
+  firstTurn: boolean,
+): string[] {
+  if (!firstTurn || !devrevTicketOf(triggerInput)) return [];
   return [
     "A new DevRev ticket started this run. The trigger payload's body is the ticket as DevRev's API returns it. When you finish, Responder posts your final reply as an internal comment on the ticket: your team sees it and the customer does not. Write the final reply as that comment.",
   ];
@@ -467,6 +470,8 @@ function automationPrompt(
   repositories: Array<{ path: string; repository: string }>,
   conversation: AutomationConversation,
   resumed: boolean,
+  // Whether this is the run's first turn, the one that reports.
+  firstTurn: boolean,
   // Where post_notification posts: the automation's channels, or the thread
   // of the message whose button this turn answers.
   notificationChannels: { inThread: boolean; names: string[] },
@@ -488,7 +493,7 @@ function automationPrompt(
     ...automationSkillInstructions(extensions.skills),
     ...(secretInstructions ? [secretInstructions] : []),
     ...slackTriggerInstructions(run.triggerInput),
-    ...devrevTriggerInstructions(run.triggerInput),
+    ...devrevTriggerInstructions(run.triggerInput, firstTurn),
     "Trigger payload:",
     JSON.stringify(run.triggerInput, null, 2),
     ...(continuation ? ["", continuation] : []),
@@ -1014,6 +1019,7 @@ export async function processAutomationRun(
                   repositories,
                   conversation,
                   resumed,
+                  firstTurn,
                   notificationChannels,
                   connections,
                   { secrets: workspaceSecrets, skills },
@@ -1248,7 +1254,12 @@ export async function processAutomationRun(
   // A run started by a DevRev ticket reports its first turn on the ticket.
   // Follow-ups continue on the run page.
   const ticket = devrevTicketOf(run.triggerInput);
-  if (outcome && firstTurn && ticket) {
+  // A turn that failed before reading its conversation does not know yet
+  // whether it was the first.
+  const ticketTurn = ticket && outcome && answeredThrough === undefined
+    ? await dependencies.hasFinishedTurn(run.runId).then((finished) => !finished).catch(() => false)
+    : firstTurn;
+  if (outcome && ticketTurn && ticket) {
     await dependencies.commentOnDevRevTicket({
       automationId: run.automationId,
       automationName: run.automationName,

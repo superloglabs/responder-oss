@@ -114,6 +114,22 @@ describe("DevRev webhooks", () => {
     });
   });
 
+  it("starts a run for a ticket whose title and severity are unset", async () => {
+    vi.mocked(findAutomationsForDevRevTicket).mockResolvedValue([
+      { automationId: "20000000-0000-4000-8000-000000000000" },
+    ]);
+    const event = workCreated();
+    const work = { ...event.work_created.work, severity: null, title: null };
+
+    const response = await deliver({ ...event, work_created: { work } });
+
+    expect(await response.json()).toEqual({ matchedAutomations: 1, ok: true });
+    expect(vi.mocked(queueAutomationRun).mock.calls[0]![0].trigger).toMatchObject({
+      attributes: { severity: null },
+      title: "TKT-42",
+    });
+  });
+
   it("ignores work items that are not tickets", async () => {
     const response = await deliver(workCreated("issue"));
 

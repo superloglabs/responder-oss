@@ -4160,6 +4160,19 @@ describe("DevRev connections", () => {
     expect(deleteDevRevWebhook).toHaveBeenCalledWith({ id: "webhook-1", token: "old-token" });
   });
 
+  it("deletes the new webhook when the connection cannot be saved", async () => {
+    vi.mocked(upsertIntegrationAccount)
+      .mockResolvedValueOnce(accountId)
+      .mockRejectedValueOnce(new Error("database unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await connect();
+
+    expect(response.status).toBe(502);
+    expect(deleteDevRevWebhook).toHaveBeenCalledWith({ id: "webhook-2", token: "devrev-token" });
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(accountId, "error");
+  });
+
   it("rejects a token DevRev does not accept", async () => {
     vi.mocked(getDevRevOrganization).mockRejectedValue(new DevRevApiError("dev-orgs.get", 401));
 

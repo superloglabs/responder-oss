@@ -212,7 +212,9 @@ The endpoint answers DevRev's verify challenge, then checks each event's
 returned for the webhook. Only new tickets start runs; other work items are
 ignored. Each ticket starts each matching automation once, so redelivered
 events do not start a second run. Reconnecting the same DevRev organization
-registers a new webhook and deletes the old one.
+registers a new webhook and tries to delete the old one. If that fails, the
+old webhook keeps sending events, which are refused because their signature
+no longer matches; delete it in DevRev.
 
 When a run's first turn ends, Responder posts its final reply, or the failure,
 as an internal comment on the ticket, so the customer does not see it. Comments

@@ -23,8 +23,8 @@ const devrevWorkSchema = z
   .object({
     display_id: z.string().min(1),
     id: z.string().min(1),
-    severity: z.string().optional(),
-    title: z.string().optional(),
+    severity: z.string().nullish(),
+    title: z.string().nullish(),
     type: z.string().min(1),
   })
   .passthrough();

@@ -810,7 +810,21 @@ describe("automation run processor", () => {
         runId,
         ticket,
       }));
-      expect(deps.notify).not.toHaveBeenCalled();
+    });
+
+    it("comments a first turn that failed before reading its conversation", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(devrevRun());
+      deps.getConversation.mockRejectedValue(new Error("database unavailable"));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.commentOnDevRevTicket).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: expect.objectContaining({ status: "failed" }),
+        ticket,
+      }));
     });
 
     it("comments a failed run and records a comment that could not be posted", async () => {
@@ -843,6 +857,7 @@ describe("automation run processor", () => {
       await processAutomationRun("job-1", job, process.env, deps);
 
       expect(deps.commentOnDevRevTicket).not.toHaveBeenCalled();
+      expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("internal comment on the ticket");
     });
 
     it("does not comment on runs other triggers started", async () => {

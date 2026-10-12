@@ -214,7 +214,9 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
 
   useEffect(() => {
     if (focusAdded.current) {
-      addedFieldsRef.current?.querySelector<HTMLElement>("select, button, a")?.focus();
+      // A trigger with nothing to choose, such as a connected DevRev one,
+      // leaves focus on the button that adds another.
+      (addedFieldsRef.current?.querySelector<HTMLElement>("select, button, a") ?? buttonRef.current)?.focus();
       focusAdded.current = false;
     }
   }, [triggers]);
