@@ -366,7 +366,8 @@ one server per Grafana connection, served by the run-scoped context broker at
 refreshes the OAuth token, lists tools itself, and forwards calls only to tools
 annotated read-only. For self-hosted Grafana the broker starts the same
 `mcp-grafana` process, with the same categories and egress proxy, for each tool
-listing or call, so the service account token stays in the control plane.
+call and for listings it has not cached in the last ten minutes, so the service
+account token stays in the control plane.
 
 The worker and control plane images install a pinned `mcp-grafana` release and
 set `MCP_GRAFANA_BINARY`. Local development downloads the same release into

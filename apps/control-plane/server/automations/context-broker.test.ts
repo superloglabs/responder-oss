@@ -631,10 +631,31 @@ describe("automation context broker", () => {
       expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["query_prometheus"]);
       expect(dependencies.grafana.connect).toHaveBeenCalledWith(
         { authType: "service_account", grafanaUrl: "https://list.grafana.example.com", serviceAccountToken: "glsa_worker_only" },
-        undefined,
       );
       expect(client.close).toHaveBeenCalled();
       expect(JSON.stringify(listBody)).not.toContain("glsa_worker_only");
+    });
+
+    it("starts mcp-grafana once for a call that finds no cached listing", async () => {
+      const { app, dependencies } = appFor(selfHostedClaim("cold.grafana.example.com"));
+      const client = fakeMcpGrafana();
+      dependencies.grafana.connect.mockResolvedValue(client);
+
+      const call = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: {}, name: "query_prometheus" },
+        }),
+      );
+
+      expect(call.status).toBe(200);
+      expect(dependencies.grafana.connect).toHaveBeenCalledTimes(1);
+      expect(client.listTools).toHaveBeenCalledTimes(1);
+      expect(client.callTool).toHaveBeenCalledTimes(1);
+      expect(client.close).toHaveBeenCalledTimes(1);
     });
 
     it("calls read-only self-hosted Grafana tools and refuses the rest", async () => {

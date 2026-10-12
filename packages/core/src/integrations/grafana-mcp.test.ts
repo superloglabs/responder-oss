@@ -26,7 +26,16 @@ describe("Grafana MCP", () => {
     expect(enabledTools).toEqual(
       expect.arrayContaining(["prometheus", "loki", "dashboard", "alerting"]),
     );
-    for (const category of ["api", "sql", "admin", "provisioning", "rendering"]) {
+    for (const category of [
+      "api",
+      "sql",
+      "admin",
+      "provisioning",
+      "rendering",
+      "snapshot",
+      "plugin",
+      "assistant",
+    ]) {
       expect(enabledTools).not.toContain(category);
     }
   });

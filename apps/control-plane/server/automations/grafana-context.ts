@@ -16,8 +16,8 @@ import {
 // rule as investigations: only tools the server annotates read-only are
 // listed or callable. Grafana Cloud's hosted MCP server is proxied like the
 // other managed servers. Self-hosted Grafana is served by the pinned
-// mcp-grafana binary, started for each listing or call, so the service account
-// token stays on the server.
+// mcp-grafana binary, started for a call or an uncached listing, so the service
+// account token stays on the server.
 
 const CALL_TIMEOUT_MS = 60_000;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -47,10 +47,7 @@ export function grafanaCloudContextServer(input: {
 export type GrafanaMcpClient = Pick<Client, "callTool" | "close" | "listTools">;
 
 export interface SelfHostedGrafanaDependencies {
-  connect: (
-    connection: SelfHostedGrafanaConnection,
-    signal?: AbortSignal,
-  ) => Promise<GrafanaMcpClient>;
+  connect: (connection: SelfHostedGrafanaConnection) => Promise<GrafanaMcpClient>;
   now: () => number;
 }
 
@@ -61,12 +58,11 @@ export interface SelfHostedGrafanaConnection {
 
 async function connectSelfHostedGrafana(
   connection: SelfHostedGrafanaConnection,
-  signal?: AbortSignal,
 ): Promise<GrafanaMcpClient> {
   const client = new Client({ name: "responder-context-broker", version: "1" });
   await client.connect(
     new StdioClientTransport(await grafanaSelfHostedProcess(connection)),
-    { signal, timeout: CONNECT_TIMEOUT_MS },
+    { timeout: CONNECT_TIMEOUT_MS },
   );
   return client;
 }
@@ -76,28 +72,34 @@ export const defaultSelfHostedGrafanaDependencies: SelfHostedGrafanaDependencies
   now: Date.now,
 };
 
-async function withClient<T>(
+// Starts mcp-grafana only when a request needs it, at most once, so a call that
+// first loads the tool listing uses the same process for the call. The process
+// does not follow the request's abort signal because the listing it loads is
+// shared; the call itself does.
+async function withLazyClient<T>(
   connection: SelfHostedGrafanaConnection,
   dependencies: SelfHostedGrafanaDependencies,
-  signal: AbortSignal | undefined,
-  operation: (client: GrafanaMcpClient) => Promise<T>,
+  operation: (client: () => Promise<GrafanaMcpClient>) => Promise<T>,
 ): Promise<T> {
-  const client = await dependencies.connect(connection, signal);
+  let started: Promise<GrafanaMcpClient> | undefined;
   try {
-    return await operation(client);
+    return await operation(() => (started ??= dependencies.connect(connection)));
   } finally {
-    await client.close().catch(() => {});
+    const client = await started?.catch(() => undefined);
+    await client?.close().catch(() => {});
   }
 }
 
 function allowedSelfHostedTools(input: {
   accountId: string;
+  client: () => Promise<GrafanaMcpClient>;
   connection: SelfHostedGrafanaConnection;
   dependencies: SelfHostedGrafanaDependencies;
 }): Promise<McpTool[]> {
   return cachedMcpTools({
     cacheKey: `grafana:${input.accountId}:${input.connection.grafanaUrl}`,
-    load: () => withClient(input.connection, input.dependencies, undefined, async (client) => {
+    load: async () => {
+      const client = await input.client();
       const tools: McpTool[] = [];
       let cursor: string | undefined;
       for (let page = 0; ; page += 1) {
@@ -113,7 +115,7 @@ function allowedSelfHostedTools(input: {
         if (!cursor) break;
       }
       return tools.filter(isGrafanaReadOnlyTool);
-    }),
+    },
     now: input.dependencies.now(),
   });
 }
@@ -145,33 +147,32 @@ export async function selfHostedGrafanaAnswer(input: {
     };
   }
   if (input.method === "ping") return { kind: "result", result: {} };
-  if (input.method === "tools/list") {
-    return { kind: "result", result: { tools: await allowedSelfHostedTools(input) } };
-  }
-  if (input.method !== "tools/call") {
+  if (input.method !== "tools/list" && input.method !== "tools/call") {
     return { code: -32601, kind: "reject", message: "Method not found", status: 404 };
   }
-  const name = z.string().safeParse(input.params?.name);
-  const tools = await allowedSelfHostedTools(input);
-  if (!name.success || !tools.some((tool) => tool.name === name.data)) {
+  return await withLazyClient(input.connection, input.dependencies, async (client) => {
+    const tools = await allowedSelfHostedTools({ ...input, client });
+    if (input.method === "tools/list") return { kind: "result", result: { tools } };
+    const name = z.string().safeParse(input.params?.name);
+    if (!name.success || !tools.some((tool) => tool.name === name.data)) {
+      return {
+        code: -32602,
+        kind: "reject",
+        message: "Unknown or non-read-only tool",
+        status: 400,
+      };
+    }
+    const args = z.record(z.string(), z.unknown()).optional().safeParse(input.params?.arguments);
+    if (!args.success) {
+      return { code: -32602, kind: "reject", message: "Invalid tool arguments", status: 400 };
+    }
     return {
-      code: -32602,
-      kind: "reject",
-      message: "Unknown or non-read-only tool",
-      status: 400,
-    };
-  }
-  const args = z.record(z.string(), z.unknown()).optional().safeParse(input.params?.arguments);
-  if (!args.success) {
-    return { code: -32602, kind: "reject", message: "Invalid tool arguments", status: 400 };
-  }
-  return {
-    kind: "result",
-    result: await withClient(input.connection, input.dependencies, input.signal, (client) =>
-      client.callTool(
+      kind: "result",
+      result: await (await client()).callTool(
         { arguments: args.data, name: name.data },
         undefined,
         { signal: input.signal, timeout: CALL_TIMEOUT_MS },
-      )),
-  };
+      ),
+    };
+  });
 }
