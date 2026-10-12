@@ -281,9 +281,11 @@ export function applyAutomationTemplate(configuration: AutomationConfiguration, 
   return { ...configuration, contextAccountIds, prompt: template.prompt, triggers };
 }
 
-// Axiom alerts arrive at the connection's webhook, so there is nothing to choose.
+// Axiom alerts and DevRev tickets arrive at the connection's webhook, so there
+// is nothing to choose.
 const triggerResources: Record<ConnectedAutomationTrigger["kind"], string | null> = {
   axiom: null,
+  devrev: null,
   discord: "a Discord channel",
   sentry: "a Sentry project",
   slack: "a Slack channel",

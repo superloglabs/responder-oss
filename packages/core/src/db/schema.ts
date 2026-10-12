@@ -79,6 +79,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "custom_mcp",
   "linear",
   "discord",
+  "devrev",
 ]);
 
 export const integrationResourceKind = pgEnum("integration_resource_kind", [

@@ -55,6 +55,7 @@ describe("Dash0 webhooks", () => {
   function connected() {
     vi.mocked(getConnectedIntegrationAccountCredential).mockResolvedValue({
       encryptedCredentials: "encrypted",
+      metadata: {},
       organizationId: "organization-1",
     });
     vi.mocked(decryptCredentials).mockReturnValue({

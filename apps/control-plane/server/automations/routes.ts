@@ -232,6 +232,7 @@ export const automationRoutes = new Hono()
           "aws",
           "axiom",
           "cloudflare",
+          "devrev",
           "discord",
           "github",
           "slack",

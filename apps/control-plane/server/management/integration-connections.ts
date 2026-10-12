@@ -10,6 +10,8 @@ const consentProviders = new Set([
   "slack", "github", "sentry", "discord", "vercel", "linear", "gcp", "axiom", "posthog",
   "cloudflare",
 ]);
+// Only automations use these, so they are offered only with automations on.
+const automationOnlyProviders = new Set(["devrev", "discord"]);
 const provider = z.enum(productIntegrationIds);
 const connectionType = z.enum(["oauth", "secure_setup"]);
 
@@ -32,7 +34,7 @@ export const integrationConnectionOperations = [
     async run(context) {
       const automations = await organizationHasCapability(context.organizationId, "automations");
       return { integrations: integrationCatalog
-        .filter((item) => item.implemented && (item.id !== "discord" || automations))
+        .filter((item) => item.implemented && (!automationOnlyProviders.has(item.id) || automations))
         .map((item) => ({
           provider: item.id, name: item.name, description: item.description,
           available: integrationIsConfigured(item),
@@ -57,7 +59,7 @@ export const integrationConnectionOperations = [
     }),
     async run(context, input) {
       const definition = integrationCatalog.find((item) => item.id === input.provider)!;
-      if (!definition.implemented || (input.provider === "discord" &&
+      if (!definition.implemented || (automationOnlyProviders.has(input.provider) &&
           !await organizationHasCapability(context.organizationId, "automations"))) {
         throw new ManagementError(404, "Integration is not available.", "integration_unavailable");
       }

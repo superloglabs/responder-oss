@@ -195,6 +195,33 @@ every matching enabled automation, with the optional `context` argument added
 to the trigger payload. Interaction signatures are verified before the guild
 and channel are matched, and retries are deduplicated by interaction ID.
 
+## DevRev
+
+DevRev is an automation trigger, available in workspaces with the `automations`
+capability. Connect it from Settings or from a DevRev trigger card with a
+personal access token from a DevRev admin. Responder reads the organization with
+`dev-orgs.get`, stores the token encrypted, and registers a `work_created`
+webhook for the connection:
+
+```text
+<public>/api/webhooks/devrev/<connection>
+```
+
+The endpoint answers DevRev's verify challenge, then checks each event's
+`X-DevRev-Signature`, the HMAC-SHA256 of the raw body under the secret DevRev
+returned for the webhook. Only new tickets start runs; other work items are
+ignored. Each ticket starts each matching automation once, so redelivered
+events do not start a second run. Reconnecting the same DevRev organization
+registers a new webhook and tries to delete the old one. If that fails, the
+old webhook keeps sending events, which are refused because their signature
+no longer matches; delete it in DevRev.
+
+When a run's first turn ends, Responder posts its final reply, or the failure,
+as an internal comment on the ticket, so the customer does not see it. Comments
+are posted as the person who created the token. A comment that cannot be posted
+is recorded as a `devrev_comment_failed` run event. Follow-up turns continue on
+the run page.
+
 ## Sentry
 
 Create a public Sentry integration with:

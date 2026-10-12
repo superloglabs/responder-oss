@@ -375,6 +375,7 @@ export async function getConnectedIntegrationAccountCredential(input: {
   const rows = await getDatabase()
     .select({
       encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
       organizationId: integrationAccounts.organizationId,
     })
     .from(integrationAccounts)

@@ -273,7 +273,7 @@ const inferenceUsageSchema = z
   .nullable();
 
 const runTriggerSchema = z.object({
-  provider: z.string().describe("What started the run: `manual`, `schedule`, `slack`, `sentry`, `axiom`, or `discord`."),
+  provider: z.string().describe("What started the run: `manual`, `schedule`, `slack`, `sentry`, `axiom`, `devrev`, or `discord`."),
   sourceUrl: z.string().nullable().describe("A link to the event that started the run."),
   title: z.string(),
 });

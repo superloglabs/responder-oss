@@ -76,6 +76,10 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("axiom"),
   }).describe("Runs when an Axiom monitor sends an alert to the connection's webhook."),
   z.object({
+    integrationAccountId: integrationAccountIdSchema,
+    kind: z.literal("devrev"),
+  }).describe("Runs when a ticket is created in the connected DevRev organization. The run's final reply is posted as an internal comment on the ticket."),
+  z.object({
     channelIds: z.array(externalResourceIdSchema).min(1).max(50)
       .refine(uniqueIds, "Channel IDs must be unique")
       .describe("Discord channel IDs."),

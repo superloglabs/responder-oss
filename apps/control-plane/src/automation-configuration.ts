@@ -90,7 +90,7 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
   const triggerAccountAvailable = options.accounts.some((account) =>
     account.id === trigger.integrationAccountId && account.provider === trigger.kind
   );
-  if (trigger.kind === "axiom") {
+  if (trigger.kind === "axiom" || trigger.kind === "devrev") {
     return { ...trigger, integrationAccountId: triggerAccountAvailable ? trigger.integrationAccountId : "" };
   }
   const resourceKind = trigger.kind === "sentry" ? "sentry_project" : trigger.kind === "discord" ? "discord_channel" : "slack_channel";
@@ -107,7 +107,7 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
 export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   if (trigger.kind === "schedule") return isScheduleComplete(trigger);
   if (!trigger.integrationAccountId) return false;
-  if (trigger.kind === "axiom") return true;
+  if (trigger.kind === "axiom" || trigger.kind === "devrev") return true;
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;
 }
 

@@ -4,7 +4,7 @@ import type { AutomationTrigger } from "../automations-api";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { searchInputProps } from "./search-input-props";
 
-export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "alert" | "command" | "hourly" | "daily" | "weekly" | "custom";
+export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "alert" | "ticket" | "command" | "hourly" | "daily" | "weekly" | "custom";
 const providers = [
   { kind: "slack", name: "Slack", events: [
     { value: "every_message", label: "New message in channel" },
@@ -18,6 +18,9 @@ const providers = [
   ] },
   { kind: "axiom", name: "Axiom", events: [
     { value: "alert", label: "Monitor alert" },
+  ] },
+  { kind: "devrev", name: "DevRev", events: [
+    { value: "ticket", label: "New ticket" },
   ] },
   { kind: "discord", name: "Discord", events: [
     { value: "command", label: "Automation command in channel" },

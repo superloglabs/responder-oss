@@ -27,8 +27,8 @@ export function shareableAutomationTriggers(
     if (trigger.kind === "discord") {
       return { channelIds: [], integrationAccountId: "", kind: "discord" };
     }
-    if (trigger.kind === "axiom") {
-      return { integrationAccountId: "", kind: "axiom" };
+    if (trigger.kind === "axiom" || trigger.kind === "devrev") {
+      return { integrationAccountId: "", kind: trigger.kind };
     }
     return { ...(trigger.frequency === "custom" ? { cron: trigger.cron } : {}), frequency: trigger.frequency, hour: trigger.hour, kind: "schedule", timezone: "UTC", weekday: trigger.weekday };
   });

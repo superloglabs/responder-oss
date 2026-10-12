@@ -6,6 +6,7 @@ import {
   findAutomationsForSlackEvent,
   listSlackMessageAuthors,
   findAutomationsForAxiomAlert,
+  findAutomationsForDevRevTicket,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   getAutomationRunSlackButtons,
@@ -307,6 +308,15 @@ describe("trigger matching", () => {
       { automationId: "slack-only", triggers: [slack] },
     ]]));
     await expect(findAutomationsForAxiomAlert(accountId)).resolves.toEqual([{ automationId: "axiom" }]);
+  });
+
+  it("matches DevRev tickets to automations with a DevRev trigger on that connection", async () => {
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { automationId: "devrev", triggers: [slack, { integrationAccountId: accountId, kind: "devrev" }] },
+      { automationId: "axiom", triggers: [{ integrationAccountId: accountId, kind: "axiom" }] },
+      { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "devrev" }] },
+    ]]));
+    await expect(findAutomationsForDevRevTicket(accountId)).resolves.toEqual([{ automationId: "devrev" }]);
   });
 
   it("skips an environment only when every matching Sentry trigger excludes it", async () => {

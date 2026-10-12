@@ -13,10 +13,12 @@ describe("shared automation templates", () => {
       { channelIds: ["C123"], eventMode: "mentions", integrationAccountId: accountId, kind: "slack" },
       { eventTypes: ["regression"], integrationAccountId: accountId, kind: "sentry", projectIds: ["backend"] },
       { channelIds: ["998877"], integrationAccountId: accountId, kind: "discord" },
+      { integrationAccountId: accountId, kind: "devrev" },
     ])).toEqual([
       { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
       { eventTypes: ["regression"], integrationAccountId: "", kind: "sentry", projectIds: [] },
       { channelIds: [], integrationAccountId: "", kind: "discord" },
+      { integrationAccountId: "", kind: "devrev" },
     ]);
   });
 

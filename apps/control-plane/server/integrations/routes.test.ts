@@ -50,6 +50,12 @@ import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations
 import { POSTHOG_MCP_URL } from "../../../../packages/core/src/integrations/posthog.js";
 import { CLOUDFLARE_MCP_URL } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
+  createDevRevTicketWebhook,
+  deleteDevRevWebhook,
+  DevRevApiError,
+  getDevRevOrganization,
+} from "../../../../packages/core/src/integrations/devrev.js";
+import {
   createLinearPkce,
   exchangeLinearOAuthCode,
   getLinearWorkspace,
@@ -156,6 +162,13 @@ vi.mock("../../../../packages/core/src/integrations/dash0.js", async (importOrig
     normalizeDash0McpUrl: vi.fn(),
   };
 });
+
+vi.mock("../../../../packages/core/src/integrations/devrev.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../../packages/core/src/integrations/devrev.js")>(),
+  createDevRevTicketWebhook: vi.fn(),
+  deleteDevRevWebhook: vi.fn(),
+  getDevRevOrganization: vi.fn(),
+}));
 
 vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
   createLinearPkce: vi.fn(),
@@ -4051,5 +4064,147 @@ describe("integration callback routing", () => {
         provider: "clickstack",
       }),
     );
+  });
+});
+
+describe("DevRev connections", () => {
+  const accountId = "30000000-0000-4000-8000-000000000000";
+  const organization = {
+    displayName: "Acme",
+    id: "don:identity:dvrv-us-1:devo/1abc",
+    slug: "acme",
+  };
+
+  function connect(token = "devrev-token") {
+    return app.request("/api/integrations/devrev/connect", {
+      body: JSON.stringify({ returnTo: "/automations/new", token }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://hooks.responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+    vi.mocked(encryptCredentials).mockImplementation((value) => JSON.stringify(value));
+    vi.mocked(getDevRevOrganization).mockResolvedValue(organization);
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue(null as never);
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(accountId);
+    vi.mocked(createDevRevTicketWebhook).mockResolvedValue({ id: "webhook-2", secret: "secret-2" });
+    vi.mocked(deleteDevRevWebhook).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("registers a new-ticket webhook that names the new connection", async () => {
+    const response = await connect();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId,
+      redirectUrl: "https://responder.example/automations/new?integration=devrev&status=connected",
+    });
+    expect(getDevRevOrganization).toHaveBeenCalledWith("devrev-token");
+    expect(createDevRevTicketWebhook).toHaveBeenCalledWith({
+      token: "devrev-token",
+      url: `https://hooks.responder.example/api/webhooks/devrev/${accountId}`,
+    });
+    const writes = vi.mocked(upsertIntegrationAccount).mock.calls.map(([input]) => input);
+    expect(writes).toEqual([
+      expect.objectContaining({
+        encryptedCredentials: JSON.stringify({ authType: "personal_access_token", token: "devrev-token" }),
+        status: "pending",
+      }),
+      {
+        credentialKeyVersion: 1,
+        displayName: "Acme",
+        encryptedCredentials: JSON.stringify({
+          authType: "personal_access_token",
+          token: "devrev-token",
+          webhookId: "webhook-2",
+          webhookSecret: "secret-2",
+        }),
+        externalAccountId: organization.id,
+        metadata: { organizationName: "Acme", organizationSlug: "acme" },
+        organizationId: tenant.organizationId,
+        provider: "devrev",
+        status: "connected",
+      },
+    ]);
+    expect(deleteDevRevWebhook).not.toHaveBeenCalled();
+  });
+
+  it("replaces the webhook of an existing connection", async () => {
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      encryptedCredentials: "previous",
+      id: accountId,
+      metadata: {},
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "personal_access_token",
+      token: "old-token",
+      webhookId: "webhook-1",
+      webhookSecret: "secret-1",
+    });
+
+    expect((await connect()).status).toBe(200);
+
+    expect(upsertIntegrationAccount).toHaveBeenCalledTimes(1);
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(expect.objectContaining({ status: "connected" }));
+    expect(deleteDevRevWebhook).toHaveBeenCalledWith({ id: "webhook-1", token: "old-token" });
+  });
+
+  it("deletes the new webhook when the connection cannot be saved", async () => {
+    vi.mocked(upsertIntegrationAccount)
+      .mockResolvedValueOnce(accountId)
+      .mockRejectedValueOnce(new Error("database unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await connect();
+
+    expect(response.status).toBe(502);
+    expect(deleteDevRevWebhook).toHaveBeenCalledWith({ id: "webhook-2", token: "devrev-token" });
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(accountId, "error");
+  });
+
+  it("rejects a token DevRev does not accept", async () => {
+    vi.mocked(getDevRevOrganization).mockRejectedValue(new DevRevApiError("dev-orgs.get", 401));
+
+    const response = await connect();
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "DevRev rejected the token" });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("marks a new connection failed when its token cannot create webhooks", async () => {
+    vi.mocked(createDevRevTicketWebhook).mockRejectedValue(new DevRevApiError("webhooks.create", 403));
+
+    const response = await connect();
+
+    expect(response.status).toBe(403);
+    expect(setIntegrationAccountStatus).toHaveBeenCalledWith(accountId, "error");
+    expect(upsertIntegrationAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("is available only with automations", async () => {
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+    const listed = await (await app.request("/api/integrations")).json();
+    expect(listed.integrations).toContainEqual(expect.objectContaining({
+      connectUrl: "/api/integrations/devrev/connect",
+      id: "devrev",
+    }));
+
+    vi.mocked(organizationHasCapability).mockResolvedValue(false);
+    const hidden = await (await app.request("/api/integrations")).json();
+    expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "devrev" }));
+    expect((await connect()).status).toBe(404);
+    expect(getDevRevOrganization).not.toHaveBeenCalled();
   });
 });

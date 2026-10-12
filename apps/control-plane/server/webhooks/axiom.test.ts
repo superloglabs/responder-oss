@@ -49,6 +49,7 @@ describe("Axiom webhooks", () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
     vi.mocked(getConnectedIntegrationAccountCredential).mockResolvedValue({
       encryptedCredentials: "encrypted",
+      metadata: {},
       organizationId: "organization-1",
     });
   });

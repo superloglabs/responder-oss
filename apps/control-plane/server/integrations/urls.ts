@@ -44,6 +44,15 @@ export function axiomWebhookUrl(integrationAccountId: string): string {
   ).toString();
 }
 
+export function devrevWebhookUrl(integrationAccountId: string): string {
+  const callbackBaseUrl =
+    process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
+  return new URL(
+    `/api/webhooks/devrev/${encodeURIComponent(integrationAccountId)}`,
+    callbackBaseUrl,
+  ).toString();
+}
+
 export function settingsRedirect(
   returnTo: string,
   provider: string,
