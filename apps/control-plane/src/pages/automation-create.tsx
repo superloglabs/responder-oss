@@ -14,7 +14,7 @@ import {
 import { automationTriggersNotify, defaultAutomationModelSettings } from "../../../../packages/core/src/automations/config";
 import { BookOpenTextIcon, ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
-import { automationConnectorProviders, type AutomationConnectorProvider } from "../components/automation-connectors";
+import type { AutomationConnectorProvider } from "../components/automation-connectors";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
@@ -31,7 +31,7 @@ import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationUsage } from "../components/automation-usage";
 import { AutomationNotificationEditor } from "../components/automation-notification-editor";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
-import { availableAutomationConfiguration, isScheduleComplete, isTriggerComplete, moveItem, slackPhrasesError } from "../automation-configuration";
+import { automationContextAccounts, availableAutomationConfiguration, defaultContextAccountIds, isScheduleComplete, isTriggerComplete, moveItem, slackPhrasesError } from "../automation-configuration";
 import { AutomationRepositoryList } from "../components/automation-repository-list";
 import { AutomationShareDialog } from "../components/automation-share-dialog";
 import "./automation-create.css";
@@ -208,9 +208,12 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       } else if (sharedTemplateSlug) {
         setError("This shared template is no longer available. Set up the automation below or pick a template from Automations.");
       }
+      const contextAccountIds = defaultContextAccountIds(loadedOptions);
       updateConfiguration((current) => {
-        const blank = { ...current, model: "", repositoryIds: [] };
-        return starting ? applyAutomationTemplate(blank, starting, loadedOptions) : blank;
+        const blank = { ...current, contextAccountIds, model: "", repositoryIds: [] };
+        if (!starting) return blank;
+        const fromTemplate = applyAutomationTemplate(blank, starting, loadedOptions);
+        return { ...fromTemplate, contextAccountIds: [...new Set([...fromTemplate.contextAccountIds, ...contextAccountIds])] };
       }, false);
       return;
     }
@@ -292,10 +295,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   // from their history.
   const scheduled = configuration.triggers.some((trigger) => trigger.kind === "schedule");
   const notifies = automationTriggersNotify(configuration.triggers);
-  const contextAccounts = options?.accounts.filter((account) =>
-    account.provider !== "github" &&
-    (automationConnectorProviders as readonly string[]).includes(account.provider)
-  ) ?? [];
+  const contextAccounts = options ? automationContextAccounts(options) : [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -321,12 +321,13 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   }
 
   // Clears what the template filled in and keeps the model and repositories.
+  // Connectors return to every connected one.
   function startBlank() {
     setTemplate(undefined);
     nameRef.current = "New automation";
     setName(nameRef.current);
     setError(null);
-    updateConfiguration((current) => ({ ...current, contextAccountIds: [], prompt: "", triggers: [] }), false);
+    updateConfiguration((current) => ({ ...current, contextAccountIds: options ? defaultContextAccountIds(options) : [], prompt: "", triggers: [] }), false);
     window.history.replaceState(window.history.state, "", editorPath);
   }
 

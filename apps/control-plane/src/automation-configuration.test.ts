@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationConfiguration, AutomationOptions } from "./automations-api";
-import { availableAutomationConfiguration, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, scheduleCronError, sentryEnvironmentChoices, slackFiltersInUse, slackPhrasesError, slackPhrasesFromText, withScheduleFrequency } from "./automation-configuration";
+import { availableAutomationConfiguration, defaultContextAccountIds, excludedSentryEnvironments, isTriggerComplete, moveItem, scheduleCron, scheduleCronError, sentryEnvironmentChoices, slackFiltersInUse, slackPhrasesError, slackPhrasesFromText, withScheduleFrequency } from "./automation-configuration";
 
 const options = {
   accounts: [
@@ -54,6 +54,26 @@ describe("availableAutomationConfiguration", () => {
       { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
       schedule,
     ]);
+  });
+});
+
+describe("defaultContextAccountIds", () => {
+  it("selects every connected connector except GitHub", () => {
+    expect(defaultContextAccountIds({
+      ...options,
+      accounts: [
+        { id: "sentry", provider: "sentry", displayName: "Acme" },
+        { id: "github", provider: "github", displayName: "acme" },
+        { id: "aws-production", provider: "aws", displayName: "Production" },
+        { id: "aws-staging", provider: "aws", displayName: "Staging" },
+        { id: "discord", provider: "discord", displayName: "Server" },
+      ],
+    } as AutomationOptions)).toEqual(["sentry", "aws-production", "aws-staging"]);
+  });
+
+  it("stops at the 50 connectors the server accepts", () => {
+    const accounts = Array.from({ length: 51 }, (_, index) => ({ id: `mcp-${index}`, provider: "custom_mcp", displayName: `MCP ${index}` }));
+    expect(defaultContextAccountIds({ ...options, accounts } as AutomationOptions)).toHaveLength(50);
   });
 });
 

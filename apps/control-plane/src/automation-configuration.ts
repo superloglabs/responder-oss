@@ -1,6 +1,7 @@
 import type { AutomationConfiguration, AutomationOptions, AutomationTrigger } from "./automations-api";
 import { cronProblem, maxCronLength, type AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 import { maxSlackPhrases, slackPhraseError } from "../../../packages/core/src/automations/slack-phrases";
+import { automationConnectorProviders } from "./components/automation-connectors";
 
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -48,6 +49,21 @@ export function scheduleCronError(trigger: ScheduleTrigger): string | null {
 
 export function isScheduleComplete(trigger: ScheduleTrigger): boolean {
   return scheduleCronError(trigger) === null;
+}
+
+// Connected accounts a run can use as connectors. GitHub is used through the
+// automation's repositories instead.
+export function automationContextAccounts(options: AutomationOptions): AutomationOptions["accounts"] {
+  return options.accounts.filter((account) =>
+    account.provider !== "github" &&
+    (automationConnectorProviders as readonly string[]).includes(account.provider)
+  );
+}
+
+// A new automation starts with every connected connector, up to the 50 the
+// server accepts.
+export function defaultContextAccountIds(options: AutomationOptions): string[] {
+  return automationContextAccounts(options).slice(0, 50).map((account) => account.id);
 }
 
 // Saved automation settings can reference connections, trigger resources,

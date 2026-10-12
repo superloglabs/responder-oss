@@ -48,9 +48,7 @@ test("creates an automation using the compact editor and selected resources", as
   await page.getByLabel("Automation name").fill("Fix incoming issues");
   await page.getByLabel("Automation name").press("Enter");
   await page.getByRole("textbox", { name: "Agent instructions" }).fill("Investigate the event and open a pull request.");
-  await page.getByRole("button", { name: "Add connector", exact: true }).click();
-  await page.getByRole("option", { name: /^Engineering/ }).click();
-  await page.keyboard.press("Escape");
+  // A new automation starts with every connected connector.
   await expect(page.getByRole("button", { name: "Remove Engineering" })).toBeVisible();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("menu", { name: "Trigger providers" })).toBeVisible();
@@ -895,6 +893,7 @@ test("clears a template with Start blank", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "New automation" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toBeEmpty();
   await expect(page.getByRole("button", { name: "Add trigger", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove Engineering" })).toBeVisible();
   await expect(page.getByText(/Started from the/)).toHaveCount(0);
 });
 
