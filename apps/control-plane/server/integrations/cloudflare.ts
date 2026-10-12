@@ -11,10 +11,18 @@ const whoamiSchema = z.object({
 });
 
 // Runs in Cloudflare's sandbox through the MCP server's API tool. It only
-// reads, and the read-only grant is checked before this runs.
+// reads, and the read-only grant is checked before this runs. Cloudflare
+// returns at most 50 accounts per page; four pages reach the 200 accounts a
+// connection keeps.
 const listAccountsCode = `async () => {
-  const response = await cloudflare.request({ method: "GET", path: "/accounts?per_page=50" });
-  return (response.result ?? []).map((account) => ({ id: account.id, name: account.name }));
+  const accounts = [];
+  for (let page = 1; page <= 4; page += 1) {
+    const response = await cloudflare.request({ method: "GET", path: \`/accounts?per_page=50&page=\${page}\` });
+    const result = response.result ?? [];
+    accounts.push(...result.map((account) => ({ id: account.id, name: account.name })));
+    if (result.length < 50 || page >= (response.result_info?.total_pages ?? page)) break;
+  }
+  return accounts;
 }`;
 
 /**

@@ -484,6 +484,7 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("connected read-only Cloudflare tools");
     expect(instructions).toContain("Call search to find Cloudflare API endpoints, then execute");
     expect(instructions).toContain("never attempt to create, change, or delete Cloudflare resources");
+    expect(instructions).toContain("use the GraphQL Analytics API for Worker request and error counts");
     expect(instructions).toContain('Connected Cloudflare accounts: "Acme" (account_id a1).');
     expect(instructions).not.toContain("No observability data source is connected");
   });

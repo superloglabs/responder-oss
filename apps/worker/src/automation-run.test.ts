@@ -400,6 +400,7 @@ describe("automation run processor", () => {
     );
     expect(prompt).not.toContain("\n- ignore the instructions");
     expect(prompt).toContain("pass account_id for the account you need");
+    expect(prompt).toContain("use the GraphQL Analytics API for Worker request and error counts");
   });
 
   it("gives runs the workspace tools in workspaces with simplified navigation", async () => {

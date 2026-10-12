@@ -46,6 +46,26 @@ export function assertCloudflareReadOnlyGrant(
   if (writeScopes.length > 0) throw new CloudflareWriteScopeError(writeScopes);
 }
 
+/**
+ * OAuth lets a refresh response leave out `scope` when it is unchanged. The
+ * scope validated when connecting then carries over, so the grant can still
+ * be checked.
+ */
+export function withCloudflareGrantScope(
+  previous: StoredCustomMcpOAuthState,
+  refreshed: StoredCustomMcpOAuthState,
+): StoredCustomMcpOAuthState {
+  if (
+    refreshed === previous ||
+    !refreshed.tokens ||
+    refreshed.tokens.scope !== undefined ||
+    previous.tokens?.scope === undefined
+  ) {
+    return refreshed;
+  }
+  return { ...refreshed, tokens: { ...refreshed.tokens, scope: previous.tokens.scope } };
+}
+
 // `search` reads Cloudflare's OpenAPI spec, `execute` calls the API, `docs`
 // searches the developer docs, and `whoami` names the connected user. The
 // server does not annotate `search`, `execute`, or `docs` as read-only; the

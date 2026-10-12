@@ -28,6 +28,7 @@ import { parseGrafanaCredentials } from "../../../../packages/core/src/integrati
 import {
   assertCloudflareReadOnlyGrant,
   parseCloudflareCredentials,
+  withCloudflareGrantScope,
 } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
   linearAccessTokenNeedsRefresh,
@@ -317,11 +318,14 @@ async function cloudflareAccessToken(
       const current = parseCloudflareCredentials(
         decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
-      const oauth = await dependencies.refreshCustomMcp({
-        mcpUrl: current.mcpUrl,
-        oauth: current.oauth,
-        redirectUrl: integrationCallbackUrl("cloudflare"),
-      });
+      const oauth = withCloudflareGrantScope(
+        current.oauth,
+        await dependencies.refreshCustomMcp({
+          mcpUrl: current.mcpUrl,
+          oauth: current.oauth,
+          redirectUrl: integrationCallbackUrl("cloudflare"),
+        }),
+      );
       if (oauth === current.oauth) return { value: current };
       const updated = { ...current, oauth };
       return {

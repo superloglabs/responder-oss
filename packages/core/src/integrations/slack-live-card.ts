@@ -320,7 +320,9 @@ function sourceLabel(url: string): string {
   if (host.includes("sentry")) return "Open in Sentry";
   if (host.includes("slack")) return "Open in Slack";
   if (host.includes("grafana")) return "Open in Grafana";
-  if (host.includes("cloudflare")) return "Open in Cloudflare";
+  if (host === "cloudflare.com" || host.endsWith(".cloudflare.com")) {
+    return "Open in Cloudflare";
+  }
   if (host.includes("clickhouse") || host.includes("hyperdx")) {
     return "Open in ClickStack";
   }

@@ -22,6 +22,7 @@ import {
   assertCloudflareReadOnlyGrant,
   cloudflareAccountsSchema,
   parseCloudflareCredentials,
+  withCloudflareGrantScope,
   type CloudflareAccount,
 } from "../integrations/cloudflare.js";
 import {
@@ -2230,11 +2231,14 @@ export async function getRuntimeCloudflareConnections(
         const credentials = parseCloudflareCredentials(
           decryptCredentials<Record<string, unknown>>(encryptedCredentials),
         );
-        const oauth = await refreshCustomMcpOAuth({
-          mcpUrl: credentials.mcpUrl,
-          oauth: credentials.oauth,
-          redirectUrl: mcpOAuthRedirectUrl("cloudflare"),
-        });
+        const oauth = withCloudflareGrantScope(
+          credentials.oauth,
+          await refreshCustomMcpOAuth({
+            mcpUrl: credentials.mcpUrl,
+            oauth: credentials.oauth,
+            redirectUrl: mcpOAuthRedirectUrl("cloudflare"),
+          }),
+        );
         const accessToken = oauth.tokens?.access_token;
         if (!accessToken) throw new Error("Reconnect the Cloudflare OAuth connection");
         assertCloudflareReadOnlyGrant(oauth.tokens);
