@@ -7,7 +7,7 @@ import { rpcMessages } from "./mcp-messages.js";
 
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1_000;
 const MAX_CACHED_LISTINGS = 500;
-const MAX_TOOL_PAGES = 10;
+export const MAX_TOOL_PAGES = 10;
 const PROTOCOL_VERSION = "2025-03-26";
 
 // Methods forwarded to the provider. tools/list is answered by the broker
@@ -82,22 +82,34 @@ function pruneToolCache(now: number) {
   }
 }
 
-/** The tools a managed MCP server offers that its provider's rule allows. */
-export function allowedManagedMcpTools(server: ManagedMcpServer): Promise<McpTool[]> {
-  const now = server.now();
-  const cached = toolCache.get(server.cacheKey);
-  if (cached && cached.expiresAt > now) return cached.tools;
+/** One connection's allowed tools, loaded once and reused for ten minutes. */
+export function cachedMcpTools(input: {
+  cacheKey: string;
+  load: () => Promise<McpTool[]>;
+  now: number;
+}): Promise<McpTool[]> {
+  const cached = toolCache.get(input.cacheKey);
+  if (cached && cached.expiresAt > input.now) return cached.tools;
 
-  pruneToolCache(now);
+  pruneToolCache(input.now);
   const entry = {
-    expiresAt: now + TOOL_CACHE_TTL_MS,
-    tools: listAllowedTools(server),
+    expiresAt: input.now + TOOL_CACHE_TTL_MS,
+    tools: input.load(),
   };
-  toolCache.set(server.cacheKey, entry);
+  toolCache.set(input.cacheKey, entry);
   entry.tools.catch(() => {
-    if (toolCache.get(server.cacheKey) === entry) toolCache.delete(server.cacheKey);
+    if (toolCache.get(input.cacheKey) === entry) toolCache.delete(input.cacheKey);
   });
   return entry.tools;
+}
+
+/** The tools a managed MCP server offers that its provider's rule allows. */
+export function allowedManagedMcpTools(server: ManagedMcpServer): Promise<McpTool[]> {
+  return cachedMcpTools({
+    cacheKey: server.cacheKey,
+    load: () => listAllowedTools(server),
+    now: server.now(),
+  });
 }
 
 async function listAllowedTools(server: ManagedMcpServer): Promise<McpTool[]> {

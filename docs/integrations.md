@@ -325,9 +325,9 @@ delivery does not require a second public webhook or shared secret.
 
 ## Grafana
 
-Connect Grafana from Settings and choose the deployment. Grafana is
-investigation context; alerts still arrive through a watched Slack channel or
-another trigger.
+Connect Grafana from Settings or the automation editor and choose the
+deployment. Grafana is context for investigations and automations; alerts still
+arrive through a watched Slack channel or another trigger.
 
 **Grafana Cloud** uses Grafana's hosted MCP server. Enter the stack URL, for
 example `https://acme.grafana.net`. Responder derives the stack-scoped endpoint
@@ -360,9 +360,18 @@ sandbox.
 
 In both modes the worker exposes only tools annotated read-only.
 
-The worker image installs a pinned `mcp-grafana` release and sets
-`MCP_GRAFANA_BINARY`. Local development downloads the same release into
-`.tools/` on the first `pnpm dev:worker` start.
+Automations can use a Grafana connection as context. The worker gives each run
+one server per Grafana connection, served by the run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>`. For Grafana Cloud the broker
+refreshes the OAuth token, lists tools itself, and forwards calls only to tools
+annotated read-only. For self-hosted Grafana the broker starts the same
+`mcp-grafana` process, with the same categories and egress proxy, for each tool
+call and for listings it has not cached in the last ten minutes, so the service
+account token stays in the control plane.
+
+The worker and control plane images install a pinned `mcp-grafana` release and
+set `MCP_GRAFANA_BINARY`. Local development downloads the same release into
+`.tools/` on the first `pnpm local:dev` or `pnpm dev:worker` start.
 
 ## Axiom
 

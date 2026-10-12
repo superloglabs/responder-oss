@@ -94,7 +94,7 @@ THE FONT SOFTWARE OR FROM OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ---
 
-The worker container image includes the `mcp-grafana` binary from
-https://github.com/grafana/mcp-grafana, Copyright Grafana Labs, licensed under
-the Apache License, Version 2.0. The image includes its license at
+The worker and control plane container images include the `mcp-grafana` binary
+from https://github.com/grafana/mcp-grafana, Copyright Grafana Labs, licensed
+under the Apache License, Version 2.0. Each image includes its license at
 `/usr/share/licenses/mcp-grafana/LICENSE`.

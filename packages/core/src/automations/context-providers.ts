@@ -6,6 +6,7 @@ export const automationContextProviders = [
   "custom_mcp",
   "datadog",
   "gcp",
+  "grafana",
   "linear",
   "sentry",
   "slack",

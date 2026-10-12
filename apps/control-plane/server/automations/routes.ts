@@ -237,6 +237,7 @@ export const automationRoutes = new Hono()
           "sentry",
           "datadog",
           "gcp",
+          "grafana",
           "posthog",
           "custom_mcp",
           "linear",

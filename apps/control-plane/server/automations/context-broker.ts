@@ -24,6 +24,7 @@ import {
   type CustomMcpCredentials,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
+import { parseGrafanaCredentials } from "../../../../packages/core/src/integrations/grafana.js";
 import {
   linearAccessTokenNeedsRefresh,
   parseLinearOAuthCredentials,
@@ -43,6 +44,12 @@ import {
   type GcpContextDependencies,
   isGcpMcpService,
 } from "./gcp-context.js";
+import {
+  defaultSelfHostedGrafanaDependencies,
+  grafanaCloudContextServer,
+  selfHostedGrafanaAnswer,
+  type SelfHostedGrafanaDependencies,
+} from "./grafana-context.js";
 import { managedMcpDecision, type ManagedMcpServer } from "./managed-mcp-context.js";
 import {
   callLinearTool,
@@ -73,6 +80,7 @@ interface ContextBrokerDependencies {
   aws: AwsContextDependencies;
   freshSentryCredentials: typeof freshSentryCredentials;
   gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
+  grafana: SelfHostedGrafanaDependencies;
   linear: LinearToolDependencies;
   providerFetch: typeof safeCustomMcpFetch;
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
@@ -86,6 +94,7 @@ const defaultDependencies: ContextBrokerDependencies = {
   aws: { credentials: awsContextCredentials, fetch: awsContextFetch, now: Date.now },
   freshSentryCredentials,
   gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
+  grafana: defaultSelfHostedGrafanaDependencies,
   linear: defaultLinearToolDependencies,
   providerFetch: safeCustomMcpFetch,
   refreshCustomMcp: refreshCustomMcpOAuth,
@@ -254,6 +263,123 @@ function managedContextServer(
     });
   }
   return null;
+}
+
+async function grafanaCloudAccessToken(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<string> {
+  const credentials = await dependencies.withCredentialLease({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parseGrafanaCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      if (current.authType !== "oauth") return { value: null };
+      const oauth = await dependencies.refreshCustomMcp({
+        mcpUrl: current.mcpUrl,
+        oauth: current.oauth,
+        redirectUrl: integrationCallbackUrl("grafana"),
+      });
+      if (oauth === current.oauth) return { value: current };
+      const updated = { ...current, oauth };
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "grafana",
+  });
+  const accessToken = credentials?.oauth.tokens?.access_token;
+  if (typeof accessToken !== "string") {
+    throw new Error("Reconnect the Grafana Cloud OAuth connection");
+  }
+  return accessToken;
+}
+
+// Serves one MCP request for a managed server: the broker answers tool
+// listings itself and forwards only allowed calls.
+async function managedServerResponse(input: {
+  dependencies: ContextBrokerDependencies;
+  rawBody: string;
+  request: Request;
+  rpc: z.infer<typeof requestSchema>;
+  server: ManagedMcpServer;
+}): Promise<Response> {
+  const decision = await managedMcpDecision({
+    method: input.rpc.method,
+    params: input.rpc.params,
+    server: input.server,
+  });
+  if (decision.kind === "accept") return new Response(null, { status: 202 });
+  if (decision.kind === "list") {
+    return Response.json(rpcResult(input.rpc.id, { tools: decision.tools }));
+  }
+  if (decision.kind === "reject") {
+    return Response.json(
+      rpcError(input.rpc.id, decision.code, decision.message),
+      { status: decision.status },
+    );
+  }
+  return await proxyMcpRequest({
+    dependencies: input.dependencies,
+    rawBody: input.rawBody,
+    request: input.request,
+    target: {
+      fetch: input.server.fetch,
+      headers: await input.server.headers(),
+      url: input.server.url,
+    },
+  });
+}
+
+async function grafanaResponse(input: {
+  claim: AutomationContextBrokerClaim;
+  dependencies: ContextBrokerDependencies;
+  rawBody: string;
+  request: Request;
+  rpc: z.infer<typeof requestSchema>;
+}): Promise<Response> {
+  const { claim, dependencies, rpc } = input;
+  if (!claim.account.encryptedCredentials) {
+    return Response.json(rpcError(rpc.id, -32601, "Connection does not expose context tools"), {
+      status: 404,
+    });
+  }
+  const credentials = parseGrafanaCredentials(
+    decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+  );
+  if (credentials.authType === "oauth") {
+    return await managedServerResponse({
+      ...input,
+      server: grafanaCloudContextServer({
+        accessToken: () => grafanaCloudAccessToken(claim, dependencies),
+        accountId: claim.account.id,
+        fetch: dependencies.providerFetch,
+        mcpUrl: credentials.mcpUrl,
+        now: dependencies.grafana.now,
+      }),
+    });
+  }
+  const answer = await selfHostedGrafanaAnswer({
+    accountId: claim.account.id,
+    connection: credentials,
+    dependencies: dependencies.grafana,
+    method: rpc.method,
+    params: rpc.params,
+    signal: input.request.signal,
+  });
+  if (answer.kind === "accept") return new Response(null, { status: 202 });
+  if (answer.kind === "reject") {
+    return Response.json(rpcError(rpc.id, answer.code, answer.message), {
+      status: answer.status,
+    });
+  }
+  return Response.json(rpcResult(rpc.id, answer.result), {
+    headers: { "cache-control": "no-store" },
+  });
 }
 
 async function linearAccessToken(
@@ -490,30 +616,21 @@ export function createAutomationContextBrokerRoutes(
         if (!server) {
           return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
         }
-        const decision = await managedMcpDecision({
-          method: parsed.data.method,
-          params: parsed.data.params,
-          server,
-        });
-        if (decision.kind === "accept") return new Response(null, { status: 202 });
-        if (decision.kind === "list") {
-          return context.json(rpcResult(parsed.data.id, { tools: decision.tools }));
-        }
-        if (decision.kind === "reject") {
-          return context.json(
-            rpcError(parsed.data.id, decision.code, decision.message),
-            decision.status,
-          );
-        }
-        return await proxyMcpRequest({
+        return await managedServerResponse({
           dependencies,
           rawBody,
           request: context.req.raw,
-          target: {
-            fetch: server.fetch,
-            headers: await server.headers(),
-            url: server.url,
-          },
+          rpc: parsed.data,
+          server,
+        });
+      }
+      if (claim.account.provider === "grafana") {
+        return await grafanaResponse({
+          claim,
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          rpc: parsed.data,
         });
       }
       if (claim.account.provider === "axiom") {

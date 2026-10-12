@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { createAutomationContextBrokerRoutes } from "./context-broker.js";
+import { selfHostedGrafanaAnswer } from "./grafana-context.js";
 
 const accountId = "61616161-6161-4161-8161-616161616161";
 
@@ -56,6 +57,10 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
         authorization: "Bearer google-federated-token",
         "x-goog-user-project": "konex-prod",
       })),
+      now: () => Date.now(),
+    },
+    grafana: {
+      connect: vi.fn(),
       now: () => Date.now(),
     },
     freshSentryCredentials: vi.fn().mockResolvedValue({
@@ -490,6 +495,228 @@ describe("automation context broker", () => {
       expect(servicePath.status).toBe(404);
       expect(resources.status).toBe(404);
       expect(dependencies.aws.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Grafana", () => {
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    const grafanaTools = [
+      { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "query_prometheus" },
+      { annotations: { readOnlyHint: false }, inputSchema: { type: "object" }, name: "update_dashboard" },
+      { inputSchema: { type: "object" }, name: "create_incident" },
+    ];
+
+    function cloudClaim(stack: string) {
+      return claim("grafana", {
+        authType: "oauth",
+        mcpUrl: `https://mcp.grafana.com/mcp/${stack}.grafana.net`,
+        oauth: {
+          tokens: {
+            access_token: "expired-grafana-token",
+            refresh_token: "grafana-refresh-token",
+          },
+        },
+        stackUrl: `https://${stack}.grafana.net`,
+      });
+    }
+
+    function fakeGrafanaCloudMcp() {
+      return vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+        if (body.method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        const result = body.method === "initialize"
+          ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+          : body.method === "tools/list"
+            ? { tools: grafanaTools }
+            : { content: [{ text: "p99 412ms", type: "text" }] };
+        return Response.json(
+          { id: body.id, jsonrpc: "2.0", result },
+          { headers: body.method === "initialize" ? { "mcp-session-id": "grafana-session" } : {} },
+        );
+      });
+    }
+
+    function selfHostedClaim(host: string) {
+      return claim("grafana", {
+        authType: "service_account",
+        grafanaUrl: `https://${host}`,
+        serviceAccountToken: "glsa_worker_only",
+      });
+    }
+
+    function fakeMcpGrafana() {
+      return {
+        callTool: vi.fn().mockResolvedValue({ content: [{ text: "3 firing alerts", type: "text" }] }),
+        close: vi.fn().mockResolvedValue(undefined),
+        listTools: vi.fn().mockResolvedValue({ tools: grafanaTools }),
+      };
+    }
+
+    it("lists only read-only Grafana Cloud tools with a refreshed token", async () => {
+      const { app, dependencies } = appFor(cloudClaim("list-acme"));
+      dependencies.providerFetch.mockImplementation(fakeGrafanaCloudMcp());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 4, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { result: { tools: Array<{ name: string }> } };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual(["query_prometheus"]);
+      expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
+        mcpUrl: "https://mcp.grafana.com/mcp/list-acme.grafana.net",
+      }));
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.every(([url]) => url === "https://mcp.grafana.com/mcp/list-acme.grafana.net")).toBe(true);
+      expect(new Headers(calls.at(-1)![1].headers).get("authorization")).toBe("Bearer fresh-oauth-token");
+      expect(JSON.stringify(body)).not.toContain("fresh-oauth-token");
+    });
+
+    it("refuses Grafana Cloud tools that are not read-only and forwards the rest", async () => {
+      const { app, dependencies } = appFor(cloudClaim("call-acme"));
+      dependencies.providerFetch.mockImplementation(fakeGrafanaCloudMcp());
+
+      for (const name of ["update_dashboard", "create_incident"]) {
+        const refused = await app.request(
+          `/api/automation-context-broker/v1/${accountId}`,
+          rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name } }),
+        );
+        expect(refused.status).toBe(400);
+      }
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.some(([, init]) => String(init.body).includes("tools/call"))).toBe(false);
+
+      const forwarded = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { expr: "up" }, name: "query_prometheus" },
+        }),
+      );
+      expect(forwarded.status).toBe(200);
+      expect(await forwarded.text()).toContain("p99 412ms");
+      const [, init] = (dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>).at(-1)!;
+      expect(String(init.body)).toContain("query_prometheus");
+      expect(new Headers(init.headers).get("authorization")).toBe("Bearer fresh-oauth-token");
+    });
+
+    it("serves self-hosted Grafana's read-only tools without exposing the token", async () => {
+      const { app, dependencies } = appFor(selfHostedClaim("list.grafana.example.com"));
+      const client = fakeMcpGrafana();
+      dependencies.grafana.connect.mockResolvedValue(client);
+
+      const initialize = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "initialize", params: { protocolVersion: "2025-06-18" } }),
+      );
+      expect(await initialize.json()).toMatchObject({
+        id: 1,
+        result: { protocolVersion: "2025-06-18", serverInfo: { name: "responder-grafana" } },
+      });
+      expect(dependencies.grafana.connect).not.toHaveBeenCalled();
+
+      const list = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 2, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const listBody = await list.json() as { id: number; result: { tools: Array<{ name: string }> } };
+      expect(listBody.id).toBe(2);
+      expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["query_prometheus"]);
+      expect(dependencies.grafana.connect).toHaveBeenCalledWith(
+        { authType: "service_account", grafanaUrl: "https://list.grafana.example.com", serviceAccountToken: "glsa_worker_only" },
+        expect.any(AbortSignal),
+      );
+      expect(client.close).toHaveBeenCalled();
+      expect(JSON.stringify(listBody)).not.toContain("glsa_worker_only");
+    });
+
+    it("starts mcp-grafana once for a call that finds no cached listing", async () => {
+      const { app, dependencies } = appFor(selfHostedClaim("cold.grafana.example.com"));
+      const client = fakeMcpGrafana();
+      dependencies.grafana.connect.mockResolvedValue(client);
+
+      const call = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: {}, name: "query_prometheus" },
+        }),
+      );
+
+      expect(call.status).toBe(200);
+      expect(dependencies.grafana.connect).toHaveBeenCalledTimes(1);
+      expect(client.listTools).toHaveBeenCalledTimes(1);
+      expect(client.callTool).toHaveBeenCalledTimes(1);
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not start mcp-grafana for a request that was already cancelled", async () => {
+      const { dependencies } = appFor(null);
+      const cancelled = new AbortController();
+      cancelled.abort();
+
+      await expect(selfHostedGrafanaAnswer({
+        accountId,
+        connection: { grafanaUrl: "https://cancelled.grafana.example.com", serviceAccountToken: "glsa_token" },
+        dependencies: dependencies.grafana,
+        method: "tools/list",
+        params: {},
+        signal: cancelled.signal,
+      })).rejects.toThrow();
+      expect(dependencies.grafana.connect).not.toHaveBeenCalled();
+    });
+
+    it("calls read-only self-hosted Grafana tools and refuses the rest", async () => {
+      const { app, dependencies } = appFor(selfHostedClaim("call.grafana.example.com"));
+      const client = fakeMcpGrafana();
+      dependencies.grafana.connect.mockResolvedValue(client);
+
+      for (const name of ["update_dashboard", "create_incident", "not_a_tool"]) {
+        const refused = await app.request(
+          `/api/automation-context-broker/v1/${accountId}`,
+          rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name } }),
+        );
+        expect(refused.status).toBe(400);
+      }
+      expect(client.callTool).not.toHaveBeenCalled();
+
+      const call = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 3,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { expr: "up" }, name: "query_prometheus" },
+        }),
+      );
+      expect(call.status).toBe(200);
+      expect(await call.json()).toEqual({
+        id: 3,
+        jsonrpc: "2.0",
+        result: { content: [{ text: "3 firing alerts", type: "text" }] },
+      });
+      expect(client.callTool).toHaveBeenCalledWith(
+        { arguments: { expr: "up" }, name: "query_prometheus" },
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal), timeout: 60_000 }),
+      );
+      expect(client.close).toHaveBeenCalledTimes(2);
+
+      const resources = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 4, jsonrpc: "2.0", method: "resources/list" }),
+      );
+      expect(resources.status).toBe(404);
     });
   });
 
