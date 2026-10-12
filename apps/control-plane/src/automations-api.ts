@@ -29,6 +29,10 @@ export type AutomationTrigger =
       kind: "axiom";
     }
   | {
+      integrationAccountId: string;
+      kind: "devrev";
+    }
+  | {
       channelIds: string[];
       integrationAccountId: string;
       kind: "discord";
@@ -186,7 +190,7 @@ export interface AutomationCredential {
 
 export interface AutomationOptions extends Omit<AgentOptions, "accounts" | "resources"> {
   accounts: Array<Omit<AgentOptions["accounts"][number], "provider"> & {
-    provider: AgentOptions["accounts"][number]["provider"] | "discord";
+    provider: AgentOptions["accounts"][number]["provider"] | "devrev" | "discord";
   }>;
   credentials: AutomationCredential[];
   // Workspace skills, with the names of the secrets each one brings.

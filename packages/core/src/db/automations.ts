@@ -381,7 +381,24 @@ export async function findAutomationsForDiscordCommand(input: {
 
 // Enabled automations with an Axiom trigger on the connection that received
 // the alert.
-export async function findAutomationsForAxiomAlert(
+export function findAutomationsForAxiomAlert(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  return findAutomationsForConnectionTrigger("axiom", integrationAccountId);
+}
+
+// Enabled automations with a DevRev trigger on the connection whose webhook
+// received the new ticket.
+export function findAutomationsForDevRevTicket(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  return findAutomationsForConnectionTrigger("devrev", integrationAccountId);
+}
+
+// These triggers have no resources to choose: every event that reaches the
+// connection's webhook starts a run.
+async function findAutomationsForConnectionTrigger(
+  kind: "axiom" | "devrev",
   integrationAccountId: string,
 ): Promise<Array<{ automationId: string }>> {
   const rows = await getDatabase()
@@ -407,7 +424,7 @@ export async function findAutomationsForAxiomAlert(
       and(
         eq(integrationAccounts.id, integrationAccountId),
         eq(integrationAccounts.organizationId, automations.organizationId),
-        eq(integrationAccounts.provider, "axiom"),
+        eq(integrationAccounts.provider, kind),
         eq(integrationAccounts.status, "connected"),
       ),
     )
@@ -415,7 +432,7 @@ export async function findAutomationsForAxiomAlert(
 
   return rows.flatMap((row) =>
     row.triggers.some((trigger) =>
-      trigger.kind === "axiom" &&
+      trigger.kind === kind &&
       trigger.integrationAccountId === integrationAccountId
     )
       ? [{ automationId: row.automationId }]
@@ -543,9 +560,9 @@ async function validateConfigurationResources(
         "integration_not_found",
       );
     }
-    // Axiom alerts arrive at the connection's webhook, so there is no
-    // resource to choose.
-    if (trigger.kind === "axiom") continue;
+    // Axiom alerts and DevRev tickets arrive at the connection's webhook, so
+    // there is no resource to choose.
+    if (trigger.kind === "axiom" || trigger.kind === "devrev") continue;
     const triggerResource = trigger.kind === "sentry"
       ? {
           externalIds: trigger.projectIds,
@@ -1518,7 +1535,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "discord" | "manual" | "schedule" | "sentry" | "slack";
+  provider: "axiom" | "devrev" | "discord" | "manual" | "schedule" | "sentry" | "slack";
   sourceUrl?: string;
   title: string;
 }
@@ -2130,10 +2147,12 @@ export async function getAutomationNotificationChannelNames(input: {
   return new Map(rows.map((row) => [`${row.integrationAccountId}:${row.channelId}`, row.name]));
 }
 
-// The Slack connection a notification posts through, while it is connected.
+// The Slack connection a notification posts through, or the DevRev
+// connection a ticket comment posts through, while it is connected.
 export async function getAutomationNotificationAccount(input: {
   integrationAccountId: string;
   organizationId: string;
+  provider?: "devrev" | "slack";
 }): Promise<{ encryptedCredentials: string } | null> {
   const rows = await getDatabase()
     .select({ encryptedCredentials: integrationAccounts.encryptedCredentials })
@@ -2141,7 +2160,7 @@ export async function getAutomationNotificationAccount(input: {
     .where(and(
       eq(integrationAccounts.id, input.integrationAccountId),
       eq(integrationAccounts.organizationId, input.organizationId),
-      eq(integrationAccounts.provider, "slack"),
+      eq(integrationAccounts.provider, input.provider ?? "slack"),
       eq(integrationAccounts.status, "connected"),
     ))
     .limit(1);

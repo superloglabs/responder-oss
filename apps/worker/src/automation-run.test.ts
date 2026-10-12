@@ -88,6 +88,7 @@ function dependencies() {
       workspaceBaseSha: "a".repeat(40),
     }]),
     claimRun: vi.fn().mockResolvedValue(claimedRun()),
+    commentOnDevRevTicket: vi.fn<AutomationRunDependencies["commentOnDevRevTicket"]>().mockResolvedValue(undefined),
     createGrant: vi.fn().mockResolvedValue({
       expiresAt: new Date("2026-09-22T19:10:00.000Z"),
       id: "71717171-7171-4171-8171-717171717171",
@@ -771,6 +772,89 @@ describe("automation run processor", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("DevRev tickets", () => {
+    const ticket = {
+      integrationAccountId: "63636363-6363-4363-8363-636363636363",
+      ticketId: "don:core:dvrv-us-1:devo/1abc:ticket/42",
+    };
+    const job = { kind: "automation_run" as const, queuedAt: "2026-09-22T19:00:00.000Z", runId };
+    const devrevRun = () => ({
+      ...claimedRun(),
+      triggerInput: {
+        attributes: { ...ticket, displayId: "TKT-42", severity: "high" },
+        body: "{\"title\":\"Checkout is down\"}",
+        externalEventId: `${ticket.integrationAccountId}:${ticket.ticketId}`,
+        provider: "devrev",
+        title: "TKT-42: Checkout is down",
+      },
+    });
+
+    it("comments the agent's final reply on the ticket that started the run", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(devrevRun());
+      deps.runCodex.mockResolvedValue({
+        eventStream: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "The payment service is down." } }),
+      });
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("internal comment on the ticket");
+      expect(deps.commentOnDevRevTicket).toHaveBeenCalledWith(expect.objectContaining({
+        automationName: "Weekly digest",
+        organizationId,
+        outcome: { message: "The payment service is down.", status: "succeeded" },
+        runId,
+        ticket,
+      }));
+      expect(deps.notify).not.toHaveBeenCalled();
+    });
+
+    it("comments a failed run and records a comment that could not be posted", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(devrevRun());
+      deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+      deps.commentOnDevRevTicket.mockRejectedValue(new Error("DevRev timeline-entries.create failed (403)"));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.commentOnDevRevTicket).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: { message: "Codex automation harness failed", status: "failed" },
+      }));
+      expect(deps.appendEvent).toHaveBeenCalledWith({
+        data: { message: "DevRev timeline-entries.create failed (403)", ticketId: ticket.ticketId },
+        runId,
+        type: "devrev_comment_failed",
+      });
+    });
+
+    it("leaves follow-up turns on the run page", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(devrevRun());
+      deps.hasFinishedTurn.mockResolvedValue(true);
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.commentOnDevRevTicket).not.toHaveBeenCalled();
+    });
+
+    it("does not comment on runs other triggers started", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.commentOnDevRevTicket).not.toHaveBeenCalled();
+      expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("DevRev");
+    });
   });
 
   describe("notifications", () => {

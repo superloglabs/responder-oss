@@ -63,7 +63,7 @@ describe("editor context integrations", () => {
 
     const result = await fetchIntegrations();
 
-    expect(result).toEqual(integrationCatalog.filter(({ id }) => id !== "discord"));
+    expect(result).toEqual(integrationCatalog.filter(({ id }) => id !== "devrev" && id !== "discord"));
     expect(result.some(({ id }) => id === "sentry")).toBe(true);
     expect(result.some(({ id }) => id === "custom_mcp")).toBe(true);
   });

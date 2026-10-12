@@ -97,6 +97,13 @@ import {
 } from "./datadog.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
+  createDevRevTicketWebhook,
+  deleteDevRevWebhook,
+  DevRevApiError,
+  getDevRevOrganization,
+  parseDevRevCredentials,
+} from "../../../../packages/core/src/integrations/devrev.js";
+import {
   AXIOM_MCP_URL,
   AXIOM_WEBHOOK_BODY_TEMPLATE,
   axiomWebhookSecret,
@@ -158,6 +165,7 @@ import {
 } from "./vercel.js";
 import {
   axiomWebhookUrl,
+  devrevWebhookUrl,
   dash0WebhookUrl,
   integrationCallbackUrl,
   settingsRedirect,
@@ -332,6 +340,10 @@ const upstashConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4_096),
   email: z.string().trim().email().max(320),
   returnTo: z.string().max(2_048).optional(),
+});
+const devrevConnectionSchema = z.object({
+  returnTo: z.string().max(2_048).optional(),
+  token: z.string().trim().min(1).max(4_096),
 });
 const langfuseConnectionSchema = z.object({
   baseUrl: z.string().trim().url().max(2_048),
@@ -753,7 +765,7 @@ export async function startIntegrationConnection(input: {
   }
 
   if (
-    parsedProvider.data === "discord" &&
+    (parsedProvider.data === "devrev" || parsedProvider.data === "discord") &&
     !(await organizationHasCapability(tenant.organizationId, "automations"))
   ) {
     return Response.json({ error: "Unknown integration provider" }, { status: 404 });
@@ -764,6 +776,7 @@ export async function startIntegrationConnection(input: {
   if (
     parsedProvider.data === "aws" ||
     parsedProvider.data === "datadog" ||
+    parsedProvider.data === "devrev" ||
     parsedProvider.data === "dash0" ||
     parsedProvider.data === "grafana" ||
     parsedProvider.data === "clickstack" ||
@@ -1054,7 +1067,9 @@ export const integrationRoutes = new Hono()
 
     return context.json({
       integrations: integrationCatalog
-        .filter((definition) => definition.id !== "discord" || automationsEnabled)
+        .filter((definition) =>
+          (definition.id !== "devrev" && definition.id !== "discord") || automationsEnabled
+        )
         .map((definition) => {
         const providerAccounts = accounts.filter(
           (account) => account.provider === definition.id,
@@ -1116,6 +1131,7 @@ export const integrationRoutes = new Hono()
             definition.implemented && configured
               ? definition.id === "aws" ||
                   definition.id === "datadog" ||
+                  definition.id === "devrev" ||
                   definition.id === "dash0" ||
                   definition.id === "grafana" ||
                   definition.id === "clickstack" ||
@@ -1662,6 +1678,125 @@ export const integrationRoutes = new Hono()
         502,
       );
     }
+  })
+  .post("/devrev/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (!(await organizationHasCapability(tenant.organizationId, "automations"))) {
+      return context.json({ error: "Unknown integration provider" }, 404);
+    }
+
+    const parsed = devrevConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter a DevRev personal access token" }, 400);
+    }
+    const { token } = parsed.data;
+
+    let organization: Awaited<ReturnType<typeof getDevRevOrganization>>;
+    try {
+      organization = await getDevRevOrganization(token);
+    } catch (error) {
+      if (error instanceof DevRevApiError && error.unauthorized) {
+        return context.json({ error: "DevRev rejected the token" }, 401);
+      }
+      logCallbackError("DevRev", error, { organizationId: tenant.organizationId });
+      return context.json({ error: "Unable to verify the DevRev token" }, 502);
+    }
+
+    const account = {
+      displayName: organization.displayName,
+      externalAccountId: organization.id,
+      metadata: { organizationName: organization.displayName, organizationSlug: organization.slug },
+      organizationId: tenant.organizationId,
+      provider: "devrev" as const,
+    };
+    const existing = await getOrganizationIntegrationAccountByExternalId({
+      externalAccountId: organization.id,
+      organizationId: tenant.organizationId,
+      provider: "devrev",
+    });
+    let previous: ReturnType<typeof parseDevRevCredentials> | null = null;
+    try {
+      previous = existing?.encryptedCredentials
+        ? parseDevRevCredentials(decryptCredentials(existing.encryptedCredentials))
+        : null;
+    } catch {
+      previous = null;
+    }
+    // A new connection is stored first so the webhook URL can name it. It
+    // stays pending until the webhook exists.
+    const accountId = existing?.id ?? await upsertIntegrationAccount({
+      ...account,
+      credentialKeyVersion: 1,
+      encryptedCredentials: encryptCredentials({ authType: "personal_access_token", token }),
+      status: "pending",
+    });
+
+    let webhook: Awaited<ReturnType<typeof createDevRevTicketWebhook>>;
+    try {
+      webhook = await createDevRevTicketWebhook({ token, url: devrevWebhookUrl(accountId) });
+    } catch (error) {
+      if (!existing) {
+        await setIntegrationAccountStatus(accountId, "error").catch(() => undefined);
+      }
+      if (error instanceof DevRevApiError && error.unauthorized) {
+        return context.json(
+          { error: "DevRev did not let this token create a webhook. Use a token from a DevRev admin." },
+          403,
+        );
+      }
+      logCallbackError("DevRev", error, { accountId, organizationId: tenant.organizationId });
+      return context.json({ error: "Unable to register the DevRev webhook" }, 502);
+    }
+
+    await upsertIntegrationAccount({
+      ...account,
+      credentialKeyVersion: 1,
+      encryptedCredentials: encryptCredentials({
+        authType: "personal_access_token",
+        token,
+        webhookId: webhook.id,
+        webhookSecret: webhook.secret,
+      }),
+      status: "connected",
+    });
+    // The replaced webhook would otherwise keep sending every ticket.
+    if (previous?.webhookId && previous.webhookId !== webhook.id) {
+      await deleteDevRevWebhook({ id: previous.webhookId, token: previous.token })
+        .catch((error: unknown) => {
+          logCallbackError("DevRev", error, { accountId, organizationId: tenant.organizationId, stage: "delete_previous_webhook" });
+        });
+    }
+    await captureAnalyticsEvent({
+      distinctId: tenant.user.id,
+      event: "integration connected",
+      organizationId: tenant.organizationId,
+      properties: {
+        integration_account_id: accountId,
+        provider: "devrev",
+      },
+    });
+    console.info(
+      JSON.stringify({
+        accountId,
+        event: "devrev_connected",
+        organizationId: tenant.organizationId,
+        provider: "devrev",
+        reconnected: Boolean(existing),
+      }),
+    );
+    return context.json({
+      accountId,
+      redirectUrl: settingsRedirect(
+        parsed.data.returnTo ?? "/settings",
+        "devrev",
+        "connected",
+      ),
+    });
   })
   .post("/dash0/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

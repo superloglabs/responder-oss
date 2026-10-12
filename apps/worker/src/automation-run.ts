@@ -91,6 +91,10 @@ import {
   type AutomationRunOutcome,
 } from "./automation-notifications.js";
 import {
+  commentAutomationRunOnDevRevTicket,
+  devrevTicketOf,
+} from "./automation-devrev.js";
+import {
   automationToolServer,
   checkoutPullRequestToolName,
   installAutomationToolServer,
@@ -125,6 +129,7 @@ export interface AutomationRunDependencies {
   cancellationRequested: typeof automationRunCancellationRequested;
   checkoutRepositories: typeof checkoutAutomationRuntimeRepositories;
   claimRun: typeof claimAutomationRun;
+  commentOnDevRevTicket: typeof commentAutomationRunOnDevRevTicket;
   createGrant: typeof createAutomationModelBrokerGrant;
   createToolHandler: typeof createAutomationToolHandler;
   getCredential: typeof getOrganizationModelCredential;
@@ -174,6 +179,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   cancellationRequested: automationRunCancellationRequested,
   checkoutRepositories: checkoutAutomationRuntimeRepositories,
   claimRun: claimAutomationRun,
+  commentOnDevRevTicket: commentAutomationRunOnDevRevTicket,
   createGrant: createAutomationModelBrokerGrant,
   createToolHandler: createAutomationToolHandler,
   getCredential: getOrganizationModelCredential,
@@ -447,6 +453,15 @@ function slackTriggerInstructions(triggerInput: Record<string, unknown>): string
   ];
 }
 
+// A DevRev run answers on its ticket, so the agent writes its final reply
+// for the team reading it there.
+function devrevTriggerInstructions(triggerInput: Record<string, unknown>): string[] {
+  if (!devrevTicketOf(triggerInput)) return [];
+  return [
+    "A new DevRev ticket started this run. The trigger payload's body is the ticket as DevRev's API returns it. When you finish, Responder posts your final reply as an internal comment on the ticket: your team sees it and the customer does not. Write the final reply as that comment.",
+  ];
+}
+
 function automationPrompt(
   run: ClaimedAutomationRun,
   repositories: Array<{ path: string; repository: string }>,
@@ -473,6 +488,7 @@ function automationPrompt(
     ...automationSkillInstructions(extensions.skills),
     ...(secretInstructions ? [secretInstructions] : []),
     ...slackTriggerInstructions(run.triggerInput),
+    ...devrevTriggerInstructions(run.triggerInput),
     "Trigger payload:",
     JSON.stringify(run.triggerInput, null, 2),
     ...(continuation ? ["", continuation] : []),
@@ -1228,6 +1244,23 @@ export async function processAutomationRun(
         ? { thread: { eventId: answeredThrough, timestamp: button.threadTimestamp } }
         : {}),
     });
+  }
+  // A run started by a DevRev ticket reports its first turn on the ticket.
+  // Follow-ups continue on the run page.
+  const ticket = devrevTicketOf(run.triggerInput);
+  if (outcome && firstTurn && ticket) {
+    await dependencies.commentOnDevRevTicket({
+      automationId: run.automationId,
+      automationName: run.automationName,
+      environment,
+      organizationId: run.organizationId,
+      outcome,
+      runId: run.runId,
+      ticket,
+    }).catch((error: unknown) => recordEvent(dependencies, run.runId, "devrev_comment_failed", {
+      message: error instanceof Error ? error.message.slice(0, 300) : "Comment failed",
+      ticketId: ticket.ticketId,
+    }));
   }
   if (turnEnded && answeredThrough !== undefined) {
     await answerNewMessages(dependencies, run, answeredThrough, jobId);

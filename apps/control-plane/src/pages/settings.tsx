@@ -14,6 +14,7 @@ import { gcpSetupProgressLabel, type GcpSetupStatus } from "../gcp-setup-status"
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
+import { DevRevConnectionDialog } from "../components/devrev-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import {
@@ -54,7 +55,8 @@ interface IntegrationSummary {
     | "custom_mcp"
     | "clickstack"
     | "linear"
-    | "discord";
+    | "discord"
+    | "devrev";
   name: string;
   description: string;
   state: IntegrationState;
@@ -389,6 +391,7 @@ function DefaultIntegrationCard({
   const [configuringCustomMcp, setConfiguringCustomMcp] = useState(false);
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
+  const [connectingDevRev, setConnectingDevRev] = useState(false);
   const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     integration.id === "supabase" && Boolean(supabaseSelectionState),
@@ -427,6 +430,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "langfuse") {
       setConnectingLangfuse(true);
+      return;
+    }
+    if (integration.id === "devrev") {
+      setConnectingDevRev(true);
       return;
     }
     if (integration.id === "supabase") {
@@ -510,6 +517,11 @@ function DefaultIntegrationCard({
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConnectingLangfuse(false)}
         open={connectingLangfuse}
+        returnTo="/settings"
+      />
+      <DevRevConnectionDialog
+        onCancel={() => setConnectingDevRev(false)}
+        open={connectingDevRev}
         returnTo="/settings"
       />
       <SupabaseConnectionDialog

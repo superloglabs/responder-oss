@@ -66,6 +66,15 @@ describe("automation configuration", () => {
         kind: "axiom",
       }],
     }).notifications).toEqual([notification]);
+    // DevRev runs report on their ticket instead.
+    expect(automationConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [{
+        integrationAccountId: "41414141-4141-4141-8141-414141414141",
+        kind: "devrev",
+      }],
+    }).success).toBe(false);
     expect(automationConfigurationSchema.safeParse({
       ...baseConfiguration,
       notifications: [notification, notification],

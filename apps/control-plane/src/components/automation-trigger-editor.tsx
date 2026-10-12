@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
-import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { PlugsConnectedIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
 import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
 import { defaultScheduleTrigger, scheduleCronError, slackFiltersInUse, slackTriggerFilters, type SlackTriggerFilter, withScheduleFrequency } from "../automation-configuration";
@@ -8,6 +8,7 @@ import { AutomationTriggerConnect } from "./automation-trigger-connect";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
 import { AxiomWebhookDialog } from "./axiom-webhook-dialog";
+import { DevRevConnectionDialog } from "./devrev-connection-dialog";
 import { SentryEnvironmentPicker } from "./sentry-environment-picker";
 import { SlackAuthorPickers } from "./slack-author-picker";
 import { SlackFilterMenu } from "./slack-filter-menu";
@@ -69,6 +70,25 @@ function AxiomTriggerFields({ accountId }: { accountId: string }) {
   </div>;
 }
 
+// DevRev connects with a token in a dialog instead of a popup.
+function DevRevTriggerConnect({ onConnected }: {
+  onConnected: (kind: ConnectedTriggerKind, signal: AbortSignal) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  function connected() {
+    setOpen(false);
+    void onConnected("devrev", new AbortController().signal)
+      .then((usable) => setError(usable ? null : "DevRev connected, but the connection is not available yet. Try again to refresh it."))
+      .catch(() => setError("Could not refresh the connection. Please try again."));
+  }
+  return <div className="automationTrigger__connectAction">
+    <button className="automationCreate__save" onClick={() => { setError(null); setOpen(true); }} type="button"><PlugsConnectedIcon size={16} />Connect</button>
+    {error ? <p className="automationTrigger__connectError" role="alert">{error}</p> : null}
+    <DevRevConnectionDialog onCancel={() => setOpen(false)} onConnected={connected} open={open} returnTo="/automations" />
+  </div>;
+}
+
 // Most automations need one or two triggers; the server accepts up to ten.
 export const maxAutomationTriggers = 10;
 
@@ -100,7 +120,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
   const accounts = options?.accounts.filter((account) => account.provider === connected?.kind) ?? [];
   const account = accounts.find((item) => item.id === connected?.integrationAccountId);
   const resources = options?.resources.filter((resource) => resource.integrationAccountId === connected?.integrationAccountId && resource.kind === (connected?.kind === "sentry" ? "sentry_project" : connected?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
-  const selectedIds = !connected || connected.kind === "axiom" ? [] : connected.kind === "sentry" ? connected.projectIds : connected.channelIds;
+  const selectedIds = !connected || connected.kind === "axiom" || connected.kind === "devrev" ? [] : connected.kind === "sentry" ? connected.projectIds : connected.channelIds;
   const providerName = providerDisplayName(trigger.kind);
   const removeTrigger = <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={onRemove} type="button"><TrashIcon size={14} /></button>;
 
@@ -124,7 +144,9 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
       <p>Connect {providerName} to use this trigger</p>
     </div>
     <div className="automationTrigger__connectionActions">
-      <AutomationTriggerConnect key={connected.kind} kind={connected.kind} name={providerName} onConnected={onConnected} />
+      {connected.kind === "devrev"
+        ? <DevRevTriggerConnect onConnected={onConnected} />
+        : <AutomationTriggerConnect key={connected.kind} kind={connected.kind} name={providerName} onConnected={onConnected} />}
       {removeTrigger}
     </div>
   </div>;
@@ -132,7 +154,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     <div className="automationTrigger__heading">
       <AutomationTriggerIcon kind={connected.kind} />
       <span className="automationTrigger__provider">{title}</span>
-      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "axiom" ? { ...connected, integrationAccountId: event.target.value } : connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : connected.kind === "slack" ? { ...connected, ignoredAuthors: undefined, includedAuthors: undefined, integrationAccountId: event.target.value, channelIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
+      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "axiom" || connected.kind === "devrev" ? { ...connected, integrationAccountId: event.target.value } : connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : connected.kind === "slack" ? { ...connected, ignoredAuthors: undefined, includedAuthors: undefined, integrationAccountId: event.target.value, channelIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
         <option value="" disabled>Choose a workspace</option>
         {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
       </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}
@@ -141,6 +163,8 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     </div>
     {connected.kind === "axiom" ? <div className="automationTrigger__fields" ref={fieldsRef}>
       {account ? <AxiomTriggerFields accountId={connected.integrationAccountId} /> : null}
+    </div> : connected.kind === "devrev" ? <div className="automationTrigger__fields" ref={fieldsRef}>
+      <p className="automationTrigger__hint">Runs when a ticket is created. The run's final reply is posted as an internal comment on the ticket.</p>
     </div> : <div className="automationTrigger__fields" ref={fieldsRef}>
       <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label={connected.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(connected.kind === "sentry" ? { ...connected, projectIds: ids } : { ...connected, channelIds: ids })} onRefresh={connected.kind === "discord" ? undefined : () => onRefresh(connected.kind)} />
       {connected.kind === "sentry" && account ? <SentryEnvironmentPicker key={connected.integrationAccountId} accountId={connected.integrationAccountId} excluded={connected.excludedEnvironments ?? []} onChange={(excludedEnvironments) => onChange({ ...connected, excludedEnvironments })} /> : null}
@@ -203,7 +227,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
       return;
     }
     const account = options?.accounts.find((item) => item.provider === kind);
-    if (kind === "axiom") {
+    if (kind === "axiom" || kind === "devrev") {
       onChange([...triggers, { kind, integrationAccountId: account?.id ?? "" }]);
       return;
     }

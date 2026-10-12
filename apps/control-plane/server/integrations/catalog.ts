@@ -18,6 +18,7 @@ export const productIntegrationIds = [
   "clickstack",
   "linear",
   "discord",
+  "devrev",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -84,6 +85,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
       "DISCORD_CLIENT_SECRET",
       "DISCORD_PUBLIC_KEY",
     ],
+  },
+  {
+    id: "devrev",
+    name: "DevRev",
+    description: "New-ticket triggers for automations, with results commented on the ticket.",
+    implemented: true,
+    requiredEnvironment: [],
   },
   {
     id: "sentry",
