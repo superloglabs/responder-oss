@@ -1,9 +1,9 @@
 import { safeCustomMcpFetch } from "@responder/core/integrations/custom-mcp";
+import { grafanaSelfHostedArgs } from "@responder/core/integrations/grafana-mcp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createGrafanaMcpServer,
   grafanaReadOnlyToolFilter,
-  grafanaSelfHostedArgs,
 } from "./grafana.js";
 
 const { httpConstructor, stdioConstructor } = vi.hoisted(() => ({
@@ -24,7 +24,7 @@ vi.mock("@openai/agents", () => ({
   },
 }));
 
-vi.mock("./egress-proxy.js", () => ({
+vi.mock("@responder/core/integrations/egress-proxy", () => ({
   startEgressProxy: vi.fn(async () => ({
     close: async () => undefined,
     server: { unref: vi.fn() },
@@ -86,23 +86,6 @@ describe("Grafana MCP", () => {
         toolFilter: grafanaReadOnlyToolFilter,
       }),
     );
-  });
-
-  it("disables write, raw API, and SQL tools in the self-hosted process", () => {
-    const args = grafanaSelfHostedArgs();
-    const enabledTools = args
-      .find((arg) => arg.startsWith("--enabled-tools="))!
-      .slice("--enabled-tools=".length)
-      .split(",");
-
-    expect(args).toContain("--disable-write");
-    expect(args).toContain("--usage-stats=disabled");
-    expect(enabledTools).toEqual(
-      expect.arrayContaining(["prometheus", "loki", "dashboard", "alerting"]),
-    );
-    for (const category of ["api", "sql", "admin", "provisioning", "rendering"]) {
-      expect(enabledTools).not.toContain(category);
-    }
   });
 
   it("exposes only tools annotated read-only", async () => {

@@ -1,5 +1,5 @@
 import { isIP, type Server, type Socket, connect, createServer } from "node:net";
-import { resolvePublicHostAddresses } from "@responder/core/integrations/custom-mcp";
+import { resolvePublicHostAddresses } from "./custom-mcp.js";
 
 const SOCKS_VERSION = 0x05;
 const NO_AUTHENTICATION = 0x00;

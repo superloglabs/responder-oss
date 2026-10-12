@@ -39,5 +39,6 @@ if ! database_is_reachable; then
 fi
 pnpm db:migrate
 pnpm --filter @responder/core exec node scripts/local-bootstrap.mjs
+responder_use_mcp_grafana "$repository_root"
 
 exec bash scripts/local-portless.sh

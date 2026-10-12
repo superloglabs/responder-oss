@@ -19,6 +19,7 @@ import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
+import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import { ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
@@ -97,7 +98,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const description = initialAutomation?.description ?? template?.description ?? "";
   const [enabled, setEnabled] = useState(initialAutomation?.enabled ?? true);
   const [configuration, setConfiguration] = useState<AutomationConfiguration>(initialAutomation?.configuration ?? { ...defaultConfiguration, prompt: "" });
-  const [connectDialog, setConnectDialog] = useState<{ provider: "aws" | "datadog" | "custom_mcp" | "gcp"; connectUrl: string } | null>(null);
+  const [connectDialog, setConnectDialog] = useState<{ provider: "aws" | "datadog" | "custom_mcp" | "gcp" | "grafana"; connectUrl: string } | null>(null);
   // Google Cloud returns here to pick a project and finishes the connection in
   // its dialog. Read before the restored draft cleans the URL.
   const [gcpSelectionState, setGcpSelectionState] = useState(() => currentProjectSelectionState("gcp"));
@@ -265,7 +266,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   }, []);
 
   // Connects in this tab. OAuth providers redirect; AWS, Datadog, Google
-  // Cloud, and custom MCP start in a dialog. All return to this page.
+  // Cloud, Grafana, and custom MCP start in a dialog. All return to this page.
   async function connectConnector(provider: AutomationConnectorProvider) {
     setError(null);
     try {
@@ -275,7 +276,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
       saveAutomationDraft({ automationId, name, configuration, ...(isSharedTemplate(template) ? { sharedTemplate: template } : { templateId: template?.id }), githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
-      if (provider === "aws" || provider === "datadog" || provider === "custom_mcp" || provider === "gcp") {
+      if (provider === "aws" || provider === "datadog" || provider === "custom_mcp" || provider === "gcp" || provider === "grafana") {
         setConnectDialog({ provider, connectUrl });
         return;
       }
@@ -492,6 +493,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       {automationId && sharing ? <AutomationShareDialog automationId={automationId} onClose={() => setSharing(false)} /> : null}
       <AwsConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "aws"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <DatadogConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "datadog"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
+      <GrafanaConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "grafana"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <CustomMcpConnectionDialog connectUrl={connectDialog?.connectUrl ?? ""} open={connectDialog?.provider === "custom_mcp"} onCancel={() => { takeAutomationDraft(); setConnectDialog(null); }} returnTo={editorPath} />
       <GcpConnectionDialog
         connectUrl={connectDialog?.provider === "gcp" ? connectDialog.connectUrl : "/api/integrations/gcp/start"}

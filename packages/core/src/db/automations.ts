@@ -2152,6 +2152,7 @@ export async function getAutomationNotificationAccount(input: {
 export async function getAutomationRuntimeConnections(versionId: string) {
   return getDatabase()
     .select({
+      displayName: integrationAccounts.displayName,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
       externalAccountId: integrationAccounts.externalAccountId,
       id: integrationAccounts.id,

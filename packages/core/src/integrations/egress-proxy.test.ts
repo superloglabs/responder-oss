@@ -1,13 +1,11 @@
 import { once } from "node:events";
 import { connect, createServer, type Server, type Socket } from "node:net";
-import { resolvePublicHostAddresses } from "@responder/core/integrations/custom-mcp";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolvePublicHostAddresses } from "./custom-mcp.js";
 import { startEgressProxy } from "./egress-proxy.js";
 
-vi.mock("@responder/core/integrations/custom-mcp", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@responder/core/integrations/custom-mcp")
-  >();
+vi.mock("./custom-mcp.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./custom-mcp.js")>();
   return {
     ...actual,
     resolvePublicHostAddresses: vi.fn(actual.resolvePublicHostAddresses),

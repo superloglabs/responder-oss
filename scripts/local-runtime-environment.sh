@@ -68,3 +68,21 @@ responder_load_runtime_environment() {
   fi
   set +a
 }
+
+# Self-hosted Grafana context runs the pinned grafana/mcp-grafana binary in the
+# worker for investigations and in the control plane for automations. The
+# first start downloads and verifies it into .tools/.
+responder_use_mcp_grafana() {
+  local responder_repository_root="$1"
+  local responder_mcp_grafana_binary
+
+  if [[ -n "${MCP_GRAFANA_BINARY:-}" ]]; then
+    return 0
+  fi
+  if responder_mcp_grafana_binary="$(node "$responder_repository_root/scripts/install-mcp-grafana.mjs")"; then
+    export MCP_GRAFANA_BINARY="$responder_mcp_grafana_binary"
+  else
+    echo "Note: mcp-grafana could not be installed. Self-hosted Grafana context" >&2
+    echo "      is unavailable until scripts/install-mcp-grafana.mjs succeeds." >&2
+  fi
+}
