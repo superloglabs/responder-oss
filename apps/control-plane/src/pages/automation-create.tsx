@@ -208,12 +208,11 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       } else if (sharedTemplateSlug) {
         setError("This shared template is no longer available. Set up the automation below or pick a template from Automations.");
       }
-      const contextAccountIds = defaultContextAccountIds(loadedOptions);
       updateConfiguration((current) => {
-        const blank = { ...current, contextAccountIds, model: "", repositoryIds: [] };
+        const blank = { ...current, contextAccountIds: defaultContextAccountIds(loadedOptions), model: "", repositoryIds: [] };
         if (!starting) return blank;
         const fromTemplate = applyAutomationTemplate(blank, starting, loadedOptions);
-        return { ...fromTemplate, contextAccountIds: [...new Set([...fromTemplate.contextAccountIds, ...contextAccountIds])] };
+        return { ...fromTemplate, contextAccountIds: defaultContextAccountIds(loadedOptions, fromTemplate.contextAccountIds) };
       }, false);
       return;
     }

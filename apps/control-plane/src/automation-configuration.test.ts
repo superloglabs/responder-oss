@@ -58,7 +58,7 @@ describe("availableAutomationConfiguration", () => {
 });
 
 describe("defaultContextAccountIds", () => {
-  it("selects every connected connector except GitHub", () => {
+  it("selects every supported connected connector except GitHub", () => {
     expect(defaultContextAccountIds({
       ...options,
       accounts: [
@@ -74,6 +74,13 @@ describe("defaultContextAccountIds", () => {
   it("stops at the 50 connectors the server accepts", () => {
     const accounts = Array.from({ length: 51 }, (_, index) => ({ id: `mcp-${index}`, provider: "custom_mcp", displayName: `MCP ${index}` }));
     expect(defaultContextAccountIds({ ...options, accounts } as AutomationOptions)).toHaveLength(50);
+  });
+
+  it("keeps already selected connectors first within the limit", () => {
+    const accounts = Array.from({ length: 51 }, (_, index) => ({ id: `mcp-${index}`, provider: "custom_mcp", displayName: `MCP ${index}` }));
+    const selected = defaultContextAccountIds({ ...options, accounts } as AutomationOptions, ["mcp-50"]);
+    expect(selected).toHaveLength(50);
+    expect(selected.slice(0, 2)).toEqual(["mcp-50", "mcp-0"]);
   });
 });
 

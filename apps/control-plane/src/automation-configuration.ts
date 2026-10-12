@@ -61,9 +61,9 @@ export function automationContextAccounts(options: AutomationOptions): Automatio
 }
 
 // A new automation starts with every connected connector, up to the 50 the
-// server accepts.
-export function defaultContextAccountIds(options: AutomationOptions): string[] {
-  return automationContextAccounts(options).slice(0, 50).map((account) => account.id);
+// server accepts. Connectors already selected, such as a template's, come first.
+export function defaultContextAccountIds(options: AutomationOptions, selectedIds: string[] = []): string[] {
+  return [...new Set([...selectedIds, ...automationContextAccounts(options).map((account) => account.id)])].slice(0, 50);
 }
 
 // Saved automation settings can reference connections, trigger resources,
