@@ -1089,4 +1089,68 @@ describe("automation context broker", () => {
     }));
     expect(dependencies.providerFetch).not.toHaveBeenCalled();
   });
+
+  it("serves the Vercel read tools scoped to the installation's projects", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      id: "prj-1",
+      name: "web",
+      token: "nested-token",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const vercelClaim = {
+      ...claim("vercel", {
+        accessToken: "vercel-installation-token",
+        configurationId: "icfg_1",
+        teamId: "team-1",
+        userId: null,
+      }),
+      resources: [{ displayName: "web", externalId: "prj-1", kind: "vercel_project" }],
+    };
+    const { app, dependencies } = appFor(vercelClaim);
+    const call = (id: number, name: string, args: unknown) => app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id, jsonrpc: "2.0", method: "tools/call", params: { arguments: args, name } }),
+    );
+
+    try {
+      const list = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const listBody = await list.json() as { result: { tools: Array<{ annotations: { readOnlyHint: boolean }; name: string }> } };
+      expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["search_vercel_api", "call_vercel_api"]);
+      expect(listBody.result.tools.every((tool) => tool.annotations.readOnlyHint)).toBe(true);
+
+      const search = await call(2, "search_vercel_api", { query: "runtime logs" });
+      expect(await search.text()).toContain("getRuntimeLogs");
+
+      const project = await call(3, "call_vercel_api", {
+        operationId: "getProject",
+        pathParameters: [{ name: "idOrName", value: "prj-1" }],
+        queryParameters: [{ name: "teamId", value: "other-team" }],
+      });
+      const projectBody = await project.text();
+      expect(projectBody).toContain("prj-1");
+      expect(projectBody).not.toContain("nested-token");
+      const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+      expect(url.toString()).toBe("https://api.vercel.com/v9/projects/prj-1?teamId=team-1");
+      expect((init.headers as Record<string, string>).authorization).toBe("Bearer vercel-installation-token");
+
+      const outside = await call(4, "call_vercel_api", {
+        operationId: "getProject",
+        pathParameters: [{ name: "idOrName", value: "prj-other" }],
+      });
+      expect(await outside.json()).toMatchObject({
+        result: { isError: true, content: [{ text: expect.stringContaining("not available to this connection") }] },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const unknown = await call(5, "createDeployment", {});
+      expect(unknown.status).toBe(400);
+      expect(dependencies.providerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

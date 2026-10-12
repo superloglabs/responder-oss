@@ -71,6 +71,13 @@ import {
   UnknownSlackToolError,
   type SlackToolDependencies,
 } from "./slack-tools.js";
+import {
+  callVercelTool,
+  defaultVercelToolDependencies,
+  vercelContextConnection,
+  vercelToolDefinitions,
+  type VercelToolDependencies,
+} from "./vercel-context.js";
 
 const accountIdSchema = z.uuid();
 const requestSchema = z.object({
@@ -94,6 +101,7 @@ interface ContextBrokerDependencies {
   refreshLinear: typeof refreshLinearOAuthCredentials;
   resolveGrant: ResolveGrant;
   slack: SlackToolDependencies;
+  vercel: VercelToolDependencies;
   withCredentialLease: typeof withIntegrationAccountCredentialLease;
 }
 
@@ -109,6 +117,7 @@ const defaultDependencies: ContextBrokerDependencies = {
   refreshLinear: refreshLinearOAuthCredentials,
   resolveGrant: resolveAutomationContextBrokerGrant,
   slack: defaultSlackToolDependencies,
+  vercel: defaultVercelToolDependencies,
   withCredentialLease: withIntegrationAccountCredentialLease,
 };
 
@@ -504,6 +513,60 @@ async function linearResponse(
   })));
 }
 
+// Vercel has no MCP server, so the broker serves the investigation tools.
+async function vercelResponse(
+  claim: AutomationContextBrokerClaim,
+  request: z.infer<typeof requestSchema>,
+  dependencies: ContextBrokerDependencies,
+): Promise<Response> {
+  if (request.method.startsWith("notifications/")) {
+    return new Response(null, { status: 202 });
+  }
+  if (request.method === "initialize") {
+    const requestedVersion = z.string().safeParse(request.params?.protocolVersion);
+    return Response.json(rpcResult(request.id, {
+      capabilities: { tools: {} },
+      protocolVersion: requestedVersion.success
+        ? requestedVersion.data
+        : "2025-03-26",
+      serverInfo: { name: "responder-vercel", version: "1" },
+    }));
+  }
+  if (request.method === "ping") return Response.json(rpcResult(request.id, {}));
+  if (request.method === "tools/list") {
+    return Response.json(rpcResult(request.id, { tools: vercelToolDefinitions }));
+  }
+  if (request.method !== "tools/call") {
+    return Response.json(rpcError(request.id, -32601, "Method not found"), {
+      status: 404,
+    });
+  }
+  const connection = vercelContextConnection(claim);
+  if (!connection) {
+    return Response.json(rpcError(request.id, -32601, "Connection does not expose context tools"), {
+      status: 404,
+    });
+  }
+  const toolName = z.string().safeParse(request.params?.name);
+  if (!toolName.success) {
+    return Response.json(rpcError(request.id, -32602, "Invalid tool arguments"), {
+      status: 400,
+    });
+  }
+  const result = await callVercelTool({
+    args: request.params?.arguments,
+    connection,
+    dependencies: dependencies.vercel,
+    name: toolName.data,
+  });
+  if (!result) {
+    return Response.json(rpcError(request.id, -32602, "Unknown tool"), {
+      status: 400,
+    });
+  }
+  return Response.json(rpcResult(request.id, result));
+}
+
 async function slackResponse(
   claim: AutomationContextBrokerClaim,
   request: z.infer<typeof requestSchema>,
@@ -653,6 +716,9 @@ export function createAutomationContextBrokerRoutes(
       }
       if (claim.account.provider === "linear") {
         return await linearResponse(claim, parsed.data, dependencies);
+      }
+      if (claim.account.provider === "vercel") {
+        return await vercelResponse(claim, parsed.data, dependencies);
       }
       if (claim.account.provider === "aws" || claim.account.provider === "gcp") {
         if (claim.account.provider === "gcp" && !isGcpMcpService(service)) {

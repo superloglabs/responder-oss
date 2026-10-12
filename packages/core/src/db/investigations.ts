@@ -43,6 +43,7 @@ import {
 } from "../integrations/linear.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
 import { parseLangfuseCredentials } from "../integrations/langfuse.js";
+import { vercelCredentialsSchema } from "../integrations/vercel.js";
 import {
   parseSupabaseCredentials,
   type SupabaseAccessMode,
@@ -1413,13 +1414,6 @@ export interface RuntimeVercelConnection {
   projectIds: string[];
   teamId: string | null;
 }
-
-const vercelCredentialsSchema = z.object({
-  accessToken: z.string().min(1),
-  configurationId: z.string().min(1),
-  teamId: z.string().min(1).nullable(),
-  userId: z.string().min(1).nullable(),
-});
 
 export async function getRuntimeVercelConnections(
   versionId: string,

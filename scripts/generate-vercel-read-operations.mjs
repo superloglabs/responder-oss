@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 
 const SOURCE_URL = "https://openapi.vercel.sh/";
 const OUTPUT_PATH = resolve(
-  "apps/worker/src/generated/vercel-read-operations.json",
+  "packages/core/src/integrations/generated/vercel-read-operations.json",
 );
 const SENSITIVE_PATH =
   /(?:^|\/)(?:api-keys?|env|environment-variables?|secrets?|tokens?)(?:\/|$)/iu;

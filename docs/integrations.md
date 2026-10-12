@@ -590,6 +590,12 @@ set without narrowing the integration's configured read permissions.
 Regenerate the catalog from Vercel's published OpenAPI document after API
 updates with `pnpm vercel:generate-api`.
 
+Automations can use a Vercel connection as context. Connect it from Settings or
+the automation editor. The run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>` serves the same two tools as
+one MCP server per connection, so the installation token stays in the control
+plane. A run reaches every project the installation shares with Responder.
+
 ## AWS
 
 AWS is optional read-only context for investigations and automations. A
