@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { createAutomationContextBrokerRoutes } from "./context-broker.js";
+import { selfHostedGrafanaAnswer } from "./grafana-context.js";
 
 const accountId = "61616161-6161-4161-8161-616161616161";
 
@@ -631,6 +632,7 @@ describe("automation context broker", () => {
       expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["query_prometheus"]);
       expect(dependencies.grafana.connect).toHaveBeenCalledWith(
         { authType: "service_account", grafanaUrl: "https://list.grafana.example.com", serviceAccountToken: "glsa_worker_only" },
+        expect.any(AbortSignal),
       );
       expect(client.close).toHaveBeenCalled();
       expect(JSON.stringify(listBody)).not.toContain("glsa_worker_only");
@@ -656,6 +658,22 @@ describe("automation context broker", () => {
       expect(client.listTools).toHaveBeenCalledTimes(1);
       expect(client.callTool).toHaveBeenCalledTimes(1);
       expect(client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not start mcp-grafana for a request that was already cancelled", async () => {
+      const { dependencies } = appFor(null);
+      const cancelled = new AbortController();
+      cancelled.abort();
+
+      await expect(selfHostedGrafanaAnswer({
+        accountId,
+        connection: { grafanaUrl: "https://cancelled.grafana.example.com", serviceAccountToken: "glsa_token" },
+        dependencies: dependencies.grafana,
+        method: "tools/list",
+        params: {},
+        signal: cancelled.signal,
+      })).rejects.toThrow();
+      expect(dependencies.grafana.connect).not.toHaveBeenCalled();
     });
 
     it("calls read-only self-hosted Grafana tools and refuses the rest", async () => {

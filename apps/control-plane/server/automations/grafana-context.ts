@@ -47,7 +47,10 @@ export function grafanaCloudContextServer(input: {
 export type GrafanaMcpClient = Pick<Client, "callTool" | "close" | "listTools">;
 
 export interface SelfHostedGrafanaDependencies {
-  connect: (connection: SelfHostedGrafanaConnection) => Promise<GrafanaMcpClient>;
+  connect: (
+    connection: SelfHostedGrafanaConnection,
+    signal: AbortSignal,
+  ) => Promise<GrafanaMcpClient>;
   now: () => number;
 }
 
@@ -58,11 +61,12 @@ export interface SelfHostedGrafanaConnection {
 
 async function connectSelfHostedGrafana(
   connection: SelfHostedGrafanaConnection,
+  signal: AbortSignal,
 ): Promise<GrafanaMcpClient> {
   const client = new Client({ name: "responder-context-broker", version: "1" });
   await client.connect(
     new StdioClientTransport(await grafanaSelfHostedProcess(connection)),
-    { timeout: CONNECT_TIMEOUT_MS },
+    { signal, timeout: CONNECT_TIMEOUT_MS },
   );
   return client;
 }
@@ -73,17 +77,21 @@ export const defaultSelfHostedGrafanaDependencies: SelfHostedGrafanaDependencies
 };
 
 // Starts mcp-grafana only when a request needs it, at most once, so a call that
-// first loads the tool listing uses the same process for the call. The process
-// does not follow the request's abort signal because the listing it loads is
-// shared; the call itself does.
+// first loads the tool listing uses the same process for the call. A cancelled
+// request stops the process; a listing it was loading fails and is dropped from
+// the cache, so the next request loads it again.
 async function withLazyClient<T>(
   connection: SelfHostedGrafanaConnection,
   dependencies: SelfHostedGrafanaDependencies,
+  signal: AbortSignal,
   operation: (client: () => Promise<GrafanaMcpClient>) => Promise<T>,
 ): Promise<T> {
   let started: Promise<GrafanaMcpClient> | undefined;
   try {
-    return await operation(() => (started ??= dependencies.connect(connection)));
+    return await operation(() => {
+      signal.throwIfAborted();
+      return (started ??= dependencies.connect(connection, signal));
+    });
   } finally {
     const client = await started?.catch(() => undefined);
     await client?.close().catch(() => {});
@@ -150,7 +158,7 @@ export async function selfHostedGrafanaAnswer(input: {
   if (input.method !== "tools/list" && input.method !== "tools/call") {
     return { code: -32601, kind: "reject", message: "Method not found", status: 404 };
   }
-  return await withLazyClient(input.connection, input.dependencies, async (client) => {
+  return await withLazyClient(input.connection, input.dependencies, input.signal, async (client) => {
     const tools = await allowedSelfHostedTools({ ...input, client });
     if (input.method === "tools/list") return { kind: "result", result: { tools } };
     const name = z.string().safeParse(input.params?.name);
