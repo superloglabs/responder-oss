@@ -471,6 +471,35 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("keeps Cloudflare investigation access read-only and names the accounts", () => {
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      cloudflareAccountNames: ['"Acme" (account_id a1)'],
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain("connected read-only Cloudflare tools");
+    expect(instructions).toContain("Call search to find Cloudflare API endpoints, then execute");
+    expect(instructions).toContain("never attempt to create, change, or delete Cloudflare resources");
+    expect(instructions).toContain('Connected Cloudflare accounts: "Acme" (account_id a1).');
+    expect(instructions).not.toContain("No observability data source is connected");
+  });
+
+  it("identifies Cloudflare connection failures", () => {
+    expect(
+      contextServerConnectFailureEvent({
+        cloudflareConnections: [{ accountId: "account-1" }],
+        customMcpConnections: [],
+        error: "HTTP 401: Unauthorized",
+        investigationId: "investigation-123",
+        serverName: "cloudflare-account-1",
+      }),
+    ).toMatchObject({ accountId: "account-1", server: "cloudflare-account-1" });
+  });
+
   it("tells the agent to continue when live Sentry context is unavailable", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",

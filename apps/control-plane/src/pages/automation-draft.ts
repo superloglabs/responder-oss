@@ -93,7 +93,7 @@ export function restoreAutomationDraft(options: AutomationOptions, location: Loc
   const name = providerDisplayName(provider);
   return {
     draft: withConnectedAccounts(draft, added),
-    error: connected || selectingProject ? null : search.get("reason") === "cancelled" ? `${name} connection was cancelled.` : `${name} could not be connected.`,
+    error: connected || selectingProject ? null : search.get("reason") === "cancelled" ? `${name} connection was cancelled.` : search.get("reason") === "write_scopes" ? `${name} could not be connected. Choose read-only permissions on the consent screen.` : `${name} could not be connected.`,
     finishing: status === "finishing" && !added.length,
     returnedAccountId,
   };

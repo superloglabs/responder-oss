@@ -45,6 +45,7 @@ interface IntegrationSummary {
     | "dash0"
     | "posthog"
     | "grafana"
+    | "cloudflare"
     | "axiom"
     | "upstash"
     | "langfuse"
@@ -136,7 +137,9 @@ function connectionNotice(): {
         ? "The connection was cancelled."
         : reason === "no_projects"
           ? "That Google account cannot see any active projects."
-          : "The connection could not be completed.";
+          : reason === "write_scopes"
+            ? "Choose read-only permissions on the consent screen. Responder connects only with permissions that cannot change resources."
+            : "The connection could not be completed.";
   return { tone: "error", message: `${name}: ${detail}` };
 }
 

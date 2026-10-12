@@ -19,6 +19,12 @@ import { parseDash0Credentials } from "../integrations/dash0.js";
 import { parsePostHogCredentials } from "../integrations/posthog.js";
 import { parseGrafanaCredentials } from "../integrations/grafana.js";
 import {
+  assertCloudflareReadOnlyGrant,
+  cloudflareAccountsSchema,
+  parseCloudflareCredentials,
+  type CloudflareAccount,
+} from "../integrations/cloudflare.js";
+import {
   CLICKSTACK_CLOUD_MCP_URL,
   CLICKSTACK_CLOUD_OAUTH_ISSUER,
   CLICKSTACK_CLOUD_OAUTH_RESOURCE,
@@ -1342,6 +1348,15 @@ export interface RuntimePostHogConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeCloudflareConnection {
+  accessToken: string;
+  accountId: string;
+  /** The Cloudflare accounts the authorizing user could reach when connecting. */
+  accounts: CloudflareAccount[];
+  displayName: string;
+  mcpUrl: string;
+}
+
 export type RuntimeGrafanaConnection =
   | {
       accessToken: string;
@@ -1734,6 +1749,7 @@ export async function getRuntimeGcpConnections(
 function mcpOAuthRedirectUrl(
   provider:
     | "axiom"
+    | "cloudflare"
     | "custom_mcp"
     | "dash0"
     | "grafana"
@@ -2159,6 +2175,89 @@ export async function getRuntimePostHogConnections(
       },
       organizationId: config.organizationId,
       provider: "posthog",
+    });
+    if (connection) connections.push(connection);
+  }
+
+  return connections;
+}
+
+export async function getRuntimeCloudflareConnections(
+  versionId: string,
+): Promise<RuntimeCloudflareConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config) return [];
+  const accountIds = [...new Set(config.contextAccountIds)];
+  if (accountIds.length === 0) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      metadata: integrationAccounts.metadata,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "cloudflare"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, accountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeCloudflareConnection[] = [];
+
+  for (const accountId of accountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const cloudflareAccounts = cloudflareAccountsSchema.safeParse(
+      (account.metadata as Record<string, unknown> | null)?.accounts,
+    );
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseCloudflareCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = await refreshCustomMcpOAuth({
+          mcpUrl: credentials.mcpUrl,
+          oauth: credentials.oauth,
+          redirectUrl: mcpOAuthRedirectUrl("cloudflare"),
+        });
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Cloudflare OAuth connection");
+        assertCloudflareReadOnlyGrant(oauth.tokens);
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                }),
+              }),
+          value: {
+            accessToken,
+            accountId: account.id,
+            accounts: cloudflareAccounts.success ? cloudflareAccounts.data : [],
+            displayName: account.displayName,
+            mcpUrl: credentials.mcpUrl,
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "cloudflare",
     });
     if (connection) connections.push(connection);
   }

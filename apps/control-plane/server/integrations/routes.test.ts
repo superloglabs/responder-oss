@@ -48,6 +48,7 @@ import {
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations/dash0.js";
 import { POSTHOG_MCP_URL } from "../../../../packages/core/src/integrations/posthog.js";
+import { CLOUDFLARE_MCP_URL } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -3098,6 +3099,133 @@ describe("integration callback routing", () => {
         status: "connected",
       }),
     );
+  });
+
+  it("starts Cloudflare OAuth with only the identity scopes", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://mcp.cloudflare.com/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/cloudflare/start?returnTo=%2Fautomations%2Fnew",
+    );
+
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://mcp.cloudflare.com/authorize");
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: CLOUDFLARE_MCP_URL,
+      redirectUrl: "https://responder.example/api/integrations/cloudflare/callback",
+      scope: "user:read account:read offline_access",
+    });
+    expect(updateIntegrationConnectionStateMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { encryptedCredentials: "encrypted-credentials" },
+        provider: "cloudflare",
+        state: "oauth-state",
+      }),
+    );
+  });
+
+  it("finishes Cloudflare OAuth as the Cloudflare user and keeps the accounts", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/automations/new",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: CLOUDFLARE_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        scope: "user:read account:read offline_access workers-observability.read zone.read",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(callCustomMcpTool).mockImplementation(async ({ name }) =>
+      name === "whoami"
+        ? { email: "ops@acme.example", id: "user:cf-user-1" }
+        : [{ id: "a1", name: "Acme" }, { id: "b2", name: "Acme Staging" }]
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/cloudflare/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/automations/new" +
+        "?integration=cloudflare&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(decryptCredentials).toHaveBeenCalledWith("pending-credentials");
+    expect(callCustomMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({ accessToken: "oauth-access-token", mcpUrl: CLOUDFLARE_MCP_URL, name: "whoami" }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "ops@acme.example · 2 accounts",
+        encryptedCredentials: "connected-credentials",
+        externalAccountId: "user:cf-user-1",
+        metadata: expect.objectContaining({
+          accounts: [{ id: "a1", name: "Acme" }, { id: "b2", name: "Acme Staging" }],
+          email: "ops@acme.example",
+        }),
+        provider: "cloudflare",
+        status: "connected",
+      }),
+    );
+  });
+
+  it("refuses a Cloudflare grant that can change resources", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      authType: "oauth",
+      mcpUrl: CLOUDFLARE_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "oauth-access-token",
+        scope: "user:read account:read offline_access workers-scripts.write",
+        token_type: "bearer",
+      },
+    });
+
+    const response = await app.request(
+      "/api/integrations/cloudflare/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=cloudflare&status=error&reason=write_scopes",
+    );
+    expect(callCustomMcpTool).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("finishes PostHog OAuth from expiring flow credentials without a pending account", async () => {

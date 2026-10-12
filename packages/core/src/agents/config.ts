@@ -172,6 +172,7 @@ export const contextIntegrationProviders = [
   "dash0",
   "posthog",
   "grafana",
+  "cloudflare",
   "axiom",
   "clickstack",
   "upstash",

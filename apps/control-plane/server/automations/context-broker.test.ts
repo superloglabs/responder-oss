@@ -52,6 +52,7 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
       fetch: vi.fn(),
       now: () => Date.now(),
     },
+    cloudflare: { now: () => Date.now() },
     gcp: {
       authHeaders: vi.fn(async () => new Headers({
         authorization: "Bearer google-federated-token",
@@ -495,6 +496,129 @@ describe("automation context broker", () => {
       expect(servicePath.status).toBe(404);
       expect(resources.status).toBe(404);
       expect(dependencies.aws.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Cloudflare", () => {
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    const cloudflareTools = [
+      { annotations: { readOnlyHint: false }, inputSchema: { type: "object" }, name: "search" },
+      { annotations: { destructiveHint: true }, inputSchema: { type: "object" }, name: "execute" },
+      { annotations: { readOnlyHint: false }, inputSchema: { type: "object" }, name: "docs" },
+      { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "whoami" },
+      { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "get_workers_scripts" },
+    ];
+
+    function cloudflareClaim() {
+      return claim("cloudflare", {
+        authType: "oauth",
+        mcpUrl: "https://mcp.cloudflare.com/mcp",
+        oauth: {
+          tokens: {
+            access_token: "expired-cloudflare-token",
+            refresh_token: "cloudflare-refresh-token",
+            scope: "user:read account:read offline_access workers-observability.read",
+          },
+        },
+      });
+    }
+
+    function fakeCloudflareMcp() {
+      return vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+        if (body.method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        const result = body.method === "initialize"
+          ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+          : body.method === "tools/list"
+            ? { tools: cloudflareTools }
+            : { content: [{ text: "[{\"message\":\"checkout failed\"}]", type: "text" }] };
+        return Response.json({ id: body.id, jsonrpc: "2.0", result });
+      });
+    }
+
+    it("serves the API, docs, and identity tools with a refreshed read-only token", async () => {
+      const { app, dependencies } = appFor(cloudflareClaim());
+      dependencies.providerFetch.mockImplementation(fakeCloudflareMcp());
+      dependencies.refreshCustomMcp.mockResolvedValue({
+        tokens: {
+          access_token: "fresh-cloudflare-token",
+          refresh_token: "refresh-token",
+          scope: "user:read account:read offline_access workers-observability.read",
+        },
+      });
+
+      const listed = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      expect(listed.status).toBe(200);
+      const body = await listed.json() as { result: { tools: Array<{ name: string }> } };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual([
+        "search",
+        "execute",
+        "docs",
+        "whoami",
+      ]);
+
+      const refused = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: {}, name: "get_workers_scripts" },
+        }),
+      );
+      expect(refused.status).toBe(400);
+
+      const forwarded = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 3,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { account_id: "a1", code: "async () => 1" }, name: "execute" },
+        }),
+      );
+      expect(forwarded.status).toBe(200);
+      expect(await forwarded.text()).toContain("checkout failed");
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.every(([url]) => url === "https://mcp.cloudflare.com/mcp")).toBe(true);
+      expect(new Headers(calls.at(-1)![1].headers).get("authorization")).toBe("Bearer fresh-cloudflare-token");
+      expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
+        redirectUrl: expect.stringMatching(/\/api\/integrations\/cloudflare\/callback$/u),
+      }));
+    });
+
+    it("refuses calls when the grant can change resources", async () => {
+      const { app, dependencies } = appFor(cloudflareClaim());
+      dependencies.providerFetch.mockImplementation(fakeCloudflareMcp());
+      dependencies.refreshCustomMcp.mockResolvedValue({
+        tokens: {
+          access_token: "fresh-cloudflare-token",
+          refresh_token: "refresh-token",
+          scope: "user:read account:read workers-scripts.write",
+        },
+      });
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { code: "async () => 1" }, name: "execute" },
+        }),
+      );
+
+      expect(response.status).toBe(502);
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.some(([, init]) => String(init.body).includes("tools/call"))).toBe(false);
     });
   });
 

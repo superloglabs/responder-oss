@@ -12,7 +12,7 @@ export const connectionWidgetHtml = String.raw`<!doctype html>
   const title = document.getElementById('title'), status = document.getElementById('status');
   const connect = document.getElementById('connect'), check = document.getElementById('check');
   const pending = new Map(); let next = 1, data, timer, checking = false, checkFailed = false, active = false, sent = false, ready = false;
-  const names = {slack:'Slack',github:'GitHub',gcp:'Google Cloud',posthog:'PostHog',sentry:'Sentry',linear:'Linear',discord:'Discord',vercel:'Vercel',axiom:'Axiom'};
+  const names = {slack:'Slack',github:'GitHub',gcp:'Google Cloud',posthog:'PostHog',sentry:'Sentry',linear:'Linear',discord:'Discord',vercel:'Vercel',axiom:'Axiom',cloudflare:'Cloudflare'};
   function request(method, params) {
     const id = next++;
     return new Promise((resolve,reject) => {

@@ -212,6 +212,17 @@ const initialSources: ScanSource[] = [
     resources: [],
   },
   {
+    id: "cloudflare",
+    kind: "account",
+    connected: false,
+    description: "Workers logs and analytics, deployments, and zones",
+    enabled: false,
+    name: "Cloudflare",
+    provider: "cloudflare",
+    resourceLabel: "connections",
+    resources: [],
+  },
+  {
     id: "upstash",
     kind: "account",
     connected: false,

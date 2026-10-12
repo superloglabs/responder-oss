@@ -3,6 +3,7 @@
 export const automationContextProviders = [
   "aws",
   "axiom",
+  "cloudflare",
   "custom_mcp",
   "datadog",
   "gcp",

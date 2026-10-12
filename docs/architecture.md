@@ -69,6 +69,12 @@ types. `drizzle/` contains the ordered schema history.
   automations. Its outbound traffic goes through a process-local SOCKS5 proxy.
   In production the proxy connects only to public addresses; local development
   also permits loopback hosts. Both modes expose only tools annotated read-only.
+- Cloudflare uses dynamic OAuth client registration against Cloudflare's hosted
+  API MCP endpoint. Its API tool runs code that can call any Cloudflare
+  endpoint, so the granted OAuth scopes are the read-only boundary: Responder
+  refuses a grant with any scope that can change resources, at connection and
+  after every token refresh. Only the API, spec search, docs, and identity
+  tools are exposed.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link. Automations reach Linear

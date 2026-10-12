@@ -26,6 +26,10 @@ import {
 import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
 import { parseGrafanaCredentials } from "../../../../packages/core/src/integrations/grafana.js";
 import {
+  assertCloudflareReadOnlyGrant,
+  parseCloudflareCredentials,
+} from "../../../../packages/core/src/integrations/cloudflare.js";
+import {
   linearAccessTokenNeedsRefresh,
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
@@ -38,6 +42,7 @@ import {
   type AwsContextDependencies,
 } from "./aws-context.js";
 import { axiomContextDecision, filterAxiomToolList } from "./axiom-context.js";
+import { cloudflareContextServer } from "./cloudflare-context.js";
 import {
   gcpAuthHeaders,
   gcpContextServer,
@@ -78,6 +83,7 @@ type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 
 interface ContextBrokerDependencies {
   aws: AwsContextDependencies;
+  cloudflare: { now: () => number };
   freshSentryCredentials: typeof freshSentryCredentials;
   gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
   grafana: SelfHostedGrafanaDependencies;
@@ -92,6 +98,7 @@ interface ContextBrokerDependencies {
 
 const defaultDependencies: ContextBrokerDependencies = {
   aws: { credentials: awsContextCredentials, fetch: awsContextFetch, now: Date.now },
+  cloudflare: { now: Date.now },
   freshSentryCredentials,
   gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
   grafana: defaultSelfHostedGrafanaDependencies,
@@ -296,6 +303,41 @@ async function grafanaCloudAccessToken(
   if (typeof accessToken !== "string") {
     throw new Error("Reconnect the Grafana Cloud OAuth connection");
   }
+  return accessToken;
+}
+
+async function cloudflareAccessToken(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<string> {
+  const credentials = await dependencies.withCredentialLease({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parseCloudflareCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      const oauth = await dependencies.refreshCustomMcp({
+        mcpUrl: current.mcpUrl,
+        oauth: current.oauth,
+        redirectUrl: integrationCallbackUrl("cloudflare"),
+      });
+      if (oauth === current.oauth) return { value: current };
+      const updated = { ...current, oauth };
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "cloudflare",
+  });
+  const accessToken = credentials?.oauth.tokens?.access_token;
+  if (typeof accessToken !== "string") {
+    throw new Error("Reconnect the Cloudflare OAuth connection");
+  }
+  // The API tool can reach any endpoint the grant allows.
+  assertCloudflareReadOnlyGrant(credentials?.oauth.tokens);
   return accessToken;
 }
 
@@ -622,6 +664,27 @@ export function createAutomationContextBrokerRoutes(
           request: context.req.raw,
           rpc: parsed.data,
           server,
+        });
+      }
+      if (claim.account.provider === "cloudflare") {
+        if (!claim.account.encryptedCredentials) {
+          return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+        }
+        const credentials = parseCloudflareCredentials(
+          decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+        );
+        return await managedServerResponse({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          rpc: parsed.data,
+          server: cloudflareContextServer({
+            accessToken: () => cloudflareAccessToken(claim, dependencies),
+            accountId: claim.account.id,
+            fetch: dependencies.providerFetch,
+            mcpUrl: credentials.mcpUrl,
+            now: dependencies.cloudflare.now,
+          }),
         });
       }
       if (claim.account.provider === "grafana") {

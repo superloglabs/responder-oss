@@ -120,6 +120,7 @@ const toolNameAliases: Record<string, string> = {
 
 const toolNameProviders = [
   "axiom",
+  "cloudflare",
   "datadog",
   "github",
   "grafana",

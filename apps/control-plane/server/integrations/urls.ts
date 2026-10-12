@@ -6,6 +6,7 @@ export function integrationCallbackUrl(
   provider:
     | "axiom"
     | "clickstack"
+    | "cloudflare"
     | "custom_mcp"
     | "dash0"
     | "datadog"
