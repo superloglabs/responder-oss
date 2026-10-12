@@ -107,6 +107,7 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "dash0",
   "posthog",
   "grafana",
+  "cloudflare",
 ]);
 
 const EMPTY_OPTIONS: AgentOptions = {
@@ -416,7 +417,9 @@ function connectionNotice(): {
     message:
       search.get("reason") === "cancelled"
         ? `${name} connection was cancelled.`
-        : `${name} could not be connected.`,
+        : search.get("reason") === "write_scopes"
+          ? `${name} could not be connected. Choose read-only permissions on the consent screen.`
+          : `${name} could not be connected.`,
   };
 }
 
@@ -445,6 +448,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const dash0JustConnected = successfulConnectionReturn("dash0");
   const postHogJustConnected = successfulConnectionReturn("posthog");
   const grafanaJustConnected = successfulConnectionReturn("grafana");
+  const cloudflareJustConnected = successfulConnectionReturn("cloudflare");
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
@@ -724,6 +728,20 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
         ) {
           loadedDraft.contextAccountIds.push(connectedGrafana.id);
         }
+        const connectedCloudflare = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "cloudflare",
+            )
+          : accountsFor(loadedOptions, "cloudflare")[0];
+        if (
+          cloudflareJustConnected &&
+          connectedCloudflare &&
+          !loadedDraft.contextAccountIds.includes(connectedCloudflare.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedCloudflare.id);
+        }
         const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
         if (
           axiomJustConnected &&
@@ -884,6 +902,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     dash0JustConnected,
     postHogJustConnected,
     grafanaJustConnected,
+    cloudflareJustConnected,
     draftStorageKey,
     githubJustConnected,
     isEditing,
@@ -944,6 +963,10 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   );
   const grafanaAccounts = useMemo(
     () => accountsFor(options, "grafana"),
+    [options],
+  );
+  const cloudflareAccounts = useMemo(
+    () => accountsFor(options, "cloudflare"),
     [options],
   );
   const axiomAccounts = useMemo(
@@ -1550,6 +1573,9 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
       draft.contextAccountIds.includes(account.id),
     ).length +
     grafanaAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
+    cloudflareAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
     axiomAccounts.filter((account) =>
@@ -2788,6 +2814,26 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
                         key={account.id}
                         label={label}
                         provider="grafana"
+                      />
+                    );
+                  })}
+                  {cloudflareAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = cloudflareAccounts.length > 1 ? account.displayName : "Cloudflare";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            showConfigureLabel
+                            enabled={connected}
+                            label={label}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Workers logs and analytics, deployments, and zones`}
+                        key={account.id}
+                        label={label}
+                        provider="cloudflare"
                       />
                     );
                   })}

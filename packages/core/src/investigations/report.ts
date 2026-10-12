@@ -38,6 +38,7 @@ export const issueEvidenceSchema = z.object({
     "dash0",
     "posthog",
     "grafana",
+    "cloudflare",
     "axiom",
     "sentry",
     "clickstack",

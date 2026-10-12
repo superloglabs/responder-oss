@@ -51,6 +51,13 @@ import {
   POSTHOG_MCP_URL,
 } from "../../../../packages/core/src/integrations/posthog.js";
 import {
+  assertCloudflareReadOnlyGrant,
+  CLOUDFLARE_MCP_URL,
+  CLOUDFLARE_OAUTH_SCOPE,
+  CloudflareWriteScopeError,
+  parseCloudflareCredentials,
+} from "../../../../packages/core/src/integrations/cloudflare.js";
+import {
   GRAFANA_CLOUD_OAUTH_SCOPE,
   normalizeGrafanaCloudStackUrl,
   normalizeGrafanaUrl,
@@ -137,6 +144,7 @@ import {
   GrafanaCredentialsError,
   grafanaServiceAccountOrganization,
 } from "./grafana.js";
+import { cloudflareConnectionProfile } from "./cloudflare.js";
 import {
   langfuseProject,
   LangfuseCredentialsError,
@@ -395,6 +403,7 @@ const vercelCallbackSchema = z.object({
 type BrowserOAuthProvider =
   | "axiom"
   | "clickstack"
+  | "cloudflare"
   | "custom_mcp"
   | "dash0"
   | "discord"
@@ -959,6 +968,39 @@ export async function startIntegrationConnection(input: {
     } catch (error) {
       logCustomMcpError("connect", error);
       return Response.redirect(settingsRedirect(input.returnTo ?? "/settings", "posthog", "error", "connection_failed"));
+    }
+  }
+  if (parsedProvider.data === "cloudflare") {
+    try {
+      // The Cloudflare user is known only after consent, so the incomplete
+      // OAuth credentials stay in the expiring flow.
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "cloudflare",
+        returnTo: input.returnTo,
+        routingUrl: integrationCallbackUrl("cloudflare"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        connectionState,
+        mcpUrl: CLOUDFLARE_MCP_URL,
+        redirectUrl: integrationCallbackUrl("cloudflare"),
+        scope: CLOUDFLARE_OAUTH_SCOPE,
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: { encryptedCredentials: encryptCredentials({
+          authType: "oauth", mcpUrl: CLOUDFLARE_MCP_URL, oauth: oauthResult.oauth,
+        }) },
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "cloudflare",
+        state: connectionState,
+      });
+      if (!updated) throw new Error("The Cloudflare OAuth state was superseded");
+      return Response.redirect(oauthResult.authorizationUrl);
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return Response.redirect(settingsRedirect(input.returnTo ?? "/settings", "cloudflare", "error", "connection_failed"));
     }
   }
   const state = await createIntegrationConnectionState({
@@ -2227,6 +2269,95 @@ export const integrationRoutes = new Hono()
           "posthog",
           "error",
           browserOAuthErrorReason(context.req.query("error")),
+        ),
+      );
+    }
+  })
+  .get("/cloudflare/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "cloudflare", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "cloudflare",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "cloudflare", "error", "invalid_state"),
+        );
+      }
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const credentials = parseCloudflareCredentials(
+        decryptCredentials<Record<string, unknown>>(
+          pendingConnectionCredentialsSchema.parse(connectionState.metadata)
+            .encryptedCredentials,
+        ),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: credentials.mcpUrl,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("cloudflare"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Cloudflare OAuth access token is missing");
+      // The consent screen lets people pick any scope; a grant that can
+      // change resources is refused before anything is stored.
+      assertCloudflareReadOnlyGrant(oauth.tokens);
+      const profile = await cloudflareConnectionProfile({
+        accessToken,
+        mcpUrl: credentials.mcpUrl,
+      });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "cloudflare",
+        externalAccountId: profile.externalAccountId,
+        displayName: profile.displayName,
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        credentialKeyVersion: 1,
+        metadata: {
+          accounts: profile.accounts,
+          authType: "oauth",
+          ...(profile.email ? { email: profile.email } : {}),
+          mcpUrl: credentials.mcpUrl,
+        },
+        status: "connected",
+      });
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "cloudflare",
+          resource_count: profile.accounts.length,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "cloudflare", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error);
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "cloudflare",
+          "error",
+          error instanceof CloudflareWriteScopeError
+            ? "write_scopes"
+            : browserOAuthErrorReason(context.req.query("error")),
         ),
       );
     }

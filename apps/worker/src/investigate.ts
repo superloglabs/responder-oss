@@ -19,6 +19,7 @@ import {
   getRuntimeDash0Connections,
   getRuntimePostHogConnections,
   getRuntimeGrafanaConnections,
+  getRuntimeCloudflareConnections,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
@@ -65,6 +66,8 @@ import { createDatadogMcpServer } from "./datadog.js";
 import { createDash0McpServer } from "./dash0.js";
 import { createPostHogMcpServer } from "./posthog.js";
 import { createGrafanaMcpServer } from "./grafana.js";
+import { createCloudflareMcpServer } from "./cloudflare.js";
+import { cloudflareAccountList } from "@responder/core/integrations/cloudflare";
 import { createCustomMcpServer, createLinearMcpServer } from "./custom-mcp.js";
 import { RecoverableMcpServer } from "./recoverable-mcp.js";
 import { createClickStackMcpServer } from "./clickstack.js";
@@ -210,6 +213,7 @@ export function contextServerConnectFailureEvent(input: {
   dash0Connections?: ReadonlyArray<{ accountId: string }>;
   postHogConnections?: ReadonlyArray<{ accountId: string }>;
   grafanaConnections?: ReadonlyArray<{ accountId: string }>;
+  cloudflareConnections?: ReadonlyArray<{ accountId: string }>;
   langfuseConnections?: ReadonlyArray<{ accountId: string }>;
   supabaseConnections?: ReadonlyArray<{ accountId: string }>;
   /** Already redacted with {@link redactSecrets}. */
@@ -242,6 +246,11 @@ export function contextServerConnectFailureEvent(input: {
             ? input.grafanaConnections?.find(
                 (connection) =>
                   input.serverName === `grafana-${connection.accountId}`,
+              )?.accountId
+          : input.serverName.startsWith("cloudflare-")
+            ? input.cloudflareConnections?.find(
+                (connection) =>
+                  input.serverName === `cloudflare-${connection.accountId}`,
               )?.accountId
           : input.serverName.startsWith("langfuse-")
             ? input.langfuseConnections?.find(
@@ -418,6 +427,7 @@ export function investigationInstructions(input: {
   dash0AccountNames?: string[];
   postHogAccountNames?: string[];
   grafanaInstanceNames?: string[];
+  cloudflareAccountNames?: string[];
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
@@ -462,6 +472,7 @@ export function investigationInstructions(input: {
   const dash0AccountNames = input.dash0AccountNames ?? [];
   const postHogAccountNames = input.postHogAccountNames ?? [];
   const grafanaInstanceNames = input.grafanaInstanceNames ?? [];
+  const cloudflareAccountNames = input.cloudflareAccountNames ?? [];
   const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const supabaseConnections = input.supabaseConnections ?? [];
@@ -478,6 +489,7 @@ export function investigationInstructions(input: {
     dash0AccountNames.length > 0 ||
     postHogAccountNames.length > 0 ||
     grafanaInstanceNames.length > 0 ||
+    cloudflareAccountNames.length > 0 ||
     input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
@@ -525,6 +537,9 @@ export function investigationInstructions(input: {
       : null,
     grafanaInstanceNames.length > 0
       ? prompt("grafana", { value1: grafanaInstanceNames.join(", ") })
+      : null,
+    cloudflareAccountNames.length > 0
+      ? prompt("cloudflare", { value1: cloudflareAccountNames.join(", ") })
       : null,
     input.axiomConnected
       ? prompt("axiom")
@@ -772,6 +787,7 @@ export async function runInvestigationAgent(
     dash0Connections,
     postHogConnections,
     grafanaConnections,
+    cloudflareConnections,
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
@@ -794,6 +810,7 @@ export async function runInvestigationAgent(
     getRuntimeDash0Connections(job.config.id),
     getRuntimePostHogConnections(job.config.id),
     getRuntimeGrafanaConnections(job.config.id),
+    getRuntimeCloudflareConnections(job.config.id),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -832,6 +849,7 @@ export async function runInvestigationAgent(
       createGrafanaMcpServer(connection, environment),
     ),
   );
+  const cloudflareServers = cloudflareConnections.map(createCloudflareMcpServer);
   const sentryServer = sentryConnection
     ? createSentryMcpServer(sentryConnection, {
         investigationId: job.investigationId,
@@ -880,6 +898,7 @@ export async function runInvestigationAgent(
     ...dash0Connections,
     ...postHogConnections,
     ...grafanaConnections,
+    ...cloudflareConnections,
     sentryConnection,
     ...customMcpConnections,
     clickStackConnection,
@@ -902,6 +921,7 @@ export async function runInvestigationAgent(
       dash0Connections,
       postHogConnections,
       grafanaConnections,
+      cloudflareConnections,
       error: describeConnectError(error),
       investigationId: job.investigationId,
       langfuseConnections,
@@ -920,6 +940,7 @@ export async function runInvestigationAgent(
     ...dash0Servers,
     ...postHogServers,
     ...grafanaServers,
+    ...cloudflareServers,
     ...langfuseServers,
     ...supabaseServers,
     ...awsServers,
@@ -1176,6 +1197,11 @@ export async function runInvestigationAgent(
       ),
       grafanaInstanceNames: grafanaConnections.map(
         (connection) => connection.displayName,
+      ),
+      cloudflareAccountNames: cloudflareConnections.map((connection) =>
+        connection.accounts.length > 0
+          ? cloudflareAccountList(connection.accounts)
+          : JSON.stringify(connection.displayName),
       ),
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,

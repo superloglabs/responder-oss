@@ -76,3 +76,10 @@ describe("connection card", () => {
     await vi.waitFor(() => expect(card.elements.status.textContent).toContain("Tell the chat"));
   });
 });
+
+describe("connection card provider names", () => {
+  it("uses the integration catalog's names", () => {
+    expect(connectionWidgetHtml).toContain('"cloudflare":"Cloudflare"');
+    expect(connectionWidgetHtml).toContain('"gcp":"Google Cloud"');
+  });
+});

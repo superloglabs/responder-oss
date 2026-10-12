@@ -578,6 +578,29 @@ describe("Slack live investigation card", () => {
     ]);
   });
 
+  it("labels only Cloudflare-owned links as Cloudflare", () => {
+    const sourceText = (url: string) => {
+      const message = slackInvestigationCard({
+        agentId: context.agentId,
+        detail: "Gathering telemetry.",
+        investigationId: context.investigationId,
+        status: "in_progress",
+        title: context.title,
+        traceItems: [{
+          detail: "{}",
+          id: "call-1",
+          output: `See ${url}`,
+          status: "complete",
+          title: "execute",
+        }],
+      });
+      return JSON.stringify(message.blocks);
+    };
+
+    expect(sourceText("https://dash.cloudflare.com/a1/workers")).toContain("Open in Cloudflare");
+    expect(sourceText("https://cloudflare.example.attacker.com/x")).not.toContain("Open in Cloudflare");
+  });
+
   it("renders Datadog tools with styled inputs, raw data, and deep links", () => {
     const traceUrl = "https://app.datadoghq.eu/apm/trace/abc123";
     const logsUrl = "https://app.datadoghq.eu/logs?query=status%3Aerror";

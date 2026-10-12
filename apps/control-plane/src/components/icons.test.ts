@@ -15,6 +15,7 @@ describe("ProviderGlyph", () => {
   it.each([
     ["axiom", "Axiom", "AX"],
     ["clickstack", "ClickStack", "CS"],
+    ["cloudflare", "Cloudflare", "CF"],
     ["dash0", "Dash0", "D0"],
     ["datadog", "Datadog", "DD"],
     ["discord", "Discord", "DC"],

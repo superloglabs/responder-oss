@@ -15,7 +15,7 @@ Use `list_available_integrations` to discover configured providers, then
 are `GET /api/v1/integrations/available` and `POST /api/v1/integrations/connect`.
 
 Slack, GitHub, Sentry, Discord (only in workspaces with the `automations` capability),
-Vercel, Linear, Google Cloud, Axiom, and PostHog normally return a provider consent
+Vercel, Linear, Google Cloud, Axiom, PostHog, and Cloudflare normally return a provider consent
 URL. Sentry may recover an existing installation and return `connected` without
 another consent prompt. The person opens the consent link, approves access, and
 returns to chat. The browser must be signed into the same Superlog user and
@@ -372,6 +372,45 @@ account token stays in the control plane.
 The worker and control plane images install a pinned `mcp-grafana` release and
 set `MCP_GRAFANA_BINARY`. Local development downloads the same release into
 `.tools/` on the first `pnpm local:dev` or `pnpm dev:worker` start.
+
+## Cloudflare
+
+Cloudflare is read-only context for investigations, tag mode, and automations:
+Workers logs and analytics, deployments, and account and zone configuration.
+Connect it from Settings or the automation editor. Responder uses Cloudflare's
+hosted API MCP server at `https://mcp.cloudflare.com/mcp`, dynamically registers
+an OAuth client, and requests only the identity and refresh scopes. Cloudflare's
+consent screen then preselects its **Read only** permissions. The OAuth callback
+is:
+
+```text
+<public>/api/integrations/cloudflare/callback
+```
+
+No deployment-level Cloudflare client ID, secret, or API token is required.
+
+The server's `execute` tool runs JavaScript that can call any Cloudflare API
+endpoint, so the granted scopes are the read-only boundary. Responder accepts
+only scopes that read (`read`, `metadata_read`, `monitoring`, and `report`
+scopes, plus `offline_access`). It refuses a grant with any other scope when
+connecting, and checks the grant again after every token refresh. If the
+person picks other permissions on the consent screen, the connection fails and
+asks them to choose read-only permissions.
+
+Each connection belongs to the Cloudflare user who authorized it, so
+reconnecting the same user updates that connection. Responder stores the
+accounts the user could reach when connecting and passes their names and IDs to
+the agent, which passes `account_id` to `execute`. The worker and the context
+broker expose only `search`, `execute`, `docs`, and `whoami`. The OAuth tokens
+stay outside the investigation sandbox.
+
+Automations reach Cloudflare through the run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>`. The broker refreshes the
+OAuth token, checks the grant, lists tools itself, and forwards calls only to
+the same four tools.
+
+Cloudflare is context only. Runs start from another trigger, such as a watched
+Slack channel or a schedule.
 
 ## Axiom
 

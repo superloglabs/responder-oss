@@ -69,6 +69,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "dash0",
   "posthog",
   "grafana",
+  "cloudflare",
   "axiom",
   "clickstack",
   "upstash",

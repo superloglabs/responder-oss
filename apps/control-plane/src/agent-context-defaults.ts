@@ -10,6 +10,7 @@ const DIRECT_CONTEXT_PROVIDERS = new Set<
   "dash0",
   "posthog",
   "grafana",
+  "cloudflare",
   "axiom",
   "clickstack",
   "upstash",

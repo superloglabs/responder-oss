@@ -66,12 +66,14 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "dash0",
   "posthog",
   "grafana",
+  "cloudflare",
 ]);
 
 const contextProviderOrder: ContextAccount["provider"][] = [
   "sentry",
   "aws",
   "gcp",
+  "cloudflare",
   "upstash",
   "langfuse",
   "supabase",
@@ -100,6 +102,8 @@ function accountDetail(account: ContextAccount): string {
       return "Infrastructure, telemetry, configuration, and service health";
     case "gcp":
       return "Asset inventory, logs, metrics, and alerting state";
+    case "cloudflare":
+      return `${prefix}Workers logs and analytics, deployments, and zones`;
     case "upstash":
       return `${prefix}Redis, Vector, Search, QStash, and Workflow`;
     case "langfuse":
