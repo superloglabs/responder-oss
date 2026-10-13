@@ -16,6 +16,7 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
       { bucket: "2026-10-13 11:30:00", count: 1, group: "web" },
     ]),
     findProject: vi.fn(async () => ({ name: "Default", projectId })),
+    hasDashboards: vi.fn(async () => true),
     hasTelemetry: vi.fn(async () => true),
     listProjects: vi.fn(async () => [{ name: "Default", projectId }]),
     listServices: vi.fn(async () => ["checkout", "api"]),
@@ -245,6 +246,14 @@ describe("telemetry routes", () => {
         range: expect.anything(),
         resourceAttrs: [],
       });
+    });
+
+    it("needs the dashboards capability", async () => {
+      const { app, dependencies } = routes({ hasDashboards: vi.fn(async () => false) });
+
+      expect((await post(app, { config: {}, projectId, range: "1h", type: "log_table" })).status).toBe(404);
+      expect(dependencies.queryLogs).not.toHaveBeenCalled();
+      expect(dependencies.hasDashboards).toHaveBeenCalledWith(organizationId);
     });
 
     it("rejects notes, invalid configs and unlinked projects", async () => {

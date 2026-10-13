@@ -61,6 +61,7 @@ export type TelemetryRouteDependencies = {
     step: Step,
   ) => Promise<Array<{ bucket: string; count: number; group: string }>>;
   findProject: (organizationId: string, projectId: string) => Promise<TelemetryProject | null>;
+  hasDashboards: (organizationId: string) => Promise<boolean>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
   listProjects: (organizationId: string) => Promise<TelemetryProject[]>;
   metricNames: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
@@ -116,6 +117,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
   client: getTelemetryClient,
   countSeries,
   findProject: findTelemetryProject,
+  hasDashboards: (organizationId) => organizationHasCapability(organizationId, "dashboards"),
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
   listProjects: listTelemetryProjects,
   listServices,
@@ -325,6 +327,9 @@ export function createTelemetryRoutes(
     .post("/widget-data", async (context) => {
       const granted = await access(context.req.raw.headers);
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!(await dependencies.hasDashboards(granted.organizationId))) {
+        return context.json({ error: "Dashboards are not available" }, 404);
+      }
       const body = widgetDataSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Invalid widget" }, 400);
       const { config, projectId, type, variables } = body.data;

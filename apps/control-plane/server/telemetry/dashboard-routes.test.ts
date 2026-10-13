@@ -32,7 +32,6 @@ function routes(overrides: Partial<DashboardRouteDependencies> = {}) {
     deleteDashboard: vi.fn(async () => true),
     deleteWidget: vi.fn(async () => true),
     findDashboard: vi.fn(async () => dashboard),
-    findProject: vi.fn(async () => ({ name: "Shop", projectId })),
     hasCapability: vi.fn(async () => true),
     listDashboards: vi.fn(async () => [{ ...dashboard, widgetCount: 0 }]),
     storeConfigured: () => true,
@@ -72,9 +71,8 @@ describe("dashboard routes", () => {
       projectId,
     });
 
-    const unlinked = routes({ findProject: vi.fn(async () => null) });
+    const unlinked = routes({ createDashboard: vi.fn(async () => null) });
     expect((await send(unlinked.app, "POST", "/", { name: "Checkout", projectId })).status).toBe(404);
-    expect(unlinked.dependencies.createDashboard).not.toHaveBeenCalled();
   });
 
   it("renames, sets variables, and deletes", async () => {

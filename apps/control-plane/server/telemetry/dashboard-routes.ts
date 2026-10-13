@@ -12,7 +12,6 @@ import {
   updateTelemetryDashboardLayout,
   updateTelemetryDashboardWidget,
 } from "../../../../packages/core/src/db/telemetry-dashboards.js";
-import { findTelemetryProject } from "../../../../packages/core/src/db/telemetry-projects.js";
 import { getTelemetryClient } from "../../../../packages/core/src/telemetry/client.js";
 import {
   dashboardCreateSchema,
@@ -32,7 +31,6 @@ export type DashboardRouteDependencies = {
   deleteDashboard: typeof deleteTelemetryDashboard;
   deleteWidget: typeof deleteTelemetryDashboardWidget;
   findDashboard: typeof findTelemetryDashboard;
-  findProject: typeof findTelemetryProject;
   hasCapability: (organizationId: string, capability: "dashboards" | "telemetry") => Promise<boolean>;
   listDashboards: typeof listTelemetryDashboards;
   storeConfigured: () => boolean;
@@ -53,7 +51,6 @@ const defaultDependencies: DashboardRouteDependencies = {
   deleteDashboard: deleteTelemetryDashboard,
   deleteWidget: deleteTelemetryDashboardWidget,
   findDashboard: findTelemetryDashboard,
-  findProject: findTelemetryProject,
   hasCapability: organizationHasCapability,
   listDashboards: listTelemetryDashboards,
   storeConfigured: () => getTelemetryClient() !== null,
@@ -99,14 +96,13 @@ export function createDashboardRoutes(dependencies: DashboardRouteDependencies =
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const body = dashboardCreateSchema.safeParse(await jsonBody(context.req.raw));
       if (!body.success) return context.json({ error: "Invalid dashboard" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, body.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       const dashboard = await dependencies.createDashboard(granted.organizationId, {
         createdBy: granted.userId,
         ...body.data,
       });
-      return context.json({ dashboard }, 201);
+      return dashboard
+        ? context.json({ dashboard }, 201)
+        : context.json({ error: "Telemetry project not found" }, 404);
     })
     .get("/:dashboardId", async (context) => {
       const granted = await access(context.req.raw.headers);

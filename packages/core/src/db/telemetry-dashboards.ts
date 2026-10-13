@@ -97,24 +97,38 @@ export async function findTelemetryDashboard(
   return { ...dashboard, widgets };
 }
 
-// The caller checks that the project is linked to the workspace.
+// Null when the project is not linked to the workspace. The link is checked
+// and held in the same transaction as the insert, so an unlink cannot slip
+// between them.
 export async function createTelemetryDashboard(
   organizationId: string,
   input: { createdBy: string; name: string; projectId: string; variables?: DashboardVariable[] },
-): Promise<TelemetryDashboard> {
-  const [row] = await getDatabase()
-    .insert(telemetryDashboards)
-    .values({
-      createdBy: input.createdBy,
-      name: input.name,
-      organizationId,
-      projectId: input.projectId,
-      variables: input.variables ?? [],
-    })
-    .returning({ id: telemetryDashboards.id });
-  const dashboard = await findTelemetryDashboard(organizationId, row!.id);
-  if (!dashboard) throw new Error("Created dashboard is not readable");
-  return dashboard;
+): Promise<TelemetryDashboard | null> {
+  return getDatabase().transaction(async (transaction) => {
+    const [project] = await transaction
+      .select({ name: telemetryProjects.name })
+      .from(telemetryProjects)
+      .where(and(eq(telemetryProjects.organizationId, organizationId), eq(telemetryProjects.projectId, input.projectId)))
+      .for("share");
+    if (!project) return null;
+    const [row] = await transaction
+      .insert(telemetryDashboards)
+      .values({
+        createdBy: input.createdBy,
+        name: input.name,
+        organizationId,
+        projectId: input.projectId,
+        variables: input.variables ?? [],
+      })
+      .returning({
+        id: telemetryDashboards.id,
+        name: telemetryDashboards.name,
+        projectId: telemetryDashboards.projectId,
+        updatedAt: telemetryDashboards.updatedAt,
+        variables: telemetryDashboards.variables,
+      });
+    return { ...row!, projectName: project.name, updatedAt: row!.updatedAt.toISOString(), widgets: [] };
+  });
 }
 
 export async function updateTelemetryDashboard(
