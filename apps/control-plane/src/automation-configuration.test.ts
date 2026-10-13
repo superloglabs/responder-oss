@@ -55,6 +55,21 @@ describe("availableAutomationConfiguration", () => {
       schedule,
     ]);
   });
+
+  it("keeps only the GitHub trigger repositories its connection still offers", () => {
+    const withGitHub = {
+      ...options,
+      accounts: [...options.accounts, { id: "github", provider: "github", displayName: "acme" }, { id: "other-github", provider: "github", displayName: "other" }],
+      repositories: [...options.repositories, { id: "other-repository", integrationAccountId: "other-github", fullName: "other/app", defaultBranch: "main", private: true }],
+    } as AutomationOptions;
+    const github: AutomationConfiguration["triggers"][number] = { eventTypes: ["merged"], integrationAccountId: "github", kind: "github", repositoryIds: ["repository", "other-repository", "removed-repository"] };
+    expect(availableAutomationConfiguration({ ...configuration, triggers: [github] }, withGitHub).triggers).toEqual([
+      { ...github, repositoryIds: ["repository"] },
+    ]);
+    expect(availableAutomationConfiguration({ ...configuration, triggers: [github] }, options).triggers).toEqual([
+      { ...github, integrationAccountId: "", repositoryIds: [] },
+    ]);
+  });
 });
 
 describe("defaultContextAccountIds", () => {
@@ -96,6 +111,9 @@ describe("isTriggerComplete", () => {
     expect(isTriggerComplete({ integrationAccountId: "", kind: "axiom" })).toBe(false);
     expect(isTriggerComplete({ integrationAccountId: "devrev", kind: "devrev" })).toBe(true);
     expect(isTriggerComplete({ integrationAccountId: "", kind: "devrev" })).toBe(false);
+    expect(isTriggerComplete({ eventTypes: ["opened"], integrationAccountId: "github", kind: "github", repositoryIds: ["repository-1"] })).toBe(true);
+    expect(isTriggerComplete({ eventTypes: ["opened"], integrationAccountId: "github", kind: "github", repositoryIds: [] })).toBe(false);
+    expect(isTriggerComplete({ eventTypes: ["opened"], integrationAccountId: "", kind: "github", repositoryIds: ["repository-1"] })).toBe(false);
   });
 });
 

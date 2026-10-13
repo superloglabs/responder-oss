@@ -54,6 +54,7 @@ function dependencies() {
       installationId: 123,
       private: true,
     }]),
+    getTriggerRepository: vi.fn().mockResolvedValue(null),
   };
 }
 
@@ -643,5 +644,94 @@ describe("automation pull request follow-up tools", () => {
       resolve: true,
       target,
     });
+  });
+});
+
+describe("automation GitHub read tools", () => {
+  function readDependencies() {
+    const deps = dependencies();
+    const fetch = vi.fn().mockResolvedValue(new Response("diff --git a/x b/x", { status: 200 }));
+    return {
+      deps: {
+        ...deps,
+        readTools: {
+          createInstallationToken: vi.fn().mockResolvedValue("installation-token"),
+          fetch,
+          importCommit: vi.fn(),
+        },
+      },
+      fetch,
+    };
+  }
+
+  it("reads the repository of the pull request that started the run", async () => {
+    const { deps, fetch } = readDependencies();
+    deps.getTriggerRepository.mockResolvedValue({
+      defaultBranch: "main",
+      fullName: "acme/web",
+      installationId: 456,
+      private: true,
+    });
+    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+
+    const result = await handle({
+      arguments: { format: "diff", path: "/repos/acme/web/pulls/7" },
+      name: "github_api",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.getTriggerRepository).toHaveBeenCalledWith({
+      organizationId: "organization-1",
+      repositoryId: "repository-2",
+    });
+    expect(deps.readTools.createInstallationToken).toHaveBeenCalledWith(456);
+    expect(String(fetch.mock.calls[0]![0])).toBe("https://api.github.com/repos/acme/web/pulls/7");
+  });
+
+  it("does not open pull requests on the trigger repository", async () => {
+    const { deps } = readDependencies();
+    deps.getTriggerRepository.mockResolvedValue({
+      defaultBranch: "main",
+      fullName: "acme/web",
+      installationId: 456,
+      private: true,
+    });
+    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+
+    const result = await handle({
+      ...openPullRequest,
+      arguments: { ...openPullRequest.arguments, repository: "acme/web" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(deps.createPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("still reads the automation's repositories when the trigger repository cannot be loaded", async () => {
+    const { deps, fetch } = readDependencies();
+    deps.getTriggerRepository.mockRejectedValue(new Error("Trigger repository installation is invalid"));
+    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+
+    const result = await handle({
+      arguments: { path: "/repos/acme/app/pulls/7" },
+      name: "github_api",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(String(fetch.mock.calls[0]![0])).toBe("https://api.github.com/repos/acme/app/pulls/7");
+  });
+
+  it("reads only the automation's repositories without a trigger repository", async () => {
+    const { deps, fetch } = readDependencies();
+    const { handle } = handler(deps);
+
+    const result = await handle({
+      arguments: { path: "/repos/acme/web/pulls/7" },
+      name: "github_api",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(deps.getTriggerRepository).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

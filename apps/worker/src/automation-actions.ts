@@ -5,7 +5,9 @@ import {
   completeAutomationActionAttempt,
   failAutomationActionAttempt,
   getAutomationRuntimeRepositories,
+  getAutomationTriggerRepository,
 } from "@responder/core/db/automations";
+import type { RuntimeRepository } from "@responder/core/db/investigations";
 import {
   getOwnedPullRequest,
   recordPullRequestOrigin,
@@ -99,6 +101,7 @@ interface AutomationActionDependencies {
   failAttempt: typeof failAutomationActionAttempt;
   getOwnedPullRequest: typeof getOwnedPullRequest;
   getRepositories: typeof getAutomationRuntimeRepositories;
+  getTriggerRepository: typeof getAutomationTriggerRepository;
   postNotification: typeof postAutomationNotification;
   readTools?: Parameters<typeof createGitHubReadTools>[1];
   recordOrigin: typeof recordPullRequestOrigin;
@@ -115,6 +118,7 @@ const defaultDependencies: AutomationActionDependencies = {
   failAttempt: failAutomationActionAttempt,
   getOwnedPullRequest,
   getRepositories: getAutomationRuntimeRepositories,
+  getTriggerRepository: getAutomationTriggerRepository,
   postNotification: postAutomationNotification,
   recordOrigin: recordPullRequestOrigin,
   replyToComment: replyToPullRequestComment,
@@ -187,6 +191,9 @@ export function createAutomationToolHandler(input: {
   runId: string;
   session: DaytonaSandboxSession;
   signal?: AbortSignal;
+  // The repository of the pull request that started the run. The read tools
+  // reach it even when the automation does not check it out.
+  triggerRepositoryId?: string;
   workspaceTools?: WorkspaceTool[];
 }, dependencies: AutomationActionDependencies = defaultDependencies) {
   const channelName = (notification: AutomationNotification) =>
@@ -310,10 +317,35 @@ export function createAutomationToolHandler(input: {
     }
     return repositories;
   };
+  let readableRepositories: Promise<RuntimeRepository[]> | undefined;
+  const readRepositories = () => {
+    if (!readableRepositories) {
+      const triggerRepositoryId = input.triggerRepositoryId;
+      readableRepositories = Promise.all([
+        selectedRepositories(),
+        triggerRepositoryId
+          // The automation's own repositories stay readable when the
+          // trigger repository cannot be loaded.
+          ? dependencies.getTriggerRepository({
+              organizationId: input.organizationId,
+              repositoryId: triggerRepositoryId,
+            }).catch(() => null)
+          : null,
+      ]).then(([selected, triggered]) =>
+        triggered && !selected.some((repository) =>
+          repository.fullName.toLowerCase() === triggered.fullName.toLowerCase()
+        )
+          ? [...selected, triggered]
+          : selected
+      );
+      readableRepositories.catch(() => { readableRepositories = undefined; });
+    }
+    return readableRepositories;
+  };
   const readTools: Record<string, ((args: unknown) => Promise<AutomationToolResult>) | undefined> =
     createGitHubReadTools({
       checkedOutRepositories: input.checkedOutRepositories,
-      repositories: selectedRepositories,
+      repositories: readRepositories,
       session: input.session,
     }, dependencies.readTools);
   // A review on the pull request continues this run. Recording is safe to

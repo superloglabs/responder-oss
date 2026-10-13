@@ -17,6 +17,12 @@ export function sharedTriggerDescription(trigger: AutomationTrigger): string {
   }
   if (trigger.kind === "axiom") return "When an Axiom monitor sends an alert to its Responder notifier";
   if (trigger.kind === "devrev") return "When a ticket is created in DevRev";
+  if (trigger.kind === "github") {
+    const events = trigger.eventTypes.length > 1
+      ? "opened or merged"
+      : trigger.eventTypes[0] === "merged" ? "merged" : "opened";
+    return `When a pull request is ${events} in a GitHub repository you choose`;
+  }
   if (trigger.kind === "discord") return "When someone runs /automate in a Discord channel you choose";
   return `${scheduleLabel(trigger)}, in your time zone`;
 }

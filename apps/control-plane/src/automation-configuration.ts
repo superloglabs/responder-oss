@@ -93,6 +93,16 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
   if (trigger.kind === "axiom" || trigger.kind === "devrev") {
     return { ...trigger, integrationAccountId: triggerAccountAvailable ? trigger.integrationAccountId : "" };
   }
+  if (trigger.kind === "github") {
+    const repositoryIds = new Set(options.repositories
+      .filter((repository) => triggerAccountAvailable && repository.integrationAccountId === trigger.integrationAccountId)
+      .map((repository) => repository.id));
+    return {
+      ...trigger,
+      integrationAccountId: triggerAccountAvailable ? trigger.integrationAccountId : "",
+      repositoryIds: trigger.repositoryIds.filter((id) => repositoryIds.has(id)),
+    };
+  }
   const resourceKind = trigger.kind === "sentry" ? "sentry_project" : trigger.kind === "discord" ? "discord_channel" : "slack_channel";
   const resourceIds = new Set(options.resources
     .filter((resource) => triggerAccountAvailable && resource.integrationAccountId === trigger.integrationAccountId && resource.kind === resourceKind)
@@ -108,6 +118,7 @@ export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   if (trigger.kind === "schedule") return isScheduleComplete(trigger);
   if (!trigger.integrationAccountId) return false;
   if (trigger.kind === "axiom" || trigger.kind === "devrev") return true;
+  if (trigger.kind === "github") return trigger.repositoryIds.length > 0 && trigger.eventTypes.length > 0;
   return trigger.kind === "sentry" ? trigger.projectIds.length > 0 && trigger.eventTypes.length > 0 : trigger.channelIds.length > 0;
 }
 

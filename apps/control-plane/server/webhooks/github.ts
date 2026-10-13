@@ -6,6 +6,7 @@ import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-p
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { Hono } from "hono";
 import { z } from "zod";
+import { startPullRequestAutomations } from "./github-pull-request-automations.js";
 import {
   pullRequestReviewEventSchema,
   startPullRequestReviewTurn,
@@ -93,14 +94,38 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
     return context.json({ ok: true, ignored: true });
   }
 
-  const parsed = pullRequestEventSchema.safeParse(parseJson(rawBody));
+  const payload = parseJson(rawBody);
+  const [merge, automations] = await Promise.all([
+    recordPullRequestMerge(payload),
+    startPullRequestAutomations(payload).catch((error: unknown) => {
+      console.error("Unable to fan out GitHub pull request", error);
+      return null;
+    }),
+  ]);
+  if (!automations) {
+    return context.json({ error: "Unable to start GitHub automations" }, 502);
+  }
+  return context.json({
+    ok: true,
+    ...merge,
+    ...(automations.outcome === "matched" && automations.matchedAutomations > 0
+      ? { matchedAutomations: automations.matchedAutomations }
+      : {}),
+  });
+});
+
+// Records the merge of a pull request Responder opened.
+async function recordPullRequestMerge(
+  payload: unknown,
+): Promise<{ ignored: true } | { matched: boolean }> {
+  const parsed = pullRequestEventSchema.safeParse(payload);
   if (!parsed.success) {
-    return context.json({ ok: true, ignored: true });
+    return { ignored: true };
   }
 
   const { action, pull_request: pullRequest, repository } = parsed.data;
   if (action !== "closed" || pullRequest.merged !== true) {
-    return context.json({ ok: true, ignored: true });
+    return { ignored: true };
   }
 
   const mergedIssue = await markIssuePullRequestMerged({
@@ -121,7 +146,7 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
       pullRequestNumber: pullRequest.number,
       repositoryFullName: repository.full_name,
     });
-    return context.json({ ok: true, matched: mergedOrigin });
+    return { matched: mergedOrigin };
   }
   if (mergedIssue) {
     await refreshIssuePullRequestSlackMessages(merged.requestId);
@@ -152,5 +177,5 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
     },
   });
 
-  return context.json({ ok: true, matched: true });
-});
+  return { matched: true };
+}

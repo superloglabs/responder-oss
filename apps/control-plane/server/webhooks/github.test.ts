@@ -1,12 +1,13 @@
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { markPullRequestOriginMerged } from "@responder/core/db/pull-request-origins";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { githubWebhookRoutes, verifyGitHubSignature } from "./github.js";
+import { startPullRequestAutomations } from "./github-pull-request-automations.js";
 import { startPullRequestReviewTurn } from "./github-reviews.js";
 
 vi.mock("@responder/core/analytics", () => ({
@@ -28,6 +29,10 @@ vi.mock("@responder/core/db/suggestion-pull-requests", () => ({
 
 vi.mock("@responder/core/integrations/slack-remediations", () => ({
   refreshIssuePullRequestSlackMessages: vi.fn(),
+}));
+
+vi.mock("./github-pull-request-automations.js", () => ({
+  startPullRequestAutomations: vi.fn(),
 }));
 
 vi.mock("./github-reviews.js", async (importOriginal) => ({
@@ -89,8 +94,13 @@ function post(body: string, headers: Record<string, string> = {}) {
 }
 
 describe("GitHub pull request webhooks", () => {
+  beforeEach(() => {
+    vi.mocked(startPullRequestAutomations).mockResolvedValue({ outcome: "ignored" });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -270,5 +280,32 @@ describe("GitHub pull request webhooks", () => {
     });
     expect(refreshIssuePullRequestSlackMessages).not.toHaveBeenCalled();
     expect(captureAnalyticsEvent).not.toHaveBeenCalled();
+  });
+
+  it("starts automations that watch the pull request's repository", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(startPullRequestAutomations).mockResolvedValue({ matchedAutomations: 2, outcome: "matched" });
+    const body = pullRequestEvent({ action: "opened", merged: false });
+
+    const response = await post(body);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, ignored: true, matchedAutomations: 2 });
+    expect(startPullRequestAutomations).toHaveBeenCalledWith(JSON.parse(body));
+  });
+
+  it("records a merge even when its automations cannot start", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(markIssuePullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markSuggestionPullRequestMerged).mockResolvedValue(null);
+    vi.mocked(markPullRequestOriginMerged).mockResolvedValue(true);
+    vi.mocked(startPullRequestAutomations).mockRejectedValue(new Error("Automation worker is unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await post(pullRequestEvent());
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "Unable to start GitHub automations" });
+    expect(markPullRequestOriginMerged).toHaveBeenCalled();
   });
 });

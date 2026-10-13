@@ -12,7 +12,7 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
   defaultOpen?: boolean;
   empty?: string;
   hideLabel?: boolean;
-  label: "Author" | "Channel" | "Environment" | "Project";
+  label: "Author" | "Channel" | "Environment" | "Project" | "Repository";
   resources: Array<{ externalId: string; displayName: string }>;
   selected: string[];
   single?: boolean;
@@ -34,7 +34,8 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
     setOpenState(next);
     if (!next) onClose?.();
   }, [onClose]);
-  const noun = single ? label.toLowerCase() : `${label.toLowerCase()}s`;
+  const plural = label === "Repository" ? "repositories" : `${label.toLowerCase()}s`;
+  const noun = single ? label.toLowerCase() : plural;
   const names = selected.map((value) => resources.find((resource) => resource.externalId === value)?.displayName ?? value);
   const search = query.trim().toLowerCase();
   const available = [...resources, ...selected.filter(id => !resources.some(resource => resource.externalId === id)).map(externalId => ({ externalId, displayName: `${externalId} (unavailable)` }))];
@@ -54,7 +55,7 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
     if (!onRefresh || refreshing) return;
     setRefreshing(true);
     setError(null);
-    try { await onRefresh(); } catch { setError(`Could not refresh ${label.toLowerCase()}s. Try again.`); }
+    try { await onRefresh(); } catch { setError(`Could not refresh ${plural}. Try again.`); }
     finally { setRefreshing(false); }
   }
   return <div className="automationResourcePicker" ref={root} onBlur={(event) => {
@@ -75,8 +76,8 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
     <span className={hideLabel ? "srOnly" : "automationTrigger__fieldLabel"} id={`${id}-label`}>{title ?? label}</span>
     <button aria-labelledby={`${id}-label`} aria-describedby={`${id}-value`} aria-expanded={open} aria-controls={id} aria-haspopup="dialog" className="automationResourcePicker__trigger" onClick={() => { setQuery(""); setOpen(!open); }} ref={button} type="button"><span id={`${id}-value`}>{summary ?? (names.length ? names.join(", ") : `Select ${label.toLowerCase()}`)}</span><CaretDownIcon size={12} /></button>
     {open ? <div aria-label={`Choose ${noun}`} className="automationResourcePicker__popover" id={id} role="dialog">
-      <label className="automationResourcePicker__search"><MagnifyingGlassIcon size={14} /><input {...searchInputProps} aria-label={`Search ${label.toLowerCase()}s`} placeholder={label === "Environment" || label === "Author" ? `Search ${label.toLowerCase()}s…` : `Search ${label.toLowerCase()}s or paste ${label.toLowerCase()} ID…`} onChange={(event) => setQuery(event.target.value)} ref={input} value={query} /></label>
-      <div className="automationResourcePicker__list"><span className="automationResourcePicker__group">{label}s</span>
+      <label className="automationResourcePicker__search"><MagnifyingGlassIcon size={14} /><input {...searchInputProps} aria-label={`Search ${plural}`} placeholder={label === "Environment" || label === "Author" || label === "Repository" ? `Search ${plural}…` : `Search ${plural} or paste ${label.toLowerCase()} ID…`} onChange={(event) => setQuery(event.target.value)} ref={input} value={query} /></label>
+      <div className="automationResourcePicker__list"><span className="automationResourcePicker__group">{plural[0]!.toUpperCase()}{plural.slice(1)}</span>
         {filtered.map((resource) => <label className="automationResourcePicker__option" key={resource.externalId}><span>{resource.displayName}</span><input checked={selected.includes(resource.externalId)} name={single ? id : undefined} onChange={() => {
           if (!single) {
             onChange(selected.includes(resource.externalId) ? selected.filter((value) => value !== resource.externalId) : [...selected, resource.externalId]);
@@ -86,10 +87,10 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
           setOpen(false);
           button.current?.focus();
         }} type={single ? "radio" : "checkbox"} /></label>)}
-        {!filtered.length ? <p className="automationResourcePicker__empty">{resources.length ? `No matching ${label.toLowerCase()}s.` : (empty ?? `No ${label.toLowerCase()}s available.`)}</p> : null}
+        {!filtered.length ? <p className="automationResourcePicker__empty">{resources.length ? `No matching ${plural}.` : (empty ?? `No ${plural} available.`)}</p> : null}
       </div>
       {error ? <p className="automationResourcePicker__error" role="alert">{error}</p> : null}
-      {onRefresh ? <button className="automationResourcePicker__refresh" disabled={refreshing} onClick={() => void refresh()} type="button"><ArrowClockwiseIcon size={14} />{refreshing ? "Refreshing…" : `Refresh ${label.toLowerCase()}s`}</button> : null}
+      {onRefresh ? <button className="automationResourcePicker__refresh" disabled={refreshing} onClick={() => void refresh()} type="button"><ArrowClockwiseIcon size={14} />{refreshing ? "Refreshing…" : `Refresh ${plural}`}</button> : null}
     </div> : null}
   </div>;
 }

@@ -12,8 +12,8 @@ export const sharedAutomationTemplateSlugSchema = z
 const shareableContextProviders = new Set<string>(automationContextProviders);
 
 // Removes everything that identifies the owner's workspace from triggers: the
-// connection, the channels, and the projects. Schedules keep their timing and
-// run in the recipient's time zone once applied.
+// connection, the channels, the projects, and the repositories. Schedules keep
+// their timing and run in the recipient's time zone once applied.
 export function shareableAutomationTriggers(
   triggers: AutomationTrigger[],
 ): AutomationTrigger[] {
@@ -26,6 +26,9 @@ export function shareableAutomationTriggers(
     }
     if (trigger.kind === "discord") {
       return { channelIds: [], integrationAccountId: "", kind: "discord" };
+    }
+    if (trigger.kind === "github") {
+      return { eventTypes: trigger.eventTypes, integrationAccountId: "", kind: "github", repositoryIds: [] };
     }
     if (trigger.kind === "axiom" || trigger.kind === "devrev") {
       return { integrationAccountId: "", kind: trigger.kind };

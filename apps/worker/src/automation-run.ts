@@ -95,6 +95,10 @@ import {
   devrevTicketOf,
 } from "./automation-devrev.js";
 import {
+  githubPullRequestOf,
+  githubTriggerInstructions,
+} from "./automation-github.js";
+import {
   automationToolServer,
   checkoutPullRequestToolName,
   installAutomationToolServer,
@@ -500,6 +504,7 @@ function automationPrompt(
     ...(secretInstructions ? [secretInstructions] : []),
     ...slackTriggerInstructions(run.triggerInput),
     ...devrevTriggerInstructions(run.triggerInput, firstTurn),
+    ...githubTriggerInstructions(run.triggerInput),
     "Trigger payload:",
     JSON.stringify(run.triggerInput, null, 2),
     ...(continuation ? ["", continuation] : []),
@@ -684,6 +689,7 @@ export async function processAutomationRun(
 ): Promise<{ runId: string }> {
   const run = await dependencies.claimRun(payload.runId);
   if (!run) return { runId: payload.runId };
+  const triggerPullRequest = githubPullRequestOf(run.triggerInput);
   // Usage recorded from here on belongs to this turn.
   const turnStartedAt = await dependencies.usageWaiverStart();
 
@@ -969,6 +975,7 @@ export async function processAutomationRun(
             runId: run.runId,
             session,
             signal: runAbort.signal,
+            ...(triggerPullRequest ? { triggerRepositoryId: triggerPullRequest.repositoryId } : {}),
             workspaceTools,
           });
         // A review of a pull request the run opened is answered on the pull
