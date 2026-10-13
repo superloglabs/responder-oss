@@ -4,6 +4,8 @@ import {
   createClient,
 } from "@clickhouse/client";
 
+export type TelemetryClient = ClickHouseClient;
+
 let client: ClickHouseClient | undefined;
 
 // Telemetry is optional. Without TELEMETRY_CLICKHOUSE_URL the application has

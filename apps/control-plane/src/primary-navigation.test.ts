@@ -26,6 +26,15 @@ describe("primaryNavigation", () => {
     ]);
   });
 
+  it("lists logs with the telemetry capability", () => {
+    expect(
+      primaryNavigation({ automations: true, simplified: false, telemetry: true }).map((item) => item.label),
+    ).toEqual(["Agents", "Automations", "PRs", "Skills", "Issues", "Scans", "Suggestions", "Logs", "Settings"]);
+    expect(
+      primaryNavigation({ automations: true, simplified: true, telemetry: true }).map((item) => item.label),
+    ).toEqual(["Automations", "PRs", "Skills", "Logs", "Integrations", "Tag mode", "Settings"]);
+  });
+
   it("keeps simplified navigation usable without automations", () => {
     expect(
       primaryNavigation({ automations: false, simplified: true }).map((item) => item.label),
@@ -53,6 +62,10 @@ describe("homePath", () => {
 
   it("opens automations in simplified navigation", () => {
     expect(homePath(["automations", "simplified_navigation"])).toBe("/automations");
+  });
+
+  it("opens logs in simplified navigation with telemetry but without automations", () => {
+    expect(homePath(["simplified_navigation", "telemetry"])).toBe("/logs");
   });
 
   it("opens integrations in simplified navigation without automations", () => {

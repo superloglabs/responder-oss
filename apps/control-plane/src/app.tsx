@@ -17,6 +17,7 @@ import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
+import { LogsPage } from "./pages/logs";
 import { PullRequestDetailPage } from "./pages/pull-request-detail";
 import { PullRequestsPage } from "./pages/pull-requests";
 import { ScanDetailPage } from "./pages/scan-detail";
@@ -145,6 +146,7 @@ export function App() {
         <Route element={<SkillEditorPage />} path="/skills/new" />
         <Route element={<SkillEditorPage />} path="/skills/:skillId" />
         <Route element={<IssuesPage />} path="/issues" />
+        <Route element={<LogsPage />} path="/logs" />
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />

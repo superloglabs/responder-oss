@@ -818,10 +818,19 @@ const SERVICE_SOURCES = [
   },
 ] as const;
 
-export async function listServices(ch: ClickHouseClient, projectId: string, range?: TimeRange) {
+// Services seen in any signal, or only in logs.
+export async function listServices(
+  ch: ClickHouseClient,
+  projectId: string,
+  range?: TimeRange,
+  signal?: "logs",
+) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
+  const sources = signal
+    ? SERVICE_SOURCES.filter((source) => source.table === `otel_${signal}`)
+    : SERVICE_SOURCES;
   const servicesBySource = await Promise.all(
-    SERVICE_SOURCES.map(async (source): Promise<string[]> => {
+    sources.map(async (source): Promise<string[]> => {
       // Logs are partitioned by TimestampTime. Keep the canonical nanosecond
       // Timestamp filter for exactness, and add the padded partition-key window
       // so ClickHouse can prune retained log partitions efficiently.
