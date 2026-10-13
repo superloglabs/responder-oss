@@ -166,23 +166,24 @@ export function DashboardPage() {
   }, [load]);
 
   // Saves layout changes still waiting for the debounce.
-  const flushLayouts = useCallback(() => {
+  const flushLayouts = useCallback((leaving = false) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = null;
     if (pendingLayouts.current.size === 0) return;
     const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
     pendingLayouts.current.clear();
-    updateLayout(dashboardId, widgets).catch((cause: unknown) =>
+    updateLayout(dashboardId, widgets, { keepalive: leaving }).catch((cause: unknown) =>
       setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
     );
   }, [dashboardId]);
 
   // Leaving the page or closing the tab saves a move made just before.
   useEffect(() => {
-    window.addEventListener("pagehide", flushLayouts);
+    const leave = () => flushLayouts(true);
+    window.addEventListener("pagehide", leave);
     return () => {
-      window.removeEventListener("pagehide", flushLayouts);
-      flushLayouts();
+      window.removeEventListener("pagehide", leave);
+      leave();
     };
   }, [flushLayouts]);
 
@@ -199,7 +200,7 @@ export function DashboardPage() {
     });
     for (const change of changes) pendingLayouts.current.set(change.id, change.layout);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(flushLayouts, 400);
+    saveTimer.current = setTimeout(() => flushLayouts(), 400);
   }
 
   async function saveWidget(draft: WidgetDraft) {

@@ -21,7 +21,7 @@ function FreeVariable({ label, onCommit, value }: { label: string; onCommit: (va
       maxLength={500}
       onBlur={commit}
       onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => { if (event.key === "Enter") commit(); }}
+      onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) commit(); }}
       value={draft}
     />
   );

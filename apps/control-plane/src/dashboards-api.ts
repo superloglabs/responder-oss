@@ -126,14 +126,16 @@ export function deleteWidget(dashboardId: string, widgetId: string): Promise<voi
   });
 }
 
-// Kept alive so a save started as the page closes still completes.
+// `keepalive` lets a save started as the page closes complete. Browsers
+// share a small budget for such requests, so only that save uses it.
 export function updateLayout(
   dashboardId: string,
   widgets: Array<{ id: string; layout: DashboardWidgetLayout }>,
+  options: { keepalive?: boolean } = {},
 ): Promise<void> {
   return request(`${base}/${encodeURIComponent(dashboardId)}/layout`, {
     body: { widgets },
-    keepalive: true,
+    ...(options.keepalive ? { keepalive: true } : {}),
     method: "PATCH",
   });
 }
