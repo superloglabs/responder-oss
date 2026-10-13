@@ -680,6 +680,11 @@ describe("integration account tenancy", () => {
           ],
         }],
         [{ organizationId: account.organizationId, repositoryIds: ["old-repo"] }],
+        // The earlier connection, its repositories, and no active usage.
+        [{ id: "old" }],
+        [],
+        [],
+        [],
         [],
       ];
       const query = (rows: unknown) => {
@@ -688,6 +693,7 @@ describe("integration account tenancy", () => {
           innerJoin: () => chain,
           where: () => chain,
           for: () => chain,
+          limit: () => chain,
           then: (resolve: (value: unknown) => unknown) => resolve(rows),
         };
         return chain;
@@ -722,7 +728,7 @@ describe("integration account tenancy", () => {
 
       await expect(
         replaceGitHubInstallationAccount({ accountId: "new", replacedAccountId: "old" }),
-      ).resolves.toBe("not_found");
+      ).resolves.toBe("removed");
       expect(inserted).toEqual([
         {
           table: automationVersionRepositories,
@@ -741,6 +747,9 @@ describe("integration account tenancy", () => {
         automationVersionRepositories,
         agentVersionRepositories,
         automationVersionIntegrationAccounts,
+        automationVersionRepositories,
+        automationVersionIntegrationAccounts,
+        integrationAccounts,
       ]);
       expect(updated).toEqual([
         {
