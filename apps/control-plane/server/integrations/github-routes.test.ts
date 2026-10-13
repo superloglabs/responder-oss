@@ -5,8 +5,9 @@ import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   listOrganizationIntegrationAccounts,
+  removeGitHubInstallationAccount,
   replaceRepositories,
-  upsertIntegrationAccount,
+  upsertGitHubInstallationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
@@ -31,9 +32,11 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   createIntegrationConnectionState: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
+  removeGitHubInstallationAccount: vi.fn(),
   replaceIntegrationResources: vi.fn(),
   replaceRepositories: vi.fn(),
   setIntegrationAccountStatus: vi.fn(),
+  upsertGitHubInstallationAccount: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
 }));
 
@@ -197,9 +200,10 @@ describe("GitHub integration routing", () => {
       repository_selection: "selected",
     });
     vi.mocked(listGitHubRepositories).mockResolvedValue([]);
-    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
-      "30000000-0000-4000-8000-000000000000",
-    );
+    vi.mocked(upsertGitHubInstallationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      replacedAccountIds: [],
+    });
     vi.mocked(disableAgentsWithUnavailableRepositories).mockResolvedValue([]);
 
     const response = await app.request(
@@ -253,9 +257,10 @@ describe("GitHub integration routing", () => {
         private: true,
       },
     ]);
-    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
-      "30000000-0000-4000-8000-000000000000",
-    );
+    vi.mocked(upsertGitHubInstallationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      replacedAccountIds: [],
+    });
     vi.mocked(disableAgentsWithUnavailableRepositories).mockResolvedValue([
       { id: "agent-1", name: "Production responder" },
       { id: "agent-2", name: "API responder" },
@@ -284,6 +289,56 @@ describe("GitHub integration routing", () => {
     );
     expect(disableAgentsWithUnavailableRepositories).toHaveBeenCalledWith(
       tenant.organizationId,
+    );
+  });
+
+  it("keeps one connection when the GitHub App is installed again", async () => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      codeVerifier: null,
+      metadata: {},
+      organizationId: tenant.organizationId,
+      returnTo: "/settings",
+      userId: tenant.user.id,
+    });
+    vi.mocked(exchangeGitHubCode).mockResolvedValue({
+      access_token: "user-token",
+      token_type: "bearer",
+    });
+    vi.mocked(verifyGitHubUserInstallation).mockResolvedValue({
+      account: { id: 98, login: "example", type: "Organization" },
+      id: 12346,
+      repository_selection: "selected",
+    });
+    vi.mocked(listGitHubRepositories).mockResolvedValue([]);
+    vi.mocked(upsertGitHubInstallationAccount).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      replacedAccountIds: ["30000000-0000-4000-8000-000000000001"],
+    });
+    vi.mocked(disableAgentsWithUnavailableRepositories).mockResolvedValue([]);
+
+    const response = await app.request(
+      "/api/integrations/github/callback" +
+        "?code=one-time-code" +
+        "&installation_id=12346" +
+        "&setup_action=install" +
+        "&state=connection-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(upsertGitHubInstallationAccount).toHaveBeenCalledWith({
+      displayName: "example",
+      installationId: 12346,
+      metadata: {
+        accountId: 98,
+        accountType: "Organization",
+        repositorySelection: "selected",
+      },
+      organizationId: tenant.organizationId,
+    });
+    expect(removeGitHubInstallationAccount).toHaveBeenCalledWith(
+      "30000000-0000-4000-8000-000000000001",
     );
   });
 });

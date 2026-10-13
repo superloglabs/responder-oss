@@ -23,6 +23,7 @@ import {
   getSlackChannelConnection,
   listConnectedIntegrationAccounts,
   markSlackChannelJoined,
+  removeGitHubInstallationAccount,
   replaceRepositories,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
@@ -32,6 +33,7 @@ import {
   listInvestigationTraceEvents,
 } from "../../../../packages/core/src/db/investigations.js";
 import type { InvestigationTraceEvent } from "../../../../packages/core/src/db/schema.js";
+import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
 import {
   joinSlackChannel,
   SlackChannelJoinError,
@@ -76,9 +78,16 @@ export async function refreshGitHubRepositories(
 
   await Promise.all(
     accounts.map(async (account) => {
-      const repositories = await listGitHubRepositories(
-        githubInstallationIdSchema.parse(account.externalAccountId),
-      );
+      let repositories;
+      try {
+        repositories = await listGitHubRepositories(
+          githubInstallationIdSchema.parse(account.externalAccountId),
+        );
+      } catch (error) {
+        if (!(error instanceof GitHubInstallationNotFoundError)) throw error;
+        await removeGitHubInstallationAccount(account.id);
+        return;
+      }
       await replaceRepositories(account.id, repositories);
     }),
   );

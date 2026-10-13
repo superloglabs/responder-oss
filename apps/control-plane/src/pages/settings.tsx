@@ -311,10 +311,17 @@ export function SettingsPage() {
   );
 }
 
-function displayedSentryHealth(
+function displayedHealth(
   integration: IntegrationSummary,
   health: SentryHealth | null,
 ): SentryHealth | null {
+  // A GitHub connection fails when its app installation was removed on GitHub
+  // while an automation still uses it. Installing the app again restores it.
+  if (integration.id === "github") {
+    return integration.accounts.some((account) => account.status === "error")
+      ? "needs_reconnect"
+      : null;
+  }
   if (integration.id !== "sentry") return null;
   if (integration.accounts.some((account) => account.status === "error")) {
     return "needs_reconnect";
@@ -330,7 +337,7 @@ function integrationDetail(
   integration: IntegrationSummary,
   sentryHealth: SentryHealth | null,
 ): string {
-  const health = displayedSentryHealth(integration, sentryHealth);
+  const health = displayedHealth(integration, sentryHealth);
   if (health === "checking") return "Checking the connection…";
   if (health === "working") {
     const projectLabel = integration.resourceCount === 1 ? "project" : "projects";
@@ -384,7 +391,7 @@ function DefaultIntegrationCard({
   sentryHealth: SentryHealth | null;
 }) {
   const actionUrl = integrationActionUrl(integration);
-  const health = displayedSentryHealth(integration, sentryHealth);
+  const health = displayedHealth(integration, sentryHealth);
   const canConnect = Boolean(actionUrl);
   const [isConnecting, setIsConnecting] = useState(false);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);

@@ -11,6 +11,7 @@ import {
 import {
   listConnectedIntegrationAccounts,
   listConnectedIntegrationAccountCredentials,
+  removeGitHubInstallationAccount,
   replaceRepositories,
   replaceIntegrationResourcesIfCredentialsMatch,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -28,6 +29,7 @@ import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
 import { listSlackChannels } from "../integrations/slack.js";
 import { listGitHubRepositories } from "../integrations/github.js";
+import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
 import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
@@ -53,6 +55,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   listConnectedIntegrationAccounts: vi.fn(),
   listConnectedIntegrationAccountCredentials: vi.fn(),
   markSlackChannelJoined: vi.fn(),
+  removeGitHubInstallationAccount: vi.fn(),
   replaceRepositories: vi.fn(),
   replaceIntegrationResourcesIfCredentialsMatch: vi.fn(),
 }));
@@ -715,6 +718,27 @@ describe("GitHub repository option refresh", () => {
     expect(disableAgentsWithUnavailableRepositories).toHaveBeenCalledWith(
       tenant.organizationId,
     );
+  });
+
+  it("removes a connection whose GitHub App was uninstalled and refreshes the rest", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { id: "github-account-1", externalAccountId: "123" },
+      { id: "github-account-2", externalAccountId: "456" },
+    ]);
+    vi.mocked(listGitHubRepositories)
+      .mockRejectedValueOnce(new GitHubInstallationNotFoundError(123))
+      .mockResolvedValueOnce([]);
+    vi.mocked(listAgentOptions).mockResolvedValue(options);
+
+    const response = await app.request("/api/agents/options/refresh/github", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(removeGitHubInstallationAccount).toHaveBeenCalledWith("github-account-1");
+    expect(replaceRepositories).toHaveBeenCalledTimes(1);
+    expect(replaceRepositories).toHaveBeenCalledWith("github-account-2", []);
   });
 
   it("returns a retryable error without replacing repositories when GitHub fails", async () => {

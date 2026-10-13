@@ -56,6 +56,15 @@ export function githubAppHeaders(token: string): HeadersInit {
   };
 }
 
+// The installation was removed or never existed, for example after someone
+// uninstalled the GitHub App from their account.
+export class GitHubInstallationNotFoundError extends Error {
+  constructor(readonly installationId: number) {
+    super("The GitHub App is no longer installed. Reconnect GitHub in Settings.");
+    this.name = "GitHubInstallationNotFoundError";
+  }
+}
+
 export async function createGitHubInstallationToken(
   installationId: number,
   signal?: AbortSignal,
@@ -68,6 +77,9 @@ export async function createGitHubInstallationToken(
       signal,
     },
   );
+  if (response.status === 404) {
+    throw new GitHubInstallationNotFoundError(installationId);
+  }
   if (!response.ok) {
     throw new Error("Unable to create GitHub installation token");
   }

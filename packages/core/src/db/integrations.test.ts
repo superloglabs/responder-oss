@@ -9,15 +9,19 @@ import {
   deleteIntegrationAccount,
   getIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
+  removeGitHubInstallationAccount,
   updateIntegrationAccountSetup,
   updateIntegrationConnectionStateMetadata,
+  upsertGitHubInstallationAccount,
   upsertIntegrationAccount,
   withIntegrationAccountCredentialLease,
 } from "./integrations.js";
 import {
   automationVersionIntegrationAccounts,
+  automationVersionRepositories,
   integrationAccounts,
   integrationConnectionStates,
+  repositories,
 } from "./schema.js";
 
 vi.mock("./client.js", () => ({
@@ -472,6 +476,189 @@ describe("integration account tenancy", () => {
       await expect(deleteIntegrationAccount(removal)).resolves.toEqual({
         status: "not_found",
       });
+      expect(deleted).toEqual([]);
+    });
+  });
+
+  describe("GitHub App installations", () => {
+    const metadata = {
+      accountId: 98,
+      accountType: "Organization",
+      repositorySelection: "selected",
+    };
+
+    function installationDouble(candidates: Array<{
+      id: string;
+      externalAccountId: string;
+      updatedAt: Date;
+    }>) {
+      const updated: Array<{ values: unknown }> = [];
+      const inserted: unknown[] = [];
+      const tx = {
+        select: () => ({
+          from: () => ({ where: () => ({ for: vi.fn().mockResolvedValue(candidates) }) }),
+        }),
+        update: () => ({
+          set: (values: unknown) => ({
+            where: vi.fn(() => {
+              updated.push({ values });
+              return Promise.resolve();
+            }),
+          }),
+        }),
+        insert: () => ({
+          values: (values: unknown) => {
+            inserted.push(values);
+            return {
+              onConflictDoUpdate: () => ({
+                returning: vi.fn().mockResolvedValue([{ id: "new-account" }]),
+              }),
+            };
+          },
+        }),
+      };
+      vi.mocked(getDatabase).mockReturnValue({
+        transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+      } as never);
+      return { inserted, updated };
+    }
+
+    const install = {
+      organizationId: account.organizationId,
+      installationId: 3,
+      displayName: "konzeptlab",
+      metadata,
+    };
+
+    it("moves an earlier connection to the new installation after a reinstall", async () => {
+      const { inserted, updated } = installationDouble([
+        { id: "older", externalAccountId: "1", updatedAt: new Date("2026-09-01") },
+        { id: "newer", externalAccountId: "2", updatedAt: new Date("2026-10-01") },
+      ]);
+
+      await expect(upsertGitHubInstallationAccount(install)).resolves.toEqual({
+        id: "newer",
+        replacedAccountIds: ["older"],
+      });
+      expect(inserted).toEqual([]);
+      expect(updated).toEqual([
+        {
+          values: expect.objectContaining({
+            externalAccountId: "3",
+            metadata,
+            status: "connected",
+          }),
+        },
+      ]);
+    });
+
+    it("keeps the connection that already has the installation", async () => {
+      installationDouble([
+        { id: "current", externalAccountId: "3", updatedAt: new Date("2026-09-01") },
+        { id: "stale", externalAccountId: "2", updatedAt: new Date("2026-10-01") },
+      ]);
+
+      await expect(upsertGitHubInstallationAccount(install)).resolves.toEqual({
+        id: "current",
+        replacedAccountIds: ["stale"],
+      });
+    });
+
+    it("creates a connection for a GitHub account seen for the first time", async () => {
+      const { inserted } = installationDouble([]);
+
+      await expect(upsertGitHubInstallationAccount(install)).resolves.toEqual({
+        id: "new-account",
+        replacedAccountIds: [],
+      });
+      expect(inserted).toEqual([
+        expect.objectContaining({
+          externalAccountId: "3",
+          organizationId: account.organizationId,
+          provider: "github",
+        }),
+      ]);
+    });
+
+    function removalDouble(input: { found?: boolean; usedBy?: number }) {
+      const deleted: unknown[] = [];
+      const updated: unknown[] = [];
+      const usage = [[], [], []].map((rows, index) =>
+        index === input.usedBy ? [{ id: "version-1" }] : rows,
+      );
+      const usageQuery = (rows: unknown[]) => {
+        const query = {
+          from: () => query,
+          innerJoin: () => query,
+          where: () => query,
+          limit: () => Promise.resolve(rows),
+        };
+        return query;
+      };
+      const select = vi
+        .fn()
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({
+              for: vi.fn().mockResolvedValue(input.found === false ? [] : [{ id: "account-1" }]),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({ from: () => ({ where: () => "account repositories" }) })
+        .mockReturnValueOnce(usageQuery(usage[0]!))
+        .mockReturnValueOnce(usageQuery(usage[1]!))
+        .mockReturnValueOnce(usageQuery(usage[2]!));
+      const tx = {
+        select,
+        update: (table: unknown) => ({
+          set: (values: unknown) => ({
+            where: vi.fn(() => {
+              updated.push({ table, values });
+              return Promise.resolve();
+            }),
+          }),
+        }),
+        delete: vi.fn((table: unknown) => {
+          deleted.push(table);
+          return { where: vi.fn().mockResolvedValue(undefined) };
+        }),
+      };
+      vi.mocked(getDatabase).mockReturnValue({
+        transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+      } as never);
+      return { deleted, updated };
+    }
+
+    it("deletes a removed installation that nothing active uses", async () => {
+      const { deleted, updated } = removalDouble({});
+
+      await expect(removeGitHubInstallationAccount("account-1")).resolves.toBe("removed");
+      expect(deleted).toEqual([
+        automationVersionRepositories,
+        automationVersionIntegrationAccounts,
+        integrationAccounts,
+      ]);
+      expect(updated).toEqual([]);
+    });
+
+    it.each([0, 1, 2])(
+      "keeps a removed installation that an active automation or agent uses (%i)",
+      async (usedBy) => {
+        const { deleted, updated } = removalDouble({ usedBy });
+
+        await expect(removeGitHubInstallationAccount("account-1")).resolves.toBe("disconnected");
+        expect(deleted).toEqual([]);
+        expect(updated).toEqual([
+          { table: integrationAccounts, values: expect.objectContaining({ status: "error" }) },
+          { table: repositories, values: expect.objectContaining({ available: false }) },
+        ]);
+      },
+    );
+
+    it("reports a connection that no longer exists", async () => {
+      const { deleted } = removalDouble({ found: false });
+
+      await expect(removeGitHubInstallationAccount("account-1")).resolves.toBe("not_found");
       expect(deleted).toEqual([]);
     });
   });

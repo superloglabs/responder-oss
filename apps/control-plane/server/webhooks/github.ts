@@ -6,6 +6,10 @@ import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-p
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { Hono } from "hono";
 import { z } from "zod";
+import {
+  githubInstallationEventSchema,
+  syncGitHubInstallation,
+} from "./github-installations.js";
 import { startPullRequestAutomations } from "./github-pull-request-automations.js";
 import {
   pullRequestReviewEventSchema,
@@ -84,6 +88,23 @@ export const githubWebhookRoutes = new Hono().post("/", async (context) => {
           pullRequestNumber: parsed.data.pull_request.number,
           repository: parsed.data.repository.full_name,
           reviewId: parsed.data.review.id,
+        }),
+      );
+    }
+    return context.json({ ok: true, outcome });
+  }
+
+  if (eventType === "installation" || eventType === "installation_repositories") {
+    const parsed = githubInstallationEventSchema.safeParse(parseJson(rawBody));
+    if (!parsed.success) return context.json({ ok: true, ignored: true });
+    const outcome = await syncGitHubInstallation(eventType, parsed.data);
+    if (outcome !== "ignored" && outcome !== "not_ours") {
+      console.info(
+        JSON.stringify({
+          event: "github_installation_synced",
+          action: parsed.data.action,
+          installationId: parsed.data.installation.id,
+          outcome,
         }),
       );
     }

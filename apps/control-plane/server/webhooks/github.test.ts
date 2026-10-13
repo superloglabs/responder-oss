@@ -7,6 +7,7 @@ import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
 import { githubWebhookRoutes, verifyGitHubSignature } from "./github.js";
+import { syncGitHubInstallation } from "./github-installations.js";
 import { startPullRequestAutomations } from "./github-pull-request-automations.js";
 import { startPullRequestReviewTurn } from "./github-reviews.js";
 
@@ -29,6 +30,11 @@ vi.mock("@responder/core/db/suggestion-pull-requests", () => ({
 
 vi.mock("@responder/core/integrations/slack-remediations", () => ({
   refreshIssuePullRequestSlackMessages: vi.fn(),
+}));
+
+vi.mock("./github-installations.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./github-installations.js")>(),
+  syncGitHubInstallation: vi.fn(),
 }));
 
 vi.mock("./github-pull-request-automations.js", () => ({
@@ -225,6 +231,35 @@ describe("GitHub pull request webhooks", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
     expect(markIssuePullRequestMerged).not.toHaveBeenCalled();
+  });
+
+  it("removes the connection when the GitHub App is uninstalled", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(syncGitHubInstallation).mockResolvedValue("removed");
+    const body = JSON.stringify({ action: "deleted", installation: { id: 789 } });
+
+    const response = await post(body, { "x-github-event": "installation" });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, outcome: "removed" });
+    expect(syncGitHubInstallation).toHaveBeenCalledWith("installation", {
+      action: "deleted",
+      installation: { id: 789 },
+    });
+  });
+
+  it("syncs repositories when the app's repository access changes", async () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.mocked(syncGitHubInstallation).mockResolvedValue("synced");
+    const body = JSON.stringify({ action: "removed", installation: { id: 789 } });
+
+    const response = await post(body, { "x-github-event": "installation_repositories" });
+
+    await expect(response.json()).resolves.toEqual({ ok: true, outcome: "synced" });
+    expect(syncGitHubInstallation).toHaveBeenCalledWith("installation_repositories", {
+      action: "removed",
+      installation: { id: 789 },
+    });
   });
 
   it("continues the run or thread that opened a reviewed pull request", async () => {
