@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startPullRequestAutomations } from "./github-pull-request-automations.js";
 
 vi.mock("@responder/core/db/automations", () => ({
@@ -55,6 +55,10 @@ function dependencies(matches = [{ automationId: "automation-1", integrationAcco
 const appEnvironment = { GITHUB_APP_SLUG: "superlog-responder" };
 
 describe("GitHub pull request automations", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
 
   it("starts each matching automation when a pull request is opened", async () => {
     const deps = dependencies([
@@ -208,7 +212,10 @@ describe("GitHub pull request automations", () => {
 
     await expect(startPullRequestAutomations(event(), deps, {})).resolves.toEqual({ outcome: "ignored" });
     expect(deps.findAutomations).not.toHaveBeenCalled();
-    consoleError.mockRestore();
+    expect(consoleError).toHaveBeenCalledWith(JSON.stringify({
+      event: "github_pull_request_trigger_skipped",
+      reason: "missing_app_slug",
+    }));
   });
 
   it("keeps the trigger body valid JSON when the pull request is large", async () => {
