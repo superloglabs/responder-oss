@@ -31,7 +31,9 @@ function sentryClientSecretJwt(clientId: string, clientSecret: string): string {
 // stored refresh token revoked. Sentry can also revoke it while leaving the
 // installation in place. When Sentry rejects the refresh token, a client
 // secret JWT gets a token for the installation without it. Timeouts and
-// provider outages are left to the caller's retry.
+// provider outages are left to the caller's retry, which then takes the
+// fallback if the timed-out refresh rotated the token. Both requests share one
+// deadline so the refresh ends within the caller's credential lease.
 export async function requestSentryTokenRefresh(input: {
   clientId: string;
   clientSecret: string;
@@ -40,9 +42,10 @@ export async function requestSentryTokenRefresh(input: {
 }): Promise<Response> {
   const authorizationUrl =
     `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(input.installationId)}/authorizations/`;
+  const signal = AbortSignal.timeout(sentryRequestTimeoutMs);
   const response = await fetch(authorizationUrl, {
     method: "POST",
-    signal: AbortSignal.timeout(sentryRequestTimeoutMs),
+    signal,
     headers: {
       accept: "application/json",
       "content-type": "application/json",
@@ -58,7 +61,7 @@ export async function requestSentryTokenRefresh(input: {
 
   return fetch(authorizationUrl, {
     method: "POST",
-    signal: AbortSignal.timeout(sentryRequestTimeoutMs),
+    signal,
     headers: {
       accept: "application/json",
       "content-type": "application/json",

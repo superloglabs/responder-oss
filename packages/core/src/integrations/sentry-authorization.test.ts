@@ -51,7 +51,10 @@ describe("requestSentryTokenRefresh", () => {
       const response = await requestSentryTokenRefresh(input);
 
       expect(response.status).toBe(200);
-      const [, jwtRequest] = fetchMock.mock.calls[1];
+      const [[, refreshRequest], [, jwtRequest]] = fetchMock.mock.calls;
+      // One deadline covers both requests, so the fallback cannot outlast
+      // the credential lease.
+      expect(jwtRequest.signal).toBe(refreshRequest.signal);
       const jwt = (jwtRequest.headers.authorization as string).slice("Bearer ".length);
       const [encodedHeader, encodedPayload, encodedSignature] = jwt.split(".");
       expect(JSON.parse(Buffer.from(encodedHeader, "base64url").toString())).toEqual({
