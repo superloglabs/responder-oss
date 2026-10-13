@@ -43,6 +43,7 @@ import {
 } from "../integrations/linear.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
 import { parseLangfuseCredentials } from "../integrations/langfuse.js";
+import { requestSentryTokenRefresh } from "../integrations/sentry-authorization.js";
 import { vercelCredentialsSchema } from "../integrations/vercel.js";
 import {
   parseSupabaseCredentials,
@@ -2444,23 +2445,12 @@ export async function freshSentryCredentials(input: {
         const requestStartedAt = Date.now();
         let refreshed: z.infer<typeof sentryAuthorizationSchema>;
         try {
-          const response = await fetch(
-            `https://sentry.io/api/0/sentry-app-installations/${encodeURIComponent(current.installationId)}/authorizations/`,
-            {
-              method: "POST",
-              headers: {
-                accept: "application/json",
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({
-                grant_type: "refresh_token",
-                refresh_token: current.refreshToken,
-                client_id: clientId,
-                client_secret: clientSecret,
-              }),
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
+          const response = await requestSentryTokenRefresh({
+            clientId,
+            clientSecret,
+            installationId: current.installationId,
+            refreshToken: current.refreshToken,
+          });
           if (!response.ok) {
             throw new SentryRefreshHttpError(response.status);
           }
