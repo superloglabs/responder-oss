@@ -251,6 +251,22 @@ describe("Codex automation harness", () => {
     );
   });
 
+  it("names an error event when the turn reported no failure", async () => {
+    const events = JSON.stringify({ type: "error", message: "stream disconnected before completion" });
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce("Chunk ID: install\nProcess exited with code 0\nOutput:\n")
+        .mockResolvedValueOnce("Chunk ID: workspace\nProcess exited with code 0\nOutput:\n")
+        .mockResolvedValue(`Chunk ID: run\nProcess exited with code 1\nOutput:\n${events}\n`),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      /^Codex automation harness failed: stream disconnected before completion$/u,
+    );
+  });
+
   it("names the exit code when Codex reported no error", async () => {
     const session = {
       execCommand: vi

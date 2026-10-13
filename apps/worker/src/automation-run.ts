@@ -296,7 +296,7 @@ type AutomationConversation = Awaited<ReturnType<typeof listAutomationRunConvers
 const maxConversationLength = 60_000;
 // A run lease lasts at most ten minutes past its last heartbeat.
 const maxRunLeaseMs = 600_000;
-const leaseExpiryMarginMs = 1_000;
+const runHeartbeatIntervalMs = 30_000;
 
 function userMessagePrompt(message: AutomationUserMessageEventData): string {
   if (message.slackButton) {
@@ -698,11 +698,14 @@ export async function processAutomationRun(
   let run = await dependencies.claimRun(payload.runId);
   // The retry of a job cut off by a worker restart can arrive before the
   // stopped worker's lease runs out. Wait for the lease and claim once more.
-  // A live worker renews its lease, so a run it holds is left alone.
-  const leaseExpiresAt = run ? null : await dependencies.leaseExpiry(payload.runId);
-  if (leaseExpiresAt) {
-    const remainingMs = leaseExpiresAt.getTime() - dependencies.now().getTime();
-    await dependencies.sleep(Math.min(Math.max(remainingMs, 0), maxRunLeaseMs) + leaseExpiryMarginMs);
+  // A live worker renews its lease within one heartbeat, so a run it holds,
+  // even with a late heartbeat, is left alone.
+  if (!run) {
+    const leaseExpiresAt = await dependencies.leaseExpiry(payload.runId);
+    if (leaseExpiresAt) {
+      const remainingMs = leaseExpiresAt.getTime() - dependencies.now().getTime();
+      await dependencies.sleep(Math.min(Math.max(remainingMs, 0), maxRunLeaseMs) + runHeartbeatIntervalMs);
+    }
     run = await dependencies.claimRun(payload.runId);
   }
   if (!run) return { runId: payload.runId };
@@ -766,7 +769,7 @@ export async function processAutomationRun(
           runId: run.runId,
         }));
       });
-  }, 30_000);
+  }, runHeartbeatIntervalMs);
   try {
     if (!(await dependencies.heartbeatRun({
       leaseId: run.leaseId,

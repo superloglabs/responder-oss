@@ -821,7 +821,8 @@ describe("automation run processor", () => {
 
       await processAutomationRun("job-1", job, process.env, deps);
 
-      expect(deps.sleep).toHaveBeenCalledWith(25_000);
+      // A worker that is only slow gets one more heartbeat to renew its lease.
+      expect(deps.sleep).toHaveBeenCalledWith(54_000);
       expect(deps.claimRun).toHaveBeenCalledTimes(2);
       expect(deps.runCodex).toHaveBeenCalled();
     });
@@ -837,14 +838,26 @@ describe("automation run processor", () => {
       expect(deps.runInSandbox).not.toHaveBeenCalled();
     });
 
-    it("does not wait for a run that no lease holds", async () => {
+    it("takes over a run whose lease ran out just after the first claim", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValueOnce(null).mockResolvedValue(claimedRun());
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.sleep).not.toHaveBeenCalled();
+      expect(deps.runCodex).toHaveBeenCalled();
+    });
+
+    it("does nothing for a run no lease holds that cannot be claimed", async () => {
       const deps = dependencies();
       deps.claimRun.mockResolvedValue(null);
 
       await expect(processAutomationRun("job-1", job, process.env, deps)).resolves.toEqual({ runId });
 
       expect(deps.sleep).not.toHaveBeenCalled();
-      expect(deps.claimRun).toHaveBeenCalledTimes(1);
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
     });
   });
 
