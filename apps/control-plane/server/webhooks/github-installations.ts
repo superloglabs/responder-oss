@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { disableAgentsWithUnavailableRepositories } from "../../../../packages/core/src/db/agents.js";
 import {
+  disconnectGitHubInstallationAccount,
   listGitHubAccountsForInstallation,
   removeGitHubInstallationAccount,
   replaceRepositories,
   setIntegrationAccountStatus,
 } from "../../../../packages/core/src/db/integrations.js";
+import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
 import { listGitHubRepositories } from "../integrations/github.js";
 
 export const githubInstallationEventSchema = z.object({
@@ -19,6 +21,23 @@ export type GitHubInstallationOutcome =
   | "removed"
   | "suspended"
   | "synced";
+
+type GitHubConnection = { id: string; organizationId: string };
+
+// Applies a change to every connection that uses the installation, then pauses
+// agents that lost a repository. One failing connection does not stop the
+// others; the first failure is raised afterwards so GitHub retries the event.
+async function forEachConnection(
+  accounts: GitHubConnection[],
+  apply: (account: GitHubConnection) => Promise<unknown>,
+): Promise<void> {
+  const results = await Promise.allSettled(accounts.map(apply));
+  for (const organizationId of new Set(accounts.map((account) => account.organizationId))) {
+    await disableAgentsWithUnavailableRepositories(organizationId);
+  }
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
+}
 
 // Keeps connections in step with changes people make to the GitHub App on
 // GitHub: uninstalling it, suspending it, or changing which repositories it
@@ -38,24 +57,31 @@ export async function syncGitHubInstallation(
   const accounts = await listGitHubAccountsForInstallation(event.installation.id);
   if (accounts.length === 0) return "not_ours";
 
+  const remove = () =>
+    forEachConnection(accounts, (account) => removeGitHubInstallationAccount(account.id));
   if (event.action === "deleted") {
-    for (const account of accounts) {
-      await removeGitHubInstallationAccount(account.id);
-    }
+    await remove();
     return "removed";
   }
   if (event.action === "suspend") {
-    for (const account of accounts) {
-      await setIntegrationAccountStatus(account.id, "error");
-    }
+    await forEachConnection(accounts, (account) =>
+      disconnectGitHubInstallationAccount(account.id),
+    );
     return "suspended";
   }
 
-  const repositories = await listGitHubRepositories(event.installation.id);
-  for (const account of accounts) {
+  let repositories;
+  try {
+    repositories = await listGitHubRepositories(event.installation.id);
+  } catch (error) {
+    // The app was uninstalled before this event arrived.
+    if (!(error instanceof GitHubInstallationNotFoundError)) throw error;
+    await remove();
+    return "removed";
+  }
+  await forEachConnection(accounts, async (account) => {
     await replaceRepositories(account.id, repositories);
     await setIntegrationAccountStatus(account.id, "connected");
-    await disableAgentsWithUnavailableRepositories(account.organizationId);
-  }
+  });
   return "synced";
 }

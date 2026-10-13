@@ -17,7 +17,7 @@ import {
   getRecoverableSentryIntegrationAccount,
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
-  removeGitHubInstallationAccount,
+  replaceGitHubInstallationAccount,
   replaceIntegrationResources,
   replaceIntegrationResourcesIfCredentialsMatch,
   replaceRepositories,
@@ -4163,6 +4163,7 @@ export const integrationRoutes = new Hono()
         repositoryCount: number;
       }> = [];
       for (const installation of installations) {
+        const repositories = await listGitHubRepositories(installation.id);
         const { id: accountId, replacedAccountIds } =
           await upsertGitHubInstallationAccount({
             organizationId: connectionState.organizationId,
@@ -4174,10 +4175,9 @@ export const integrationRoutes = new Hono()
               repositorySelection: installation.repository_selection,
             },
           });
-        const repositories = await listGitHubRepositories(installation.id);
         await replaceRepositories(accountId, repositories);
         for (const replacedAccountId of replacedAccountIds) {
-          await removeGitHubInstallationAccount(replacedAccountId);
+          await replaceGitHubInstallationAccount({ accountId, replacedAccountId });
         }
         connectedAccounts.push({
           accountId,

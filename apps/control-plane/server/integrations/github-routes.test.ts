@@ -5,7 +5,7 @@ import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   listOrganizationIntegrationAccounts,
-  removeGitHubInstallationAccount,
+  replaceGitHubInstallationAccount,
   replaceRepositories,
   upsertGitHubInstallationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -16,6 +16,7 @@ import {
   listGitHubRepositories,
   verifyGitHubUserInstallation,
 } from "./github.js";
+import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
 import { integrationRoutes } from "./routes.js";
 
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
@@ -32,7 +33,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   createIntegrationConnectionState: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
-  removeGitHubInstallationAccount: vi.fn(),
+  replaceGitHubInstallationAccount: vi.fn(),
   replaceIntegrationResources: vi.fn(),
   replaceRepositories: vi.fn(),
   setIntegrationAccountStatus: vi.fn(),
@@ -337,8 +338,47 @@ describe("GitHub integration routing", () => {
       },
       organizationId: tenant.organizationId,
     });
-    expect(removeGitHubInstallationAccount).toHaveBeenCalledWith(
-      "30000000-0000-4000-8000-000000000001",
+    expect(replaceGitHubInstallationAccount).toHaveBeenCalledWith({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      replacedAccountId: "30000000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it("leaves connections unchanged when the installation disappears mid-connection", async () => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      codeVerifier: null,
+      metadata: {},
+      organizationId: tenant.organizationId,
+      returnTo: "/settings",
+      userId: tenant.user.id,
+    });
+    vi.mocked(exchangeGitHubCode).mockResolvedValue({
+      access_token: "user-token",
+      token_type: "bearer",
+    });
+    vi.mocked(verifyGitHubUserInstallation).mockResolvedValue({
+      account: { id: 98, login: "example", type: "Organization" },
+      id: 12346,
+      repository_selection: "selected",
+    });
+    vi.mocked(listGitHubRepositories).mockRejectedValue(
+      new GitHubInstallationNotFoundError(12346),
     );
+
+    const response = await app.request(
+      "/api/integrations/github/callback" +
+        "?code=one-time-code" +
+        "&installation_id=12346" +
+        "&setup_action=install" +
+        "&state=connection-state",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("status=error");
+    expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
+    expect(replaceRepositories).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsHeading } from "../components/settings-heading";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
-import { integrationActionUrl } from "./settings-presentation";
+import { githubNeedsReconnect, integrationActionUrl } from "./settings-presentation";
 
 type IntegrationState =
   | "available"
@@ -315,12 +315,8 @@ function displayedHealth(
   integration: IntegrationSummary,
   health: SentryHealth | null,
 ): SentryHealth | null {
-  // A GitHub connection fails when its app installation was removed on GitHub
-  // while an automation still uses it. Installing the app again restores it.
   if (integration.id === "github") {
-    return integration.accounts.some((account) => account.status === "error")
-      ? "needs_reconnect"
-      : null;
+    return githubNeedsReconnect(integration) ? "needs_reconnect" : null;
   }
   if (integration.id !== "sentry") return null;
   if (integration.accounts.some((account) => account.status === "error")) {

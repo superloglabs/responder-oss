@@ -22,7 +22,6 @@ import { listAIGatewayModels } from "../../../../packages/core/src/automations/m
 import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
 import {
   AgentConfigurationError,
-  disableAgentsWithUnavailableRepositories,
   getSlackThreadModeConfiguration,
   listAgentOptions,
   saveSlackThreadModeConfiguration,
@@ -359,7 +358,6 @@ export const managementOperations: ManagementOperation[] = [
       try {
         if (input.provider === "github") {
           await refreshGitHubRepositories(context.organizationId);
-          await disableAgentsWithUnavailableRepositories(context.organizationId);
         } else {
           await refreshSlackChannelResources(context.organizationId);
         }

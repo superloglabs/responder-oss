@@ -68,6 +68,9 @@ function tenantVisibleTraceEvents(
   return events.filter((event) => !tenantHiddenTraceEventTypes.has(event.type));
 }
 
+// Reloads repositories for every GitHub connection, removing connections
+// whose installation is gone, then pauses agents that lost a repository. One
+// failing connection does not stop the others.
 export async function refreshGitHubRepositories(
   organizationId: string,
 ): Promise<void> {
@@ -76,7 +79,7 @@ export async function refreshGitHubRepositories(
     "github",
   );
 
-  await Promise.all(
+  const results = await Promise.allSettled(
     accounts.map(async (account) => {
       let repositories;
       try {
@@ -91,6 +94,9 @@ export async function refreshGitHubRepositories(
       await replaceRepositories(account.id, repositories);
     }),
   );
+  await disableAgentsWithUnavailableRepositories(organizationId);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 export async function ensureSlackChannelMemberships(
@@ -258,7 +264,6 @@ export const agentRoutes = new Hono()
 
     try {
       await refreshGitHubRepositories(tenant.organizationId);
-      await disableAgentsWithUnavailableRepositories(tenant.organizationId);
       return context.json(await listAgentOptions(tenant.organizationId));
     } catch (error) {
       console.error("Unable to refresh GitHub repositories", error);

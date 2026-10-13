@@ -255,6 +255,7 @@ describe("GitHub pull request webhooks", () => {
 
     const response = await post(body, { "x-github-event": "installation_repositories" });
 
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, outcome: "synced" });
     expect(syncGitHubInstallation).toHaveBeenCalledWith("installation_repositories", {
       action: "removed",

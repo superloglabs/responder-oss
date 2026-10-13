@@ -763,6 +763,28 @@ describe("GitHub repository option refresh", () => {
     expect(replaceRepositories).not.toHaveBeenCalled();
     expect(listAgentOptions).not.toHaveBeenCalled();
   });
+
+  it("pauses agents for a removed installation even when another refresh fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { id: "github-account-1", externalAccountId: "123" },
+      { id: "github-account-2", externalAccountId: "456" },
+    ]);
+    vi.mocked(listGitHubRepositories)
+      .mockRejectedValueOnce(new GitHubInstallationNotFoundError(123))
+      .mockRejectedValueOnce(new Error("GitHub unavailable"));
+
+    const response = await app.request("/api/agents/options/refresh/github", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(502);
+    expect(removeGitHubInstallationAccount).toHaveBeenCalledWith("github-account-1");
+    expect(disableAgentsWithUnavailableRepositories).toHaveBeenCalledWith(
+      tenant.organizationId,
+    );
+  });
 });
 
 describe("agent status updates", () => {

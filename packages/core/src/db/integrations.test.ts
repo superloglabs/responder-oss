@@ -10,6 +10,7 @@ import {
   getIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
   removeGitHubInstallationAccount,
+  replaceGitHubInstallationAccount,
   updateIntegrationAccountSetup,
   updateIntegrationConnectionStateMetadata,
   upsertGitHubInstallationAccount,
@@ -17,11 +18,14 @@ import {
   withIntegrationAccountCredentialLease,
 } from "./integrations.js";
 import {
+  agentVersionRepositories,
   automationVersionIntegrationAccounts,
   automationVersionRepositories,
+  automationVersions,
   integrationAccounts,
   integrationConnectionStates,
   repositories,
+  scanConfigurations,
 } from "./schema.js";
 
 vi.mock("./client.js", () => ({
@@ -660,6 +664,96 @@ describe("integration account tenancy", () => {
 
       await expect(removeGitHubInstallationAccount("account-1")).resolves.toBe("not_found");
       expect(deleted).toEqual([]);
+    });
+
+    it("moves what used an earlier connection onto the new installation", async () => {
+      const selected = [
+        [{ from: "old-repo", to: "new-repo" }],
+        [{ automationVersionId: "version-1", repositoryId: "old-repo", position: 0 }],
+        [{ agentConfigVersionId: "agent-version-1", repositoryId: "old-repo" }],
+        [{ automationVersionId: "version-1", integrationAccountId: "old", role: "trigger" }],
+        [{
+          id: "version-1",
+          triggers: [
+            { eventTypes: ["opened"], integrationAccountId: "old", kind: "github", repositoryIds: ["old-repo", "gone-repo"] },
+            { kind: "schedule", cron: "0 * * * *" },
+          ],
+        }],
+        [{ organizationId: account.organizationId, repositoryIds: ["old-repo"] }],
+        [],
+      ];
+      const query = (rows: unknown) => {
+        const chain = {
+          from: () => chain,
+          innerJoin: () => chain,
+          where: () => chain,
+          for: () => chain,
+          then: (resolve: (value: unknown) => unknown) => resolve(rows),
+        };
+        return chain;
+      };
+      const inserted: Array<{ table: unknown; values: unknown }> = [];
+      const deleted: unknown[] = [];
+      const updated: Array<{ table: unknown; values: unknown }> = [];
+      const tx = {
+        select: vi.fn(() => query(selected.shift())),
+        insert: (table: unknown) => ({
+          values: (values: unknown) => {
+            inserted.push({ table, values });
+            return { onConflictDoNothing: vi.fn().mockResolvedValue(undefined) };
+          },
+        }),
+        delete: (table: unknown) => {
+          deleted.push(table);
+          return { where: vi.fn().mockResolvedValue(undefined) };
+        },
+        update: (table: unknown) => ({
+          set: (values: unknown) => ({
+            where: vi.fn(() => {
+              updated.push({ table, values });
+              return Promise.resolve();
+            }),
+          }),
+        }),
+      };
+      vi.mocked(getDatabase).mockReturnValue({
+        transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+      } as never);
+
+      await expect(
+        replaceGitHubInstallationAccount({ accountId: "new", replacedAccountId: "old" }),
+      ).resolves.toBe("not_found");
+      expect(inserted).toEqual([
+        {
+          table: automationVersionRepositories,
+          values: [{ automationVersionId: "version-1", repositoryId: "new-repo", position: 0 }],
+        },
+        {
+          table: agentVersionRepositories,
+          values: [{ agentConfigVersionId: "agent-version-1", repositoryId: "new-repo" }],
+        },
+        {
+          table: automationVersionIntegrationAccounts,
+          values: [{ automationVersionId: "version-1", integrationAccountId: "new", role: "trigger" }],
+        },
+      ]);
+      expect(deleted).toEqual([
+        automationVersionRepositories,
+        agentVersionRepositories,
+        automationVersionIntegrationAccounts,
+      ]);
+      expect(updated).toEqual([
+        {
+          table: automationVersions,
+          values: {
+            triggers: [
+              { eventTypes: ["opened"], integrationAccountId: "new", kind: "github", repositoryIds: ["new-repo", "gone-repo"] },
+              { kind: "schedule", cron: "0 * * * *" },
+            ],
+          },
+        },
+        { table: scanConfigurations, values: { repositoryIds: ["new-repo"] } },
+      ]);
     });
   });
 });
