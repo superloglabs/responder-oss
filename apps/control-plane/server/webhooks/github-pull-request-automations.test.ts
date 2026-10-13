@@ -59,7 +59,6 @@ describe("GitHub pull request automations", () => {
     vi.restoreAllMocks();
   });
 
-
   it("starts each matching automation when a pull request is opened", async () => {
     const deps = dependencies([
       { automationId: "automation-1", integrationAccountId, repositoryId },
