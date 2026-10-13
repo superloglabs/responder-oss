@@ -1,7 +1,10 @@
 import { serve } from "@hono/node-server";
+import { cellDirectory } from "@responder/core/cells";
 import { loadResponderSecrets } from "@responder/core/secrets";
 
 loadResponderSecrets();
+// Invalid regional cell configuration stops the server before it serves.
+cellDirectory();
 
 const { flushServerMonitoring, initializeServerMonitoring } = await import(
   "./monitoring.js"

@@ -229,7 +229,7 @@ export function OAuthAuthorizePage() {
   } else if (session.isPending) {
     content = <p className="authMuted">Loading Superlog…</p>;
   } else if (!session.data) {
-    content = <SignIn allowLegacyHandoff={false} />;
+    content = <SignIn allowLegacyHandoff={false} allowRegionChoice={false} />;
   } else {
     content = (
       <Consent
