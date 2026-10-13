@@ -20,7 +20,8 @@
 .telemetryPage__table { min-width: 0; }
 .telemetryPage__time, .telemetryPage__service { color: var(--ds-text-muted); font-size: 12px; white-space: nowrap; }
 .telemetryPage__service { display: block; overflow: hidden; text-overflow: ellipsis; }
-.telemetryPage__message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.telemetryPage__message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: inherit; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+button.telemetryPage__message, a.telemetryPage__message { cursor: pointer; }
 
 .telemetryDetail { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 96px); overflow: auto; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; }
 /* The pane scrolls as a whole; its sections keep their height. */

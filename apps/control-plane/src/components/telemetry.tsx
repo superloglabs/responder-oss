@@ -21,6 +21,27 @@ export function TelemetryAttributes({ title, values }: { title: string; values: 
   );
 }
 
+export function TelemetryException({
+  message,
+  stacktrace,
+  type,
+}: {
+  message: string;
+  stacktrace: string;
+  type: string;
+}) {
+  if (!type && !message && !stacktrace) return null;
+  return (
+    <section className="telemetryDetail__section">
+      <h3>Exception</h3>
+      {type || message ? (
+        <p className="telemetryDetail__exception">{[type, message].filter(Boolean).join(": ")}</p>
+      ) : null}
+      {stacktrace ? <pre className="telemetryDetail__body">{stacktrace}</pre> : null}
+    </section>
+  );
+}
+
 // Renders the page once the workspace has linked telemetry projects, and the
 // loading, unavailable and empty states before that.
 export function TelemetryProjectsGate({

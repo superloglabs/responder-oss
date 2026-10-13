@@ -182,6 +182,19 @@ export function traceHref(projectId: string, traceId: string): string {
   return `/traces/${encodeURIComponent(traceId)}?${new URLSearchParams({ projectId })}`;
 }
 
+// The trace list passes its filters to a trace it opens, so the trace page's
+// breadcrumb returns to the same list. A trace opened any other way returns
+// to the list for its project.
+export interface TraceListState {
+  traceList: string;
+}
+
+export function traceListHref(state: unknown, projectId: string): string {
+  const traceList = (state as Partial<TraceListState> | null)?.traceList;
+  if (typeof traceList === "string") return traceList ? `/traces?${traceList}` : "/traces";
+  return `/traces?${new URLSearchParams({ projectId })}`;
+}
+
 export function traceSearchParams(query: TraceQuery): URLSearchParams {
   const params = new URLSearchParams({ projectId: query.projectId, range: query.range });
   if (query.service) params.set("service", query.service);
@@ -208,7 +221,9 @@ export function formatDuration(milliseconds: number): string {
   if (milliseconds < 1) return `${Math.round(milliseconds * 1000)} µs`;
   if (milliseconds < 1000) return `${Number(milliseconds.toPrecision(3))} ms`;
   if (milliseconds < 60_000) return `${Number((milliseconds / 1000).toPrecision(3))} s`;
-  return `${Math.floor(milliseconds / 60_000)} m ${Math.round((milliseconds % 60_000) / 1000)} s`;
+  // Round once, so 119.6 s reads "2 m 0 s" rather than "1 m 60 s".
+  const seconds = Math.round(milliseconds / 1000);
+  return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
 
 export interface WaterfallRow {

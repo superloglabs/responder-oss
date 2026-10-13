@@ -13,6 +13,7 @@ import {
   telemetryRanges,
   traceHref,
   type TelemetryRange,
+  type TraceListState,
   type TraceQuery,
   type TraceSummary,
 } from "../telemetry-api";
@@ -60,6 +61,7 @@ export function TracesPage() {
   const filters = traceFilters(params);
   const projectId = filters.projectId || telemetry.projects?.[0]?.projectId || "";
   const { minDurationMs, range, service, status } = filters;
+  const listState: TraceListState = { traceList: params.toString() };
   const [services, setServices] = useState<string[]>([]);
   const [traces, setTraces] = useState<TraceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -196,6 +198,7 @@ export function TracesPage() {
                       render: (trace) => (
                         <Link
                           className="telemetryPage__message"
+                          state={listState}
                           title={trace.root_span_name}
                           to={traceHref(projectId, trace.trace_id)}
                         >
@@ -234,7 +237,7 @@ export function TracesPage() {
                   ]}
                   emptyMessage="No traces match these filters in this time range."
                   getRowKey={(trace) => trace.trace_id}
-                  onRowClick={(trace) => navigate(traceHref(projectId, trace.trace_id))}
+                  onRowClick={(trace) => navigate(traceHref(projectId, trace.trace_id), { state: listState })}
                   rows={traces}
                   variant="workspace"
                 />

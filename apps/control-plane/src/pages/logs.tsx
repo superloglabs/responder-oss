@@ -2,7 +2,7 @@ import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
-import { TelemetryAttributes, TelemetryProjectsGate } from "../components/telemetry";
+import { TelemetryAttributes, TelemetryException, TelemetryProjectsGate } from "../components/telemetry";
 import { Badge, DataTable, IconButton, SegmentedControl, SelectField } from "../design-system";
 import {
   fetchLogs,
@@ -44,17 +44,11 @@ function LogDetail({ log, onClose, projectId }: { log: LogRecord; onClose: () =>
         </IconButton>
       </header>
       <pre className="telemetryDetail__body">{log.body}</pre>
-      {log.exception_type || log.exception_message ? (
-        <section className="telemetryDetail__section">
-          <h3>Exception</h3>
-          <p className="telemetryDetail__exception">
-            {[log.exception_type, log.exception_message].filter(Boolean).join(": ")}
-          </p>
-          {log.exception_stacktrace ? (
-            <pre className="telemetryDetail__body">{log.exception_stacktrace}</pre>
-          ) : null}
-        </section>
-      ) : null}
+      <TelemetryException
+        message={log.exception_message}
+        stacktrace={log.exception_stacktrace}
+        type={log.exception_type}
+      />
       <dl className="telemetryDetail__attributes">
         <div><dt>Service</dt><dd>{log.service || "—"}</dd></div>
         {log.trace_id ? (

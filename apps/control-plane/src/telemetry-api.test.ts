@@ -9,6 +9,7 @@ import {
   spanStatus,
   spanWaterfall,
   traceHref,
+  traceListHref,
   traceSearchParams,
   type Span,
 } from "./telemetry-api";
@@ -90,6 +91,13 @@ describe("spans", () => {
   it("links to a trace in its project", () => {
     expect(traceHref("p-1", "abc")).toBe("/traces/abc?projectId=p-1");
   });
+
+  it("returns from a trace to the list that opened it", () => {
+    expect(traceListHref({ traceList: "status=error&range=6h" }, "p-1")).toBe("/traces?status=error&range=6h");
+    expect(traceListHref({ traceList: "" }, "p-1")).toBe("/traces");
+    expect(traceListHref(null, "p-1")).toBe("/traces?projectId=p-1");
+    expect(traceListHref({ other: 1 }, "p-1")).toBe("/traces?projectId=p-1");
+  });
 });
 
 describe("traceSearchParams", () => {
@@ -115,6 +123,7 @@ describe("formatDuration", () => {
     expect(formatDuration(42.123)).toBe("42.1 ms");
     expect(formatDuration(1234)).toBe("1.23 s");
     expect(formatDuration(125_000)).toBe("2 m 5 s");
+    expect(formatDuration(119_600)).toBe("2 m 0 s");
     expect(formatDuration(Number.NaN)).toBe("—");
   });
 });

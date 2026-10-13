@@ -1,8 +1,8 @@
 import { XIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
-import { TelemetryAttributes, TelemetryProjectsGate } from "../components/telemetry";
+import { TelemetryAttributes, TelemetryException, TelemetryProjectsGate } from "../components/telemetry";
 import { Badge, DataTable, IconButton } from "../design-system";
 import {
   fetchTrace,
@@ -13,6 +13,7 @@ import {
   spanKindLabel,
   spanStatus,
   spanWaterfall,
+  traceListHref,
   type Span,
   type TraceDetail,
 } from "../telemetry-api";
@@ -22,17 +23,6 @@ import "../components/automation-run-history.css";
 import "./automation-create.css";
 
 type TraceLog = TraceDetail["logs"][number];
-
-function Exception({ message, stacktrace, type }: { message: string; stacktrace: string; type: string }) {
-  if (!type && !message) return null;
-  return (
-    <section className="telemetryDetail__section">
-      <h3>Exception</h3>
-      <p className="telemetryDetail__exception">{[type, message].filter(Boolean).join(": ")}</p>
-      {stacktrace ? <pre className="telemetryDetail__body">{stacktrace}</pre> : null}
-    </section>
-  );
-}
 
 function SpanDetail({ logs, onClose, span }: { logs: TraceLog[]; onClose: () => void; span: Span }) {
   const status = spanStatus(span.status_code);
@@ -47,7 +37,7 @@ function SpanDetail({ logs, onClose, span }: { logs: TraceLog[]; onClose: () => 
       </header>
       <pre className="telemetryDetail__body">{span.span_name}</pre>
       {span.status_message ? <p className="telemetryDetail__exception">{span.status_message}</p> : null}
-      <Exception message={span.exception_message} stacktrace={span.exception_stacktrace} type={span.exception_type} />
+      <TelemetryException message={span.exception_message} stacktrace={span.exception_stacktrace} type={span.exception_type} />
       <dl className="telemetryDetail__attributes">
         <div><dt>Service</dt><dd>{span.service || "—"}</dd></div>
         <div><dt>Kind</dt><dd>{spanKindLabel(span.span_kind)}</dd></div>
@@ -78,6 +68,7 @@ function SpanDetail({ logs, onClose, span }: { logs: TraceLog[]; onClose: () => 
 const ticks = [0, 25, 50, 75, 100];
 
 function TraceView({ projectId, traceId }: { projectId: string; traceId: string }) {
+  const location = useLocation();
   const [trace, setTrace] = useState<TraceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -121,7 +112,7 @@ function TraceView({ projectId, traceId }: { projectId: string; traceId: string 
   }
   if (!trace || !root) return <p className="telemetryPage__status">Loading trace…</p>;
 
-  const services = new Set(trace.spans.map((span) => span.service));
+  const services = new Set(trace.spans.map((span) => span.service).filter(Boolean));
   const errors = trace.spans.filter((span) => span.status_code === "STATUS_CODE_ERROR").length;
   const selectedSpan = trace.spans.find((span) => span.span_id === selected) ?? null;
 
@@ -129,7 +120,7 @@ function TraceView({ projectId, traceId }: { projectId: string; traceId: string 
     <>
       <header className="automationCreate__header">
         <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
-          <Link to={`/traces?${new URLSearchParams({ projectId })}`}>Traces</Link>
+          <Link to={traceListHref(location.state, projectId)}>Traces</Link>
           <span aria-hidden="true">›</span>
           <span aria-current="page">{traceId.slice(0, 8)}</span>
         </nav>
