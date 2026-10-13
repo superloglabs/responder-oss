@@ -1,0 +1,126 @@
+import { describe, expect, it } from "vitest";
+import {
+  chartSeries,
+  dashboardVariablesSchema,
+  dashboardWidgetConfigSchema,
+  dashboardWidgetCreateSchema,
+  dashboardWidgetLayoutSchema,
+  defaultWidgetLayout,
+  resolveWidgetFilters,
+} from "./dashboards.js";
+
+const minute = 60_000;
+const start = Date.parse("2026-10-13T12:00:00.000Z");
+
+describe("dashboard widgets", () => {
+  it("accepts a Superlog widget config as stored", () => {
+    const config = {
+      aggregation: "p95",
+      chartType: "line",
+      filter: { resourceAttrs: [{ key: "service.name", op: "neq", value: "$service" }] },
+      groupBy: "attr:http.route",
+      legendPosition: "bottom",
+      limit: 5,
+      metricName: "http.server.duration",
+      showLegend: true,
+      unit: "duration_ms",
+    };
+    expect(dashboardWidgetConfigSchema.parse(config)).toEqual(config);
+  });
+
+  it("rejects home page widgets and layouts past the grid", () => {
+    expect(
+      dashboardWidgetCreateSchema.safeParse({ config: {}, title: "Incidents", type: "active_incidents" }).success,
+    ).toBe(false);
+    expect(dashboardWidgetLayoutSchema.safeParse({ h: 4, w: 6, x: 8, y: 0 }).success).toBe(false);
+    expect(dashboardWidgetLayoutSchema.safeParse({ h: 4, w: 6, x: 6, y: 0 }).success).toBe(true);
+  });
+
+  it("sizes new widgets by type and places them last", () => {
+    expect(defaultWidgetLayout("timeseries_count")).toEqual({ h: 4, w: 6, x: 0, y: 100_000 });
+    expect(defaultWidgetLayout("log_table").w).toBe(12);
+  });
+});
+
+describe("dashboard variables", () => {
+  it("rejects duplicate names and a default outside the options", () => {
+    expect(
+      dashboardVariablesSchema.safeParse([
+        { name: "env", options: [] },
+        { name: "env", options: [] },
+      ]).success,
+    ).toBe(false);
+    expect(dashboardVariablesSchema.safeParse([{ defaultValue: "dev", name: "env", options: ["prod"] }]).success).toBe(
+      false,
+    );
+    expect(dashboardVariablesSchema.safeParse([{ defaultValue: "any", name: "env", options: [] }]).success).toBe(true);
+    expect(dashboardVariablesSchema.safeParse([{ name: "1env", options: [] }]).success).toBe(false);
+  });
+
+  it("substitutes references in filter values and keeps unknown ones", () => {
+    expect(
+      resolveWidgetFilters(
+        [
+          { key: "deployment.environment", value: "$env" },
+          { key: "service.name", op: "neq", value: "${service}-worker" },
+          { key: "region", value: "$region" },
+        ],
+        { env: "production", service: "api" },
+      ),
+    ).toEqual([
+      { key: "deployment.environment", value: "production" },
+      { key: "service.name", op: "neq", value: "api-worker" },
+      { key: "region", value: "$region" },
+    ]);
+    expect(resolveWidgetFilters(undefined, {})).toEqual([]);
+  });
+
+  it("ignores inherited object properties as variable names", () => {
+    expect(resolveWidgetFilters([{ key: "k", value: "$constructor" }], {})).toEqual([
+      { key: "k", value: "$constructor" },
+    ]);
+  });
+});
+
+describe("chartSeries", () => {
+  const window = { sinceMs: start, stepMs: minute, untilMs: start + 3 * minute };
+
+  it("puts every bucket in the window on the axis and fills counts with zero", () => {
+    const data = chartSeries([{ bucket: "2026-10-13 12:01:00", group: "", value: 4 }], { ...window, fill: "zero" });
+    expect(data.buckets).toEqual([start, start + minute, start + 2 * minute, start + 3 * minute]);
+    expect(data.series).toEqual([{ name: "(none)", other: false, values: [0, 4, 0, 0] }]);
+  });
+
+  it("leaves metric gaps empty", () => {
+    const data = chartSeries([{ bucket: "2026-10-13 12:02:00", group: "api", value: 1.5 }], { ...window, fill: "null" });
+    expect(data.series[0]!.values).toEqual([null, null, 1.5, null]);
+  });
+
+  it("keeps the largest groups and sums the rest into Other", () => {
+    const data = chartSeries(
+      [
+        { bucket: "2026-10-13 12:00:00", group: "a", value: 1 },
+        { bucket: "2026-10-13 12:00:00", group: "b", value: 10 },
+        { bucket: "2026-10-13 12:01:00", group: "Other", value: 5 },
+        { bucket: "2026-10-13 12:01:00", group: "c", value: 2 },
+      ],
+      { ...window, fill: "zero", limit: 2 },
+    );
+    expect(data.series.map((series) => [series.name, series.other])).toEqual([
+      ["b", false],
+      ["Other", false],
+      ["Other (2)", true],
+    ]);
+    expect(data.series[2]!.values).toEqual([1, 2, 0, 0]);
+  });
+
+  it("skips the window fill when the step does not fit it", () => {
+    const data = chartSeries([{ bucket: "2026-10-13 12:00:00", group: "a", value: 1 }], {
+      fill: "zero",
+      sinceMs: start,
+      stepMs: 1,
+      untilMs: start + 7 * 24 * 60 * minute,
+    });
+    expect(data.buckets).toEqual([start]);
+  });
+});
