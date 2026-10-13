@@ -287,6 +287,7 @@ const triggerResources: Record<ConnectedAutomationTrigger["kind"], string | null
   axiom: null,
   devrev: null,
   discord: "a Discord channel",
+  github: "a GitHub repository",
   sentry: "a Sentry project",
   slack: "a Slack channel",
 };

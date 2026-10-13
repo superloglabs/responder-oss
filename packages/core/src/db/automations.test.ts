@@ -7,6 +7,7 @@ import {
   listSlackMessageAuthors,
   findAutomationsForAxiomAlert,
   findAutomationsForDevRevTicket,
+  findAutomationsForGitHubPullRequest,
   findAutomationsForSentryIssue,
   findDueScheduledAutomations,
   getAutomationRunSlackButtons,
@@ -317,6 +318,19 @@ describe("trigger matching", () => {
       { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "devrev" }] },
     ]]));
     await expect(findAutomationsForDevRevTicket(accountId)).resolves.toEqual([{ automationId: "devrev" }]);
+  });
+
+  it("matches pull requests to GitHub triggers that watch the repository for the event", async () => {
+    const repositoryId = "00000000-0000-4000-8000-000000000042";
+    const github = { eventTypes: ["opened"], integrationAccountId: accountId, kind: "github", repositoryIds: [repositoryId] };
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { accountId, automationId: "opened", repositoryId, triggers: [slack, github] },
+      { accountId, automationId: "merged-only", repositoryId, triggers: [{ ...github, eventTypes: ["merged"] }] },
+      { accountId, automationId: "other-repository", repositoryId, triggers: [{ ...github, repositoryIds: ["00000000-0000-4000-8000-000000000043"] }] },
+      { accountId, automationId: "other-connection", repositoryId, triggers: [{ ...github, integrationAccountId: "00000000-0000-4000-8000-000000000099" }] },
+    ]]));
+    await expect(findAutomationsForGitHubPullRequest({ event: "opened", installationId: "789", repositoryExternalId: "555" }))
+      .resolves.toEqual([{ automationId: "opened", integrationAccountId: accountId, repositoryId }]);
   });
 
   it("skips an environment only when every matching Sentry trigger excludes it", async () => {

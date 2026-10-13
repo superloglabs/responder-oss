@@ -119,8 +119,11 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
   }
   const accounts = options?.accounts.filter((account) => account.provider === connected?.kind) ?? [];
   const account = accounts.find((item) => item.id === connected?.integrationAccountId);
-  const resources = options?.resources.filter((resource) => resource.integrationAccountId === connected?.integrationAccountId && resource.kind === (connected?.kind === "sentry" ? "sentry_project" : connected?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
-  const selectedIds = !connected || connected.kind === "axiom" || connected.kind === "devrev" ? [] : connected.kind === "sentry" ? connected.projectIds : connected.channelIds;
+  // GitHub triggers choose the connection's repositories, by their Responder IDs.
+  const resources = connected?.kind === "github"
+    ? options?.repositories.filter((repository) => repository.integrationAccountId === connected.integrationAccountId).map((repository) => ({ displayName: repository.fullName, externalId: repository.id })) ?? []
+    : options?.resources.filter((resource) => resource.integrationAccountId === connected?.integrationAccountId && resource.kind === (connected?.kind === "sentry" ? "sentry_project" : connected?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
+  const selectedIds = !connected || connected.kind === "axiom" || connected.kind === "devrev" ? [] : connected.kind === "sentry" ? connected.projectIds : connected.kind === "github" ? connected.repositoryIds : connected.channelIds;
   const providerName = providerDisplayName(trigger.kind);
   const removeTrigger = <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={onRemove} type="button"><TrashIcon size={14} /></button>;
 
@@ -154,7 +157,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     <div className="automationTrigger__heading">
       <AutomationTriggerIcon kind={connected.kind} />
       <span className="automationTrigger__provider">{title}</span>
-      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "axiom" || connected.kind === "devrev" ? { ...connected, integrationAccountId: event.target.value } : connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : connected.kind === "slack" ? { ...connected, ignoredAuthors: undefined, includedAuthors: undefined, integrationAccountId: event.target.value, channelIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
+      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "axiom" || connected.kind === "devrev" ? { ...connected, integrationAccountId: event.target.value } : connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : connected.kind === "github" ? { ...connected, integrationAccountId: event.target.value, repositoryIds: [] } : connected.kind === "slack" ? { ...connected, ignoredAuthors: undefined, includedAuthors: undefined, integrationAccountId: event.target.value, channelIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
         <option value="" disabled>Choose a workspace</option>
         {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
       </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}
@@ -165,6 +168,9 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
       {account ? <AxiomTriggerFields accountId={connected.integrationAccountId} /> : null}
     </div> : connected.kind === "devrev" ? <div className="automationTrigger__fields" ref={fieldsRef}>
       <p className="automationTrigger__hint">Runs when a ticket is created. The run's final reply is posted as an internal comment on the ticket.</p>
+    </div> : connected.kind === "github" ? <div className="automationTrigger__fields" ref={fieldsRef}>
+      <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label="Repository" resources={resources} selected={selectedIds} onChange={(repositoryIds) => onChange({ ...connected, repositoryIds })} onRefresh={() => onRefresh(connected.kind)} />
+      <p className="automationTrigger__hint">A draft counts as opened when it is marked ready for review. On a public repository, only pull requests from people with write access start a run when opened.</p>
     </div> : <div className="automationTrigger__fields" ref={fieldsRef}>
       <AutomationResourcePicker key={`${connected.kind}:${connected.integrationAccountId}`} label={connected.kind === "sentry" ? "Project" : "Channel"} resources={resources} selected={selectedIds} onChange={(ids) => onChange(connected.kind === "sentry" ? { ...connected, projectIds: ids } : { ...connected, channelIds: ids })} onRefresh={connected.kind === "discord" ? undefined : () => onRefresh(connected.kind)} />
       {connected.kind === "sentry" && account ? <SentryEnvironmentPicker key={connected.integrationAccountId} accountId={connected.integrationAccountId} excluded={connected.excludedEnvironments ?? []} onChange={(excludedEnvironments) => onChange({ ...connected, excludedEnvironments })} /> : null}
@@ -231,6 +237,10 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
     const account = options?.accounts.find((item) => item.provider === kind);
     if (kind === "axiom" || kind === "devrev") {
       onChange([...triggers, { kind, integrationAccountId: account?.id ?? "" }]);
+      return;
+    }
+    if (kind === "github") {
+      onChange([...triggers, { kind, integrationAccountId: account?.id ?? "", eventTypes: event === "both" ? ["opened", "merged"] : [event === "merged" ? "merged" : "opened"], repositoryIds: [] }]);
       return;
     }
     onChange([...triggers, kind === "sentry"

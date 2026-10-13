@@ -66,6 +66,16 @@ describe("automation configuration", () => {
         kind: "axiom",
       }],
     }).notifications).toEqual([notification]);
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [{
+        eventTypes: ["opened", "merged"],
+        integrationAccountId: "41414141-4141-4141-8141-414141414141",
+        kind: "github",
+        repositoryIds: ["42424242-4242-4242-8242-424242424242"],
+      }],
+    }).notifications).toEqual([notification]);
     // DevRev runs report on their ticket instead.
     expect(automationConfigurationSchema.safeParse({
       ...baseConfiguration,

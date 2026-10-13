@@ -42,6 +42,10 @@ export function triggerEventLabel(trigger: AutomationListTrigger): string {
   }
   if (trigger.kind === "axiom") return "Monitor alert";
   if (trigger.kind === "devrev") return "New ticket";
+  if (trigger.kind === "github") {
+    if (trigger.eventTypes.length > 1) return "Pull request opened or merged";
+    return trigger.eventTypes[0] === "merged" ? "Pull request merged" : "Pull request opened";
+  }
   return "Command in channel";
 }
 
@@ -67,5 +71,9 @@ export function triggerTitle(trigger: AutomationListTrigger): string {
   }
   if (trigger.kind === "axiom") return "Axiom monitor alert";
   if (trigger.kind === "devrev") return "DevRev new ticket";
+  if (trigger.kind === "github") {
+    if (trigger.eventTypes.length > 1) return "GitHub pull request opened or merged";
+    return trigger.eventTypes[0] === "merged" ? "GitHub pull request merged" : "GitHub pull request opened";
+  }
   return trigger.kind === "discord" ? "Discord automation command" : "Schedule";
 }

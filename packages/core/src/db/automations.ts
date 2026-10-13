@@ -23,6 +23,7 @@ import { matchesSlackPhrase } from "../automations/slack-phrase-match.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
+import type { RuntimeRepository } from "./investigations.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agents,
@@ -379,6 +380,78 @@ export async function findAutomationsForDiscordCommand(input: {
   );
 }
 
+// Enabled automations with a GitHub trigger that watches the repository for
+// this pull request event. One installation can be connected to several
+// workspaces, so each match names its own copy of the repository.
+export async function findAutomationsForGitHubPullRequest(input: {
+  event: "merged" | "opened";
+  installationId: string;
+  repositoryExternalId: string;
+}): Promise<Array<{
+  automationId: string;
+  integrationAccountId: string;
+  repositoryId: string;
+}>> {
+  const rows = await getDatabase()
+    .select({
+      accountId: integrationAccounts.id,
+      automationId: automations.id,
+      repositoryId: repositories.id,
+      triggers: automationVersions.triggers,
+    })
+    .from(automations)
+    .innerJoin(
+      organizationCapabilities,
+      and(
+        eq(organizationCapabilities.organizationId, automations.organizationId),
+        eq(organizationCapabilities.capability, "automations"),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automations.activeVersionId),
+    )
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.organizationId, automations.organizationId),
+        eq(integrationAccounts.provider, "github"),
+        eq(integrationAccounts.externalAccountId, input.installationId),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .innerJoin(
+      repositories,
+      and(
+        eq(repositories.integrationAccountId, integrationAccounts.id),
+        eq(repositories.externalId, input.repositoryExternalId),
+        eq(repositories.available, true),
+      ),
+    )
+    .where(
+      and(
+        eq(automations.enabled, true),
+        sql`${automationVersions.triggers} @> '[{"kind":"github"}]'::jsonb`,
+      ),
+    );
+
+  return rows.flatMap((row) =>
+    row.triggers.some((trigger) =>
+      trigger.kind === "github" &&
+      trigger.integrationAccountId === row.accountId &&
+      trigger.repositoryIds.includes(row.repositoryId) &&
+      trigger.eventTypes.includes(input.event)
+    )
+      ? [{
+          automationId: row.automationId,
+          integrationAccountId: row.accountId,
+          repositoryId: row.repositoryId,
+        }]
+      : []
+  );
+}
+
 // Enabled automations with an Axiom trigger on the connection that received
 // the alert.
 export function findAutomationsForAxiomAlert(
@@ -563,6 +636,25 @@ async function validateConfigurationResources(
     // Axiom alerts and DevRev tickets arrive at the connection's webhook, so
     // there is no resource to choose.
     if (trigger.kind === "axiom" || trigger.kind === "devrev") continue;
+    if (trigger.kind === "github") {
+      const triggerRepositories = await tx
+        .select({ id: repositories.id })
+        .from(repositories)
+        .where(
+          and(
+            eq(repositories.integrationAccountId, trigger.integrationAccountId),
+            eq(repositories.available, true),
+            inArray(repositories.id, trigger.repositoryIds),
+          ),
+        );
+      if (triggerRepositories.length !== trigger.repositoryIds.length) {
+        throw new AutomationConfigurationError(
+          "One or more selected trigger repositories are unavailable",
+          "repository_not_found",
+        );
+      }
+      continue;
+    }
     const triggerResource = trigger.kind === "sentry"
       ? {
           externalIds: trigger.projectIds,
@@ -1535,7 +1627,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "devrev" | "discord" | "manual" | "schedule" | "sentry" | "slack";
+  provider: "axiom" | "devrev" | "discord" | "github" | "manual" | "schedule" | "sentry" | "slack";
   sourceUrl?: string;
   title: string;
 }
@@ -2027,6 +2119,40 @@ export async function getAutomationRuntimeRepositories(versionId: string) {
     }
     return { ...repository, installationId };
   });
+}
+
+// The repository of the pull request that started a GitHub-triggered run,
+// while its connection is still connected to the workspace.
+export async function getAutomationTriggerRepository(input: {
+  organizationId: string;
+  repositoryId: string;
+}): Promise<RuntimeRepository | null> {
+  const rows = await getDatabase()
+    .select({
+      defaultBranch: repositories.defaultBranch,
+      fullName: repositories.fullName,
+      installationId: integrationAccounts.externalAccountId,
+      private: repositories.private,
+    })
+    .from(repositories)
+    .innerJoin(
+      integrationAccounts,
+      and(
+        eq(integrationAccounts.id, repositories.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, "github"),
+        eq(integrationAccounts.status, "connected"),
+      ),
+    )
+    .where(and(eq(repositories.id, input.repositoryId), eq(repositories.available, true)))
+    .limit(1);
+  const repository = rows[0];
+  if (!repository) return null;
+  const installationId = Number(repository.installationId);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+    throw new Error("Trigger repository installation is invalid");
+  }
+  return { ...repository, installationId };
 }
 
 function automationPullRequestScope(organizationId: string) {

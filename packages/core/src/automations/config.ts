@@ -80,6 +80,16 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("devrev"),
   }).describe("Runs when a ticket is created in the connected DevRev organization. The run's final reply is posted as an internal comment on the ticket."),
   z.object({
+    eventTypes: z.array(z.enum(["opened", "merged"])).min(1).max(2)
+      .refine(uniqueIds, "Event types must be unique")
+      .describe("Run when a pull request is opened, merged, or both. A draft counts as opened when it is marked ready for review."),
+    integrationAccountId: integrationAccountIdSchema,
+    kind: z.literal("github"),
+    repositoryIds: z.array(z.uuid()).min(1).max(50)
+      .refine(uniqueIds, "Repository IDs must be unique")
+      .describe("Responder repository IDs from the GitHub connection."),
+  }).describe("Runs when a pull request is opened or merged in the selected GitHub repositories."),
+  z.object({
     channelIds: z.array(externalResourceIdSchema).min(1).max(50)
       .refine(uniqueIds, "Channel IDs must be unique")
       .describe("Discord channel IDs."),
@@ -103,8 +113,8 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   ).describe("Runs on the hour, at a local time each day or week, or on a custom cron expression."),
 ]);
 
-// Where a scheduled, Sentry, or Axiom automation reports each finished run.
-// Slack only for now.
+// Where a scheduled, Sentry, Axiom, or GitHub automation reports each
+// finished run. Slack only for now.
 export const automationNotificationSchema = z.discriminatedUnion("kind", [
   z.object({
     channelId: externalResourceIdSchema,
@@ -114,11 +124,12 @@ export const automationNotificationSchema = z.discriminatedUnion("kind", [
 ]);
 
 // Slack and Discord runs answer where their event came from. Scheduled,
-// Sentry, and Axiom runs have no reply thread, so they report to notification
-// channels.
+// Sentry, Axiom, and GitHub runs have no reply thread, so they report to
+// notification channels.
 export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigger["kind"] }>): boolean {
   return triggers.some((trigger) =>
-    trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "axiom"
+    trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "axiom" ||
+    trigger.kind === "github"
   );
 }
 
@@ -170,7 +181,7 @@ export const automationConfigurationSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Notifications are only available for scheduled, Sentry, and Axiom automations",
+        message: "Notifications are only available for scheduled, Sentry, Axiom, and GitHub automations",
         path: ["notifications"],
       });
     }

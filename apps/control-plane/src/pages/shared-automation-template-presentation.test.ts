@@ -13,6 +13,8 @@ describe("shared automation template presentation", () => {
       .toBe("When an Axiom monitor sends an alert to its Responder notifier");
     expect(sharedTriggerDescription({ integrationAccountId: "", kind: "devrev" }))
       .toBe("When a ticket is created in DevRev");
+    expect(sharedTriggerDescription({ eventTypes: ["merged"], integrationAccountId: "", kind: "github", repositoryIds: [] }))
+      .toBe("When a pull request is merged in a GitHub repository you choose");
     expect(sharedTriggerDescription({ channelIds: [], integrationAccountId: "", kind: "discord" }))
       .toBe("When someone runs /automate in a Discord channel you choose");
     expect(sharedTriggerDescription({ frequency: "hourly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }))

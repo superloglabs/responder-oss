@@ -33,6 +33,12 @@ export type AutomationTrigger =
       kind: "devrev";
     }
   | {
+      eventTypes: Array<"opened" | "merged">;
+      integrationAccountId: string;
+      kind: "github";
+      repositoryIds: string[];
+    }
+  | {
       channelIds: string[];
       integrationAccountId: string;
       kind: "discord";
@@ -59,7 +65,7 @@ export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
-// Where a scheduled, Sentry, or Axiom automation posts each finished run.
+// Where a scheduled, Sentry, Axiom, or GitHub automation posts each finished run.
 export interface AutomationNotification {
   channelId: string;
   integrationAccountId: string;

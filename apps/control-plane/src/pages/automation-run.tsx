@@ -92,6 +92,9 @@ function triggerMeta(run: AutomationRunDetail): string[] {
   }
   if (provider === "axiom") return ["Axiom", "Monitor alert"];
   if (provider === "devrev") return ["DevRev", typeof attributes.displayId === "string" ? attributes.displayId : "New ticket"];
+  if (provider === "github") {
+    return ["GitHub", attributes.event === "merged" ? "Pull request merged" : "Pull request opened", typeof attributes.repository === "string" && typeof attributes.pullRequestNumber === "number" ? `${attributes.repository}#${attributes.pullRequestNumber}` : null].filter((value): value is string => Boolean(value));
+  }
   if (provider === "discord") return ["Discord", typeof attributes.username === "string" ? `@${attributes.username}` : "Command"];
   if (provider === "slack") return ["Slack", "Message"];
   if (provider === "schedule") {

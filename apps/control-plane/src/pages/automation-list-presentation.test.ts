@@ -25,6 +25,9 @@ describe("automation list presentation", () => {
     expect(triggerEventLabel({ channelIds: [], integrationAccountId: "a", kind: "discord" })).toBe("Command in channel");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "axiom" })).toBe("Monitor alert");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "devrev" })).toBe("New ticket");
+    expect(triggerEventLabel({ eventTypes: ["opened"], integrationAccountId: "a", kind: "github", repositoryIds: [] })).toBe("Pull request opened");
+    expect(triggerEventLabel({ eventTypes: ["merged"], integrationAccountId: "a", kind: "github", repositoryIds: [] })).toBe("Pull request merged");
+    expect(triggerEventLabel({ eventTypes: ["opened", "merged"], integrationAccountId: "a", kind: "github", repositoryIds: [] })).toBe("Pull request opened or merged");
     expect(triggerEventLabel({ frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 })).toBe("Mondays at 09:00");
   });
 
