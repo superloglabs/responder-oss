@@ -118,6 +118,7 @@ function dependencies() {
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
+    leaseExpiry: vi.fn<AutomationRunDependencies["leaseExpiry"]>().mockResolvedValue(null),
     loadRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -144,6 +145,7 @@ function dependencies() {
     runOpenCode: vi.fn(),
     saveSandbox: vi.fn().mockResolvedValue(undefined),
     setStatus: vi.fn().mockResolvedValue(true),
+    sleep: vi.fn<AutomationRunDependencies["sleep"]>().mockResolvedValue(undefined),
     subscriptionAuth: vi.fn<(owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>>(),
     createSubscriptionSecret: vi.fn<AutomationRunDependencies["createSubscriptionSecret"]>().mockResolvedValue({ id: "secret-1", name: "responder_chatgpt_run", placeholder: "dtn_secret_run" }),
     deleteSubscriptionSecret: vi.fn<AutomationRunDependencies["deleteSubscriptionSecret"]>().mockResolvedValue(undefined),
@@ -805,6 +807,45 @@ describe("automation run processor", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("claiming", () => {
+    const job = { kind: "automation_run" as const, queuedAt: "2026-09-22T19:00:00.000Z", runId };
+
+    it("waits out the lease of a worker that stopped mid-run and takes the run over", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValueOnce(null).mockResolvedValue(claimedRun());
+      deps.leaseExpiry.mockResolvedValue(new Date("2026-09-22T19:00:24.000Z"));
+
+      await processAutomationRun("job-1", job, process.env, deps);
+
+      expect(deps.sleep).toHaveBeenCalledWith(25_000);
+      expect(deps.claimRun).toHaveBeenCalledTimes(2);
+      expect(deps.runCodex).toHaveBeenCalled();
+    });
+
+    it("leaves a run alone when its worker renews the lease", async () => {
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(null);
+      deps.leaseExpiry.mockResolvedValue(new Date("2026-09-22T19:00:24.000Z"));
+
+      await expect(processAutomationRun("job-1", job, process.env, deps)).resolves.toEqual({ runId });
+
+      expect(deps.claimRun).toHaveBeenCalledTimes(2);
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
+    });
+
+    it("does not wait for a run that no lease holds", async () => {
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue(null);
+
+      await expect(processAutomationRun("job-1", job, process.env, deps)).resolves.toEqual({ runId });
+
+      expect(deps.sleep).not.toHaveBeenCalled();
+      expect(deps.claimRun).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("DevRev tickets", () => {

@@ -66,6 +66,31 @@ function turnFailure(output: string): string | null {
   return null;
 }
 
+// The error Codex reported last, from a turn.failed or error event.
+function codexError(output: string): string | null {
+  for (const line of output.split("\n").reverse()) {
+    if (!line.includes("\"turn.failed\"") && !line.includes("\"error\"")) continue;
+    let event: { error?: { message?: unknown }; message?: unknown; type?: unknown };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const message = event.type === "turn.failed"
+      ? event.error?.message
+      : event.type === "error" ? event.message : undefined;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  }
+  return null;
+}
+
+// Why a run failed: the error Codex reported, or else its exit code.
+function harnessFailure(output: string): string {
+  const exitCode = /(?:^|\n)Process exited with code (\d+)(?:\n|$)/u.exec(output)?.[1];
+  const reason = codexError(output) ?? (exitCode ? `Codex exited with code ${exitCode}` : null);
+  return reason ? `Codex automation harness failed: ${reason}` : "Codex automation harness failed";
+}
+
 // Names the ChatGPT refusals the organization can fix itself.
 function subscriptionRefusal(output: string, model: string): string | null {
   const failure = turnFailure(output) ?? "";
@@ -288,7 +313,7 @@ export async function runCodexAutomation(
   if (!commandSucceeded(output)) {
     const refusal = input.model.subscription ? subscriptionRefusal(output, input.model.model) : null;
     if (refusal) throw new AutomationHarnessError(refusal, output, true);
-    throw new AutomationHarnessError("Codex automation harness failed", output);
+    throw new AutomationHarnessError(harnessFailure(output), output);
   }
   return { eventStream: output };
 }

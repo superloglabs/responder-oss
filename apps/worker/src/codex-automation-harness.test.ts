@@ -231,6 +231,40 @@ describe("Codex automation harness", () => {
     await expect(run).rejects.toBeInstanceOf(AutomationHarnessError);
     await expect(run).rejects.toHaveProperty("eventStream", expect.stringContaining("Process exited with code 1"));
   });
+
+  it("names the error Codex reported", async () => {
+    const events = [
+      JSON.stringify({ type: "error", message: "Reconnecting... 1/5" }),
+      JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit." } }),
+    ].join("\n");
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce("Chunk ID: install\nProcess exited with code 0\nOutput:\n")
+        .mockResolvedValueOnce("Chunk ID: workspace\nProcess exited with code 0\nOutput:\n")
+        .mockResolvedValue(`Chunk ID: run\nProcess exited with code 1\nOutput:\n${events}\n`),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      /^Codex automation harness failed: You've hit your usage limit\.$/u,
+    );
+  });
+
+  it("names the exit code when Codex reported no error", async () => {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValueOnce("Chunk ID: install\nProcess exited with code 0\nOutput:\n")
+        .mockResolvedValueOnce("Chunk ID: workspace\nProcess exited with code 0\nOutput:\n")
+        .mockResolvedValue("Chunk ID: run\nProcess exited with code 137\nOutput:\n"),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+
+    await expect(runCodexAutomation(session, input)).rejects.toThrow(
+      /^Codex automation harness failed: Codex exited with code 137$/u,
+    );
+  });
 });
 
 it("uses managed ChatGPT inference without writing the login back, and removes the cache on failure", async () => {
@@ -402,7 +436,7 @@ it("names only the refusal that ended the turn", async () => {
     model: { ...input.model, subscription: { authJson } },
   });
 
-  await expect(run).rejects.toThrow(/^Codex automation harness failed$/u);
+  await expect(run).rejects.toThrow(/^Codex automation harness failed: stream disconnected before completion$/u);
   await expect(run).rejects.toHaveProperty("organizationFixable", false);
 });
 
