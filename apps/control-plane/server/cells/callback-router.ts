@@ -20,10 +20,18 @@ export function cellCallbackRedirect(
   } catch {
     return null;
   }
-  const cell = directory.cells.find(
-    (candidate) => candidate.id !== directory.current && candidate.url === origin,
-  );
-  return cell ? `${cell.url}${requestUrl.pathname}${requestUrl.search}` : null;
+  const cell = directory.cells.find((candidate) => candidate.url === origin);
+  if (!cell) {
+    // A state from an address no cell has: the flow started elsewhere, or the
+    // cells' addresses are configured inconsistently.
+    console.warn(
+      JSON.stringify({ event: "cell_oauth_callback_unknown_origin", origin, path: requestUrl.pathname }),
+    );
+    return null;
+  }
+  return cell.id === directory.current
+    ? null
+    : `${cell.url}${requestUrl.pathname}${requestUrl.search}`;
 }
 
 export function cellCallbackRouter(

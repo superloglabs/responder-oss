@@ -2346,7 +2346,7 @@ describe("integration callback routing", () => {
         accountId: "30000000-0000-4000-8000-000000000000",
       }),
       returnTo: "/agents/new",
-      routingUrl: expect.stringMatching(/\/api\/integrations\/custom_mcp\/callback$/u),
+      routingUrl: "https://responder.example/api/integrations/custom_mcp/callback",
     });
     expect(updateIntegrationAccountCredentials).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -287,9 +287,6 @@ instrumentedApp.use("*", (context, next) =>
       ? skillBodyLimit(context, next)
       : apiBodyLimit(context, next),
 );
-// After the body limits, before the webhook and OAuth callback handlers.
-instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
-instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
 if (Sentry.isInitialized()) {
   instrumentedApp.use(Sentry.sentry(instrumentedApp));
   instrumentedApp.use(async (_context, next) => {
@@ -297,6 +294,10 @@ if (Sentry.isInitialized()) {
     await next();
   });
 }
+// After the body limits and monitoring, before the webhook and OAuth callback
+// handlers.
+instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
+instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
 
 export const app = instrumentedApp
   .get("/api/health", (context) =>
@@ -310,7 +311,9 @@ export const app = instrumentedApp
     if (
       !verifyBearerToken(
         context.req.header("authorization") ?? null,
-        process.env.RESPONDER_CELL_TOKEN?.trim() || undefined,
+        // An empty token fails closed instead of falling back to the
+        // general internal token.
+        process.env.RESPONDER_CELL_TOKEN?.trim() ?? "",
       )
     ) {
       return context.json({ error: "Unauthorized" }, 401);

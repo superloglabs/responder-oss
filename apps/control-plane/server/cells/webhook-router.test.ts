@@ -12,12 +12,17 @@ const directory: CellDirectory = {
   current: "eu",
 };
 
-function harness(overrides: Partial<CellWebhookRouterDependencies> = {}) {
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function harness(
+  overrides: Partial<CellWebhookRouterDependencies> = {},
+  cells: CellDirectory = directory,
+) {
   const handled = vi.fn();
   const dependencies: CellWebhookRouterDependencies = {
     askCell: vi.fn(async () => true),
     cellToken: () => "cell-token",
-    directory: () => directory,
+    directory: () => cells,
     forward: vi.fn(async () => new Response(JSON.stringify({ ok: true, from: "us" }), {
       headers: { "content-type": "application/json" },
       status: 202,
@@ -31,6 +36,10 @@ function harness(overrides: Partial<CellWebhookRouterDependencies> = {}) {
     .post("/api/webhooks/slack", async (context) => {
       handled(await context.req.text());
       return context.json({ ok: true, from: "eu" });
+    })
+    .post("/api/webhooks/discord", async (context) => {
+      handled(await context.req.text());
+      return context.json({ type: 4 });
     });
   return { app, dependencies, handled };
 }
@@ -51,14 +60,33 @@ const slackRequest = (headers: Record<string, string> = {}) => ({
 describe("cell webhook router", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("handles a tenant this cell holds", async () => {
+  it("handles a tenant this cell holds and copies the event to other holders", async () => {
     const { app, dependencies, handled } = harness({ hasTenant: vi.fn(async () => true) });
 
     const response = await app.request("/api/webhooks/slack", slackRequest());
+    await flush();
 
     await expect(response.json()).resolves.toEqual({ ok: true, from: "eu" });
     expect(handled).toHaveBeenCalledWith(slackEvent);
+    expect(dependencies.forward).toHaveBeenCalledWith(
+      "https://us.superlog.sh/api/webhooks/slack",
+      expect.anything(),
+    );
+  });
+
+  it("lets only one cell answer an interactive webhook", async () => {
+    const { app, dependencies, handled } = harness({ hasTenant: vi.fn(async () => true) });
+
+    await app.request("/api/webhooks/discord", {
+      body: JSON.stringify({ guild_id: "G1", type: 2 }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    await flush();
+
+    expect(handled).toHaveBeenCalled();
     expect(dependencies.askCell).not.toHaveBeenCalled();
+    expect(dependencies.forward).not.toHaveBeenCalled();
   });
 
   it("forwards the unchanged request to the cell that holds the tenant", async () => {
@@ -123,17 +151,42 @@ describe("cell webhook router", () => {
     }
   });
 
-  it("handles the request itself when the owning cell cannot be asked", async () => {
+  it("fails the delivery when no cell can be asked, so the provider retries", async () => {
     const { app, dependencies, handled } = harness({
       askCell: vi.fn(async () => {
         throw new Error("timeout");
       }),
     });
 
-    await app.request("/api/webhooks/slack", slackRequest());
+    const response = await app.request("/api/webhooks/slack", slackRequest());
 
-    expect(handled).toHaveBeenCalled();
+    expect(response.status).toBe(502);
+    expect(handled).not.toHaveBeenCalled();
     expect(dependencies.forward).not.toHaveBeenCalled();
+  });
+
+  it("keeps looking when one cell cannot be asked", async () => {
+    const threeCells: CellDirectory = {
+      ...directory,
+      cells: [...directory.cells, { id: "ap", label: "Asia Pacific", url: "https://ap.superlog.sh" }],
+    };
+    const { app, dependencies } = harness(
+      {
+        askCell: vi.fn(async (cell) => {
+          if (cell.id === "us") throw new Error("timeout");
+          return true;
+        }),
+      },
+      threeCells,
+    );
+
+    const response = await app.request("/api/webhooks/slack", slackRequest());
+
+    expect(response.status).toBe(202);
+    expect(dependencies.forward).toHaveBeenCalledWith(
+      "https://ap.superlog.sh/api/webhooks/slack",
+      expect.anything(),
+    );
   });
 
   it("fails the delivery when the owning cell is unreachable, so the provider retries", async () => {

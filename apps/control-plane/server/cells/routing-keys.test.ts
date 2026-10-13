@@ -30,6 +30,9 @@ describe("webhook routing keys", () => {
     expect(
       webhookRoutingKey("/api/webhooks/slack/actions", "application/x-www-form-urlencoded", body),
     ).toEqual({ provider: "slack", key: "T789" });
+    expect(
+      webhookRoutingKey("/api/webhooks/slack/actions", "Application/X-WWW-Form-Urlencoded; charset=utf-8", body),
+    ).toEqual({ provider: "slack", key: "T789" });
   });
 
   it("routes Discord interactions by guild and leaves PING to the receiving cell", () => {

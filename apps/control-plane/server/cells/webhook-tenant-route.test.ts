@@ -39,6 +39,8 @@ describe("webhook tenant route", () => {
     expect((await ask({ key: "T123", provider: "slack" }, "wrong")).status).toBe(401);
     vi.stubEnv("RESPONDER_CELL_TOKEN", "");
     expect((await ask({ key: "T123", provider: "slack" }, "")).status).toBe(401);
+    vi.stubEnv("INTERNAL_INGEST_TOKEN", "internal-token");
+    expect((await ask({ key: "T123", provider: "slack" }, "internal-token")).status).toBe(401);
     expect(hasWebhookTenant).not.toHaveBeenCalled();
   });
 

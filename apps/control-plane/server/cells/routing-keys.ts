@@ -51,7 +51,7 @@ export function webhookRoutingKey(
 
   const route = path.replace(/\/$/u, "");
   if (route === "/api/webhooks/slack/actions") {
-    if (!contentType?.includes("application/x-www-form-urlencoded")) return null;
+    if (!contentType?.toLowerCase().includes("application/x-www-form-urlencoded")) return null;
     const payload = new URLSearchParams(new TextDecoder().decode(body)).get("payload");
     if (!payload) return null;
     const interaction = parseJson(new TextEncoder().encode(payload));
