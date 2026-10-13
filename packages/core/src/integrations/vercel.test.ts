@@ -1,0 +1,345 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildVercelReadUrl,
+  executeVercelRead,
+  searchVercelOperations,
+} from "./vercel.js";
+
+const connection = {
+  accessToken: "sensitive-vercel-token",
+  projectIds: ["prj-1"],
+  teamId: "team-1",
+};
+
+describe("Vercel read API", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("searches broad read operations without exposing secret endpoints", () => {
+    expect(
+      searchVercelOperations("deployment runtime logs", 20).map(
+        ({ operationId }) => operationId,
+      ),
+    ).toContain("getRuntimeLogs");
+    expect(
+      searchVercelOperations("environment variables decrypted token secret", 20),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: expect.stringMatching(/\/(?:env|secrets?|tokens?)(?:\/|$)/iu),
+        }),
+      ]),
+    );
+  });
+
+
+  it("builds a fixed-origin, team-scoped project request", () => {
+    const operation = searchVercelOperations("find project by id", 20).find(
+      ({ operationId }) => operationId === "getProject",
+    );
+    expect(operation).toBeDefined();
+
+    const url = buildVercelReadUrl({
+      connection,
+      operation: operation!,
+      pathParameters: { idOrName: "prj-1" },
+    });
+
+    expect(url.origin).toBe("https://api.vercel.com");
+    expect(url.pathname).toBe("/v9/projects/prj-1");
+    expect(url.searchParams.get("teamId")).toBe("team-1");
+  });
+
+  it("rejects project access outside the synchronized installation scope", () => {
+    const operation = searchVercelOperations("find project by id", 20).find(
+      ({ operationId }) => operationId === "getProject",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        pathParameters: { idOrName: "prj-other" },
+      }),
+    ).toThrow("not available to this connection");
+  });
+
+  it("rejects project arrays outside the selected project scope", () => {
+    const operation = searchVercelOperations("list deployments", 20).find(
+      ({ operationId }) => operationId === "getDeployments",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectIds: ["prj-1", "prj-other"] },
+      }),
+    ).toThrow("not available to this connection");
+  });
+
+  it("requires an explicit selected-project filter when listing deployments", () => {
+    const operation = searchVercelOperations("list deployments", 20).find(
+      ({ operationId }) => operationId === "getDeployments",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({ connection, operation: operation! }),
+    ).toThrow("Choose at least one selected Vercel project");
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectIds: [] },
+      }),
+    ).toThrow("Choose at least one selected Vercel project");
+  });
+
+  it("normalizes team path parameters to the connected team", () => {
+    const operation = searchVercelOperations("get a team", 20).find(
+      ({ operationId }) => operationId === "getTeam",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        pathParameters: { teamId: "attacker-team" },
+      }),
+    ).toThrow("team is not available");
+    expect(
+      buildVercelReadUrl({ connection, operation: operation! }).pathname,
+    ).toBe("/v2/teams/team-1");
+  });
+
+  it("cannot redirect an operation away from Vercel's API origin", () => {
+    const operation = searchVercelOperations("find project by id", 20).find(
+      ({ operationId }) => operationId === "getProject",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: { ...operation!, path: "//example.com/{idOrName}" },
+        pathParameters: { idOrName: "prj-1" },
+      }),
+    ).toThrow("Invalid Vercel API path");
+  });
+
+  it("executes GET requests and redacts credential-shaped output", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        deployments: [{ id: "dpl-1", state: "ERROR" }],
+        accessToken: "another-token",
+        echoed: "sensitive-vercel-token",
+        env: [{ key: "DATABASE_URL", value: "postgres://secret" }],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = JSON.parse(
+      await executeVercelRead({
+        connection,
+        operationId: "getDeployments",
+        queryParameters: { limit: 1, projectId: "prj-1" },
+      }),
+    ) as Record<string, unknown>;
+
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.origin).toBe("https://api.vercel.com");
+    expect(url.searchParams.get("teamId")).toBe("team-1");
+    expect(init.method).toBeUndefined();
+    expect((init.headers as Record<string, string>).authorization).toBe(
+      "Bearer sensitive-vercel-token",
+    );
+    expect(JSON.stringify(result)).not.toContain("sensitive-vercel-token");
+    expect(JSON.stringify(result)).not.toContain("another-token");
+    expect(JSON.stringify(result)).not.toContain("postgres://secret");
+    expect(JSON.stringify(result)).toContain("[redacted]");
+  });
+
+  it("verifies deployment ownership before calling deployment-scoped operations", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "dpl-1", projectId: "prj-other" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeVercelRead({
+        connection,
+        operationId: "getDeploymentEvents",
+        pathParameters: { idOrUrl: "dpl-1" },
+      }),
+    ).rejects.toThrow("deployment is not available");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(fetchMock.mock.calls[0]![0] as URL).pathname).toBe(
+      "/v13/deployments/dpl-1",
+    );
+  });
+
+  it("verifies deployment ownership even with a selected project parameter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "dpl-other", projectId: "prj-other" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeVercelRead({
+        connection,
+        operationId: "getRuntimeLogs",
+        pathParameters: {
+          deploymentId: "dpl-other",
+          projectId: "prj-1",
+        },
+      }),
+    ).rejects.toThrow("deployment is not available");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses operations absent from the generated read catalog", async () => {
+    await expect(
+      executeVercelRead({
+        connection,
+        operationId: "createDeployment",
+      }),
+    ).rejects.toThrow("Unknown or blocked Vercel read operation");
+  });
+
+  it("requires a selected-project filter on every project-filterable listing", () => {
+    for (const operationId of ["listAliases", "getWebhooks", "listUserEvents"]) {
+      const operation = searchVercelOperations(operationId, 20).find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      expect(operation, operationId).toBeDefined();
+      expect(() =>
+        buildVercelReadUrl({ connection, operation: operation! }),
+      ).toThrow("Choose at least one selected Vercel project");
+    }
+  });
+
+  it("rejects a team query parameter for another team", () => {
+    const operation = searchVercelOperations("list aliases", 20).find(
+      ({ operationId }) => operationId === "listAliases",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectId: "prj-1", teamId: "attacker-team" },
+      }),
+    ).toThrow("team is not available");
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectId: "prj-1", slug: "attacker" },
+      }),
+    ).toThrow("Pass teamId instead of slug");
+    expect(
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectId: "prj-1", teamId: "team-1" },
+      }).searchParams.get("teamId"),
+    ).toBe("team-1");
+  });
+
+  it("returns only the installation's projects and team from listings", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        projects: [{ id: "prj-1", name: "web" }, { id: "prj-other", name: "private" }],
+      }))
+      .mockResolvedValueOnce(Response.json({
+        teams: [{ id: "team-1", name: "Acme" }, { id: "team-other", name: "Other" }],
+      })));
+
+    const projects = JSON.parse(
+      await executeVercelRead({ connection, operationId: "getProjects" }),
+    ) as { data: { projects: Array<{ id: string }> } };
+    const teams = JSON.parse(
+      await executeVercelRead({ connection, operationId: "getTeams" }),
+    ) as { data: { teams: Array<{ id: string }> } };
+
+    expect(projects.data.projects.map(({ id }) => id)).toEqual(["prj-1"]);
+    expect(teams.data.teams.map(({ id }) => id)).toEqual(["team-1"]);
+  });
+
+  it("stops the Vercel request when the caller cancels", async () => {
+    const fetchMock = vi.fn((_url: URL, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener("abort", () => reject(init.signal!.reason));
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    const request = executeVercelRead({
+      connection,
+      operationId: "getProject",
+      pathParameters: { idOrName: "prj-1" },
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort(new Error("run cancelled"));
+
+    await expect(request).rejects.toThrow("run cancelled");
+  });
+
+  it("does not offer listings that span the team's projects", async () => {
+    for (const operationId of [
+      "listAccessGroupProjects",
+      "getMicrofrontendsInGroup",
+      "getObservabilityConfigurationProjects",
+      "getConfigurations",
+      "getDomainProjectDomains",
+      "listNetworks",
+      "listTeamFlags",
+      "listTeamFlagsV2",
+      "listTeamFlagSettings",
+    ]) {
+      expect(
+        searchVercelOperations(operationId, 20).map((operation) => operation.operationId),
+      ).not.toContain(operationId);
+      await expect(
+        executeVercelRead({ connection, operationId }),
+      ).rejects.toThrow("Unknown or blocked Vercel read operation");
+    }
+  });
+
+  it("checks every project path and project query parameter against the installation", () => {
+    for (const [operationId, pathParameters, queryParameters] of [
+      ["getRollingRelease", { idOrName: "prj-other" }, {}],
+      ["getProjectMembers", { idOrName: "prj-other" }, {}],
+      ["getTeamMembers", {}, { eligibleMembersForProjectId: "prj-other" }],
+    ] as const) {
+      const operation = searchVercelOperations(operationId, 20).find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      expect(operation, operationId).toBeDefined();
+      expect(() =>
+        buildVercelReadUrl({
+          connection,
+          operation: operation!,
+          pathParameters: { ...pathParameters },
+          queryParameters: { ...queryParameters },
+        }),
+      ).toThrow("not available to this connection");
+    }
+  });
+
+  it("rejects a negative project filter", () => {
+    const operation = searchVercelOperations("getTeamMembers", 20).find(
+      ({ operationId }) => operationId === "getTeamMembers",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { excludeProject: "prj-1" },
+      }),
+    ).toThrow("Vercel query parameter is not available: excludeProject");
+  });
+});

@@ -587,8 +587,17 @@ investigation sandbox receives two host-side tools: one searches a generated
 catalog of safe Vercel GET operations, and one executes a selected operation.
 The callback verifies the installation identity, team, and selected-project
 set without narrowing the integration's configured read permissions.
+Listings that can filter by project must name a shared project, project and
+team listings return only the installation's projects and team, and listings
+that span the team's projects without a project filter are not offered.
 Regenerate the catalog from Vercel's published OpenAPI document after API
 updates with `pnpm vercel:generate-api`.
+
+Automations can use a Vercel connection as context. Connect it from Settings or
+the automation editor. The run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>` serves the same two tools as
+one MCP server per connection, so the installation token stays in the control
+plane. A run reaches every project the installation shares with Responder.
 
 ## AWS
 

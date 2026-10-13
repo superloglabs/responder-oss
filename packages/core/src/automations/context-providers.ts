@@ -11,6 +11,7 @@ export const automationContextProviders = [
   "linear",
   "sentry",
   "slack",
+  "vercel",
 ] as const;
 
 export type AutomationContextProvider = typeof automationContextProviders[number];

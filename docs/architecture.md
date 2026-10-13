@@ -80,6 +80,10 @@ types. `drizzle/` contains the ordered schema history.
   stores the resulting Linear identifier and link. Automations reach Linear
   through the context broker, which lists the read-only tools and adds its own
   `create_issue` tool that records each write as a run action.
+- Vercel context uses a generated catalog of read-only REST operations, scoped
+  to the installation's team and synchronized projects. Investigations call it
+  from the worker; automations reach it through the context broker, which
+  serves the same search and call tools.
 - Langfuse context uses encrypted project-scoped API keys outside the sandbox.
 - A context server that cannot be reached does not fail the investigation.
   Its tools are replaced by a single reconnect tool that shows the connection
