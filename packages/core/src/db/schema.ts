@@ -27,6 +27,12 @@ import type {
 } from "../investigations/report.js";
 import type { SuggestionCodeChange } from "../suggestions/model.js";
 import type {
+  DashboardVariable,
+  DashboardWidgetConfig,
+  DashboardWidgetLayout,
+  DashboardWidgetType,
+} from "../telemetry/dashboards.js";
+import type {
   AutomationHarnessKind,
   AutomationInferenceSource,
   AutomationModelProvider,
@@ -671,6 +677,51 @@ export const telemetryProjects = pgTable(
       .defaultNow(),
   },
   (table) => [index("telemetry_projects_organization_idx").on(table.organizationId)],
+);
+
+// The project is not a foreign key: unlinking a project hides its dashboards
+// rather than deleting them, and linking it again brings them back.
+export const telemetryDashboards = pgTable(
+  "telemetry_dashboards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull(),
+    name: text("name").notNull(),
+    variables: jsonb("variables").$type<DashboardVariable[]>().notNull().default([]),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("telemetry_dashboards_organization_idx").on(table.organizationId)],
+);
+
+export const telemetryDashboardWidgets = pgTable(
+  "telemetry_dashboard_widgets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dashboardId: uuid("dashboard_id")
+      .notNull()
+      .references(() => telemetryDashboards.id, { onDelete: "cascade" }),
+    type: text("type").$type<DashboardWidgetType>().notNull(),
+    title: text("title").notNull(),
+    config: jsonb("config").$type<DashboardWidgetConfig>().notNull(),
+    layout: jsonb("layout").$type<DashboardWidgetLayout>().notNull(),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("telemetry_dashboard_widgets_dashboard_idx").on(table.dashboardId)],
 );
 
 export const modelSubscriptionConnections = pgTable("model_subscription_connections", {

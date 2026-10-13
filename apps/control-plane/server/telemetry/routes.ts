@@ -11,10 +11,24 @@ import {
   type TelemetryClient as ClickHouseClient,
 } from "../../../../packages/core/src/telemetry/client.js";
 import {
+  chartSeries,
+  dashboardWidgetConfigSchema,
+  type ChartData,
+  type DashboardWidgetConfig,
+  resolveWidgetFilters,
+} from "../../../../packages/core/src/telemetry/dashboards.js";
+import {
+  countSeries,
   getTraceDetail,
+  listAttributeKeys,
+  listAttributeValues,
+  listMetricNames,
   listServices,
+  metricSeries,
+  pickStep,
   queryLogs,
   queryTracesAggregated,
+  type Step,
   type TimeRange,
 } from "../../../../packages/core/src/telemetry/query.js";
 import { getActiveTenant } from "../tenant.js";
@@ -23,10 +37,46 @@ import { getActiveTenant } from "../tenant.js";
 // telemetry only with the telemetry capability and a configured store, and
 // only for the projects linked to it.
 export type TelemetryRouteDependencies = {
+  // Attribute keys seen in the window, for filters and grouping.
+  attributeKeys: (
+    client: ClickHouseClient,
+    projectId: string,
+    range: TimeRange,
+    source: AttributeSource,
+  ) => Promise<unknown>;
+  // Values seen for one attribute key in the window.
+  attributeValues: (
+    client: ClickHouseClient,
+    projectId: string,
+    params: { key: string; prefix?: string; range: TimeRange; source: AttributeSource },
+  ) => Promise<unknown>;
   client: () => ClickHouseClient | null;
+  // Log or span counts per bucket and group.
+  countSeries: (
+    client: ClickHouseClient,
+    projectId: string,
+    source: TelemetrySignal,
+    filter: { range: TimeRange; resourceAttrs: DashboardWidgetConfig["filter"]["resourceAttrs"] },
+    groupBy: string | undefined,
+    step: Step,
+  ) => Promise<Array<{ bucket: string; count: number; group: string }>>;
   findProject: (organizationId: string, projectId: string) => Promise<TelemetryProject | null>;
+  hasDashboards: (organizationId: string) => Promise<boolean>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
   listProjects: (organizationId: string) => Promise<TelemetryProject[]>;
+  metricNames: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
+  // One metric aggregated per bucket and group.
+  metricSeries: (
+    client: ClickHouseClient,
+    projectId: string,
+    params: {
+      aggregation?: DashboardWidgetConfig["aggregation"];
+      filter: { range: TimeRange; resourceAttrs: DashboardWidgetConfig["filter"]["resourceAttrs"] };
+      groupBy: string | undefined;
+      metricName: string;
+      step: Step;
+    },
+  ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
   // Services that sent the signal in the window.
   listServices: (
     client: ClickHouseClient,
@@ -61,11 +111,19 @@ export type TelemetryRouteDependencies = {
 };
 
 const defaultDependencies: TelemetryRouteDependencies = {
+  attributeKeys: (client, projectId, range, source) => listAttributeKeys(client, projectId, range, source),
+  attributeValues: (client, projectId, params) =>
+    listAttributeValues(client, projectId, params.key, params.range, 200, params.source, params.prefix),
   client: getTelemetryClient,
+  countSeries,
   findProject: findTelemetryProject,
+  hasDashboards: (organizationId) => organizationHasCapability(organizationId, "dashboards"),
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
   listProjects: listTelemetryProjects,
   listServices,
+  metricNames: listMetricNames,
+  metricSeries: (client, projectId, params) =>
+    metricSeries(client, projectId, params.metricName, params.filter, params.groupBy, params.step, params.aggregation),
   now: () => new Date(),
   queryLogs,
   queryTrace: async (client, projectId, traceId) => {
@@ -100,6 +158,31 @@ const tracesSchema = windowSchema.extend({
 });
 
 const traceSchema = z.object({ projectId: z.uuid() });
+
+const attributeSources = ["logs", "traces", "metrics"] as const;
+export type AttributeSource = (typeof attributeSources)[number];
+
+const attributeKeysSchema = windowSchema.extend({ source: z.enum(attributeSources).default("logs") });
+const attributeValuesSchema = attributeKeysSchema.extend({
+  key: z.string().trim().min(1).max(200),
+  prefix: z.string().max(200).optional(),
+});
+
+const widgetDataSchema = z.object({
+  config: dashboardWidgetConfigSchema,
+  projectId: z.uuid(),
+  range: windowSchema.shape.range,
+  type: z.enum(["timeseries_count", "timeseries_metric", "log_table", "trace_table"]),
+  // Selected dashboard variable values, substituted into filter values.
+  variables: z.record(z.string().max(60), z.string().max(500)).default({}),
+});
+
+export type WidgetData =
+  | { chart: ChartData; kind: "chart" }
+  | { kind: "logs"; logs: unknown }
+  | { kind: "traces"; traces: unknown };
+
+const stepMilliseconds = { DAY: 86_400_000, HOUR: 3_600_000, MINUTE: 60_000, SECOND: 1_000 } as const;
 const traceIdPattern = /^[0-9a-f]{32}$/u;
 
 const logsSchema = windowSchema.extend({
@@ -189,6 +272,113 @@ export function createTelemetryRoutes(
         ...(query.data.status === "error" ? { statusCode: "STATUS_CODE_ERROR" } : {}),
       });
       return context.json({ traces });
+    })
+    .get("/attribute-keys", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = attributeKeysSchema.safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid attribute query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      return context.json({
+        keys: await dependencies.attributeKeys(
+          granted.client,
+          query.data.projectId,
+          windowFor(query.data.range, dependencies.now()),
+          query.data.source,
+        ),
+      });
+    })
+    .get("/attribute-values", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = attributeValuesSchema.safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid attribute query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      return context.json({
+        values: await dependencies.attributeValues(granted.client, query.data.projectId, {
+          key: query.data.key,
+          range: windowFor(query.data.range, dependencies.now()),
+          source: query.data.source,
+          ...(query.data.prefix ? { prefix: query.data.prefix } : {}),
+        }),
+      });
+    })
+    .get("/metric-names", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = windowSchema.safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid metric query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      return context.json({
+        metrics: await dependencies.metricNames(
+          granted.client,
+          query.data.projectId,
+          windowFor(query.data.range, dependencies.now()),
+        ),
+      });
+    })
+    // Data for one dashboard widget, saved or still being edited.
+    .post("/widget-data", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!(await dependencies.hasDashboards(granted.organizationId))) {
+        return context.json({ error: "Dashboards are not available" }, 404);
+      }
+      const body = widgetDataSchema.safeParse(await context.req.json().catch(() => null));
+      if (!body.success) return context.json({ error: "Invalid widget" }, 400);
+      const { config, projectId, type, variables } = body.data;
+      if (type === "timeseries_metric" && !config.metricName) {
+        return context.json({ error: "Choose a metric" }, 400);
+      }
+      if (!(await dependencies.findProject(granted.organizationId, projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      const range = windowFor(body.data.range, dependencies.now());
+      const resourceAttrs = resolveWidgetFilters(config.filter.resourceAttrs, variables);
+      const limit = config.limit;
+      if (type === "log_table") {
+        const logs = await dependencies.queryLogs(granted.client, projectId, { limit: limit ?? 50, range, resourceAttrs });
+        return context.json({ kind: "logs", logs } satisfies WidgetData);
+      }
+      if (type === "trace_table") {
+        const traces = await dependencies.queryTraces(granted.client, projectId, {
+          limit: Math.min(limit ?? 50, 200),
+          range,
+          resourceAttrs,
+        });
+        return context.json({ kind: "traces", traces } satisfies WidgetData);
+      }
+      const sinceMs = Date.parse(range.since);
+      const untilMs = Date.parse(range.until);
+      const step = pickStep((untilMs - sinceMs) / 1000);
+      const window = { limit, sinceMs, stepMs: step.n * stepMilliseconds[step.unit], untilMs };
+      const groupBy = config.groupBy || undefined;
+      if (type === "timeseries_metric") {
+        const rows = await dependencies.metricSeries(granted.client, projectId, {
+          ...(config.aggregation ? { aggregation: config.aggregation } : {}),
+          filter: { range, resourceAttrs },
+          groupBy,
+          metricName: config.metricName!,
+          step,
+        });
+        return context.json({ chart: chartSeries(rows, { ...window, fill: "null" }), kind: "chart" } satisfies WidgetData);
+      }
+      const rows = await dependencies.countSeries(
+        granted.client,
+        projectId,
+        config.source ?? "logs",
+        { range, resourceAttrs },
+        groupBy,
+        step,
+      );
+      const values = rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
+      return context.json({ chart: chartSeries(values, { ...window, fill: "zero" }), kind: "chart" } satisfies WidgetData);
     })
     .get("/traces/:traceId", async (context) => {
       const granted = await access(context.req.raw.headers);
