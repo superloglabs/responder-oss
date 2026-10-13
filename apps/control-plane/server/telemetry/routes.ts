@@ -25,6 +25,7 @@ export type TelemetryRouteDependencies = {
   findProject: (organizationId: string, projectId: string) => Promise<TelemetryProject | null>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
   listProjects: (organizationId: string) => Promise<TelemetryProject[]>;
+  // Services that sent logs in the window.
   listServices: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
   now: () => Date;
   queryLogs: (
@@ -45,7 +46,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
   findProject: findTelemetryProject,
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
   listProjects: listTelemetryProjects,
-  listServices,
+  listServices: (client, projectId, range) => listServices(client, projectId, range, "logs"),
   now: () => new Date(),
   queryLogs,
   tenant: getActiveTenant,

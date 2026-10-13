@@ -19,6 +19,13 @@ function recordingClient(queries: string[]): ClickHouseClient {
   } as unknown as ClickHouseClient;
 }
 
+test("log services come only from the logs table", async () => {
+  const queries: string[] = [];
+  await listServices(recordingClient(queries), "project-1", undefined, "logs");
+  assert.equal(queries.length, 1);
+  assert.match(queries[0]!, /\bFROM otel_logs\b/);
+});
+
 test("raw telemetry queries filter through the materialized project column", async () => {
   const queries: string[] = [];
   const ch = recordingClient(queries);

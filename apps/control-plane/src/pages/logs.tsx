@@ -106,6 +106,8 @@ export function LogsPage() {
   useDocumentTitle("Logs");
   // Undefined while loading; null when the workspace cannot read telemetry.
   const [projects, setProjects] = useState<TelemetryProject[] | null | undefined>(undefined);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectsAttempt, setProjectsAttempt] = useState(0);
   const [projectId, setProjectId] = useState("");
   const [range, setRange] = useState<TelemetryRange>("1h");
   const [service, setService] = useState("");
@@ -124,15 +126,16 @@ export function LogsPage() {
       .then((loaded) => {
         if (cancelled) return;
         setProjects(loaded);
+        setProjectsError(null);
         setProjectId(loaded?.[0]?.projectId ?? "");
       })
       .catch((cause: unknown) => {
-        if (cancelled) return;
-        setProjects([]);
-        setError(cause instanceof Error ? cause.message : "Unable to load telemetry projects");
+        if (!cancelled) {
+          setProjectsError(cause instanceof Error ? cause.message : "Unable to load telemetry projects");
+        }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [projectsAttempt]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -185,7 +188,22 @@ export function LogsPage() {
         <h1><MagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
       </header>
       {projects === undefined ? (
-        <p className="logsPage__status">Loading…</p>
+        projectsError ? (
+          <div className="automationRuns__message" role="alert">
+            <p>{projectsError}</p>
+            <button
+              onClick={() => {
+                setProjectsError(null);
+                setProjectsAttempt((attempt) => attempt + 1);
+              }}
+              type="button"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <p className="logsPage__status">Loading…</p>
+        )
       ) : projects === null ? (
         <section className="emptyState emptyState--list">
           <h2>Logs are not available</h2>
@@ -194,7 +212,7 @@ export function LogsPage() {
       ) : projects.length === 0 ? (
         <section className="emptyState emptyState--list">
           <h2>No telemetry projects</h2>
-          <p>{error ?? "Logs appear here once a telemetry project is linked to this workspace."}</p>
+          <p>Logs appear here once a telemetry project is linked to this workspace.</p>
         </section>
       ) : (
         <section aria-label="Logs" className="logsPage">
@@ -258,24 +276,34 @@ export function LogsPage() {
                       header: "Time",
                       key: "time",
                       render: (log) => <time className="logsPage__time" dateTime={logTimestamp(log.timestamp)?.toISOString()}>{formatTime(log.timestamp)}</time>,
-                      width: "150px",
+                      width: "130px",
                     },
                     {
                       header: "Level",
                       key: "severity",
                       render: (log) => <Badge tone={severityTone(log.severity_number)}>{log.severity || "Unset"}</Badge>,
-                      width: "96px",
+                      width: "88px",
                     },
                     {
                       header: "Service",
                       key: "service",
                       render: (log) => <span className="logsPage__service">{log.service || "—"}</span>,
-                      width: "160px",
+                      width: "120px",
                     },
                     {
                       header: "Message",
                       key: "message",
-                      render: (log) => <span className="logsPage__message">{log.body}</span>,
+                      // A button, so the details open from the keyboard too.
+                      render: (log) => (
+                        <button
+                          aria-expanded={log.key === selected}
+                          className="logsPage__message"
+                          onClick={() => setSelected(log.key === selected ? null : log.key)}
+                          type="button"
+                        >
+                          {log.body}
+                        </button>
+                      ),
                     },
                   ]}
                   emptyMessage="No logs match these filters in this time range."

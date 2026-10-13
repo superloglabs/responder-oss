@@ -16,11 +16,11 @@
 .logsPage__status { margin: 0; padding: 24px 8px; color: var(--ds-text-muted); font-size: 12px; }
 
 .logsPage__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
-.logsPage__body--detail { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
+.logsPage__body--detail { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
 .logsPage__table { min-width: 0; }
 .logsPage__time, .logsPage__service { color: var(--ds-text-muted); font-size: 12px; white-space: nowrap; }
 .logsPage__service { display: block; overflow: hidden; text-overflow: ellipsis; }
-.logsPage__message { display: block; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.logsPage__message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
 .logDetail { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 96px); overflow: auto; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; }
 .logDetail__header { display: flex; align-items: center; gap: 8px; color: var(--ds-text-muted); font-size: 12px; }
@@ -34,8 +34,11 @@
 .logDetail__attributes dt { overflow: hidden; color: var(--ds-text-muted); text-overflow: ellipsis; white-space: nowrap; }
 .logDetail__attributes dd { margin: 0; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 
-@media (max-width: 900px) {
+.logsPage__message:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+/* Below this width the detail pane would leave the table too narrow. */
+@media (max-width: 1360px) {
   .logsPage__body--detail { grid-template-columns: minmax(0, 1fr); }
-  .logDetail { position: static; max-height: none; }
+  .logDetail { position: static; order: -1; max-height: none; }
   .logsPage__toolbar .dsSegmentedControl { margin-left: 0; }
 }

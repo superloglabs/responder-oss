@@ -6,6 +6,7 @@ import { resetBrowserAnalytics } from "../browser-analytics";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import {
   activeNavigationSection,
+  navigationOptions,
   primaryNavigation,
   type NavigationSection,
 } from "../primary-navigation";
@@ -76,9 +77,8 @@ export function AppShell({ active, children, density = "default", guest, redesig
   const capabilities = useOrganizationCapabilities(!guest);
   const simplifiedNavigation = capabilities.includes("simplified_navigation");
   const navigation = primaryNavigation({
+    ...navigationOptions(capabilities),
     automations: capabilities.includes("automations") || Boolean(guest),
-    simplified: simplifiedNavigation,
-    telemetry: capabilities.includes("telemetry"),
   });
   const activeSection = activeNavigationSection(active, simplifiedNavigation);
   const menuRef = useRef<HTMLDivElement>(null);

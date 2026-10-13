@@ -69,10 +69,15 @@ export function activeNavigationSection(
 
 // Where the application opens for a signed-in member: the first sidebar entry.
 export function homePath(capabilities: readonly string[]): string {
-  return primaryNavigation({
+  return primaryNavigation(navigationOptions(capabilities))[0].to;
+}
+
+export function navigationOptions(capabilities: readonly string[]) {
+  return {
     automations: capabilities.includes("automations"),
     simplified: capabilities.includes("simplified_navigation"),
-  })[0].to;
+    telemetry: capabilities.includes("telemetry"),
+  };
 }
 
 // Where a member lands after creating a workspace: guided setup that ends at
