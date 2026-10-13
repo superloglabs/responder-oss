@@ -40,8 +40,9 @@ export interface MetricName {
   unit: string;
 }
 
-async function request<T>(url: string, init?: { body?: unknown; method?: string }): Promise<T> {
+async function request<T>(url: string, init?: { body?: unknown; keepalive?: boolean; method?: string }): Promise<T> {
   const response = await fetch(url, {
+    ...(init?.keepalive ? { keepalive: true } : {}),
     ...(init?.method ? { method: init.method } : {}),
     ...(init?.body === undefined
       ? {}
@@ -125,11 +126,16 @@ export function deleteWidget(dashboardId: string, widgetId: string): Promise<voi
   });
 }
 
+// Kept alive so a save started as the page closes still completes.
 export function updateLayout(
   dashboardId: string,
   widgets: Array<{ id: string; layout: DashboardWidgetLayout }>,
 ): Promise<void> {
-  return request(`${base}/${encodeURIComponent(dashboardId)}/layout`, { body: { widgets }, method: "PATCH" });
+  return request(`${base}/${encodeURIComponent(dashboardId)}/layout`, {
+    body: { widgets },
+    keepalive: true,
+    method: "PATCH",
+  });
 }
 
 export function fetchWidgetData(input: {
@@ -194,6 +200,22 @@ export function placeWidget(type: DashboardWidgetType, taken: DashboardWidgetLay
       if (!overlaps(x, y)) return { h, w, x, y };
     }
   }
+}
+
+// Selections after the variables change: each kept while the variable still
+// allows it, otherwise the variable's default.
+export function nextVariableValues(
+  variables: DashboardVariable[],
+  current: Record<string, string>,
+): Record<string, string> {
+  const defaults = defaultVariableValues(variables);
+  return Object.fromEntries(
+    variables.map((variable) => {
+      const selected = current[variable.name];
+      const allowed = selected !== undefined && (variable.options.length === 0 || variable.options.includes(selected));
+      return [variable.name, allowed ? selected : defaults[variable.name]!];
+    }),
+  );
 }
 
 // Widgets whose position or size changed, for one layout update.
@@ -266,7 +288,7 @@ export function suggestedWidgetTitle(widget: { config: DashboardWidgetConfig; ty
       return "Recent traces";
     case "markdown": {
       const heading = (config.markdown ?? "").split("\n").map((line) => line.trim()).find((line) => line.startsWith("#"));
-      return heading ? heading.replace(/^#+\s*/u, "").slice(0, 80) : "Note";
+      return heading?.replace(/^#+\s*/u, "").slice(0, 80) || "Note";
     }
   }
 }

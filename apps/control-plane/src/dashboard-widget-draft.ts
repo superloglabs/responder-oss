@@ -10,8 +10,9 @@ import {
 export type WidgetKind = "chart" | "note" | "table";
 export type WidgetSource = "logs" | "metric" | "traces";
 
-// The widget editor's form. Fields that do not apply to the chosen kind are
-// kept, so switching kinds back and forth loses nothing.
+// The widget editor's form. While editing, fields that do not apply to the
+// chosen kind are kept, so switching kinds back and forth loses nothing. A
+// saved widget keeps only the settings its type uses.
 export interface WidgetForm {
   aggregation: "" | NonNullable<DashboardWidgetConfig["aggregation"]>;
   chartType: "bar" | "line";
@@ -32,6 +33,9 @@ export interface WidgetForm {
   title: string;
   unit: WidgetUnit;
 }
+
+// The most filters a widget can have.
+export const maximumWidgetFilters = 50;
 
 export const emptyWidgetForm: WidgetForm = {
   aggregation: "",

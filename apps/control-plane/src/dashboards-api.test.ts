@@ -4,19 +4,23 @@ import {
   changedLayouts,
   defaultVariableValues,
   formatWidgetValue,
+  nextVariableValues,
   placeWidget,
   suggestedWidgetTitle,
 } from "./dashboards-api";
 
 describe("formatWidgetValue", () => {
   it("formats each unit", () => {
-    expect(formatWidgetValue(1234.5678)).toBe("1,234.568");
-    expect(formatWidgetValue(2_500_000)).toBe("2.5M");
+    // Plain numbers follow the reader's locale.
+    expect(formatWidgetValue(1234.5678)).toBe(new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(1234.5678));
+    expect(formatWidgetValue(2_500_000)).toBe(
+      new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact" }).format(2_500_000),
+    );
     expect(formatWidgetValue(1500, "duration_ms")).toBe("1.5 s");
     expect(formatWidgetValue(0.25, "duration_s")).toBe("250 ms");
     expect(formatWidgetValue(1536, "bytes")).toBe("1.5 KB");
     expect(formatWidgetValue(512, "bytes")).toBe("512 B");
-    expect(formatWidgetValue(42, "percent")).toBe("42%");
+    expect(formatWidgetValue(42, "percent")).toBe(`${new Intl.NumberFormat().format(42)}%`);
     expect(formatWidgetValue(null)).toBe("—");
   });
 });
@@ -59,6 +63,22 @@ describe("dashboard variables", () => {
   });
 });
 
+describe("nextVariableValues", () => {
+  it("keeps a selection only while the variable still allows it", () => {
+    expect(
+      nextVariableValues(
+        [
+          { defaultValue: "production", name: "env", options: ["production", "staging"] },
+          { name: "region", options: ["eu"] },
+          { name: "free", options: [] },
+          { name: "added", options: ["a", "b"] },
+        ],
+        { env: "staging", free: "typed", gone: "x", region: "us" },
+      ),
+    ).toEqual({ added: "a", env: "staging", free: "typed", region: "eu" });
+  });
+});
+
 describe("suggestedWidgetTitle", () => {
   it("describes the widget", () => {
     expect(suggestedWidgetTitle({ config: { filter: {} }, type: "timeseries_count" })).toBe("Logs");
@@ -66,6 +86,7 @@ describe("suggestedWidgetTitle", () => {
       suggestedWidgetTitle({ config: { aggregation: "p99", filter: {}, metricName: "rpc.duration" }, type: "timeseries_metric" }),
     ).toBe("rpc.duration (p99)");
     expect(suggestedWidgetTitle({ config: { filter: {}, markdown: "no heading" }, type: "markdown" })).toBe("Note");
+    expect(suggestedWidgetTitle({ config: { filter: {}, markdown: "#\nbody" }, type: "markdown" })).toBe("Note");
   });
 });
 

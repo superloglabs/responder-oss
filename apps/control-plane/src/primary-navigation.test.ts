@@ -42,6 +42,9 @@ describe("primaryNavigation", () => {
     expect(
       primaryNavigation({ automations: true, dashboards: true, simplified: true }).map((item) => item.label),
     ).not.toContain("Dashboards");
+    expect(
+      primaryNavigation({ automations: true, dashboards: false, simplified: true, telemetry: true }).map((item) => item.label),
+    ).not.toContain("Dashboards");
   });
 
   it("keeps simplified navigation usable without automations", () => {

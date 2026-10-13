@@ -54,7 +54,9 @@ export function TimeseriesChart({
   const { ref, size } = useSize<HTMLDivElement>();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<number | null>(null);
-  const visible = chart.series.filter((series) => !hidden.has(series.name));
+  const visible = useMemo(() => chart.series.filter((series) => !hidden.has(series.name)), [chart.series, hidden]);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [tooltipWidth, setTooltipWidth] = useState(0);
   const colorOf = useMemo(
     () => new Map(chart.series.map((series, index) => [series.name, index % seriesColors])),
     [chart.series],
@@ -133,13 +135,24 @@ export function TimeseriesChart({
   const singlePoints = (values: Array<number | null>) =>
     values.filter((value) => value !== null).length === 1 ? values.findIndex((value) => value !== null) : -1;
 
-  const hoverRows = hover === null
+  const hoverValues = hover === null
     ? []
     : visible
         .map((series) => ({ name: series.name, value: series.values[hover] ?? null }))
         .filter((row) => row.value !== null)
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-        .slice(0, 10);
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  const hoverRows = hoverValues.slice(0, 10);
+  // Beside the pointer, on whichever side has room, and inside the plot.
+  const tooltipLeft = (() => {
+    if (hover === null) return 0;
+    const pointer = x(hover);
+    const preferred = pointer > size.width / 2 ? pointer - 12 - tooltipWidth : pointer + 12;
+    return Math.max(0, Math.min(preferred, size.width - tooltipWidth));
+  })();
+
+  useEffect(() => {
+    if (tooltipRef.current) setTooltipWidth(tooltipRef.current.offsetWidth);
+  }, [hover, hoverRows.length]);
 
   const legend = showLegend && chart.series.length > 0 ? (
     <ul aria-label="Series" className="timeseriesChart__legend">
@@ -169,7 +182,8 @@ export function TimeseriesChart({
   ) : null;
 
   return (
-    <figure className={`timeseriesChart timeseriesChart--legend-${legendPosition}`}>
+    <figure className="timeseriesChart">
+      <div className={`timeseriesChart__layout timeseriesChart--legend-${legendPosition}`}>
       <div className="timeseriesChart__plot" ref={ref}>
         {size.width > 0 ? (
           <svg
@@ -246,10 +260,7 @@ export function TimeseriesChart({
           </svg>
         ) : null}
         {hover !== null && hoverRows.length > 0 ? (
-          <div
-            className="timeseriesChart__tooltip"
-            style={x(hover) > size.width / 2 ? { right: size.width - x(hover) + 12 } : { left: x(hover) + 12 }}
-          >
+          <div className="timeseriesChart__tooltip" ref={tooltipRef} style={{ transform: `translateX(${tooltipLeft}px)` }}>
             <time>{new Date(chart.buckets[hover]!).toLocaleString(undefined, { day: "numeric", hour: "2-digit", hour12: false, minute: "2-digit", month: "short", second: chart.stepMs < 60_000 ? "2-digit" : undefined })}</time>
             <dl>
               {hoverRows.map((row) => (
@@ -262,10 +273,14 @@ export function TimeseriesChart({
                 </div>
               ))}
             </dl>
+            {hoverValues.length > hoverRows.length ? (
+              <p className="timeseriesChart__more">{hoverValues.length - hoverRows.length} more</p>
+            ) : null}
           </div>
         ) : null}
       </div>
       {legend}
+      </div>
     </figure>
   );
 }

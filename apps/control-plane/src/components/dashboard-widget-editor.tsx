@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Button, IconButton, SegmentedControl, SelectField, Switch, TextAreaField, TextField } from "../design-system";
 import {
   emptyWidgetForm,
+  maximumWidgetFilters,
   widgetDraft,
   widgetForm,
   type WidgetForm,
@@ -94,20 +95,20 @@ export function DashboardWidgetEditor({
   useEffect(() => {
     if (form.kind !== "chart" || form.source !== "metric") return;
     let cancelled = false;
-    fetchMetricNames(projectId, "24h")
+    fetchMetricNames(projectId, range)
       .then((loaded) => { if (!cancelled) setMetrics(loaded); })
       .catch(() => { if (!cancelled) setMetrics([]); });
     return () => { cancelled = true; };
-  }, [form.kind, form.source, projectId]);
+  }, [form.kind, form.source, projectId, range]);
 
   useEffect(() => {
     if (form.kind === "note") return;
     let cancelled = false;
-    fetchAttributeKeys(projectId, "24h", attributeSource)
+    fetchAttributeKeys(projectId, range, attributeSource)
       .then((loaded) => { if (!cancelled) setKeys(loaded); })
       .catch(() => { if (!cancelled) setKeys([]); });
     return () => { cancelled = true; };
-  }, [attributeSource, form.kind, projectId]);
+  }, [attributeSource, form.kind, projectId, range]);
 
   async function save() {
     if (draft.type === "timeseries_metric" && !draft.config.metricName) {
@@ -255,7 +256,10 @@ export function DashboardWidgetEditor({
                   </IconButton>
                 </div>
               ))}
-              <div className="widgetEditor__filterActions">
+              {form.filters.length >= maximumWidgetFilters ? (
+                <p className="dashboardDialog__hint">A widget can have up to {maximumWidgetFilters} filters.</p>
+              ) : null}
+              <div className="widgetEditor__filterActions" hidden={form.filters.length >= maximumWidgetFilters}>
                 <Button onClick={() => update({ filters: [...form.filters, { key: "", value: "" }] })} size="small" variant="secondary">
                   <PlusIcon size={12} />Add filter
                 </Button>

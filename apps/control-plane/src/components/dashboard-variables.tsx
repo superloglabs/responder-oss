@@ -4,6 +4,29 @@ import { Button, IconButton, SelectField, TextField } from "../design-system";
 import { variableRow, variablesFromRows, type DashboardVariable, type VariableRow } from "../dashboards-api";
 import { DashboardDialog } from "./dashboard-dialog";
 
+// A typed value applies on Enter or when the field loses focus, so widgets
+// reload once rather than on every keystroke.
+function FreeVariable({ label, onCommit, value }: { label: string; onCommit: (value: string) => void; value: string }) {
+  const [draft, setDraft] = useState(value);
+  const [committed, setCommitted] = useState(value);
+  if (value !== committed) {
+    setCommitted(value);
+    setDraft(value);
+  }
+  const commit = () => { if (draft !== value) onCommit(draft); };
+  return (
+    <TextField
+      className="dashboardVariables__field"
+      label={label}
+      maxLength={500}
+      onBlur={commit}
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={(event) => { if (event.key === "Enter") commit(); }}
+      value={draft}
+    />
+  );
+}
+
 // One control per variable: a list when it has options, a text box otherwise.
 export function DashboardVariableBar({
   onChange,
@@ -29,12 +52,10 @@ export function DashboardVariableBar({
             value={values[variable.name] ?? ""}
           />
         ) : (
-          <TextField
-            className="dashboardVariables__field"
+          <FreeVariable
             key={variable.name}
             label={variable.label || variable.name}
-            maxLength={500}
-            onChange={(event) => onChange(variable.name, event.target.value)}
+            onCommit={(value) => onChange(variable.name, value)}
             value={values[variable.name] ?? ""}
           />
         ),
@@ -59,6 +80,7 @@ export function DashboardVariablesEditor({
     setRows((current) => current.map((row, at) => (at === index ? { ...row, ...update } : row)));
 
   async function save() {
+    if (saving) return;
     const result = variablesFromRows(rows);
     if ("error" in result) {
       setError(result.error);
@@ -89,7 +111,7 @@ export function DashboardVariablesEditor({
         Use a variable in a widget filter as <code>$name</code>. Leave the options empty to type the value freely.
       </p>
       {rows.map((row, index) => (
-        <fieldset className="dashboardVariableRow" key={index}>
+        <fieldset className="dashboardVariableRow" disabled={saving} key={index}>
           <legend className="dashboardVariableRow__legend">{row.name || "New variable"}</legend>
           <div className="widgetEditor__row">
             <TextField label="Name" maxLength={60} onChange={(event) => change(index, { name: event.target.value })} value={row.name} />
@@ -118,6 +140,7 @@ export function DashboardVariablesEditor({
       ))}
       <div>
         <Button
+          disabled={saving}
           onClick={() => setRows((current) => [...current, { attributeKey: "", defaultValue: "", label: "", name: "", options: "" }])}
           size="small"
           variant="secondary"

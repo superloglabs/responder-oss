@@ -100,12 +100,17 @@ export const dashboardUpdateSchema = z
 
 const widgetTitleSchema = z.string().trim().min(1).max(200);
 
-export const dashboardWidgetCreateSchema = z.object({
-  config: dashboardWidgetConfigSchema,
-  layout: dashboardWidgetLayoutSchema.optional(),
-  title: widgetTitleSchema,
-  type: z.enum(dashboardWidgetTypes),
-});
+export const dashboardWidgetCreateSchema = z
+  .object({
+    config: dashboardWidgetConfigSchema,
+    layout: dashboardWidgetLayoutSchema.optional(),
+    title: widgetTitleSchema,
+    type: z.enum(dashboardWidgetTypes),
+  })
+  .refine((widget) => widget.type !== "timeseries_metric" || Boolean(widget.config.metricName), {
+    message: "Choose a metric",
+    path: ["config", "metricName"],
+  });
 
 export const dashboardWidgetUpdateSchema = z
   .object({

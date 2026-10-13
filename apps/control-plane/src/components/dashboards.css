@@ -4,7 +4,7 @@
 .dashboardPage__titleRow .dsSegmentedControl { padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
 .dashboardPage__titleRow .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
 .dashboardPage__rename { flex: 0 1 360px; }
-.dashboardPage__rename .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.dashboardPage__rename .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dashboardPage__meta { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
 .dashboardPage__grid { min-width: 0; }
 .dashboardPage__stack { display: flex; flex-direction: column; gap: 12px; }
@@ -29,15 +29,16 @@
 .dashboardWidget__status { margin: 0; padding: 12px 0; color: var(--ds-text-muted); font-size: 12px; }
 
 .dashboardWidget__table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
-.dashboardWidget__table th { position: sticky; top: -8px; padding: 4px 8px 6px 0; background: var(--ds-surface-base); color: var(--ds-text-muted); font-weight: 500; text-align: left; }
-.dashboardWidget__table th:first-child { width: 120px; }
-.dashboardWidget__table th:nth-child(2) { width: 90px; }
+.dashboardWidget__table th { position: sticky; top: -8px; padding: 4px 8px 6px 0; overflow: hidden; background: var(--ds-surface-base); color: var(--ds-text-muted); font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+/* Proportional columns, so the message or root span keeps room in a narrow widget. */
+.dashboardWidget__table th:first-child { width: 22%; }
+.dashboardWidget__table th:nth-child(2) { width: 16%; }
 .dashboardWidget__table td { padding: 5px 8px 5px 0; overflow: hidden; border-top: 1px solid var(--ds-border-subtle); color: var(--ds-text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .dashboardWidget__table a { color: inherit; text-decoration: none; }
 .dashboardWidget__table a:hover { text-decoration: underline; }
 .dashboardWidget__muted { color: var(--ds-text-muted) !important; }
 .dashboardWidget__mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.dashboardWidget__table .dashboardWidget__number { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.dashboardWidget__table .dashboardWidget__number { width: 15%; text-align: right; font-variant-numeric: tabular-nums; }
 .dashboardWidget__error { color: var(--ds-danger) !important; }
 
 .dashboardWidget__markdown { color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }
@@ -69,7 +70,7 @@
 .widgetEditor__filters { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .widgetEditor__filters legend { margin-bottom: 6px; padding: 0; color: var(--ds-text-secondary); font-size: 12px; font-weight: 500; }
 .widgetEditor__filter { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 6px; }
-.widgetEditor__filter .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.widgetEditor__filter .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .widgetEditor__filterActions { display: flex; flex-wrap: wrap; gap: 6px; }
 .widgetEditor__preview { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
 .widgetEditor__preview h3 { margin: 0; font-size: 12px; font-weight: 600; }

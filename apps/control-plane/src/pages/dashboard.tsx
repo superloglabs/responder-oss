@@ -22,6 +22,7 @@ import {
   deleteDashboard,
   deleteWidget,
   fetchDashboard,
+  nextVariableValues,
   placeWidget,
   updateDashboard,
   updateLayout,
@@ -164,9 +165,26 @@ export function DashboardPage() {
     void Promise.resolve().then(load);
   }, [load]);
 
-  useEffect(() => () => {
+  // Saves layout changes still waiting for the debounce.
+  const flushLayouts = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-  }, []);
+    saveTimer.current = null;
+    if (pendingLayouts.current.size === 0) return;
+    const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
+    pendingLayouts.current.clear();
+    updateLayout(dashboardId, widgets).catch((cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
+    );
+  }, [dashboardId]);
+
+  // Leaving the page or closing the tab saves a move made just before.
+  useEffect(() => {
+    window.addEventListener("pagehide", flushLayouts);
+    return () => {
+      window.removeEventListener("pagehide", flushLayouts);
+      flushLayouts();
+    };
+  }, [flushLayouts]);
 
   // Saves moved and resized widgets, and the positions the grid settles new
   // widgets into.
@@ -181,13 +199,7 @@ export function DashboardPage() {
     });
     for (const change of changes) pendingLayouts.current.set(change.id, change.layout);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
-      pendingLayouts.current.clear();
-      updateLayout(dashboard.id, widgets).catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
-      );
-    }, 400);
+    saveTimer.current = setTimeout(flushLayouts, 400);
   }
 
   async function saveWidget(draft: WidgetDraft) {
@@ -364,9 +376,7 @@ export function DashboardPage() {
           onSave={async (variables) => {
             const updated = await updateDashboard(dashboard.id, { variables });
             setDashboard({ ...dashboard, variables: updated.variables });
-            setValues((current) => ({ ...defaultVariableValues(updated.variables), ...Object.fromEntries(
-              Object.entries(current).filter(([name]) => updated.variables.some((variable) => variable.name === name)),
-            ) }));
+            setValues((current) => nextVariableValues(updated.variables, current));
             setEditingVariables(false);
           }}
           variables={dashboard.variables}

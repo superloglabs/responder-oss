@@ -21,6 +21,7 @@ function NewDashboardDialog({ onClose, projects }: { onClose: () => void; projec
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
+    if (saving) return;
     if (!name.trim()) {
       setError("Name the dashboard.");
       return;
@@ -87,6 +88,13 @@ export function DashboardsPage() {
 
   const projects = telemetry.projects ?? [];
   const canCreate = projects.length > 0;
+  // Without the project list, creating a dashboard is not possible yet.
+  const projectsError = telemetry.error ? (
+    <div className="automationRuns__message" role="alert">
+      <p>{telemetry.error}</p>
+      <button onClick={telemetry.retry} type="button">Retry</button>
+    </div>
+  ) : null;
   const newButton = canCreate ? (
     <Button onClick={() => setCreating(true)} size="small" variant="primary">
       <PlusIcon size={12} />New dashboard
@@ -99,6 +107,7 @@ export function DashboardsPage() {
         <h1><ChartLineIcon aria-hidden="true" size={16} weight="bold" />Dashboards</h1>
         {dashboards && dashboards.length > 0 ? <div className="workspaceHeading__actions">{newButton}</div> : null}
       </header>
+      {projectsError}
       {dashboards === undefined ? (
         error ? (
           <div className="automationRuns__message" role="alert">
@@ -117,7 +126,7 @@ export function DashboardsPage() {
         <section className="emptyState emptyState--list">
           <h2>No dashboards yet</h2>
           <p>
-            {canCreate
+            {canCreate || telemetry.projects === undefined
               ? "Chart logs, spans and metrics from your telemetry projects."
               : "Dashboards need a telemetry project linked to this workspace."}
           </p>

@@ -1,15 +1,5 @@
+/* Workspace pages always use light surfaces, so one palette serves them. */
 :root {
-  --chart-0: #6ea8fe;
-  --chart-1: #e8b04a;
-  --chart-2: #e27aa8;
-  --chart-3: #a68bf0;
-  --chart-4: #5cc8b8;
-  --chart-5: #e08a52;
-  --chart-6: #9cc46a;
-  --chart-7: #8a8a86;
-}
-
-:root[data-color-theme="light"] {
   --chart-0: #2f6fd6;
   --chart-1: #b8860b;
   --chart-2: #c2477e;
@@ -20,8 +10,10 @@
   --chart-7: #6f6f6a;
 }
 
-.timeseriesChart { display: flex; flex-direction: column; gap: 8px; width: 100%; height: 100%; min-height: 0; margin: 0; }
-.timeseriesChart--legend-side { flex-direction: row; }
+/* The figure is the size container; the layout inside it responds to it. */
+.timeseriesChart { container-type: size; width: 100%; height: 100%; min-height: 80px; margin: 0; }
+.timeseriesChart__layout { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+.timeseriesChart__layout.timeseriesChart--legend-side { flex-direction: row; }
 .timeseriesChart__plot { position: relative; flex: 1 1 auto; min-width: 0; min-height: 80px; }
 .timeseriesChart__plot svg { position: absolute; inset: 0; display: block; overflow: visible; }
 
@@ -48,12 +40,19 @@
 .timeseriesChart--legend-side .timeseriesChart__legend { flex: 0 0 180px; flex-direction: column; flex-wrap: nowrap; max-height: none; }
 .timeseriesChart__legend button { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 0; border: 0; background: none; color: var(--ds-text-secondary); cursor: pointer; font: inherit; font-size: 11px; text-align: left; }
 .timeseriesChart--legend-side .timeseriesChart__legend button { width: 100%; }
+/* A side legend leaves too little plot in a narrow widget; stack it below. */
+@container (max-width: 480px) {
+  .timeseriesChart__layout.timeseriesChart--legend-side { flex-direction: column; }
+  .timeseriesChart--legend-side .timeseriesChart__legend { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; max-height: 44px; }
+  .timeseriesChart--legend-side .timeseriesChart__legend button { width: auto; }
+}
 .timeseriesChart__legend button[aria-pressed="false"] { opacity: .4; }
 .timeseriesChart__legend button:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; border-radius: 4px; }
 .timeseriesChart__seriesName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeseriesChart__seriesTotal { margin-left: auto; padding-left: 8px; color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
 
-.timeseriesChart__tooltip { position: absolute; top: 4px; z-index: 2; min-width: 160px; max-width: 280px; padding: 8px 10px; border-radius: 8px; background: var(--ds-surface-overlay); outline: .5px solid var(--ds-border-strong); box-shadow: 0 4px 12px #0000002e; color: var(--ds-text-primary); font-size: 11px; pointer-events: none; }
+.timeseriesChart__tooltip { position: absolute; top: 4px; left: 0; z-index: 2; min-width: 160px; max-width: 280px; padding: 8px 10px; border-radius: 8px; background: var(--ds-surface-overlay); outline: .5px solid var(--ds-border-strong); box-shadow: 0 4px 12px #0000002e; color: var(--ds-text-primary); font-size: 11px; pointer-events: none; }
+.timeseriesChart__more { margin: 4px 0 0; color: var(--ds-text-muted); }
 .timeseriesChart__tooltip time { display: block; margin-bottom: 6px; color: var(--ds-text-muted); }
 .timeseriesChart__tooltip dl { display: flex; flex-direction: column; gap: 3px; margin: 0; }
 .timeseriesChart__tooltip dl > div { display: flex; align-items: center; gap: 12px; }
