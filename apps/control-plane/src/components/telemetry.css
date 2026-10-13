@@ -1,0 +1,83 @@
+.telemetryPage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.telemetryPage__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.telemetryPage__toolbar .dsField { gap: 0; }
+.telemetryPage__toolbar .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.telemetryPage__select { width: 180px; }
+.telemetryPage__toolbar .dsSelect__trigger { height: 32px; padding: 0 10px; font-size: 12px; }
+.telemetryPage__toolbar .dsSegmentedControl { flex-shrink: 0; margin-left: auto; padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
+.telemetryPage__toolbar .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+
+.telemetryPage__search { display: flex; flex: 1 1 220px; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--ds-border-default); border-radius: var(--ds-radius-small); background: var(--ds-surface-base); color: var(--ds-text-muted); }
+.telemetryPage__search:focus-within { border-color: var(--ds-border-strong); }
+.telemetryPage__search input::-webkit-search-cancel-button { display: none; }
+.telemetryPage__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ds-text-primary); font: inherit; font-size: 12px; }
+
+.telemetryPage__status { margin: 0; padding: 24px 8px; color: var(--ds-text-muted); font-size: 12px; }
+
+.telemetryPage__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.telemetryPage__body--detail { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
+.telemetryPage__table { min-width: 0; }
+.telemetryPage__time, .telemetryPage__service { color: var(--ds-text-muted); font-size: 12px; white-space: nowrap; }
+.telemetryPage__service { display: block; overflow: hidden; text-overflow: ellipsis; }
+.telemetryPage__message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: inherit; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+button.telemetryPage__message, a.telemetryPage__message { cursor: pointer; }
+
+.telemetryDetail { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 96px); overflow: auto; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; }
+/* The pane scrolls as a whole; its sections keep their height. */
+.telemetryDetail > * { flex-shrink: 0; }
+.telemetryDetail__header { display: flex; align-items: center; gap: 8px; color: var(--ds-text-muted); font-size: 12px; }
+.telemetryDetail__header button { margin-left: auto; }
+.telemetryDetail__body { margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px; background: var(--ds-surface-hover); color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-word; }
+.telemetryDetail__exception { margin: 0; color: var(--ds-text-primary); font-size: 12px; }
+.telemetryDetail__section { display: flex; flex-direction: column; gap: 8px; }
+.telemetryDetail__section h3 { margin: 0; color: var(--ds-text-primary); font-size: 12px; font-weight: 600; }
+.telemetryDetail__attributes { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.telemetryDetail__attributes > div { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px; font-size: 12px; }
+.telemetryDetail__attributes dt { overflow: hidden; color: var(--ds-text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.telemetryDetail__attributes dd { margin: 0; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+.telemetryPage__message:focus-visible, .traceWaterfall__row:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+a.telemetryPage__message:hover { text-decoration: underline; }
+.telemetryPage__number { color: var(--ds-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.telemetryDetail__attributes dd a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.telemetryPage__errors { color: var(--ds-danger); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.traceDetail__title { overflow-wrap: anywhere; }
+.traceDetail__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 18px; }
+.traceDetail__meta code { font-size: 11px; }
+.traceDetail__heading { margin: 0; color: var(--ds-text-primary); font-size: 13px; font-weight: 600; }
+.traceDetail__spanLogs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.traceDetail__spanLogs li { display: flex; align-items: flex-start; gap: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.traceDetail__spanLogs li .dsBadge { flex-shrink: 0; font-family: var(--ds-font-sans); }
+
+/* Span name, timeline and duration columns, shared by the axis and each row. */
+.traceWaterfall { --trace-name-width: minmax(160px, 34%); min-width: 0; padding: 4px 0; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
+.traceWaterfall__axis, .traceWaterfall__row { display: grid; grid-template-columns: var(--trace-name-width) minmax(0, 1fr) 72px; align-items: center; gap: 12px; padding: 0 12px; }
+.traceWaterfall__axis { height: 28px; border-bottom: 1px solid var(--ds-border-subtle); color: var(--ds-text-muted); font-size: 11px; }
+.traceWaterfall__axis .traceWaterfall__track span { position: absolute; top: 50%; transform: translate(-50%, -50%); white-space: nowrap; }
+.traceWaterfall__axis .traceWaterfall__track span:first-child { transform: translate(0, -50%); }
+.traceWaterfall__axis .traceWaterfall__track span:last-child { transform: translate(-100%, -50%); }
+.traceWaterfall__rows { max-height: calc(100vh - 260px); margin: 0; padding: 0; overflow: auto; list-style: none; }
+.traceWaterfall__row { width: 100%; min-height: 28px; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.traceWaterfall__row:hover { background: var(--ds-surface-hover); }
+.traceWaterfall__row--selected, .traceWaterfall__row--selected:hover { background: var(--ds-info-surface); }
+.traceWaterfall__name { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; white-space: nowrap; }
+.traceWaterfall__service { flex-shrink: 0; max-width: 45%; overflow: hidden; color: var(--ds-text-muted); text-overflow: ellipsis; }
+.traceWaterfall__spanName { overflow: hidden; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
+.traceWaterfall__row--error .traceWaterfall__spanName { color: var(--ds-danger); }
+.traceWaterfall__srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.traceWaterfall__track { position: relative; height: 100%; min-height: 28px; }
+.traceWaterfall__bar { position: absolute; top: 50%; min-width: 2px; height: 10px; border-radius: 3px; background: var(--ds-info); transform: translateY(-50%); }
+.traceWaterfall__row--error .traceWaterfall__bar { background: var(--ds-danger); }
+.traceWaterfall__duration { color: var(--ds-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+/* Below this width the detail pane would leave the table too narrow. */
+@media (max-width: 1360px) {
+  .traceWaterfall__rows { max-height: none; }
+  /* Keep the waterfall in view; the span opens below it. */
+  .traceDetail .telemetryDetail { order: 0; }
+  .telemetryPage__body--detail { grid-template-columns: minmax(0, 1fr); }
+  .telemetryDetail { position: static; order: -1; max-height: none; }
+  .telemetryPage__toolbar .dsSegmentedControl { margin-left: 0; }
+}

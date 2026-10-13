@@ -4,6 +4,7 @@ import { createTelemetryRoutes, type TelemetryRouteDependencies } from "./routes
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const projectId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const now = new Date("2026-10-13T12:00:00.000Z");
+const traceId = "5255bbc393af888bdef2e83d0e0c2990";
 
 function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
   const dependencies: TelemetryRouteDependencies = {
@@ -14,6 +15,8 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     listServices: vi.fn(async () => ["checkout", "api"]),
     now: () => now,
     queryLogs: vi.fn(async () => [{ body: "hello", service: "checkout" }]),
+    queryTrace: vi.fn(async () => ({ logs: [], spans: [{ span_id: "a1" }] })),
+    queryTraces: vi.fn(async () => [{ trace_id: traceId }]),
     tenant: vi.fn(async () => ({ ok: true as const, organizationId })),
     ...overrides,
   };
@@ -57,19 +60,71 @@ describe("telemetry routes", () => {
     const response = await app.request(`/services?projectId=${projectId}&range=24h`);
 
     await expect(response.json()).resolves.toEqual({ services: ["checkout", "api"] });
-    expect(dependencies.listServices).toHaveBeenCalledWith(expect.anything(), projectId, {
-      since: "2026-10-12T12:00:00.000Z",
-      until: "2026-10-13T12:00:00.000Z",
+    expect(dependencies.listServices).toHaveBeenCalledWith(
+      expect.anything(),
+      projectId,
+      { since: "2026-10-12T12:00:00.000Z", until: "2026-10-13T12:00:00.000Z" },
+      "logs",
+    );
+
+    await app.request(`/services?projectId=${projectId}&signal=traces`);
+    expect(dependencies.listServices).toHaveBeenLastCalledWith(
+      expect.anything(),
+      projectId,
+      expect.anything(),
+      "traces",
+    );
+  });
+
+  it("queries traces of a linked project with the chosen filters and window", async () => {
+    const { app, dependencies } = routes();
+
+    const response = await app.request(
+      `/traces?projectId=${projectId}&range=6h&service=checkout&status=error&minDurationMs=500`,
+    );
+
+    await expect(response.json()).resolves.toEqual({ traces: [{ trace_id: traceId }] });
+    expect(dependencies.queryTraces).toHaveBeenCalledWith(expect.anything(), projectId, {
+      limit: 50,
+      minDurationMs: 500,
+      range: { since: "2026-10-13T06:00:00.000Z", until: "2026-10-13T12:00:00.000Z" },
+      service: "checkout",
+      statusCode: "STATUS_CODE_ERROR",
     });
+  });
+
+  it("returns a trace's spans and logs, and 404 for a trace with no spans", async () => {
+    const { app, dependencies } = routes();
+
+    const response = await app.request(`/traces/${traceId.toUpperCase()}?projectId=${projectId}`);
+
+    await expect(response.json()).resolves.toEqual({ logs: [], spans: [{ span_id: "a1" }] });
+    expect(dependencies.queryTrace).toHaveBeenCalledWith(expect.anything(), projectId, traceId);
+
+    const empty = routes({ queryTrace: vi.fn(async () => ({ logs: [], spans: [] })) });
+    expect((await empty.app.request(`/traces/${traceId}?projectId=${projectId}`)).status).toBe(404);
+  });
+
+  it("rejects malformed trace IDs and trace filters", async () => {
+    const { app, dependencies } = routes();
+
+    expect((await app.request(`/traces/not-a-trace?projectId=${projectId}`)).status).toBe(400);
+    expect((await app.request(`/traces/${traceId}`)).status).toBe(400);
+    expect((await app.request(`/traces?projectId=${projectId}&status=ok`)).status).toBe(400);
+    expect((await app.request(`/traces?projectId=${projectId}&minDurationMs=-1`)).status).toBe(400);
+    expect(dependencies.queryTrace).not.toHaveBeenCalled();
+    expect(dependencies.queryTraces).not.toHaveBeenCalled();
   });
 
   it("does not read a project the workspace has not linked", async () => {
     const { app, dependencies } = routes({ findProject: vi.fn(async () => null) });
 
-    const response = await app.request(`/logs?projectId=${projectId}`);
-
-    expect(response.status).toBe(404);
+    expect((await app.request(`/logs?projectId=${projectId}`)).status).toBe(404);
+    expect((await app.request(`/traces?projectId=${projectId}`)).status).toBe(404);
+    expect((await app.request(`/traces/${traceId}?projectId=${projectId}`)).status).toBe(404);
     expect(dependencies.queryLogs).not.toHaveBeenCalled();
+    expect(dependencies.queryTraces).not.toHaveBeenCalled();
+    expect(dependencies.queryTrace).not.toHaveBeenCalled();
   });
 
   it("hides telemetry from a workspace without the capability or a configured store", async () => {

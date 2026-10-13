@@ -23,6 +23,8 @@ import { PullRequestsPage } from "./pages/pull-requests";
 import { ScanDetailPage } from "./pages/scan-detail";
 import { ScansPage } from "./pages/scans";
 import { SharedAutomationTemplatePage } from "./pages/shared-automation-template";
+import { TraceDetailPage } from "./pages/trace-detail";
+import { TracesPage } from "./pages/traces";
 import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
@@ -147,6 +149,8 @@ export function App() {
         <Route element={<SkillEditorPage />} path="/skills/:skillId" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<LogsPage />} path="/logs" />
+        <Route element={<TracesPage />} path="/traces" />
+        <Route element={<TraceDetailPage />} path="/traces/:traceId" />
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />
         <Route element={<IssueDetailPage />} path="/issues/:issueId" />

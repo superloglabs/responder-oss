@@ -27,6 +27,7 @@ import {
   RobotIcon,
   SignOutIcon,
   TagIcon,
+  TreeStructureIcon,
   UserCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
@@ -45,6 +46,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   skills: BookOpenTextIcon,
   suggestions: FlagIcon,
   "tag-mode": TagIcon,
+  traces: TreeStructureIcon,
 };
 
 interface AppShellProps {

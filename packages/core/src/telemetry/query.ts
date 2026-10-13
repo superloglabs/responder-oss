@@ -818,12 +818,12 @@ const SERVICE_SOURCES = [
   },
 ] as const;
 
-// Services seen in any signal, or only in logs.
+// Services seen in any signal, or only in logs or traces.
 export async function listServices(
   ch: ClickHouseClient,
   projectId: string,
   range?: TimeRange,
-  signal?: "logs",
+  signal?: "logs" | "traces",
 ) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
   const sources = signal
