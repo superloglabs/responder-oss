@@ -268,19 +268,41 @@ describe("Vercel read API", () => {
   });
 
   it("stops the Vercel request when the caller cancels", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: "prj-1" }));
+    const fetchMock = vi.fn((_url: URL, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener("abort", () => reject(init.signal!.reason));
+      }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
 
-    await executeVercelRead({
+    const request = executeVercelRead({
       connection,
       operationId: "getProject",
       pathParameters: { idOrName: "prj-1" },
       signal: controller.signal,
     });
-    controller.abort();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort(new Error("run cancelled"));
 
-    const signal = (fetchMock.mock.calls[0]![1] as RequestInit).signal!;
-    expect(signal.aborted).toBe(true);
+    await expect(request).rejects.toThrow("run cancelled");
+  });
+
+  it("does not offer listings that span the team's projects", async () => {
+    for (const operationId of [
+      "listAccessGroupProjects",
+      "getMicrofrontendsInGroup",
+      "getObservabilityConfigurationProjects",
+      "getDomainProjectDomains",
+      "listTeamFlags",
+      "listTeamFlagsV2",
+      "listTeamFlagSettings",
+    ]) {
+      expect(
+        searchVercelOperations(operationId, 20).map((operation) => operation.operationId),
+      ).not.toContain(operationId);
+      await expect(
+        executeVercelRead({ connection, operationId }),
+      ).rejects.toThrow("Unknown or blocked Vercel read operation");
+    }
   });
 });

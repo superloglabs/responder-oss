@@ -51,7 +51,20 @@ type ReadOperation = {
   parameters: OperationParameter[];
 };
 
-const operations = catalog.operations as ReadOperation[];
+// These list projects or project settings across the whole team and cannot
+// be narrowed to the installation's projects.
+const crossProjectListings = new Set([
+  "getDomainProjectDomains",
+  "getMicrofrontendsInGroup",
+  "getObservabilityConfigurationProjects",
+  "listAccessGroupProjects",
+  "listTeamFlagSettings",
+  "listTeamFlags",
+  "listTeamFlagsV2",
+]);
+const operations = (catalog.operations as ReadOperation[]).filter(
+  (operation) => !crossProjectListings.has(operation.operationId),
+);
 /** Vercel's published OpenAPI document the catalog was generated from. */
 export const vercelApiDocumentation = catalog.source;
 const operationsById = new Map(
