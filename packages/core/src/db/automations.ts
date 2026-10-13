@@ -2018,6 +2018,24 @@ export async function claimAutomationRun(runId: string) {
   return { ...run, ...configuration, leaseId, runId };
 }
 
+// When a live lease holds a running run, the time that lease runs out.
+export async function automationRunLeaseExpiry(
+  runId: string,
+): Promise<Date | null> {
+  const rows = await getDatabase()
+    .select({ leaseExpiresAt: automationRuns.leaseExpiresAt })
+    .from(automationRuns)
+    .where(
+      and(
+        eq(automationRuns.id, runId),
+        eq(automationRuns.status, "running"),
+        gt(automationRuns.leaseExpiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+  return rows[0]?.leaseExpiresAt ?? null;
+}
+
 export async function automationRunCancellationRequested(
   runId: string,
 ): Promise<boolean> {

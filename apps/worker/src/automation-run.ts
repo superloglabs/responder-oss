@@ -9,6 +9,7 @@ import {
   automationRunCancellationRequested,
   automationRunHasFinishedTurn,
   automationRunHasNewMessages,
+  automationRunLeaseExpiry,
   automationRunPostedInSlackThread,
   claimAutomationRun,
   getAutomationNotificationAccount,
@@ -151,6 +152,7 @@ export interface AutomationRunDependencies {
   hasFinishedTurn: typeof automationRunHasFinishedTurn;
   hasNewMessages: typeof automationRunHasNewMessages;
   heartbeatRun: typeof heartbeatAutomationRun;
+  leaseExpiry: typeof automationRunLeaseExpiry;
   loadRepositories: typeof loadCheckedOutRepositories;
   notify: typeof sendAutomationRunNotifications;
   notifyLimitReached: typeof notifyBillingLimitReached;
@@ -167,6 +169,7 @@ export interface AutomationRunDependencies {
   runInSandbox: typeof runInFreshAutomationSandbox;
   saveSandbox: typeof saveAutomationRunSandbox;
   setStatus: typeof setAutomationRunStatus;
+  sleep(delayMs: number): Promise<void>;
   slackCard: AutomationSlackCardDependencies;
   subscriptionAuth: (owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>;
   createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
@@ -201,6 +204,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   hasFinishedTurn: automationRunHasFinishedTurn,
   hasNewMessages: automationRunHasNewMessages,
   heartbeatRun: heartbeatAutomationRun,
+  leaseExpiry: automationRunLeaseExpiry,
   loadRepositories: loadCheckedOutRepositories,
   notify: sendAutomationRunNotifications,
   notifyLimitReached: notifyBillingLimitReached,
@@ -218,6 +222,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   runInSandbox: runInFreshAutomationSandbox,
   saveSandbox: saveAutomationRunSandbox,
   setStatus: setAutomationRunStatus,
+  sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   slackCard: defaultAutomationSlackCardDependencies,
   subscriptionAuth: (owner, validUntil) => subscriptionAuthCoveringRun(owner, validUntil),
   createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
@@ -289,6 +294,9 @@ function automationContextServers(
 type AutomationConversation = Awaited<ReturnType<typeof listAutomationRunConversation>>;
 
 const maxConversationLength = 60_000;
+// A run lease lasts at most ten minutes past its last heartbeat.
+const maxRunLeaseMs = 600_000;
+const runHeartbeatIntervalMs = 30_000;
 
 function userMessagePrompt(message: AutomationUserMessageEventData): string {
   if (message.slackButton) {
@@ -687,7 +695,19 @@ export async function processAutomationRun(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: AutomationRunDependencies = defaultAutomationRunDependencies,
 ): Promise<{ runId: string }> {
-  const run = await dependencies.claimRun(payload.runId);
+  let run = await dependencies.claimRun(payload.runId);
+  // The retry of a job cut off by a worker restart can arrive before the
+  // stopped worker's lease runs out. Wait for the lease and claim once more.
+  // A live worker renews its lease within one heartbeat, so a run it holds,
+  // even with a late heartbeat, is left alone.
+  if (!run) {
+    const leaseExpiresAt = await dependencies.leaseExpiry(payload.runId);
+    if (leaseExpiresAt) {
+      const remainingMs = leaseExpiresAt.getTime() - dependencies.now().getTime();
+      await dependencies.sleep(Math.min(Math.max(remainingMs, 0), maxRunLeaseMs) + runHeartbeatIntervalMs);
+    }
+    run = await dependencies.claimRun(payload.runId);
+  }
   if (!run) return { runId: payload.runId };
   const triggerPullRequest = githubPullRequestOf(run.triggerInput);
   // Usage recorded from here on belongs to this turn.
@@ -749,7 +769,7 @@ export async function processAutomationRun(
           runId: run.runId,
         }));
       });
-  }, 30_000);
+  }, runHeartbeatIntervalMs);
   try {
     if (!(await dependencies.heartbeatRun({
       leaseId: run.leaseId,
