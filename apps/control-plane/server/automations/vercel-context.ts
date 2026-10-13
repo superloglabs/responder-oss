@@ -84,6 +84,7 @@ export async function callVercelTool(input: {
   connection: VercelReadConnection;
   dependencies: VercelToolDependencies;
   name: string;
+  signal: AbortSignal;
 }): Promise<VercelToolResult | null> {
   try {
     if (input.name === "search_vercel_api") {
@@ -94,7 +95,7 @@ export async function callVercelTool(input: {
     if (input.name === "call_vercel_api") {
       const args = vercelCallInputSchema.safeParse(input.args ?? {});
       if (!args.success) return failure("Invalid tool arguments");
-      const text = await input.dependencies.callApi(input.connection, args.data);
+      const text = await input.dependencies.callApi(input.connection, args.data, input.signal);
       return { content: [{ text, type: "text" }] };
     }
   } catch (error) {

@@ -177,7 +177,12 @@ function validateProjectScope(
   const projectIds = projectParameters.flatMap(([, value]) =>
     Array.isArray(value) ? value : [value],
   );
-  if (operation.operationId === "getDeployments" && projectIds.length === 0) {
+  // A listing that can be filtered by project otherwise spans the whole team.
+  const isListing = !operation.parameters.some((parameter) => parameter.in === "path");
+  const filtersByProject = operation.parameters.some((parameter) =>
+    isProjectScopeParameter(operation, parameter.name),
+  );
+  if (isListing && filtersByProject && projectIds.length === 0) {
     throw new Error("Choose at least one selected Vercel project");
   }
   if (
@@ -229,7 +234,15 @@ export function buildVercelReadUrl(input: {
     if (!pathNames.has(name)) throw new Error(`Unknown Vercel path parameter: ${name}`);
   }
   for (const name of Object.keys(queryParameters)) {
-    if (name === "teamId" || name === "slug") continue;
+    if (name === "slug") {
+      throw new Error("Pass teamId instead of slug; the connection's team is applied automatically");
+    }
+    if (name === "teamId") {
+      if (queryParameters.teamId !== (input.connection.teamId ?? undefined)) {
+        throw new Error("The Vercel team is not available to this connection");
+      }
+      continue;
+    }
     if (!queryNames.has(name)) throw new Error(`Unknown Vercel query parameter: ${name}`);
   }
   for (const parameter of input.operation.parameters) {
@@ -305,10 +318,16 @@ function deploymentIdentifier(
   return typeof entry?.[1] === "string" ? entry[1] : null;
 }
 
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 async function validateDeploymentScope(input: {
   connection: VercelReadConnection;
   operation: ReadOperation;
   pathParameters: Record<string, ParameterValue>;
+  signal?: AbortSignal;
 }): Promise<void> {
   const deploymentId = deploymentIdentifier(
     input.operation,
@@ -329,7 +348,7 @@ async function validateDeploymentScope(input: {
       authorization: `Bearer ${input.connection.accessToken}`,
     },
     redirect: "error",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(input.signal),
   });
   if (!response.ok) {
     throw new Error(`Unable to verify Vercel deployment scope (HTTP ${response.status})`);
@@ -389,11 +408,43 @@ async function boundedResponseText(response: Response): Promise<string> {
   return new TextDecoder().decode(body);
 }
 
+// Project and team listings take no project filter, so their results are
+// narrowed to what the installation shares.
+const listingScopes: Record<string, {
+  allowed: (connection: VercelReadConnection) => string[];
+  field: string;
+}> = {
+  getProjects: { allowed: (connection) => connection.projectIds, field: "projects" },
+  getTeams: {
+    allowed: (connection) => (connection.teamId ? [connection.teamId] : []),
+    field: "teams",
+  },
+};
+
+function withinConnection(
+  operation: ReadOperation,
+  connection: VercelReadConnection,
+  body: unknown,
+): unknown {
+  const scope = listingScopes[operation.operationId];
+  if (!scope || !body || typeof body !== "object") return body;
+  const items = (body as Record<string, unknown>)[scope.field];
+  if (!Array.isArray(items)) return body;
+  const allowed = new Set(scope.allowed(connection));
+  return {
+    ...body,
+    [scope.field]: items.filter((item) =>
+      item && typeof item === "object" && allowed.has((item as { id?: unknown }).id as string),
+    ),
+  };
+}
+
 export async function executeVercelRead(input: {
   connection: VercelReadConnection;
   operationId: string;
   pathParameters?: Record<string, ParameterValue>;
   queryParameters?: Record<string, ParameterValue>;
+  signal?: AbortSignal;
 }): Promise<string> {
   const operation = operationsById.get(input.operationId);
   if (!operation) throw new Error("Unknown or blocked Vercel read operation");
@@ -402,6 +453,7 @@ export async function executeVercelRead(input: {
     connection: input.connection,
     operation,
     pathParameters: input.pathParameters ?? {},
+    signal: input.signal,
   });
   const response = await fetch(url, {
     headers: {
@@ -409,7 +461,7 @@ export async function executeVercelRead(input: {
       authorization: `Bearer ${input.connection.accessToken}`,
     },
     redirect: "error",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(input.signal),
   });
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("json") && !contentType.startsWith("text/")) {
@@ -423,7 +475,10 @@ export async function executeVercelRead(input: {
   const result = {
     operationId: operation.operationId,
     status: response.status,
-    data: sanitizeVercelValue(body, input.connection.accessToken),
+    data: sanitizeVercelValue(
+      withinConnection(operation, input.connection, body),
+      input.connection.accessToken,
+    ),
   };
   if (!response.ok) {
     throw new Error(`Vercel API returned HTTP ${response.status}: ${JSON.stringify(result.data)}`);
@@ -504,9 +559,11 @@ export function searchVercelApi(
 export async function callVercelApi(
   connection: VercelReadConnection,
   input: z.infer<typeof vercelCallInputSchema>,
+  signal?: AbortSignal,
 ): Promise<string> {
   return executeVercelRead({
     connection,
+    signal,
     operationId: input.operationId,
     pathParameters: vercelParameterEntriesToRecord(input.pathParameters, "path"),
     queryParameters: vercelParameterEntriesToRecord(input.queryParameters, "query"),

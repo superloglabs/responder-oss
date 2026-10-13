@@ -517,6 +517,7 @@ async function linearResponse(
 async function vercelResponse(
   claim: AutomationContextBrokerClaim,
   request: z.infer<typeof requestSchema>,
+  signal: AbortSignal,
   dependencies: ContextBrokerDependencies,
 ): Promise<Response> {
   if (request.method.startsWith("notifications/")) {
@@ -533,10 +534,7 @@ async function vercelResponse(
     }));
   }
   if (request.method === "ping") return Response.json(rpcResult(request.id, {}));
-  if (request.method === "tools/list") {
-    return Response.json(rpcResult(request.id, { tools: vercelToolDefinitions }));
-  }
-  if (request.method !== "tools/call") {
+  if (request.method !== "tools/list" && request.method !== "tools/call") {
     return Response.json(rpcError(request.id, -32601, "Method not found"), {
       status: 404,
     });
@@ -546,6 +544,9 @@ async function vercelResponse(
     return Response.json(rpcError(request.id, -32601, "Connection does not expose context tools"), {
       status: 404,
     });
+  }
+  if (request.method === "tools/list") {
+    return Response.json(rpcResult(request.id, { tools: vercelToolDefinitions }));
   }
   const toolName = z.string().safeParse(request.params?.name);
   if (!toolName.success) {
@@ -558,6 +559,7 @@ async function vercelResponse(
     connection,
     dependencies: dependencies.vercel,
     name: toolName.data,
+    signal,
   });
   if (!result) {
     return Response.json(rpcError(request.id, -32602, "Unknown tool"), {
@@ -718,7 +720,12 @@ export function createAutomationContextBrokerRoutes(
         return await linearResponse(claim, parsed.data, dependencies);
       }
       if (claim.account.provider === "vercel") {
-        return await vercelResponse(claim, parsed.data, dependencies);
+        return await vercelResponse(
+          claim,
+          parsed.data,
+          context.req.raw.signal,
+          dependencies,
+        );
       }
       if (claim.account.provider === "aws" || claim.account.provider === "gcp") {
         if (claim.account.provider === "gcp" && !isGcpMcpService(service)) {

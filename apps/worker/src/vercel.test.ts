@@ -48,7 +48,7 @@ describe("Vercel read tools", () => {
         accountId: connection.accountId,
         operationId: "getProject",
         pathParameters: [{ name: "idOrName", value: "prj-1" }],
-        queryParameters: [{ name: "teamId", value: "attacker-team" }],
+        queryParameters: [],
       }),
     );
 

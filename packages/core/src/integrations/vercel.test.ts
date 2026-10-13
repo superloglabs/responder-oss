@@ -45,7 +45,6 @@ describe("Vercel read API", () => {
       connection,
       operation: operation!,
       pathParameters: { idOrName: "prj-1" },
-      queryParameters: { teamId: "attacker-team" },
     });
 
     expect(url.origin).toBe("https://api.vercel.com");
@@ -206,5 +205,82 @@ describe("Vercel read API", () => {
         operationId: "createDeployment",
       }),
     ).rejects.toThrow("Unknown or blocked Vercel read operation");
+  });
+
+  it("requires a selected-project filter on every project-filterable listing", () => {
+    for (const operationId of ["listAliases", "getWebhooks", "listUserEvents"]) {
+      const operation = searchVercelOperations(operationId, 20).find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      expect(operation, operationId).toBeDefined();
+      expect(() =>
+        buildVercelReadUrl({ connection, operation: operation! }),
+      ).toThrow("Choose at least one selected Vercel project");
+    }
+  });
+
+  it("rejects a team query parameter for another team", () => {
+    const operation = searchVercelOperations("list aliases", 20).find(
+      ({ operationId }) => operationId === "listAliases",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectId: "prj-1", teamId: "attacker-team" },
+      }),
+    ).toThrow("team is not available");
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectId: "prj-1", slug: "attacker" },
+      }),
+    ).toThrow("Pass teamId instead of slug");
+    expect(
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { projectId: "prj-1", teamId: "team-1" },
+      }).searchParams.get("teamId"),
+    ).toBe("team-1");
+  });
+
+  it("returns only the installation's projects and team from listings", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        projects: [{ id: "prj-1", name: "web" }, { id: "prj-other", name: "private" }],
+      }))
+      .mockResolvedValueOnce(Response.json({
+        teams: [{ id: "team-1", name: "Acme" }, { id: "team-other", name: "Other" }],
+      })));
+
+    const projects = JSON.parse(
+      await executeVercelRead({ connection, operationId: "getProjects" }),
+    ) as { data: { projects: Array<{ id: string }> } };
+    const teams = JSON.parse(
+      await executeVercelRead({ connection, operationId: "getTeams" }),
+    ) as { data: { teams: Array<{ id: string }> } };
+
+    expect(projects.data.projects.map(({ id }) => id)).toEqual(["prj-1"]);
+    expect(teams.data.teams.map(({ id }) => id)).toEqual(["team-1"]);
+  });
+
+  it("stops the Vercel request when the caller cancels", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: "prj-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await executeVercelRead({
+      connection,
+      operationId: "getProject",
+      pathParameters: { idOrName: "prj-1" },
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    const signal = (fetchMock.mock.calls[0]![1] as RequestInit).signal!;
+    expect(signal.aborted).toBe(true);
   });
 });

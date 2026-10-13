@@ -1128,7 +1128,6 @@ describe("automation context broker", () => {
       const project = await call(3, "call_vercel_api", {
         operationId: "getProject",
         pathParameters: [{ name: "idOrName", value: "prj-1" }],
-        queryParameters: [{ name: "teamId", value: "other-team" }],
       });
       const projectBody = await project.text();
       expect(projectBody).toContain("prj-1");
@@ -1152,5 +1151,52 @@ describe("automation context broker", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("lists no Vercel tools for a connection without credentials", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const vercelClaim = claim("vercel", {});
+    const { app } = appFor({
+      ...vercelClaim,
+      account: { ...vercelClaim.account, encryptedCredentials: null },
+    } as unknown as ReturnType<typeof claim>);
+
+    const list = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(list.status).toBe(404);
+  });
+
+  it("passes the broker request's cancellation to Vercel calls", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { dependencies } = appFor(claim("vercel", {
+      accessToken: "vercel-installation-token",
+      configurationId: "icfg_1",
+      teamId: "team-1",
+      userId: null,
+    }));
+    const callApi = vi.fn().mockResolvedValue("{}");
+    const routes = new Hono().route(
+      "/api/automation-context-broker",
+      createAutomationContextBrokerRoutes({ ...dependencies, vercel: { callApi } }),
+    );
+
+    await routes.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: { operationId: "getProject" }, name: "call_vercel_api" },
+      }),
+    );
+
+    expect(callApi).toHaveBeenCalledWith(
+      expect.objectContaining({ accessToken: "vercel-installation-token" }),
+      expect.objectContaining({ operationId: "getProject" }),
+      expect.any(AbortSignal),
+    );
   });
 });

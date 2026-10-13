@@ -587,6 +587,8 @@ investigation sandbox receives two host-side tools: one searches a generated
 catalog of safe Vercel GET operations, and one executes a selected operation.
 The callback verifies the installation identity, team, and selected-project
 set without narrowing the integration's configured read permissions.
+Listings that can filter by project must name a shared project, and project
+and team listings return only the installation's projects and team.
 Regenerate the catalog from Vercel's published OpenAPI document after API
 updates with `pnpm vercel:generate-api`.
 
