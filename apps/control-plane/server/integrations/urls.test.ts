@@ -9,6 +9,7 @@ describe("integration URLs", () => {
   it("names this cell's own address in OAuth state, from the cell list when there is one", () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://sign-in.example");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://superlog.sh");
+    vi.stubEnv("RESPONDER_CELLS", "");
     expect(cellCallbackUrl("slack")).toBe("https://sign-in.example/api/integrations/slack/callback");
 
     vi.stubEnv(
