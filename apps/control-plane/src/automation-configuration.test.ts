@@ -57,8 +57,12 @@ describe("availableAutomationConfiguration", () => {
   });
 
   it("keeps only the GitHub trigger repositories its connection still offers", () => {
-    const withGitHub = { ...options, accounts: [...options.accounts, { id: "github", provider: "github", displayName: "acme" }] } as AutomationOptions;
-    const github: AutomationConfiguration["triggers"][number] = { eventTypes: ["merged"], integrationAccountId: "github", kind: "github", repositoryIds: ["repository", "removed-repository"] };
+    const withGitHub = {
+      ...options,
+      accounts: [...options.accounts, { id: "github", provider: "github", displayName: "acme" }, { id: "other-github", provider: "github", displayName: "other" }],
+      repositories: [...options.repositories, { id: "other-repository", integrationAccountId: "other-github", fullName: "other/app", defaultBranch: "main", private: true }],
+    } as AutomationOptions;
+    const github: AutomationConfiguration["triggers"][number] = { eventTypes: ["merged"], integrationAccountId: "github", kind: "github", repositoryIds: ["repository", "other-repository", "removed-repository"] };
     expect(availableAutomationConfiguration({ ...configuration, triggers: [github] }, withGitHub).triggers).toEqual([
       { ...github, repositoryIds: ["repository"] },
     ]);

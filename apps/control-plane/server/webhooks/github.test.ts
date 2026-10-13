@@ -100,6 +100,7 @@ describe("GitHub pull request webhooks", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -299,13 +300,12 @@ describe("GitHub pull request webhooks", () => {
     vi.mocked(markSuggestionPullRequestMerged).mockResolvedValue(null);
     vi.mocked(markPullRequestOriginMerged).mockResolvedValue(true);
     vi.mocked(startPullRequestAutomations).mockRejectedValue(new Error("Automation worker is unavailable"));
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const response = await post(pullRequestEvent());
 
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({ error: "Unable to start GitHub automations" });
     expect(markPullRequestOriginMerged).toHaveBeenCalled();
-    consoleError.mockRestore();
   });
 });

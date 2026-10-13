@@ -707,6 +707,20 @@ describe("automation GitHub read tools", () => {
     expect(deps.createPullRequest).not.toHaveBeenCalled();
   });
 
+  it("still reads the automation's repositories when the trigger repository cannot be loaded", async () => {
+    const { deps, fetch } = readDependencies();
+    deps.getTriggerRepository.mockRejectedValue(new Error("Trigger repository installation is invalid"));
+    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+
+    const result = await handle({
+      arguments: { path: "/repos/acme/app/pulls/7" },
+      name: "github_api",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(String(fetch.mock.calls[0]![0])).toBe("https://api.github.com/repos/acme/app/pulls/7");
+  });
+
   it("reads only the automation's repositories without a trigger repository", async () => {
     const { deps, fetch } = readDependencies();
     const { handle } = handler(deps);

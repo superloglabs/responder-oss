@@ -324,10 +324,12 @@ export function createAutomationToolHandler(input: {
       readableRepositories = Promise.all([
         selectedRepositories(),
         triggerRepositoryId
+          // The automation's own repositories stay readable when the
+          // trigger repository cannot be loaded.
           ? dependencies.getTriggerRepository({
               organizationId: input.organizationId,
               repositoryId: triggerRepositoryId,
-            })
+            }).catch(() => null)
           : null,
       ]).then(([selected, triggered]) =>
         triggered && !selected.some((repository) =>

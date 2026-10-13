@@ -304,13 +304,15 @@ subscription.
 - A draft counts as opened when it is marked ready for review. A pull request
   starts each automation at most once per event, even when GitHub delivers the
   event again or the pull request goes back to draft.
-- On a public repository, a pull request starts a run when opened only if
-  GitHub lists its author as the repository's owner, a member of its
-  organization, or a collaborator. A merged pull request starts a run for
-  any author, because someone with write access merged it.
+- On a public repository, a pull request starts a run only if GitHub lists
+  its author as the repository's owner, a member of its organization, or a
+  collaborator. This applies to merged pull requests too.
 - Pull requests the app opens do not start a run when opened, so an
   automation that opens pull requests cannot start itself. Their merges do
-  start runs.
+  start runs. Without `GITHUB_APP_SLUG`, opened pull requests do not start
+  runs, because the app's own cannot be told apart.
+- The agent is told to treat the pull request's title, body, diff, and
+  comments as untrusted data.
 - The run's trigger payload is the pull request as it was when the event
   arrived. The agent's `github_api` tool can read the pull request's
   repository even when the automation does not check it out. The run cannot

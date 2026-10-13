@@ -52,13 +52,21 @@ function dependencies(matches = [{ automationId: "automation-1", integrationAcco
   };
 }
 
+const appEnvironment = { GITHUB_APP_SLUG: "superlog-responder" };
+
 describe("GitHub pull request automations", () => {
+
   it("starts each matching automation when a pull request is opened", async () => {
-    const deps = dependencies();
+    const deps = dependencies([
+      { automationId: "automation-1", integrationAccountId, repositoryId },
+      { automationId: "automation-2", integrationAccountId, repositoryId },
+    ]);
 
-    const outcome = await startPullRequestAutomations(event(), deps, {});
+    const outcome = await startPullRequestAutomations(event(), deps, appEnvironment);
 
-    expect(outcome).toEqual({ matchedAutomations: 1, outcome: "matched" });
+    expect(outcome).toEqual({ matchedAutomations: 2, outcome: "matched" });
+    expect(deps.queueAutomationRun.mock.calls.map(([input]) => input.automationId))
+      .toEqual(["automation-1", "automation-2"]);
     expect(deps.findAutomations).toHaveBeenCalledWith({
       event: "opened",
       installationId: "789",
@@ -93,7 +101,7 @@ describe("GitHub pull request automations", () => {
   it("starts merged automations when a pull request is merged", async () => {
     const deps = dependencies();
 
-    await startPullRequestAutomations(event({ action: "closed", merged: true }), deps, {});
+    await startPullRequestAutomations(event({ action: "closed", merged: true }), deps, appEnvironment);
 
     expect(deps.findAutomations).toHaveBeenCalledWith(expect.objectContaining({ event: "merged" }));
     const trigger = deps.queueAutomationRun.mock.calls[0]![0].trigger;
@@ -106,12 +114,12 @@ describe("GitHub pull request automations", () => {
 
   it("treats a draft as opened when it is marked ready for review", async () => {
     const draft = dependencies();
-    await expect(startPullRequestAutomations(event({ draft: true }), draft, {}))
+    await expect(startPullRequestAutomations(event({ draft: true }), draft, appEnvironment))
       .resolves.toEqual({ outcome: "ignored" });
     expect(draft.findAutomations).not.toHaveBeenCalled();
 
     const ready = dependencies();
-    await startPullRequestAutomations(event({ action: "ready_for_review" }), ready, {});
+    await startPullRequestAutomations(event({ action: "ready_for_review" }), ready, appEnvironment);
     expect(ready.findAutomations).toHaveBeenCalledWith(expect.objectContaining({ event: "opened" }));
     expect(ready.queueAutomationRun.mock.calls[0]![0].trigger.externalEventId).toBe("789:555:42:opened");
   });
@@ -123,7 +131,7 @@ describe("GitHub pull request automations", () => {
       event({ action: "edited" }),
     ]) {
       const deps = dependencies();
-      await expect(startPullRequestAutomations(payload, deps, {})).resolves.toEqual({ outcome: "ignored" });
+      await expect(startPullRequestAutomations(payload, deps, appEnvironment)).resolves.toEqual({ outcome: "ignored" });
       expect(deps.findAutomations).not.toHaveBeenCalled();
     }
   });
@@ -134,7 +142,7 @@ describe("GitHub pull request automations", () => {
     const outcome = await startPullRequestAutomations(
       event({ login: "superlog-responder[bot]" }),
       deps,
-      { GITHUB_APP_SLUG: "superlog-responder" },
+      appEnvironment,
     );
 
     expect(outcome).toEqual({ outcome: "ignored" });
@@ -147,34 +155,42 @@ describe("GitHub pull request automations", () => {
     await startPullRequestAutomations(
       event({ action: "closed", login: "superlog-responder[bot]", merged: true }),
       deps,
-      { GITHUB_APP_SLUG: "superlog-responder" },
+      appEnvironment,
     );
 
     expect(deps.queueAutomationRun).toHaveBeenCalledTimes(1);
   });
 
-  it("ignores pull requests opened on a public repository by people without write access", async () => {
+  it("ignores pull requests on a public repository from authors who are not owners, members, or collaborators", async () => {
+    const merged = dependencies();
+    await expect(startPullRequestAutomations(
+      event({ action: "closed", authorAssociation: "CONTRIBUTOR", merged: true, private: false }),
+      merged,
+      appEnvironment,
+    )).resolves.toEqual({ outcome: "ignored" });
+    expect(merged.findAutomations).not.toHaveBeenCalled();
+
     const outsider = dependencies();
     await expect(startPullRequestAutomations(
       event({ authorAssociation: "CONTRIBUTOR", private: false }),
       outsider,
-      {},
+      appEnvironment,
     )).resolves.toEqual({ outcome: "ignored" });
     expect(outsider.findAutomations).not.toHaveBeenCalled();
 
     const collaborator = dependencies();
-    await startPullRequestAutomations(event({ authorAssociation: "COLLABORATOR", private: false }), collaborator, {});
+    await startPullRequestAutomations(event({ authorAssociation: "COLLABORATOR", private: false }), collaborator, appEnvironment);
     expect(collaborator.queueAutomationRun).toHaveBeenCalledTimes(1);
 
     const privateRepository = dependencies();
-    await startPullRequestAutomations(event({ authorAssociation: "CONTRIBUTOR", private: true }), privateRepository, {});
+    await startPullRequestAutomations(event({ authorAssociation: "CONTRIBUTOR", private: true }), privateRepository, appEnvironment);
     expect(privateRepository.queueAutomationRun).toHaveBeenCalledTimes(1);
   });
 
   it("ignores a malformed payload", async () => {
     const deps = dependencies();
 
-    await expect(startPullRequestAutomations({ action: "opened" }, deps, {}))
+    await expect(startPullRequestAutomations({ action: "opened" }, deps, appEnvironment))
       .resolves.toEqual({ outcome: "ignored" });
     expect(deps.findAutomations).not.toHaveBeenCalled();
   });
@@ -183,6 +199,28 @@ describe("GitHub pull request automations", () => {
     const deps = dependencies();
     deps.queueAutomationRun.mockRejectedValue(new Error("Automation worker is unavailable"));
 
-    await expect(startPullRequestAutomations(event(), deps, {})).rejects.toThrow("Automation worker is unavailable");
+    await expect(startPullRequestAutomations(event(), deps, appEnvironment)).rejects.toThrow("Automation worker is unavailable");
+  });
+
+  it("does not start runs for opened pull requests without the app's slug", async () => {
+    const deps = dependencies();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(startPullRequestAutomations(event(), deps, {})).resolves.toEqual({ outcome: "ignored" });
+    expect(deps.findAutomations).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("keeps the trigger body valid JSON when the pull request is large", async () => {
+    const deps = dependencies();
+    const payload = event();
+    payload.pull_request.body = `${"x".repeat(59_999)}😀${"y".repeat(10_000)}`;
+    payload.pull_request.labels = Array.from({ length: 100 }, (_, index) => ({ name: `${"label".repeat(9)}${index}` }));
+
+    await startPullRequestAutomations(payload, deps, appEnvironment);
+
+    const body = JSON.parse(deps.queueAutomationRun.mock.calls[0]![0].trigger.body) as { body: string };
+    expect(body.body).toHaveLength(59_999);
+    expect(body.body.endsWith("x")).toBe(true);
   });
 });

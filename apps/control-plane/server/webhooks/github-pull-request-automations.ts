@@ -35,8 +35,8 @@ export const pullRequestAutomationEventSchema = z.object({
 export type PullRequestAutomationEvent = z.infer<typeof pullRequestAutomationEventSchema>;
 type PullRequestTriggerEvent = "merged" | "opened";
 
-// People who can push to the repository. Anyone can open a pull request on a
-// public repository, and their text must not steer the agent.
+// Anyone can open a pull request on a public repository, and their text must
+// not steer the agent. Merging does not make it trusted.
 const trustedAssociations = new Set(["COLLABORATOR", "MEMBER", "OWNER"]);
 
 // A draft counts as opened when it is marked ready for review.
@@ -48,20 +48,28 @@ function triggerEvent(event: PullRequestAutomationEvent): PullRequestTriggerEven
   return null;
 }
 
+// Fields are cut before serializing so the body stays JSON. A cut never
+// splits a surrogate pair.
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const end = /[\uD800-\uDBFF]/u.test(value[maxLength - 1] ?? "") ? maxLength - 1 : maxLength;
+  return value.slice(0, end);
+}
+
 export function pullRequestBody(event: PullRequestAutomationEvent): string {
   const pullRequest = event.pull_request;
   return JSON.stringify(
     {
       repository: event.repository.full_name,
       number: pullRequest.number,
-      title: pullRequest.title,
+      title: truncate(pullRequest.title, 500),
       url: pullRequest.html_url,
       author: pullRequest.user?.login ?? null,
       authorAssociation: pullRequest.author_association,
       base: pullRequest.base.ref,
       head: pullRequest.head.ref,
       headSha: pullRequest.head.sha,
-      labels: pullRequest.labels?.map((label) => label.name) ?? [],
+      labels: pullRequest.labels?.slice(0, 50).map((label) => truncate(label.name, 100)) ?? [],
       additions: pullRequest.additions ?? null,
       deletions: pullRequest.deletions ?? null,
       changedFiles: pullRequest.changed_files ?? null,
@@ -71,11 +79,11 @@ export function pullRequestBody(event: PullRequestAutomationEvent): string {
             mergeCommitSha: pullRequest.merge_commit_sha ?? null,
           }
         : {}),
-      body: pullRequest.body ?? "",
+      body: truncate(pullRequest.body ?? "", 60_000),
     },
     null,
     2,
-  ).slice(0, 100_000);
+  );
 }
 
 export type PullRequestAutomationOutcome =
@@ -105,18 +113,19 @@ export async function startPullRequestAutomations(
   const kind = triggerEvent(event);
   if (!kind) return { outcome: "ignored" };
   const pullRequest = event.pull_request;
+  if (!event.repository.private && !trustedAssociations.has(pullRequest.author_association)) {
+    return { outcome: "ignored" };
+  }
   if (kind === "opened") {
     // Pull requests Responder opens do not start runs, so an automation that
-    // opens pull requests cannot start itself.
-    if (
-      environment.GITHUB_APP_SLUG &&
-      pullRequest.user?.login === `${environment.GITHUB_APP_SLUG}[bot]`
-    ) {
+    // opens pull requests cannot start itself. Without the app's slug they
+    // cannot be told apart, so no opened pull request starts a run.
+    const appSlug = environment.GITHUB_APP_SLUG;
+    if (!appSlug) {
+      console.error(JSON.stringify({ event: "github_pull_request_trigger_skipped", reason: "missing_app_slug" }));
       return { outcome: "ignored" };
     }
-    if (!event.repository.private && !trustedAssociations.has(pullRequest.author_association)) {
-      return { outcome: "ignored" };
-    }
+    if (pullRequest.user?.login === `${appSlug}[bot]`) return { outcome: "ignored" };
   }
 
   const installationId = String(event.installation.id);
