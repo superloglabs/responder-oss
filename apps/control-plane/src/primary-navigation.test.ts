@@ -26,6 +26,15 @@ describe("primaryNavigation", () => {
     ]);
   });
 
+  it("lists logs with the telemetry capability", () => {
+    expect(
+      primaryNavigation({ automations: true, simplified: false, telemetry: true }).map((item) => item.label),
+    ).toEqual(["Agents", "Automations", "PRs", "Skills", "Issues", "Scans", "Suggestions", "Logs", "Settings"]);
+    expect(
+      primaryNavigation({ automations: true, simplified: true, telemetry: true }).map((item) => item.label),
+    ).toEqual(["Automations", "PRs", "Skills", "Logs", "Integrations", "Tag mode", "Settings"]);
+  });
+
   it("keeps simplified navigation usable without automations", () => {
     expect(
       primaryNavigation({ automations: false, simplified: true }).map((item) => item.label),

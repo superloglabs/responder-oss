@@ -3,6 +3,7 @@ export type NavigationSection =
   | "automations"
   | "integrations"
   | "issues"
+  | "logs"
   | "pull-requests"
   | "scans"
   | "settings"
@@ -21,6 +22,7 @@ export interface NavigationItem {
 export function primaryNavigation(options: {
   automations: boolean;
   simplified: boolean;
+  telemetry?: boolean;
 }): NavigationItem[] {
   // Skills extend automations and pull requests come from their runs, so
   // both appear with them.
@@ -31,9 +33,13 @@ export function primaryNavigation(options: {
         { label: "Skills", section: "skills", to: "/skills" },
       ]
     : [];
+  const telemetry: NavigationItem[] = options.telemetry
+    ? [{ label: "Logs", section: "logs", to: "/logs" }]
+    : [];
   if (options.simplified) {
     return [
       ...automations,
+      ...telemetry,
       { label: "Integrations", section: "integrations", to: "/settings" },
       { label: "Tag mode", section: "tag-mode", to: "/settings/tag-mode" },
       { label: "Settings", section: "settings", to: "/settings/workspace" },
@@ -45,6 +51,7 @@ export function primaryNavigation(options: {
     { label: "Issues", section: "issues", to: "/issues" },
     { label: "Scans", section: "scans", to: "/scans" },
     { label: "Suggestions", section: "suggestions", to: "/suggestions" },
+    ...telemetry,
     { label: "Settings", section: "settings", to: "/settings" },
   ];
 }

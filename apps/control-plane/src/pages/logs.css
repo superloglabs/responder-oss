@@ -1,0 +1,41 @@
+.logsPage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.logsPage__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.logsPage__toolbar .dsField { gap: 0; }
+.logsPage__toolbar .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.logsPage__select { width: 180px; }
+.logsPage__toolbar .dsSelect__trigger { height: 32px; padding: 0 10px; font-size: 12px; }
+.logsPage__toolbar .dsSegmentedControl { flex-shrink: 0; margin-left: auto; padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
+.logsPage__toolbar .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+
+.logsPage__search { display: flex; flex: 1 1 220px; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--ds-border-default); border-radius: var(--ds-radius-small); background: var(--ds-surface-base); color: var(--ds-text-muted); }
+.logsPage__search:focus-within { border-color: var(--ds-border-strong); }
+.logsPage__search input::-webkit-search-cancel-button { display: none; }
+.logsPage__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ds-text-primary); font: inherit; font-size: 12px; }
+
+.logsPage__status { margin: 0; padding: 24px 8px; color: var(--ds-text-muted); font-size: 12px; }
+
+.logsPage__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.logsPage__body--detail { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
+.logsPage__table { min-width: 0; }
+.logsPage__time, .logsPage__service { color: var(--ds-text-muted); font-size: 12px; white-space: nowrap; }
+.logsPage__service { display: block; overflow: hidden; text-overflow: ellipsis; }
+.logsPage__message { display: block; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+.logDetail { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 96px); overflow: auto; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; }
+.logDetail__header { display: flex; align-items: center; gap: 8px; color: var(--ds-text-muted); font-size: 12px; }
+.logDetail__header button { margin-left: auto; }
+.logDetail__body { margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px; background: var(--ds-surface-hover); color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-word; }
+.logDetail__exception { margin: 0; color: var(--ds-text-primary); font-size: 12px; }
+.logDetail__section { display: flex; flex-direction: column; gap: 8px; }
+.logDetail__section h3 { margin: 0; color: var(--ds-text-primary); font-size: 12px; font-weight: 600; }
+.logDetail__attributes { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.logDetail__attributes > div { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px; font-size: 12px; }
+.logDetail__attributes dt { overflow: hidden; color: var(--ds-text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.logDetail__attributes dd { margin: 0; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .logsPage__body--detail { grid-template-columns: minmax(0, 1fr); }
+  .logDetail { position: static; max-height: none; }
+  .logsPage__toolbar .dsSegmentedControl { margin-left: 0; }
+}

@@ -29,6 +29,7 @@ import { billingRoutes } from "./billing/routes.js";
 import { consentBasePath, handleConsentRequest } from "./consent.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
+import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
 import { getActiveTenant } from "./tenant.js";
 import { githubWebhookRoutes } from "./webhooks/github.js";
@@ -472,6 +473,7 @@ export const app = instrumentedApp
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)
   .route("/api/suggestions", suggestionRoutes)
+  .route("/api/telemetry", createTelemetryRoutes())
   .route("/api/automation-model-broker", automationModelBrokerRoutes)
   .route(
     "/api/automation-context-broker",

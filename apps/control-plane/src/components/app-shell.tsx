@@ -20,6 +20,7 @@ import {
   ListIcon,
   ListBulletsIcon,
   BookOpenTextIcon,
+  MagnifyingGlassIcon,
   PlugsConnectedIcon,
   ScanIcon,
   RobotIcon,
@@ -36,6 +37,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   automations: RobotIcon,
   integrations: PlugsConnectedIcon,
   issues: ListBulletsIcon,
+  logs: MagnifyingGlassIcon,
   "pull-requests": GitPullRequestIcon,
   scans: ScanIcon,
   settings: GearIcon,
@@ -76,6 +78,7 @@ export function AppShell({ active, children, density = "default", guest, redesig
   const navigation = primaryNavigation({
     automations: capabilities.includes("automations") || Boolean(guest),
     simplified: simplifiedNavigation,
+    telemetry: capabilities.includes("telemetry"),
   });
   const activeSection = activeNavigationSection(active, simplifiedNavigation);
   const menuRef = useRef<HTMLDivElement>(null);
