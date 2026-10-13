@@ -13,6 +13,7 @@ import {
 import { BillingBanner } from "./billing-banner";
 import {
   CaretDownIcon,
+  ChartLineIcon,
   CheckIcon,
   FlagIcon,
   GearIcon,
@@ -37,6 +38,7 @@ import "./workspace.css";
 const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   agents: LightningIcon,
   automations: RobotIcon,
+  dashboards: ChartLineIcon,
   integrations: PlugsConnectedIcon,
   issues: ListBulletsIcon,
   logs: MagnifyingGlassIcon,

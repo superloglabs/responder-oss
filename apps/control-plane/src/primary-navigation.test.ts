@@ -35,6 +35,15 @@ describe("primaryNavigation", () => {
     ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Integrations", "Tag mode", "Settings"]);
   });
 
+  it("lists dashboards only with telemetry", () => {
+    expect(
+      primaryNavigation({ automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),
+    ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Dashboards", "Integrations", "Tag mode", "Settings"]);
+    expect(
+      primaryNavigation({ automations: true, dashboards: true, simplified: true }).map((item) => item.label),
+    ).not.toContain("Dashboards");
+  });
+
   it("keeps simplified navigation usable without automations", () => {
     expect(
       primaryNavigation({ automations: false, simplified: true }).map((item) => item.label),

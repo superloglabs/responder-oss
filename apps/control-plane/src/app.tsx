@@ -13,6 +13,8 @@ import { BillingPage } from "./pages/billing";
 import { OAuthAuthorizePage } from "./pages/oauth-authorize";
 import { ResetPasswordPage } from "./pages/reset-password";
 import { OnboardingPage } from "./pages/onboarding";
+import { DashboardPage } from "./pages/dashboard";
+import { DashboardsPage } from "./pages/dashboards";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
@@ -150,6 +152,8 @@ export function App() {
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<LogsPage />} path="/logs" />
         <Route element={<TracesPage />} path="/traces" />
+        <Route element={<DashboardsPage />} path="/dashboards" />
+        <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />
         <Route element={<TraceDetailPage />} path="/traces/:traceId" />
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />
