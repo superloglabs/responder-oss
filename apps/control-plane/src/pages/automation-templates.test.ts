@@ -71,6 +71,7 @@ describe("automation templates", () => {
     expect(applied.triggers).toEqual([{ frequency: "hourly", hour: 9, kind: "schedule", timezone: "Europe/London", weekday: 1 }]);
     expect(applied.contextAccountIds).toEqual(["sentry-1", "datadog-1", "slack-1"]);
     expect(findAutomationTemplate("review-architecture")!.triggers[0]).toMatchObject({ frequency: "weekly", kind: "schedule" });
+    expect(findAutomationTemplate("update-docs")!.triggers[0]).toMatchObject({ frequency: "weekly", hour: 9, kind: "schedule", weekday: 1 });
   });
 
   it("leaves missing connections for the user to connect", () => {

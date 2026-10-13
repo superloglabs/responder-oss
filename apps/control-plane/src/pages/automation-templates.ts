@@ -249,6 +249,22 @@ export const automationTemplates: AutomationTemplate[] = [
     ].join("\n"),
     triggers: [weeklyAtNine],
   },
+  {
+    category: "scans",
+    connectors: ["github"],
+    description: "Every Monday, check the changes merged in the past week against your docs, and open a pull request that updates anything out of date.",
+    id: "update-docs",
+    name: "Keep docs up to date",
+    prompt: [
+      "This is a weekly documentation review.",
+      "Read the changes merged in the past seven days in the selected repositories.",
+      "Find documentation that no longer matches the code: READMEs, docs folders, API references, configuration and environment variable lists, setup steps, code examples, and comments that describe behavior.",
+      "Also find new features, options, and commands that have no documentation yet.",
+      "Open one pull request that updates the docs to match the code. Follow the structure, tone, and formatting already used in the docs, and link the commit behind each change in the pull request description.",
+      "Do not change code or rewrite docs that are still correct. If everything is up to date, do not open a pull request.",
+    ].join("\n"),
+    triggers: [weeklyAtNine],
+  },
 ];
 
 // Shown first, in this order, before the member picks a category.

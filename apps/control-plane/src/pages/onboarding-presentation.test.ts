@@ -89,9 +89,10 @@ describe("recommendedTemplates", () => {
   });
 
   it("recommends what needs the fewest connections when only GitHub is connected", () => {
-    const recommendations = recommendedTemplates(["github"]);
-    expect(recommendations).toHaveLength(3);
-    expect(recommendations.every(({ missing }) => missing.length === 1)).toBe(true);
+    const [first, ...rest] = recommendedTemplates(["github"]);
+    expect(first).toMatchObject({ missing: [], template: { id: "update-docs" } });
+    expect(rest).toHaveLength(2);
+    expect(rest.every(({ missing }) => missing.length === 1)).toBe(true);
   });
 
   it("names the providers a recommendation still needs", () => {
