@@ -27,7 +27,7 @@ import { providerDisplayName } from "../components/provider-glyphs";
 import { SettingsHeading } from "../components/settings-heading";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
-import { integrationActionUrl } from "./settings-presentation";
+import { githubNeedsReconnect, integrationActionUrl } from "./settings-presentation";
 
 type IntegrationState =
   | "available"
@@ -311,10 +311,13 @@ export function SettingsPage() {
   );
 }
 
-function displayedSentryHealth(
+function displayedHealth(
   integration: IntegrationSummary,
   health: SentryHealth | null,
 ): SentryHealth | null {
+  if (integration.id === "github") {
+    return githubNeedsReconnect(integration) ? "needs_reconnect" : null;
+  }
   if (integration.id !== "sentry") return null;
   if (integration.accounts.some((account) => account.status === "error")) {
     return "needs_reconnect";
@@ -330,7 +333,7 @@ function integrationDetail(
   integration: IntegrationSummary,
   sentryHealth: SentryHealth | null,
 ): string {
-  const health = displayedSentryHealth(integration, sentryHealth);
+  const health = displayedHealth(integration, sentryHealth);
   if (health === "checking") return "Checking the connection…";
   if (health === "working") {
     const projectLabel = integration.resourceCount === 1 ? "project" : "projects";
@@ -384,7 +387,7 @@ function DefaultIntegrationCard({
   sentryHealth: SentryHealth | null;
 }) {
   const actionUrl = integrationActionUrl(integration);
-  const health = displayedSentryHealth(integration, sentryHealth);
+  const health = displayedHealth(integration, sentryHealth);
   const canConnect = Boolean(actionUrl);
   const [isConnecting, setIsConnecting] = useState(false);
   const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);

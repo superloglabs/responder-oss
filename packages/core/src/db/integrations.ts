@@ -1,15 +1,21 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, count, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDatabase } from "./client.js";
 import {
+  agents,
+  agentVersionRepositories,
   automations,
   automationVersionIntegrationAccounts,
+  automationVersionRepositories,
+  automationVersions,
   integrationAccounts,
   integrationConnectionStates,
   integrationProvider,
   integrationResourceKind,
   integrationResources,
   repositories,
+  scanConfigurations,
   slackDirectMessageWelcomes,
 } from "./schema.js";
 
@@ -340,6 +346,317 @@ export async function deleteIntegrationAccount(input: {
       .where(eq(automationVersionIntegrationAccounts.integrationAccountId, account.id));
     await tx.delete(integrationAccounts).where(eq(integrationAccounts.id, account.id));
     return { status: "removed" };
+  });
+}
+
+// GitHub allows one installation of an app per GitHub account, and
+// reinstalling the app creates a new installation. The connection follows the
+// GitHub account, so a reinstall takes over the earlier connection and keeps
+// its repository records and the automations that use them. Other connections
+// to the same GitHub account belong to installations that no longer exist and
+// are returned so the caller can remove them.
+export async function upsertGitHubInstallationAccount(input: {
+  organizationId: string;
+  installationId: number;
+  displayName: string;
+  metadata: { accountId: number; accountType: string; repositorySelection: string };
+}): Promise<{ id: string; replacedAccountIds: string[] }> {
+  const installationId = String(input.installationId);
+  return getDatabase().transaction(async (tx) => {
+    const candidates = await tx
+      .select({
+        id: integrationAccounts.id,
+        externalAccountId: integrationAccounts.externalAccountId,
+        updatedAt: integrationAccounts.updatedAt,
+      })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.organizationId, input.organizationId),
+          eq(integrationAccounts.provider, "github"),
+          or(
+            eq(integrationAccounts.externalAccountId, installationId),
+            sql`${integrationAccounts.metadata} ->> 'accountId' = ${String(input.metadata.accountId)}`,
+          ),
+        ),
+      )
+      .for("update");
+    const kept =
+      candidates.find((candidate) => candidate.externalAccountId === installationId) ??
+      [...candidates].sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0];
+    const values = {
+      externalAccountId: installationId,
+      displayName: input.displayName,
+      status: "connected",
+      metadata: input.metadata,
+      updatedAt: new Date(),
+    };
+
+    if (kept) {
+      await tx.update(integrationAccounts).set(values).where(eq(integrationAccounts.id, kept.id));
+    }
+    const id = kept?.id ?? (
+      await tx
+        .insert(integrationAccounts)
+        .values({ ...values, organizationId: input.organizationId, provider: "github" })
+        .onConflictDoUpdate({
+          target: [
+            integrationAccounts.organizationId,
+            integrationAccounts.provider,
+            integrationAccounts.externalAccountId,
+          ],
+          set: values,
+        })
+        .returning({ id: integrationAccounts.id })
+    )[0]!.id;
+
+    return {
+      id,
+      replacedAccountIds: candidates
+        .filter((candidate) => candidate.id !== id)
+        .map((candidate) => candidate.id),
+    };
+  });
+}
+
+export function listGitHubAccountsForInstallation(installationId: number) {
+  return getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      organizationId: integrationAccounts.organizationId,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.provider, "github"),
+        eq(integrationAccounts.externalAccountId, String(installationId)),
+      ),
+    );
+}
+
+type IntegrationTransaction = Parameters<
+  Parameters<ReturnType<typeof getDatabase>["transaction"]>[0]
+>[0];
+
+// Marks a GitHub connection failed and hides its repositories, for an
+// installation that was removed or suspended on GitHub.
+async function disconnectGitHubAccount(
+  tx: IntegrationTransaction,
+  integrationAccountId: string,
+): Promise<void> {
+  await tx
+    .update(integrationAccounts)
+    .set({ status: "error", updatedAt: new Date() })
+    .where(eq(integrationAccounts.id, integrationAccountId));
+  await tx
+    .update(repositories)
+    .set({ available: false, updatedAt: new Date() })
+    .where(eq(repositories.integrationAccountId, integrationAccountId));
+}
+
+export async function disconnectGitHubInstallationAccount(
+  integrationAccountId: string,
+): Promise<void> {
+  await getDatabase().transaction((tx) => disconnectGitHubAccount(tx, integrationAccountId));
+}
+
+// A connection that no active automation or agent uses is deleted. One still
+// in use stays, disconnected, so reinstalling the app restores it for the
+// automations that use it.
+async function removeGitHubAccount(
+  tx: IntegrationTransaction,
+  integrationAccountId: string,
+): Promise<"removed" | "disconnected" | "not_found"> {
+  const [account] = await tx
+    .select({ id: integrationAccounts.id })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.id, integrationAccountId),
+        eq(integrationAccounts.provider, "github"),
+      ),
+    )
+    .for("update");
+  if (!account) return "not_found";
+
+  const accountRepositories = tx
+    .select({ id: repositories.id })
+    .from(repositories)
+    .where(eq(repositories.integrationAccountId, account.id));
+  const usedByAccount = tx
+    .select({ id: automationVersionIntegrationAccounts.automationVersionId })
+    .from(automationVersionIntegrationAccounts)
+    .innerJoin(
+      automations,
+      eq(automations.activeVersionId, automationVersionIntegrationAccounts.automationVersionId),
+    )
+    .where(eq(automationVersionIntegrationAccounts.integrationAccountId, account.id))
+    .limit(1);
+  const usedByAutomationRepository = tx
+    .select({ id: automationVersionRepositories.automationVersionId })
+    .from(automationVersionRepositories)
+    .innerJoin(
+      automations,
+      eq(automations.activeVersionId, automationVersionRepositories.automationVersionId),
+    )
+    .where(inArray(automationVersionRepositories.repositoryId, accountRepositories))
+    .limit(1);
+  const usedByAgentRepository = tx
+    .select({ id: agentVersionRepositories.agentConfigVersionId })
+    .from(agentVersionRepositories)
+    .innerJoin(agents, eq(agents.activeVersionId, agentVersionRepositories.agentConfigVersionId))
+    .where(inArray(agentVersionRepositories.repositoryId, accountRepositories))
+    .limit(1);
+  const inUse =
+    (await usedByAccount).length > 0 ||
+    (await usedByAutomationRepository).length > 0 ||
+    (await usedByAgentRepository).length > 0;
+
+  if (inUse) {
+    await disconnectGitHubAccount(tx, account.id);
+    return "disconnected";
+  }
+
+  // Only superseded automation versions still point at the account or its
+  // repositories. They no longer run, so their references go with it.
+  await tx
+    .delete(automationVersionRepositories)
+    .where(inArray(automationVersionRepositories.repositoryId, accountRepositories));
+  await tx
+    .delete(automationVersionIntegrationAccounts)
+    .where(eq(automationVersionIntegrationAccounts.integrationAccountId, account.id));
+  await tx.delete(integrationAccounts).where(eq(integrationAccounts.id, account.id));
+  return "removed";
+}
+
+// Handles a GitHub App installation that was removed on GitHub.
+export async function removeGitHubInstallationAccount(
+  integrationAccountId: string,
+): Promise<"removed" | "disconnected" | "not_found"> {
+  return getDatabase().transaction((tx) => removeGitHubAccount(tx, integrationAccountId));
+}
+
+// Moves what used an earlier connection to a GitHub account onto the
+// connection that now holds the account's installation, then removes the
+// earlier one. Repositories are matched by their GitHub ID. A repository the
+// new installation cannot access keeps its references, so the earlier
+// connection stays, disconnected, while something active still uses it.
+export async function replaceGitHubInstallationAccount(input: {
+  replacedAccountId: string;
+  accountId: string;
+}): Promise<"removed" | "disconnected" | "not_found"> {
+  return getDatabase().transaction(async (tx) => {
+    const target = alias(repositories, "target");
+    const pairs = await tx
+      .select({ from: repositories.id, to: target.id })
+      .from(repositories)
+      .innerJoin(
+        target,
+        and(
+          eq(target.integrationAccountId, input.accountId),
+          eq(target.externalId, repositories.externalId),
+        ),
+      )
+      .where(eq(repositories.integrationAccountId, input.replacedAccountId));
+    const repositoryMap = new Map(pairs.map((pair) => [pair.from, pair.to]));
+    const movedRepositoryIds = [...repositoryMap.keys()];
+    const mapRepositoryIds = (ids: string[]) => [
+      ...new Set(ids.map((id) => repositoryMap.get(id) ?? id)),
+    ];
+
+    if (movedRepositoryIds.length > 0) {
+      const automationLinks = await tx
+        .select()
+        .from(automationVersionRepositories)
+        .where(inArray(automationVersionRepositories.repositoryId, movedRepositoryIds));
+      if (automationLinks.length > 0) {
+        await tx
+          .insert(automationVersionRepositories)
+          .values(automationLinks.map((link) => ({
+            ...link,
+            repositoryId: repositoryMap.get(link.repositoryId)!,
+          })))
+          .onConflictDoNothing();
+        await tx
+          .delete(automationVersionRepositories)
+          .where(inArray(automationVersionRepositories.repositoryId, movedRepositoryIds));
+      }
+
+      const agentLinks = await tx
+        .select()
+        .from(agentVersionRepositories)
+        .where(inArray(agentVersionRepositories.repositoryId, movedRepositoryIds));
+      if (agentLinks.length > 0) {
+        await tx
+          .insert(agentVersionRepositories)
+          .values(agentLinks.map((link) => ({
+            ...link,
+            repositoryId: repositoryMap.get(link.repositoryId)!,
+          })))
+          .onConflictDoNothing();
+        await tx
+          .delete(agentVersionRepositories)
+          .where(inArray(agentVersionRepositories.repositoryId, movedRepositoryIds));
+      }
+    }
+
+    const accountLinks = await tx
+      .select()
+      .from(automationVersionIntegrationAccounts)
+      .where(eq(automationVersionIntegrationAccounts.integrationAccountId, input.replacedAccountId));
+    if (accountLinks.length > 0) {
+      await tx
+        .insert(automationVersionIntegrationAccounts)
+        .values(accountLinks.map((link) => ({ ...link, integrationAccountId: input.accountId })))
+        .onConflictDoNothing();
+      await tx
+        .delete(automationVersionIntegrationAccounts)
+        .where(eq(automationVersionIntegrationAccounts.integrationAccountId, input.replacedAccountId));
+    }
+
+    // GitHub pull request triggers name their connection and repositories.
+    const triggerVersions = await tx
+      .select({ id: automationVersions.id, triggers: automationVersions.triggers })
+      .from(automationVersions)
+      .where(
+        sql`${automationVersions.triggers} @> ${JSON.stringify([
+          { kind: "github", integrationAccountId: input.replacedAccountId },
+        ])}::jsonb`,
+      );
+    for (const version of triggerVersions) {
+      await tx
+        .update(automationVersions)
+        .set({
+          triggers: version.triggers.map((trigger) =>
+            trigger.kind === "github" && trigger.integrationAccountId === input.replacedAccountId
+              ? {
+                  ...trigger,
+                  integrationAccountId: input.accountId,
+                  repositoryIds: mapRepositoryIds(trigger.repositoryIds),
+                }
+              : trigger
+          ),
+        })
+        .where(eq(automationVersions.id, version.id));
+    }
+
+    const scans = movedRepositoryIds.length === 0 ? [] : await tx
+      .select({
+        organizationId: scanConfigurations.organizationId,
+        repositoryIds: scanConfigurations.repositoryIds,
+      })
+      .from(scanConfigurations)
+      .where(
+        sql`${scanConfigurations.repositoryIds} ?| string_to_array(${movedRepositoryIds.join(",")}, ',')`,
+      );
+    for (const scan of scans) {
+      await tx
+        .update(scanConfigurations)
+        .set({ repositoryIds: mapRepositoryIds(scan.repositoryIds) })
+        .where(eq(scanConfigurations.organizationId, scan.organizationId));
+    }
+
+    return removeGitHubAccount(tx, input.replacedAccountId);
   });
 }
 

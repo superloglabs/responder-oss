@@ -17,6 +17,7 @@ import {
   getRecoverableSentryIntegrationAccount,
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
+  replaceGitHubInstallationAccount,
   replaceIntegrationResources,
   replaceIntegrationResourcesIfCredentialsMatch,
   replaceRepositories,
@@ -25,6 +26,7 @@ import {
   updateIntegrationAccountCredentials,
   updateIntegrationAccountSetup,
   updateIntegrationConnectionStateMetadata,
+  upsertGitHubInstallationAccount,
   upsertIntegrationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
@@ -4161,19 +4163,22 @@ export const integrationRoutes = new Hono()
         repositoryCount: number;
       }> = [];
       for (const installation of installations) {
-        const accountId = await upsertIntegrationAccount({
-          organizationId: connectionState.organizationId,
-          provider: "github",
-          externalAccountId: String(installation.id),
-          displayName: installation.account.login,
-          metadata: {
-            accountId: installation.account.id,
-            accountType: installation.account.type,
-            repositorySelection: installation.repository_selection,
-          },
-        });
         const repositories = await listGitHubRepositories(installation.id);
+        const { id: accountId, replacedAccountIds } =
+          await upsertGitHubInstallationAccount({
+            organizationId: connectionState.organizationId,
+            installationId: installation.id,
+            displayName: installation.account.login,
+            metadata: {
+              accountId: installation.account.id,
+              accountType: installation.account.type,
+              repositorySelection: installation.repository_selection,
+            },
+          });
         await replaceRepositories(accountId, repositories);
+        for (const replacedAccountId of replacedAccountIds) {
+          await replaceGitHubInstallationAccount({ accountId, replacedAccountId });
+        }
         connectedAccounts.push({
           accountId,
           repositoryCount: repositories.length,

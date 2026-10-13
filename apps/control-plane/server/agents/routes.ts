@@ -23,6 +23,7 @@ import {
   getSlackChannelConnection,
   listConnectedIntegrationAccounts,
   markSlackChannelJoined,
+  removeGitHubInstallationAccount,
   replaceRepositories,
 } from "../../../../packages/core/src/db/integrations.js";
 import {
@@ -32,6 +33,7 @@ import {
   listInvestigationTraceEvents,
 } from "../../../../packages/core/src/db/investigations.js";
 import type { InvestigationTraceEvent } from "../../../../packages/core/src/db/schema.js";
+import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
 import {
   joinSlackChannel,
   SlackChannelJoinError,
@@ -66,6 +68,9 @@ function tenantVisibleTraceEvents(
   return events.filter((event) => !tenantHiddenTraceEventTypes.has(event.type));
 }
 
+// Reloads repositories for every GitHub connection, removing connections
+// whose installation is gone, then pauses agents that lost a repository. One
+// failing connection does not stop the others.
 export async function refreshGitHubRepositories(
   organizationId: string,
 ): Promise<void> {
@@ -74,14 +79,24 @@ export async function refreshGitHubRepositories(
     "github",
   );
 
-  await Promise.all(
+  const results = await Promise.allSettled(
     accounts.map(async (account) => {
-      const repositories = await listGitHubRepositories(
-        githubInstallationIdSchema.parse(account.externalAccountId),
-      );
+      let repositories;
+      try {
+        repositories = await listGitHubRepositories(
+          githubInstallationIdSchema.parse(account.externalAccountId),
+        );
+      } catch (error) {
+        if (!(error instanceof GitHubInstallationNotFoundError)) throw error;
+        await removeGitHubInstallationAccount(account.id);
+        return;
+      }
       await replaceRepositories(account.id, repositories);
     }),
   );
+  await disableAgentsWithUnavailableRepositories(organizationId);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 export async function ensureSlackChannelMemberships(
@@ -249,7 +264,6 @@ export const agentRoutes = new Hono()
 
     try {
       await refreshGitHubRepositories(tenant.organizationId);
-      await disableAgentsWithUnavailableRepositories(tenant.organizationId);
       return context.json(await listAgentOptions(tenant.organizationId));
     } catch (error) {
       console.error("Unable to refresh GitHub repositories", error);

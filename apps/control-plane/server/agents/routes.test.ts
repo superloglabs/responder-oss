@@ -11,6 +11,7 @@ import {
 import {
   listConnectedIntegrationAccounts,
   listConnectedIntegrationAccountCredentials,
+  removeGitHubInstallationAccount,
   replaceRepositories,
   replaceIntegrationResourcesIfCredentialsMatch,
 } from "../../../../packages/core/src/db/integrations.js";
@@ -28,6 +29,7 @@ import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
 import { listSlackChannels } from "../integrations/slack.js";
 import { listGitHubRepositories } from "../integrations/github.js";
+import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
 import {
   createDaytonaWorkspaceSecret,
   deleteDaytonaWorkspaceSecret,
@@ -53,6 +55,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   listConnectedIntegrationAccounts: vi.fn(),
   listConnectedIntegrationAccountCredentials: vi.fn(),
   markSlackChannelJoined: vi.fn(),
+  removeGitHubInstallationAccount: vi.fn(),
   replaceRepositories: vi.fn(),
   replaceIntegrationResourcesIfCredentialsMatch: vi.fn(),
 }));
@@ -717,6 +720,27 @@ describe("GitHub repository option refresh", () => {
     );
   });
 
+  it("removes a connection whose GitHub App was uninstalled and refreshes the rest", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { id: "github-account-1", externalAccountId: "123" },
+      { id: "github-account-2", externalAccountId: "456" },
+    ]);
+    vi.mocked(listGitHubRepositories)
+      .mockRejectedValueOnce(new GitHubInstallationNotFoundError(123))
+      .mockResolvedValueOnce([]);
+    vi.mocked(listAgentOptions).mockResolvedValue(options);
+
+    const response = await app.request("/api/agents/options/refresh/github", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(removeGitHubInstallationAccount).toHaveBeenCalledWith("github-account-1");
+    expect(replaceRepositories).toHaveBeenCalledTimes(1);
+    expect(replaceRepositories).toHaveBeenCalledWith("github-account-2", []);
+  });
+
   it("returns a retryable error without replacing repositories when GitHub fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
@@ -738,6 +762,28 @@ describe("GitHub repository option refresh", () => {
     });
     expect(replaceRepositories).not.toHaveBeenCalled();
     expect(listAgentOptions).not.toHaveBeenCalled();
+  });
+
+  it("pauses agents for a removed installation even when another refresh fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { id: "github-account-1", externalAccountId: "123" },
+      { id: "github-account-2", externalAccountId: "456" },
+    ]);
+    vi.mocked(listGitHubRepositories)
+      .mockRejectedValueOnce(new GitHubInstallationNotFoundError(123))
+      .mockRejectedValueOnce(new Error("GitHub unavailable"));
+
+    const response = await app.request("/api/agents/options/refresh/github", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(502);
+    expect(removeGitHubInstallationAccount).toHaveBeenCalledWith("github-account-1");
+    expect(disableAgentsWithUnavailableRepositories).toHaveBeenCalledWith(
+      tenant.organizationId,
+    );
   });
 });
 
