@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   completeInvestigationRun,
   deliverPersistedInvestigationAfterFailure,
+  recoverSubmittedInvestigationReport,
 } from "./investigation-completion.js";
 
 describe("investigation completion", () => {
@@ -127,6 +128,20 @@ describe("investigation completion", () => {
     );
 
     expect(deliver).toHaveBeenCalledWith("investigation-id", "job-id");
+  });
+
+  it("recovers a submitted report when the agent returns no final text", async () => {
+    await expect(
+      recoverSubmittedInvestigationReport(
+        "  Submitted report  ",
+      ),
+    ).resolves.toBe("Submitted report");
+  });
+
+  it("rejects empty agent output when no report was submitted", async () => {
+    await expect(
+      recoverSubmittedInvestigationReport(null),
+    ).rejects.toThrow("OpenAI agent returned an empty report");
   });
 
   it("delivers the persisted report when a completed job is recovered", async () => {
