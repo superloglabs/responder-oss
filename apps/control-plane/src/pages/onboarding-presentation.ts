@@ -66,6 +66,7 @@ const onboardingTemplateOrder = [
   "review-observability",
   "review-performance",
   "review-testing",
+  "update-docs",
   "review-architecture",
 ];
 
