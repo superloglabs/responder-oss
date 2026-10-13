@@ -2,6 +2,15 @@ export function controlPlaneBaseUrl(): string {
   return process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
 }
 
+export type IntegrationCallbackProvider = Parameters<typeof integrationCallbackUrl>[0];
+
+// The callback on this cell's own address. OAuth state carries it, so a
+// callback that arrives at the shared public address can be sent to the cell
+// that started the flow.
+export function cellCallbackUrl(provider: IntegrationCallbackProvider): string {
+  return `${controlPlaneBaseUrl()}/api/integrations/${provider}/callback`;
+}
+
 export function integrationCallbackUrl(
   provider:
     | "axiom"

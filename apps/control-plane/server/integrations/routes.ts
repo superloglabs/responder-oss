@@ -167,6 +167,7 @@ import {
   axiomWebhookUrl,
   devrevWebhookUrl,
   dash0WebhookUrl,
+  cellCallbackUrl,
   integrationCallbackUrl,
   settingsRedirect,
 } from "./urls.js";
@@ -824,7 +825,7 @@ export async function startIntegrationConnection(input: {
         provider: "gcp",
         codeVerifier: pkce.codeVerifier,
         returnTo: input.returnTo,
-        routingUrl: integrationCallbackUrl("gcp"),
+        routingUrl: cellCallbackUrl("gcp"),
       });
       return Response.redirect(
         gcpAuthorizeUrl({
@@ -857,7 +858,7 @@ export async function startIntegrationConnection(input: {
         provider: "linear",
         codeVerifier: pkce.codeVerifier,
         returnTo: input.returnTo,
-        routingUrl: integrationCallbackUrl("linear"),
+        routingUrl: cellCallbackUrl("linear"),
       });
       return Response.redirect(
         linearAuthorizeUrl({
@@ -910,7 +911,7 @@ export async function startIntegrationConnection(input: {
         provider: "axiom",
         codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
         returnTo: input.returnTo,
-        routingUrl: integrationCallbackUrl("axiom"),
+        routingUrl: cellCallbackUrl("axiom"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -960,7 +961,7 @@ export async function startIntegrationConnection(input: {
         provider: "posthog",
         codeVerifier: JSON.stringify({ externalAccountId }),
         returnTo: input.returnTo,
-        routingUrl: integrationCallbackUrl("posthog"),
+        routingUrl: cellCallbackUrl("posthog"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -992,7 +993,7 @@ export async function startIntegrationConnection(input: {
         userId: tenant.user.id,
         provider: "cloudflare",
         returnTo: input.returnTo,
-        routingUrl: integrationCallbackUrl("cloudflare"),
+        routingUrl: cellCallbackUrl("cloudflare"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -1021,13 +1022,7 @@ export async function startIntegrationConnection(input: {
     userId: tenant.user.id,
     provider: parsedProvider.data,
     returnTo: input.returnTo,
-    routingUrl:
-      parsedProvider.data === "github" ||
-      parsedProvider.data === "discord" ||
-      parsedProvider.data === "sentry" ||
-      parsedProvider.data === "vercel"
-        ? integrationCallbackUrl(parsedProvider.data)
-        : undefined,
+    routingUrl: cellCallbackUrl(parsedProvider.data),
   });
 
   if (parsedProvider.data === "slack") {
@@ -1848,7 +1843,7 @@ export const integrationRoutes = new Hono()
         provider: "dash0",
         codeVerifier: JSON.stringify({ accountId, externalAccountId }),
         returnTo: parsed.data.returnTo,
-        routingUrl: integrationCallbackUrl("dash0"),
+        routingUrl: cellCallbackUrl("dash0"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -2170,7 +2165,7 @@ export const integrationRoutes = new Hono()
         provider: "grafana",
         codeVerifier: JSON.stringify({ accountId, preserveExistingAccount }),
         returnTo: parsed.data.returnTo,
-        routingUrl: integrationCallbackUrl("grafana"),
+        routingUrl: cellCallbackUrl("grafana"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -2781,7 +2776,7 @@ export const integrationRoutes = new Hono()
         userId: tenant.user.id,
         provider: "supabase",
         returnTo: parsed.data.returnTo,
-        routingUrl: integrationCallbackUrl("supabase"),
+        routingUrl: cellCallbackUrl("supabase"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -3097,6 +3092,7 @@ export const integrationRoutes = new Hono()
         provider: "custom_mcp",
         codeVerifier: JSON.stringify({ accountId }),
         returnTo: parsed.data.returnTo,
+        routingUrl: cellCallbackUrl("custom_mcp"),
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
@@ -3374,7 +3370,7 @@ export const integrationRoutes = new Hono()
             serviceId: parsed.data.serviceId,
           },
           returnTo: parsed.data.returnTo,
-          routingUrl: redirectUri,
+          routingUrl: cellCallbackUrl("clickstack"),
         });
         return context.json({
           redirectUrl: clickStackCloudAuthorizeUrl({
@@ -4127,7 +4123,7 @@ export const integrationRoutes = new Hono()
           organizationId: connectionState.organizationId,
           provider: "github",
           returnTo: connectionState.returnTo,
-          routingUrl: integrationCallbackUrl("github"),
+          routingUrl: cellCallbackUrl("github"),
           userId: connectionState.userId,
         });
         return context.redirect(githubAuthorizeUrl(authorizationState));

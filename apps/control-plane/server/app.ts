@@ -4,6 +4,12 @@ import * as Sentry from "@sentry/hono/node";
 import { createHash } from "node:crypto";
 import { verifyBearerToken } from "../../../packages/core/src/auth/internal.js";
 import { cellDirectory } from "../../../packages/core/src/cells.js";
+import {
+  hasWebhookTenant,
+  webhookTenantSchema,
+} from "../../../packages/core/src/db/webhook-tenants.js";
+import { cellCallbackRouter } from "./cells/callback-router.js";
+import { cellWebhookRouter } from "./cells/webhook-router.js";
 import { getAuthUserSupportIdentity } from "../../../packages/core/src/db/superusers.js";
 import { investigationRequestSchema } from "../../../packages/core/src/investigations/input.js";
 import { agentRoutes } from "./agents/routes.js";
@@ -281,6 +287,9 @@ instrumentedApp.use("*", (context, next) =>
       ? skillBodyLimit(context, next)
       : apiBodyLimit(context, next),
 );
+// After the body limits, before the webhook and OAuth callback handlers.
+instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
+instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
 if (Sentry.isInitialized()) {
   instrumentedApp.use(Sentry.sentry(instrumentedApp));
   instrumentedApp.use(async (_context, next) => {
@@ -296,6 +305,22 @@ export const app = instrumentedApp
       status: "ok",
     }),
   )
+  // Another cell asks whether this cell holds a webhook's tenant.
+  .post("/api/internal/cells/webhook-tenant", async (context) => {
+    if (
+      !verifyBearerToken(
+        context.req.header("authorization") ?? null,
+        process.env.RESPONDER_CELL_TOKEN?.trim() || undefined,
+      )
+    ) {
+      return context.json({ error: "Unauthorized" }, 401);
+    }
+    const parsed = webhookTenantSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) return context.json({ error: "Invalid tenant" }, 400);
+    return context.json({ held: await hasWebhookTenant(parsed.data) });
+  })
   // Public: the sign-in page offers the other regional cells, if any.
   .get("/api/cells", (context) =>
     context.json(
