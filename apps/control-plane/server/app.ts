@@ -3,6 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import * as Sentry from "@sentry/hono/node";
 import { createHash } from "node:crypto";
 import { verifyBearerToken } from "../../../packages/core/src/auth/internal.js";
+import { cellDirectory } from "../../../packages/core/src/cells.js";
 import { getAuthUserSupportIdentity } from "../../../packages/core/src/db/superusers.js";
 import { investigationRequestSchema } from "../../../packages/core/src/investigations/input.js";
 import { agentRoutes } from "./agents/routes.js";
@@ -294,6 +295,12 @@ export const app = instrumentedApp
       service: "responder-control-plane",
       status: "ok",
     }),
+  )
+  // Public: the sign-in page offers the other regional cells, if any.
+  .get("/api/cells", (context) =>
+    context.json(
+      cellDirectory() ?? { cells: [], cookieDomain: null, current: null },
+    ),
   )
   .get("/api/legacy-account-redirect", async (context) => {
     const session = await getAuth().api

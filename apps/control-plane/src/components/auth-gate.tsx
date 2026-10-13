@@ -22,6 +22,8 @@ import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import { OnboardingFrame } from "./onboarding-frame";
 import { onboardingSteps } from "../pages/onboarding-presentation";
+import { cellSwitchUrl, rememberCell, useCellDirectory } from "../cells";
+import { SegmentedControl } from "../design-system";
 
 interface AuthGateProps {
   children: ReactNode;
@@ -43,11 +45,16 @@ export function AuthFrame({ children }: AuthGateProps) {
 
 export function SignIn({
   allowLegacyHandoff = true,
+  allowRegionChoice = true,
   isInvitation = false,
 }: {
   allowLegacyHandoff?: boolean;
+  // An invitation or an OAuth authorization belongs to the cell that issued
+  // it, so those pages do not offer another region.
+  allowRegionChoice?: boolean;
   isInvitation?: boolean;
 }) {
+  const cells = useCellDirectory();
   // Visitors who follow a sign-up link or open an automation template are
   // usually new, so they start on account creation.
   const [settingUpTemplate] = useState(() => automationSetupReturnPath(window.location) !== null);
@@ -193,6 +200,17 @@ export function SignIn({
     }
   }
 
+  function chooseCell(id: string) {
+    const cell = cells?.cells.find((candidate) => candidate.id === id);
+    if (!cells || !cell || id === cells.current) return;
+    rememberCell(cell.id, cells.cookieDomain);
+    window.location.assign(cellSwitchUrl(cell, new URL(window.location.href)));
+  }
+  const regionChoice =
+    allowRegionChoice && !isInvitation && cells?.current && cells.cells.length > 1
+      ? { current: cells.current, options: cells.cells }
+      : null;
+
   if (isRequestingReset) {
     return (
       <PasswordResetRequest
@@ -229,6 +247,21 @@ export function SignIn({
         </div>
         <p className={isInvitation || settingUpTemplate ? undefined : "authDescription"}>{description}</p>
       </div>
+      {regionChoice ? (
+        <div className="authRegion">
+          <span className="authFieldLabel">Data region</span>
+          <SegmentedControl
+            aria-label="Data region"
+            onChange={chooseCell}
+            options={regionChoice.options.map((cell) => ({
+              disabled: isSubmitting || socialProvider !== null,
+              label: cell.label,
+              value: cell.id,
+            }))}
+            value={regionChoice.current}
+          />
+        </div>
+      ) : null}
       <div className="socialAuth">
         <button
           className="socialAuth__button"
@@ -785,6 +818,7 @@ function WorkspaceActivation({
 
 export function AuthGate({ children }: AuthGateProps) {
   const session = authClient.useSession();
+  const cells = useCellDirectory();
   const invitationMatch = window.location.pathname.match(
     /^\/invite\/([0-9a-f-]+)$/i,
   );
@@ -794,6 +828,12 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const signedInUserId = session.data?.user.id;
   const activeOrganizationId = session.data?.session.activeOrganizationId;
+  // A signed-in visitor's next /app visit on any cell's host comes back here.
+  useEffect(() => {
+    if (signedInUserId && cells?.current) {
+      rememberCell(cells.current, cells.cookieDomain);
+    }
+  }, [cells, signedInUserId]);
   useEffect(() => {
     if (!signedInUserId) return;
     const url = new URL(window.location.href);
