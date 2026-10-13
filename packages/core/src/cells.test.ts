@@ -90,4 +90,27 @@ describe("cell directory", () => {
       }),
     ).toThrow(/identifier/);
   });
+
+  it("compares the cookie domain without regard to case", () => {
+    expect(
+      cellDirectory({
+        RESPONDER_CELL_COOKIE_DOMAIN: ".SUPERLOG.SH",
+        RESPONDER_CELL_ID: "us",
+        RESPONDER_CELLS: cells,
+      })?.cookieDomain,
+    ).toBe(".superlog.sh");
+  });
+
+  it("rejects a top-level domain as the cookie domain", () => {
+    expect(() =>
+      cellDirectory({
+        RESPONDER_CELL_COOKIE_DOMAIN: ".com",
+        RESPONDER_CELL_ID: "a",
+        RESPONDER_CELLS: JSON.stringify([
+          { id: "a", label: "A", url: "https://a.com" },
+          { id: "b", label: "B", url: "https://b.com" },
+        ]),
+      }),
+    ).toThrow(/registrable domain/);
+  });
 });

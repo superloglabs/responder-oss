@@ -54,7 +54,7 @@ export function SignIn({
   allowRegionChoice?: boolean;
   isInvitation?: boolean;
 }) {
-  const cells = useCellDirectory();
+  const cells = useCellDirectory(allowRegionChoice && !isInvitation);
   // Visitors who follow a sign-up link or open an automation template are
   // usually new, so they start on account creation.
   const [settingUpTemplate] = useState(() => automationSetupReturnPath(window.location) !== null);

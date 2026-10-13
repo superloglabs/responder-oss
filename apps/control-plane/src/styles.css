@@ -1960,26 +1960,28 @@ button:disabled {
   margin-bottom: 16px;
 }
 
+/* The authentication page is always light; these use its palette. */
 .authRegion .dsSegmentedControl {
   width: 100%;
   padding: 2px;
   border: 0;
   border-radius: 8px;
-  background: #f0f0f0;
+  background: var(--border);
   box-shadow: 0 0 0 .5px #00000029;
 }
 
 .authRegion .dsSegmentedControl__option {
   height: 28px;
+  min-height: 28px;
   flex: 1 1 0;
   border-radius: 6px;
-  color: #646464;
+  color: var(--muted);
   font-size: 13px;
 }
 
 .authRegion .dsSegmentedControl__option[aria-checked="true"] {
-  color: #202020;
-  background: #fff;
+  color: var(--foreground);
+  background: var(--surface);
   box-shadow: inset 0 0 0 .5px #ffffffcc, 0 1px 2px -.5px #0000001f, 0 0 0 .5px #00000029;
 }
 

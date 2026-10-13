@@ -46,19 +46,32 @@ export function cellSwitchUrl(cell: Cell, location: URL): string {
   return target.toString();
 }
 
-export function useCellDirectory(): CellDirectory | null {
+// One request per page load, shared by every caller. A failed request is
+// retried by the next caller.
+let directoryRequest: Promise<CellDirectory | null> | undefined;
+
+function requestCellDirectory(): Promise<CellDirectory | null> {
+  directoryRequest ??= fetch("/api/cells")
+    .then((response) => (response.ok ? (response.json() as Promise<CellDirectory>) : null))
+    .catch(() => null)
+    .then((directory) => {
+      if (!directory) directoryRequest = undefined;
+      return directory;
+    });
+  return directoryRequest;
+}
+
+export function useCellDirectory(enabled = true): CellDirectory | null {
   const [directory, setDirectory] = useState<CellDirectory | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
-    void fetch("/api/cells")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((value: CellDirectory | null) => {
-        if (!cancelled && value) setDirectory(value);
-      })
-      .catch(() => undefined);
+    void requestCellDirectory().then((value) => {
+      if (!cancelled && value) setDirectory(value);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
   return directory;
 }

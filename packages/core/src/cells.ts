@@ -92,8 +92,16 @@ export function cellDirectory(
     );
   }
 
-  const cookieDomain = environment.RESPONDER_CELL_COOKIE_DOMAIN?.trim() || null;
+  const cookieDomain =
+    environment.RESPONDER_CELL_COOKIE_DOMAIN?.trim().toLowerCase() || null;
   if (cookieDomain) {
+    // Browsers drop cookies scoped to a top-level domain. Deeper public
+    // suffixes such as co.uk are not detected here.
+    if (cookieDomain.replace(/^\./u, "").split(".").length < 2) {
+      throw new Error(
+        `RESPONDER_CELL_COOKIE_DOMAIN ${cookieDomain} must be a registrable domain`,
+      );
+    }
     for (const cell of cells) {
       if (!coversHost(cookieDomain, new URL(cell.url).hostname)) {
         throw new Error(
