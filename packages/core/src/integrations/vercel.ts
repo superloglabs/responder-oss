@@ -172,7 +172,7 @@ function isProjectScopeParameter(
   name: string,
 ): boolean {
   return (
-    /^(?:eligibleMembersForProjectId|excludeProject|project|projectId|projectIds|projectIdOrName)$/iu.test(name) ||
+    /^(?:eligibleMembersForProjectId|project|projectId|projectIds|projectIdOrName)$/iu.test(name) ||
     operation.path.includes(`/projects/{${name}}`) ||
     (operation.tags.includes("projects") && name === "idOrName")
   );
@@ -250,6 +250,10 @@ export function buildVercelReadUrl(input: {
     if (!pathNames.has(name)) throw new Error(`Unknown Vercel path parameter: ${name}`);
   }
   for (const name of Object.keys(queryParameters)) {
+    // A negative project filter names a project without limiting results to it.
+    if (name === "excludeProject") {
+      throw new Error(`Vercel query parameter is not available: ${name}`);
+    }
     if (name === "slug") {
       throw new Error("Pass teamId instead of slug; the connection's team is applied automatically");
     }

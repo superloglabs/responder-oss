@@ -313,7 +313,6 @@ describe("Vercel read API", () => {
       ["getRollingRelease", { idOrName: "prj-other" }, {}],
       ["getProjectMembers", { idOrName: "prj-other" }, {}],
       ["getTeamMembers", {}, { eligibleMembersForProjectId: "prj-other" }],
-      ["getTeamMembers", {}, { excludeProject: "prj-other" }],
     ] as const) {
       const operation = searchVercelOperations(operationId, 20).find(
         (candidate) => candidate.operationId === operationId,
@@ -328,5 +327,19 @@ describe("Vercel read API", () => {
         }),
       ).toThrow("not available to this connection");
     }
+  });
+
+  it("rejects a negative project filter", () => {
+    const operation = searchVercelOperations("getTeamMembers", 20).find(
+      ({ operationId }) => operationId === "getTeamMembers",
+    );
+
+    expect(() =>
+      buildVercelReadUrl({
+        connection,
+        operation: operation!,
+        queryParameters: { excludeProject: "prj-1" },
+      }),
+    ).toThrow("Vercel query parameter is not available: excludeProject");
   });
 });
