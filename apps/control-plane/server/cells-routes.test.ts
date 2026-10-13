@@ -42,3 +42,30 @@ describe("cell directory route", () => {
     });
   });
 });
+
+describe("cell OAuth callback routing", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("sends a callback started on another cell back to that cell", async () => {
+    vi.stubEnv(
+      "RESPONDER_CELLS",
+      JSON.stringify([
+        { id: "eu", label: "Europe", url: "https://superlog.sh" },
+        { id: "us", label: "United States", url: "https://us.superlog.sh" },
+      ]),
+    );
+    vi.stubEnv("RESPONDER_CELL_ID", "eu");
+    const state = `responder-v1.${Buffer.from("https://us.superlog.sh/api/integrations/slack/callback").toString("base64url")}.nonce`;
+
+    const response = await app.request(
+      `/api/integrations/slack/callback?code=abc&state=${state}`,
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      `https://us.superlog.sh/api/integrations/slack/callback?code=abc&state=${state}`,
+    );
+  });
+});

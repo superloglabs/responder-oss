@@ -1,5 +1,21 @@
+import { cellDirectory } from "../../../../packages/core/src/cells.js";
+
 export function controlPlaneBaseUrl(): string {
   return process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+}
+
+export type IntegrationCallbackProvider = Parameters<typeof integrationCallbackUrl>[0];
+
+// The callback on this cell's own address: its RESPONDER_CELLS entry in a
+// multi-cell deployment, otherwise BETTER_AUTH_URL. OAuth state carries it, so
+// a callback that arrives at the shared public address can be sent to the cell
+// that started the flow.
+export function cellCallbackUrl(provider: IntegrationCallbackProvider): string {
+  const directory = cellDirectory();
+  const origin =
+    directory?.cells.find((cell) => cell.id === directory.current)?.url ??
+    controlPlaneBaseUrl();
+  return `${origin}/api/integrations/${provider}/callback`;
 }
 
 export function integrationCallbackUrl(

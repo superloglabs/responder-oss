@@ -2346,6 +2346,7 @@ describe("integration callback routing", () => {
         accountId: "30000000-0000-4000-8000-000000000000",
       }),
       returnTo: "/agents/new",
+      routingUrl: "https://responder.example/api/integrations/custom_mcp/callback",
     });
     expect(updateIntegrationAccountCredentials).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3801,6 +3802,7 @@ describe("integration callback routing", () => {
 
   it("starts ClickStack Cloud OAuth with PKCE and the managed URL", async () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    vi.stubEnv("BETTER_AUTH_URL", "https://cell.responder.example");
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(createIntegrationConnectionState).mockResolvedValue(
       "connection-state",
@@ -3841,8 +3843,10 @@ describe("integration callback routing", () => {
           serviceId: "60000000-0000-4000-8000-000000000000",
         },
         provider: "clickstack",
+        // The state names this cell's own callback; providers redirect to the
+        // public one.
         routingUrl:
-          "https://responder.example/api/integrations/clickstack/callback",
+          "https://cell.responder.example/api/integrations/clickstack/callback",
       }),
     );
   });
