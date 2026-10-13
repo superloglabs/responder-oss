@@ -292,7 +292,9 @@ describe("Vercel read API", () => {
       "listAccessGroupProjects",
       "getMicrofrontendsInGroup",
       "getObservabilityConfigurationProjects",
+      "getConfigurations",
       "getDomainProjectDomains",
+      "listNetworks",
       "listTeamFlags",
       "listTeamFlagsV2",
       "listTeamFlagSettings",
@@ -303,6 +305,28 @@ describe("Vercel read API", () => {
       await expect(
         executeVercelRead({ connection, operationId }),
       ).rejects.toThrow("Unknown or blocked Vercel read operation");
+    }
+  });
+
+  it("checks every project path and project query parameter against the installation", () => {
+    for (const [operationId, pathParameters, queryParameters] of [
+      ["getRollingRelease", { idOrName: "prj-other" }, {}],
+      ["getProjectMembers", { idOrName: "prj-other" }, {}],
+      ["getTeamMembers", {}, { eligibleMembersForProjectId: "prj-other" }],
+      ["getTeamMembers", {}, { excludeProject: "prj-other" }],
+    ] as const) {
+      const operation = searchVercelOperations(operationId, 20).find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      expect(operation, operationId).toBeDefined();
+      expect(() =>
+        buildVercelReadUrl({
+          connection,
+          operation: operation!,
+          pathParameters: { ...pathParameters },
+          queryParameters: { ...queryParameters },
+        }),
+      ).toThrow("not available to this connection");
     }
   });
 });

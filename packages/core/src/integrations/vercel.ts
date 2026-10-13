@@ -51,13 +51,15 @@ type ReadOperation = {
   parameters: OperationParameter[];
 };
 
-// These list projects or project settings across the whole team and cannot
-// be narrowed to the installation's projects.
+// These list projects, project settings, or integration configurations
+// across the whole team and cannot be narrowed to the installation's projects.
 const crossProjectListings = new Set([
+  "getConfigurations",
   "getDomainProjectDomains",
   "getMicrofrontendsInGroup",
   "getObservabilityConfigurationProjects",
   "listAccessGroupProjects",
+  "listNetworks",
   "listTeamFlagSettings",
   "listTeamFlags",
   "listTeamFlagsV2",
@@ -170,7 +172,8 @@ function isProjectScopeParameter(
   name: string,
 ): boolean {
   return (
-    /^(?:project|projectId|projectIds|projectIdOrName)$/iu.test(name) ||
+    /^(?:eligibleMembersForProjectId|excludeProject|project|projectId|projectIds|projectIdOrName)$/iu.test(name) ||
+    operation.path.includes(`/projects/{${name}}`) ||
     (operation.tags.includes("projects") && name === "idOrName")
   );
 }
