@@ -11,8 +11,10 @@ import {
   type TelemetryClient as ClickHouseClient,
 } from "../../../../packages/core/src/telemetry/client.js";
 import {
+  getTraceDetail,
   listServices,
   queryLogs,
+  queryTracesAggregated,
   type TimeRange,
 } from "../../../../packages/core/src/telemetry/query.js";
 import { getActiveTenant } from "../tenant.js";
@@ -25,13 +27,30 @@ export type TelemetryRouteDependencies = {
   findProject: (organizationId: string, projectId: string) => Promise<TelemetryProject | null>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
   listProjects: (organizationId: string) => Promise<TelemetryProject[]>;
-  // Services that sent logs in the window.
-  listServices: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
+  // Services that sent the signal in the window.
+  listServices: (
+    client: ClickHouseClient,
+    projectId: string,
+    range: TimeRange,
+    signal: TelemetrySignal,
+  ) => Promise<unknown>;
   now: () => Date;
   queryLogs: (
     client: ClickHouseClient,
     projectId: string,
     params: Parameters<typeof queryLogs>[2],
+  ) => Promise<unknown>;
+  // A trace's spans and logs.
+  queryTrace: (
+    client: ClickHouseClient,
+    projectId: string,
+    traceId: string,
+  ) => Promise<{ logs: unknown[]; spans: unknown[] }>;
+  // Traces that started in the window, newest first.
+  queryTraces: (
+    client: ClickHouseClient,
+    projectId: string,
+    params: Parameters<typeof queryTracesAggregated>[2],
   ) => Promise<unknown>;
   tenant: (
     headers: Headers,
@@ -46,9 +65,14 @@ const defaultDependencies: TelemetryRouteDependencies = {
   findProject: findTelemetryProject,
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
   listProjects: listTelemetryProjects,
-  listServices: (client, projectId, range) => listServices(client, projectId, range, "logs"),
+  listServices,
   now: () => new Date(),
   queryLogs,
+  queryTrace: async (client, projectId, traceId) => {
+    const trace = await getTraceDetail(client, projectId, traceId);
+    return { logs: trace.logs as unknown[], spans: trace.spans as unknown[] };
+  },
+  queryTraces: queryTracesAggregated,
   tenant: getActiveTenant,
 };
 
@@ -59,6 +83,24 @@ const windowSchema = z.object({
   projectId: z.uuid(),
   range: z.enum(Object.keys(rangeMinutes) as [TelemetryRange, ...TelemetryRange[]]).default("1h"),
 });
+
+const signals = ["logs", "traces"] as const;
+export type TelemetrySignal = (typeof signals)[number];
+
+const servicesSchema = windowSchema.extend({
+  signal: z.enum(signals).default("logs"),
+});
+
+const tracesSchema = windowSchema.extend({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  // Shortest total duration, in milliseconds, up to one hour.
+  minDurationMs: z.coerce.number().min(0).max(3_600_000).optional(),
+  service: z.string().trim().max(200).optional(),
+  status: z.enum(["error"]).optional(),
+});
+
+const traceSchema = z.object({ projectId: z.uuid() });
+const traceIdPattern = /^[0-9a-f]{32}$/u;
 
 const logsSchema = windowSchema.extend({
   limit: z.coerce.number().int().min(1).max(500).default(100),
@@ -117,7 +159,7 @@ export function createTelemetryRoutes(
     .get("/services", async (context) => {
       const granted = await access(context.req.raw.headers);
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
-      const query = windowSchema.safeParse(context.req.query());
+      const query = servicesSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid service query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
@@ -127,7 +169,40 @@ export function createTelemetryRoutes(
           granted.client,
           query.data.projectId,
           windowFor(query.data.range, dependencies.now()),
+          query.data.signal,
         ),
       });
+    })
+    .get("/traces", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = tracesSchema.safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid trace query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      const traces = await dependencies.queryTraces(granted.client, query.data.projectId, {
+        limit: query.data.limit,
+        range: windowFor(query.data.range, dependencies.now()),
+        ...(query.data.minDurationMs ? { minDurationMs: query.data.minDurationMs } : {}),
+        ...(query.data.service ? { service: query.data.service } : {}),
+        ...(query.data.status === "error" ? { statusCode: "STATUS_CODE_ERROR" } : {}),
+      });
+      return context.json({ traces });
+    })
+    .get("/traces/:traceId", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = traceSchema.safeParse(context.req.query());
+      const traceId = context.req.param("traceId").toLowerCase();
+      if (!query.success || !traceIdPattern.test(traceId)) {
+        return context.json({ error: "Invalid trace" }, 400);
+      }
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      const trace = await dependencies.queryTrace(granted.client, query.data.projectId, traceId);
+      if (trace.spans.length === 0) return context.json({ error: "Trace not found" }, 404);
+      return context.json(trace);
     });
 }

@@ -9,7 +9,8 @@ export type NavigationSection =
   | "settings"
   | "skills"
   | "suggestions"
-  | "tag-mode";
+  | "tag-mode"
+  | "traces";
 
 export interface NavigationItem {
   label: string;
@@ -34,7 +35,10 @@ export function primaryNavigation(options: {
       ]
     : [];
   const telemetry: NavigationItem[] = options.telemetry
-    ? [{ label: "Logs", section: "logs", to: "/logs" }]
+    ? [
+        { label: "Logs", section: "logs", to: "/logs" },
+        { label: "Traces", section: "traces", to: "/traces" },
+      ]
     : [];
   if (options.simplified) {
     return [
