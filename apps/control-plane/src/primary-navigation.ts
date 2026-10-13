@@ -1,6 +1,7 @@
 export type NavigationSection =
   | "agents"
   | "automations"
+  | "dashboards"
   | "integrations"
   | "issues"
   | "logs"
@@ -22,6 +23,8 @@ export interface NavigationItem {
 // automations depend on. The other product areas stay reachable by URL.
 export function primaryNavigation(options: {
   automations: boolean;
+  // Shown only with telemetry.
+  dashboards?: boolean;
   simplified: boolean;
   telemetry?: boolean;
 }): NavigationItem[] {
@@ -38,6 +41,7 @@ export function primaryNavigation(options: {
     ? [
         { label: "Logs", section: "logs", to: "/logs" },
         { label: "Traces", section: "traces", to: "/traces" },
+        ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
       ]
     : [];
   if (options.simplified) {
@@ -79,6 +83,7 @@ export function homePath(capabilities: readonly string[]): string {
 export function navigationOptions(capabilities: readonly string[]) {
   return {
     automations: capabilities.includes("automations"),
+    dashboards: capabilities.includes("dashboards"),
     simplified: capabilities.includes("simplified_navigation"),
     telemetry: capabilities.includes("telemetry"),
   };

@@ -36,6 +36,23 @@ describe("dashboard widgets", () => {
     expect(dashboardWidgetLayoutSchema.safeParse({ h: 4, w: 6, x: 6, y: 0 }).success).toBe(true);
   });
 
+  it("needs a metric name for a metric chart", () => {
+    expect(dashboardWidgetCreateSchema.safeParse({ config: {}, title: "Latency", type: "timeseries_metric" }).success).toBe(
+      false,
+    );
+    expect(
+      dashboardWidgetCreateSchema.safeParse({ config: { metricName: " " }, title: "Latency", type: "timeseries_metric" })
+        .success,
+    ).toBe(false);
+    expect(
+      dashboardWidgetCreateSchema.safeParse({
+        config: { metricName: "http.server.duration" },
+        title: "Latency",
+        type: "timeseries_metric",
+      }).success,
+    ).toBe(true);
+  });
+
   it("sizes new widgets by type and places them last", () => {
     expect(defaultWidgetLayout("timeseries_count")).toEqual({ h: 4, w: 6, x: 0, y: 100_000 });
     expect(defaultWidgetLayout("log_table").w).toBe(12);

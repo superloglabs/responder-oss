@@ -1,0 +1,87 @@
+.dashboardPage { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dashboardPage__titleRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; }
+.dashboardPage__titleRow h1 { margin: 0; color: var(--ds-text-primary); font-size: 15px; font-weight: 600; line-height: 23px; overflow-wrap: anywhere; }
+.dashboardPage__titleRow .dsSegmentedControl { padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
+.dashboardPage__titleRow .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+.dashboardPage__rename { flex: 0 1 360px; }
+.dashboardPage__rename .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.dashboardPage__meta { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
+.dashboardPage__grid { min-width: 0; }
+.dashboardPage__stack { display: flex; flex-direction: column; gap: 12px; }
+
+.dashboardVariables { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.dashboardVariables__field { width: 200px; }
+
+/* Grid placeholder and resize handle in the design's colors. */
+.dashboardPage .react-grid-item.react-grid-placeholder { border-radius: 12px; background: var(--ds-info); opacity: .15; }
+.dashboardPage .react-grid-item > .react-resizable-handle::after { border-color: var(--ds-text-muted); }
+.dashboardPage .react-grid-item.react-draggable-dragging { z-index: 3; }
+
+.dashboardWidget { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; }
+.dashboardWidget__header { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 0 14px; cursor: grab; }
+.dashboardPage__stack .dashboardWidget__header { cursor: default; }
+.react-draggable-dragging .dashboardWidget__header { cursor: grabbing; }
+.dashboardWidget__handle { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ds-text-primary); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dashboardWidget__actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--ds-duration-fast) var(--ds-ease-standard); }
+.dashboardWidget:hover .dashboardWidget__actions, .dashboardWidget:focus-within .dashboardWidget__actions { opacity: 1; }
+@media (hover: none) { .dashboardWidget__actions { opacity: 1; } }
+.dashboardWidget__body { flex: 1; min-height: 0; padding: 8px 14px 12px; overflow: auto; cursor: default; }
+.dashboardWidget__status { margin: 0; padding: 12px 0; color: var(--ds-text-muted); font-size: 12px; }
+
+.dashboardWidget__table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.dashboardWidget__table th { position: sticky; top: -8px; padding: 4px 8px 6px 0; overflow: hidden; background: var(--ds-surface-base); color: var(--ds-text-muted); font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+/* Proportional columns, so the message or root span keeps room in a narrow widget. */
+.dashboardWidget__table th:first-child { width: 22%; }
+.dashboardWidget__table th:nth-child(2) { width: 16%; }
+.dashboardWidget__table td { padding: 5px 8px 5px 0; overflow: hidden; border-top: 1px solid var(--ds-border-subtle); color: var(--ds-text-primary); text-overflow: ellipsis; white-space: nowrap; }
+.dashboardWidget__table a { color: inherit; text-decoration: none; }
+.dashboardWidget__table a:hover { text-decoration: underline; }
+.dashboardWidget__muted { color: var(--ds-text-muted) !important; }
+.dashboardWidget__mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dashboardWidget__table .dashboardWidget__number { width: 15%; text-align: right; font-variant-numeric: tabular-nums; }
+.dashboardWidget__error { color: var(--ds-danger) !important; }
+
+.dashboardWidget__markdown { color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }
+.dashboardWidget__markdown > :first-child { margin-top: 0; }
+.dashboardWidget__markdown :is(h1, h2, h3) { margin: 12px 0 6px; color: var(--ds-text-primary); font-size: 14px; font-weight: 600; }
+.dashboardWidget__markdown p { margin: 0 0 8px; }
+.dashboardWidget__markdown :is(ul, ol) { margin: 0 0 8px; padding-left: 18px; }
+.dashboardWidget__markdown code { padding: 1px 4px; border-radius: 4px; background: var(--ds-surface-hover); font-size: 12px; }
+.dashboardWidget__markdown a { color: var(--ds-info); }
+
+.dashboardDialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100svh - 48px); margin: auto; padding: 0; overflow: hidden; border: 0; border-radius: 16px; background: var(--ds-surface-overlay); color: var(--ds-text-primary); font-family: var(--ds-font-sans); font-size: 13px; outline: .5px solid var(--ds-border-strong); box-shadow: var(--shadow-xl); }
+.dashboardDialog[open] { display: flex; flex-direction: column; }
+.dashboardDialog--wide { width: min(1040px, calc(100vw - 32px)); }
+.dashboardDialog::backdrop { background: #0008; }
+.dashboardDialog__header { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 12px 20px; }
+.dashboardDialog__header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.dashboardDialog__body { display: flex; flex-direction: column; gap: 14px; min-height: 0; padding: 4px 20px 16px; overflow: auto; }
+.dashboardDialog__footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--ds-border-subtle); }
+.dashboardDialog__form { display: flex; flex-direction: column; gap: 14px; }
+.dashboardDialog__hint { margin: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 18px; }
+.dashboardDialog :focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+.widgetEditor { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.widgetEditor__form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.widgetEditor__form > .dsSegmentedControl { align-self: flex-start; }
+.widgetEditor__row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.widgetEditor__row > .dsField { flex: 1 1 140px; }
+.widgetEditor__number { flex: 0 0 88px !important; }
+.widgetEditor__filters { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.widgetEditor__filters legend { margin-bottom: 6px; padding: 0; color: var(--ds-text-secondary); font-size: 12px; font-weight: 500; }
+.widgetEditor__filter { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.widgetEditor__filter .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.widgetEditor__filterActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.widgetEditor__preview { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
+.widgetEditor__preview h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.widgetEditor__previewBody { height: 300px; min-height: 0; overflow: auto; }
+
+.dashboardVariableRow { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 12px; border: 0; border-radius: 12px; background: var(--ds-surface-base); }
+.dashboardVariableRow__legend { float: left; margin-bottom: 2px; padding: 0; color: var(--ds-text-secondary); font-size: 12px; font-weight: 600; }
+.dashboardVariableRow__footer { display: flex; align-items: flex-end; gap: 8px; }
+.dashboardVariableRow__footer > .dsField { flex: 1; }
+
+@media (max-width: 860px) {
+  .widgetEditor { grid-template-columns: minmax(0, 1fr); }
+  .widgetEditor__preview { position: static; }
+}
