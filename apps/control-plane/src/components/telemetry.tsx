@@ -1,7 +1,17 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { TelemetryProject } from "../telemetry-api";
+import { useIngestAvailable } from "../use-ingest-available";
 import type { TelemetryProjectsState } from "../use-telemetry-projects";
 import "./telemetry.css";
+
+// Shown only where the workspace can send telemetry to this cell.
+export function SendTelemetryLink({ variant }: { variant: "primary" | "secondary" }) {
+  const available = useIngestAvailable();
+  return available ? (
+    <Link className={`dsButton dsButton--${variant} dsButton--small`} to="/telemetry/setup">Send telemetry</Link>
+  ) : null;
+}
 
 export function TelemetryAttributes({ title, values }: { title: string; values: Record<string, string> }) {
   const entries = Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
@@ -75,7 +85,8 @@ export function TelemetryProjectsGate({
     return (
       <section className="emptyState emptyState--list">
         <h2>No telemetry projects</h2>
-        <p>{signal} appear here once a telemetry project is linked to this workspace.</p>
+        <p>{signal} appear here once a telemetry project is linked to this workspace, or once an app sends data.</p>
+        <SendTelemetryLink variant="primary" />
       </section>
     );
   }

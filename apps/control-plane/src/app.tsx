@@ -28,6 +28,7 @@ import { ScanDetailPage } from "./pages/scan-detail";
 import { ScansPage } from "./pages/scans";
 import { SharedAutomationTemplatePage } from "./pages/shared-automation-template";
 import { TraceDetailPage } from "./pages/trace-detail";
+import { TelemetrySetupPage } from "./pages/telemetry-setup";
 import { TracesPage } from "./pages/traces";
 import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
@@ -154,6 +155,7 @@ export function App() {
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<LogsPage />} path="/logs" />
         <Route element={<TracesPage />} path="/traces" />
+        <Route element={<TelemetrySetupPage />} path="/telemetry/setup" />
         <Route element={<DashboardsPage />} path="/dashboards" />
         <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />
         <Route element={<AlertsPage />} path="/alerts" />

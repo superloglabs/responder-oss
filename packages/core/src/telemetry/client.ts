@@ -43,3 +43,10 @@ export function getTelemetryClient(): ClickHouseClient | null {
   client = createClient(config);
   return client;
 }
+
+// Where this cell's OpenTelemetry collector receives OTLP over HTTP. Without
+// it, the cell does not accept telemetry from applications.
+export function telemetryCollectorUrl(environment: NodeJS.ProcessEnv = process.env): string | null {
+  const url = environment.TELEMETRY_COLLECTOR_URL?.trim();
+  return url ? url.replace(/\/+$/u, "") : null;
+}
