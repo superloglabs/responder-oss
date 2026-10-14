@@ -107,9 +107,10 @@ export async function checkTelemetryAlert(
     });
     if (delivery && "timestamp" in delivery && delivery.timestamp) {
       await dependencies.setMessage(episode.id, delivery.timestamp);
-    } else if (delivery && "error" in delivery) {
-      // The next check tries again while the episode is open.
-      postError = errorText(delivery.error);
+    } else if (delivery) {
+      // The next check tries again while the episode is open. Without a
+      // message ID there is no thread to reply in, so that is a failure too.
+      postError = "error" in delivery ? errorText(delivery.error) : "Slack did not return the message";
       console.warn(JSON.stringify({ alertId: alert.id, error: postError, event: "telemetry_alert_post_failed" }));
     }
   }

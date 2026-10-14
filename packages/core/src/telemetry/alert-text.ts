@@ -4,13 +4,16 @@ import type { AlertComparator, AlertRule } from "./alerts.js";
 // the app can use it without the validation library.
 
 // Text from users or telemetry, made inert in Slack: no mentions, links or
-// formatting.
+// formatting. Backslashes are escaped first, so they cannot undo the other
+// escapes. A zero-width space after each "." and ":" stops Slack from
+// turning URLs and domains into links.
 export function slackText(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replace(/[`*_~[\]|#]/gu, (character) => `\\${character}`);
+    .replace(/[\\`*_~[\]|#]/gu, (character) => `\\${character}`)
+    .replace(/[.:]/gu, (character) => `${character}\u200b`);
 }
 
 const numberFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });

@@ -183,6 +183,19 @@ describe("checkTelemetryAlert", () => {
     expect(deps.setMessage).not.toHaveBeenCalled();
   });
 
+  it("counts a post without a message ID as failed", async () => {
+    const deps = dependencies({
+      post: vi.fn<TelemetryAlertDependencies["post"]>(async (input) =>
+        input.notifications.map((notification) => ({ notification, timestamp: null })),
+      ),
+    });
+
+    await checkTelemetryAlert(alert, {} as never, deps);
+
+    expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", "Posting to Slack failed: Slack did not return the message");
+    expect(deps.setMessage).not.toHaveBeenCalled();
+  });
+
   it("records a failed check and does not touch episodes", async () => {
     const deps = dependencies({ values: vi.fn(async () => { throw new Error("Timeout exceeded"); }) });
 

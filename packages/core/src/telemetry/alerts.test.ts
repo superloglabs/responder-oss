@@ -106,7 +106,8 @@ describe("alert messages", () => {
       rule: errorLogs,
       value: 1234.567,
     });
-    expect(firing.text).toBe("Checkout errors is firing for http.route /pay");
+    // Zero-width spaces keep Slack from linking dotted values; they are invisible.
+    expect(firing.text.replaceAll("\u200b", "")).toBe("Checkout errors is firing for http.route /pay");
     expect(firing.markdown).toContain("**1,234.57**, above 50.");
     expect(firing.markdown).toContain("[View alert](https://us.superlog.sh/alerts/1)");
   });
@@ -123,6 +124,22 @@ describe("alert messages", () => {
     expect(firing.markdown).toContain("**&lt;!channel&gt; \\*urgent\\***");
     expect(firing.markdown).toContain("for user\\_agent &lt;@U123&gt; \\`x\\`");
     expect(firing.text).not.toMatch(/<!channel>|<@U123>/u);
+  });
+
+  it("keeps backslashes from undoing escapes, and URLs from linking", () => {
+    const firing = alertFiringMessage({
+      alertName: "\\*bold\\* https://evil.example",
+      alertUrl: "https://us.superlog.sh/alerts/1",
+      groupBy: null,
+      groupKey: "",
+      rule: errorLogs,
+      value: 51,
+    });
+    expect(firing.markdown).toContain("\\\\\\*bold\\\\\\*");
+    expect(firing.markdown).not.toContain("https://evil.example");
+    expect(firing.markdown).toContain("https:\u200b//evil.\u200bexample");
+    // The app's own link is not altered.
+    expect(firing.markdown).toContain("[View alert](https://us.superlog.sh/alerts/1)");
   });
 
   it("says how long the alert fired", () => {
