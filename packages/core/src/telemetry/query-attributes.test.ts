@@ -155,34 +155,44 @@ describe("metric series of one kind", () => {
 });
 
 describe("the metric catalog", () => {
-  it("marks services complete only when the details read every point", async () => {
-    const client = {
+  // Lists two gauges with their counts, and details read from `sampledPoints`
+  // points of the busy one.
+  function catalogClient(names: { busy: number; quiet: number }, sampledPoints: number): ClickHouseClient {
+    return {
       query: async ({ query }: { query: string }) => ({
         json: async () => {
           if (!query.includes("FROM otel_metrics_gauge")) return [];
           if (query.includes("count() AS c")) {
             return [
-              { c: 10, name: "busy", unit: "" },
-              { c: 3, name: "quiet", unit: "" },
+              { c: names.busy, name: "busy", unit: "" },
+              { c: names.quiet, name: "quiet", unit: "" },
             ];
           }
           return [
-            { attributes: [], description: "", name: "busy", points: 4, series: 1, services: ["api"], unit: "" },
-            { attributes: [], description: "", name: "quiet", points: 3, series: 1, services: ["api"], unit: "" },
+            { attributes: [], description: "", name: "busy", points: sampledPoints, series: 1, services: ["api"], unit: "" },
+            { attributes: [], description: "", name: "quiet", points: names.quiet, series: 1, services: ["api"], unit: "" },
           ];
         },
       }),
     } as unknown as ClickHouseClient;
+  }
+  const window = { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" };
 
-    const catalog = await listMetricCatalog(client, "project-1", {
-      since: "2026-07-23T00:00:00.000Z",
-      until: "2026-07-23T01:00:00.000Z",
-    });
+  it("marks services complete only for metrics a capped scan read in full", async () => {
+    const catalog = await listMetricCatalog(catalogClient({ busy: 2_000_000, quiet: 3 }, 999_997), "project-1", window);
 
     expect(catalog.map((metric) => [metric.name, metric.servicesComplete])).toEqual([
       ["busy", false],
       ["quiet", true],
     ]);
+  });
+
+  it("trusts every service list when the scan was not capped", async () => {
+    // A rollup count includes the hour the window starts in, so it can
+    // exceed what the exact window holds.
+    const catalog = await listMetricCatalog(catalogClient({ busy: 10, quiet: 3 }, 4), "project-1", window);
+
+    expect(catalog.every((metric) => metric.servicesComplete)).toBe(true);
   });
 
   it("lists more metric names than the picker", async () => {

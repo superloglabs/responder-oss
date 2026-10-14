@@ -6,6 +6,7 @@ import {
   type WidgetDraft,
   type WidgetUnit,
 } from "./dashboards-api";
+import type { MetricKind } from "./metrics-api";
 
 export type WidgetKind = "chart" | "note" | "table";
 export type WidgetSource = "logs" | "metric" | "traces";
@@ -23,7 +24,11 @@ export interface WidgetForm {
   // Series kept when grouped.
   limit: number;
   markdown: string;
+  // With the name, the one metric charted; empty and null read every kind
+  // and unit of the name.
+  metricKind: MetricKind | "";
   metricName: string;
+  metricUnit: string | null;
   // Rows in a table.
   rows: number;
   showLegend: boolean;
@@ -43,7 +48,9 @@ export const emptyWidgetForm: WidgetForm = {
   legendPosition: "bottom",
   limit: 10,
   markdown: "",
+  metricKind: "",
   metricName: "",
+  metricUnit: null,
   rows: 50,
   showLegend: true,
   showXAxis: true,
@@ -82,7 +89,12 @@ export function widgetDraft(form: WidgetForm): WidgetDraft {
       ...(form.unit === "none" ? {} : { unit: form.unit }),
       ...(type === "timeseries_count"
         ? { source: form.source === "traces" ? ("traces" as const) : ("logs" as const) }
-        : { metricName: form.metricName, ...(form.aggregation ? { aggregation: form.aggregation } : {}) }),
+        : {
+            metricName: form.metricName,
+            ...(form.metricKind ? { metricKind: form.metricKind } : {}),
+            ...(form.metricUnit !== null ? { metricUnit: form.metricUnit } : {}),
+            ...(form.aggregation ? { aggregation: form.aggregation } : {}),
+          }),
     };
   }
   return { config, title: form.title.trim() || suggestedWidgetTitle({ config, type }), type };
@@ -103,7 +115,9 @@ export function widgetForm(widget: WidgetDraft): WidgetForm {
     legendPosition: config.legendPosition ?? "bottom",
     limit: kind === "chart" ? config.limit ?? 10 : 10,
     markdown: config.markdown ?? "",
+    metricKind: config.metricKind ?? "",
     metricName: config.metricName ?? "",
+    metricUnit: config.metricUnit ?? null,
     rows: kind === "table" ? config.limit ?? 50 : 50,
     showLegend: config.showLegend ?? true,
     showXAxis: config.showXAxis ?? true,

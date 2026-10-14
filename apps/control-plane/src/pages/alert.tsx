@@ -21,6 +21,7 @@ import {
   type TelemetryAlertEpisode,
   type TelemetryAlertSlackChannel,
 } from "../alerts-api";
+import { pickedMetricLabel } from "../metric-picker";
 import { AppShell } from "../components/app-shell";
 import { AttributeFilters } from "../components/attribute-filters";
 import { DashboardDialog } from "../components/dashboard-dialog";
@@ -421,7 +422,11 @@ export function AlertPage() {
                     onChange={(value) => update(value ? alertMetricChoice(value) : { metricKind: "", metricName: "", metricUnit: null })}
                     options={[
                       ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
-                      ...withCurrent(metricOptions, metricValue, form.metricUnit ? `${form.metricName} (${form.metricUnit})` : form.metricName),
+                      ...withCurrent(
+                        metricOptions,
+                        metricValue,
+                        pickedMetricLabel({ kind: form.metricKind, name: form.metricName, unit: form.metricUnit }),
+                      ),
                     ]}
                     searchable
                     value={metricValue}

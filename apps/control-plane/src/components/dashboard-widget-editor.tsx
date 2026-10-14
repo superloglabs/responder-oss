@@ -19,6 +19,7 @@ import type { TelemetryRange } from "../telemetry-api";
 import { DashboardDialog } from "./dashboard-dialog";
 import { AttributeFilters } from "./attribute-filters";
 import { DashboardWidgetBody } from "./dashboard-widget";
+import { metricPickerChoice, metricPickerOptions, metricPickerValue, pickedMetricLabel } from "../metric-picker";
 
 const kinds: Array<{ label: string; value: WidgetKind }> = [
   { label: "Chart", value: "chart" },
@@ -129,6 +130,12 @@ export function DashboardWidgetEditor({
     ...withCurrent(keys, form.groupBy === "service" ? "" : form.groupBy).map((key) => ({ label: key, value: key })),
   ];
   const previewReady = preview.type !== "timeseries_metric" || Boolean(preview.config.metricName);
+  const picked = { kind: form.metricKind, name: form.metricName, unit: form.metricUnit };
+  const metricValue = form.metricName ? metricPickerValue(picked) : "";
+  const metricOptions = metricPickerOptions(metrics);
+  if (metricValue && !metricOptions.some((option) => option.value === metricValue)) {
+    metricOptions.unshift({ label: pickedMetricLabel(picked), value: metricValue });
+  }
 
   return (
     <DashboardDialog
@@ -154,16 +161,16 @@ export function DashboardWidgetEditor({
             <>
               <SelectField
                 label="Metric"
-                onChange={(metricName) => update({ metricName })}
+                onChange={(value) => {
+                  const { kind, name, unit } = value ? metricPickerChoice(value) : { kind: "" as const, name: "", unit: null };
+                  update({ metricKind: kind, metricName: name, metricUnit: unit });
+                }}
                 options={[
                   ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
-                  ...withCurrent(metrics.map((metric) => metric.name), form.metricName).map((name) => {
-                    const metric = metrics.find((candidate) => candidate.name === name);
-                    return { label: metric?.unit ? `${name} (${metric.unit})` : name, value: name };
-                  }),
+                  ...metricOptions,
                 ]}
                 searchable
-                value={form.metricName}
+                value={metricValue}
               />
               <SelectField
                 label="Aggregation"

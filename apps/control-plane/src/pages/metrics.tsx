@@ -13,7 +13,7 @@ import {
   metricKinds,
   type MetricCatalogEntry,
 } from "../metrics-api";
-import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
+import { fetchServices, telemetryRanges, type TelemetryRange } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryProjects } from "../use-telemetry-projects";
 import "../components/automation-run-history.css";
@@ -41,6 +41,9 @@ export function MetricsPage() {
   const service = params.get("service") ?? "";
   const search = params.get("q") ?? "";
   const [catalog, setCatalog] = useState<MetricCatalogEntry[] | null>(null);
+  // Every service in the window. The catalog's own lists are sampled, so
+  // they can miss a service.
+  const [allServices, setAllServices] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const request = useRef(0);
 
@@ -58,6 +61,9 @@ export function MetricsPage() {
     if (!projectId) return;
     const generation = ++request.current;
     setCatalog(null);
+    void fetchServices(projectId, range, "all")
+      .catch(() => [])
+      .then((loaded) => { if (request.current === generation) setAllServices(loaded); });
     try {
       const loaded = await fetchMetricCatalog(projectId, range);
       if (request.current !== generation) return;
@@ -76,8 +82,11 @@ export function MetricsPage() {
   }, [load]);
 
   const services = useMemo(
-    () => [...new Set([...(catalog ?? []).flatMap((metric) => metric.services), ...(service ? [service] : [])])].sort(),
-    [catalog, service],
+    () =>
+      [
+        ...new Set([...allServices, ...(catalog ?? []).flatMap((metric) => metric.services), ...(service ? [service] : [])]),
+      ].sort(),
+    [allServices, catalog, service],
   );
   const shown = useMemo(
     () => filterMetricCatalog(catalog ?? [], { kind, search, service }),

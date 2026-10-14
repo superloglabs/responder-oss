@@ -94,6 +94,16 @@ describe("choosing an alert's metric", () => {
     expect(alertMetricChoice(options[2]!.value)).toEqual({ metricKind: "sum", metricName: "jobs", metricUnit: "" });
   });
 
+  it("names the kind of metrics that share a name and unit", () => {
+    const options = alertMetricOptions([
+      { kind: "gauge", name: "queue.size", unit: "" },
+      { kind: "sum", name: "queue.size", unit: "" },
+      { kind: "gauge", name: "cpu", unit: "%" },
+    ]);
+
+    expect(options.map((option) => option.label)).toEqual(["queue.size · Gauge", "queue.size · Sum", "cpu (%)"]);
+  });
+
   it("keeps an alert's metric selected, with or without its kind and unit", () => {
     const options = alertMetricOptions([{ kind: "gauge", name: "rpc.duration", unit: "s" }]);
     const chosen = { metricKind: "gauge" as const, metricName: "rpc.duration", metricUnit: "s" };

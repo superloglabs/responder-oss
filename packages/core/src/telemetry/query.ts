@@ -1897,8 +1897,9 @@ async function metricDetailsFromTable(
   window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
   table: string,
   withDescription = true,
-): Promise<Map<string, MetricDetail>> {
+): Promise<{ details: Map<string, MetricDetail>; sampled: boolean }> {
   try {
+    const started = Date.now();
     const r = await ch.query({
       query: `
         SELECT
@@ -1932,7 +1933,7 @@ async function metricDetailsFromTable(
       services: string[];
       unit: string;
     }[];
-    return new Map(
+    const details = new Map(
       rows.map((row) => [
         metricDetailKey(row),
         {
@@ -1944,13 +1945,17 @@ async function metricDetailsFromTable(
         },
       ]),
     );
+    // The scan stopped early when it reached its row cap or its time limit.
+    const read = [...details.values()].reduce((total, detail) => total + detail.points, 0);
+    const sampled = read >= METRIC_DETAIL_SCAN_ROW_CAP || Date.now() - started >= METRIC_DETAIL_SCAN_SECONDS * 1000 - 250;
+    return { details, sampled };
   } catch (err) {
     // Collectors that predate descriptions do not write the column.
     if (withDescription && isMissingDescriptionError(err)) {
       return metricDetailsFromTable(ch, projectId, window, table, false);
     }
     // Details are optional: without them the metric is still listed.
-    return new Map();
+    return { details: new Map(), sampled: true };
   }
 }
 
@@ -1967,14 +1972,18 @@ export async function listMetricCatalog(
   ]);
   const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
   return names.map(({ points, ...metric }) => {
-    const detail = detailsByKind.get(metric.kind)?.get(metricDetailKey(metric));
+    const table = detailsByKind.get(metric.kind);
+    const detail = table?.details.get(metricDetailKey(metric));
     return {
       ...metric,
       attributes: detail?.attributes ?? [],
       description: detail?.description ?? "",
       series: detail?.series ?? null,
       services: detail?.services ?? [],
-      servicesComplete: detail !== undefined && detail.points >= points,
+      // A scan that stopped early read some metrics only in part. A complete
+      // scan read every point, even where the name count, rounded out to whole
+      // hours, holds more.
+      servicesComplete: detail !== undefined && (!table!.sampled || detail.points >= points),
     };
   });
 }

@@ -54,6 +54,19 @@ describe("widgetDraft", () => {
     expect(draft.config.source).toBeUndefined();
   });
 
+  it("keeps a metric chart's kind and unit through an edit", () => {
+    const saved = {
+      config: { filter: {}, metricKind: "histogram" as const, metricName: "rpc.duration", metricUnit: "ms" },
+      title: "RPC duration",
+      type: "timeseries_metric" as const,
+    };
+
+    expect(widgetDraft(widgetForm(saved)).config).toMatchObject({ metricKind: "histogram", metricUnit: "ms" });
+    const byName = widgetDraft({ ...emptyWidgetForm, kind: "chart", metricName: "rpc.duration", source: "metric" });
+    expect(byName.config).not.toHaveProperty("metricKind");
+    expect(byName.config).not.toHaveProperty("metricUnit");
+  });
+
   it("caps table rows and saves notes", () => {
     expect(widgetDraft({ ...emptyWidgetForm, kind: "table", source: "logs" }).config).toEqual({ filter: {}, limit: 50 });
     expect(widgetDraft({ ...emptyWidgetForm, kind: "table", rows: 500, source: "traces" }).config).toEqual({
