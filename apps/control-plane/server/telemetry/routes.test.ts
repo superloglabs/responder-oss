@@ -93,6 +93,13 @@ describe("telemetry routes", () => {
     });
   });
 
+  it("accepts a log search as long as the filter field allows", async () => {
+    const { app } = routes();
+
+    expect((await app.request(`/logs?projectId=${projectId}&search=${"a".repeat(500)}`)).status).toBe(200);
+    expect((await app.request(`/logs?projectId=${projectId}&search=${"a".repeat(501)}`)).status).toBe(400);
+  });
+
   it("counts matching logs per bucket and level for the explorer chart", async () => {
     const { app, dependencies } = routes();
 

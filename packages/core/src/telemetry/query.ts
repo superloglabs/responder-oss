@@ -2623,14 +2623,14 @@ export async function traceOverview(
     read<Record<string, string | number>>(`
       SELECT
         if(StatusMessage != '', StatusMessage, SpanName) AS message,
-        any(SpanName) AS span_name,
-        any(ServiceName) AS service,
+        SpanName AS span_name,
+        ServiceName AS service,
         count() AS spans,
         uniqExact(TraceId) AS traces,
         toString(min(Timestamp)) AS first_seen
       FROM otel_traces
       WHERE ${where} AND ${ERROR_SPAN_COND}
-      GROUP BY message
+      GROUP BY message, service, span_name
       ORDER BY traces DESC
       LIMIT 8
     `),

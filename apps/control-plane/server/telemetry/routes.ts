@@ -212,7 +212,7 @@ const stepMilliseconds = { DAY: 86_400_000, HOUR: 3_600_000, MINUTE: 60_000, SEC
 const traceIdPattern = /^[0-9a-f]{32}$/u;
 
 const logFilterSchema = windowSchema.extend({
-  search: z.string().trim().max(200).optional(),
+  search: z.string().trim().max(500).optional(),
 });
 
 const logsSchema = logFilterSchema.extend({

@@ -388,7 +388,11 @@ export function TracesPage() {
                 openTrace={openTrace}
                 projects={projects}
                 query={resolved}
-                setQuery={(update) => navigate({ ...resolved, ...update }, openTrace)}
+                // A trace ID from one project means nothing in another.
+                setQuery={(update) => navigate(
+                  { ...resolved, ...update },
+                  update.projectId && update.projectId !== resolved.projectId ? null : openTrace,
+                )}
               />
             );
           }}

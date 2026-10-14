@@ -310,7 +310,7 @@ function OverviewBody({
                   },
                 ]}
                 emptyMessage="No errors in this window."
-                getRowKey={(row) => row.message}
+                getRowKey={(row) => `${row.message}\u0000${row.service}\u0000${row.span_name}`}
                 onRowClick={(row) => navigate(scope({ operations: [row.span_name], services: [row.service], statuses: ["STATUS_CODE_ERROR"] }))}
                 rows={data.errors}
                 variant="workspace"

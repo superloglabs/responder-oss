@@ -135,7 +135,7 @@ describe("trace overview", () => {
           return [{ bucket: "2026-10-14 14:42:00", errors: "3", p95_ms: 980.5, requests: "40" }];
         }
         if (/SPAN_KIND_CLIENT/u.test(query)) return [{ errors: 2, name: "api.stripe.com", p95_ms: 980, requests: 12 }];
-        if (/GROUP BY message/u.test(query)) {
+        if (/AS message/u.test(query)) {
           return [{
             first_seen: "2026-10-14 14:42:01.000000000",
             message: "upstream timeout",
@@ -172,6 +172,16 @@ describe("trace overview", () => {
       expect(call.query).toMatch(/ServiceName = \{service:String\}/u);
       expect(call.params).toMatchObject({ projectId: "project-1", service: "checkout-api" });
     }
+  });
+
+  it("groups top errors by message, service and span name", async () => {
+    const calls: Call[] = [];
+
+    await traceOverview(client(calls), "project-1", { range, step: { n: 1, unit: "MINUTE" } });
+
+    const errors = calls.find((call) => /AS message/u.test(call.query))!;
+    expect(errors.query).toMatch(/GROUP BY message, service, span_name/u);
+    expect(errors.query).not.toMatch(/any\(/u);
   });
 
   it("reports zero totals for an empty window", async () => {
