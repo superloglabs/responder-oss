@@ -82,4 +82,34 @@ describe("metric attribute filters", () => {
       expect(params.groupKey).toBe("cloud.region");
     }
   });
+
+  it("filters series by a data-point attribute named like its grouping", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await metricSeries(
+      recordingClient(queries),
+      "project-1",
+      "http.server.request.duration",
+      {
+        range,
+        resourceAttrs: [
+          { key: "resource.deployment.environment", value: "prod" },
+          { key: "attr:http.route", value: "POST /checkout" },
+        ],
+      },
+      undefined,
+      { n: 1, unit: "MINUTE" },
+    );
+
+    expect(queries.length).toBeGreaterThan(0);
+    for (const { params, query } of queries) {
+      expect(query).toContain("ResourceAttributes[{attr_k_0:String}] = {attr_v_0:String}");
+      expect(query).toContain("Attributes[{pattr_k_0:String}] = {pattr_v_0:String}");
+      expect(params).toMatchObject({
+        attr_k_0: "deployment.environment",
+        pattr_k_0: "http.route",
+        pattr_v_0: "POST /checkout",
+      });
+    }
+  });
 });

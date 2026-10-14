@@ -22,6 +22,8 @@ import { InvestigationDetailPage } from "./pages/investigation-detail";
 import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
 import { LogsPage } from "./pages/logs";
+import { MetricExplorerPage } from "./pages/metric-explorer";
+import { MetricsPage } from "./pages/metrics";
 import { PullRequestDetailPage } from "./pages/pull-request-detail";
 import { PullRequestsPage } from "./pages/pull-requests";
 import { ScanDetailPage } from "./pages/scan-detail";
@@ -155,6 +157,8 @@ export function App() {
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<LogsPage />} path="/logs" />
         <Route element={<TracesPage />} path="/traces" />
+        <Route element={<MetricsPage />} path="/metrics" />
+        <Route element={<MetricExplorerPage />} path="/metrics/explore" />
         <Route element={<TelemetrySetupPage />} path="/telemetry/setup" />
         <Route element={<DashboardsPage />} path="/dashboards" />
         <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />

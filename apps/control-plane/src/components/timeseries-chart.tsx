@@ -2,7 +2,9 @@ import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { axisTicks, formatWidgetValue, type ChartData, type WidgetUnit } from "../dashboards-api";
 import "./timeseries-chart.css";
 
-const seriesColors = 8;
+// Series take `timeseriesChart__color--<index % seriesColors>`, also in
+// legends drawn outside the chart.
+export const seriesColors = 8;
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -35,6 +37,7 @@ function seriesTotal(values: Array<number | null>): number {
 export function TimeseriesChart({
   chart,
   chartType = "bar",
+  hiddenSeries,
   label,
   legendPosition = "bottom",
   showLegend = true,
@@ -45,6 +48,9 @@ export function TimeseriesChart({
 }: {
   chart: ChartData;
   chartType?: "bar" | "line";
+  // Series hidden by a legend outside the chart. Without it the chart's own
+  // legend hides and shows series.
+  hiddenSeries?: ReadonlySet<string>;
   label: string;
   legendPosition?: "bottom" | "side";
   showLegend?: boolean;
@@ -55,7 +61,8 @@ export function TimeseriesChart({
   unit?: WidgetUnit;
 }) {
   const { ref, size } = useSize<HTMLDivElement>();
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [ownHidden, setHidden] = useState<Set<string>>(new Set());
+  const hidden = hiddenSeries ?? ownHidden;
   const [hover, setHover] = useState<number | null>(null);
   const visible = useMemo(() => chart.series.filter((series) => !hidden.has(series.name)), [chart.series, hidden]);
   const tooltipRef = useRef<HTMLDivElement>(null);

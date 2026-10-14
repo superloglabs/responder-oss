@@ -15,6 +15,7 @@ import {
   BellIcon,
   CaretDownIcon,
   ChartLineIcon,
+  ChartLineUpIcon,
   CheckIcon,
   FlagIcon,
   GearIcon,
@@ -44,6 +45,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   integrations: PlugsConnectedIcon,
   issues: ListBulletsIcon,
   logs: MagnifyingGlassIcon,
+  metrics: ChartLineUpIcon,
   "pull-requests": GitPullRequestIcon,
   scans: ScanIcon,
   settings: GearIcon,
@@ -68,7 +70,9 @@ interface AppShellProps {
     | "investigation"
     | "scans"
     | "settings"
-    | "issues";
+    | "issues"
+    // Explorers with side panels use the full width.
+    | "wide";
 }
 
 export function AppShell({ active, children, density = "default", guest, redesigned = false }: AppShellProps) {

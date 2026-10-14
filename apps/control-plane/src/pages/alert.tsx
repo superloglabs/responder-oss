@@ -1,6 +1,6 @@
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import {
   alertForm,
@@ -173,6 +173,8 @@ export function AlertPage() {
   const { alertId } = useParams();
   const navigate = useNavigate();
   const telemetry = useTelemetryProjects();
+  // A new alert may start from a graph, such as one in the metrics explorer.
+  const draft = (useLocation().state as { alertDraft?: Partial<AlertForm> } | null)?.alertDraft;
   // What was loaded and edited, for the alert it belongs to. Moving to
   // another alert shows nothing of the previous one.
   const [loaded, setLoaded] = useState<{
@@ -221,9 +223,12 @@ export function AlertPage() {
     void Promise.resolve().then(load);
   }, [alertId, load]);
 
-  // A new alert starts on the first linked project.
-  const firstProjectId = telemetry.projects?.[0]?.projectId;
-  const form = edited ?? (!alertId && firstProjectId ? emptyAlertForm(firstProjectId) : null);
+  // A new alert starts on the first linked project, or the draft's project
+  // when it is linked.
+  const newProjectId = telemetry.projects?.some((project) => project.projectId === draft?.projectId)
+    ? draft?.projectId
+    : telemetry.projects?.[0]?.projectId;
+  const form = edited ?? (!alertId && newProjectId ? { ...emptyAlertForm(newProjectId), ...draft, projectId: newProjectId } : null);
 
   useEffect(() => {
     let cancelled = false;

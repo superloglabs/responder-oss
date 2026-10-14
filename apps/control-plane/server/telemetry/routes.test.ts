@@ -20,6 +20,20 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     hasTelemetry: vi.fn(async () => true),
     listProjects: vi.fn(async () => [{ name: "Default", projectId }]),
     listServices: vi.fn(async () => ["checkout", "api"]),
+    metricCatalog: vi.fn(async () => [
+      {
+        attributes: ["http.route"],
+        description: "Duration of HTTP server requests",
+        kind: "histogram",
+        name: "http.server.duration",
+        series: 4,
+        services: ["checkout"],
+        unit: "ms",
+      },
+    ]),
+    metricDimensions: vi.fn(async () => [
+      { cardinality: 2, key: "attr:http.route", name: "http.route", scope: "point", values: [] },
+    ]),
     metricNames: vi.fn(async () => [{ kind: "histogram", name: "http.server.duration", unit: "ms" }]),
     metricSeries: vi.fn(async () => [{ bucket: "2026-10-13 11:00:00", group: "", value: 12.5 }]),
     now: () => now,
@@ -269,6 +283,80 @@ describe("telemetry routes", () => {
       const unlinked = routes({ findProject: vi.fn(async () => null) });
       expect((await post(unlinked.app, { config: {}, projectId, range: "1h", type: "log_table" })).status).toBe(404);
       expect(unlinked.dependencies.queryLogs).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("metrics explorer", () => {
+    function series(app: ReturnType<typeof routes>["app"], body: unknown) {
+      return app.request("/metric-series", {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+    }
+
+    it("lists the metric catalog and one metric's dimensions", async () => {
+      const { app, dependencies } = routes();
+
+      const catalog = await app.request(`/metric-catalog?projectId=${projectId}&range=6h`);
+      expect((await catalog.json()).metrics).toHaveLength(1);
+      expect(dependencies.metricCatalog).toHaveBeenCalledWith(expect.anything(), projectId, {
+        since: "2026-10-13T06:00:00.000Z",
+        until: "2026-10-13T12:00:00.000Z",
+      });
+
+      const dimensions = await app.request(
+        `/metric-dimensions?projectId=${projectId}&name=http.server.duration&kind=histogram`,
+      );
+      expect((await dimensions.json()).dimensions).toHaveLength(1);
+      expect(dependencies.metricDimensions).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        { kind: "histogram", name: "http.server.duration" },
+        { since: "2026-10-13T11:00:00.000Z", until: "2026-10-13T12:00:00.000Z" },
+      );
+
+      const unknownKind = await app.request(`/metric-dimensions?projectId=${projectId}&name=a&kind=counter`);
+      expect(unknownKind.status).toBe(400);
+    });
+
+    it("charts a metric with filters and grouping without the dashboards capability", async () => {
+      const { app, dependencies } = routes({ hasDashboards: vi.fn(async () => false) });
+
+      const response = await series(app, {
+        aggregation: "p95",
+        filters: [{ key: "attr:http.route", value: "POST /checkout" }],
+        groupBy: "resource.service.name",
+        metricName: "http.server.duration",
+        projectId,
+        range: "1h",
+      });
+
+      expect(response.status).toBe(200);
+      const { chart } = await response.json();
+      expect(chart.series).toEqual([expect.objectContaining({ name: "(none)", other: false })]);
+      expect(dependencies.metricSeries).toHaveBeenCalledWith(expect.anything(), projectId, {
+        aggregation: "p95",
+        filter: {
+          range: { since: "2026-10-13T11:00:00.000Z", until: "2026-10-13T12:00:00.000Z" },
+          resourceAttrs: [{ key: "attr:http.route", value: "POST /checkout" }],
+        },
+        groupBy: "resource.service.name",
+        metricName: "http.server.duration",
+        step: expect.anything(),
+      });
+    });
+
+    it("rejects invalid metric queries and unlinked projects", async () => {
+      const { app } = routes();
+
+      expect((await series(app, { metricName: "", projectId, range: "1h" })).status).toBe(400);
+      expect((await series(app, { aggregation: "median", metricName: "a", projectId, range: "1h" })).status).toBe(400);
+      const unlinked = routes({ findProject: vi.fn(async () => null) });
+      expect((await series(unlinked.app, { metricName: "a", projectId, range: "1h" })).status).toBe(404);
+      expect((await unlinked.app.request(`/metric-catalog?projectId=${projectId}`)).status).toBe(404);
+      expect(unlinked.dependencies.metricSeries).not.toHaveBeenCalled();
+      expect(unlinked.dependencies.metricCatalog).not.toHaveBeenCalled();
     });
   });
 

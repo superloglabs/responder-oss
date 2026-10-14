@@ -22,12 +22,15 @@ import {
   getTraceDetail,
   listAttributeKeys,
   listAttributeValues,
+  listMetricCatalog,
+  listMetricDimensions,
   listMetricNames,
   listServices,
   metricSeries,
   pickStep,
   queryLogs,
   queryTracesAggregated,
+  type MetricKind,
   type Step,
   type TimeRange,
 } from "../../../../packages/core/src/telemetry/query.js";
@@ -64,6 +67,15 @@ export type TelemetryRouteDependencies = {
   hasDashboards: (organizationId: string) => Promise<boolean>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
   listProjects: (organizationId: string) => Promise<TelemetryProject[]>;
+  // Every metric in the window, with its description, services and attributes.
+  metricCatalog: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
+  // The attributes one metric carries and their most frequent values.
+  metricDimensions: (
+    client: ClickHouseClient,
+    projectId: string,
+    metric: { kind: MetricKind; name: string },
+    range: TimeRange,
+  ) => Promise<unknown>;
   metricNames: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
   // One metric aggregated per bucket and group.
   metricSeries: (
@@ -121,6 +133,8 @@ const defaultDependencies: TelemetryRouteDependencies = {
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
   listProjects: listTelemetryProjects,
   listServices,
+  metricCatalog: listMetricCatalog,
+  metricDimensions: listMetricDimensions,
   metricNames: listMetricNames,
   metricSeries: (client, projectId, params) =>
     metricSeries(client, projectId, params.metricName, params.filter, params.groupBy, params.step, params.aggregation),
@@ -169,6 +183,29 @@ const attributeValuesSchema = attributeKeysSchema.extend({
   prefix: z.string().max(200).optional(),
 });
 
+const metricKinds = ["gauge", "sum", "histogram", "exponential_histogram", "summary"] as const satisfies readonly MetricKind[];
+
+const metricDimensionsSchema = windowSchema.extend({
+  kind: z.enum(metricKinds),
+  name: z.string().trim().min(1).max(200),
+});
+
+// One metric over the window, for the metrics explorer.
+const metricSeriesSchema = z.object({
+  aggregation: dashboardWidgetConfigSchema.shape.aggregation,
+  // `attr:<key>` keys are data-point attributes; others are resource attributes.
+  filters: z.array(z.object({
+    key: z.string().trim().min(1).max(200),
+    op: z.enum(["eq", "neq", "not_contains"]).optional(),
+    value: z.string().max(500),
+  })).max(20).default([]),
+  groupBy: z.string().trim().max(200).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+  metricName: z.string().trim().min(1).max(200),
+  projectId: z.uuid(),
+  range: windowSchema.shape.range,
+});
+
 const widgetDataSchema = z.object({
   config: dashboardWidgetConfigSchema,
   projectId: z.uuid(),
@@ -203,6 +240,39 @@ function windowFor(range: TelemetryRange, now: Date): Required<TimeRange> {
 export function createTelemetryRoutes(
   dependencies: TelemetryRouteDependencies = defaultDependencies,
 ) {
+  // One metric per bucket and group, with every bucket in the window.
+  async function metricChart(
+    client: ClickHouseClient,
+    projectId: string,
+    query: {
+      aggregation?: DashboardWidgetConfig["aggregation"];
+      filters: DashboardWidgetConfig["filter"]["resourceAttrs"];
+      groupBy: string | undefined;
+      limit: number | undefined;
+      metricName: string;
+      range: TelemetryRange;
+    },
+  ): Promise<ChartData> {
+    const range = windowFor(query.range, dependencies.now());
+    const sinceMs = Date.parse(range.since);
+    const untilMs = Date.parse(range.until);
+    const step = pickStep((untilMs - sinceMs) / 1000);
+    const rows = await dependencies.metricSeries(client, projectId, {
+      ...(query.aggregation ? { aggregation: query.aggregation } : {}),
+      filter: { range, resourceAttrs: query.filters },
+      groupBy: query.groupBy,
+      metricName: query.metricName,
+      step,
+    });
+    return chartSeries(rows, {
+      fill: "null",
+      limit: query.limit,
+      sinceMs,
+      stepMs: step.n * stepMilliseconds[step.unit],
+      untilMs,
+    });
+  }
+
   // The workspace's ID and store, or why the request is refused.
   async function access(headers: Headers): Promise<
     | { client: ClickHouseClient; ok: true; organizationId: string }
@@ -324,6 +394,58 @@ export function createTelemetryRoutes(
         ),
       });
     })
+    .get("/metric-catalog", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = windowSchema.safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid metric query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      return context.json({
+        metrics: await dependencies.metricCatalog(
+          granted.client,
+          query.data.projectId,
+          windowFor(query.data.range, dependencies.now()),
+        ),
+      });
+    })
+    .get("/metric-dimensions", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = metricDimensionsSchema.safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid metric query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      return context.json({
+        dimensions: await dependencies.metricDimensions(
+          granted.client,
+          query.data.projectId,
+          { kind: query.data.kind, name: query.data.name },
+          windowFor(query.data.range, dependencies.now()),
+        ),
+      });
+    })
+    // Exploring a metric needs telemetry only, not dashboards.
+    .post("/metric-series", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const body = metricSeriesSchema.safeParse(await context.req.json().catch(() => null));
+      if (!body.success) return context.json({ error: "Invalid metric query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, body.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      const chart = await metricChart(granted.client, body.data.projectId, {
+        ...(body.data.aggregation ? { aggregation: body.data.aggregation } : {}),
+        filters: body.data.filters,
+        groupBy: body.data.groupBy || undefined,
+        limit: body.data.limit,
+        metricName: body.data.metricName,
+        range: body.data.range,
+      });
+      return context.json({ chart });
+    })
     // Data for one dashboard widget, saved or still being edited.
     .post("/widget-data", async (context) => {
       const granted = await access(context.req.raw.headers);
@@ -355,21 +477,22 @@ export function createTelemetryRoutes(
         });
         return context.json({ kind: "traces", traces } satisfies WidgetData);
       }
+      const groupBy = config.groupBy || undefined;
+      if (type === "timeseries_metric") {
+        const chart = await metricChart(granted.client, projectId, {
+          ...(config.aggregation ? { aggregation: config.aggregation } : {}),
+          filters: resourceAttrs,
+          groupBy,
+          limit,
+          metricName: config.metricName!,
+          range: body.data.range,
+        });
+        return context.json({ chart, kind: "chart" } satisfies WidgetData);
+      }
       const sinceMs = Date.parse(range.since);
       const untilMs = Date.parse(range.until);
       const step = pickStep((untilMs - sinceMs) / 1000);
       const window = { limit, sinceMs, stepMs: step.n * stepMilliseconds[step.unit], untilMs };
-      const groupBy = config.groupBy || undefined;
-      if (type === "timeseries_metric") {
-        const rows = await dependencies.metricSeries(granted.client, projectId, {
-          ...(config.aggregation ? { aggregation: config.aggregation } : {}),
-          filter: { range, resourceAttrs },
-          groupBy,
-          metricName: config.metricName!,
-          step,
-        });
-        return context.json({ chart: chartSeries(rows, { ...window, fill: "null" }), kind: "chart" } satisfies WidgetData);
-      }
       const rows = await dependencies.countSeries(
         granted.client,
         projectId,

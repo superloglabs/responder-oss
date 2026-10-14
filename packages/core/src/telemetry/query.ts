@@ -9,7 +9,7 @@ export type ResourceAttrFilter = {
   op?: "eq" | "neq" | "not_contains";
 };
 
-type AttributeColumn = "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
+type AttributeColumn = "Attributes" | "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
 // `field` is not an attribute map — it routes a `field.<name>` filter key to a
 // top-level column (TraceId, SpanId, SeverityNumber) via the fieldColumnExpr
 // allowlist below, so the explore UI can filter on identifiers, not just attrs.
@@ -1834,6 +1834,195 @@ async function listMetricNamesFromRawTable(
   }
 }
 
+export type MetricCatalogEntry = MetricName & {
+  // Data-point attribute keys, most frequent first.
+  attributes: string[];
+  description: string;
+  // Distinct resource and data-point attribute sets: the lines the metric
+  // draws when grouped by everything. Null when details were not read.
+  series: number | null;
+  services: string[];
+};
+
+type MetricDetail = Pick<MetricCatalogEntry, "attributes" | "description" | "series" | "services">;
+
+// Catalog details and dimensions describe metrics; they never decide which
+// metrics exist. Their reads sample the window and stop early with what they
+// have, so a high-volume project still opens the catalog quickly.
+const METRIC_DETAIL_SCAN_ROW_CAP = 1_000_000;
+const METRIC_DIMENSION_SCAN_ROW_CAP = 200_000;
+const METRIC_DETAIL_SCAN_SECONDS = 4;
+const METRIC_DETAIL_SETTINGS = {
+  max_execution_time: METRIC_DETAIL_SCAN_SECONDS,
+  timeout_overflow_mode: "break",
+} as const;
+
+function isMissingDescriptionError(err: unknown): boolean {
+  return err instanceof Error && /MetricDescription/u.test(err.message);
+}
+
+async function metricDetailsFromTable(
+  ch: ClickHouseClient,
+  projectId: string,
+  window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
+  table: string,
+  withDescription = true,
+): Promise<Map<string, MetricDetail>> {
+  try {
+    const r = await ch.query({
+      query: `
+        SELECT
+          MetricName AS name,
+          ${withDescription ? "anyIf(MetricDescription, MetricDescription != '')" : "''"} AS description,
+          groupUniqArray(20)(ServiceName) AS services,
+          topKArray(30)(mapKeys(Attributes)) AS attributes,
+          uniq(ResourceAttributes, Attributes) AS series
+        FROM (
+          SELECT MetricName, ${withDescription ? "MetricDescription, " : ""}ServiceName, Attributes, ResourceAttributes
+          FROM ${table}
+          WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+            AND TimeUnix >= ${window.sinceExpr}
+            AND TimeUnix <= ${window.untilExpr}
+          LIMIT ${METRIC_DETAIL_SCAN_ROW_CAP}
+        )
+        GROUP BY name
+      `,
+      query_params: { projectId, since: window.sinceSql, until: window.untilSql },
+      format: "JSONEachRow",
+      clickhouse_settings: METRIC_DETAIL_SETTINGS,
+    });
+    const rows = (await r.json()) as {
+      attributes: string[];
+      description: string;
+      name: string;
+      series: string | number;
+      services: string[];
+    }[];
+    return new Map(
+      rows.map((row) => [
+        row.name,
+        {
+          attributes: row.attributes.filter(Boolean),
+          description: row.description,
+          series: Number(row.series),
+          services: row.services.filter(Boolean).sort(),
+        },
+      ]),
+    );
+  } catch (err) {
+    // Collectors that predate descriptions do not write the column.
+    if (withDescription && isMissingDescriptionError(err)) {
+      return metricDetailsFromTable(ch, projectId, window, table, false);
+    }
+    // Details are optional: without them the metric is still listed.
+    return new Map();
+  }
+}
+
+// Every metric in the window, with what the catalog shows about each.
+export async function listMetricCatalog(
+  ch: ClickHouseClient,
+  projectId: string,
+  range?: TimeRange,
+): Promise<MetricCatalogEntry[]> {
+  const window = resolveRange(range);
+  const [names, details] = await Promise.all([
+    listMetricNames(ch, projectId, range),
+    Promise.all(METRIC_TABLES.map(({ table }) => metricDetailsFromTable(ch, projectId, window, table))),
+  ]);
+  const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
+  return names.map((metric) => {
+    const detail = detailsByKind.get(metric.kind)?.get(metric.name);
+    return {
+      ...metric,
+      attributes: detail?.attributes ?? [],
+      description: detail?.description ?? "",
+      series: detail?.series ?? null,
+      services: detail?.services ?? [],
+    };
+  });
+}
+
+export type MetricDimension = {
+  cardinality: number;
+  // How a filter or grouping names it: `attr:<key>` for a data-point
+  // attribute, `resource.<key>` for a resource attribute.
+  key: string;
+  name: string;
+  scope: "point" | "resource";
+  // The most frequent values, each with its share of the points that carry
+  // the attribute.
+  values: { share: number; value: string }[];
+};
+
+// The attributes one metric's points carry, with how many values each takes.
+export async function listMetricDimensions(
+  ch: ClickHouseClient,
+  projectId: string,
+  metric: { kind: MetricKind; name: string },
+  range?: TimeRange,
+): Promise<MetricDimension[]> {
+  const table = METRIC_TABLES.find(({ kind }) => kind === metric.kind)?.table;
+  if (!table) return [];
+  const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
+  try {
+    const r = await ch.query({
+      query: `
+        SELECT
+          scope,
+          key,
+          uniqExact(value) AS cardinality,
+          sum(c) AS points,
+          arraySlice(arraySort(pair -> -pair.2, groupArray((value, c))), 1, 5) AS top
+        FROM (
+          SELECT pair.1 AS scope, pair.2 AS key, pair.3 AS value, count() AS c
+          FROM (
+            SELECT arrayConcat(
+              arrayMap((k, v) -> ('point', k, v), mapKeys(Attributes), mapValues(Attributes)),
+              arrayMap((k, v) -> ('resource', k, v), mapKeys(ResourceAttributes), mapValues(ResourceAttributes))
+            ) AS pairs
+            FROM ${table}
+            WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+              AND MetricName = {metricName:String}
+              AND TimeUnix >= ${sinceExpr}
+              AND TimeUnix <= ${untilExpr}
+            LIMIT ${METRIC_DIMENSION_SCAN_ROW_CAP}
+          )
+          ARRAY JOIN pairs AS pair
+          WHERE NOT (pair.1 = 'resource' AND pair.2 = 'superlog.project_id')
+          GROUP BY scope, key, value
+        )
+        GROUP BY scope, key
+        ORDER BY scope = 'resource', points DESC, key
+        LIMIT 100
+      `,
+      query_params: { projectId, metricName: metric.name, since: sinceSql, until: untilSql },
+      format: "JSONEachRow",
+      clickhouse_settings: METRIC_DETAIL_SETTINGS,
+    });
+    const rows = (await r.json()) as {
+      cardinality: string | number;
+      key: string;
+      points: string | number;
+      scope: "point" | "resource";
+      top: [string, string | number][];
+    }[];
+    return rows.map((row) => {
+      const points = Number(row.points) || 1;
+      return {
+        cardinality: Number(row.cardinality),
+        key: row.scope === "point" ? `attr:${row.key}` : `resource.${row.key}`,
+        name: row.key,
+        scope: row.scope,
+        values: row.top.map(([value, count]) => ({ share: Number(count) / points, value })),
+      };
+    });
+  } catch (err) {
+    if (!isMissingMetricTableError(err)) throw err;
+    return [];
+  }
+}
+
 // Attribute discovery names metric filter keys `resource.<key>`. Metric points
 // only carry resource attributes, so drop that scope prefix before reading the
 // map. Unscoped keys are resource keys already.
@@ -1845,6 +2034,23 @@ function metricResourceAttrs(
   attrs: ResourceAttrFilter[] | undefined,
 ): ResourceAttrFilter[] | undefined {
   return attrs?.map((attr) => ({ ...attr, key: metricResourceKey(attr.key) }));
+}
+
+// Conditions for metric filters. `attr:<key>` filters a data-point attribute,
+// matching how `attr:<key>` groups; any other key is a resource attribute.
+function metricAttrConds(attrs: ResourceAttrFilter[] | undefined): {
+  conds: string[];
+  params: Record<string, string>;
+} {
+  const point = (attrs ?? [])
+    .filter((attr) => attr.key.startsWith("attr:"))
+    .map((attr) => ({ ...attr, key: attr.key.slice("attr:".length) }));
+  const resource = attrConds(metricResourceAttrs(attrs?.filter((attr) => !attr.key.startsWith("attr:"))));
+  const points = attrConds(point, "Attributes", "pattr");
+  return {
+    conds: [...resource.conds, ...points.conds],
+    params: { ...resource.params, ...points.params },
+  };
 }
 
 export type MetricSeriesFilter = {
@@ -1870,7 +2076,7 @@ export async function metricSeries(
   queryOptions: MetricSeriesQueryOptions = {},
 ): Promise<MetricSeriesRow[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(filter.range);
-  const attr = attrConds(metricResourceAttrs(filter.resourceAttrs));
+  const attr = metricAttrConds(filter.resourceAttrs);
 
   let groupExpr = "''";
   const groupParams: Record<string, string> = {};
