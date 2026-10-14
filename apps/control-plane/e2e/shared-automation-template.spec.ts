@@ -42,7 +42,10 @@ async function mockApi(context: BrowserContext, signedIn: boolean) {
       repositories: [{ id: repositoryId, fullName: "globex/api" }],
       resources: [],
       secrets: [],
+      skills: [],
     } });
+    if (/^\/api\/automations\/sentry\/[^/]+\/environments$/.test(path)) return route.fulfill({ json: { environments: ["production"] } });
+    if (path === "/api/automations/credentials") return route.fulfill({ json: { credentials: [] } });
     if (path.startsWith("/api/automations/included-models/")) return route.fulfill({ json: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] } });
     return route.fulfill({ json: {} });
   });
@@ -65,13 +68,34 @@ test("shows a shared template to a signed-out visitor and sends them to sign up"
   await expect(page.getByText("Create an account to set up this automation in your own workspace.")).toBeVisible();
 });
 
+test("shows a built-in template at its public link", async ({ context, page }) => {
+  await mockApi(context, false);
+  await page.goto("/templates/triage-sentry-issues");
+  await expect(page.getByRole("heading", { name: "Alert on critical Sentry issues" })).toBeVisible();
+  await expect(page.getByText("A Superlog template.")).toBeVisible();
+  await expect(page.getByText("When Sentry reports a new issue in a project you choose")).toBeVisible();
+
+  await page.getByRole("link", { name: "Use this automation" }).click();
+  await expect(page).toHaveURL("/automations/new?template=triage-sentry-issues");
+  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+});
+
+test("copies the public link of the template a new automation started from", async ({ context, page }) => {
+  await mockApi(context, true);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/automations/new?template=triage-sentry-issues");
+  await page.getByRole("button", { name: "Copy link" }).click();
+  await expect(page.getByRole("button", { name: "Link copied" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/templates\/triage-sentry-issues$/);
+});
+
 test("fills a new automation from a shared template", async ({ context, page }) => {
   await mockApi(context, true);
   await page.goto(`/automations/new?shared=${slug}`);
   await expect(page.getByRole("heading", { name: "Triage new Sentry issues" })).toBeVisible();
   await expect(page.getByText(/shared by Acme Robotics\. Choose a Sentry project and a repository, then save\./)).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Agent instructions" })).toHaveValue(template.prompt);
-  await expect(page.getByRole("button", { name: "Remove Globex" })).toBeVisible();
+  await expect(page.getByRole("button", { exact: true, name: "Remove Globex" })).toBeVisible();
 });
 
 test("explains when a shared template is no longer available", async ({ context, page }) => {

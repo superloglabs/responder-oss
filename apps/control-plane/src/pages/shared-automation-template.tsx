@@ -10,7 +10,8 @@ import { providerDisplayName, providerGlyphs, type ProviderGlyphId } from "../co
 import { AutomationEditorSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
 import { triggerTitle } from "./automation-list-presentation";
-import { sharedTemplateSetupPath, sharedTriggerDescription } from "./shared-automation-template-presentation";
+import { findAutomationTemplate, type AutomationTemplateContent } from "./automation-templates";
+import { builtInTemplateSetupPath, sharedTemplateSetupPath, sharedTriggerDescription } from "./shared-automation-template-presentation";
 import "../components/automation-trigger-editor.css";
 import "./automation-create.css";
 import "./shared-automation-template.css";
@@ -19,33 +20,37 @@ function isGlyph(provider: string): provider is ProviderGlyphId {
   return provider in providerGlyphs;
 }
 
-// The public, read-only view of an automation another workspace shared. It
-// uses the automation page's layout so visitors see the product as members
-// do. Setting it up goes through sign-in and opens the create page with the
-// template applied.
+// The public, read-only view of a built-in template, or of an automation
+// another workspace shared. It uses the automation page's layout so visitors
+// see the product as members do. Setting it up goes through sign-in and opens
+// the create page with the template applied.
 export function SharedAutomationTemplatePage() {
   const { slug = "" } = useParams();
+  const builtIn = findAutomationTemplate(slug);
   const session = authClient.useSession();
   const signedIn = Boolean(session.data);
-  const [template, setTemplate] = useState<SharedAutomationTemplate | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [shared, setShared] = useState<SharedAutomationTemplate | null>(null);
+  const [sharedStatus, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const status = builtIn ? "ready" : sharedStatus;
+  const template: AutomationTemplateContent | null = builtIn ?? shared;
   useDocumentTitle(template ? template.name : "Automation template");
 
   useEffect(() => {
+    if (builtIn) return;
     let cancelled = false;
     void fetchSharedAutomationTemplate(slug)
       .then((loaded) => {
         if (cancelled) return;
-        setTemplate(loaded);
+        setShared(loaded);
         setStatus("ready");
       })
       .catch((cause: unknown) => {
         if (!cancelled) setStatus(cause instanceof Error && cause.message === "Template not found" ? "missing" : "error");
       });
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [builtIn, slug]);
 
-  const setupPath = sharedTemplateSetupPath(slug);
+  const setupPath = builtIn ? builtInTemplateSetupPath(builtIn.id) : sharedTemplateSetupPath(slug);
   const guest = session.isPending || signedIn ? undefined : <div className="sharedTemplate__guest">
     <Link className="dsButton dsButton--primary dsButton--small" to={setupPath}>Get started</Link>
     <Link className="sharedTemplate__signIn" to="/automations">Sign in</Link>
@@ -62,7 +67,7 @@ export function SharedAutomationTemplatePage() {
       </section> : null}
       {template ? <div className="automationCreate">
         <header className="automationCreate__header">
-          <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb"><Link to="/automations">Automations</Link><span aria-hidden="true">›</span><span>Shared template</span></nav>
+          <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb"><Link to="/automations">Automations</Link><span aria-hidden="true">›</span><span>{builtIn ? "Template" : "Shared template"}</span></nav>
           <div className="automationCreate__titleRow">
             <h1>{template.name}</h1>
             <span className="automationCreate__spacer" />
@@ -72,7 +77,7 @@ export function SharedAutomationTemplatePage() {
         <div className="automationCreate__template" role="status">
           <SquaresFourIcon aria-hidden="true" size={16} />
           <p>
-            Shared by {template.workspaceName}.{" "}
+            {shared ? `Shared by ${shared.workspaceName}. ` : "A Superlog template. "}
             {signedIn ? "Use it to add a copy to your workspace." : "Create an account to set up a copy in your own workspace."}
             {template.description ? <span className="sharedTemplate__description">{template.description}</span> : null}
           </p>

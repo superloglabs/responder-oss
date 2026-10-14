@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { automationSetupReturnPath, sharedTemplateSetupPath, sharedTriggerDescription } from "./shared-automation-template-presentation";
+import { automationSetupReturnPath, builtInTemplateSetupPath, sharedTemplateSetupPath, sharedTriggerDescription } from "./shared-automation-template-presentation";
 
 describe("shared automation template presentation", () => {
   it("describes each trigger without the owner's resources", () => {
@@ -23,6 +23,7 @@ describe("shared automation template presentation", () => {
 
   it("opens the create page with the template", () => {
     expect(sharedTemplateSetupPath("aB3_-xYz09aB3_-x")).toBe("/automations/new?shared=aB3_-xYz09aB3_-x");
+    expect(builtInTemplateSetupPath("triage-sentry-issues")).toBe("/automations/new?template=triage-sentry-issues");
   });
 
   it("returns to the template setup only from its create page", () => {
