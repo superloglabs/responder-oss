@@ -83,7 +83,7 @@ describe("metric attribute filters", () => {
     }
   });
 
-  it("filters series by a data-point attribute written as attr:<key>", async () => {
+  it("filters and groups series by the same data-point attribute", async () => {
     const queries: RecordedQuery[] = [];
 
     await metricSeries(
@@ -97,7 +97,7 @@ describe("metric attribute filters", () => {
           { key: "attr:http.route", value: "POST /checkout" },
         ],
       },
-      undefined,
+      "attr:http.route",
       { n: 1, unit: "MINUTE" },
     );
 
@@ -107,6 +107,7 @@ describe("metric attribute filters", () => {
       expect(query).toContain("Attributes[{pattr_k_0:String}] = {pattr_v_0:String}");
       expect(params).toMatchObject({
         attr_k_0: "deployment.environment",
+        groupKey: "http.route",
         pattr_k_0: "http.route",
         pattr_v_0: "POST /checkout",
       });
