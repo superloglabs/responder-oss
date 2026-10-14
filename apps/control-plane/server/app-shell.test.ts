@@ -41,16 +41,19 @@ describe("application shell", () => {
   });
 
   it("ignores a response that is not the application shell", async () => {
+    let time = 0;
     const fetchRemote = vi.fn()
       .mockResolvedValueOnce(new Response("{}", { headers: { "content-type": "application/json" }, status: 200 }))
       .mockResolvedValueOnce(new Response("<html><body>Not found</body></html>", { headers: { "content-type": "text/html" }, status: 200 }));
-    const load = appShellLoader({ baseUrl: () => "https://superlog.sh", fetchRemote, readLocal: missing });
+    const load = appShellLoader({ baseUrl: () => "https://superlog.sh", fetchRemote, now: () => time, readLocal: missing });
 
     await expect(load()).resolves.toBeNull();
+    time = 5_000;
     await expect(load()).resolves.toBeNull();
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
   });
 
-  it("serves the last shell when a refresh fails, and nothing before any succeeds", async () => {
+  it("serves the last shell when a fetch fails, and nothing before any succeeds", async () => {
     let time = 0;
     const fetchRemote = vi.fn()
       .mockResolvedValueOnce(new Response("", { status: 503 }))
@@ -59,8 +62,35 @@ describe("application shell", () => {
     const load = appShellLoader({ baseUrl: () => "https://superlog.sh", fetchRemote, now: () => time, readLocal: missing });
 
     await expect(load()).resolves.toBeNull();
+    time = 5_000;
     await expect(load()).resolves.toBe(shell("first"));
+    time = 66_000;
+    await expect(load()).resolves.toBe(shell("first"));
+  });
+
+  it("shares one fetch between requests that arrive together", async () => {
+    const fetchRemote = vi.fn(() => Promise.resolve(page("cdn")));
+    const load = appShellLoader({ baseUrl: () => "https://superlog.sh", fetchRemote, readLocal: missing });
+
+    await expect(Promise.all([load(), load(), load()])).resolves.toEqual([shell("cdn"), shell("cdn"), shell("cdn")]);
+    expect(fetchRemote).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits five seconds after a failed fetch before trying again", async () => {
+    let time = 0;
+    const fetchRemote = vi.fn()
+      .mockResolvedValueOnce(page("first"))
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockResolvedValueOnce(page("second"));
+    const load = appShellLoader({ baseUrl: () => "https://superlog.sh", fetchRemote, now: () => time, readLocal: missing });
+
+    await load();
     time = 61_000;
     await expect(load()).resolves.toBe(shell("first"));
+    time = 65_000;
+    await expect(load()).resolves.toBe(shell("first"));
+    expect(fetchRemote).toHaveBeenCalledTimes(2);
+    time = 66_000;
+    await expect(load()).resolves.toBe(shell("second"));
   });
 });
