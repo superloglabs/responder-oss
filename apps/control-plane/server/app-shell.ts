@@ -1,6 +1,12 @@
 const remoteShellMaxAgeMs = 60_000;
 const remoteShellTimeoutMs = 3_000;
 
+// The shell has a head for preview tags and the element the application
+// mounts in. Anything else, such as an error page, is not cached.
+function isAppShell(html: string): boolean {
+  return html.includes("</head>") && html.includes('<div id="root"></div>');
+}
+
 // Loads the application shell for documents the server renders itself.
 // Self-hosted servers read it from their build. A deployment that serves the
 // build from a CDN has no local copy, so the server fetches /app.html from its
@@ -23,9 +29,12 @@ export function appShellLoader(options: {
         new URL("/app.html", options.baseUrl()).toString(),
         { signal: AbortSignal.timeout(remoteShellTimeoutMs) },
       );
-      if (!response.ok) return remote?.html ?? null;
-      remote = { fetchedAt: now(), html: await response.text() };
-      return remote.html;
+      const html = response.ok && response.headers.get("content-type")?.startsWith("text/html")
+        ? await response.text()
+        : null;
+      if (!html || !isAppShell(html)) return remote?.html ?? null;
+      remote = { fetchedAt: now(), html };
+      return html;
     } catch {
       return remote?.html ?? null;
     }
