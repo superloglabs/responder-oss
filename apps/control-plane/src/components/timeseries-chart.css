@@ -22,6 +22,8 @@
 .timeseriesChart__hover { fill: var(--ds-surface-hover); }
 .timeseriesChart__threshold { stroke: var(--ds-danger); stroke-dasharray: 5 4; stroke-width: 1.25; }
 .timeseriesChart__cursor { stroke: var(--ds-border-strong); }
+.timeseriesChart__svg--zoomable { cursor: crosshair; user-select: none; }
+.timeseriesChart__selection { fill: #4e58f91f; stroke: #4e58f9; stroke-width: 1; }
 .timeseriesChart__bar { fill: var(--series); }
 .timeseriesChart__point { fill: var(--series); }
 .timeseriesChart__line { fill: none; stroke: var(--series); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }

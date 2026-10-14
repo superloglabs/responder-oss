@@ -25,6 +25,7 @@ import {
   histogramBars,
   logTimestamp,
   parseExplorerFilter,
+  telemetryRangeWindow,
   traceExplorerParams,
   traceExplorerQuery,
   withEnvironment,
@@ -91,9 +92,9 @@ function TraceExplorer({
   const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(query), live);
   const facets = useTelemetryQuery(key, () => fetchTraceFacets(query), live);
   const keyQuery = `${query.projectId}|${query.range}`;
-  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, query.range, "traces"));
+  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, telemetryRangeWindow(query.range), "traces"));
   const environments = useTelemetryQuery(keyQuery, () =>
-    fetchAttributeValues(query.projectId, query.range, "traces", "resource.deployment.environment"),
+    fetchAttributeValues(query.projectId, telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
   );
   const bars = useMemo(
     () => (histogram.data ? histogramBars(histogram.data, statusSeriesNames, statusSeries) : null),

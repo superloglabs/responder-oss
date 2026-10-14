@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { sharedAutomationTemplateSlugSchema } from "../../../../packages/core/src/automations/shared-template.js";
+import { findBuiltInAutomationTemplate } from "../../../../packages/core/src/automations/templates.js";
 import { getSharedAutomationTemplate } from "../../../../packages/core/src/db/shared-automation-templates.js";
 import { escapeHtml } from "../../../../packages/core/src/email.js";
 
@@ -18,6 +19,20 @@ export const sharedAutomationTemplateRoutes = new Hono().get(
       : context.json({ error: "Template not found" }, 404);
   },
 );
+
+// The name and description for a template page, from a built-in template id
+// or a shared template slug. Returns null for unknown or stopped templates.
+export async function templatePreview(
+  slug: string,
+): Promise<{ description: string; name: string; slug: string } | null> {
+  const builtIn = findBuiltInAutomationTemplate(slug);
+  if (builtIn) {
+    return { description: builtIn.description, name: builtIn.name, slug: builtIn.id };
+  }
+  const parsed = sharedAutomationTemplateSlugSchema.safeParse(slug);
+  if (!parsed.success) return null;
+  return getSharedAutomationTemplate(parsed.data).catch(() => null);
+}
 
 // Link previews in Slack, X, and similar apps read the HTML head without
 // running scripts, so the template's title and description are rendered into

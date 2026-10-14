@@ -1,9 +1,10 @@
 import { ArrowClockwiseIcon, DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardDialog } from "../components/dashboard-dialog";
+import { DashboardTimePicker, LiveStatus } from "../components/dashboard-time-picker";
 import { DashboardVariableBar, DashboardVariablesEditor } from "../components/dashboard-variables";
 import { DashboardWidgetBody } from "../components/dashboard-widget";
 import { DashboardWidgetEditor } from "../components/dashboard-widget-editor";
@@ -14,11 +15,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Button, IconButton, SegmentedControl, TextField } from "../design-system";
+import { Button, IconButton, TextField } from "../design-system";
+import {
+  browserTimeZone,
+  defaultTimeRange,
+  isLive,
+  liveRefreshInterval,
+  timeRangeFromParams,
+  timeRangeParams,
+  zoomOutTimeRange,
+  type DashboardTimeRange,
+} from "../dashboard-time-range";
 import {
   addWidget,
   changedLayouts,
-  defaultVariableValues,
   deleteDashboard,
   deleteWidget,
   fetchDashboard,
@@ -27,18 +37,32 @@ import {
   updateDashboard,
   updateLayout,
   updateWidget,
+  variableParams,
+  variableValuesFromParams,
   type TelemetryDashboard,
   type TelemetryDashboardWidget,
+  type VariableValues,
   type WidgetDraft,
 } from "../dashboards-api";
-import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import "react-grid-layout/css/styles.css";
 import "../components/automation-run-history.css";
 import "../components/dashboards.css";
 import "./automation-create.css";
 
-const rangeValues = new Set<string>(telemetryRanges.map((range) => range.value));
+const timeZoneKey = "responder.dashboardTimeZone";
+
+// "browser", or a time zone this browser knows.
+function storedTimeZone(): string {
+  try {
+    const stored = localStorage.getItem(timeZoneKey) ?? "browser";
+    if (stored !== "browser") new Intl.DateTimeFormat(undefined, { timeZone: stored });
+    return stored;
+  } catch {
+    return "browser";
+  }
+}
+
 // Below this width the grid stacks widgets in one column, without dragging.
 const gridMinimumWidth = 720;
 
@@ -88,18 +112,22 @@ function DashboardGrid({
 function WidgetTile({
   onDelete,
   onEdit,
+  onZoom,
   projectId,
   range,
   refresh,
+  timeZone,
   values,
   widget,
 }: {
   onDelete: () => void;
   onEdit: () => void;
+  onZoom: (since: number, until: number) => void;
   projectId: string;
-  range: TelemetryRange;
+  range: DashboardTimeRange;
   refresh: number;
-  values: Record<string, string>;
+  timeZone: string;
+  values: VariableValues;
   widget: TelemetryDashboardWidget;
 }) {
   return (
@@ -118,9 +146,11 @@ function WidgetTile({
       <div className="dashboardWidget__body">
         <DashboardWidgetBody
           config={widget.config}
+          onZoom={onZoom}
           projectId={projectId}
           range={range}
           refresh={refresh}
+          timeZone={timeZone}
           title={widget.title}
           type={widget.type}
           variables={values}
@@ -134,12 +164,20 @@ export function DashboardPage() {
   const { dashboardId = "" } = useParams();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const rangeParam = params.get("range") ?? "";
-  const range: TelemetryRange = rangeValues.has(rangeParam) ? (rangeParam as TelemetryRange) : "1h";
+  const rangeKey = ["range", "from", "to"].map((name) => params.get(name) ?? "").join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the range changes only with its own parameters.
+  const range = useMemo(() => timeRangeFromParams(params), [rangeKey]);
+  // The range before someone zoomed into a chart, which zooming out returns to.
+  const [zoomedFrom, setZoomedFrom] = useState<DashboardTimeRange | null>(null);
+  // The live range Resume live returns to.
+  const [lastLive, setLastLive] = useState<DashboardTimeRange>(() => (isLive(range) ? range : defaultTimeRange));
+  const [timeZonePreference, setTimeZonePreference] = useState(storedTimeZone);
+  const timeZone = timeZonePreference === "browser" ? browserTimeZone() : timeZonePreference;
+  const [now, setNow] = useState(() => Date.now());
   const [dashboard, setDashboard] = useState<TelemetryDashboard | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<VariableValues>({});
   const [refresh, setRefresh] = useState(0);
   const [editing, setEditing] = useState<Editing>(null);
   const [editingVariables, setEditingVariables] = useState(false);
@@ -155,7 +193,7 @@ export function DashboardPage() {
     try {
       const loaded = await fetchDashboard(dashboardId);
       setDashboard(loaded);
-      setValues(defaultVariableValues(loaded.variables));
+      setValues(variableValuesFromParams(loaded.variables, new URLSearchParams(window.location.search)));
     } catch (cause) {
       setLoadError(cause instanceof Error ? cause.message : "Unable to load the dashboard");
     }
@@ -164,6 +202,53 @@ export function DashboardPage() {
   useEffect(() => {
     void Promise.resolve().then(load);
   }, [load]);
+
+  // A live range reloads every widget on its own while the page is visible,
+  // and the header's times follow now.
+  useEffect(() => {
+    if (!isLive(range)) return;
+    const reload = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      setNow(Date.now());
+      setRefresh((count) => count + 1);
+    }, liveRefreshInterval(range, Date.now()));
+    const clock = setInterval(() => setNow(Date.now()), 30_000);
+    return () => {
+      clearInterval(reload);
+      clearInterval(clock);
+    };
+  }, [range]);
+
+  const changeRange = useCallback((next: DashboardTimeRange, zoomed: DashboardTimeRange | null = null) => {
+    if (isLive(next)) setLastLive(next);
+    setZoomedFrom(zoomed);
+    setNow(Date.now());
+    setParams((current) => timeRangeParams(next, current), { replace: true });
+  }, [setParams]);
+
+  // Dragging across a chart shows that window, at least a minute long.
+  const zoomInto = useCallback((since: number, until: number) => {
+    const current = Date.now();
+    const centre = (since + until) / 2;
+    const from = Math.round(Math.min(since, centre - 30_000));
+    const to = Math.min(current, Math.round(Math.max(until, centre + 30_000)));
+    if (to <= from) return;
+    changeRange({ from, kind: "absolute", to }, zoomedFrom ?? range);
+  }, [changeRange, range, zoomedFrom]);
+
+  function changeTimeZone(preference: string) {
+    setTimeZonePreference(preference);
+    try {
+      localStorage.setItem(timeZoneKey, preference);
+    } catch {
+      // The choice still applies to this page.
+    }
+  }
+
+  function changeValues(next: VariableValues) {
+    setValues(next);
+    setParams((current) => variableParams(next, current), { replace: true });
+  }
 
   // Saves layout changes still waiting for the debounce.
   const flushLayouts = useCallback((leaving = false) => {
@@ -275,9 +360,11 @@ export function DashboardPage() {
     <WidgetTile
       onDelete={() => setRemoving(widget)}
       onEdit={() => setEditing({ widget })}
+      onZoom={zoomInto}
       projectId={dashboard.projectId}
       range={range}
       refresh={refresh}
+      timeZone={timeZone}
       values={values}
       widget={widget}
     />
@@ -309,17 +396,29 @@ export function DashboardPage() {
               </form>
             )}
             <span className="automationCreate__spacer" />
-            <SegmentedControl
-              aria-label="Time range"
-              onChange={(value) => setParams((current) => {
-                const next = new URLSearchParams(current);
-                next.set("range", value);
-                return next;
-              }, { replace: true })}
-              options={telemetryRanges}
-              value={range}
+            <LiveStatus live={isLive(range)} onResume={() => changeRange(lastLive)} />
+            <DashboardTimePicker
+              now={now}
+              onChange={(next) => changeRange(next)}
+              onTimeZoneChange={changeTimeZone}
+              onZoomOut={() => {
+                const zoomed = zoomOutTimeRange(range, Date.now(), zoomedFrom);
+                changeRange(zoomed.range, zoomed.zoomedFrom);
+              }}
+              range={range}
+              timeZone={timeZone}
+              timeZonePreference={timeZonePreference}
+              zoomed={zoomedFrom !== null}
             />
-            <IconButton aria-label="Refresh" onClick={() => setRefresh((count) => count + 1)} size="small" variant="ghost">
+            <IconButton
+              aria-label="Refresh"
+              onClick={() => {
+                setNow(Date.now());
+                setRefresh((count) => count + 1);
+              }}
+              size="small"
+              variant="ghost"
+            >
               <ArrowClockwiseIcon size={14} />
             </IconButton>
             <Button onClick={() => setEditing({ widget: null })} size="small" variant="primary">
@@ -342,7 +441,10 @@ export function DashboardPage() {
           {dashboard.projectName ? <p className="dashboardPage__meta">{dashboard.projectName}</p> : null}
         </header>
         <DashboardVariableBar
-          onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
+          onAdd={() => setEditingVariables(true)}
+          onChange={(name, value) => changeValues({ ...values, [name]: value })}
+          projectId={dashboard.projectId}
+          range={range}
           values={values}
           variables={dashboard.variables}
         />
@@ -367,6 +469,7 @@ export function DashboardPage() {
           onSave={saveWidget}
           projectId={dashboard.projectId}
           range={range}
+          timeZone={timeZone}
           variableValues={values}
           variables={dashboard.variables}
         />
@@ -377,7 +480,7 @@ export function DashboardPage() {
           onSave={async (variables) => {
             const updated = await updateDashboard(dashboard.id, { variables });
             setDashboard({ ...dashboard, variables: updated.variables });
-            setValues((current) => nextVariableValues(updated.variables, current));
+            changeValues(nextVariableValues(updated.variables, values));
             setEditingVariables(false);
           }}
           variables={dashboard.variables}

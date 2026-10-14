@@ -103,10 +103,11 @@ export const telemetryRanges: Array<{ label: string; value: TelemetryRange }> = 
   { label: "7d", value: "7d" },
 ];
 
-export function formatTelemetryTime(value: string): string {
+export function formatTelemetryTime(value: string, timeZone?: string): string {
   const date = logTimestamp(value);
   if (!date) return value;
   return date.toLocaleString(undefined, {
+    ...(timeZone ? { timeZone } : {}),
     day: "numeric",
     hour: "2-digit",
     hour12: false,
@@ -516,4 +517,11 @@ export function formatExplorerTime(value: string, withDate: boolean): string {
 export function traceSearchHref(params: URLSearchParams): string {
   const query = params.toString();
   return query ? `/traces/search?${query}` : "/traces/search";
+}
+
+const telemetryRangeMinutes: Record<TelemetryRange, number> = { "15m": 15, "1h": 60, "6h": 360, "24h": 1_440, "7d": 10_080 };
+
+// The last `range` up to now, for lookups that take an explicit window.
+export function telemetryRangeWindow(range: TelemetryRange, now = Date.now()): { since: number; until: number } {
+  return { since: now - telemetryRangeMinutes[range] * 60_000, until: now };
 }

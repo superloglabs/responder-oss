@@ -1,6 +1,6 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import { describe, expect, it } from "vitest";
-import { listAttributeValues, metricSeries, queryMetrics } from "./query.js";
+import { listAttributeValues, metricSeries, queryLogs, queryMetrics } from "./query.js";
 
 type RecordedQuery = { query: string; params: Record<string, unknown> };
 
@@ -27,6 +27,72 @@ describe("attribute value discovery", () => {
     const scans = query.match(/FROM otel_(?:logs|traces)\b[\s\S]*?(?=\)\s*GROUP BY v)/gu) ?? [];
     expect(scans.length).toBeGreaterThan(0);
     for (const scan of scans) expect(scan).toMatch(/LIMIT 1000000\s*$/u);
+  });
+});
+
+describe("attribute values filtered by other attributes", () => {
+  it("counts only rows that match the filters, with several values matching any of them", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listAttributeValues(recordingClient(queries), "project-1", "http.route", undefined, 200, undefined, undefined, [
+      { key: "service.name", value: "checkout" },
+      { key: "deployment.environment", value: "prod", values: ["prod", "staging"] },
+    ]);
+
+    const [{ params, query }] = queries;
+    expect(query).toContain("AND ServiceName = {fattr_r_v_0:String}");
+    expect(query).toContain("AND ResourceAttributes[{fattr_r_k_1:String}] IN {fattr_r_v_1:Array(String)}");
+    expect(params).toMatchObject({ fattr_r_k_1: "deployment.environment", fattr_r_v_0: "checkout", fattr_r_v_1: ["prod", "staging"] });
+  });
+
+  it("applies field filters to each table that has the field", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listAttributeValues(recordingClient(queries), "project-1", "service.name", undefined, 200, undefined, undefined, [
+      { key: "field.trace_id", value: "a", values: ["a", "b"] },
+      { key: "field.severity_number", value: "17" },
+    ]);
+
+    const [{ params, query }] = queries;
+    const logs = query.slice(query.indexOf("FROM otel_logs"), query.indexOf("FROM otel_traces"));
+    const traces = query.slice(query.indexOf("FROM otel_traces"));
+    expect(logs).toContain("TraceId IN {fattr_f_v_0:Array(String)}");
+    expect(logs).toContain("toString(SeverityNumber) = {fattr_f_v_1:String}");
+    expect(traces).toContain("TraceId IN {fattr_f_v_0:Array(String)}");
+    expect(traces).not.toContain("SeverityNumber");
+    expect(params).toMatchObject({ fattr_f_v_0: ["a", "b"], fattr_f_v_1: "17" });
+  });
+
+  it("leaves out traces when a filter is on a log attribute", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listAttributeValues(recordingClient(queries), "project-1", "service.name", undefined, 200, undefined, undefined, [
+      { key: "log.level", value: "error" },
+    ]);
+
+    expect(queries[0]!.query).toContain("FROM otel_logs");
+    expect(queries[0]!.query).not.toContain("FROM otel_traces");
+  });
+});
+
+describe("field filters", () => {
+  it("keeps the operator when a field filter has several values", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await queryLogs(recordingClient(queries), "project-1", {
+      limit: 10,
+      resourceAttrs: [
+        { key: "field.trace_id", op: "neq", value: "a", values: ["a", "b"] },
+        { key: "field.span_id", value: "c", values: ["c", "d"] },
+        { key: "field.severity_number", op: "neq", value: "9" },
+      ],
+    });
+
+    const [{ params, query }] = queries;
+    expect(query).toContain("TraceId NOT IN {fattr_v_0:Array(String)}");
+    expect(query).toContain("SpanId IN {fattr_v_1:Array(String)}");
+    expect(query).toContain("toString(SeverityNumber) != {fattr_v_2:String}");
+    expect(params).toMatchObject({ fattr_v_0: ["a", "b"], fattr_v_1: ["c", "d"], fattr_v_2: "9" });
   });
 });
 

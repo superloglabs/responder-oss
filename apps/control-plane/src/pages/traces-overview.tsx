@@ -19,6 +19,7 @@ import {
   traceExplorerQuery,
   traceSearchHref,
   withEnvironment,
+  telemetryRangeWindow,
   type TelemetryRange,
   type TraceExplorerQuery,
   type TraceOverview,
@@ -106,7 +107,7 @@ function OverviewBody({
   const keyQuery = `${query.projectId}|${query.range}`;
   const services = useTelemetryQuery(keyQuery, () => fetchServices(query.projectId, query.range, "traces"));
   const environments = useTelemetryQuery(keyQuery, () =>
-    fetchAttributeValues(query.projectId, query.range, "traces", "resource.deployment.environment"),
+    fetchAttributeValues(query.projectId, telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
   );
   const data: TraceOverview | null = overview.data?.overview ?? null;
   const since = overview.data ? Date.parse(overview.data.since) : 0;

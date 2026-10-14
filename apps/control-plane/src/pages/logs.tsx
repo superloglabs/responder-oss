@@ -30,6 +30,7 @@ import {
   logTimestamp,
   parseExplorerFilter,
   severityTextTone,
+  telemetryRangeWindow,
   traceHref,
   withEnvironment,
   type ExplorerFilter,
@@ -168,9 +169,9 @@ function LogExplorer({ live, projects, query, setQuery }: {
   const histogram = useTelemetryQuery(key, () => fetchLogHistogram(query), live);
   const facets = useTelemetryQuery(key, () => fetchLogFacets(query), live);
   const keyQuery = `${query.projectId}|${query.range}`;
-  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, query.range, "logs"));
+  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, telemetryRangeWindow(query.range), "logs"));
   const environments = useTelemetryQuery(keyQuery, () =>
-    fetchAttributeValues(query.projectId, query.range, "logs", "resource.deployment.environment"),
+    fetchAttributeValues(query.projectId, telemetryRangeWindow(query.range), "logs", "resource.deployment.environment"),
   );
 
   const bars = useMemo(

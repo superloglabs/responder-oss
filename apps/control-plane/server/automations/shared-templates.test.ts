@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sharedAutomationTemplateRoutes, sharedTemplateDocument } from "./shared-templates.js";
+import { sharedAutomationTemplateRoutes, sharedTemplateDocument, templatePreview } from "./shared-templates.js";
 
 const mocks = vi.hoisted(() => ({ getTemplate: vi.fn() }));
 vi.mock("../../../../packages/core/src/db/shared-automation-templates.js", () => ({
@@ -36,6 +36,30 @@ describe("public shared automation templates", () => {
 
     expect(response.status).toBe(404);
     expect(mocks.getTemplate).not.toHaveBeenCalled();
+  });
+});
+
+describe("template previews", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("describes a built-in template without a query", async () => {
+    await expect(templatePreview("triage-sentry-issues")).resolves.toMatchObject({
+      name: "Alert on critical Sentry issues",
+      slug: "triage-sentry-issues",
+    });
+    expect(mocks.getTemplate).not.toHaveBeenCalled();
+  });
+
+  it("describes a shared template by slug", async () => {
+    mocks.getTemplate.mockResolvedValue({ description: "", name: "Triage", slug });
+
+    await expect(templatePreview(slug)).resolves.toEqual({ description: "", name: "Triage", slug });
+  });
+
+  it("returns null for an unknown template or a failed query", async () => {
+    await expect(templatePreview("unknown")).resolves.toBeNull();
+    mocks.getTemplate.mockRejectedValue(new Error("connection refused"));
+    await expect(templatePreview(slug)).resolves.toBeNull();
   });
 });
 
