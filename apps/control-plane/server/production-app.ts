@@ -27,13 +27,14 @@ export const productionApp = new Hono()
     return next();
   })
   .use("*", serveAsset)
-  .get("/templates/:slug", async (context, next) => {
+  .get("/templates/*", async (context, next) => {
     // The path names a built-in template id or a shared template slug. Link
     // previews get the template's title and description. Unknown or stopped
-    // templates get the plain shell, and the application shows its own
-    // not-found state.
+    // templates, and other paths here, get the plain shell, and the
+    // application shows its own not-found state.
+    const slug = context.req.path.slice("/templates/".length).replace(/\/$/u, "");
     const [template, shell] = await Promise.all([
-      templatePreview(context.req.param("slug")),
+      templatePreview(slug),
       loadAppShell(),
     ]);
     if (!shell) return next();
