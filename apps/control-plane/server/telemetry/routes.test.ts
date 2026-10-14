@@ -207,6 +207,17 @@ describe("telemetry routes", () => {
       { n: 15, unit: "MINUTE" },
     );
 
+    await app.request(`/traces/histogram?projectId=${projectId}&minDurationMs=600`);
+    expect(dependencies.countSeries).toHaveBeenLastCalledWith(
+      expect.anything(),
+      projectId,
+      "traces",
+      expect.objectContaining({ minTraceDurationMs: 600 }),
+      "status",
+      expect.anything(),
+    );
+    expect(vi.mocked(dependencies.countSeries).mock.lastCall?.[3]).not.toHaveProperty("minDurationMs");
+
     const facets = await app.request(`/traces/facets?projectId=${projectId}&status=error&operation=checkout`);
     await expect(facets.json()).resolves.toEqual({
       attributes: {},

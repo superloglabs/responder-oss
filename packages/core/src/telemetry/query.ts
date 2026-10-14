@@ -135,10 +135,10 @@ function splitAttrs(
   return out;
 }
 
-// Build equality conditions for `field.*` filters against top-level columns.
-// Only keys on the fieldColumnExpr allowlist for this source produce a
-// condition; everything else is silently dropped. Op is ignored — identifier
-// filters are equality-only.
+// Build conditions for `field.*` filters against top-level columns. Only keys
+// on the fieldColumnExpr allowlist for this source produce a condition;
+// everything else is silently dropped. Identifiers match exactly, or with
+// `neq` exclude the value.
 function fieldConds(
   attrs: ResourceAttrFilter[],
   source: FieldFilterSource,
@@ -150,7 +150,7 @@ function fieldConds(
     const expr = fieldColumnExpr(a.key, source);
     if (!expr) return;
     const vName = `${paramPrefix}_v_${i}`;
-    conds.push(`${expr} = {${vName}:String}`);
+    conds.push(`${expr} ${a.op === "neq" ? "!=" : "="} {${vName}:String}`);
     params[vName] = a.value;
   });
   return { conds, params };
@@ -2158,6 +2158,10 @@ export type SeriesFilter = {
   spanName?: string;
   statusCode?: string;
   minDurationMs?: number;
+  // Spans of traces lasting at least this long, first span start to last span
+  // end within the window, as the trace list measures them. `minDurationMs`
+  // compares each span's own duration instead.
+  minTraceDurationMs?: number;
   // Any of these values, alongside the single-value fields above.
   services?: string[];
   severities?: string[];
@@ -2280,7 +2284,7 @@ function rollupEligible(filter: SeriesFilter, groupBy: string | undefined, step:
   if (filter.resourceAttrs?.length) return false;
   if (filter.search) return false;
   if (filter.spanName || filter.spanNames?.length) return false;
-  if (filter.minDurationMs) return false;
+  if (filter.minDurationMs || filter.minTraceDurationMs) return false;
   if (groupBy && !rollupGroupColumn(groupBy)) return false;
   return true;
 }
@@ -2450,6 +2454,16 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
     if (typeof filter.minDurationMs === "number") {
       conds.push("Duration >= {minDurationNs:UInt64}");
     }
+    if (filter.minTraceDurationMs) {
+      conds.push(`TraceId IN (
+        SELECT TraceId FROM otel_traces
+        WHERE SuperlogProjectId = {projectId:String}
+          AND Timestamp >= ${sinceExpr}
+          AND Timestamp <= ${untilExpr}
+        GROUP BY TraceId
+        HAVING max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp)) >= {minTraceDurationNs:UInt64}
+      )`);
+    }
   }
 
   return {
@@ -2464,6 +2478,7 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
       spanName: filter.spanName ?? "",
       statusCode: filter.statusCode ?? "",
       minDurationNs: Math.round((filter.minDurationMs ?? 0) * 1_000_000),
+      minTraceDurationNs: Math.round((filter.minTraceDurationMs ?? 0) * 1_000_000),
       ...attr.params,
       ...eventAttr.params,
       ...field.params,

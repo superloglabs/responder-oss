@@ -323,7 +323,8 @@ export function createTelemetryRoutes(
         resourceAttrs: attrs,
         ...lists,
         ...(options.search ? { search: options.search } : {}),
-        ...(options.minDurationMs ? { minDurationMs: options.minDurationMs } : {}),
+        // A trace's total duration, as the trace list filters it.
+        ...(options.minDurationMs ? { minTraceDurationMs: options.minDurationMs } : {}),
       },
       ok: true,
       query: query.data,
@@ -455,7 +456,7 @@ export function createTelemetryRoutes(
         limit: request.query.limit,
         range: filter.range,
         ...(filter.resourceAttrs.length ? { resourceAttrs: filter.resourceAttrs } : {}),
-        ...(filter.minDurationMs ? { minDurationMs: filter.minDurationMs } : {}),
+        ...(filter.minTraceDurationMs ? { minDurationMs: filter.minTraceDurationMs } : {}),
         ...(filter.services ? { services: filter.services } : {}),
         ...(filter.spanNames ? { spanNames: filter.spanNames } : {}),
         ...(filter.statusCodes ? { statusCodes: filter.statusCodes } : {}),

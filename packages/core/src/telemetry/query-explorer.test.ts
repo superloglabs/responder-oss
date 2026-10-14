@@ -96,6 +96,36 @@ describe("explorer value lists", () => {
   });
 });
 
+describe("explorer trace duration", () => {
+  it("counts spans of traces that last at least the minimum, not spans that do", async () => {
+    const calls: Call[] = [];
+    const ch = client(calls, { tables: ["events_per_minute"] });
+
+    await countSeries(ch, "project-1", "traces", { minTraceDurationMs: 600, range }, "status", { n: 1, unit: "MINUTE" });
+
+    const query = calls.find((call) => /\bFROM otel_traces\b/u.test(call.query))!;
+    expect(query.query).not.toMatch(/Duration >= \{minDurationNs:UInt64\}/u);
+    expect(query.query).toMatch(/TraceId IN \(/u);
+    expect(query.query).toMatch(/HAVING .*>= \{minTraceDurationNs:UInt64\}/su);
+    expect(query.params).toMatchObject({ minTraceDurationNs: 600_000_000 });
+    expect(calls.some((call) => /FROM events_per_minute/u.test(call.query))).toBe(false);
+  });
+});
+
+describe("identifier filters", () => {
+  it("excludes a trace ID with !=", async () => {
+    const calls: Call[] = [];
+
+    await queryLogs(client(calls), "project-1", {
+      limit: 10,
+      range,
+      resourceAttrs: [{ key: "field.trace_id", op: "neq", value: "abc" }],
+    });
+
+    expect(calls[0]!.query).toMatch(/TraceId != \{fattr_v_0:String\}/u);
+  });
+});
+
 describe("trace overview", () => {
   it("summarizes a service's entry spans, client calls, and errors", async () => {
     const calls: Call[] = [];

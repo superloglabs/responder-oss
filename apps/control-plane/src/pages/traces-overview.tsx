@@ -168,7 +168,7 @@ function OverviewBody({
           <SelectField
             className="explorerSelect"
             label="Project"
-            onChange={(projectId) => setQuery({ filters: [], projectId })}
+            onChange={(projectId) => setQuery({ filters: [], projectId, services: [] })}
             options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
             value={query.projectId}
           />
