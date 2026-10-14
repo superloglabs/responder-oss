@@ -22,6 +22,7 @@ import {
 } from "@responder/core/telemetry/alerts";
 import { getTelemetryClient, type TelemetryClient } from "@responder/core/telemetry/client";
 import { postAutomationNotification } from "./automation-notifications.js";
+import type { startAlertAutomations } from "./telemetry-alert-automations.js";
 
 // Alerts claimed per pass, and checked at once. The read-only store limits
 // concurrent queries, and the API shares it.
@@ -44,6 +45,9 @@ export interface TelemetryAlertDependencies {
   recordCheck: typeof recordTelemetryAlertCheck;
   resolveEpisode: typeof resolveTelemetryAlertEpisode;
   setMessage: typeof setTelemetryAlertEpisodeMessage;
+  // Starts the automations watching the alert's channel. The worker supplies
+  // it with its job queue; without it, alerts only post.
+  startAutomations?: (input: Parameters<typeof startAlertAutomations>[0]) => Promise<number>;
   unannouncedRecoveries: typeof unannouncedTelemetryAlertRecoveries;
   values: typeof alertValues;
 }
@@ -107,6 +111,21 @@ export async function checkTelemetryAlert(
     });
     if (delivery && "timestamp" in delivery && delivery.timestamp) {
       await dependencies.setMessage(episode.id, delivery.timestamp);
+      if (dependencies.startAutomations) {
+        await dependencies
+          .startAutomations({
+            body: content.markdown,
+            channelId: target.channelId,
+            episodeId: episode.id,
+            integrationAccountId: target.integrationAccountId,
+            organizationId: alert.organizationId,
+            timestamp: delivery.timestamp,
+            title: content.text,
+          })
+          .catch((error: unknown) => {
+            console.warn(JSON.stringify({ alertId: alert.id, error: errorText(error), event: "telemetry_alert_automations_failed" }));
+          });
+      }
     } else if (delivery) {
       // The next check tries again while the episode is open. Without a
       // message ID there is no thread to reply in, so that is a failure too.

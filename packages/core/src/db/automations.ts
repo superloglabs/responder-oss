@@ -95,6 +95,9 @@ export async function findAutomationsForSlackEvent(input: {
   broadcast?: boolean;
   channelId: string;
   eventType: "app_mention" | "message";
+  // A message the app posted for the workspace, such as a telemetry alert,
+  // which may start runs. Other messages from the app never do.
+  ownMessage?: boolean;
   teamId: string;
   text: string;
   threadTimestamp?: string;
@@ -155,8 +158,9 @@ export async function findAutomationsForSlackEvent(input: {
   return rows.flatMap((row) => {
     const { appId, botUserId } = row.accountMetadata;
     if (
-      (typeof botUserId === "string" && input.authorIds.includes(botUserId)) ||
-      (typeof appId === "string" && input.authorIds.includes(appId))
+      !input.ownMessage &&
+      ((typeof botUserId === "string" && input.authorIds.includes(botUserId)) ||
+        (typeof appId === "string" && input.authorIds.includes(appId)))
     ) {
       return [];
     }
@@ -2289,6 +2293,32 @@ export async function getAutomationNotificationChannelNames(input: {
       inArray(integrationResources.externalId, input.notifications.map((notification) => notification.channelId)),
     ));
   return new Map(rows.map((row) => [`${row.integrationAccountId}:${row.channelId}`, row.name]));
+}
+
+// The Slack workspace and the app's own IDs for a connected account, to
+// start automations on a message the app posted.
+export async function getSlackAppIdentity(input: {
+  integrationAccountId: string;
+  organizationId: string;
+}): Promise<{ appId: string | null; botUserId: string | null; teamId: string } | null> {
+  const rows = await getDatabase()
+    .select({ metadata: integrationAccounts.metadata, teamId: integrationAccounts.externalAccountId })
+    .from(integrationAccounts)
+    .where(and(
+      eq(integrationAccounts.id, input.integrationAccountId),
+      eq(integrationAccounts.organizationId, input.organizationId),
+      eq(integrationAccounts.provider, "slack"),
+      eq(integrationAccounts.status, "connected"),
+    ))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+  return {
+    appId: typeof metadata.appId === "string" ? metadata.appId : null,
+    botUserId: typeof metadata.botUserId === "string" ? metadata.botUserId : null,
+    teamId: row.teamId,
+  };
 }
 
 // The Slack connection a notification posts through, or the DevRev

@@ -135,6 +135,19 @@ describe("trigger matching", () => {
       ]);
   });
 
+  it("lets the app's own alert messages start runs, unless a trigger ignores the app", async () => {
+    const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
+    const ignoringApp = { ...slack, eventMode: "every_message", ignoredAuthors: [{ id: "A-RESPONDER", name: "Superlog" }] } as const;
+    const rows = [
+      { accountId, accountMetadata: metadata, automationId: "ignoring", triggers: [ignoringApp] },
+      { accountId, accountMetadata: metadata, automationId: "open", triggers: [{ ...slack, eventMode: "every_message" }] },
+    ];
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([rows]));
+
+    await expect(findAutomationsForSlackEvent({ authorIds: ["A-RESPONDER", "U-BOT"], channelId: "C1", eventType: "message", ownMessage: true, teamId: "T1", text: "Checkout errors is firing", timestamp: "1790000000.000100" }))
+      .resolves.toEqual([{ automationId: "open", integrationAccountId: accountId, mentioned: false, startsRun: true }]);
+  });
+
   it("skips messages that match a trigger's ignored phrases", async () => {
     const metadata = { appId: "A-RESPONDER", botUserId: "U-BOT" };
     const ignoring = { ...slack, eventMode: "every_message", ignoredPhrases: ["^resolved:", "deploy (started|finished)"] } as const;

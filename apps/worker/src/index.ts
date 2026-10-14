@@ -99,7 +99,8 @@ import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
-import { checkDueTelemetryAlerts } from "./telemetry-alerts.js";
+import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
+import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -139,10 +140,27 @@ const pollers: {
 } = {};
 
 let telemetryAlertPass: Promise<void> | undefined;
+// Alerts start the Slack automations watching their channel through this
+// worker's job queue.
+const telemetryAlertDependencies = {
+  ...defaultTelemetryAlertDependencies,
+  startAutomations: (input: Parameters<typeof startAlertAutomations>[0]) =>
+    startAlertAutomations(input, {
+      ...defaultAlertAutomationDependencies,
+      queue: async (run) => {
+        const queued = await boss.send(automationRunQueue, {
+          kind: "automation_run",
+          queuedAt: new Date().toISOString(),
+          runId: run.runId,
+        }, automationRunJobOptions(run.organizationId));
+        if (!queued) throw new Error("Automation run job was not created");
+      },
+    }),
+};
 
 // Runs at most one alert pass at a time; a slow pass delays the next.
 function checkTelemetryAlerts(): Promise<void> {
-  telemetryAlertPass ??= checkDueTelemetryAlerts()
+  telemetryAlertPass ??= checkDueTelemetryAlerts(telemetryAlertDependencies)
     .then(() => undefined)
     .catch((error: unknown) => {
       void reportWorkerException(error, { operation: "telemetry_alerts" });
