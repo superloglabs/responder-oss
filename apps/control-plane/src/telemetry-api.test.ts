@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  environmentFilter,
   formatDuration,
-  logSearchParams,
+  histogramBars,
+  levelSeries,
+  logExplorerParams,
+  logExplorerQuery,
   logTimestamp,
   severityTextTone,
   severityTone,
@@ -9,8 +13,10 @@ import {
   spanStatus,
   spanWaterfall,
   traceHref,
+  traceExplorerParams,
+  traceExplorerQuery,
   traceListHref,
-  traceSearchParams,
+  withEnvironment,
   type Span,
 } from "./telemetry-api";
 
@@ -35,17 +41,67 @@ function span(id: string, parent: string, startMs: number, durationMs: number): 
   };
 }
 
-describe("logSearchParams", () => {
-  it("sends only the filters that are set", () => {
-    expect(
-      logSearchParams({
-        projectId: "11111111-1111-4111-8111-111111111111",
-        range: "6h",
-        search: "  timeout ",
-        service: "",
-        severity: "ERROR",
-      }).toString(),
-    ).toBe("projectId=11111111-1111-4111-8111-111111111111&range=6h&search=timeout&severity=ERROR");
+describe("explorer queries", () => {
+  it("reads a log explorer query from the URL and writes it back", () => {
+    const params = new URLSearchParams(
+      "projectId=p&range=6h&search=timeout&service=api&service=api&severity=error&severity=WARN" +
+        "&filter=log.http.route%3D%2Fcheckout&filter=resource.deployment.environment!%3Dstaging&filter=bad&facet=log.http.route",
+    );
+    const query = logExplorerQuery(params);
+
+    expect(query).toEqual({
+      facets: ["log.http.route"],
+      filters: [
+        { key: "log.http.route", op: "eq", value: "/checkout" },
+        { key: "resource.deployment.environment", op: "neq", value: "staging" },
+      ],
+      projectId: "p",
+      range: "6h",
+      search: "timeout",
+      services: ["api"],
+      severities: ["ERROR", "WARN"],
+    });
+    expect(logExplorerParams(query).toString()).toBe(
+      "projectId=p&range=6h&search=timeout&service=api&severity=ERROR&severity=WARN" +
+        "&filter=log.http.route%3D%2Fcheckout&filter=resource.deployment.environment%21%3Dstaging&facet=log.http.route",
+    );
+  });
+
+  it("reads the trace list's older status links and ignores unknown ranges", () => {
+    const query = traceExplorerQuery(new URLSearchParams("projectId=p&range=90d&status=error&minDurationMs=-5&operation=GET"));
+
+    expect(query).toMatchObject({ minDurationMs: 0, operations: ["GET"], range: "1h", statuses: ["STATUS_CODE_ERROR"] });
+    expect(traceExplorerParams({ ...query, minDurationMs: 500 }).toString()).toBe(
+      "projectId=p&range=1h&operation=GET&status=STATUS_CODE_ERROR&minDurationMs=500",
+    );
+  });
+
+  it("sets and clears the environment filter", () => {
+    const filters = withEnvironment([{ key: "log.a", op: "eq", value: "1" }], "production");
+
+    expect(environmentFilter(filters)).toBe("production");
+    expect(withEnvironment(filters, "")).toEqual([{ key: "log.a", op: "eq", value: "1" }]);
+  });
+
+  it("fills empty buckets and sorts groups into series", () => {
+    const bars = histogramBars(
+      {
+        buckets: [
+          { bucket: "2026-10-13 11:00:30", count: 2, group: "ERROR" },
+          { bucket: "2026-10-13 11:00:30", count: 5, group: "INFO" },
+          { bucket: "2026-10-13 11:01:30", count: 1, group: "WARN" },
+        ],
+        since: "2026-10-13T11:00:10.000Z",
+        stepMs: 30_000,
+        until: "2026-10-13T11:01:40.000Z",
+      },
+      ["error", "warn", "other"] as const,
+      levelSeries,
+    );
+
+    expect(bars.map((bar) => bar.total)).toEqual([0, 7, 0, 1]);
+    expect(bars[1]).toMatchObject({ counts: { error: 2, other: 5, warn: 0 } });
+    expect(bars[0]!.start.toISOString()).toBe("2026-10-13T11:00:00.000Z");
   });
 });
 
@@ -93,27 +149,10 @@ describe("spans", () => {
   });
 
   it("returns from a trace to the list that opened it", () => {
-    expect(traceListHref({ traceList: "status=error&range=6h" }, "p-1")).toBe("/traces?status=error&range=6h");
-    expect(traceListHref({ traceList: "" }, "p-1")).toBe("/traces");
-    expect(traceListHref(null, "p-1")).toBe("/traces?projectId=p-1");
-    expect(traceListHref({ other: 1 }, "p-1")).toBe("/traces?projectId=p-1");
-  });
-});
-
-describe("traceSearchParams", () => {
-  it("sends only the filters that are set", () => {
-    expect(
-      traceSearchParams({
-        minDurationMs: 0,
-        projectId: "p",
-        range: "1h",
-        service: "checkout",
-        status: "",
-      }).toString(),
-    ).toBe("projectId=p&range=1h&service=checkout");
-    expect(
-      traceSearchParams({ minDurationMs: 500, projectId: "p", range: "7d", service: "", status: "error" }).toString(),
-    ).toBe("projectId=p&range=7d&status=error&minDurationMs=500");
+    expect(traceListHref({ traceList: "status=error&range=6h" }, "p-1")).toBe("/traces/search?status=error&range=6h");
+    expect(traceListHref({ traceList: "" }, "p-1")).toBe("/traces/search");
+    expect(traceListHref(null, "p-1")).toBe("/traces/search?projectId=p-1");
+    expect(traceListHref({ other: 1 }, "p-1")).toBe("/traces/search?projectId=p-1");
   });
 });
 

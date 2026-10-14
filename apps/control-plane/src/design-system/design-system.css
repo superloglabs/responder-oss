@@ -1263,6 +1263,10 @@
   cursor: pointer;
 }
 
+.dsDataTable tbody tr.dsDataTable__row--selected td {
+  background: var(--ds-info-surface);
+}
+
 .dsDataTable__cell--left {
   text-align: left;
 }

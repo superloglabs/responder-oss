@@ -30,6 +30,7 @@ import { SharedAutomationTemplatePage } from "./pages/shared-automation-template
 import { TraceDetailPage } from "./pages/trace-detail";
 import { TelemetrySetupPage } from "./pages/telemetry-setup";
 import { TracesPage } from "./pages/traces";
+import { TracesOverviewPage } from "./pages/traces-overview";
 import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
@@ -154,7 +155,8 @@ export function App() {
         <Route element={<SkillEditorPage />} path="/skills/:skillId" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<LogsPage />} path="/logs" />
-        <Route element={<TracesPage />} path="/traces" />
+        <Route element={<TracesOverviewPage />} path="/traces" />
+        <Route element={<TracesPage />} path="/traces/search" />
         <Route element={<TelemetrySetupPage />} path="/telemetry/setup" />
         <Route element={<DashboardsPage />} path="/dashboards" />
         <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />

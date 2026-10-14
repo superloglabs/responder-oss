@@ -177,12 +177,37 @@ function fieldConds(
   return { conds, params };
 }
 
+// Conditions that each listed column holds one of its values. Empty lists
+// add nothing.
+function anyOfConds(
+  lists: Array<{ expr: string; param: string; values: string[] | undefined }>,
+): { conds: string[]; params: Record<string, string[]> } {
+  const conds: string[] = [];
+  const params: Record<string, string[]> = {};
+  for (const list of lists) {
+    if (!list.values?.length) continue;
+    conds.push(`${list.expr} IN {${list.param}:Array(String)}`);
+    params[list.param] = list.values;
+  }
+  return { conds, params };
+}
+
 function groupExprForAttribute(
   groupBy: string | undefined,
   source: SeriesSource,
 ): { expr: string; params: Record<string, string> } {
   if (groupBy === "service.name" || groupBy === "service") {
     return { expr: "ServiceName", params: {} };
+  }
+  // Log level or span status, as the explorers' count charts and facets show them.
+  if (groupBy === "severity" && source === "logs") {
+    return { expr: "upper(SeverityText)", params: {} };
+  }
+  if (groupBy === "status" && source === "traces") {
+    return { expr: "StatusCode", params: {} };
+  }
+  if (groupBy === "operation" && source === "traces") {
+    return { expr: "SpanName", params: {} };
   }
   if (groupBy?.startsWith("attr:")) {
     return {
@@ -219,6 +244,9 @@ export async function queryLogs(
     traceId?: string;
     resourceAttrs?: ResourceAttrFilter[];
     logAttrs?: ResourceAttrFilter[];
+    // Any of these services or levels.
+    services?: string[];
+    severities?: string[];
     limit: number;
   },
 ) {
@@ -227,6 +255,10 @@ export async function queryLogs(
   const attr = attrConds(split.resource);
   const logAttr = attrConds([...split.log, ...(params.logAttrs ?? [])], "LogAttributes", "lattr");
   const field = fieldConds(split.field, "logs");
+  const anyOf = anyOfConds([
+    { expr: "ServiceName", param: "services", values: params.services },
+    { expr: "upper(SeverityText)", param: "severities", values: params.severities?.map((value) => value.toUpperCase()) },
+  ]);
   const conds: string[] = [
     "SuperlogProjectId = {projectId:String}",
     `Timestamp >= ${sinceExpr}`,
@@ -244,6 +276,7 @@ export async function queryLogs(
     ...attr.conds,
     ...logAttr.conds,
     ...field.conds,
+    ...anyOf.conds,
   ];
   if (params.service) conds.push("ServiceName = {service:String}");
   if (params.severity) conds.push("upper(SeverityText) = upper({severity:String})");
@@ -284,6 +317,7 @@ export async function queryLogs(
         ...attr.params,
         ...logAttr.params,
         ...field.params,
+        ...anyOf.params,
       },
       format: "JSONEachRow",
     });
@@ -379,6 +413,10 @@ type TracesAggregatedParams = {
   service?: string;
   spanName?: string;
   statusCode?: string;
+  // A trace qualifies when one of its spans has any of these values.
+  services?: string[];
+  spanNames?: string[];
+  statusCodes?: string[];
   minDurationMs?: number;
   resourceAttrs?: ResourceAttrFilter[];
   limit: number;
@@ -409,6 +447,7 @@ function traceSummaryEligible(params: TracesAggregatedParams): boolean {
   if (params.service) return false;
   if (params.spanName) return false;
   if (params.statusCode) return false;
+  if (params.services?.length || params.spanNames?.length || params.statusCodes?.length) return false;
   if (params.minDurationMs) return false;
   if (params.resourceAttrs?.length) return false;
   return true;
@@ -550,7 +589,12 @@ export async function queryTracesAggregated(
   ];
   // Inner scope: span-level filters pick which TraceIds qualify. Identifier
   // (field.*) filters like span_id are span-level too.
-  const innerConds: string[] = [...outerConds, ...spanAttr.conds, ...field.conds];
+  const anyOf = anyOfConds([
+    { expr: "ServiceName", param: "services", values: params.services },
+    { expr: "SpanName", param: "spanNames", values: params.spanNames },
+    { expr: "StatusCode", param: "statusCodes", values: params.statusCodes },
+  ]);
+  const innerConds: string[] = [...outerConds, ...spanAttr.conds, ...field.conds, ...anyOf.conds];
   if (params.service) innerConds.push("ServiceName = {service:String}");
   if (params.spanName) innerConds.push("SpanName = {spanName:String}");
   if (params.statusCode) innerConds.push("StatusCode = {statusCode:String}");
@@ -559,7 +603,8 @@ export async function queryTracesAggregated(
     params.spanName ||
     params.statusCode ||
     spanAttr.conds.length ||
-    field.conds.length
+    field.conds.length ||
+    anyOf.conds.length
   );
 
   // After GROUP BY TraceId, filter by total duration if requested.
@@ -611,6 +656,7 @@ export async function queryTracesAggregated(
         ...attr.params,
         ...spanAttr.params,
         ...field.params,
+        ...anyOf.params,
       },
       format: "JSONEachRow",
     });
@@ -2156,6 +2202,15 @@ export type SeriesFilter = {
   spanName?: string;
   statusCode?: string;
   minDurationMs?: number;
+  // Spans of traces lasting at least this long, first span start to last span
+  // end within the window, as the trace list measures them. `minDurationMs`
+  // compares each span's own duration instead.
+  minTraceDurationMs?: number;
+  // Any of these values, alongside the single-value fields above.
+  services?: string[];
+  severities?: string[];
+  spanNames?: string[];
+  statusCodes?: string[];
 };
 
 export type StepUnit = "SECOND" | "MINUTE" | "HOUR" | "DAY";
@@ -2272,10 +2327,18 @@ function rollupEligible(filter: SeriesFilter, groupBy: string | undefined, step:
   if (step.unit === "SECOND") return false; // rollup resolution is one minute
   if (filter.resourceAttrs?.length) return false;
   if (filter.search) return false;
-  if (filter.spanName) return false;
-  if (filter.minDurationMs) return false;
-  if (groupBy && groupBy !== "service" && groupBy !== "service.name") return false;
+  if (filter.spanName || filter.spanNames?.length) return false;
+  if (filter.minDurationMs || filter.minTraceDurationMs) return false;
+  if (groupBy && !rollupGroupColumn(groupBy)) return false;
   return true;
+}
+
+// The rollup column a supported grouping reads.
+function rollupGroupColumn(groupBy: string): "service" | "severity" | "status_code" | null {
+  if (groupBy === "service" || groupBy === "service.name") return "service";
+  if (groupBy === "severity") return "severity";
+  if (groupBy === "status") return "status_code";
+  return null;
 }
 
 async function countSeriesFromRollup(
@@ -2308,7 +2371,21 @@ async function countSeriesFromRollup(
   } else if (filter.statusCode) {
     conds.push("status_code = {statusCode:String}");
   }
-  const groupExpr = groupBy ? "service" : "''";
+  const anyOf = anyOfConds([
+    { expr: "service", param: "services", values: filter.services },
+    ...(source === "logs"
+      ? [{ expr: "severity", param: "severities", values: filter.severities?.map((value) => value.toUpperCase()) }]
+      : [{ expr: "status_code", param: "statusCodes", values: filter.statusCodes }]),
+  ]);
+  conds.push(...anyOf.conds);
+  const groupColumn = groupBy ? rollupGroupColumn(groupBy) : null;
+  // The rollup keeps severity for logs and status codes for spans only.
+  const groupExpr =
+    groupColumn === "service" ||
+    (groupColumn === "severity" && source === "logs") ||
+    (groupColumn === "status_code" && source === "traces")
+      ? groupColumn
+      : "''";
 
   const query = `
     SELECT
@@ -2332,6 +2409,7 @@ async function countSeriesFromRollup(
       service: filter.service ?? "",
       severity: filter.severity ?? "",
       statusCode: filter.statusCode ?? "",
+      ...anyOf.params,
     },
     format: "JSONEachRow",
   });
@@ -2386,6 +2464,18 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
       : attrConds(split.span, "SpanAttributes", "event_attr");
   const field = fieldConds(split.field, source === "logs" ? "logs" : "traces");
   const table = source === "logs" ? "otel_logs" : "otel_traces";
+  const anyOf = anyOfConds(
+    source === "logs"
+      ? [
+          { expr: "ServiceName", param: "services", values: filter.services },
+          { expr: "upper(SeverityText)", param: "severities", values: filter.severities?.map((value) => value.toUpperCase()) },
+        ]
+      : [
+          { expr: "ServiceName", param: "services", values: filter.services },
+          { expr: "SpanName", param: "spanNames", values: filter.spanNames },
+          { expr: "StatusCode", param: "statusCodes", values: filter.statusCodes },
+        ],
+  );
   const conds: string[] = [
     "SuperlogProjectId = {projectId:String}",
     `Timestamp >= ${sinceExpr}`,
@@ -2393,6 +2483,7 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
     ...attr.conds,
     ...eventAttr.conds,
     ...field.conds,
+    ...anyOf.conds,
   ];
   if (filter.service) conds.push("ServiceName = {service:String}");
   if (source === "logs") {
@@ -2406,6 +2497,16 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
     if (filter.statusCode) conds.push("StatusCode = {statusCode:String}");
     if (typeof filter.minDurationMs === "number") {
       conds.push("Duration >= {minDurationNs:UInt64}");
+    }
+    if (filter.minTraceDurationMs) {
+      conds.push(`TraceId IN (
+        SELECT TraceId FROM otel_traces
+        WHERE SuperlogProjectId = {projectId:String}
+          AND Timestamp >= ${sinceExpr}
+          AND Timestamp <= ${untilExpr}
+        GROUP BY TraceId
+        HAVING max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp)) >= {minTraceDurationNs:UInt64}
+      )`);
     }
   }
 
@@ -2421,9 +2522,11 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
       spanName: filter.spanName ?? "",
       statusCode: filter.statusCode ?? "",
       minDurationNs: Math.round((filter.minDurationMs ?? 0) * 1_000_000),
+      minTraceDurationNs: Math.round((filter.minTraceDurationMs ?? 0) * 1_000_000),
       ...attr.params,
       ...eventAttr.params,
       ...field.params,
+      ...anyOf.params,
     },
     table,
   };
@@ -2460,3 +2563,140 @@ export async function countAggregate(
   });
 }
 
+// -----------------------------------------------------------------------------
+// Trace overview: how requests into a service behave over the window.
+// -----------------------------------------------------------------------------
+
+export type TraceOverviewSeriesRow = { bucket: string; errors: number; p95_ms: number; requests: number };
+export type TraceOverviewOperation = { errors: number; name: string; p95_ms: number; requests: number };
+export type TraceOverviewDependency = { errors: number; name: string; p95_ms: number; requests: number };
+export type TraceOverviewError = {
+  first_seen: string;
+  message: string;
+  service: string;
+  span_name: string;
+  spans: number;
+  traces: number;
+};
+export type TraceOverview = {
+  dependencies: TraceOverviewDependency[];
+  errors: TraceOverviewError[];
+  operations: TraceOverviewOperation[];
+  series: TraceOverviewSeriesRow[];
+  totals: { errors: number; p95_ms: number; requests: number };
+};
+
+// Requests enter a service through server and consumer spans, or start a
+// trace with a root span.
+const ENTRY_SPAN_COND =
+  "(SpanKind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
+const ERROR_SPAN_COND = "StatusCode = 'STATUS_CODE_ERROR'";
+// What a client span calls, from the most specific attribute it carries.
+const DEPENDENCY_NAME_EXPR = `multiIf(
+  SpanAttributes['peer.service'] != '', SpanAttributes['peer.service'],
+  SpanAttributes['server.address'] != '', SpanAttributes['server.address'],
+  SpanAttributes['net.peer.name'] != '', SpanAttributes['net.peer.name'],
+  SpanAttributes['db.system'] != '', SpanAttributes['db.system'],
+  SpanName
+)`;
+
+export async function traceOverview(
+  ch: ClickHouseClient,
+  projectId: string,
+  params: { range?: TimeRange; resourceAttrs?: ResourceAttrFilter[]; service?: string; step: Step },
+): Promise<TraceOverview> {
+  const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
+  const attr = attrConds(splitAttrs(params.resourceAttrs).resource);
+  const conds = [
+    "SuperlogProjectId = {projectId:String}",
+    `Timestamp >= ${sinceExpr}`,
+    `Timestamp <= ${untilExpr}`,
+    ...attr.conds,
+  ];
+  if (params.service) conds.push("ServiceName = {service:String}");
+  const where = conds.join(" AND ");
+  const queryParams = {
+    projectId,
+    since: sinceSql,
+    until: untilSql,
+    service: params.service ?? "",
+    ...attr.params,
+  };
+  const read = <Row>(query: string) =>
+    retryOneConnectionReset(async () => {
+      const r = await ch.query({ query, query_params: queryParams, format: "JSONEachRow" });
+      return (await r.json()) as Row[];
+    });
+  const stats = `
+    count() AS requests,
+    countIf(${ERROR_SPAN_COND}) AS errors,
+    quantile(0.95)(Duration) / 1000000 AS p95_ms`;
+
+  const [totals, series, operations, dependencies, errors] = await Promise.all([
+    read<Record<string, string | number>>(`
+      SELECT ${stats}
+      FROM otel_traces
+      WHERE ${where} AND ${ENTRY_SPAN_COND}
+    `),
+    read<Record<string, string | number>>(`
+      SELECT
+        toString(toStartOfInterval(Timestamp, INTERVAL ${params.step.n} ${params.step.unit})) AS bucket,
+        ${stats}
+      FROM otel_traces
+      WHERE ${where} AND ${ENTRY_SPAN_COND}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+      LIMIT 10000
+    `),
+    read<Record<string, string | number>>(`
+      SELECT SpanName AS name, ${stats}
+      FROM otel_traces
+      WHERE ${where} AND ${ENTRY_SPAN_COND}
+      GROUP BY name
+      ORDER BY errors DESC, requests DESC
+      LIMIT 10
+    `),
+    read<Record<string, string | number>>(`
+      SELECT ${DEPENDENCY_NAME_EXPR} AS name, ${stats}
+      FROM otel_traces
+      WHERE ${where} AND SpanKind = 'SPAN_KIND_CLIENT'
+      GROUP BY name
+      ORDER BY p95_ms DESC
+      LIMIT 8
+    `),
+    read<Record<string, string | number>>(`
+      SELECT
+        if(StatusMessage != '', StatusMessage, SpanName) AS message,
+        SpanName AS span_name,
+        ServiceName AS service,
+        count() AS spans,
+        uniqExact(TraceId) AS traces,
+        toString(min(Timestamp)) AS first_seen
+      FROM otel_traces
+      WHERE ${where} AND ${ERROR_SPAN_COND}
+      GROUP BY message, service, span_name
+      ORDER BY traces DESC
+      LIMIT 8
+    `),
+  ]);
+  const number = (value: string | number | undefined) => Number(value) || 0;
+  const statRow = (row: Record<string, string | number>) => ({
+    errors: number(row.errors),
+    p95_ms: number(row.p95_ms),
+    requests: number(row.requests),
+  });
+  return {
+    dependencies: dependencies.map((row) => ({ name: String(row.name), ...statRow(row) })),
+    errors: errors.map((row) => ({
+      first_seen: String(row.first_seen),
+      message: String(row.message),
+      service: String(row.service),
+      span_name: String(row.span_name),
+      spans: number(row.spans),
+      traces: number(row.traces),
+    })),
+    operations: operations.map((row) => ({ name: String(row.name), ...statRow(row) })),
+    series: series.map((row) => ({ bucket: String(row.bucket), ...statRow(row) })),
+    totals: totals[0] ? statRow(totals[0]) : { errors: 0, p95_ms: 0, requests: 0 },
+  };
+}

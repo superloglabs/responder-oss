@@ -52,25 +52,27 @@ a.telemetryPage__message:hover { text-decoration: underline; }
 .traceDetail__spanLogs li .dsBadge { flex-shrink: 0; font-family: var(--ds-font-sans); }
 
 /* Span name, timeline and duration columns, shared by the axis and each row. */
-.traceWaterfall { --trace-name-width: minmax(160px, 34%); min-width: 0; padding: 4px 0; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
+.traceWaterfall { --trace-name-width: minmax(160px, 34%); min-width: 0; overflow: clip; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
 .traceWaterfall__axis, .traceWaterfall__row { display: grid; grid-template-columns: var(--trace-name-width) minmax(0, 1fr) 72px; align-items: center; gap: 12px; padding: 0 12px; }
-.traceWaterfall__axis { height: 28px; border-bottom: 1px solid var(--ds-border-subtle); color: var(--ds-text-muted); font-size: 11px; }
+.traceWaterfall__axis { height: 34px; color: #999; font-size: 11px; font-variant-numeric: tabular-nums; }
+.traceWaterfall__axis .traceWaterfall__name { color: #1a1a1a; font-size: 13px; font-weight: 500; }
 .traceWaterfall__axis .traceWaterfall__track span { position: absolute; top: 50%; transform: translate(-50%, -50%); white-space: nowrap; }
 .traceWaterfall__axis .traceWaterfall__track span:first-child { transform: translate(0, -50%); }
 .traceWaterfall__axis .traceWaterfall__track span:last-child { transform: translate(-100%, -50%); }
-.traceWaterfall__rows { max-height: calc(100vh - 260px); margin: 0; padding: 0; overflow: auto; list-style: none; }
-.traceWaterfall__row { width: 100%; min-height: 28px; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; font: inherit; }
-.traceWaterfall__row:hover { background: var(--ds-surface-hover); }
-.traceWaterfall__row--selected, .traceWaterfall__row--selected:hover { background: var(--ds-info-surface); }
+.traceWaterfall__rows { max-height: calc(100vh - 260px); margin: 0; padding: 4px 0; overflow: auto; border-radius: 12px 12px 0 0; background: #fff; box-shadow: 0 0 0 .5px #e6e8ec; list-style: none; }
+.traceWaterfall__empty { padding: 12px; color: #666; font-size: 12px; }
+.traceWaterfall__row { width: 100%; min-height: 30px; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.traceWaterfall__row:hover { background: #fafafa; }
+.traceWaterfall__row--selected, .traceWaterfall__row--selected:hover { background: #f1f2fe; }
 .traceWaterfall__name { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; white-space: nowrap; }
-.traceWaterfall__service { flex-shrink: 0; max-width: 45%; overflow: hidden; color: var(--ds-text-muted); text-overflow: ellipsis; }
-.traceWaterfall__spanName { overflow: hidden; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
-.traceWaterfall__row--error .traceWaterfall__spanName { color: var(--ds-danger); }
+.traceWaterfall__service { flex-shrink: 0; max-width: 45%; overflow: hidden; color: #666; text-overflow: ellipsis; }
+.traceWaterfall__spanName { overflow: hidden; color: #1a1a1a; text-overflow: ellipsis; }
+.traceWaterfall__row--error .traceWaterfall__spanName { color: #b33d43; }
 .traceWaterfall__srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.traceWaterfall__track { position: relative; height: 100%; min-height: 28px; }
-.traceWaterfall__bar { position: absolute; top: 50%; min-width: 2px; height: 10px; border-radius: 3px; background: var(--ds-info); transform: translateY(-50%); }
-.traceWaterfall__row--error .traceWaterfall__bar { background: var(--ds-danger); }
-.traceWaterfall__duration { color: var(--ds-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.traceWaterfall__track { position: relative; height: 100%; min-height: 30px; }
+.traceWaterfall__bar { position: absolute; top: 50%; min-width: 3px; height: 8px; border-radius: 2px; background: #4e58f9; transform: translateY(-50%); }
+.traceWaterfall__row--error .traceWaterfall__bar { background: #a8474b; }
+.traceWaterfall__duration { color: #666; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 
 /* Below this width the detail pane would leave the table too narrow. */
 @media (max-width: 1360px) {
