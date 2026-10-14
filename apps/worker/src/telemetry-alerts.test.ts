@@ -89,6 +89,22 @@ describe("checkTelemetryAlert", () => {
     expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", null);
   });
 
+  it("starts the channel's automations on the posted alert", async () => {
+    const startAutomations = vi.fn(async () => 1);
+    const deps = dependencies({ startAutomations });
+
+    await checkTelemetryAlert(alert, {} as never, deps);
+
+    expect(startAutomations).toHaveBeenCalledWith(expect.objectContaining({
+      channelId: "C123",
+      episodeId: "episode-1",
+      integrationAccountId: slack.integrationAccountId,
+      organizationId: "org-1",
+      timestamp: "1700000000.000200",
+      title: "Checkout errors is firing",
+    }));
+  });
+
   it("updates a firing episode without posting again", async () => {
     const deps = dependencies({ openEpisodes: vi.fn(async () => [episode()]) });
 
