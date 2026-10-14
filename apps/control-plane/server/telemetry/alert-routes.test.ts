@@ -148,6 +148,22 @@ describe("alert routes", () => {
     expect((await send(unlinked.app, "POST", "/preview", { ...rule, projectId })).status).toBe(404);
   });
 
+  it("lists the lowest values first for an alert on falling values", async () => {
+    const { app } = routes({
+      values: vi.fn(async () => [{ group: "a", value: 9 }, { group: "b", value: 2 }, { group: "c", value: 5 }]),
+    });
+    const response = await send(app, "POST", "/preview", {
+      ...rule,
+      comparator: "lt",
+      groupBy: "service",
+      groupMode: "per_group",
+      projectId,
+      threshold: 6,
+    });
+    const body = (await response.json()) as { evaluations: Array<{ groupKey: string }> };
+    expect(body.evaluations.map((evaluation) => evaluation.groupKey)).toEqual(["b", "c", "a"]);
+  });
+
   it("lists and refreshes Slack channels", async () => {
     const { app, dependencies } = routes();
 

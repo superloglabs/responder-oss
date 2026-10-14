@@ -796,7 +796,9 @@ export const telemetryAlertEpisodes = pgTable(
     lastValue: doublePrecision("last_value").notNull(),
     // The channel and message that announced the episode; recovery replies
     // in its thread.
-    slackIntegrationAccountId: uuid("slack_integration_account_id"),
+    slackIntegrationAccountId: uuid("slack_integration_account_id").references(() => integrationAccounts.id, {
+      onDelete: "set null",
+    }),
     slackChannelId: text("slack_channel_id"),
     slackMessageTs: text("slack_message_ts"),
     // Set once the recovery is posted, or when there is nothing to post.

@@ -104,7 +104,7 @@ export interface AlertEvaluation {
 }
 
 // One value per group, or one total. `rows` are what the store returned for
-// the window. Counts with no rows are zero; metrics with no rows have no
+// the window: one row per group, or a single ungrouped row for a total. Counts with no rows are zero; metrics with no rows have no
 // data and give no evaluation, so an open episode stays as it is.
 export function evaluateAlert(
   rule: Pick<AlertRule, "aggregation" | "comparator" | "groupBy" | "groupMode" | "source" | "threshold">,
@@ -123,9 +123,9 @@ export function evaluateAlert(
     if (counted) for (const group of openGroups) if (!values.has(group)) values.set(group, 0);
     return [...values].map(([group, value]) => evaluation(group, value));
   }
+  // A total is queried without grouping, so there is one row.
   if (rows.length === 0) return counted ? [evaluation("", 0)] : [];
-  const total = rows.reduce((sum, row) => sum + row.value, 0);
-  return [evaluation("", rule.aggregation === "avg" ? total / rows.length : total)];
+  return [evaluation("", rows.reduce((sum, row) => sum + row.value, 0))];
 }
 
 export type AlertTransition = "opened" | "continued" | "recovered";
@@ -141,79 +141,11 @@ export function worseValue(comparator: AlertComparator, a: number, b: number): n
   return comparator === "gt" ? Math.max(a, b) : Math.min(a, b);
 }
 
-const numberFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-
-export function formatAlertValue(value: number): string {
-  return numberFormat.format(value);
-}
-
-function windowLabel(minutes: number): string {
-  if (minutes % 1_440 === 0) return minutes === 1_440 ? "day" : `${minutes / 1_440} days`;
-  if (minutes % 60 === 0) return minutes === 60 ? "hour" : `${minutes / 60} hours`;
-  return minutes === 1 ? "minute" : `${minutes} minutes`;
-}
-
-// "Error logs from checkout in the last 5 minutes", for messages and lists.
-export function describeAlertRule(rule: Pick<AlertRule, "aggregation" | "filter" | "metricName" | "source" | "windowMinutes">): string {
-  const measured =
-    rule.source === "metric"
-      ? `${rule.aggregation === "avg" ? "Average" : "Sum"} of ${rule.metricName ?? "a metric"}`
-      : rule.source === "traces"
-        ? rule.filter.statusCode === "STATUS_CODE_ERROR" ? "Error spans" : "Spans"
-        : rule.filter.severity ? `${rule.filter.severity.toUpperCase()} logs` : "Logs";
-  const service = rule.filter.service ? ` from ${rule.filter.service}` : "";
-  return `${measured}${service} in the last ${windowLabel(rule.windowMinutes)}`;
-}
-
-export function describeAlertCondition(comparator: AlertComparator, threshold: number): string {
-  return `${comparator === "gt" ? "above" : "below"} ${formatAlertValue(threshold)}`;
-}
-
-export interface AlertMessageInput {
-  alertName: string;
-  alertUrl: string | null;
-  groupBy: string | null;
-  groupKey: string;
-  rule: Pick<AlertRule, "aggregation" | "comparator" | "filter" | "metricName" | "source" | "threshold" | "windowMinutes">;
-  value: number;
-}
-
-function groupLabel(input: Pick<AlertMessageInput, "groupBy" | "groupKey">): string {
-  if (!input.groupBy) return "";
-  return ` for ${input.groupBy.replace(/^attr:/u, "")} \`${input.groupKey || "(none)"}\``;
-}
-
-// The message posted when an episode opens.
-export function alertFiringMessage(input: AlertMessageInput): { markdown: string; text: string } {
-  const group = groupLabel(input);
-  const link = input.alertUrl ? `\n\n[View alert](${input.alertUrl})` : "";
-  return {
-    markdown:
-      `:rotating_light: **${input.alertName}** is firing${group}.\n\n` +
-      `${describeAlertRule(input.rule)}: **${formatAlertValue(input.value)}**, ` +
-      `${describeAlertCondition(input.rule.comparator, input.rule.threshold)}.${link}`,
-    text: `${input.alertName} is firing${group.replaceAll("`", "")}`,
-  };
-}
-
-function durationLabel(milliseconds: number): string {
-  const minutes = Math.max(1, Math.round(milliseconds / 60_000));
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} minute${rest === 1 ? "" : "s"}` : ""}`;
-}
-
-// The thread reply posted when an episode ends.
-export function alertRecoveredMessage(
-  input: AlertMessageInput & { firingForMs: number },
-): { markdown: string; text: string } {
-  const group = groupLabel(input);
-  const back = input.rule.comparator === "gt" ? "at or below" : "at or above";
-  return {
-    markdown:
-      `:white_check_mark: **${input.alertName}** recovered${group} after ${durationLabel(input.firingForMs)}. ` +
-      `The value is **${formatAlertValue(input.value)}**, ${back} ${formatAlertValue(input.rule.threshold)}.`,
-    text: `${input.alertName} recovered${group.replaceAll("`", "")}`,
-  };
-}
+export {
+  alertFiringMessage,
+  alertRecoveredMessage,
+  describeAlertCondition,
+  describeAlertRule,
+  formatAlertValue,
+  type AlertMessageInput,
+} from "./alert-text.js";

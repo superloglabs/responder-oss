@@ -1,5 +1,5 @@
 {
-  "id": "2fa1ff60-20a3-4a58-8c52-fa19d46870e1",
+  "id": "7a009ed1-9e8f-456f-b524-835626e31d00",
   "prevId": "e22afb33-9b0c-465c-b8fc-e20c40518f8f",
   "version": "7",
   "dialect": "postgresql",
@@ -8792,6 +8792,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "telemetry_alert_episodes_slack_integration_account_id_integration_accounts_id_fk": {
+          "name": "telemetry_alert_episodes_slack_integration_account_id_integration_accounts_id_fk",
+          "tableFrom": "telemetry_alert_episodes",
+          "tableTo": "integration_accounts",
+          "columnsFrom": [
+            "slack_integration_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

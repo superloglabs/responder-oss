@@ -188,8 +188,10 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
         dependencies.values(granted.client, projectId, rule, now),
         dependencies.series(granted.client, projectId, rule, now),
       ]);
+      // Breaching groups first, then furthest past the threshold.
+      const severity = rule.comparator === "gt" ? 1 : -1;
       const evaluations = evaluateAlert(rule, values, [])
-        .sort((a, b) => Number(b.breaching) - Number(a.breaching) || b.value - a.value)
+        .sort((a, b) => Number(b.breaching) - Number(a.breaching) || severity * (b.value - a.value))
         .slice(0, 50);
       const range = alertWindow(rule.windowMinutes * chartWindows, now);
       // Buckets are one window long.

@@ -63,10 +63,11 @@ describe("evaluateAlert", () => {
     ]);
   });
 
-  it("averages groups for an average rule and gives no evaluation without metric data", () => {
+  it("takes a metric total as queried, and gives no evaluation without metric data", () => {
+    // The store averages every data point of an ungrouped total.
     const metric = { ...errorLogs, aggregation: "avg" as const, metricName: "cpu", source: "metric" as const };
-    expect(evaluateAlert(metric, [{ group: "a", value: 40 }, { group: "b", value: 80 }], [])).toEqual([
-      { breaching: true, groupKey: "", value: 60 },
+    expect(evaluateAlert(metric, [{ group: "", value: 72.5 }], [])).toEqual([
+      { breaching: true, groupKey: "", value: 72.5 },
     ]);
     expect(evaluateAlert(metric, [], [""])).toEqual([]);
   });
@@ -108,6 +109,20 @@ describe("alert messages", () => {
     expect(firing.text).toBe("Checkout errors is firing for http.route /pay");
     expect(firing.markdown).toContain("**1,234.57**, above 50.");
     expect(firing.markdown).toContain("[View alert](https://us.superlog.sh/alerts/1)");
+  });
+
+  it("keeps names and group values from mentioning or formatting", () => {
+    const firing = alertFiringMessage({
+      alertName: "<!channel> *urgent*",
+      alertUrl: null,
+      groupBy: "user_agent",
+      groupKey: "<@U123> `x`",
+      rule: errorLogs,
+      value: 51,
+    });
+    expect(firing.markdown).toContain("**&lt;!channel&gt; \\*urgent\\***");
+    expect(firing.markdown).toContain("for user\\_agent &lt;@U123&gt; \\`x\\`");
+    expect(firing.text).not.toMatch(/<!channel>|<@U123>/u);
   });
 
   it("says how long the alert fired", () => {

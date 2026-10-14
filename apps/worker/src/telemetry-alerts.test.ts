@@ -71,7 +71,13 @@ describe("checkTelemetryAlert", () => {
     await checkTelemetryAlert(alert, {} as never, deps);
 
     expect(deps.values).toHaveBeenCalledWith(expect.anything(), "project-1", alert, now);
-    expect(deps.openEpisode).toHaveBeenCalledWith({ alertId: "alert-1", groupKey: "", slack, value: 25 });
+    expect(deps.openEpisode).toHaveBeenCalledWith({
+      alertId: "alert-1",
+      groupKey: "",
+      ruleUpdatedAt: alert.updatedAt,
+      slack,
+      value: 25,
+    });
     expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({
       markdown: expect.stringContaining("**Checkout errors** is firing"),
       notifications: [{ ...slack, kind: "slack" }],
@@ -162,6 +168,19 @@ describe("checkTelemetryAlert", () => {
 
     expect(deps.openEpisode).toHaveBeenCalledTimes(12);
     expect(deps.post).toHaveBeenCalledTimes(10);
+  });
+
+  it("records a failed Slack post on the alert, so the app can show it", async () => {
+    const deps = dependencies({
+      post: vi.fn<TelemetryAlertDependencies["post"]>(async (input) =>
+        input.notifications.map((notification) => ({ error: new Error("channel_not_found"), notification })),
+      ),
+    });
+
+    await checkTelemetryAlert(alert, {} as never, deps);
+
+    expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", "Posting to Slack failed: channel_not_found");
+    expect(deps.setMessage).not.toHaveBeenCalled();
   });
 
   it("records a failed check and does not touch episodes", async () => {

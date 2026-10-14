@@ -1,6 +1,5 @@
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
 import type { AlertCreate, AlertRule, AlertSlackTarget, AlertUpdate } from "../telemetry/alerts.js";
-import { worseValue } from "../telemetry/alerts.js";
 import { getDatabase } from "./client.js";
 import {
   integrationAccounts,
@@ -190,6 +189,21 @@ async function endOpenEpisodes(executor: Pick<ReturnType<typeof getDatabase>, "u
     .where(and(eq(telemetryAlertEpisodes.alertId, alertId), eq(telemetryAlertEpisodes.state, "firing")));
 }
 
+// Equal values, ignoring object key order, which jsonb does not keep.
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => sameValue(item, b[index]));
+  }
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const defined = (value: object) => Object.entries(value).filter(([, item]) => item !== undefined);
+    const left = defined(a);
+    const right = new Map(defined(b));
+    return left.length === right.size && left.every(([key, item]) => right.has(key) && sameValue(item, right.get(key)));
+  }
+  return false;
+}
+
 const evaluatedFields = [
   "aggregation",
   "comparator",
@@ -212,9 +226,7 @@ export async function updateTelemetryAlert(
 ): Promise<TelemetryAlert | null> {
   const current = await findTelemetryAlert(organizationId, alertId);
   if (!current) return null;
-  const evaluationChanged = evaluatedFields.some(
-    (field) => JSON.stringify(current[field]) !== JSON.stringify(input[field]),
-  );
+  const evaluationChanged = evaluatedFields.some((field) => !sameValue(current[field], input[field]));
   await getDatabase().transaction(async (transaction) => {
     await transaction
       .update(telemetryAlerts)
@@ -345,37 +357,65 @@ export async function openTelemetryAlertEpisodes(alertId: string): Promise<OpenT
     .where(and(eq(telemetryAlertEpisodes.alertId, alertId), eq(telemetryAlertEpisodes.state, "firing")));
 }
 
-// Null when the group already has an open episode.
+// Null when the group already has an open episode, or when the alert was
+// disabled or changed since `ruleUpdatedAt`, the version the check used.
 export async function openTelemetryAlertEpisode(input: {
   alertId: string;
   groupKey: string;
+  ruleUpdatedAt: string;
   slack: AlertSlackTarget | null;
   value: number;
 }): Promise<OpenTelemetryAlertEpisode | null> {
-  const [row] = await getDatabase()
-    .insert(telemetryAlertEpisodes)
-    .values({
-      alertId: input.alertId,
-      groupKey: input.groupKey,
-      lastValue: input.value,
-      openValue: input.value,
-      peakValue: input.value,
-      slackChannelId: input.slack?.channelId ?? null,
-      slackIntegrationAccountId: input.slack?.integrationAccountId ?? null,
-    })
-    .onConflictDoNothing()
-    .returning(openEpisodeColumns);
-  return row ?? null;
+  const result = await getDatabase().execute<{
+    group_key: string;
+    id: string;
+    peak_value: number;
+    slack_channel_id: string | null;
+    slack_integration_account_id: string | null;
+    slack_message_ts: string | null;
+    started_at: Date | string;
+  }>(sql`
+    insert into ${telemetryAlertEpisodes}
+      (alert_id, group_key, open_value, peak_value, last_value, slack_channel_id, slack_integration_account_id)
+    select ${input.alertId}, ${input.groupKey}, ${input.value}, ${input.value}, ${input.value},
+      ${input.slack?.channelId ?? null}, ${input.slack?.integrationAccountId ?? null}
+    where exists (
+      select 1 from ${telemetryAlerts}
+      where ${telemetryAlerts.id} = ${input.alertId}
+        and ${telemetryAlerts.enabled}
+        -- The version is read back in JavaScript, which keeps milliseconds.
+        and date_trunc('milliseconds', ${telemetryAlerts.updatedAt}) = ${input.ruleUpdatedAt}::timestamptz
+    )
+    on conflict do nothing
+    returning id, group_key, peak_value, slack_channel_id, slack_integration_account_id, slack_message_ts, started_at
+  `);
+  const row = result.rows[0];
+  return row
+    ? {
+        groupKey: row.group_key,
+        id: row.id,
+        peakValue: Number(row.peak_value),
+        slackChannelId: row.slack_channel_id,
+        slackIntegrationAccountId: row.slack_integration_account_id,
+        slackMessageTs: row.slack_message_ts,
+        startedAt: new Date(row.started_at),
+      }
+    : null;
 }
 
+// The peak is compared in the update, so overlapping checks keep the worst.
 export async function continueTelemetryAlertEpisode(
-  episode: Pick<OpenTelemetryAlertEpisode, "id" | "peakValue">,
+  episode: Pick<OpenTelemetryAlertEpisode, "id">,
   comparator: AlertRule["comparator"],
   value: number,
 ): Promise<void> {
+  const peak =
+    comparator === "gt"
+      ? sql`greatest(${telemetryAlertEpisodes.peakValue}, ${value})`
+      : sql`least(${telemetryAlertEpisodes.peakValue}, ${value})`;
   await getDatabase()
     .update(telemetryAlertEpisodes)
-    .set({ lastValue: value, peakValue: worseValue(comparator, episode.peakValue, value), updatedAt: new Date() })
+    .set({ lastValue: value, peakValue: peak, updatedAt: new Date() })
     .where(and(eq(telemetryAlertEpisodes.id, episode.id), eq(telemetryAlertEpisodes.state, "firing")));
 }
 

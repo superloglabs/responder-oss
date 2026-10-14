@@ -2307,6 +2307,32 @@ export async function countSeries(
   if (folded && rollupEligible(folded, groupBy, step) && (await rollupAvailable(ch))) {
     return countSeriesFromRollup(ch, projectId, source, folded, groupBy, step);
   }
+  const { conds, params, table } = countConditions(projectId, source, filter);
+  const group = groupExprForAttribute(groupBy, source);
+
+  const query = `
+    SELECT
+      toString(toStartOfInterval(Timestamp, INTERVAL ${step.n} ${step.unit})) AS bucket,
+      ${group.expr} AS group_key,
+      count() AS c
+    FROM ${table}
+    WHERE ${conds.join(" AND ")}
+    GROUP BY bucket, group_key
+    ORDER BY bucket ASC
+    LIMIT 10000
+  `;
+
+  const r = await ch.query({
+    query,
+    query_params: { ...params, ...group.params },
+    format: "JSONEachRow",
+  });
+  const rows = (await r.json()) as { bucket: string; group_key: string; c: string | number }[];
+  return rows.map((row) => ({ bucket: row.bucket, group: row.group_key, count: Number(row.c) }));
+}
+
+// Filters on raw logs or spans for the window, shared by the count queries.
+function countConditions(projectId: string, source: SeriesSource, filter: SeriesFilter) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(filter.range);
   const split = splitAttrs(filter.resourceAttrs);
   const attr = attrConds(split.resource);
@@ -2326,6 +2352,9 @@ export async function countSeries(
   ];
   if (filter.service) conds.push("ServiceName = {service:String}");
   if (source === "logs") {
+    // otel_logs is partitioned by TimestampTime; bounding it lets the window
+    // prune partitions, as in queryLogs.
+    conds.push(`TimestampTime >= (${sinceExpr}) - INTERVAL 1 SECOND`, `TimestampTime <= ${untilExpr}`);
     if (filter.severity) conds.push("upper(SeverityText) = upper({severity:String})");
     if (filter.search) conds.push("positionCaseInsensitive(Body, {search:String}) > 0");
   } else {
@@ -2336,23 +2365,9 @@ export async function countSeries(
     }
   }
 
-  const group = groupExprForAttribute(groupBy, source);
-
-  const query = `
-    SELECT
-      toString(toStartOfInterval(Timestamp, INTERVAL ${step.n} ${step.unit})) AS bucket,
-      ${group.expr} AS group_key,
-      count() AS c
-    FROM ${table}
-    WHERE ${conds.join(" AND ")}
-    GROUP BY bucket, group_key
-    ORDER BY bucket ASC
-    LIMIT 10000
-  `;
-
-  const r = await ch.query({
-    query,
-    query_params: {
+  return {
+    conds,
+    params: {
       projectId,
       since: sinceSql,
       until: untilSql,
@@ -2365,11 +2380,39 @@ export async function countSeries(
       ...attr.params,
       ...eventAttr.params,
       ...field.params,
-      ...group.params,
     },
-    format: "JSONEachRow",
+    table,
+  };
+}
+
+// Logs or spans counted per group over exactly the window, from the raw
+// tables. The per-minute rollup would count whole boundary minutes. At most
+// `limit` groups are returned, largest first.
+export async function countAggregate(
+  ch: ClickHouseClient,
+  projectId: string,
+  source: SeriesSource,
+  filter: SeriesFilter,
+  groupBy: string | undefined,
+  limit: number,
+): Promise<{ group: string; value: number }[]> {
+  const { conds, params, table } = countConditions(projectId, source, filter);
+  const group = groupExprForAttribute(groupBy, source);
+  return retryOneConnectionReset(async () => {
+    const r = await ch.query({
+      query: `
+        SELECT ${group.expr} AS group_key, count() AS c
+        FROM ${table}
+        WHERE ${conds.join(" AND ")}
+        GROUP BY group_key
+        ORDER BY c DESC
+        LIMIT {limit:UInt32}
+      `,
+      query_params: { ...params, ...group.params, limit },
+      format: "JSONEachRow",
+    });
+    const rows = (await r.json()) as { group_key: string; c: string | number }[];
+    return rows.map((row) => ({ group: row.group_key, value: Number(row.c) }));
   });
-  const rows = (await r.json()) as { bucket: string; group_key: string; c: string | number }[];
-  return rows.map((row) => ({ bucket: row.bucket, group: row.group_key, count: Number(row.c) }));
 }
 

@@ -91,6 +91,8 @@ export async function checkTelemetryAlert(
     value,
   });
   let announcements = 0;
+  // The last failed Slack post, shown on the alert until a check posts fine.
+  let postError: string | null = null;
 
   async function announce(episode: OpenTelemetryAlertEpisode, value: number) {
     const target = slackTarget(episode);
@@ -107,7 +109,8 @@ export async function checkTelemetryAlert(
       await dependencies.setMessage(episode.id, delivery.timestamp);
     } else if (delivery && "error" in delivery) {
       // The next check tries again while the episode is open.
-      console.warn(JSON.stringify({ alertId: alert.id, error: errorText(delivery.error), event: "telemetry_alert_post_failed" }));
+      postError = errorText(delivery.error);
+      console.warn(JSON.stringify({ alertId: alert.id, error: postError, event: "telemetry_alert_post_failed" }));
     }
   }
 
@@ -133,7 +136,8 @@ export async function checkTelemetryAlert(
     });
     if (delivery && "timestamp" in delivery) await dependencies.markRecoveryNotified(episode.id);
     else if (delivery) {
-      console.warn(JSON.stringify({ alertId: alert.id, error: errorText(delivery.error), event: "telemetry_alert_post_failed" }));
+      postError = errorText(delivery.error);
+      console.warn(JSON.stringify({ alertId: alert.id, error: postError, event: "telemetry_alert_post_failed" }));
     }
   }
 
@@ -148,6 +152,7 @@ export async function checkTelemetryAlert(
         const opened = await dependencies.openEpisode({
           alertId: alert.id,
           groupKey: evaluation.groupKey,
+          ruleUpdatedAt: alert.updatedAt,
           slack: alert.slack,
           value: evaluation.value,
         });
@@ -165,7 +170,7 @@ export async function checkTelemetryAlert(
     for (const recovery of await dependencies.unannouncedRecoveries(alert.id)) {
       if (recovery.endedAt.getTime() < now.getTime()) await announceRecovery(recovery, recovery.lastValue);
     }
-    await dependencies.recordCheck(alert.id, null);
+    await dependencies.recordCheck(alert.id, postError ? `Posting to Slack failed: ${postError}` : null);
   } catch (error) {
     console.warn(JSON.stringify({ alertId: alert.id, error: errorText(error), event: "telemetry_alert_check_failed" }));
     await dependencies.recordCheck(alert.id, errorText(error)).catch(() => undefined);
