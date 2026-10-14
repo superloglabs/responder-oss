@@ -327,6 +327,9 @@ describe("metric dimension sampling", () => {
 
     await listMetricDimensions(rollupClient(queries, 1_000_000), "project-1", { kind: "gauge", name: "queue.depth" }, range);
 
+    // Hours the window covers in part count in part.
+    const rollup = queries.find(({ query }) => /FROM metric_names_per_hour\s+WHERE[\s\S]*kind =/u.test(query));
+    expect(rollup?.query).toContain("least(toFloat64(toUnixTimestamp(hour)) + 3600");
     const { params, query } = dimensionScan(queries);
     expect(query).toContain("% {stride:UInt64} = 0");
     expect(params.stride).toBe(5);

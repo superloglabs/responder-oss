@@ -2136,8 +2136,12 @@ async function metricPointCount(
     (await tableExists(ch, "metric_names_per_hour")) &&
     (await metricNamesRollupCoversWindow(ch, projectId, window.sinceExpr, window.sinceSql).catch(() => false))
   ) {
+    // An hour the window covers in part counts for that part.
+    const since = `toFloat64(toUnixTimestamp64Milli(toDateTime64(${window.sinceExpr}, 3))) / 1000`;
+    const until = `toFloat64(toUnixTimestamp64Milli(toDateTime64(${window.untilExpr}, 3))) / 1000`;
+    const start = "toFloat64(toUnixTimestamp(hour))";
     const rolledUp = await count(`
-      SELECT sum(c) AS points
+      SELECT sum(c * greatest(0, least(${start} + 3600, ${until}) - greatest(${start}, ${since})) / 3600) AS points
       FROM metric_names_per_hour
       WHERE project_id = {projectId:String}
         AND kind = {kind:String}
