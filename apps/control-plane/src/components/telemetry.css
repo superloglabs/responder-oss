@@ -81,3 +81,11 @@ a.telemetryPage__message:hover { text-decoration: underline; }
   .telemetryDetail { position: static; order: -1; max-height: none; }
   .telemetryPage__toolbar .dsSegmentedControl { margin-left: 0; }
 }
+
+.telemetrySetup { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.telemetrySetup__intro { margin: 0; color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }
+.telemetrySetup__created { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
+.telemetrySetup__created h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.telemetrySetup__created p { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
+.telemetrySetup__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.telemetrySetup__form > .dsField { flex: 1 1 240px; }

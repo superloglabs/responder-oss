@@ -687,6 +687,35 @@ export const telemetryProjects = pgTable(
   (table) => [index("telemetry_projects_organization_idx").on(table.organizationId)],
 );
 
+// A key an application sends telemetry with, for one of the workspace's
+// telemetry projects. Only its digest is stored.
+export const telemetryIngestKeys = pgTable(
+  "telemetry_ingest_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => telemetryProjects.projectId, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // The first characters of the key, shown so people can tell keys apart.
+    prefix: text("prefix").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("telemetry_ingest_keys_token_hash_idx").on(table.tokenHash),
+    index("telemetry_ingest_keys_organization_idx").on(table.organizationId),
+  ],
+);
+
 // The project is not a foreign key: unlinking a project hides its dashboards
 // rather than deleting them, and linking it again brings them back.
 export const telemetryDashboards = pgTable(

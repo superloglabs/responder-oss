@@ -2,7 +2,7 @@ import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
-import { TelemetryAttributes, TelemetryException, TelemetryProjectsGate } from "../components/telemetry";
+import { SendTelemetryLink, TelemetryAttributes, TelemetryException, TelemetryProjectsGate } from "../components/telemetry";
 import { Badge, DataTable, IconButton, SegmentedControl, SelectField } from "../design-system";
 import {
   fetchLogs,
@@ -127,6 +127,9 @@ export function LogsPage() {
     <AppShell active="logs" redesigned>
       <header className="workspaceHeading">
         <h1><MagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
+        <div className="workspaceHeading__actions">
+          <SendTelemetryLink variant="secondary" />
+        </div>
       </header>
       <TelemetryProjectsGate signal="Logs" state={telemetry}>
         {(projects) => (
