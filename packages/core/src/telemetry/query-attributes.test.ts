@@ -256,6 +256,23 @@ describe("the metric catalog", () => {
     ]);
   });
 
+  it("does not trust a service list cut at its length limit", async () => {
+    const many = Array.from({ length: 20 }, (_, index) => `service-${index}`);
+    const client = {
+      query: async ({ query }: { query: string }) => ({
+        json: async () => {
+          if (!query.includes("FROM otel_metrics_gauge")) return [];
+          if (query.includes("count() AS c")) return [{ c: 40, name: "shared", unit: "" }];
+          return [{ attributes: [], description: "", name: "shared", points: 40, series: 20, services: many, unit: "" }];
+        },
+      }),
+    } as unknown as ClickHouseClient;
+
+    const [metric] = await listMetricCatalog(client, "project-1", window);
+
+    expect(metric?.servicesComplete).toBe(false);
+  });
+
   it("trusts every service list when the scan was not capped", async () => {
     // A rollup count includes the hour the window starts in, so it can
     // exceed what the exact window holds.

@@ -1965,6 +1965,8 @@ const METRIC_DETAIL_SCAN_ROW_CAP = 1_000_000;
 const METRIC_DIMENSION_SCAN_ROW_CAP = 200_000;
 // The catalog lists every metric a project sends, within reason.
 const METRIC_CATALOG_NAMES_PER_KIND = 5_000;
+// Services kept per metric; a list this long may have been cut.
+const METRIC_CATALOG_SERVICES = 20;
 const METRIC_DETAIL_SCAN_SECONDS = 4;
 const METRIC_POINT_COUNT_SECONDS = 1;
 const METRIC_DETAIL_SETTINGS = {
@@ -1996,7 +1998,7 @@ async function metricDetailsFromTable(
           MetricName AS name,
           MetricUnit AS unit,
           ${withDescription ? "anyIf(MetricDescription, MetricDescription != '')" : "''"} AS description,
-          groupUniqArray(20)(ServiceName) AS services,
+          groupUniqArray(${METRIC_CATALOG_SERVICES})(ServiceName) AS services,
           topKArray(30)(mapKeys(Attributes)) AS attributes,
           uniq(ResourceAttributes, Attributes) AS series,
           count() AS points
@@ -2076,7 +2078,10 @@ export async function listMetricCatalog(
       // A scan that stopped early read some metrics only in part. A complete
       // scan read every point, even where the name count, rounded out to whole
       // hours, holds more.
-      servicesComplete: detail !== undefined && (!table!.sampled || detail.points >= points),
+      servicesComplete:
+        detail !== undefined &&
+        detail.services.length < METRIC_CATALOG_SERVICES &&
+        (!table!.sampled || detail.points >= points),
     }];
   });
 }
