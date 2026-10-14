@@ -1,5 +1,5 @@
 import type { TelemetryClient } from "./client.js";
-import type { AlertRule } from "./alerts.js";
+import type { AlertFilter, AlertRule } from "./alerts.js";
 import { countAggregate, metricAggregate } from "./query.js";
 
 export type AlertValueRow = { group: string; value: number };
@@ -7,6 +7,14 @@ export type AlertValueRow = { group: string; value: number };
 // The most groups a per-group alert evaluates. Past it the check fails rather
 // than evaluate part of the groups.
 export const maximumAlertGroups = 1_000;
+
+// The one metric a rule reads when its name is sent as several kinds or units.
+export function alertMetricIdentity(filter: AlertFilter): { kind?: NonNullable<AlertFilter["metricKind"]>; unit?: string } {
+  return {
+    ...(filter.metricKind ? { kind: filter.metricKind } : {}),
+    ...(filter.metricUnit !== undefined ? { unit: filter.metricUnit } : {}),
+  };
+}
 
 // The window an alert is checked over, ending now.
 export function alertWindow(windowMinutes: number, now: Date): { since: string; until: string } {
@@ -34,6 +42,7 @@ export async function alertValues(
       { range, resourceAttrs: rule.filter.resourceAttrs ?? [], ...(rule.filter.service ? { service: rule.filter.service } : {}) },
       groupBy,
       rule.aggregation === "avg" ? "avg" : "sum",
+      alertMetricIdentity(rule.filter),
     );
     // metricAggregate returns at most this many groups.
     if (groupBy && rows.length >= maximumAlertGroups) throw tooManyGroups();

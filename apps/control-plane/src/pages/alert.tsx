@@ -375,7 +375,18 @@ export function AlertPage() {
             {!saved && projects.length > 1 ? (
               <SelectField
                 label="Project"
-                onChange={(value) => update({ filters: [], groupBy: "", metricName: "", perGroup: false, projectId: value, service: "" })}
+                onChange={(value) =>
+                  update({
+                    filters: [],
+                    groupBy: "",
+                    metricKind: "",
+                    metricName: "",
+                    metricUnit: null,
+                    perGroup: false,
+                    projectId: value,
+                    service: "",
+                  })
+                }
                 options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
                 value={form.projectId}
               />
@@ -403,7 +414,7 @@ export function AlertPage() {
                 <div className="widgetEditor__row">
                   <SelectField
                     label="Metric"
-                    onChange={(metricName) => update({ metricName })}
+                    onChange={(metricName) => update({ metricKind: "", metricName, metricUnit: null })}
                     options={[
                       ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
                       ...withCurrent(metricOptions, form.metricName, form.metricName),

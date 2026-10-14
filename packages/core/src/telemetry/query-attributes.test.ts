@@ -163,7 +163,7 @@ describe("the metric catalog", () => {
       until: "2026-07-23T01:00:00.000Z",
     });
 
-    const nameQueries = queries.filter(({ query }) => query.includes("GROUP BY name, unit"));
+    const nameQueries = queries.filter(({ query }) => query.includes("count() AS c"));
     expect(nameQueries.length).toBeGreaterThan(0);
     for (const { query } of nameQueries) expect(query).toMatch(/LIMIT 5000\s*$/u);
   });

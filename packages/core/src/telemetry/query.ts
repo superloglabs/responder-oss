@@ -1869,6 +1869,11 @@ function isMissingDescriptionError(err: unknown): boolean {
   return err instanceof Error && /MetricDescription/u.test(err.message);
 }
 
+// Details are kept per name and unit: a name can be sent in several units.
+function metricDetailKey(metric: { name: string; unit: string }): string {
+  return `${metric.name}\0${metric.unit}`;
+}
+
 async function metricDetailsFromTable(
   ch: ClickHouseClient,
   projectId: string,
@@ -1881,19 +1886,20 @@ async function metricDetailsFromTable(
       query: `
         SELECT
           MetricName AS name,
+          MetricUnit AS unit,
           ${withDescription ? "anyIf(MetricDescription, MetricDescription != '')" : "''"} AS description,
           groupUniqArray(20)(ServiceName) AS services,
           topKArray(30)(mapKeys(Attributes)) AS attributes,
           uniq(ResourceAttributes, Attributes) AS series
         FROM (
-          SELECT MetricName, ${withDescription ? "MetricDescription, " : ""}ServiceName, Attributes, ResourceAttributes
+          SELECT MetricName, MetricUnit, ${withDescription ? "MetricDescription, " : ""}ServiceName, Attributes, ResourceAttributes
           FROM ${table}
           WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
             AND TimeUnix >= ${window.sinceExpr}
             AND TimeUnix <= ${window.untilExpr}
           LIMIT ${METRIC_DETAIL_SCAN_ROW_CAP}
         )
-        GROUP BY name
+        GROUP BY name, unit
       `,
       query_params: { projectId, since: window.sinceSql, until: window.untilSql },
       format: "JSONEachRow",
@@ -1905,10 +1911,11 @@ async function metricDetailsFromTable(
       name: string;
       series: string | number;
       services: string[];
+      unit: string;
     }[];
     return new Map(
       rows.map((row) => [
-        row.name,
+        metricDetailKey(row),
         {
           attributes: row.attributes.filter(Boolean),
           description: row.description,
@@ -1940,7 +1947,7 @@ export async function listMetricCatalog(
   ]);
   const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
   return names.map((metric) => {
-    const detail = detailsByKind.get(metric.kind)?.get(metric.name);
+    const detail = detailsByKind.get(metric.kind)?.get(metricDetailKey(metric));
     return {
       ...metric,
       attributes: detail?.attributes ?? [],
@@ -2346,6 +2353,7 @@ export async function metricAggregate(
   filter: MetricSeriesFilter,
   groupBy: string | undefined,
   aggregation: "sum" | "avg",
+  metric: Pick<MetricSeriesQueryOptions, "kind" | "unit"> = {},
 ): Promise<MetricAggregateRow[]> {
   const { sinceExpr } = resolveRange(filter.range);
   const rows = await metricSeries(
@@ -2357,6 +2365,7 @@ export async function metricAggregate(
     { n: 1, unit: "DAY" },
     aggregation,
     {
+      ...metric,
       bucketAnchorNs: unixTimestamp64NanoExpr(sinceExpr),
       rawBucketExpr: sinceExpr,
       rowLimit: 1000,

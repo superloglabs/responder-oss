@@ -176,7 +176,9 @@ describe("saving a graph", () => {
     expect(metricAlertDraft(query)).toMatchObject({
       aggregation: "avg",
       groupBy: "attr:http.route",
+      metricKind: "histogram",
       metricName: "http.server.request.duration",
+      metricUnit: "s",
       perGroup: true,
       source: "metric",
     });

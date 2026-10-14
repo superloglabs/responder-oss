@@ -46,6 +46,21 @@ describe("alertRequest", () => {
     expect(spans).toMatchObject({ body: { aggregation: "count", filter: { statusCode: "STATUS_CODE_ERROR" } } });
   });
 
+  it("keeps the metric's kind and unit, and drops them for other sources", () => {
+    const form = {
+      ...emptyAlertForm(projectId),
+      metricKind: "histogram" as const,
+      metricName: "rpc.duration",
+      metricUnit: "ms",
+      name: "Slow RPCs",
+      source: "metric" as const,
+      threshold: "250",
+    };
+    expect(alertRequest(form)).toMatchObject({ body: { filter: { metricKind: "histogram", metricUnit: "ms" } } });
+    const logs = alertRequest({ ...form, source: "logs" });
+    expect("body" in logs && logs.body.filter).toEqual({ severity: "ERROR" });
+  });
+
   it("says what to fix first", () => {
     expect(alertRequest({ ...emptyAlertForm(projectId), threshold: "1" })).toEqual({ error: "Name the alert." });
     expect(alertRequest({ ...emptyAlertForm(projectId), name: "x", threshold: "" })).toEqual({ error: "Set a threshold." });
