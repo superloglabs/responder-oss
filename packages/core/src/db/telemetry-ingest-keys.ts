@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { organization } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { telemetryIngestKeys, telemetryProjects } from "./schema.js";
 
@@ -56,6 +57,8 @@ export async function createTelemetryIngestKey(input: {
 }): Promise<{ key: TelemetryIngestKeySummary; token: string } | null> {
   const token = `${tokenPrefix}${randomBytes(32).toString("base64url")}`;
   return getDatabase().transaction(async (transaction) => {
+    // Holds the workspace, so two first keys made at once share one project.
+    await transaction.select({ id: organization.id }).from(organization).where(eq(organization.id, input.organizationId)).for("update");
     const linked = await transaction
       .select({ name: telemetryProjects.name, projectId: telemetryProjects.projectId })
       .from(telemetryProjects)
@@ -117,19 +120,27 @@ export async function listTelemetryIngestKeys(organizationId: string): Promise<T
   return rows.map(summary);
 }
 
-export async function revokeTelemetryIngestKey(organizationId: string, keyId: string): Promise<boolean> {
+// Members revoke their own keys; owners and admins revoke any.
+export async function revokeTelemetryIngestKey(input: {
+  keyId: string;
+  organizationId: string;
+  role: string;
+  userId: string;
+}): Promise<"forbidden" | "not_found" | "revoked"> {
+  const canRevokeAny = input.role.split(",").some((role) => role === "admin" || role === "owner");
+  const active = and(
+    eq(telemetryIngestKeys.organizationId, input.organizationId),
+    eq(telemetryIngestKeys.id, input.keyId),
+    isNull(telemetryIngestKeys.revokedAt),
+  );
   const rows = await getDatabase()
     .update(telemetryIngestKeys)
     .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(telemetryIngestKeys.organizationId, organizationId),
-        eq(telemetryIngestKeys.id, keyId),
-        isNull(telemetryIngestKeys.revokedAt),
-      ),
-    )
+    .where(and(active, ...(canRevokeAny ? [] : [eq(telemetryIngestKeys.createdBy, input.userId)])))
     .returning({ id: telemetryIngestKeys.id });
-  return rows.length > 0;
+  if (rows.length > 0) return "revoked";
+  const exists = await getDatabase().select({ id: telemetryIngestKeys.id }).from(telemetryIngestKeys).where(active).limit(1);
+  return exists.length > 0 ? "forbidden" : "not_found";
 }
 
 // The project a key sends to, while the key is active and its project is

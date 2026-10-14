@@ -42,7 +42,7 @@ export function TelemetrySetupPage() {
 
   async function create(event: FormEvent) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || telemetry.projects === undefined) return;
     if (!name.trim()) {
       setError("Name the key, for example after the app or environment that uses it.");
       return;
@@ -80,7 +80,14 @@ export function TelemetrySetupPage() {
         <h1><PaperPlaneTiltIcon aria-hidden="true" size={16} weight="bold" />Send telemetry</h1>
       </header>
       {keys === undefined ? (
-        error ? <p className="formError" role="alert">{error}</p> : <p className="telemetryPage__status">Loading…</p>
+        error ? (
+          <div className="automationRuns__message" role="alert">
+            <p>{error}</p>
+            <button onClick={() => { setError(null); void load(); }} type="button">Retry</button>
+          </div>
+        ) : (
+          <p className="telemetryPage__status">Loading…</p>
+        )
       ) : keys === null ? (
         <section className="emptyState emptyState--list">
           <h2>Sending telemetry is not available</h2>
@@ -110,9 +117,16 @@ export function TelemetrySetupPage() {
                 value={projectId}
               />
             ) : null}
-            <Button loading={saving} type="submit" variant="primary">Create key</Button>
+            {/* The key's project is chosen from the list, so wait for it. */}
+            <Button disabled={telemetry.projects === undefined} loading={saving} type="submit" variant="primary">Create key</Button>
           </form>
-          {projects.length === 0 ? (
+          {telemetry.error ? (
+            <div className="automationRuns__message" role="alert">
+              <p>{telemetry.error}</p>
+              <button onClick={telemetry.retry} type="button">Retry</button>
+            </div>
+          ) : null}
+          {telemetry.projects && projects.length === 0 ? (
             <p className="telemetryPage__status">The first key also creates the workspace's telemetry project.</p>
           ) : null}
           {error ? <p className="formError" role="alert">{error}</p> : null}

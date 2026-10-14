@@ -1,5 +1,5 @@
 {
-  "id": "beadd7e2-ecbc-43cd-addf-f5b9134b71fa",
+  "id": "9e47db8c-143b-469a-a301-574dee0b77b2",
   "prevId": "7a009ed1-9e8f-456f-b524-835626e31d00",
   "version": "7",
   "dialect": "postgresql",
@@ -9361,19 +9361,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "telemetry_ingest_keys_project_id_telemetry_projects_project_id_fk": {
-          "name": "telemetry_ingest_keys_project_id_telemetry_projects_project_id_fk",
-          "tableFrom": "telemetry_ingest_keys",
-          "tableTo": "telemetry_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "telemetry_ingest_keys_created_by_user_id_fk": {
           "name": "telemetry_ingest_keys_created_by_user_id_fk",
           "tableFrom": "telemetry_ingest_keys",
@@ -9385,6 +9372,21 @@
             "id"
           ],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "telemetry_ingest_keys_project_fk": {
+          "name": "telemetry_ingest_keys_project_fk",
+          "tableFrom": "telemetry_ingest_keys",
+          "tableTo": "telemetry_projects",
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "project_id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -9457,7 +9459,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "telemetry_projects_organization_project_unique": {
+          "name": "telemetry_projects_organization_project_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "organization_id",
+            "project_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

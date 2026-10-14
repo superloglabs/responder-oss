@@ -684,7 +684,11 @@ export const telemetryProjects = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("telemetry_projects_organization_idx").on(table.organizationId)],
+  (table) => [
+    index("telemetry_projects_organization_idx").on(table.organizationId),
+    // Lets an ingest key name its project and workspace together.
+    unique("telemetry_projects_organization_project_unique").on(table.organizationId, table.projectId),
+  ],
 );
 
 // A key an application sends telemetry with, for one of the workspace's
@@ -696,9 +700,7 @@ export const telemetryIngestKeys = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => telemetryProjects.projectId, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull(),
     name: text("name").notNull(),
     // The first characters of the key, shown so people can tell keys apart.
     prefix: text("prefix").notNull(),
@@ -713,6 +715,12 @@ export const telemetryIngestKeys = pgTable(
   (table) => [
     uniqueIndex("telemetry_ingest_keys_token_hash_idx").on(table.tokenHash),
     index("telemetry_ingest_keys_organization_idx").on(table.organizationId),
+    // The key's project belongs to the key's workspace.
+    foreignKey({
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [telemetryProjects.organizationId, telemetryProjects.projectId],
+      name: "telemetry_ingest_keys_project_fk",
+    }).onDelete("cascade"),
   ],
 );
 

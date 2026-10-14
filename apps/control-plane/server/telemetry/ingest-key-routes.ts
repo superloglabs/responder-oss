@@ -20,7 +20,7 @@ export type IngestKeyRouteDependencies = {
   tenant: (
     headers: Headers,
   ) => Promise<
-    | { ok: true; organizationId: string; user: { id: string } }
+    | { ok: true; organizationId: string; role: string; user: { id: string } }
     | { error: string; ok: false; status: 401 | 403 | 409 }
   >;
 };
@@ -41,7 +41,7 @@ const createSchema = z.object({
 
 export function createIngestKeyRoutes(dependencies: IngestKeyRouteDependencies = defaultDependencies) {
   async function access(headers: Headers): Promise<
-    | { ok: true; organizationId: string; userId: string }
+    | { ok: true; organizationId: string; role: string; userId: string }
     | { error: string; ok: false; status: 401 | 403 | 404 | 409 }
   > {
     const tenant = await dependencies.tenant(headers);
@@ -49,7 +49,7 @@ export function createIngestKeyRoutes(dependencies: IngestKeyRouteDependencies =
     if (!dependencies.collectorUrl() || !(await dependencies.hasTelemetry(tenant.organizationId))) {
       return { error: "Sending telemetry is not available", ok: false, status: 404 };
     }
-    return { ok: true, organizationId: tenant.organizationId, userId: tenant.user.id };
+    return { ok: true, organizationId: tenant.organizationId, role: tenant.role, userId: tenant.user.id };
   }
 
   return new Hono()
@@ -76,8 +76,15 @@ export function createIngestKeyRoutes(dependencies: IngestKeyRouteDependencies =
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const keyId = z.uuid().safeParse(context.req.param("keyId"));
       if (!keyId.success) return context.json({ error: "Key not found" }, 404);
-      return (await dependencies.revokeKey(granted.organizationId, keyId.data))
-        ? context.body(null, 204)
+      const result = await dependencies.revokeKey({
+        keyId: keyId.data,
+        organizationId: granted.organizationId,
+        role: granted.role,
+        userId: granted.userId,
+      });
+      if (result === "revoked") return context.body(null, 204);
+      return result === "forbidden"
+        ? context.json({ error: "Only the key's creator or an admin can revoke it" }, 403)
         : context.json({ error: "Key not found" }, 404);
     });
 }

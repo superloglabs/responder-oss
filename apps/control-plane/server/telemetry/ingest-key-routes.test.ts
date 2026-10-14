@@ -20,8 +20,8 @@ function routes(overrides: Partial<IngestKeyRouteDependencies> = {}) {
     createKey: vi.fn(async () => ({ key, token: "sl_ingest_secret" })),
     hasTelemetry: vi.fn(async () => true),
     listKeys: vi.fn(async () => [key]),
-    revokeKey: vi.fn(async () => true),
-    tenant: vi.fn(async () => ({ ok: true as const, organizationId, user: { id: userId } })),
+    revokeKey: vi.fn(async () => "revoked" as const),
+    tenant: vi.fn(async () => ({ ok: true as const, organizationId, role: "member", user: { id: userId } })),
     ...overrides,
   };
   return { app: createIngestKeyRoutes(dependencies), dependencies };
@@ -41,16 +41,27 @@ describe("ingest key routes", () => {
     expect(await created.json()).toEqual({ key, token: "sl_ingest_secret" });
     expect(dependencies.createKey).toHaveBeenCalledWith({ createdBy: userId, name: "Production", organizationId });
     expect((await app.request(`/${keyId}`, { method: "DELETE" })).status).toBe(204);
-    expect(dependencies.revokeKey).toHaveBeenCalledWith(organizationId, keyId);
+    expect(dependencies.revokeKey).toHaveBeenCalledWith({ keyId, organizationId, role: "member", userId });
+  });
+
+  it("refuses to revoke another member's key", async () => {
+    const { app } = routes({ revokeKey: vi.fn(async () => "forbidden" as const) });
+    expect((await app.request(`/${keyId}`, { method: "DELETE" })).status).toBe(403);
+    const missing = routes({ revokeKey: vi.fn(async () => "not_found" as const) });
+    expect((await missing.app.request(`/${keyId}`, { method: "DELETE" })).status).toBe(404);
   });
 
   it("rejects unnamed keys and another workspace's project", async () => {
-    const { app } = routes({ createKey: vi.fn(async () => null) });
+    const otherProject = "33333333-3333-4333-8333-333333333333";
+    const { app, dependencies } = routes({
+      createKey: vi.fn(async (input) => (input.projectId === otherProject ? null : { key, token: "sl_ingest_secret" })),
+    });
     const post = (body: unknown) =>
       app.request("/", { body: JSON.stringify(body), headers: { "content-type": "application/json" }, method: "POST" });
 
     expect((await post({ name: " " })).status).toBe(400);
-    expect((await post({ name: "x", projectId: "b925b1df-5b78-43c8-a816-6f00afb174af" })).status).toBe(404);
+    expect((await post({ name: "x", projectId: otherProject })).status).toBe(404);
+    expect(dependencies.createKey).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: otherProject }));
   });
 
   it("is not there without telemetry or a collector", async () => {

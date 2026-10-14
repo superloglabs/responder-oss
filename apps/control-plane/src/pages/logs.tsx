@@ -127,9 +127,12 @@ export function LogsPage() {
     <AppShell active="logs" redesigned>
       <header className="workspaceHeading">
         <h1><MagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
-        <div className="workspaceHeading__actions">
-          <SendTelemetryLink variant="secondary" />
-        </div>
+        {/* Without projects the empty state offers the same link. */}
+        {telemetry.projects && telemetry.projects.length > 0 ? (
+          <div className="workspaceHeading__actions">
+            <SendTelemetryLink variant="secondary" />
+          </div>
+        ) : null}
       </header>
       <TelemetryProjectsGate signal="Logs" state={telemetry}>
         {(projects) => (

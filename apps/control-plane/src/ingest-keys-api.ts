@@ -33,12 +33,13 @@ export async function revokeIngestKey(keyId: string): Promise<void> {
   if (!response.ok) throw new Error(apiErrorMessage(await response.json().catch(() => null), response.status));
 }
 
-// OpenTelemetry SDK settings for a key. The SDK adds /v1/logs, /v1/traces
-// and /v1/metrics to the endpoint.
+// OpenTelemetry SDK settings for a key, exported so an app started from the
+// same shell sees them. The SDK adds /v1/logs, /v1/traces and /v1/metrics to
+// the endpoint.
 export function otlpEnvironment(origin: string, token: string): string {
   return [
-    `OTEL_EXPORTER_OTLP_ENDPOINT=${origin.replace(/\/+$/u, "")}/api/ingest`,
-    "OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
-    `OTEL_EXPORTER_OTLP_HEADERS=x-api-key=${token}`,
+    `export OTEL_EXPORTER_OTLP_ENDPOINT=${origin.replace(/\/+$/u, "")}/api/ingest`,
+    "export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+    `export OTEL_EXPORTER_OTLP_HEADERS=x-api-key=${token}`,
   ].join("\n");
 }
