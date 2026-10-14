@@ -155,6 +155,36 @@ describe("metric series of one kind", () => {
 });
 
 describe("the metric catalog", () => {
+  it("marks services complete only when the details read every point", async () => {
+    const client = {
+      query: async ({ query }: { query: string }) => ({
+        json: async () => {
+          if (!query.includes("FROM otel_metrics_gauge")) return [];
+          if (query.includes("count() AS c")) {
+            return [
+              { c: 10, name: "busy", unit: "" },
+              { c: 3, name: "quiet", unit: "" },
+            ];
+          }
+          return [
+            { attributes: [], description: "", name: "busy", points: 4, series: 1, services: ["api"], unit: "" },
+            { attributes: [], description: "", name: "quiet", points: 3, series: 1, services: ["api"], unit: "" },
+          ];
+        },
+      }),
+    } as unknown as ClickHouseClient;
+
+    const catalog = await listMetricCatalog(client, "project-1", {
+      since: "2026-07-23T00:00:00.000Z",
+      until: "2026-07-23T01:00:00.000Z",
+    });
+
+    expect(catalog.map((metric) => [metric.name, metric.servicesComplete])).toEqual([
+      ["busy", false],
+      ["quiet", true],
+    ]);
+  });
+
   it("lists more metric names than the picker", async () => {
     const queries: RecordedQuery[] = [];
 
@@ -172,13 +202,15 @@ describe("the metric catalog", () => {
 describe("metric dimension sampling", () => {
   const range = { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" };
 
-  // Answers the rollup probes, records every query, and returns no dimensions.
-  function rollupClient(queries: RecordedQuery[], rollupPoints: number | null): ClickHouseClient {
+  // Answers the rollup probes and point counts, records every query, and
+  // returns no dimensions.
+  function rollupClient(queries: RecordedQuery[], rollupPoints: number | null, rawPoints = 0): ClickHouseClient {
     return {
       query: async ({ query, query_params }: { query: string; query_params?: Record<string, unknown> }) => {
         queries.push({ query, params: query_params ?? {} });
         if (query.startsWith("EXISTS TABLE")) return { json: async () => [{ result: rollupPoints === null ? 0 : 1 }] };
         if (query.includes("FROM metric_names_per_hour")) return { json: async () => [{ points: rollupPoints }] };
+        if (query.includes("count() AS points")) return { json: async () => [{ points: rawPoints }] };
         return { json: async () => [] };
       },
     } as unknown as ClickHouseClient;
@@ -198,6 +230,20 @@ describe("metric dimension sampling", () => {
     const { params, query } = dimensionScan(queries);
     expect(query).toContain("% {stride:UInt64} = 0");
     expect(params.stride).toBe(5);
+  });
+
+  it("counts a metric the rollup does not cover from its table", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listMetricDimensions(
+      rollupClient(queries, 0, 1_000_000),
+      "project-1",
+      { kind: "exponential_histogram", name: "rpc.duration" },
+      range,
+    );
+
+    expect(queries.some(({ query }) => /count\(\) AS points\s+FROM otel_metrics_exp_histogram/u.test(query))).toBe(true);
+    expect(dimensionScan(queries).params.stride).toBe(5);
   });
 
   it("reads every point of a metric under the row cap", async () => {

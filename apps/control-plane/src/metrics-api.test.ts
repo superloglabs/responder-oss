@@ -24,6 +24,7 @@ function metric(name: string, overrides: Partial<MetricCatalogEntry> = {}): Metr
     name,
     series: 1,
     services: ["checkout-api"],
+    servicesComplete: true,
     unit: "",
     ...overrides,
   };
@@ -93,11 +94,11 @@ describe("the metric catalog", () => {
     expect(searchMetrics(metrics, "  ")).toHaveLength(2);
   });
 
-  it("keeps metrics without read details under a service filter", () => {
+  it("keeps metrics with sampled services under a service filter", () => {
     const metrics = [
       metric("checkout.orders", { services: ["checkout-api"] }),
       metric("inventory.stock", { services: ["inventory"] }),
-      metric("queue.depth", { kind: "sum", series: null, services: [] }),
+      metric("queue.depth", { kind: "sum", services: ["worker"], servicesComplete: false }),
     ];
 
     expect(filterMetricCatalog(metrics, { kind: "", search: "", service: "checkout-api" }).map((entry) => entry.name))

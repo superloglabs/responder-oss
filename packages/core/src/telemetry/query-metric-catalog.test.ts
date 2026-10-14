@@ -137,6 +137,7 @@ test("the catalog describes each metric in the project", { skip: !clickhouseUrl 
       name: "http.server.active_requests",
       series: 4,
       services: ["checkout-api", "inventory"],
+      servicesComplete: true,
       unit: "{request}",
     },
     {
@@ -146,6 +147,7 @@ test("the catalog describes each metric in the project", { skip: !clickhouseUrl 
       name: "http.server.request.duration",
       series: 2,
       services: ["checkout-api"],
+      servicesComplete: true,
       unit: "s",
     },
   ]);

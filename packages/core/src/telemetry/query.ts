@@ -1697,7 +1697,7 @@ async function listMetricNamesFromRollup(
   sinceSql: string,
   untilSql: string,
   limitPerKind: number,
-): Promise<MetricName[]> {
+): Promise<CountedMetricName[]> {
   const r = await ch.query({
     query: `
       SELECT kind, name, unit, sum(c) AS total
@@ -1728,17 +1728,27 @@ async function listMetricNamesFromRollup(
         (METRIC_KIND_ORDER.get(a.kind) ?? 0) - (METRIC_KIND_ORDER.get(b.kind) ?? 0) ||
         Number(b.total) - Number(a.total),
     )
-    .map((row) => ({ name: row.name, kind: row.kind as MetricKind, unit: row.unit }));
+    .map((row) => ({ name: row.name, kind: row.kind as MetricKind, points: Number(row.total), unit: row.unit }));
 }
 
-// The metric picker lists the busiest 200 names of each kind; the catalog
-// asks for more.
+// The metric picker lists the busiest 200 names of each kind.
 export async function listMetricNames(
   ch: ClickHouseClient,
   projectId: string,
   range?: TimeRange,
-  { limitPerKind = 200 }: { limitPerKind?: number } = {},
 ): Promise<MetricName[]> {
+  return (await listCountedMetricNames(ch, projectId, range, 200)).map(({ kind, name, unit }) => ({ kind, name, unit }));
+}
+
+// A metric with how many points it has in the window.
+type CountedMetricName = MetricName & { points: number };
+
+async function listCountedMetricNames(
+  ch: ClickHouseClient,
+  projectId: string,
+  range: TimeRange | undefined,
+  limitPerKind: number,
+): Promise<CountedMetricName[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
 
   // Fast path: the picker only needs distinct MetricName/MetricUnit pairs, but
@@ -1775,7 +1785,7 @@ export async function listMetricNames(
           },
         ),
       ]);
-      const byIdentity = new Map<string, MetricName>();
+      const byIdentity = new Map<string, CountedMetricName>();
       for (const metric of [...rolledUp, ...exponentialHistograms]) {
         byIdentity.set(`${metric.kind}\0${metric.name}\0${metric.unit}`, metric);
       }
@@ -1813,7 +1823,7 @@ async function listMetricNamesFromRawTable(
   table: string,
   kind: MetricKind,
   options: { bestEffort?: boolean; limit?: number; maxExecutionTimeSeconds?: number } = {},
-): Promise<MetricName[]> {
+): Promise<CountedMetricName[]> {
   try {
     const r = await ch.query({
       query: `
@@ -1833,7 +1843,7 @@ async function listMetricNamesFromRawTable(
         : {}),
     });
     const rows = (await r.json()) as { name: string; unit: string; c: string | number }[];
-    return rows.map((row) => ({ name: row.name, kind, unit: row.unit }));
+    return rows.map((row) => ({ name: row.name, kind, points: Number(row.c), unit: row.unit }));
   } catch (err) {
     if (!options.bestEffort && !isMissingMetricTableError(err)) throw err;
     return [];
@@ -1848,9 +1858,15 @@ export type MetricCatalogEntry = MetricName & {
   // draws when grouped by everything. Null when details were not read.
   series: number | null;
   services: string[];
+  // Whether the details read every point of the metric. Sampled details can
+  // miss services, so only complete ones rule a service out.
+  servicesComplete: boolean;
 };
 
-type MetricDetail = Pick<MetricCatalogEntry, "attributes" | "description" | "series" | "services">;
+type MetricDetail = Pick<MetricCatalogEntry, "attributes" | "description" | "series" | "services"> & {
+  // Points the details were read from.
+  points: number;
+};
 
 // Catalog details and dimensions describe metrics; they never decide which
 // metrics exist. Their reads sample the window and stop early with what they
@@ -1860,6 +1876,7 @@ const METRIC_DIMENSION_SCAN_ROW_CAP = 200_000;
 // The catalog lists every metric a project sends, within reason.
 const METRIC_CATALOG_NAMES_PER_KIND = 5_000;
 const METRIC_DETAIL_SCAN_SECONDS = 4;
+const METRIC_POINT_COUNT_SECONDS = 1;
 const METRIC_DETAIL_SETTINGS = {
   max_execution_time: METRIC_DETAIL_SCAN_SECONDS,
   timeout_overflow_mode: "break",
@@ -1890,7 +1907,8 @@ async function metricDetailsFromTable(
           ${withDescription ? "anyIf(MetricDescription, MetricDescription != '')" : "''"} AS description,
           groupUniqArray(20)(ServiceName) AS services,
           topKArray(30)(mapKeys(Attributes)) AS attributes,
-          uniq(ResourceAttributes, Attributes) AS series
+          uniq(ResourceAttributes, Attributes) AS series,
+          count() AS points
         FROM (
           SELECT MetricName, MetricUnit, ${withDescription ? "MetricDescription, " : ""}ServiceName, Attributes, ResourceAttributes
           FROM ${table}
@@ -1909,6 +1927,7 @@ async function metricDetailsFromTable(
       attributes: string[];
       description: string;
       name: string;
+      points: string | number;
       series: string | number;
       services: string[];
       unit: string;
@@ -1919,6 +1938,7 @@ async function metricDetailsFromTable(
         {
           attributes: row.attributes.filter(Boolean),
           description: row.description,
+          points: Number(row.points),
           series: Number(row.series),
           services: row.services.filter(Boolean).sort(),
         },
@@ -1942,11 +1962,11 @@ export async function listMetricCatalog(
 ): Promise<MetricCatalogEntry[]> {
   const window = resolveRange(range);
   const [names, details] = await Promise.all([
-    listMetricNames(ch, projectId, range, { limitPerKind: METRIC_CATALOG_NAMES_PER_KIND }),
+    listCountedMetricNames(ch, projectId, range, METRIC_CATALOG_NAMES_PER_KIND),
     Promise.all(METRIC_TABLES.map(({ table }) => metricDetailsFromTable(ch, projectId, window, table))),
   ]);
   const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
-  return names.map((metric) => {
+  return names.map(({ points, ...metric }) => {
     const detail = detailsByKind.get(metric.kind)?.get(metricDetailKey(metric));
     return {
       ...metric,
@@ -1954,6 +1974,7 @@ export async function listMetricCatalog(
       description: detail?.description ?? "",
       series: detail?.series ?? null,
       services: detail?.services ?? [],
+      servicesComplete: detail !== undefined && detail.points >= points,
     };
   });
 }
@@ -1970,42 +1991,64 @@ export type MetricDimension = {
   values: { share: number; value: string }[];
 };
 
-// How many points one metric has in the window, from the hourly rollup. Zero
-// without the rollup, so the caller reads points unthinned.
+// How many points one metric has in the window. The hourly rollup answers in
+// milliseconds; it does not cover exponential histograms or every deployment,
+// so a short raw count stands in, and a count cut short still thins a busy
+// metric. Zero when neither answers, so the caller reads points unthinned.
 async function metricPointCount(
   ch: ClickHouseClient,
   projectId: string,
   metric: { kind: MetricKind; name: string; unit?: string },
+  table: string,
   window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
 ): Promise<number> {
-  if (!(await tableExists(ch, "metric_names_per_hour"))) return 0;
-  try {
-    const r = await ch.query({
-      query: `
-        SELECT sum(c) AS points
-        FROM metric_names_per_hour
-        WHERE project_id = {projectId:String}
-          AND kind = {kind:String}
-          AND name = {metricName:String}
-          ${metric.unit === undefined ? "" : "AND unit = {metricUnit:String}"}
-          AND hour >= toStartOfHour(${window.sinceExpr})
-          AND hour <= ${window.untilExpr}
-      `,
-      query_params: {
-        kind: metric.kind,
-        metricName: metric.name,
-        metricUnit: metric.unit ?? "",
-        projectId,
-        since: window.sinceSql,
-        until: window.untilSql,
-      },
-      format: "JSONEachRow",
-    });
-    const rows = (await r.json()) as { points: string | number | null }[];
-    return Number(rows[0]?.points ?? 0) || 0;
-  } catch {
-    return 0;
+  const query_params = {
+    kind: metric.kind,
+    metricName: metric.name,
+    metricUnit: metric.unit ?? "",
+    projectId,
+    since: window.sinceSql,
+    until: window.untilSql,
+  };
+  const count = async (query: string, settings?: { max_execution_time: number; timeout_overflow_mode: "break" }) => {
+    try {
+      const r = await ch.query({
+        query,
+        query_params,
+        format: "JSONEachRow",
+        ...(settings ? { clickhouse_settings: settings } : {}),
+      });
+      const rows = (await r.json()) as { points: string | number | null }[];
+      return Number(rows[0]?.points ?? 0) || 0;
+    } catch {
+      return 0;
+    }
+  };
+  if (await tableExists(ch, "metric_names_per_hour")) {
+    const rolledUp = await count(`
+      SELECT sum(c) AS points
+      FROM metric_names_per_hour
+      WHERE project_id = {projectId:String}
+        AND kind = {kind:String}
+        AND name = {metricName:String}
+        ${metric.unit === undefined ? "" : "AND unit = {metricUnit:String}"}
+        AND hour >= toStartOfHour(${window.sinceExpr})
+        AND hour <= ${window.untilExpr}
+    `);
+    if (rolledUp > 0) return rolledUp;
   }
+  return count(
+    `
+      SELECT count() AS points
+      FROM ${table}
+      WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+        AND MetricName = {metricName:String}
+        ${metric.unit === undefined ? "" : "AND MetricUnit = {metricUnit:String}"}
+        AND TimeUnix >= ${window.sinceExpr}
+        AND TimeUnix <= ${window.untilExpr}
+    `,
+    { max_execution_time: METRIC_POINT_COUNT_SECONDS, timeout_overflow_mode: "break" },
+  );
 }
 
 // The attributes one metric's points carry, with how many values each takes.
@@ -2022,7 +2065,7 @@ export async function listMetricDimensions(
   // The tables sort by service and attributes, so the first rows of a scan
   // come from a few services and series. A busy metric keeps every stride-th
   // point by hash instead, so the capped scan spans the whole window.
-  const stride = Math.ceil((await metricPointCount(ch, projectId, metric, window)) / METRIC_DIMENSION_SCAN_ROW_CAP);
+  const stride = Math.ceil((await metricPointCount(ch, projectId, metric, table, window)) / METRIC_DIMENSION_SCAN_ROW_CAP);
   try {
     const r = await ch.query({
       query: `

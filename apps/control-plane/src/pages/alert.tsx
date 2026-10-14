@@ -4,6 +4,9 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import {
   alertForm,
+  alertMetricChoice,
+  alertMetricOptions,
+  alertMetricValue,
   alertRequest,
   createAlert,
   deleteAlert,
@@ -338,7 +341,8 @@ export function AlertPage() {
       value: `${channel.integrationAccountId}:${channel.channelId}`,
     })),
   ];
-  const metricOptions = metrics.map((metric) => ({ label: metric.unit ? `${metric.name} (${metric.unit})` : metric.name, value: metric.name }));
+  const metricOptions = alertMetricOptions(metrics);
+  const metricValue = form?.metricName ? alertMetricValue(form) : "";
   const projects = telemetry.projects ?? [];
 
   return (
@@ -414,13 +418,13 @@ export function AlertPage() {
                 <div className="widgetEditor__row">
                   <SelectField
                     label="Metric"
-                    onChange={(metricName) => update({ metricKind: "", metricName, metricUnit: null })}
+                    onChange={(value) => update(value ? alertMetricChoice(value) : { metricKind: "", metricName: "", metricUnit: null })}
                     options={[
                       ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
-                      ...withCurrent(metricOptions, form.metricName, form.metricName),
+                      ...withCurrent(metricOptions, metricValue, form.metricUnit ? `${form.metricName} (${form.metricUnit})` : form.metricName),
                     ]}
                     searchable
-                    value={form.metricName}
+                    value={metricValue}
                   />
                   <SegmentedControl
                     aria-label="Aggregation"

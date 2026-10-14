@@ -13,7 +13,7 @@ import type {
   AlertSource,
   AlertUpdate,
 } from "../../../packages/core/src/telemetry/alerts";
-import type { ChartData } from "./dashboards-api";
+import type { ChartData, MetricName } from "./dashboards-api";
 
 export type {
   AlertComparator,
@@ -165,6 +165,30 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
     threshold: String(alert.threshold),
     windowMinutes: alert.windowMinutes,
   };
+}
+
+type AlertMetric = Pick<AlertForm, "metricKind" | "metricName" | "metricUnit">;
+
+// A metric picker value names one metric: its kind, name and unit. An alert
+// that names only a metric keeps an empty kind and a null unit.
+export function alertMetricValue(metric: AlertMetric): string {
+  return JSON.stringify([metric.metricKind, metric.metricName, metric.metricUnit]);
+}
+
+export function alertMetricChoice(value: string): AlertMetric {
+  const [metricKind, metricName, metricUnit] = JSON.parse(value) as [AlertMetric["metricKind"], string, string | null];
+  return { metricKind, metricName, metricUnit };
+}
+
+export function alertMetricOptions(metrics: MetricName[]): Array<{ label: string; value: string }> {
+  return metrics.map((metric) => ({
+    label: metric.unit ? `${metric.name} (${metric.unit})` : metric.name,
+    value: alertMetricValue({
+      metricKind: metric.kind as AlertMetric["metricKind"],
+      metricName: metric.name,
+      metricUnit: metric.unit,
+    }),
+  }));
 }
 
 // The rule a form describes, or what to fix first.
