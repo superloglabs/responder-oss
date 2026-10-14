@@ -27,6 +27,7 @@ import {
   relativeChoice,
   relativePresets,
   resolveTimeRange,
+  rezoneFieldText,
   sameTimeRange,
   shiftTimeRange,
   spanLabel,
@@ -211,6 +212,14 @@ function TimePickerPanel({
   const [fromText, setFromText] = useState(initialFrom);
   const [toText, setToText] = useState(initialTo);
   const [focusedField, setFocusedField] = useState<"from" | "to" | null>(null);
+  // The zone the From and To text is written in. Choosing another zone
+  // rewrites the text so it keeps naming the same instants.
+  const [fieldZone, setFieldZone] = useState(timeZone);
+  if (fieldZone !== timeZone) {
+    setFieldZone(timeZone);
+    setFromText(rezoneFieldText(fromText, fieldZone, timeZone));
+    setToText(rezoneFieldText(toText, fieldZone, timeZone));
+  }
   const [pickingEnd, setPickingEnd] = useState(false);
   const [showTimeZones, setShowTimeZones] = useState(false);
   const shown = zonedParts(isLive(range) ? now : initial.until, timeZone);

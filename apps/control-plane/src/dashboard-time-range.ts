@@ -195,8 +195,20 @@ export function parseFieldTime(text: string, timeZone: string): number | null {
   const [year, month, day, hour, minute, second] = match.slice(1).map((value) => Number(value ?? 0));
   if (month! < 1 || month! > 12 || day! < 1 || day! > 31 || hour! > 23 || minute! > 59 || second! > 59) return null;
   const time = zonedTime({ day: day!, hour, minute, month: month!, second, year: year! }, timeZone);
-  // Rejects dates such as February 30, which would roll into March.
-  return zonedParts(time, timeZone).day === day ? time : null;
+  // Rejects dates such as February 30, which would roll into March, and
+  // times skipped when summer time starts, which would move by an hour.
+  const parts = zonedParts(time, timeZone);
+  const exact =
+    parts.year === year && parts.month === month && parts.day === day &&
+    parts.hour === hour && parts.minute === minute && parts.second === second;
+  return exact ? time : null;
+}
+
+// Field text written for one time zone, rewritten for another so it names
+// the same instant. "now" and text that is not a time stay as they are.
+export function rezoneFieldText(text: string, from: string, to: string): string {
+  const time = parseFieldTime(text, from);
+  return time === null ? text : formatFieldTime(time, to);
 }
 
 function sameDay(a: number, b: number, timeZone: string): boolean {

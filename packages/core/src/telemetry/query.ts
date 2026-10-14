@@ -147,10 +147,9 @@ function splitAttrs(
   return out;
 }
 
-// Build equality conditions for `field.*` filters against top-level columns.
-// Only keys on the fieldColumnExpr allowlist for this source produce a
-// condition; everything else is silently dropped. Op is ignored — identifier
-// filters are equality-only.
+// Build conditions for `field.*` filters against top-level columns. Only keys
+// on the fieldColumnExpr allowlist for this source produce a condition;
+// everything else is silently dropped.
 function fieldConds(
   attrs: ResourceAttrFilter[],
   source: FieldFilterSource,
@@ -163,11 +162,16 @@ function fieldConds(
     if (!expr) return;
     const vName = `${paramPrefix}_v_${i}`;
     if (a.values) {
-      conds.push(`${expr} IN {${vName}:Array(String)}`);
+      if (a.op === "not_contains") {
+        conds.push(`arrayAll(v -> positionCaseInsensitive(${expr}, v) = 0, {${vName}:Array(String)})`);
+      } else {
+        conds.push(`${expr} ${a.op === "neq" ? "NOT IN" : "IN"} {${vName}:Array(String)}`);
+      }
       params[vName] = a.values;
       return;
     }
-    conds.push(`${expr} = {${vName}:String}`);
+    if (a.op === "not_contains") conds.push(`positionCaseInsensitive(${expr}, {${vName}:String}) = 0`);
+    else conds.push(`${expr} ${a.op === "neq" ? "!=" : "="} {${vName}:String}`);
     params[vName] = a.value;
   });
   return { conds, params };

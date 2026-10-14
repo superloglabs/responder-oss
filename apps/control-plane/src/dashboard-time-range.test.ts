@@ -8,6 +8,7 @@ import {
   parseRangeInput,
   relativeLabel,
   resolveTimeRange,
+  rezoneFieldText,
   shiftTimeRange,
   spanLabel,
   startOfDay,
@@ -43,6 +44,15 @@ describe("time zones", () => {
     expect(parseFieldTime("2026-10-14", paris)).toBe(startOfDay(now, paris));
     expect(parseFieldTime("2026-02-30 10:00", paris)).toBeNull();
     expect(parseFieldTime("yesterday", paris)).toBeNull();
+    // 02:30 does not exist in Paris on the day summer time starts.
+    expect(parseFieldTime("2026-03-29 02:30:00", paris)).toBeNull();
+    expect(parseFieldTime("2026-03-29 03:30:00", paris)).toBe(at("2026-03-29T01:30:00Z"));
+  });
+
+  it("moves field text to another time zone, keeping the instant", () => {
+    expect(rezoneFieldText("2026-10-14 14:52:00", paris, "UTC")).toBe("2026-10-14 12:52:00");
+    expect(rezoneFieldText("now", paris, "UTC")).toBe("now");
+    expect(rezoneFieldText("not a time", paris, "UTC")).toBe("not a time");
   });
 });
 

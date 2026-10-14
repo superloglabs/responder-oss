@@ -1,6 +1,6 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import { describe, expect, it } from "vitest";
-import { listAttributeValues, metricSeries, queryMetrics } from "./query.js";
+import { listAttributeValues, metricSeries, queryLogs, queryMetrics } from "./query.js";
 
 type RecordedQuery = { query: string; params: Record<string, unknown> };
 
@@ -54,6 +54,27 @@ describe("attribute values filtered by other attributes", () => {
 
     expect(queries[0]!.query).toContain("FROM otel_logs");
     expect(queries[0]!.query).not.toContain("FROM otel_traces");
+  });
+});
+
+describe("field filters", () => {
+  it("keeps the operator when a field filter has several values", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await queryLogs(recordingClient(queries), "project-1", {
+      limit: 10,
+      resourceAttrs: [
+        { key: "field.trace_id", op: "neq", value: "a", values: ["a", "b"] },
+        { key: "field.span_id", value: "c", values: ["c", "d"] },
+        { key: "field.severity_number", op: "neq", value: "9" },
+      ],
+    });
+
+    const [{ params, query }] = queries;
+    expect(query).toContain("TraceId NOT IN {fattr_v_0:Array(String)}");
+    expect(query).toContain("SpanId IN {fattr_v_1:Array(String)}");
+    expect(query).toContain("toString(SeverityNumber) != {fattr_v_2:String}");
+    expect(params).toMatchObject({ fattr_v_0: ["a", "b"], fattr_v_1: ["c", "d"], fattr_v_2: "9" });
   });
 });
 
