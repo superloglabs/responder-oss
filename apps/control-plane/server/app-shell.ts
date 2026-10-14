@@ -8,28 +8,22 @@ function isAppShell(html: string): boolean {
   return html.includes("</head>") && html.includes('<div id="root"></div>');
 }
 
-// Loads the application shell for documents the server renders itself.
-// Self-hosted servers read it from their build. A deployment that serves the
-// build from a CDN has no local copy, so the server fetches /app.html from its
-// public address and reuses it for a minute. Requests that arrive together
+// Fetches /app.html from the public address of a deployment that serves the
+// build from a CDN, and reuses it for a minute. Requests that arrive together
 // share one fetch. A failed fetch keeps the last shell and waits five seconds
 // before the next try; null means no shell has loaded yet.
-export function appShellLoader(options: {
+function remoteShellLoader(options: {
   baseUrl: () => string;
-  fetchRemote?: (url: string, init: RequestInit) => Promise<Response>;
-  now?: () => number;
-  readLocal: () => Promise<string>;
+  fetchRemote: (url: string, init: RequestInit) => Promise<Response>;
+  now: () => number;
 }): () => Promise<string | null> {
-  const fetchRemote = options.fetchRemote ?? fetch;
-  const now = options.now ?? Date.now;
-  let local: Promise<string | null> | undefined;
   let remote: { fetchedAt: number; html: string } | undefined;
   let refreshing: Promise<string | null> | undefined;
   let retryAt = 0;
 
   async function refresh(): Promise<string | null> {
     try {
-      const response = await fetchRemote(
+      const response = await options.fetchRemote(
         new URL("/app.html", options.baseUrl()).toString(),
         { signal: AbortSignal.timeout(remoteShellTimeoutMs) },
       );
@@ -37,27 +31,48 @@ export function appShellLoader(options: {
         ? await response.text()
         : null;
       if (html && isAppShell(html)) {
-        remote = { fetchedAt: now(), html };
+        remote = { fetchedAt: options.now(), html };
         return html;
       }
     } catch {
       // Keep the last shell below.
     }
-    retryAt = now() + remoteShellRetryMs;
+    retryAt = options.now() + remoteShellRetryMs;
     return remote?.html ?? null;
   }
 
-  return async () => {
-    local ??= options.readLocal().catch(() => null);
-    const html = await local;
-    if (html !== null) return html;
-    if (remote && now() - remote.fetchedAt < remoteShellMaxAgeMs) {
-      return remote.html;
+  return () => {
+    const time = options.now();
+    if (remote && time - remote.fetchedAt < remoteShellMaxAgeMs) {
+      return Promise.resolve(remote.html);
     }
-    if (now() < retryAt) return remote?.html ?? null;
+    if (time < retryAt) return Promise.resolve(remote?.html ?? null);
     refreshing ??= refresh().finally(() => {
       refreshing = undefined;
     });
     return refreshing;
+  };
+}
+
+// Loads the application shell for documents the server renders itself.
+// Self-hosted servers read it from their build. Without a local build, the
+// shell comes from the deployment's CDN.
+export function appShellLoader(options: {
+  baseUrl: () => string;
+  fetchRemote?: (url: string, init: RequestInit) => Promise<Response>;
+  now?: () => number;
+  readLocal: () => Promise<string>;
+}): () => Promise<string | null> {
+  const local = options.readLocal().catch(() => null);
+  let loadRemote: (() => Promise<string | null>) | undefined;
+  return async () => {
+    const html = await local;
+    if (html !== null) return html;
+    loadRemote ??= remoteShellLoader({
+      baseUrl: options.baseUrl,
+      fetchRemote: options.fetchRemote ?? fetch,
+      now: options.now ?? Date.now,
+    });
+    return loadRemote();
   };
 }
