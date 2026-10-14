@@ -5,6 +5,10 @@ import {
   defaultVariableValues,
   formatWidgetValue,
   nextVariableValues,
+  variableFilters,
+  variableParams,
+  variablesFromRows,
+  variableValuesFromParams,
   placeWidget,
   suggestedWidgetTitle,
 } from "./dashboards-api";
@@ -76,6 +80,52 @@ describe("nextVariableValues", () => {
         { env: "staging", free: "typed", gone: "x", region: "us" },
       ),
     ).toEqual({ added: "a", env: "staging", free: "typed", region: "eu" });
+  });
+});
+
+describe("multi-value variables", () => {
+  const variables = [
+    { attributeKey: "service.name", name: "service", options: [] },
+    { attributeKey: "http.route", multi: true, name: "route", options: [] },
+    { attributeKey: "cloud.region", defaultValue: "eu-west-3", multi: true, name: "region", options: ["eu-west-3", "us-east-1"] },
+  ];
+
+  it("starts with the default selected, or nothing, which matches every value", () => {
+    expect(defaultVariableValues(variables)).toEqual({ region: ["eu-west-3"], route: [], service: "" });
+  });
+
+  it("keeps selections the variable still allows", () => {
+    expect(nextVariableValues(variables, { region: ["us-east-1", "ap-south-1"], route: "POST /checkout", service: ["api"] })).toEqual({
+      region: ["us-east-1"],
+      route: ["POST /checkout"],
+      service: "api",
+    });
+    expect(nextVariableValues(variables, { region: [] })).toMatchObject({ region: [] });
+  });
+
+  it("round-trips selections through the URL", () => {
+    const values = { region: [], route: ["POST /checkout", "POST /refunds"], service: "checkout" };
+    const params = variableParams(values, new URLSearchParams("range=1h&var-old=x"));
+    expect(params.get("range")).toBe("1h");
+    expect(params.has("var-old")).toBe(false);
+    expect(variableValuesFromParams(variables, params)).toEqual(values);
+    expect(variableValuesFromParams(variables, new URLSearchParams())).toEqual(defaultVariableValues(variables));
+  });
+
+  it("filters one variable's values by the others' selections", () => {
+    expect(variableFilters(variables, { region: [], route: ["a", "b"], service: "checkout" }, "region")).toEqual({
+      filters: [
+        { key: "service.name", value: "checkout" },
+        { key: "http.route", value: "a", values: ["a", "b"] },
+      ],
+      names: ["service", "route"],
+    });
+  });
+
+  it("saves the several-values choice from the editor", () => {
+    expect(
+      variablesFromRows([{ attributeKey: "http.route", defaultValue: "", label: "", multi: true, name: "route", options: "" }]),
+    ).toEqual({ variables: [{ attributeKey: "http.route", multi: true, name: "route", options: [] }] });
   });
 });
 

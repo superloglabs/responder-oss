@@ -30,6 +30,33 @@ describe("attribute value discovery", () => {
   });
 });
 
+describe("attribute values filtered by other attributes", () => {
+  it("counts only rows that match the filters, with several values matching any of them", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listAttributeValues(recordingClient(queries), "project-1", "http.route", undefined, 200, undefined, undefined, [
+      { key: "service.name", value: "checkout" },
+      { key: "deployment.environment", value: "prod", values: ["prod", "staging"] },
+    ]);
+
+    const [{ params, query }] = queries;
+    expect(query).toContain("AND ServiceName = {fattr_r_v_0:String}");
+    expect(query).toContain("AND ResourceAttributes[{fattr_r_k_1:String}] IN {fattr_r_v_1:Array(String)}");
+    expect(params).toMatchObject({ fattr_r_k_1: "deployment.environment", fattr_r_v_0: "checkout", fattr_r_v_1: ["prod", "staging"] });
+  });
+
+  it("leaves out traces when a filter is on a log attribute", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listAttributeValues(recordingClient(queries), "project-1", "service.name", undefined, 200, undefined, undefined, [
+      { key: "log.level", value: "error" },
+    ]);
+
+    expect(queries[0]!.query).toContain("FROM otel_logs");
+    expect(queries[0]!.query).not.toContain("FROM otel_traces");
+  });
+});
+
 describe("metric attribute filters", () => {
   const range = { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" };
 

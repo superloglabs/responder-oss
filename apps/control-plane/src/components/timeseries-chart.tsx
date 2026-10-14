@@ -19,12 +19,16 @@ function useSize<T extends HTMLElement>() {
   return { ref, size };
 }
 
-function timeLabel(time: number, spanMs: number): string {
+function timeLabel(time: number, spanMs: number, timeZone: string | undefined): string {
   const date = new Date(time);
+  const zone = timeZone ? { timeZone } : {};
   return spanMs > 2 * 86_400_000
-    ? date.toLocaleDateString(undefined, { day: "numeric", month: "short" })
-    : date.toLocaleTimeString(undefined, { hour: "2-digit", hour12: false, minute: "2-digit" });
+    ? date.toLocaleDateString(undefined, { ...zone, day: "numeric", month: "short" })
+    : date.toLocaleTimeString(undefined, { ...zone, hour: "2-digit", hour12: false, minute: "2-digit" });
 }
+
+// A drag shorter than this is a click, not a selection.
+const minimumDragPixels = 6;
 
 function seriesTotal(values: Array<number | null>): number {
   return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
@@ -37,26 +41,34 @@ export function TimeseriesChart({
   chartType = "bar",
   label,
   legendPosition = "bottom",
+  onZoom,
   showLegend = true,
   showXAxis = true,
   showYAxis = true,
   threshold,
+  timeZone,
   unit = "none",
 }: {
   chart: ChartData;
   chartType?: "bar" | "line";
   label: string;
   legendPosition?: "bottom" | "side";
+  // Dragging across the plot selects a window, in milliseconds.
+  onZoom?: (since: number, until: number) => void;
   showLegend?: boolean;
   showXAxis?: boolean;
   showYAxis?: boolean;
   // Drawn as a dashed line, for an alert's condition.
   threshold?: number;
+  // Times read in this zone, or the browser's.
+  timeZone?: string;
   unit?: WidgetUnit;
 }) {
   const { ref, size } = useSize<HTMLDivElement>();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<number | null>(null);
+  // Plot offsets, in pixels, where a drag started and where the pointer is.
+  const [drag, setDrag] = useState<{ current: number; start: number } | null>(null);
   const visible = useMemo(() => chart.series.filter((series) => !hidden.has(series.name)), [chart.series, hidden]);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [tooltipWidth, setTooltipWidth] = useState(0);
@@ -108,13 +120,39 @@ export function TimeseriesChart({
   const spanMs = count > 1 ? chart.buckets[count - 1]! - chart.buckets[0]! : 0;
   const labelEvery = Math.max(1, Math.ceil(count / Math.max(1, Math.floor(width / 90))));
 
+  function plotOffset(event: MouseEvent<SVGSVGElement>): number {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return Math.min(left + width, Math.max(left, event.clientX - bounds.left));
+  }
+
   function onMove(event: MouseEvent<SVGSVGElement>) {
     if (count === 0) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const offset = event.clientX - bounds.left - left;
     const index = stacked ? Math.floor(offset / band) : Math.round((offset / (width || 1)) * (count - 1));
     setHover(index >= 0 && index < count ? index : null);
+    if (drag) setDrag({ ...drag, current: plotOffset(event) });
   }
+
+  // The time under a plot offset. A column covers its bucket's whole step.
+  const timeAt = (offset: number) => {
+    const first = chart.buckets[0] ?? 0;
+    if (stacked) return first + ((offset - left) / (band || 1)) * chart.stepMs;
+    return first + ((offset - left) / (width || 1)) * spanMs;
+  };
+
+  useEffect(() => {
+    if (!drag || !onZoom) return;
+    const finish = () => {
+      setDrag(null);
+      if (Math.abs(drag.current - drag.start) < minimumDragPixels) return;
+      const since = timeAt(Math.min(drag.start, drag.current));
+      const until = timeAt(Math.max(drag.start, drag.current));
+      onZoom(Math.round(since), Math.round(until));
+    };
+    window.addEventListener("mouseup", finish);
+    return () => window.removeEventListener("mouseup", finish);
+  });
 
   const columns = stacked
     ? chart.buckets.map((_, index) => {
@@ -195,7 +233,14 @@ export function TimeseriesChart({
         {size.width > 0 ? (
           <svg
             aria-label={label}
+            className={onZoom && count > 1 ? "timeseriesChart__svg--zoomable" : undefined}
             height={size.height}
+            onMouseDown={(event) => {
+              if (!onZoom || count < 2 || event.button !== 0) return;
+              event.preventDefault();
+              const offset = plotOffset(event);
+              setDrag({ current: offset, start: offset });
+            }}
             onMouseLeave={() => setHover(null)}
             onMouseMove={onMove}
             role="img"
@@ -221,7 +266,7 @@ export function TimeseriesChart({
                       x={x(index)}
                       y={6 + height + 15}
                     >
-                      {timeLabel(time, spanMs)}
+                      {timeLabel(time, spanMs, timeZone)}
                     </text>
                   ) : null,
                 )
@@ -264,15 +309,24 @@ export function TimeseriesChart({
                     />
                   );
                 })}
+            {drag && Math.abs(drag.current - drag.start) >= minimumDragPixels ? (
+              <rect
+                className="timeseriesChart__selection"
+                height={height}
+                width={Math.abs(drag.current - drag.start)}
+                x={Math.min(drag.start, drag.current)}
+                y={6}
+              />
+            ) : null}
             {/* Drawn last, so bars crossing it do not hide it. */}
             {threshold !== undefined ? (
               <line className="timeseriesChart__threshold" x1={left} x2={left + width} y1={y(threshold)} y2={y(threshold)} />
             ) : null}
           </svg>
         ) : null}
-        {hover !== null && hoverRows.length > 0 ? (
+        {hover !== null && hoverRows.length > 0 && !drag ? (
           <div className="timeseriesChart__tooltip" ref={tooltipRef} style={{ transform: `translateX(${tooltipLeft}px)` }}>
-            <time>{new Date(chart.buckets[hover]!).toLocaleString(undefined, { day: "numeric", hour: "2-digit", hour12: false, minute: "2-digit", month: "short", second: chart.stepMs < 60_000 ? "2-digit" : undefined })}</time>
+            <time>{new Date(chart.buckets[hover]!).toLocaleString(undefined, { ...(timeZone ? { timeZone } : {}), day: "numeric", hour: "2-digit", hour12: false, minute: "2-digit", month: "short", second: chart.stepMs < 60_000 ? "2-digit" : undefined })}</time>
             <dl>
               {hoverRows.map((row) => (
                 <div key={row.name}>

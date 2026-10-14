@@ -2,19 +2,15 @@ import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import { Link } from "react-router-dom";
 import { Badge } from "../design-system";
+import { resolveTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
 import {
   fetchWidgetData,
   type DashboardWidgetConfig,
   type DashboardWidgetType,
+  type VariableValues,
   type WidgetData,
 } from "../dashboards-api";
-import {
-  formatDuration,
-  formatTelemetryTime,
-  severityTone,
-  traceHref,
-  type TelemetryRange,
-} from "../telemetry-api";
+import { formatDuration, formatTelemetryTime, severityTone, traceHref } from "../telemetry-api";
 import { TimeseriesChart } from "./timeseries-chart";
 
 type DataWidgetType = Exclude<DashboardWidgetType, "markdown">;
@@ -22,22 +18,23 @@ type DataWidgetType = Exclude<DashboardWidgetType, "markdown">;
 function useWidgetData(input: {
   config: DashboardWidgetConfig;
   projectId: string;
-  range: TelemetryRange;
+  range: DashboardTimeRange;
   refresh: number;
   type: DataWidgetType;
-  variables: Record<string, string>;
+  variables: VariableValues;
 }) {
   const [state, setState] = useState<{ data: WidgetData | null; error: string | null; key: string }>({
     data: null,
     error: null,
     key: "",
   });
-  // Refetch when anything the query depends on changes, or on refresh.
+  // Refetch when anything the query depends on changes, or on refresh. A
+  // range that ends now is resolved when the request starts.
   const key = JSON.stringify(input);
   useEffect(() => {
     let cancelled = false;
     const { config, projectId, range, type, variables } = JSON.parse(key) as typeof input;
-    fetchWidgetData({ config, projectId, range, type, variables })
+    fetchWidgetData({ config, projectId, type, variables, window: resolveTimeRange(range, Date.now()) })
       .then((data) => { if (!cancelled) setState({ data, error: null, key }); })
       .catch((cause: unknown) => {
         if (!cancelled) setState({ data: null, error: cause instanceof Error ? cause.message : "Unable to load", key });
@@ -48,23 +45,30 @@ function useWidgetData(input: {
   return { ...state, loading: state.key !== key };
 }
 
+interface WidgetBodyProps {
+  config: DashboardWidgetConfig;
+  // Called with the window someone drags across a chart.
+  onZoom?: (since: number, until: number) => void;
+  projectId: string;
+  range: DashboardTimeRange;
+  refresh: number;
+  timeZone?: string;
+  title: string;
+  type: DashboardWidgetType;
+  variables: VariableValues;
+}
+
 function WidgetData({
   config,
+  onZoom,
   projectId,
   range,
   refresh,
+  timeZone,
   title,
   type,
   variables,
-}: {
-  config: DashboardWidgetConfig;
-  projectId: string;
-  range: TelemetryRange;
-  refresh: number;
-  title: string;
-  type: DataWidgetType;
-  variables: Record<string, string>;
-}) {
+}: WidgetBodyProps & { type: DataWidgetType }) {
   const { data, error, loading } = useWidgetData({ config, projectId, range, refresh, type, variables });
   if (error) return <p className="dashboardWidget__status" role="alert">{error}</p>;
   if (!data) return <p className="dashboardWidget__status">{loading ? "Loading…" : ""}</p>;
@@ -76,9 +80,11 @@ function WidgetData({
         chartType={config.chartType ?? (type === "timeseries_metric" ? "line" : "bar")}
         label={title}
         legendPosition={config.legendPosition ?? "bottom"}
+        {...(onZoom ? { onZoom } : {})}
         showLegend={config.showLegend ?? true}
         showXAxis={config.showXAxis ?? true}
         showYAxis={config.showYAxis ?? true}
+        {...(timeZone ? { timeZone } : {})}
         unit={config.unit ?? "none"}
       />
     );
@@ -91,7 +97,7 @@ function WidgetData({
         <tbody>
           {data.logs.map((log, index) => (
             <tr key={`${log.timestamp}-${index}`}>
-              <td className="dashboardWidget__muted">{formatTelemetryTime(log.timestamp)}</td>
+              <td className="dashboardWidget__muted">{formatTelemetryTime(log.timestamp, timeZone)}</td>
               <td><Badge tone={severityTone(log.severity_number)}>{log.severity || "Unset"}</Badge></td>
               <td className="dashboardWidget__muted">{log.service || "—"}</td>
               <td className="dashboardWidget__mono" title={log.body}>
@@ -110,7 +116,7 @@ function WidgetData({
       <tbody>
         {data.traces.map((trace) => (
           <tr key={trace.trace_id}>
-            <td className="dashboardWidget__muted">{formatTelemetryTime(trace.start_time)}</td>
+            <td className="dashboardWidget__muted">{formatTelemetryTime(trace.start_time, timeZone)}</td>
             <td className="dashboardWidget__muted">{trace.root_service || "—"}</td>
             <td className="dashboardWidget__mono">
               <Link title={trace.root_span_name} to={traceHref(projectId, trace.trace_id)}>{trace.root_span_name || trace.trace_id}</Link>
@@ -126,15 +132,7 @@ function WidgetData({
 }
 
 // The content of one widget: a chart, a table, or a note.
-export function DashboardWidgetBody(props: {
-  config: DashboardWidgetConfig;
-  projectId: string;
-  range: TelemetryRange;
-  refresh: number;
-  title: string;
-  type: DashboardWidgetType;
-  variables: Record<string, string>;
-}) {
+export function DashboardWidgetBody(props: WidgetBodyProps) {
   if (props.type === "markdown") {
     return (
       <div className="dashboardWidget__markdown">

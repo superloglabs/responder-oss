@@ -7,6 +7,8 @@ export type ResourceAttrFilter = {
   key: string;
   value: string;
   op?: "eq" | "neq" | "not_contains";
+  // Several values: eq matches any of them, neq and not_contains none of them.
+  values?: string[];
 };
 
 type AttributeColumn = "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
@@ -83,10 +85,10 @@ function attrConds(
   paramPrefix = "attr",
 ): {
   conds: string[];
-  params: Record<string, string>;
+  params: Record<string, string | string[]>;
 } {
   const conds: string[] = [];
-  const params: Record<string, string> = {};
+  const params: Record<string, string | string[]> = {};
   if (!attrs) return { conds, params };
   attrs.forEach((a, i) => {
     const kName = `${paramPrefix}_k_${i}`;
@@ -98,6 +100,16 @@ function attrConds(
     // service.name resource attribute, so the two are equivalent.)
     const native = column === "ResourceAttributes" && a.key === "service.name";
     const target = native ? "ServiceName" : `${column}[{${kName}:String}]`;
+    if (a.values) {
+      if (a.op === "not_contains") {
+        conds.push(`arrayAll(v -> positionCaseInsensitive(${target}, v) = 0, {${vName}:Array(String)})`);
+      } else {
+        conds.push(`${target} ${a.op === "neq" ? "NOT IN" : "IN"} {${vName}:Array(String)}`);
+      }
+      if (!native) params[kName] = a.key;
+      params[vName] = a.values;
+      return;
+    }
     if (a.op === "neq") {
       conds.push(`${target} != {${vName}:String}`);
     } else if (a.op === "not_contains") {
@@ -143,13 +155,18 @@ function fieldConds(
   attrs: ResourceAttrFilter[],
   source: FieldFilterSource,
   paramPrefix = "fattr",
-): { conds: string[]; params: Record<string, string> } {
+): { conds: string[]; params: Record<string, string | string[]> } {
   const conds: string[] = [];
-  const params: Record<string, string> = {};
+  const params: Record<string, string | string[]> = {};
   attrs.forEach((a, i) => {
     const expr = fieldColumnExpr(a.key, source);
     if (!expr) return;
     const vName = `${paramPrefix}_v_${i}`;
+    if (a.values) {
+      conds.push(`${expr} IN {${vName}:Array(String)}`);
+      params[vName] = a.values;
+      return;
+    }
     conds.push(`${expr} = {${vName}:String}`);
     params[vName] = a.value;
   });
@@ -951,14 +968,25 @@ export async function listAttributeValues(
   limit = 200,
   source?: SeriesSource | "metrics",
   valuePrefix?: string,
+  // Counts only rows that also match these filters, such as a dashboard's
+  // other variables. A log or span attribute filter leaves out the other table.
+  filters?: ResourceAttrFilter[],
 ): Promise<{ value: string; count: number }[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
   const parsed = parseAttributeKey(key);
   const keyParam = parsed.key;
+  const split = splitAttrs(filters);
+  const resourceFilter = attrConds(split.resource, "ResourceAttributes", "fattr_r");
+  const logFilter = attrConds(split.log, "LogAttributes", "fattr_l");
+  const spanFilter = attrConds(split.span, "SpanAttributes", "fattr_s");
+  const searchLogs = split.span.length === 0;
+  const searchTraces = split.log.length === 0;
   // Capped like listAttributeKeys: grouping the values of a map column across
   // a high-volume window reads as many rows as the key scan did. Counts become
   // approximate, which is fine for ordering the dropdown.
-  const valueScan = (table: string, column: AttributeColumn): string => `
+  const valueScan = (table: "otel_logs" | "otel_traces", column: AttributeColumn): string => {
+    const conds = [...resourceFilter.conds, ...(table === "otel_logs" ? logFilter.conds : spanFilter.conds)];
+    return `
       SELECT v, count() AS c FROM (
         SELECT ${column}[{key:String}] AS v
         FROM ${table}
@@ -966,19 +994,21 @@ export async function listAttributeValues(
           AND Timestamp >= ${sinceExpr}
           AND Timestamp <= ${untilExpr}
           AND mapContains(${column}, {key:String})
+          ${conds.map((cond) => `AND ${cond}`).join("\n          ")}
         LIMIT ${ATTRIBUTE_KEY_SCAN_ROW_CAP}
       ) GROUP BY v`;
+  };
   const subqueries: string[] = [];
   if (parsed.scope === "resource") {
-    if (source === undefined || source === "logs" || source === "metrics") {
+    if (searchLogs && (source === undefined || source === "logs" || source === "metrics")) {
       subqueries.push(valueScan("otel_logs", "ResourceAttributes"));
     }
-    if (source === undefined || source === "traces" || source === "metrics") {
+    if (searchTraces && (source === undefined || source === "traces" || source === "metrics")) {
       subqueries.push(valueScan("otel_traces", "ResourceAttributes"));
     }
-  } else if (parsed.scope === "log" && source === "logs") {
+  } else if (parsed.scope === "log" && source === "logs" && searchLogs) {
     subqueries.push(valueScan("otel_logs", "LogAttributes"));
-  } else if (parsed.scope === "span" && source === "traces") {
+  } else if (parsed.scope === "span" && source === "traces" && searchTraces) {
     subqueries.push(valueScan("otel_traces", "SpanAttributes"));
   }
   if (subqueries.length === 0) return [];
@@ -1001,6 +1031,9 @@ export async function listAttributeValues(
       until: untilSql,
       limit,
       ...(valuePrefix ? { valuePrefix } : {}),
+      ...resourceFilter.params,
+      ...logFilter.params,
+      ...spanFilter.params,
     },
     format: "JSONEachRow",
   });
@@ -2218,7 +2251,7 @@ function foldServiceAttrFilter(filter: SeriesFilter): SeriesFilter | null {
   if (attrs.length === 0) return filter;
   if (attrs.length !== 1 || filter.service) return null;
   const attr = attrs[0];
-  if (!attr || (attr.op && attr.op !== "eq")) return null;
+  if (!attr || attr.values || (attr.op && attr.op !== "eq")) return null;
   const parsed = parseAttributeKey(attr.key);
   if (parsed.scope !== "resource" || parsed.key !== "service.name") return null;
   return { ...filter, service: attr.value, resourceAttrs: [] };

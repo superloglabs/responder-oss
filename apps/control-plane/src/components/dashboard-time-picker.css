@@ -1,0 +1,145 @@
+/* The time range control in the dashboard header. */
+.timePicker { display: flex; flex-shrink: 0; align-items: stretch; height: 32px; border: 1px solid #ddd; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px #00000008; transition: border-color var(--ds-duration-fast) var(--ds-ease-standard), box-shadow var(--ds-duration-fast) var(--ds-ease-standard); }
+.timePicker:hover { border-color: #c4c4c4; }
+.timePicker[data-open] { border-color: #4e58f9; box-shadow: 0 0 0 3px #4e58f926; }
+.timePicker button { display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: #666; font: inherit; cursor: pointer; }
+.timePicker > button + button { border-left: 1px solid #ebebeb; }
+.timePicker > button:first-child { border-radius: 5px 0 0 5px; }
+.timePicker > button:last-child { border-radius: 0 5px 5px 0; }
+.timePicker button:hover:not(:disabled) { background: #f5f5f5; }
+.timePicker button:disabled { color: #c4c4c4; cursor: default; }
+.timePicker button:focus-visible { outline: 2px solid #4e58f9; outline-offset: -2px; }
+.timePicker__step { width: 28px; }
+.timePicker__zoom { width: 30px; }
+.timePicker__zoom[data-zoomed] { color: #4e58f9 !important; }
+.timePicker__range { gap: 7px; padding: 0 10px !important; color: #444 !important; white-space: nowrap; }
+.timePicker__range > svg:last-child { color: #666; }
+.timePicker__label { color: #1a1a1a; font-size: 13px; font-weight: 500; line-height: 18px; }
+.timePicker__detail { color: #999; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.timePicker__compact { display: none; color: #1a1a1a; font-size: 13px; font-weight: 500; }
+.timePicker__tag { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border-radius: 4px; background: #f2f3ff; color: #4e58f9; font-size: 11px; font-weight: 500; }
+
+/* Narrow screens keep the range button only, with a short label. */
+@media (max-width: 1279px) {
+  .timePicker__step, .timePicker__zoom, .timePicker__label, .timePicker__detail, .timePicker__tag { display: none !important; }
+  .timePicker__compact { display: inline; }
+  .timePicker__range { border-radius: 5px; }
+}
+
+.dashboardLive { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid #dce8dd; border-radius: 999px; background: #f1f7f1; color: #4b7650; font: inherit; font-size: 11px; font-weight: 500; line-height: 16px; }
+.dashboardLive__dot { width: 5px; height: 5px; border-radius: 3px; background: #4b7650; box-shadow: 0 0 8px #4b7650; }
+.dashboardLive--paused { border-color: #e3e3e3; background: #f5f5f5; color: #666; cursor: pointer; }
+.dashboardLive--paused:hover { border-color: #c4c4c4; color: #1a1a1a; }
+.dashboardLive--paused:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+/* The popover. */
+.timePickerPanel { z-index: 50; width: min(632px, calc(100vw - 24px)); border-radius: 10px; background: #fff; color: #1a1a1a; font-family: var(--ds-font-sans); font-size: 12px; line-height: 16px; box-shadow: 0 0 0 .5px #ddd, 0 8px 24px #0000001f, 0 2px 6px #0000000f; outline: 0; }
+.timePickerPanel__inner { position: relative; display: flex; flex-direction: column; }
+.timePickerPanel button { font: inherit; }
+.timePickerPanel button:focus-visible, .timePickerPanel input:focus-visible { outline: 2px solid #4e58f9; outline-offset: -2px; }
+.timePickerPanel__section { margin: 0; padding: 6px 10px 4px; color: #999; font-size: 11px; font-weight: 500; letter-spacing: .04em; line-height: 14px; text-transform: uppercase; }
+.timePickerPanel__kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid #e3e3e3; border-radius: 4px; background: #f5f5f5; color: #666; font-family: inherit; font-size: 10px; line-height: 12px; }
+
+.timePickerPanel__header { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-bottom: .5px solid #e6e8ec; border-radius: 10px 10px 0 0; color: #999; }
+.timePickerPanel__header--invalid { background: #fdf1f2; color: #b33d43; }
+.timePickerPanel__input { flex: 1; min-width: 0; padding: 0; border: 0; outline: 0 !important; background: transparent; color: #1a1a1a; font: inherit; font-size: 13px; line-height: 18px; caret-color: #1a1a1a; }
+.timePickerPanel__header--invalid .timePickerPanel__input { color: #b33d43; }
+.timePickerPanel__hint { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; color: #999; font-size: 12px; white-space: nowrap; }
+
+.timePickerPanel__columns { display: flex; min-height: 0; }
+.timePickerPanel__presets { display: flex; flex-direction: column; flex-shrink: 0; width: 208px; padding: 8px 6px; border-right: .5px solid #e6e8ec; }
+.timePickerPanel__preset { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #444; font-size: 13px !important; line-height: 18px; text-align: left; cursor: pointer; }
+.timePickerPanel__preset:hover { background: #f5f5f5; }
+.timePickerPanel__preset[aria-pressed="true"] { background: #f2f3ff; color: #4e58f9; font-weight: 500; }
+.timePickerPanel__rule { flex-shrink: 0; height: 1px; margin: 6px 10px; background: #ebebeb; }
+
+.timePickerPanel__absolute { display: flex; flex: 1; flex-direction: column; gap: 14px; min-width: 0; padding: 14px 16px 16px; }
+.timePickerPanel__absolute > .timePickerPanel__section { padding: 0; }
+.timePickerPanel__fields { display: flex; gap: 8px; }
+.timePickerPanel__field { display: flex; flex: 1 1 0; flex-direction: column; gap: 6px; min-width: 0; color: #666; font-size: 12px; }
+.timePickerPanel__fieldWrap { position: relative; display: flex; }
+.timePickerPanel__fieldInput { width: 100%; height: 32px; padding: 0 10px; border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #1a1a1a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; outline: 0 !important; }
+.timePickerPanel__fieldInput:hover { border-color: #c4c4c4; }
+.timePickerPanel__fieldInput[data-focused], .timePickerPanel__fieldInput:focus { border-color: #4e58f9; box-shadow: 0 0 0 3px #4e58f926; }
+.timePickerPanel__live { position: absolute; top: 50%; right: 10px; display: inline-flex; align-items: center; gap: 5px; color: #4b7650; font-size: 11px; line-height: 14px; transform: translateY(-50%); pointer-events: none; }
+.timePickerPanel__live span { width: 5px; height: 5px; border-radius: 3px; background: #4b7650; }
+.timePickerPanel__fieldError { margin: -6px 0 0; color: #b33d43; font-size: 12px; }
+
+.timePickerCalendar { display: flex; flex-direction: column; gap: 6px; }
+.timePickerCalendar__header { display: flex; align-items: center; justify-content: space-between; height: 28px; color: #1a1a1a; font-size: 13px; font-weight: 500; }
+.timePickerCalendar__nav { display: flex; gap: 4px; }
+.timePickerCalendar__nav button { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #666; cursor: pointer; }
+.timePickerCalendar__nav button:hover:not(:disabled) { background: #f5f5f5; }
+.timePickerCalendar__nav button:disabled { color: #c4c4c4; cursor: default; }
+.timePickerCalendar__weekdays, .timePickerCalendar__week { display: flex; }
+.timePickerCalendar__weekdays span { flex: 1 1 0; height: 24px; color: #999; font-size: 11px; line-height: 24px; text-align: center; }
+.timePickerCalendar__week { gap: 0; }
+.timePickerCalendar__day { display: flex; flex: 1 1 0; align-items: center; justify-content: center; height: 30px; }
+.timePickerCalendar__day[data-between] { background: #f2f3ff; }
+.timePickerCalendar__day button { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #444; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.timePickerCalendar__day button:hover:not(:disabled) { background: #f5f5f5; }
+.timePickerCalendar__day button[data-today] { color: #1a1a1a; font-weight: 600; }
+.timePickerCalendar__day[data-between] button { color: #4e58f9; }
+.timePickerCalendar__day[data-between] button:hover { background: #e6e8ff; }
+.timePickerCalendar__day button[aria-pressed="true"] { background: #4e58f9 !important; color: #fff; font-weight: 500; }
+.timePickerCalendar__day button:disabled { color: #c4c4c4; cursor: default; }
+
+.timePickerPanel__results { display: flex; flex-direction: column; padding: 8px 6px; }
+.timePickerPanel__results .timePickerPanel__section:not(:first-child) { margin-top: 8px; }
+.timePickerPanel__choice { display: flex; flex-shrink: 0; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #1a1a1a; text-align: left; cursor: pointer; }
+.timePickerPanel__choice[data-highlighted] { background: #f2f3ff; }
+.timePickerPanel__choiceLabel { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.timePickerPanel__choice[data-highlighted] .timePickerPanel__choiceLabel { color: #4e58f9; }
+.timePickerPanel__choiceDetail { color: #999; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timePickerPanel__choiceKey { display: flex; flex-shrink: 0; justify-content: flex-end; width: 18px; }
+.timePickerPanel__choice[data-highlighted] .timePickerPanel__kbd { background: #fff; }
+
+.timePickerPanel__preview { padding: 14px 16px 6px; }
+.timePickerPanel__interpreted { display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px; border: 0; border-radius: 8px; background: #fafafa; box-shadow: 0 0 0 .5px #e6e8ec; text-align: left; cursor: pointer; }
+.timePickerPanel__interpreted[data-highlighted] { box-shadow: 0 0 0 1px #c9ccfd; }
+.timePickerPanel__interpretedTop { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.timePickerPanel__interpretedTop > span:first-child { display: flex; flex-direction: column; gap: 4px; }
+.timePickerPanel__interpretedLabel { color: #999; font-size: 11px; line-height: 14px; }
+.timePickerPanel__interpretedTitle { color: #1a1a1a; font-size: 16px; font-weight: 500; line-height: 22px; }
+.timePickerPanel__interpretedSpan { display: flex; flex-shrink: 0; align-items: center; gap: 8px; color: #666; font-size: 12px; }
+.timePickerPanel__interpretedSpan .timePickerPanel__kbd { background: #fff; }
+.timePickerPanel__dayBar { display: flex; flex-direction: column; gap: 6px; }
+.timePickerPanel__dayTrack { position: relative; height: 28px; border-radius: 4px; background: #efefef; }
+.timePickerPanel__dayTrack span { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: #4e58f9; }
+.timePickerPanel__dayTicks { display: flex; justify-content: space-between; color: #999; font-size: 10px; line-height: 12px; }
+
+.timePickerPanel__problem { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px 6px; }
+.timePickerPanel__problem p { display: flex; align-items: center; gap: 8px; margin: 0; color: #b33d43; font-size: 13px; line-height: 18px; }
+.timePickerPanel__problem .timePickerPanel__problemHint { padding-left: 22px; color: #666; font-size: 12px; }
+
+.timePickerPanel__footer { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-top: .5px solid #e6e8ec; }
+.timePickerPanel__spacer { flex: 1; }
+.timePickerPanel__keys { display: flex; align-items: center; gap: 4px; color: #999; font-size: 11px; }
+.timePickerPanel__keys span:nth-of-type(1) { padding-right: 8px; }
+.timePickerPanel__zone { color: #666; font-size: 12px; white-space: nowrap; }
+.timePickerPanel__zoneButton { display: flex; align-items: center; gap: 8px; height: 28px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: #666; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.timePickerPanel__zoneButton svg { color: #999; }
+.timePickerPanel__zoneButton:hover, .timePickerPanel__zoneButton[aria-expanded="true"] { background: #f5f5f5; }
+.timePickerPanel__cancel { height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #666; font-size: 12px; cursor: pointer; }
+.timePickerPanel__cancel:hover { background: #f5f5f5; color: #1a1a1a; }
+.timePickerPanel__apply { flex-shrink: 0; height: 28px; padding: 0 10px; border: 1px solid #3f4af8; border-radius: 6px; background: #4e58f9; color: #fdfdfd; font-size: 12px; cursor: pointer; }
+.timePickerPanel__apply:hover:not(:disabled) { background: #3f4af8; }
+.timePickerPanel__apply:disabled { border-color: #c9ccfd; background: #c9ccfd; cursor: default; }
+
+.timeZoneMenu { position: absolute; bottom: calc(100% - 6px); left: 8px; z-index: 1; display: flex; flex-direction: column; width: 300px; overflow: hidden; border-radius: 8px; background: #fff; box-shadow: 0 0 0 .5px #ddd, 0 8px 24px #0000001f, 0 2px 6px #0000000f; }
+.timeZoneMenu__search { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border-bottom: .5px solid #e6e8ec; color: #999; }
+.timeZoneMenu__search input { flex: 1; min-width: 0; padding: 0; border: 0; outline: 0 !important; background: transparent; color: #1a1a1a; font: inherit; font-size: 12px; }
+.timeZoneMenu__list { display: flex; flex-direction: column; max-height: 240px; padding: 4px; overflow: auto; }
+.timeZoneMenu__row { display: flex; flex-shrink: 0; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
+.timeZoneMenu__row:hover { background: #f5f5f5; }
+.timeZoneMenu__row[aria-pressed="true"] { background: #f2f3ff; }
+.timeZoneMenu__name { flex: 1; min-width: 0; overflow: hidden; color: #1a1a1a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.timeZoneMenu__row[aria-pressed="true"] .timeZoneMenu__name { color: #4e58f9; }
+.timeZoneMenu__offset { color: #999; font-size: 11px; white-space: nowrap; }
+.timeZoneMenu__check { display: flex; flex-shrink: 0; justify-content: flex-end; width: 12px; color: #4e58f9; }
+.timeZoneMenu__rule { flex-shrink: 0; height: 1px; margin: 4px 6px; background: #ebebeb; }
+
+@media (max-width: 680px) {
+  .timePickerPanel__columns { flex-direction: column; }
+  .timePickerPanel__presets { width: auto; border-right: 0; border-bottom: .5px solid #e6e8ec; }
+}

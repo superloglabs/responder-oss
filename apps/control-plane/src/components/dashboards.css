@@ -9,8 +9,6 @@
 .dashboardPage__grid { min-width: 0; }
 .dashboardPage__stack { display: flex; flex-direction: column; gap: 12px; }
 
-.dashboardVariables { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
-.dashboardVariables__field { width: 200px; }
 
 /* Grid placeholder and resize handle in the design's colors. */
 .dashboardPage .react-grid-item.react-grid-placeholder { border-radius: 12px; background: var(--ds-info); opacity: .15; }
