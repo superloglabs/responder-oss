@@ -115,6 +115,26 @@ describe("metric attribute filters", () => {
   });
 });
 
+describe("metric series of one kind", () => {
+  it("reads only the table of the chosen kind", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await metricSeries(
+      recordingClient(queries),
+      "project-1",
+      "http.server.request.duration",
+      { range: { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" }, resourceAttrs: [] },
+      undefined,
+      { n: 1, unit: "MINUTE" },
+      "avg",
+      { kind: "histogram" },
+    );
+
+    const tables = new Set(queries.flatMap(({ query }) => query.match(/FROM otel_metrics_\w+/gu) ?? []));
+    expect([...tables]).toEqual(["FROM otel_metrics_histogram"]);
+  });
+});
+
 describe("metric dimension sampling", () => {
   const range = { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" };
 

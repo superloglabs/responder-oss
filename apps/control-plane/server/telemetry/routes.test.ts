@@ -327,6 +327,7 @@ describe("telemetry routes", () => {
         aggregation: "p95",
         filters: [{ key: "attr:http.route", value: "POST /checkout" }],
         groupBy: "resource.service.name",
+        kind: "histogram",
         metricName: "http.server.duration",
         projectId,
         range: "1h",
@@ -342,6 +343,7 @@ describe("telemetry routes", () => {
           resourceAttrs: [{ key: "attr:http.route", value: "POST /checkout" }],
         },
         groupBy: "resource.service.name",
+        kind: "histogram",
         metricName: "http.server.duration",
         step: expect.anything(),
       });

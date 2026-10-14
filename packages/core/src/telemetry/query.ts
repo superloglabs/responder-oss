@@ -2097,6 +2097,8 @@ export type MetricSeriesFilter = {
 
 type MetricSeriesQueryOptions = {
   bucketAnchorNs?: string;
+  // Read only this kind's table; a name can be sent as more than one kind.
+  kind?: MetricKind;
   rawBucketExpr?: string;
   rowLimit?: number | null;
 };
@@ -2132,6 +2134,7 @@ export async function metricSeries(
 
   const perTable = await Promise.all(
     METRIC_TABLES.map(async ({ table, kind }): Promise<MetricSeriesRow[]> => {
+      if (queryOptions.kind && queryOptions.kind !== kind) return [];
       const valueExpr = aggregation ? AGG_EXPR[aggregation][kind] : DEFAULT_AGG_EXPR[kind];
       if (!valueExpr) return [];
       const baseConds: string[] = [

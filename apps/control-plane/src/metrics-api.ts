@@ -39,6 +39,8 @@ export async function fetchMetricChart(query: MetricQuery): Promise<ChartData> {
     ...(query.aggregation ? { aggregation: query.aggregation } : {}),
     filters: query.filters,
     ...(query.groupBy ? { groupBy: query.groupBy } : {}),
+    // A name can be sent as more than one kind; chart only the chosen one.
+    kind: query.kind,
     metricName: query.name,
     projectId: query.projectId,
     range: query.range,
@@ -83,13 +85,14 @@ const aggregationLabels: Record<MetricAggregation, string> = {
 };
 
 // Summaries keep precomputed quantiles that cannot be combined, so they only
-// sum and average.
+// sum and average. Their server default averages each point's sum, not the
+// observations, so they always name an aggregation.
 export function metricAggregationOptions(kind: MetricKind): Array<{ label: string; value: MetricAggregation | "" }> {
   const allowed: MetricAggregation[] = kind === "summary"
     ? ["sum", "avg"]
     : ["sum", "avg", "min", "max", "p95", "p99"];
   return [
-    { label: defaultAggregationLabels[kind], value: "" },
+    ...(kind === "summary" ? [] : [{ label: defaultAggregationLabels[kind], value: "" as const }]),
     ...allowed.map((value) => ({ label: aggregationLabels[value], value })),
   ];
 }
@@ -99,8 +102,10 @@ export function metricAggregationLabel(kind: MetricKind, aggregation: MetricAggr
 }
 
 // Durations are mostly read as a percentile, so histograms open on p95.
+// Summaries open on the average of their observations.
 export function initialAggregation(kind: MetricKind): MetricAggregation | "" {
-  return isHistogram(kind) ? "p95" : "";
+  if (isHistogram(kind)) return "p95";
+  return kind === "summary" ? "avg" : "";
 }
 
 // How chart values read, from the metric's OpenTelemetry unit. A histogram's
@@ -210,10 +215,11 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
   if (!name || !(metricKinds as string[]).includes(kind)) return null;
   const range = params.get("range") ?? "";
   const aggregation = params.get("aggregation");
+  const chosen = aggregation !== null && aggregationValues.has(aggregation) ? (aggregation as MetricAggregation) : "";
+  const offered = metricAggregationOptions(kind as MetricKind).some((option) => option.value === chosen);
   return {
-    aggregation: aggregation === null
-      ? initialAggregation(kind as MetricKind)
-      : aggregationValues.has(aggregation) ? (aggregation as MetricAggregation) : "",
+    // An aggregation the kind does not offer falls back to where it opens.
+    aggregation: aggregation === null || !offered ? initialAggregation(kind as MetricKind) : chosen,
     chartType: params.get("chart") === "bar" ? "bar" : "line",
     filters: params.getAll("filter").flatMap((filter) => {
       const separator = filter.indexOf("=");

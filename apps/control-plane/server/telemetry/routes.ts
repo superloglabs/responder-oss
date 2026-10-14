@@ -86,6 +86,7 @@ export type TelemetryRouteDependencies = {
       aggregation?: DashboardWidgetConfig["aggregation"];
       filter: { range: TimeRange; resourceAttrs: DashboardWidgetConfig["filter"]["resourceAttrs"] };
       groupBy: string | undefined;
+      kind?: MetricKind;
       metricName: string;
       step: Step;
     },
@@ -138,7 +139,16 @@ const defaultDependencies: TelemetryRouteDependencies = {
   metricDimensions: listMetricDimensions,
   metricNames: listMetricNames,
   metricSeries: (client, projectId, params) =>
-    metricSeries(client, projectId, params.metricName, params.filter, params.groupBy, params.step, params.aggregation),
+    metricSeries(
+      client,
+      projectId,
+      params.metricName,
+      params.filter,
+      params.groupBy,
+      params.step,
+      params.aggregation,
+      params.kind ? { kind: params.kind } : {},
+    ),
   now: () => new Date(),
   queryLogs,
   queryTrace: async (client, projectId, traceId) => {
@@ -201,6 +211,7 @@ const metricSeriesSchema = z.object({
     value: z.string().max(500),
   })).max(maxWidgetFilters).default([]),
   groupBy: z.string().trim().max(200).optional(),
+  kind: z.enum(metricKinds).optional(),
   limit: z.number().int().min(1).max(50).optional(),
   metricName: z.string().trim().min(1).max(200),
   projectId: z.uuid(),
@@ -249,6 +260,7 @@ export function createTelemetryRoutes(
       aggregation?: DashboardWidgetConfig["aggregation"];
       filters: DashboardWidgetConfig["filter"]["resourceAttrs"];
       groupBy: string | undefined;
+      kind?: MetricKind;
       limit: number | undefined;
       metricName: string;
       range: TelemetryRange;
@@ -262,6 +274,7 @@ export function createTelemetryRoutes(
       ...(query.aggregation ? { aggregation: query.aggregation } : {}),
       filter: { range, resourceAttrs: query.filters },
       groupBy: query.groupBy,
+      ...(query.kind ? { kind: query.kind } : {}),
       metricName: query.metricName,
       step,
     });
@@ -441,6 +454,7 @@ export function createTelemetryRoutes(
         ...(body.data.aggregation ? { aggregation: body.data.aggregation } : {}),
         filters: body.data.filters,
         groupBy: body.data.groupBy || undefined,
+        ...(body.data.kind ? { kind: body.data.kind } : {}),
         limit: body.data.limit,
         metricName: body.data.metricName,
         range: body.data.range,

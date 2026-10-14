@@ -44,9 +44,16 @@ describe("metric aggregations", () => {
     expect(metricAggregationOptions("histogram").map((option) => option.value)).toEqual([
       "", "sum", "avg", "min", "max", "p95", "p99",
     ]);
-    expect(metricAggregationOptions("summary").map((option) => option.value)).toEqual(["", "sum", "avg"]);
+    expect(metricAggregationOptions("summary").map((option) => option.value)).toEqual(["sum", "avg"]);
     expect(metricAggregationOptions("histogram")[0]!.label).toBe("Count");
     expect(metricAggregationOptions("gauge")[0]!.label).toBe("Average");
+  });
+
+  it("opens a summary on the average of its observations", () => {
+    const summary = new URLSearchParams({ kind: "summary", metric: "rpc.duration" });
+    expect(metricQueryFromParams(summary)?.aggregation).toBe("avg");
+    summary.set("aggregation", "median");
+    expect(metricQueryFromParams(summary)?.aggregation).toBe("avg");
   });
 
   it("reads values in the metric's unit, except a histogram's point count", () => {

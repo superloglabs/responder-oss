@@ -445,7 +445,7 @@ export function MetricExplorerPage() {
     () => fetchMetricDimensions(projectId, query!.range, query!),
   );
   const chartKey = projectId && query
-    ? JSON.stringify([projectId, query.range, query.name, query.aggregation, query.groupBy, query.filters])
+    ? JSON.stringify([projectId, query.range, query.kind, query.name, query.aggregation, query.groupBy, query.filters])
     : null;
   const chart = useLoaded(chartKey, () => fetchMetricChart(query!));
   const hidden = hiddenState.key === chartKey ? hiddenState.names : new Set<string>();
