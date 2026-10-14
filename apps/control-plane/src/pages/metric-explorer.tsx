@@ -488,7 +488,7 @@ export function MetricExplorerPage() {
   const seriesCount = chart.value?.series.length ?? 0;
 
   return (
-    <AppShell active="metrics" density="wide" redesigned>
+    <AppShell active="metrics" redesigned wide>
       <TelemetryProjectsGate signal="Metrics" state={telemetry}>
         {() => (
           <div className="metricExplorer">

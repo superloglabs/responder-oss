@@ -36,14 +36,6 @@ export interface TraceSummary {
   trace_id: string;
 }
 
-export interface TraceQuery {
-  minDurationMs: number;
-  projectId: string;
-  range: TelemetryRange;
-  service: string;
-  status: "" | "error";
-}
-
 export interface Span {
   duration_ms: number;
   exception_message: string;
@@ -68,14 +60,6 @@ export interface TraceDetail {
   spans: Span[];
 }
 
-export interface LogQuery {
-  projectId: string;
-  range: TelemetryRange;
-  search: string;
-  service: string;
-  severity: string;
-}
-
 async function telemetryJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   const body = (await response.json().catch(() => null)) as T | null;
@@ -90,21 +74,6 @@ export async function fetchTelemetryProjects(): Promise<TelemetryProject[] | nul
   const body = (await response.json().catch(() => null)) as { projects: TelemetryProject[] } | null;
   if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
   return body?.projects ?? [];
-}
-
-export function logSearchParams(query: LogQuery): URLSearchParams {
-  const params = new URLSearchParams({ projectId: query.projectId, range: query.range });
-  if (query.search.trim()) params.set("search", query.search.trim());
-  if (query.service) params.set("service", query.service);
-  if (query.severity) params.set("severity", query.severity);
-  return params;
-}
-
-export async function fetchLogs(query: LogQuery): Promise<LogRecord[]> {
-  const body = await telemetryJson<{ logs: LogRecord[] }>(
-    `/api/telemetry/logs?${logSearchParams(query)}`,
-  );
-  return body.logs;
 }
 
 export async function fetchServices(
@@ -134,10 +103,11 @@ export const telemetryRanges: Array<{ label: string; value: TelemetryRange }> = 
   { label: "7d", value: "7d" },
 ];
 
-export function formatTelemetryTime(value: string): string {
+export function formatTelemetryTime(value: string, timeZone?: string): string {
   const date = logTimestamp(value);
   if (!date) return value;
   return date.toLocaleString(undefined, {
+    ...(timeZone ? { timeZone } : {}),
     day: "numeric",
     hour: "2-digit",
     hour12: false,
@@ -192,23 +162,8 @@ export interface TraceListState {
 
 export function traceListHref(state: unknown, projectId: string): string {
   const traceList = (state as Partial<TraceListState> | null)?.traceList;
-  if (typeof traceList === "string") return traceList ? `/traces?${traceList}` : "/traces";
-  return `/traces?${new URLSearchParams({ projectId })}`;
-}
-
-export function traceSearchParams(query: TraceQuery): URLSearchParams {
-  const params = new URLSearchParams({ projectId: query.projectId, range: query.range });
-  if (query.service) params.set("service", query.service);
-  if (query.status) params.set("status", query.status);
-  if (query.minDurationMs > 0) params.set("minDurationMs", String(query.minDurationMs));
-  return params;
-}
-
-export async function fetchTraces(query: TraceQuery): Promise<TraceSummary[]> {
-  const body = await telemetryJson<{ traces: TraceSummary[] }>(
-    `/api/telemetry/traces?${traceSearchParams(query)}`,
-  );
-  return body.traces;
+  if (typeof traceList === "string") return traceList ? `/traces/search?${traceList}` : "/traces/search";
+  return `/traces/search?${new URLSearchParams({ projectId })}`;
 }
 
 export function fetchTrace(projectId: string, traceId: string): Promise<TraceDetail> {
@@ -279,4 +234,294 @@ export function spanWaterfall(spans: Span[]): Waterfall {
   // Spans caught in a parent cycle have no root; list them last.
   for (const span of [...spans].sort(byStart)) visit(span, 0);
   return { durationMs: Number(traceEnd - traceStart) / 1_000_000, rows };
+}
+
+// An attribute filter as the explorers keep it in the URL: `key=value` or
+// `key!=value`. Keys are scoped, such as `log.http.route` or
+// `resource.deployment.environment`; `field.trace_id` matches a trace ID.
+export interface ExplorerFilter {
+  key: string;
+  op: "eq" | "neq";
+  value: string;
+}
+
+export function parseExplorerFilter(text: string): ExplorerFilter | null {
+  const match = /^([^=!]{1,200})(!?=)(.{0,500})$/su.exec(text.trim());
+  const key = match?.[1]?.trim();
+  if (!match || !key) return null;
+  return { key, op: match[2] === "!=" ? "neq" : "eq", value: (match[3] ?? "").trim() };
+}
+
+export function explorerFilterText(filter: ExplorerFilter): string {
+  return `${filter.key}${filter.op === "neq" ? "!=" : "="}${filter.value}`;
+}
+
+const environmentKey = "resource.deployment.environment";
+
+// The environment picker sets one equality filter on the environment.
+export function environmentFilter(filters: ExplorerFilter[]): string {
+  return filters.find((filter) => filter.key === environmentKey && filter.op === "eq")?.value ?? "";
+}
+
+export function withEnvironment(filters: ExplorerFilter[], environment: string): ExplorerFilter[] {
+  const rest = filters.filter((filter) => !(filter.key === environmentKey && filter.op === "eq"));
+  return environment ? [...rest, { key: environmentKey, op: "eq", value: environment }] : rest;
+}
+
+export interface LogExplorerQuery {
+  // Attribute keys shown as extra facets.
+  facets: string[];
+  filters: ExplorerFilter[];
+  projectId: string;
+  range: TelemetryRange;
+  search: string;
+  services: string[];
+  severities: string[];
+}
+
+export interface TraceExplorerQuery {
+  facets: string[];
+  filters: ExplorerFilter[];
+  minDurationMs: number;
+  operations: string[];
+  projectId: string;
+  range: TelemetryRange;
+  services: string[];
+  statuses: string[];
+}
+
+const explorerRanges = new Set<string>(["15m", "1h", "6h", "24h", "7d"]);
+
+function explorerRange(params: URLSearchParams): TelemetryRange {
+  const range = params.get("range") ?? "";
+  return explorerRanges.has(range) ? (range as TelemetryRange) : "1h";
+}
+
+function uniqueValues(params: URLSearchParams, name: string): string[] {
+  return [...new Set(params.getAll(name).map((value) => value.trim()).filter(Boolean))];
+}
+
+function explorerFilters(params: URLSearchParams): ExplorerFilter[] {
+  return params.getAll("filter").flatMap((text) => {
+    const filter = parseExplorerFilter(text);
+    return filter ? [filter] : [];
+  });
+}
+
+// The explorers keep their query in the page URL, under the same names the
+// API reads, so a link reopens the same view.
+export function logExplorerQuery(params: URLSearchParams): LogExplorerQuery {
+  return {
+    facets: uniqueValues(params, "facet"),
+    filters: explorerFilters(params),
+    projectId: params.get("projectId") ?? "",
+    range: explorerRange(params),
+    search: params.get("search")?.trim() ?? "",
+    services: uniqueValues(params, "service"),
+    severities: uniqueValues(params, "severity").map((value) => value.toUpperCase()),
+  };
+}
+
+export function traceExplorerQuery(params: URLSearchParams): TraceExplorerQuery {
+  const minDurationMs = Number(params.get("minDurationMs"));
+  return {
+    facets: uniqueValues(params, "facet"),
+    filters: explorerFilters(params),
+    minDurationMs: Number.isFinite(minDurationMs) && minDurationMs > 0 ? minDurationMs : 0,
+    operations: uniqueValues(params, "operation"),
+    projectId: params.get("projectId") ?? "",
+    range: explorerRange(params),
+    services: uniqueValues(params, "service"),
+    // The trace list's older links say `status=error`.
+    statuses: uniqueValues(params, "status").map((value) => (value === "error" ? "STATUS_CODE_ERROR" : value)),
+  };
+}
+
+function appendAll(params: URLSearchParams, name: string, values: string[]) {
+  for (const value of values) params.append(name, value);
+}
+
+export function logExplorerParams(query: LogExplorerQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.projectId) params.set("projectId", query.projectId);
+  params.set("range", query.range);
+  if (query.search) params.set("search", query.search);
+  appendAll(params, "service", query.services);
+  appendAll(params, "severity", query.severities);
+  appendAll(params, "filter", query.filters.map(explorerFilterText));
+  appendAll(params, "facet", query.facets);
+  return params;
+}
+
+export function traceExplorerParams(query: TraceExplorerQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.projectId) params.set("projectId", query.projectId);
+  params.set("range", query.range);
+  appendAll(params, "service", query.services);
+  appendAll(params, "operation", query.operations);
+  appendAll(params, "status", query.statuses);
+  if (query.minDurationMs > 0) params.set("minDurationMs", String(query.minDurationMs));
+  appendAll(params, "filter", query.filters.map(explorerFilterText));
+  appendAll(params, "facet", query.facets);
+  return params;
+}
+
+export interface CountBucket {
+  bucket: string;
+  count: number;
+  group: string;
+}
+
+export interface Histogram {
+  buckets: CountBucket[];
+  since: string;
+  stepMs: number;
+  until: string;
+}
+
+export interface FacetCount {
+  group: string;
+  value: number;
+}
+
+export interface LogFacets {
+  attributes: Record<string, FacetCount[]>;
+  services: FacetCount[];
+  severities: FacetCount[];
+}
+
+export interface TraceFacets {
+  attributes: Record<string, FacetCount[]>;
+  operations: FacetCount[];
+  services: FacetCount[];
+  statuses: FacetCount[];
+}
+
+export function fetchExplorerLogs(query: LogExplorerQuery): Promise<LogRecord[]> {
+  return telemetryJson<{ logs: LogRecord[] }>(`/api/telemetry/logs?${logExplorerParams(query)}`).then((body) => body.logs);
+}
+
+export function fetchLogHistogram(query: LogExplorerQuery): Promise<Histogram> {
+  return telemetryJson<Histogram>(`/api/telemetry/logs/histogram?${logExplorerParams(query)}`);
+}
+
+export function fetchLogFacets(query: LogExplorerQuery): Promise<LogFacets> {
+  return telemetryJson<LogFacets>(`/api/telemetry/logs/facets?${logExplorerParams(query)}`);
+}
+
+export function fetchExplorerTraces(query: TraceExplorerQuery): Promise<TraceSummary[]> {
+  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${traceExplorerParams(query)}`).then(
+    (body) => body.traces,
+  );
+}
+
+export function fetchTraceHistogram(query: TraceExplorerQuery): Promise<Histogram> {
+  return telemetryJson<Histogram>(`/api/telemetry/traces/histogram?${traceExplorerParams(query)}`);
+}
+
+export function fetchTraceFacets(query: TraceExplorerQuery): Promise<TraceFacets> {
+  return telemetryJson<TraceFacets>(`/api/telemetry/traces/facets?${traceExplorerParams(query)}`);
+}
+
+export interface TraceOverviewStats {
+  errors: number;
+  p95_ms: number;
+  requests: number;
+}
+
+export interface TraceOverview {
+  dependencies: Array<TraceOverviewStats & { name: string }>;
+  errors: Array<{ first_seen: string; message: string; service: string; span_name: string; spans: number; traces: number }>;
+  operations: Array<TraceOverviewStats & { name: string }>;
+  series: Array<TraceOverviewStats & { bucket: string }>;
+  totals: TraceOverviewStats;
+}
+
+export interface TraceOverviewQuery {
+  filters: ExplorerFilter[];
+  projectId: string;
+  range: TelemetryRange;
+  service: string;
+}
+
+export function fetchTraceOverview(
+  query: TraceOverviewQuery,
+): Promise<{ overview: TraceOverview; since: string; stepMs: number; until: string }> {
+  const params = new URLSearchParams({ projectId: query.projectId, range: query.range });
+  if (query.service) params.set("service", query.service);
+  appendAll(params, "filter", query.filters.map(explorerFilterText));
+  return telemetryJson(`/api/telemetry/traces/overview?${params}`);
+}
+
+export interface HistogramBar<Series extends string> {
+  counts: Record<Series, number>;
+  start: Date;
+  total: number;
+}
+
+// Every bucket in the window, empty ones included, with each group's count
+// added to the series `seriesOf` names for it.
+export function histogramBars<Series extends string>(
+  histogram: Histogram,
+  series: readonly Series[],
+  seriesOf: (group: string) => Series,
+): Array<HistogramBar<Series>> {
+  const since = Date.parse(histogram.since);
+  const until = Date.parse(histogram.until);
+  const step = histogram.stepMs;
+  if (!Number.isFinite(since) || !Number.isFinite(until) || step <= 0) return [];
+  const empty = () => Object.fromEntries(series.map((name) => [name, 0])) as Record<Series, number>;
+  const bars = new Map<number, HistogramBar<Series>>();
+  for (let start = Math.floor(since / step) * step; start <= until; start += step) {
+    bars.set(start, { counts: empty(), start: new Date(start), total: 0 });
+  }
+  for (const bucket of histogram.buckets) {
+    const start = logTimestamp(bucket.bucket)?.getTime();
+    const bar = start === undefined ? undefined : bars.get(Math.floor(start / step) * step);
+    if (!bar) continue;
+    bar.counts[seriesOf(bucket.group)] += bucket.count;
+    bar.total += bucket.count;
+  }
+  return [...bars.values()];
+}
+
+// A log level as the explorer charts and lists it.
+export type LevelSeries = "error" | "warn" | "other";
+
+export function levelSeries(severity: string): LevelSeries {
+  const tone = severityTextTone(severity);
+  return tone === "danger" ? "error" : tone === "warning" ? "warn" : "other";
+}
+
+// "ERROR" reads as "Error"; a log without a level reads as "Unset".
+export function levelLabel(severity: string): string {
+  const text = severity.trim();
+  return text ? text[0]!.toUpperCase() + text.slice(1).toLowerCase() : "Unset";
+}
+
+// Time of day with milliseconds, and the date for windows over a day.
+export function formatExplorerTime(value: string, withDate: boolean): string {
+  const date = logTimestamp(value);
+  if (!date) return value;
+  const time = date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
+  const day = withDate ? `${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ` : "";
+  return `${day}${time}.${milliseconds}`;
+}
+
+export function traceSearchHref(params: URLSearchParams): string {
+  const query = params.toString();
+  return query ? `/traces/search?${query}` : "/traces/search";
+}
+
+const telemetryRangeMinutes: Record<TelemetryRange, number> = { "15m": 15, "1h": 60, "6h": 360, "24h": 1_440, "7d": 10_080 };
+
+// The last `range` up to now, for lookups that take an explicit window.
+export function telemetryRangeWindow(range: TelemetryRange, now = Date.now()): { since: number; until: number } {
+  return { since: now - telemetryRangeMinutes[range] * 60_000, until: now };
 }

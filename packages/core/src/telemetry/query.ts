@@ -7,6 +7,8 @@ export type ResourceAttrFilter = {
   key: string;
   value: string;
   op?: "eq" | "neq" | "not_contains";
+  // Several values: eq matches any of them, neq and not_contains none of them.
+  values?: string[];
 };
 
 type AttributeColumn = "Attributes" | "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
@@ -83,10 +85,10 @@ function attrConds(
   paramPrefix = "attr",
 ): {
   conds: string[];
-  params: Record<string, string>;
+  params: Record<string, string | string[]>;
 } {
   const conds: string[] = [];
-  const params: Record<string, string> = {};
+  const params: Record<string, string | string[]> = {};
   if (!attrs) return { conds, params };
   attrs.forEach((a, i) => {
     const kName = `${paramPrefix}_k_${i}`;
@@ -98,6 +100,16 @@ function attrConds(
     // service.name resource attribute, so the two are equivalent.)
     const native = column === "ResourceAttributes" && a.key === "service.name";
     const target = native ? "ServiceName" : `${column}[{${kName}:String}]`;
+    if (a.values) {
+      if (a.op === "not_contains") {
+        conds.push(`arrayAll(v -> positionCaseInsensitive(${target}, v) = 0, {${vName}:Array(String)})`);
+      } else {
+        conds.push(`${target} ${a.op === "neq" ? "NOT IN" : "IN"} {${vName}:Array(String)}`);
+      }
+      if (!native) params[kName] = a.key;
+      params[vName] = a.values;
+      return;
+    }
     if (a.op === "neq") {
       conds.push(`${target} != {${vName}:String}`);
     } else if (a.op === "not_contains") {
@@ -135,24 +147,48 @@ function splitAttrs(
   return out;
 }
 
-// Build equality conditions for `field.*` filters against top-level columns.
-// Only keys on the fieldColumnExpr allowlist for this source produce a
-// condition; everything else is silently dropped. Op is ignored — identifier
-// filters are equality-only.
+// Build conditions for `field.*` filters against top-level columns. Only keys
+// on the fieldColumnExpr allowlist for this source produce a condition;
+// everything else is silently dropped.
 function fieldConds(
   attrs: ResourceAttrFilter[],
   source: FieldFilterSource,
   paramPrefix = "fattr",
-): { conds: string[]; params: Record<string, string> } {
+): { conds: string[]; params: Record<string, string | string[]> } {
   const conds: string[] = [];
-  const params: Record<string, string> = {};
+  const params: Record<string, string | string[]> = {};
   attrs.forEach((a, i) => {
     const expr = fieldColumnExpr(a.key, source);
     if (!expr) return;
     const vName = `${paramPrefix}_v_${i}`;
-    conds.push(`${expr} = {${vName}:String}`);
+    if (a.values) {
+      if (a.op === "not_contains") {
+        conds.push(`arrayAll(v -> positionCaseInsensitive(${expr}, v) = 0, {${vName}:Array(String)})`);
+      } else {
+        conds.push(`${expr} ${a.op === "neq" ? "NOT IN" : "IN"} {${vName}:Array(String)}`);
+      }
+      params[vName] = a.values;
+      return;
+    }
+    if (a.op === "not_contains") conds.push(`positionCaseInsensitive(${expr}, {${vName}:String}) = 0`);
+    else conds.push(`${expr} ${a.op === "neq" ? "!=" : "="} {${vName}:String}`);
     params[vName] = a.value;
   });
+  return { conds, params };
+}
+
+// Conditions that each listed column holds one of its values. Empty lists
+// add nothing.
+function anyOfConds(
+  lists: Array<{ expr: string; param: string; values: string[] | undefined }>,
+): { conds: string[]; params: Record<string, string[]> } {
+  const conds: string[] = [];
+  const params: Record<string, string[]> = {};
+  for (const list of lists) {
+    if (!list.values?.length) continue;
+    conds.push(`${list.expr} IN {${list.param}:Array(String)}`);
+    params[list.param] = list.values;
+  }
   return { conds, params };
 }
 
@@ -162,6 +198,16 @@ function groupExprForAttribute(
 ): { expr: string; params: Record<string, string> } {
   if (groupBy === "service.name" || groupBy === "service") {
     return { expr: "ServiceName", params: {} };
+  }
+  // Log level or span status, as the explorers' count charts and facets show them.
+  if (groupBy === "severity" && source === "logs") {
+    return { expr: "upper(SeverityText)", params: {} };
+  }
+  if (groupBy === "status" && source === "traces") {
+    return { expr: "StatusCode", params: {} };
+  }
+  if (groupBy === "operation" && source === "traces") {
+    return { expr: "SpanName", params: {} };
   }
   if (groupBy?.startsWith("attr:")) {
     return {
@@ -198,6 +244,9 @@ export async function queryLogs(
     traceId?: string;
     resourceAttrs?: ResourceAttrFilter[];
     logAttrs?: ResourceAttrFilter[];
+    // Any of these services or levels.
+    services?: string[];
+    severities?: string[];
     limit: number;
   },
 ) {
@@ -206,6 +255,10 @@ export async function queryLogs(
   const attr = attrConds(split.resource);
   const logAttr = attrConds([...split.log, ...(params.logAttrs ?? [])], "LogAttributes", "lattr");
   const field = fieldConds(split.field, "logs");
+  const anyOf = anyOfConds([
+    { expr: "ServiceName", param: "services", values: params.services },
+    { expr: "upper(SeverityText)", param: "severities", values: params.severities?.map((value) => value.toUpperCase()) },
+  ]);
   const conds: string[] = [
     "SuperlogProjectId = {projectId:String}",
     `Timestamp >= ${sinceExpr}`,
@@ -223,6 +276,7 @@ export async function queryLogs(
     ...attr.conds,
     ...logAttr.conds,
     ...field.conds,
+    ...anyOf.conds,
   ];
   if (params.service) conds.push("ServiceName = {service:String}");
   if (params.severity) conds.push("upper(SeverityText) = upper({severity:String})");
@@ -263,6 +317,7 @@ export async function queryLogs(
         ...attr.params,
         ...logAttr.params,
         ...field.params,
+        ...anyOf.params,
       },
       format: "JSONEachRow",
     });
@@ -358,6 +413,10 @@ type TracesAggregatedParams = {
   service?: string;
   spanName?: string;
   statusCode?: string;
+  // A trace qualifies when one of its spans has any of these values.
+  services?: string[];
+  spanNames?: string[];
+  statusCodes?: string[];
   minDurationMs?: number;
   resourceAttrs?: ResourceAttrFilter[];
   limit: number;
@@ -388,6 +447,7 @@ function traceSummaryEligible(params: TracesAggregatedParams): boolean {
   if (params.service) return false;
   if (params.spanName) return false;
   if (params.statusCode) return false;
+  if (params.services?.length || params.spanNames?.length || params.statusCodes?.length) return false;
   if (params.minDurationMs) return false;
   if (params.resourceAttrs?.length) return false;
   return true;
@@ -529,7 +589,12 @@ export async function queryTracesAggregated(
   ];
   // Inner scope: span-level filters pick which TraceIds qualify. Identifier
   // (field.*) filters like span_id are span-level too.
-  const innerConds: string[] = [...outerConds, ...spanAttr.conds, ...field.conds];
+  const anyOf = anyOfConds([
+    { expr: "ServiceName", param: "services", values: params.services },
+    { expr: "SpanName", param: "spanNames", values: params.spanNames },
+    { expr: "StatusCode", param: "statusCodes", values: params.statusCodes },
+  ]);
+  const innerConds: string[] = [...outerConds, ...spanAttr.conds, ...field.conds, ...anyOf.conds];
   if (params.service) innerConds.push("ServiceName = {service:String}");
   if (params.spanName) innerConds.push("SpanName = {spanName:String}");
   if (params.statusCode) innerConds.push("StatusCode = {statusCode:String}");
@@ -538,7 +603,8 @@ export async function queryTracesAggregated(
     params.spanName ||
     params.statusCode ||
     spanAttr.conds.length ||
-    field.conds.length
+    field.conds.length ||
+    anyOf.conds.length
   );
 
   // After GROUP BY TraceId, filter by total duration if requested.
@@ -590,6 +656,7 @@ export async function queryTracesAggregated(
         ...attr.params,
         ...spanAttr.params,
         ...field.params,
+        ...anyOf.params,
       },
       format: "JSONEachRow",
     });
@@ -951,14 +1018,30 @@ export async function listAttributeValues(
   limit = 200,
   source?: SeriesSource | "metrics",
   valuePrefix?: string,
+  // Counts only rows that also match these filters, such as a dashboard's
+  // other variables. A log or span attribute filter leaves out the other table.
+  filters?: ResourceAttrFilter[],
 ): Promise<{ value: string; count: number }[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
   const parsed = parseAttributeKey(key);
   const keyParam = parsed.key;
+  const split = splitAttrs(filters);
+  const resourceFilter = attrConds(split.resource, "ResourceAttributes", "fattr_r");
+  const logFilter = attrConds(split.log, "LogAttributes", "fattr_l");
+  const spanFilter = attrConds(split.span, "SpanAttributes", "fattr_s");
+  const logFields = fieldConds(split.field, "logs", "fattr_f");
+  const traceFields = fieldConds(split.field, "traces", "fattr_f");
+  const searchLogs = split.span.length === 0;
+  const searchTraces = split.log.length === 0;
   // Capped like listAttributeKeys: grouping the values of a map column across
   // a high-volume window reads as many rows as the key scan did. Counts become
   // approximate, which is fine for ordering the dropdown.
-  const valueScan = (table: string, column: AttributeColumn): string => `
+  const valueScan = (table: "otel_logs" | "otel_traces", column: AttributeColumn): string => {
+    const conds = [
+      ...resourceFilter.conds,
+      ...(table === "otel_logs" ? [...logFilter.conds, ...logFields.conds] : [...spanFilter.conds, ...traceFields.conds]),
+    ];
+    return `
       SELECT v, count() AS c FROM (
         SELECT ${column}[{key:String}] AS v
         FROM ${table}
@@ -966,19 +1049,21 @@ export async function listAttributeValues(
           AND Timestamp >= ${sinceExpr}
           AND Timestamp <= ${untilExpr}
           AND mapContains(${column}, {key:String})
+          ${conds.map((cond) => `AND ${cond}`).join("\n          ")}
         LIMIT ${ATTRIBUTE_KEY_SCAN_ROW_CAP}
       ) GROUP BY v`;
+  };
   const subqueries: string[] = [];
   if (parsed.scope === "resource") {
-    if (source === undefined || source === "logs" || source === "metrics") {
+    if (searchLogs && (source === undefined || source === "logs" || source === "metrics")) {
       subqueries.push(valueScan("otel_logs", "ResourceAttributes"));
     }
-    if (source === undefined || source === "traces" || source === "metrics") {
+    if (searchTraces && (source === undefined || source === "traces" || source === "metrics")) {
       subqueries.push(valueScan("otel_traces", "ResourceAttributes"));
     }
-  } else if (parsed.scope === "log" && source === "logs") {
+  } else if (parsed.scope === "log" && source === "logs" && searchLogs) {
     subqueries.push(valueScan("otel_logs", "LogAttributes"));
-  } else if (parsed.scope === "span" && source === "traces") {
+  } else if (parsed.scope === "span" && source === "traces" && searchTraces) {
     subqueries.push(valueScan("otel_traces", "SpanAttributes"));
   }
   if (subqueries.length === 0) return [];
@@ -1001,6 +1086,11 @@ export async function listAttributeValues(
       until: untilSql,
       limit,
       ...(valuePrefix ? { valuePrefix } : {}),
+      ...resourceFilter.params,
+      ...logFilter.params,
+      ...spanFilter.params,
+      ...traceFields.params,
+      ...logFields.params,
     },
     format: "JSONEachRow",
   });
@@ -2159,7 +2249,7 @@ function metricResourceAttrs(
 // matching how `attr:<key>` groups; any other key is a resource attribute.
 function metricAttrConds(attrs: ResourceAttrFilter[] | undefined): {
   conds: string[];
-  params: Record<string, string>;
+  params: Record<string, string | string[]>;
 } {
   const point = (attrs ?? [])
     .filter((attr) => attr.key.startsWith("attr:"))
@@ -2446,6 +2536,15 @@ export type SeriesFilter = {
   spanName?: string;
   statusCode?: string;
   minDurationMs?: number;
+  // Spans of traces lasting at least this long, first span start to last span
+  // end within the window, as the trace list measures them. `minDurationMs`
+  // compares each span's own duration instead.
+  minTraceDurationMs?: number;
+  // Any of these values, alongside the single-value fields above.
+  services?: string[];
+  severities?: string[];
+  spanNames?: string[];
+  statusCodes?: string[];
 };
 
 export type StepUnit = "SECOND" | "MINUTE" | "HOUR" | "DAY";
@@ -2552,7 +2651,7 @@ function foldServiceAttrFilter(filter: SeriesFilter): SeriesFilter | null {
   if (attrs.length === 0) return filter;
   if (attrs.length !== 1 || filter.service) return null;
   const attr = attrs[0];
-  if (!attr || (attr.op && attr.op !== "eq")) return null;
+  if (!attr || attr.values || (attr.op && attr.op !== "eq")) return null;
   const parsed = parseAttributeKey(attr.key);
   if (parsed.scope !== "resource" || parsed.key !== "service.name") return null;
   return { ...filter, service: attr.value, resourceAttrs: [] };
@@ -2562,10 +2661,18 @@ function rollupEligible(filter: SeriesFilter, groupBy: string | undefined, step:
   if (step.unit === "SECOND") return false; // rollup resolution is one minute
   if (filter.resourceAttrs?.length) return false;
   if (filter.search) return false;
-  if (filter.spanName) return false;
-  if (filter.minDurationMs) return false;
-  if (groupBy && groupBy !== "service" && groupBy !== "service.name") return false;
+  if (filter.spanName || filter.spanNames?.length) return false;
+  if (filter.minDurationMs || filter.minTraceDurationMs) return false;
+  if (groupBy && !rollupGroupColumn(groupBy)) return false;
   return true;
+}
+
+// The rollup column a supported grouping reads.
+function rollupGroupColumn(groupBy: string): "service" | "severity" | "status_code" | null {
+  if (groupBy === "service" || groupBy === "service.name") return "service";
+  if (groupBy === "severity") return "severity";
+  if (groupBy === "status") return "status_code";
+  return null;
 }
 
 async function countSeriesFromRollup(
@@ -2598,7 +2705,21 @@ async function countSeriesFromRollup(
   } else if (filter.statusCode) {
     conds.push("status_code = {statusCode:String}");
   }
-  const groupExpr = groupBy ? "service" : "''";
+  const anyOf = anyOfConds([
+    { expr: "service", param: "services", values: filter.services },
+    ...(source === "logs"
+      ? [{ expr: "severity", param: "severities", values: filter.severities?.map((value) => value.toUpperCase()) }]
+      : [{ expr: "status_code", param: "statusCodes", values: filter.statusCodes }]),
+  ]);
+  conds.push(...anyOf.conds);
+  const groupColumn = groupBy ? rollupGroupColumn(groupBy) : null;
+  // The rollup keeps severity for logs and status codes for spans only.
+  const groupExpr =
+    groupColumn === "service" ||
+    (groupColumn === "severity" && source === "logs") ||
+    (groupColumn === "status_code" && source === "traces")
+      ? groupColumn
+      : "''";
 
   const query = `
     SELECT
@@ -2622,6 +2743,7 @@ async function countSeriesFromRollup(
       service: filter.service ?? "",
       severity: filter.severity ?? "",
       statusCode: filter.statusCode ?? "",
+      ...anyOf.params,
     },
     format: "JSONEachRow",
   });
@@ -2676,6 +2798,18 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
       : attrConds(split.span, "SpanAttributes", "event_attr");
   const field = fieldConds(split.field, source === "logs" ? "logs" : "traces");
   const table = source === "logs" ? "otel_logs" : "otel_traces";
+  const anyOf = anyOfConds(
+    source === "logs"
+      ? [
+          { expr: "ServiceName", param: "services", values: filter.services },
+          { expr: "upper(SeverityText)", param: "severities", values: filter.severities?.map((value) => value.toUpperCase()) },
+        ]
+      : [
+          { expr: "ServiceName", param: "services", values: filter.services },
+          { expr: "SpanName", param: "spanNames", values: filter.spanNames },
+          { expr: "StatusCode", param: "statusCodes", values: filter.statusCodes },
+        ],
+  );
   const conds: string[] = [
     "SuperlogProjectId = {projectId:String}",
     `Timestamp >= ${sinceExpr}`,
@@ -2683,6 +2817,7 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
     ...attr.conds,
     ...eventAttr.conds,
     ...field.conds,
+    ...anyOf.conds,
   ];
   if (filter.service) conds.push("ServiceName = {service:String}");
   if (source === "logs") {
@@ -2696,6 +2831,16 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
     if (filter.statusCode) conds.push("StatusCode = {statusCode:String}");
     if (typeof filter.minDurationMs === "number") {
       conds.push("Duration >= {minDurationNs:UInt64}");
+    }
+    if (filter.minTraceDurationMs) {
+      conds.push(`TraceId IN (
+        SELECT TraceId FROM otel_traces
+        WHERE SuperlogProjectId = {projectId:String}
+          AND Timestamp >= ${sinceExpr}
+          AND Timestamp <= ${untilExpr}
+        GROUP BY TraceId
+        HAVING max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp)) >= {minTraceDurationNs:UInt64}
+      )`);
     }
   }
 
@@ -2711,9 +2856,11 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
       spanName: filter.spanName ?? "",
       statusCode: filter.statusCode ?? "",
       minDurationNs: Math.round((filter.minDurationMs ?? 0) * 1_000_000),
+      minTraceDurationNs: Math.round((filter.minTraceDurationMs ?? 0) * 1_000_000),
       ...attr.params,
       ...eventAttr.params,
       ...field.params,
+      ...anyOf.params,
     },
     table,
   };
@@ -2750,3 +2897,140 @@ export async function countAggregate(
   });
 }
 
+// -----------------------------------------------------------------------------
+// Trace overview: how requests into a service behave over the window.
+// -----------------------------------------------------------------------------
+
+export type TraceOverviewSeriesRow = { bucket: string; errors: number; p95_ms: number; requests: number };
+export type TraceOverviewOperation = { errors: number; name: string; p95_ms: number; requests: number };
+export type TraceOverviewDependency = { errors: number; name: string; p95_ms: number; requests: number };
+export type TraceOverviewError = {
+  first_seen: string;
+  message: string;
+  service: string;
+  span_name: string;
+  spans: number;
+  traces: number;
+};
+export type TraceOverview = {
+  dependencies: TraceOverviewDependency[];
+  errors: TraceOverviewError[];
+  operations: TraceOverviewOperation[];
+  series: TraceOverviewSeriesRow[];
+  totals: { errors: number; p95_ms: number; requests: number };
+};
+
+// Requests enter a service through server and consumer spans, or start a
+// trace with a root span.
+const ENTRY_SPAN_COND =
+  "(SpanKind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
+const ERROR_SPAN_COND = "StatusCode = 'STATUS_CODE_ERROR'";
+// What a client span calls, from the most specific attribute it carries.
+const DEPENDENCY_NAME_EXPR = `multiIf(
+  SpanAttributes['peer.service'] != '', SpanAttributes['peer.service'],
+  SpanAttributes['server.address'] != '', SpanAttributes['server.address'],
+  SpanAttributes['net.peer.name'] != '', SpanAttributes['net.peer.name'],
+  SpanAttributes['db.system'] != '', SpanAttributes['db.system'],
+  SpanName
+)`;
+
+export async function traceOverview(
+  ch: ClickHouseClient,
+  projectId: string,
+  params: { range?: TimeRange; resourceAttrs?: ResourceAttrFilter[]; service?: string; step: Step },
+): Promise<TraceOverview> {
+  const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
+  const attr = attrConds(splitAttrs(params.resourceAttrs).resource);
+  const conds = [
+    "SuperlogProjectId = {projectId:String}",
+    `Timestamp >= ${sinceExpr}`,
+    `Timestamp <= ${untilExpr}`,
+    ...attr.conds,
+  ];
+  if (params.service) conds.push("ServiceName = {service:String}");
+  const where = conds.join(" AND ");
+  const queryParams = {
+    projectId,
+    since: sinceSql,
+    until: untilSql,
+    service: params.service ?? "",
+    ...attr.params,
+  };
+  const read = <Row>(query: string) =>
+    retryOneConnectionReset(async () => {
+      const r = await ch.query({ query, query_params: queryParams, format: "JSONEachRow" });
+      return (await r.json()) as Row[];
+    });
+  const stats = `
+    count() AS requests,
+    countIf(${ERROR_SPAN_COND}) AS errors,
+    quantile(0.95)(Duration) / 1000000 AS p95_ms`;
+
+  const [totals, series, operations, dependencies, errors] = await Promise.all([
+    read<Record<string, string | number>>(`
+      SELECT ${stats}
+      FROM otel_traces
+      WHERE ${where} AND ${ENTRY_SPAN_COND}
+    `),
+    read<Record<string, string | number>>(`
+      SELECT
+        toString(toStartOfInterval(Timestamp, INTERVAL ${params.step.n} ${params.step.unit})) AS bucket,
+        ${stats}
+      FROM otel_traces
+      WHERE ${where} AND ${ENTRY_SPAN_COND}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+      LIMIT 10000
+    `),
+    read<Record<string, string | number>>(`
+      SELECT SpanName AS name, ${stats}
+      FROM otel_traces
+      WHERE ${where} AND ${ENTRY_SPAN_COND}
+      GROUP BY name
+      ORDER BY errors DESC, requests DESC
+      LIMIT 10
+    `),
+    read<Record<string, string | number>>(`
+      SELECT ${DEPENDENCY_NAME_EXPR} AS name, ${stats}
+      FROM otel_traces
+      WHERE ${where} AND SpanKind = 'SPAN_KIND_CLIENT'
+      GROUP BY name
+      ORDER BY p95_ms DESC
+      LIMIT 8
+    `),
+    read<Record<string, string | number>>(`
+      SELECT
+        if(StatusMessage != '', StatusMessage, SpanName) AS message,
+        SpanName AS span_name,
+        ServiceName AS service,
+        count() AS spans,
+        uniqExact(TraceId) AS traces,
+        toString(min(Timestamp)) AS first_seen
+      FROM otel_traces
+      WHERE ${where} AND ${ERROR_SPAN_COND}
+      GROUP BY message, service, span_name
+      ORDER BY traces DESC
+      LIMIT 8
+    `),
+  ]);
+  const number = (value: string | number | undefined) => Number(value) || 0;
+  const statRow = (row: Record<string, string | number>) => ({
+    errors: number(row.errors),
+    p95_ms: number(row.p95_ms),
+    requests: number(row.requests),
+  });
+  return {
+    dependencies: dependencies.map((row) => ({ name: String(row.name), ...statRow(row) })),
+    errors: errors.map((row) => ({
+      first_seen: String(row.first_seen),
+      message: String(row.message),
+      service: String(row.service),
+      span_name: String(row.span_name),
+      spans: number(row.spans),
+      traces: number(row.traces),
+    })),
+    operations: operations.map((row) => ({ name: String(row.name), ...statRow(row) })),
+    series: series.map((row) => ({ bucket: String(row.bucket), ...statRow(row) })),
+    totals: totals[0] ? statRow(totals[0]) : { errors: 0, p95_ms: 0, requests: 0 },
+  };
+}

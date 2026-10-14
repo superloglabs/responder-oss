@@ -92,6 +92,20 @@ describe("dashboard variables", () => {
     expect(resolveWidgetFilters(undefined, {})).toEqual([]);
   });
 
+  it("matches any selected value of a multi-value variable, and every value when none is selected", () => {
+    const filters = [
+      { key: "http.route", value: "$route" },
+      { key: "region", op: "neq" as const, value: "${region}" },
+      { key: "env", value: "$env" },
+    ];
+    expect(resolveWidgetFilters(filters, { env: [], region: ["eu-west-3"], route: ["POST /checkout", "POST /refunds"] })).toEqual([
+      { key: "http.route", value: "POST /checkout", values: ["POST /checkout", "POST /refunds"] },
+      { key: "region", op: "neq", value: "eu-west-3" },
+    ]);
+    // Inside a longer value the selection is joined.
+    expect(resolveWidgetFilters([{ key: "k", value: "$route-x" }], { route: ["a", "b"] })).toEqual([{ key: "k", value: "a,b-x" }]);
+  });
+
   it("ignores inherited object properties as variable names", () => {
     expect(resolveWidgetFilters([{ key: "k", value: "$constructor" }], {})).toEqual([
       { key: "k", value: "$constructor" },

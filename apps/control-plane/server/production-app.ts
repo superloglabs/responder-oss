@@ -3,10 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { sharedAutomationTemplateSlugSchema } from "../../../packages/core/src/automations/shared-template.js";
-import { getSharedAutomationTemplate } from "../../../packages/core/src/db/shared-automation-templates.js";
 import { app } from "./app.js";
-import { sharedTemplateDocument } from "./automations/shared-templates.js";
+import { appShellLoader } from "./app-shell.js";
+import { sharedTemplateDocument, templatePreview } from "./automations/shared-templates.js";
 import { controlPlaneBaseUrl } from "./integrations/urls.js";
 import { isSourceMapPath } from "./static-assets.js";
 
@@ -16,7 +15,10 @@ const staticRoot = path.resolve(
 );
 const serveAsset = serveStatic({ root: staticRoot });
 const serveAppShell = serveStatic({ path: "app.html", root: staticRoot });
-let appShell: Promise<string> | undefined;
+const loadAppShell = appShellLoader({
+  baseUrl: controlPlaneBaseUrl,
+  readLocal: () => readFile(path.join(staticRoot, "app.html"), "utf8"),
+});
 
 export const productionApp = new Hono()
   .route("/", app)
@@ -25,25 +27,22 @@ export const productionApp = new Hono()
     return next();
   })
   .use("*", serveAsset)
-  .get("/templates/:slug", async (context, next) => {
-    // Unknown or stopped templates fall through to the application, which
-    // shows its own not-found state.
-    const slug = sharedAutomationTemplateSlugSchema.safeParse(
-      context.req.param("slug"),
-    );
-    if (!slug.success) return next();
-    const template = await getSharedAutomationTemplate(slug.data).catch(
-      () => null,
-    );
-    if (!template) return next();
-    appShell ??= readFile(path.join(staticRoot, "app.html"), "utf8");
-    const shell = await appShell.catch(() => {
-      appShell = undefined;
-      return null;
-    });
+  .get("/templates/*", async (context, next) => {
+    // The path names a built-in template id or a shared template slug, with
+    // or without a trailing slash. Link previews get the template's title and
+    // description. Unknown or stopped templates get the plain shell, and the
+    // application shows its own not-found state. Deeper paths are not found.
+    const slug = context.req.path.slice("/templates/".length).replace(/\/$/u, "");
+    if (!slug || slug.includes("/")) return next();
+    const [template, shell] = await Promise.all([
+      templatePreview(slug),
+      loadAppShell(),
+    ]);
     if (!shell) return next();
     return context.html(
-      sharedTemplateDocument(shell, template, controlPlaneBaseUrl()),
+      template
+        ? sharedTemplateDocument(shell, template, controlPlaneBaseUrl())
+        : shell,
     );
   })
   .get("*", async (context, next) => {

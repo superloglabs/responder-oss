@@ -65,6 +65,8 @@ const dashboardVariableSchema = z.object({
   attributeKey: z.string().trim().max(200).optional(),
   defaultValue: z.string().max(500).optional(),
   label: z.string().trim().max(120).optional(),
+  // Several values can be selected at once. Selecting none matches every value.
+  multi: z.boolean().optional(),
   name: z.string().max(60).regex(variableNamePattern, "Use letters, digits and underscores, starting with a letter"),
   // Empty means the value is typed freely.
   options: z.array(z.string().max(500)).max(200),
@@ -146,20 +148,41 @@ export function defaultWidgetLayout(type: DashboardWidgetType): DashboardWidgetL
 
 // A `${name}` or bare `$name` reference to a dashboard variable.
 const variableReference = /\$\{(\w+)\}|\$(\w+)/gu;
+const wholeReference = /^(?:\$\{(\w+)\}|\$(\w+))$/u;
+
+// A selected variable value: one value, or several for a multi-value variable.
+export type DashboardVariableValue = string | string[];
+
+// A filter after variables are filled in. `values` holds the selection of a
+// multi-value variable, which matches any of them.
+export type ResolvedWidgetFilter = DashboardWidgetFilter & { values?: string[] };
 
 // Replaces variable references in each filter value with the selected value.
 // An unknown reference stays as written, so it is visible rather than blank.
+// A filter whose whole value is a multi-value variable matches any selected
+// value, and is dropped when none is selected.
 export function resolveWidgetFilters(
   filters: DashboardWidgetFilter[] | undefined,
-  values: Record<string, string>,
-): DashboardWidgetFilter[] {
-  return (filters ?? []).map((filter) => ({
-    ...filter,
-    value: filter.value.replace(variableReference, (reference, braced?: string, bare?: string) => {
-      const name = braced ?? bare ?? "";
-      return Object.hasOwn(values, name) ? values[name]! : reference;
-    }),
-  }));
+  values: Record<string, DashboardVariableValue>,
+): ResolvedWidgetFilter[] {
+  return (filters ?? []).flatMap((filter): ResolvedWidgetFilter[] => {
+    const whole = wholeReference.exec(filter.value);
+    const name = whole ? (whole[1] ?? whole[2] ?? "") : "";
+    if (whole && Object.hasOwn(values, name) && Array.isArray(values[name])) {
+      const selected = values[name];
+      if (selected.length === 0) return [];
+      return selected.length === 1 ? [{ ...filter, value: selected[0]! }] : [{ ...filter, value: selected[0]!, values: selected }];
+    }
+    return [{
+      ...filter,
+      value: filter.value.replace(variableReference, (reference, braced?: string, bare?: string) => {
+        const key = braced ?? bare ?? "";
+        if (!Object.hasOwn(values, key)) return reference;
+        const selected = values[key]!;
+        return Array.isArray(selected) ? selected.join(",") : selected;
+      }),
+    }];
+  });
 }
 
 export const defaultSeriesLimit = 10;

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
@@ -57,6 +57,8 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
 
 interface AppShellProps {
   active: NavigationSection;
+  // The open page among the active section's sub-items.
+  activePage?: string;
   children: ReactNode;
   // Shown to a signed-out visitor of a public page in place of the account
   // menu. The navigation stays as members see it.
@@ -70,12 +72,20 @@ interface AppShellProps {
     | "investigation"
     | "scans"
     | "settings"
-    | "issues"
-    // Explorers with side panels use the full width.
-    | "wide";
+    | "issues";
+  // Content spans the panel instead of the centered column.
+  wide?: boolean;
 }
 
-export function AppShell({ active, children, density = "default", guest, redesigned = false }: AppShellProps) {
+export function AppShell({
+  active,
+  activePage,
+  children,
+  density = "default",
+  guest,
+  redesigned = false,
+  wide = false,
+}: AppShellProps) {
   const workspace = redesigned || density === "issues";
   const session = authClient.useSession();
   const activeOrganization = authClient.useActiveOrganization();
@@ -280,15 +290,30 @@ export function AppShell({ active, children, density = "default", guest, redesig
               const Icon = navigationIcons[item.section];
               const isActive = item.section === activeSection;
               return (
-                <Link
-                  aria-current={isActive ? "page" : undefined}
-                  className={isActive ? "isActive" : undefined}
-                  key={item.section}
-                  to={item.to}
-                >
-                  {workspace ? <Icon size={16} aria-hidden="true" /> : null}
-                  {item.label}
-                </Link>
+                <Fragment key={item.section}>
+                  <Link
+                    aria-current={isActive && !(workspace && item.children) ? "page" : undefined}
+                    className={isActive && !(workspace && item.children) ? "isActive" : undefined}
+                    to={item.to}
+                  >
+                    {workspace ? <Icon size={16} aria-hidden="true" /> : null}
+                    {item.label}
+                  </Link>
+                  {workspace && isActive && item.children ? (
+                    <div className="primaryNav__children">
+                      {item.children.map((child) => (
+                        <Link
+                          aria-current={child.to === activePage ? "page" : undefined}
+                          className={child.to === activePage ? "isActive" : undefined}
+                          key={child.to}
+                          to={child.to}
+                        >
+                          {child.label}
+                        </Link>
+                      ))}
+                    </div>
+                  ) : null}
+                </Fragment>
               );
             })}
           </nav>
@@ -410,7 +435,7 @@ export function AppShell({ active, children, density = "default", guest, redesig
               <ListIcon aria-hidden="true" size={20} />
             </button>
           </div>
-          {guest ? null : <BillingBanner />}<div className="workspaceContent">{children}</div>
+          {guest ? null : <BillingBanner />}<div className={wide ? "workspaceContent workspaceContent--wide" : "workspaceContent"}>{children}</div>
         </div>
       ) : <>{guest ? null : <BillingBanner />}{children}</>}
     </main>

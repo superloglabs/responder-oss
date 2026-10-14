@@ -35,6 +35,15 @@ describe("primaryNavigation", () => {
     ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Metrics", "Integrations", "Tag mode", "Settings"]);
   });
 
+  it("lists the traces overview and search under Traces", () => {
+    const traces = primaryNavigation({ automations: true, simplified: true, telemetry: true }).find((item) => item.section === "traces");
+
+    expect(traces?.children).toEqual([
+      { label: "Overview", to: "/traces" },
+      { label: "Search", to: "/traces/search" },
+    ]);
+  });
+
   it("lists alerts only with telemetry and the alerts capability", () => {
     expect(
       primaryNavigation({ alerts: true, automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),

@@ -1,0 +1,192 @@
+/* Log and trace explorers: time controls, filter bar, facets, drawers. */
+.explorer { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.explorer .workspaceHeading { min-height: 32px; }
+
+.explorerTime { display: flex; align-items: center; gap: 12px; }
+.explorerTime .dsSegmentedControl { gap: 2px; padding: 2px; border: 0; border-radius: 8px; background: #f0f0f0; }
+.explorerTime .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; color: #666; font-size: 12px; font-weight: 500; }
+.explorerTime .dsSegmentedControl__option[aria-checked="true"] { background: #fff; color: #1a1a1a; box-shadow: 0 1px 3px #00000024; }
+.explorerLive { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid #e3e3e3; border-radius: 999px; background: #fafafa; color: #666; cursor: pointer; font: inherit; font-size: 11px; font-weight: 500; line-height: 16px; }
+.explorerLive > span { width: 5px; height: 5px; border-radius: 3px; background: #aaa; }
+.explorerLive[aria-pressed="true"] { border-color: #dce8dd; background: #f1f7f1; color: #4b7650; }
+.explorerLive[aria-pressed="true"] > span { background: #4b7650; box-shadow: 0 0 8px #4b7650; }
+.explorerLive:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+.explorerToolbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.explorerToolbar .dsField { flex-shrink: 0; gap: 0; }
+.explorerToolbar .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.explorerToolbar .explorerSelect { width: 180px; }
+.explorerToolbar .dsSelect__trigger { height: 32px; padding: 0 10px; border-color: #e3e3e3; border-radius: 6px; background: #fff; font-size: 12px; }
+
+.explorerFilterBar { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; min-height: 32px; padding: 4px 6px 4px 10px; border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #666; }
+.explorerFilterBar:focus-within { border-color: #b9b9b9; }
+.explorerFilterBar input { flex: 1 1 160px; min-width: 120px; border: 0; outline: 0; background: transparent; color: #1a1a1a; font: inherit; font-size: 12px; line-height: 16px; }
+.explorerFilterBar input::placeholder { color: #999; }
+.explorerFilterBar input::-webkit-search-cancel-button { display: none; }
+.explorerFilterBar__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 4px 0 7px; border-radius: 4px; background: #f5f5f5; box-shadow: 0 0 0 .5px #e6e8ec; color: #1a1a1a; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 16px; white-space: nowrap; }
+.explorerFilterBar__chip > span { color: #666; }
+.explorerFilterBar__chip button { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; color: #999; cursor: pointer; }
+.explorerFilterBar__chip button:hover { background: #e9e9e9; color: #444; }
+
+.explorerVolume { display: flex; flex-direction: column; gap: 10px; padding: 0 8px; }
+.explorerVolume__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: 12px; line-height: 16px; }
+.explorerVolume__summary strong { color: #1a1a1a; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.explorerBody { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 24px; align-items: start; }
+.explorerFacets { display: flex; flex-direction: column; gap: 20px; padding-left: 8px; }
+.explorerFacet { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.explorerFacet legend { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 0 6px; color: #434343; font-size: 12px; font-weight: 500; line-height: 16px; }
+.explorerFacet legend > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explorerFacet legend button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: #999; cursor: pointer; }
+.explorerFacet legend button:hover { background: #f0f0f0; color: #444; }
+.explorerFacet__option { position: relative; display: flex; align-items: center; gap: 8px; height: 28px; cursor: pointer; }
+.explorerFacet__option input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.explorerFacet__box { display: grid; flex-shrink: 0; place-items: center; width: 14px; height: 14px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #fff; }
+.explorerFacet__option input:checked + .explorerFacet__box { border-color: #4e58f9; background: #4e58f9; }
+.explorerFacet__option input:focus-visible + .explorerFacet__box { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.explorerFacet__label { flex: 1; min-width: 0; overflow: hidden; color: #666; font-size: 13px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.explorerFacet__option input:checked ~ .explorerFacet__label { color: #1a1a1a; }
+.explorerFacet__count { flex-shrink: 0; color: #999; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 16px; }
+.explorerFacet__option input:checked ~ .explorerFacet__count { color: #666; }
+.explorerFacet__option:hover .explorerFacet__label { color: #1a1a1a; }
+.explorerFacet__empty { margin: 0; color: #999; font-size: 12px; line-height: 28px; }
+.explorerAddFacet { width: fit-content; max-width: 100%; }
+.explorerAddFacet .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.explorerAddFacet .dsSelect__trigger { height: 26px; padding: 0 8px; border-color: #ddd; border-radius: 6px; background: #fff; color: #444; font-size: 13px; box-shadow: 0 1px 3px #00000008; }
+
+.explorerTableWrap { min-width: 0; }
+.appShell--workspace .agentListTable.explorerTableWrap .dsDataTable--workspace td { padding: 5px 12px; font-size: 13px; line-height: 20px; }
+.appShell--workspace .dsDataTable--workspace tr.dsDataTable__row--selected td { background: #f1f2fe; }
+.appShell--workspace .explorerTableWrap .dsBadge { min-height: 0; height: 20px; padding: 0 7px; font-size: 11px; line-height: 16px; }
+.explorerCell--muted { overflow: hidden; color: #434343; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.explorerCell--number { display: block; color: #1a1a1a; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.explorerCell--message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: #1a1a1a; cursor: pointer; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.explorerCell--message:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.explorerStatus { margin: 0; padding: 24px 8px; color: #666; font-size: 12px; }
+.explorerMore { display: flex; justify-content: center; padding: 12px 0 0; color: #666; font-size: 12px; }
+
+/* Div tables that share the workspace table look. */
+.explorerTable { overflow: clip; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
+.explorerTable__header { min-height: 32px; color: #1a1a1a; font-size: 13px; font-weight: 500; line-height: 20px; }
+.explorerTable__body { overflow: clip; border-radius: 12px 12px 0 0; background: #fff; box-shadow: 0 0 0 .5px #e6e8ec; }
+.explorerTable__body > * + * { border-top: .5px solid #e6e8ec; }
+.explorerTable__empty { margin: 0; padding: 12px; color: #666; font-size: 12px; }
+
+.explorerPills { display: flex; align-items: center; gap: 4px; }
+.explorerPills button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: none; color: #444; cursor: pointer; font: inherit; font-size: 12px; font-weight: 500; line-height: 16px; }
+.explorerPills button > span { color: #666; font-size: 10.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.explorerPills button[aria-pressed="true"], .explorerPills button[aria-selected="true"] { background: #fff; color: #1a1a1a; box-shadow: 0 0 0 .5px #00000014, 0 2px 7px #0000001a; }
+.explorerPills button[aria-pressed="true"] > span, .explorerPills button[aria-selected="true"] > span { padding: 0 4px; border-radius: 4px; background: #f5f5f5; color: #444; }
+.explorerPills button:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+.explorerAttributes { display: flex; flex-direction: column; gap: 8px; }
+.explorerAttributes__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.explorerAttributes__search { display: flex; flex-shrink: 0; align-items: center; gap: 6px; width: 168px; height: 28px; padding: 0 8px; border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #999; }
+.explorerAttributes__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #1a1a1a; font: inherit; font-size: 12px; }
+.explorerAttributes__search input::-webkit-search-cancel-button { display: none; }
+.explorerAttributes__row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); min-height: 32px; font-size: 12px; line-height: 16px; }
+.explorerAttributes__row > span { display: flex; align-items: center; min-width: 0; padding: 0 12px; }
+.explorerAttributes__row > span:first-child { border-right: .5px solid #e6e8ec; }
+.explorerTable__header.explorerAttributes__row { font-size: 13px; line-height: 20px; }
+.explorerAttributes__key { overflow: hidden; color: #666; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.explorerAttributes__value { gap: 8px; padding-right: 8px !important; color: #1a1a1a; font-variant-numeric: tabular-nums; }
+.explorerAttributes__value > span:first-child { flex: 1; min-width: 0; padding: 8px 0; overflow-wrap: anywhere; }
+.explorerAttributes__value em { color: #999; font-style: normal; }
+.explorerAttributes__value a { color: #4e58f9; text-decoration: none; }
+.explorerAttributes__value a:hover { text-decoration: underline; }
+.explorerAttributes__actions { display: none; flex-shrink: 0; gap: 4px; }
+.explorerAttributes__row:hover, .explorerAttributes__row:focus-within { background: #fafafa; }
+.explorerAttributes__row:hover .explorerAttributes__actions, .explorerAttributes__row:focus-within .explorerAttributes__actions { display: flex; }
+.explorerAttributes__actions button { padding: 2px 6px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #444; cursor: pointer; font: inherit; font-size: 11px; line-height: 14px; }
+.explorerAttributes__actions button:hover { background: #f5f5f5; }
+
+.explorerDrawer { position: fixed; top: 8px; right: 8px; bottom: 8px; z-index: 15; display: flex; flex-direction: column; width: min(600px, calc(100vw - 280px)); overflow: clip; border-left: .5px solid #e6e8ec; border-radius: 0 14px 14px 0; background: #fff; box-shadow: -12px 0 32px #0000000f, -1px 0 2px #0000000a; outline: 0; }
+.explorerDrawer--wide { width: min(960px, calc(100vw - 280px)); }
+.explorerDrawer__header { display: flex; flex-shrink: 0; align-items: center; gap: 10px; min-height: 56px; padding: 8px 12px 8px 20px; border-bottom: .5px solid #e6e8ec; font-size: 12px; line-height: 16px; }
+.explorerDrawer__body { display: flex; flex: 1; flex-direction: column; gap: 24px; min-height: 0; overflow: auto; padding: 20px; }
+.explorerDrawer__body > * { flex-shrink: 0; }
+.explorerDrawer__spacer { flex: 1; }
+.explorerDrawer__nav { width: 28px; height: 28px; border: 1px solid #e3e3e3; border-radius: 5px; background: #fafafa; }
+.explorerSection { display: flex; flex-direction: column; gap: 8px; }
+.explorerSection > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.explorerSection h3 { margin: 0; color: #1a1a1a; font-size: 12px; font-weight: 600; line-height: 16px; }
+.explorerSection header a, .explorerSection header button { border: 0; background: none; color: #4e58f9; cursor: pointer; font: inherit; font-size: 12px; text-decoration: none; }
+.explorerBlock { margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px; background: #f5f5f5; color: #1a1a1a; font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.explorerBlock--exception strong { display: block; margin-bottom: 4px; color: #b33d43; font-weight: 400; }
+.explorerActions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 1100px) {
+  .explorerBody { grid-template-columns: minmax(0, 1fr); }
+  .explorerFacets { flex-direction: row; flex-wrap: wrap; gap: 16px 32px; }
+  .explorerFacet { width: 200px; }
+}
+@media (max-width: 760px) {
+  .explorerToolbar { flex-wrap: wrap; }
+  .explorer .workspaceHeading { flex-wrap: wrap; }
+  .explorerDrawer, .explorerDrawer--wide { left: 8px; width: auto; border-radius: 14px; }
+}
+
+/* Trace drawer. */
+.traceDrawer__title { min-width: 0; overflow: hidden; color: #1a1a1a; font-size: 14px; font-weight: 500; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.traceDrawer__meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -8px 0 0; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 16px; }
+.traceDrawer__meta code { color: #999; font-family: inherit; font-size: 11px; }
+.traceDrawer__tabs { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: -12px; }
+.explorerDrawer .traceDrawer__errorsOnly { flex: 0 0 auto; width: auto; gap: 8px; padding: 0; border: 0; background: none; }
+.traceDrawer__errorsOnly .dsSwitch__copy strong { color: #444; font-size: 12px; font-weight: 400; }
+.explorerDrawer .traceWaterfall__rows { max-height: none; }
+.traceDrawer__span { display: flex; flex-direction: column; gap: 12px; margin-top: -8px; }
+.traceDrawer__spanHeader { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12px; line-height: 16px; }
+.traceDrawer__spanHeader strong { color: #1a1a1a; font-weight: 600; }
+.traceDrawer__spanName { color: #1a1a1a; font-size: 13px; }
+.traceDrawer__error { display: flex; align-items: center; gap: 8px; margin: 0; padding: 9px 12px; border: 1px solid #f1d8da; border-radius: 8px; background: #fdf1f2; color: #b33d43; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.traceDrawer__error svg { flex-shrink: 0; }
+.traceDrawer__spanBody { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.traceDrawer__spanBody .explorerAttributes__toolbar { flex-wrap: wrap; }
+.traceDrawer__logs .explorerTable__header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; }
+.traceDrawer__logs .explorerTable__header a { color: #4e58f9; font-size: 12px; font-weight: 400; text-decoration: none; }
+.traceDrawer__logs ul { margin: 0; padding: 0; list-style: none; }
+.traceDrawer__logs li:not(.explorerTable__empty) { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.traceDrawer__logMeta { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.traceDrawer__logMeta .dsBadge { height: 20px; padding: 0 7px; font-size: 11px; }
+.traceDrawer__logBody { color: #1a1a1a; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.traceDrawer__errorCount { color: #b33d43; }
+
+/* Trace search rows. */
+.traceRow__root { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.traceRow__root > button { flex-shrink: 1; width: auto; min-width: 0; }
+.traceRow__root > span { flex-shrink: 0; color: #666; font-size: 12px; }
+.traceRow__duration { display: flex; align-items: center; gap: 12px; }
+.traceRow__durationTrack { flex: 1; height: 4px; min-width: 40px; overflow: hidden; border-radius: 2px; background: #f0f0f0; }
+.traceRow__durationTrack > span { display: block; height: 100%; border-radius: 2px; background: #c9cbf9; }
+.traceRow__durationTrack--error > span { background: #a8474b; }
+.traceRow__duration .explorerCell--number { min-width: 64px; }
+@media (max-width: 1200px) {
+  .traceDrawer__spanBody { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Traces overview. */
+.overviewTiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.overviewTile { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border-radius: 12px; background: #fff; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
+.overviewTile h2 { margin: 0; color: #434343; font-size: 12px; font-weight: 500; line-height: 16px; }
+.overviewTile__value { display: flex; align-items: baseline; gap: 6px; margin: 0; color: #1a1a1a; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 28px; }
+.overviewTile__value span { color: #666; font-size: 12px; }
+.overviewTile__value--danger { color: #b33d43; }
+.overviewTile__chart { width: 100%; height: 36px; }
+.overviewNote { margin: -4px 0 0; padding: 0 8px; color: #999; font-size: 12px; }
+.overviewColumns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 24px; align-items: start; }
+.overviewColumn { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.overviewSection { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.overviewSection > header { display: flex; align-items: center; justify-content: space-between; padding: 0 12px; }
+.overviewSection h2 { margin: 0; color: #434343; font-size: 12px; font-weight: 500; line-height: 16px; }
+.overviewSection header a { color: #4e58f9; font-size: 12px; text-decoration: none; }
+.overviewSection header a:hover { text-decoration: underline; }
+.overviewSection .agentListTable table { min-width: 0; }
+.overviewDanger { color: #b33d43; }
+.overviewSection .traceRow__durationTrack { display: block; width: 100%; }
+.overviewBar > span { background: #4e58f9; }
+.overviewError { display: flex; flex-direction: column; min-width: 0; }
+.overviewError > span { overflow: hidden; color: #1a1a1a; text-overflow: ellipsis; white-space: nowrap; }
+.overviewError small { overflow: hidden; color: #666; font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) {
+  .overviewTiles, .overviewColumns { grid-template-columns: minmax(0, 1fr); }
+}

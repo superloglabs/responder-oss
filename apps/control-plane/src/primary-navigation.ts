@@ -16,6 +16,8 @@ export type NavigationSection =
   | "traces";
 
 export interface NavigationItem {
+  // Pages within the section, listed under it while it is open.
+  children?: Array<{ label: string; to: string }>;
   label: string;
   section: NavigationSection;
   to: string;
@@ -44,7 +46,15 @@ export function primaryNavigation(options: {
   const telemetry: NavigationItem[] = options.telemetry
     ? [
         { label: "Logs", section: "logs", to: "/logs" },
-        { label: "Traces", section: "traces", to: "/traces" },
+        {
+          children: [
+            { label: "Overview", to: "/traces" },
+            { label: "Search", to: "/traces/search" },
+          ],
+          label: "Traces",
+          section: "traces",
+          to: "/traces",
+        },
         { label: "Metrics", section: "metrics", to: "/metrics" },
         ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
         ...(options.alerts ? [{ label: "Alerts", section: "alerts" as const, to: "/alerts" }] : []),

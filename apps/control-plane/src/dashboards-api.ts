@@ -2,6 +2,7 @@ import { apiErrorMessage } from "./agents-api";
 import type {
   ChartData,
   DashboardVariable,
+  DashboardVariableValue,
   DashboardWidgetConfig,
   DashboardWidgetFilter,
   DashboardWidgetLayout,
@@ -13,12 +14,13 @@ import type {
   TelemetryDashboardSummary,
   TelemetryDashboardWidget,
 } from "../../../packages/core/src/db/telemetry-dashboards";
-import type { AttributeSource, TelemetryRange } from "../server/telemetry/routes";
+import type { AttributeSource } from "../server/telemetry/routes";
 import { formatDuration, type LogRecord, type TraceSummary } from "./telemetry-api";
 
 export type {
   ChartData,
   DashboardVariable,
+  DashboardVariableValue,
   DashboardWidgetConfig,
   DashboardWidgetFilter,
   DashboardWidgetLayout,
@@ -33,6 +35,18 @@ export type WidgetData =
   | { chart: ChartData; kind: "chart" }
   | { kind: "logs"; logs: LogRecord[] }
   | { kind: "traces"; traces: TraceSummary[] };
+
+// The instants a query covers, in milliseconds.
+export interface QueryWindow {
+  since: number;
+  until: number;
+}
+
+export type VariableValues = Record<string, DashboardVariableValue>;
+
+function windowParams(window: QueryWindow): Record<string, string> {
+  return { since: new Date(window.since).toISOString(), until: new Date(window.until).toISOString() };
+}
 
 export interface MetricName {
   kind: string;
@@ -143,43 +157,64 @@ export function updateLayout(
 export function fetchWidgetData(input: {
   config: DashboardWidgetConfig;
   projectId: string;
-  range: TelemetryRange;
   type: Exclude<DashboardWidgetType, "markdown">;
-  variables: Record<string, string>;
+  variables: VariableValues;
+  window: QueryWindow;
 }): Promise<WidgetData> {
-  return request<WidgetData>("/api/telemetry/widget-data", { body: input, method: "POST" });
+  const { window, ...rest } = input;
+  return request<WidgetData>("/api/telemetry/widget-data", { body: { ...rest, ...windowParams(window) }, method: "POST" });
 }
 
-export async function fetchMetricNames(projectId: string, range: TelemetryRange): Promise<MetricName[]> {
-  const params = new URLSearchParams({ projectId, range });
+export async function fetchMetricNames(projectId: string, window: QueryWindow): Promise<MetricName[]> {
+  const params = new URLSearchParams({ projectId, ...windowParams(window) });
   return (await request<{ metrics: MetricName[] }>(`/api/telemetry/metric-names?${params}`)).metrics;
 }
 
 export async function fetchAttributeKeys(
   projectId: string,
-  range: TelemetryRange,
+  window: QueryWindow,
   source: AttributeSource,
 ): Promise<string[]> {
-  const params = new URLSearchParams({ projectId, range, source });
+  const params = new URLSearchParams({ projectId, source, ...windowParams(window) });
   const body = await request<{ keys: Array<{ key: string }> }>(`/api/telemetry/attribute-keys?${params}`);
   return body.keys.map((entry) => entry.key);
 }
 
 export async function fetchAttributeValues(
   projectId: string,
-  range: TelemetryRange,
+  window: QueryWindow,
   source: AttributeSource,
   key: string,
 ): Promise<string[]> {
-  const params = new URLSearchParams({ key, projectId, range, source });
-  const body = await request<{ values: Array<{ value: string }> }>(`/api/telemetry/attribute-values?${params}`);
-  return body.values.map((entry) => entry.value);
+  return (await fetchAttributeValueCounts(projectId, window, key, [], source)).map((entry) => entry.value);
 }
 
-// The selected value of each variable before anyone picks one.
-export function defaultVariableValues(variables: DashboardVariable[]): Record<string, string> {
+// Values of an attribute with how often each was seen, counting only rows
+// that match the filters. A resource attribute is counted across logs and
+// spans, which the "metrics" source selects.
+export async function fetchAttributeValueCounts(
+  projectId: string,
+  window: QueryWindow,
+  key: string,
+  filters: Array<{ key: string; value: string; values?: string[] }>,
+  source: AttributeSource = key.startsWith("log.") ? "logs" : key.startsWith("span.") ? "traces" : "metrics",
+): Promise<Array<{ count: number; value: string }>> {
+  const params = new URLSearchParams({ key, projectId, source, ...windowParams(window) });
+  if (filters.length > 0) params.set("filters", JSON.stringify(filters));
+  return (await request<{ values: Array<{ count: number; value: string }> }>(`/api/telemetry/attribute-values?${params}`)).values;
+}
+
+// The selected value of each variable before anyone picks one. A
+// multi-value variable starts with its default, or with nothing selected,
+// which matches every value.
+export function defaultVariableValues(variables: DashboardVariable[]): VariableValues {
   return Object.fromEntries(
-    variables.map((variable) => [variable.name, variable.defaultValue ?? variable.options[0] ?? ""]),
+    variables.map((variable) => [
+      variable.name,
+      variable.multi
+        ? (variable.defaultValue ? [variable.defaultValue] : [])
+        : (variable.defaultValue ?? variable.options[0] ?? ""),
+    ]),
   );
 }
 
@@ -204,20 +239,75 @@ export function placeWidget(type: DashboardWidgetType, taken: DashboardWidgetLay
   }
 }
 
-// Selections after the variables change: each kept while the variable still
-// allows it, otherwise the variable's default.
-export function nextVariableValues(
-  variables: DashboardVariable[],
-  current: Record<string, string>,
-): Record<string, string> {
+// Selections after the variables change: each value kept while the variable
+// still allows it, otherwise the variable's default.
+export function nextVariableValues(variables: DashboardVariable[], current: VariableValues): VariableValues {
   const defaults = defaultVariableValues(variables);
   return Object.fromEntries(
     variables.map((variable) => {
       const selected = current[variable.name];
-      const allowed = selected !== undefined && (variable.options.length === 0 || variable.options.includes(selected));
-      return [variable.name, allowed ? selected : defaults[variable.name]!];
+      const allowed = (value: string) => variable.options.length === 0 || variable.options.includes(value);
+      if (selected === undefined) return [variable.name, defaults[variable.name]!];
+      if (variable.multi) {
+        const list = (Array.isArray(selected) ? selected : [selected]).filter((value) => value !== "" && allowed(value));
+        return [variable.name, list.length > 0 || Array.isArray(selected) ? list : defaults[variable.name]!];
+      }
+      const single = Array.isArray(selected) ? selected[0] : selected;
+      return [variable.name, single !== undefined && allowed(single) ? single : defaults[variable.name]!];
     }),
   );
+}
+
+// A variable picks from a list when it has options or an attribute to read
+// values from, or allows several values. Otherwise its value is typed.
+export function variableControl(variable: DashboardVariable): "list" | "typed" {
+  return variable.options.length > 0 || variable.attributeKey || variable.multi ? "list" : "typed";
+}
+
+// The selected values of a variable as a list; an empty one matches every value.
+export function selectedValues(value: DashboardVariableValue | undefined): string[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : value === "" ? [] : [value];
+}
+
+// The other variables' selections, as filters on their attributes.
+export function variableFilters(
+  variables: DashboardVariable[],
+  values: VariableValues,
+  except: string,
+): { filters: Array<{ key: string; value: string; values?: string[] }>; names: string[] } {
+  const filters: Array<{ key: string; value: string; values?: string[] }> = [];
+  const names: string[] = [];
+  for (const variable of variables) {
+    if (variable.name === except || !variable.attributeKey) continue;
+    const selected = selectedValues(values[variable.name]);
+    if (selected.length === 0) continue;
+    filters.push({ key: variable.attributeKey, value: selected[0]!, ...(selected.length > 1 ? { values: selected } : {}) });
+    names.push(variable.label || variable.name);
+  }
+  return { filters, names };
+}
+
+// Selections kept in the URL as var-name=value, one parameter per value.
+// A multi-value variable with nothing selected is var-name with no value.
+export function variableValuesFromParams(variables: DashboardVariable[], params: URLSearchParams): VariableValues {
+  const fromUrl: VariableValues = {};
+  for (const variable of variables) {
+    const values = params.getAll(`var-${variable.name}`);
+    if (values.length === 0) continue;
+    fromUrl[variable.name] = variable.multi ? values.filter(Boolean) : values[0]!;
+  }
+  return nextVariableValues(variables, { ...defaultVariableValues(variables), ...fromUrl });
+}
+
+export function variableParams(values: VariableValues, current: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams([...current].filter(([key]) => !key.startsWith("var-")));
+  for (const [name, value] of Object.entries(values)) {
+    const list = Array.isArray(value) ? value : [value];
+    if (list.length === 0) next.append(`var-${name}`, "");
+    for (const item of list) next.append(`var-${name}`, item);
+  }
+  return next;
 }
 
 // Widgets whose position or size changed, for one layout update.
@@ -300,6 +390,7 @@ export interface VariableRow {
   attributeKey: string;
   defaultValue: string;
   label: string;
+  multi: boolean;
   name: string;
   options: string;
 }
@@ -309,6 +400,7 @@ export function variableRow(variable: DashboardVariable): VariableRow {
     attributeKey: variable.attributeKey ?? "",
     defaultValue: variable.defaultValue ?? "",
     label: variable.label ?? "",
+    multi: variable.multi ?? false,
     name: variable.name,
     options: variable.options.join(", "),
   };
@@ -336,6 +428,7 @@ export function variablesFromRows(rows: VariableRow[]): { error: string } | { va
       ...(row.label.trim() ? { label: row.label.trim() } : {}),
       ...(row.attributeKey.trim() ? { attributeKey: row.attributeKey.trim() } : {}),
       ...(defaultValue ? { defaultValue } : {}),
+      ...(row.multi ? { multi: true } : {}),
     });
   }
   return { variables };

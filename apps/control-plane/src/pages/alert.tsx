@@ -66,6 +66,12 @@ function withCurrent<T extends { value: string }>(options: T[], value: string, l
   return value && !options.some((option) => option.value === value) ? [{ label, value }, ...options] : options;
 }
 
+// The day up to now, which the editor lists metrics and attributes from.
+function lastDayWindow(): { since: number; until: number } {
+  const now = Date.now();
+  return { since: now - 86_400_000, until: now };
+}
+
 function useDebounced<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -250,9 +256,10 @@ export function AlertPage() {
     if (!projectId) return;
     let cancelled = false;
     const attributeSource = source === "metric" ? "metrics" : source;
+    const lastDay = lastDayWindow();
     void Promise.all([
-      source === "metric" ? fetchMetricNames(projectId, "24h").catch(() => []) : Promise.resolve([]),
-      fetchAttributeKeys(projectId, "24h", attributeSource).catch(() => []),
+      source === "metric" ? fetchMetricNames(projectId, lastDay).catch(() => []) : Promise.resolve([]),
+      fetchAttributeKeys(projectId, lastDay, attributeSource).catch(() => []),
       fetchServices(projectId, "24h", source === "metric" ? "all" : source).catch(() => []),
     ]).then(([loadedMetrics, loadedKeys, loadedServices]) => {
       if (cancelled) return;
