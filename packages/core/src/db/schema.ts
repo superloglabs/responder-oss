@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   check,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -26,6 +27,13 @@ import type {
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import type { SuggestionCodeChange } from "../suggestions/model.js";
+import type {
+  AlertAggregation,
+  AlertComparator,
+  AlertFilter,
+  AlertGroupMode,
+  AlertSource,
+} from "../telemetry/alerts.js";
 import type {
   DashboardVariable,
   DashboardWidgetConfig,
@@ -722,6 +730,87 @@ export const telemetryDashboardWidgets = pgTable(
       .defaultNow(),
   },
   (table) => [index("telemetry_dashboard_widgets_dashboard_idx").on(table.dashboardId)],
+);
+
+// A threshold rule on one telemetry project. Like a dashboard, it is hidden
+// and not evaluated while its project is not linked to the workspace.
+export const telemetryAlerts = pgTable(
+  "telemetry_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull(),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    source: text("source").$type<AlertSource>().notNull(),
+    metricName: text("metric_name"),
+    filter: jsonb("filter").$type<AlertFilter>().notNull().default({}),
+    groupBy: text("group_by"),
+    groupMode: text("group_mode").$type<AlertGroupMode>().notNull().default("single"),
+    aggregation: text("aggregation").$type<AlertAggregation>().notNull(),
+    comparator: text("comparator").$type<AlertComparator>().notNull(),
+    threshold: doublePrecision("threshold").notNull(),
+    windowMinutes: integer("window_minutes").notNull().default(5),
+    evaluationIntervalSeconds: integer("evaluation_interval_seconds").notNull().default(60),
+    // Where firing and recovery are posted. Null posts nowhere.
+    slackIntegrationAccountId: uuid("slack_integration_account_id").references(() => integrationAccounts.id, {
+      onDelete: "set null",
+    }),
+    slackChannelId: text("slack_channel_id"),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    lastEvaluatedAt: timestamp("last_evaluated_at", { withTimezone: true }),
+    // Why the last check failed, cleared by the next one that succeeds.
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("telemetry_alerts_organization_idx").on(table.organizationId),
+    index("telemetry_alerts_due_idx").on(table.lastEvaluatedAt).where(sql`${table.enabled}`),
+  ],
+);
+
+// One continuous breach of an alert, per group.
+export const telemetryAlertEpisodes = pgTable(
+  "telemetry_alert_episodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    alertId: uuid("alert_id")
+      .notNull()
+      .references(() => telemetryAlerts.id, { onDelete: "cascade" }),
+    groupKey: text("group_key").notNull().default(""),
+    state: text("state").$type<"firing" | "resolved">().notNull().default("firing"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    openValue: doublePrecision("open_value").notNull(),
+    // Furthest past the threshold while firing.
+    peakValue: doublePrecision("peak_value").notNull(),
+    lastValue: doublePrecision("last_value").notNull(),
+    // The channel and message that announced the episode; recovery replies
+    // in its thread.
+    slackIntegrationAccountId: uuid("slack_integration_account_id"),
+    slackChannelId: text("slack_channel_id"),
+    slackMessageTs: text("slack_message_ts"),
+    // Set once the recovery is posted, or when there is nothing to post.
+    recoveryNotifiedAt: timestamp("recovery_notified_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("telemetry_alert_episodes_alert_idx").on(table.alertId, table.startedAt),
+    uniqueIndex("telemetry_alert_episodes_open_idx")
+      .on(table.alertId, table.groupKey)
+      .where(sql`${table.state} = 'firing'`),
+  ],
 );
 
 export const modelSubscriptionConnections = pgTable("model_subscription_connections", {

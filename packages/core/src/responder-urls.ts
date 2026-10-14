@@ -45,3 +45,11 @@ export function responderAutomationRunUrl(input: {
   }
   return url.toString();
 }
+
+export function responderAlertUrl(alertId: string, origin: string): string {
+  const url = responderUrl(origin);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/alerts/${encodeURIComponent(alertId)}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
