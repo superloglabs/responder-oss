@@ -99,6 +99,7 @@ import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
+import { checkDueTelemetryAlerts } from "./telemetry-alerts.js";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -134,7 +135,23 @@ const pollers: {
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
   replayRequest?: NodeJS.Timeout;
+  telemetryAlerts?: NodeJS.Timeout;
 } = {};
+
+let telemetryAlertPass: Promise<void> | undefined;
+
+// Runs at most one alert pass at a time; a slow pass delays the next.
+function checkTelemetryAlerts(): Promise<void> {
+  telemetryAlertPass ??= checkDueTelemetryAlerts()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "telemetry_alerts" });
+    })
+    .finally(() => {
+      telemetryAlertPass = undefined;
+    });
+  return telemetryAlertPass;
+}
 
 async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
   try {
@@ -487,11 +504,13 @@ async function shutdown(signal: string): Promise<void> {
     automationUsageBillingPass,
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
+  if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
   await replayRequestDrain;
   await linearTicketDrain;
   await remediationRecoveryDrain;
+  await telemetryAlertPass;
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
     await boss.stop({
@@ -1051,5 +1070,7 @@ pollers.remediationRecovery = setInterval(
   5 * 60 * 1_000,
 );
 pollers.remediationRecovery.unref();
+pollers.telemetryAlerts = setInterval(() => void checkTelemetryAlerts(), 15_000);
+pollers.telemetryAlerts.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));

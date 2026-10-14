@@ -547,6 +547,13 @@
       "when": 1791915399865,
       "tag": "0077_telemetry_dashboards",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791979765835,
+      "tag": "0078_telemetry_alerts",
+      "breakpoints": true
     }
   ]
 }

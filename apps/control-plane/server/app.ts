@@ -29,6 +29,7 @@ import { billingRoutes } from "./billing/routes.js";
 import { consentBasePath, handleConsentRequest } from "./consent.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
+import { createAlertRoutes } from "./telemetry/alert-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
@@ -474,6 +475,7 @@ export const app = instrumentedApp
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)
   .route("/api/suggestions", suggestionRoutes)
+  .route("/api/telemetry/alerts", createAlertRoutes())
   .route("/api/telemetry/dashboards", createDashboardRoutes())
   .route("/api/telemetry", createTelemetryRoutes())
   .route("/api/automation-model-broker", automationModelBrokerRoutes)
