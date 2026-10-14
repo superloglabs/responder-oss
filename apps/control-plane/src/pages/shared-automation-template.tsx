@@ -29,9 +29,16 @@ export function SharedAutomationTemplatePage() {
   const builtIn = findAutomationTemplate(slug);
   const session = authClient.useSession();
   const signedIn = Boolean(session.data);
-  const [shared, setShared] = useState<SharedAutomationTemplate | null>(null);
-  const [sharedStatus, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
-  const status = builtIn ? "ready" : sharedStatus;
+  // A loaded result belongs to the slug it was fetched for, so a new link
+  // never shows the previous template.
+  const [loaded, setLoaded] = useState<{
+    slug: string;
+    status: "ready" | "missing" | "error";
+    template: SharedAutomationTemplate | null;
+  } | null>(null);
+  const current = loaded?.slug === slug ? loaded : null;
+  const shared = current?.template ?? null;
+  const status = builtIn ? "ready" : current?.status ?? "loading";
   const template: AutomationTemplateContent | null = builtIn ?? shared;
   useDocumentTitle(template ? template.name : "Automation template");
 
@@ -39,13 +46,13 @@ export function SharedAutomationTemplatePage() {
     if (builtIn) return;
     let cancelled = false;
     void fetchSharedAutomationTemplate(slug)
-      .then((loaded) => {
-        if (cancelled) return;
-        setShared(loaded);
-        setStatus("ready");
+      .then((template) => {
+        if (!cancelled) setLoaded({ slug, status: "ready", template });
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setStatus(cause instanceof Error && cause.message === "Template not found" ? "missing" : "error");
+        if (cancelled) return;
+        const status = cause instanceof Error && cause.message === "Template not found" ? "missing" : "error";
+        setLoaded({ slug, status, template: null });
       });
     return () => { cancelled = true; };
   }, [builtIn, slug]);

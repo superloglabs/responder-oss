@@ -104,6 +104,18 @@ test("explains when a shared template is no longer available", async ({ context,
   await expect(page.getByRole("heading", { name: "This template is no longer shared" })).toBeVisible();
 });
 
+test("does not show the previous shared template after the link changes", async ({ context, page }) => {
+  await mockApi(context, false);
+  await page.goto(`/templates/${slug}`);
+  await expect(page.getByRole("heading", { name: "Triage new Sentry issues" })).toBeVisible();
+  await page.evaluate(() => {
+    history.pushState(null, "", "/templates/zzzzzzzzzzzzzzzz");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.getByRole("heading", { name: "This template is no longer shared" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Triage new Sentry issues" })).toHaveCount(0);
+});
+
 test("keeps the shared template readable on mobile", async ({ context, page }) => {
   await mockApi(context, false);
   await page.setViewportSize({ width: 390, height: 844 });
