@@ -239,9 +239,11 @@ export function AlertPage() {
     if (!projectId) return;
     let cancelled = false;
     const attributeSource = source === "metric" ? "metrics" : source;
+    const now = Date.now();
+    const lastDay = { since: now - 86_400_000, until: now };
     void Promise.all([
-      source === "metric" ? fetchMetricNames(projectId, "24h").catch(() => []) : Promise.resolve([]),
-      fetchAttributeKeys(projectId, "24h", attributeSource).catch(() => []),
+      source === "metric" ? fetchMetricNames(projectId, lastDay).catch(() => []) : Promise.resolve([]),
+      fetchAttributeKeys(projectId, lastDay, attributeSource).catch(() => []),
       fetchServices(projectId, "24h", source === "metric" ? "all" : source).catch(() => []),
     ]).then(([loadedMetrics, loadedKeys, loadedServices]) => {
       if (cancelled) return;

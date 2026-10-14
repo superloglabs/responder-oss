@@ -134,10 +134,11 @@ export const telemetryRanges: Array<{ label: string; value: TelemetryRange }> = 
   { label: "7d", value: "7d" },
 ];
 
-export function formatTelemetryTime(value: string): string {
+export function formatTelemetryTime(value: string, timeZone?: string): string {
   const date = logTimestamp(value);
   if (!date) return value;
   return date.toLocaleString(undefined, {
+    ...(timeZone ? { timeZone } : {}),
     day: "numeric",
     hour: "2-digit",
     hour12: false,

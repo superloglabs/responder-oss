@@ -15,6 +15,7 @@ import {
   dashboardWidgetConfigSchema,
   type ChartData,
   type DashboardWidgetConfig,
+  type ResolvedWidgetFilter,
   resolveWidgetFilters,
 } from "../../../../packages/core/src/telemetry/dashboards.js";
 import {
@@ -28,6 +29,7 @@ import {
   pickStep,
   queryLogs,
   queryTracesAggregated,
+  type ResourceAttrFilter,
   type Step,
   type TimeRange,
 } from "../../../../packages/core/src/telemetry/query.js";
@@ -48,7 +50,7 @@ export type TelemetryRouteDependencies = {
   attributeValues: (
     client: ClickHouseClient,
     projectId: string,
-    params: { key: string; prefix?: string; range: TimeRange; source: AttributeSource },
+    params: { filters?: ResourceAttrFilter[]; key: string; prefix?: string; range: TimeRange; source: AttributeSource },
   ) => Promise<unknown>;
   client: () => ClickHouseClient | null;
   // Log or span counts per bucket and group.
@@ -56,7 +58,7 @@ export type TelemetryRouteDependencies = {
     client: ClickHouseClient,
     projectId: string,
     source: TelemetrySignal,
-    filter: { range: TimeRange; resourceAttrs: DashboardWidgetConfig["filter"]["resourceAttrs"] },
+    filter: { range: TimeRange; resourceAttrs: ResolvedWidgetFilter[] },
     groupBy: string | undefined,
     step: Step,
   ) => Promise<Array<{ bucket: string; count: number; group: string }>>;
@@ -71,7 +73,7 @@ export type TelemetryRouteDependencies = {
     projectId: string,
     params: {
       aggregation?: DashboardWidgetConfig["aggregation"];
-      filter: { range: TimeRange; resourceAttrs: DashboardWidgetConfig["filter"]["resourceAttrs"] };
+      filter: { range: TimeRange; resourceAttrs: ResolvedWidgetFilter[] };
       groupBy: string | undefined;
       metricName: string;
       step: Step;
@@ -113,7 +115,7 @@ export type TelemetryRouteDependencies = {
 const defaultDependencies: TelemetryRouteDependencies = {
   attributeKeys: (client, projectId, range, source) => listAttributeKeys(client, projectId, range, source),
   attributeValues: (client, projectId, params) =>
-    listAttributeValues(client, projectId, params.key, params.range, 200, params.source, params.prefix),
+    listAttributeValues(client, projectId, params.key, params.range, 200, params.source, params.prefix, params.filters),
   client: getTelemetryClient,
   countSeries,
   findProject: findTelemetryProject,
@@ -137,10 +139,16 @@ const defaultDependencies: TelemetryRouteDependencies = {
 const rangeMinutes = { "15m": 15, "1h": 60, "6h": 360, "24h": 1_440, "7d": 10_080 } as const;
 export type TelemetryRange = keyof typeof rangeMinutes;
 
+// A query covers the last `range`, or the window from `since` to `until`.
 const windowSchema = z.object({
   projectId: z.uuid(),
   range: z.enum(Object.keys(rangeMinutes) as [TelemetryRange, ...TelemetryRange[]]).default("1h"),
+  since: z.iso.datetime().optional(),
+  until: z.iso.datetime().optional(),
 });
+// The longest window a query may cover, with a minute to spare for a
+// 30-day range resolved a moment before the request.
+const maximumWindowMs = 30 * 86_400_000 + 60_000;
 
 const signals = ["logs", "traces"] as const;
 export type TelemetrySignal = (typeof signals)[number];
@@ -164,7 +172,31 @@ const attributeSources = ["logs", "traces", "metrics"] as const;
 export type AttributeSource = (typeof attributeSources)[number];
 
 const attributeKeysSchema = windowSchema.extend({ source: z.enum(attributeSources).default("logs") });
+const filterValuesSchema = z.object({
+  key: z.string().trim().min(1).max(200),
+  op: z.enum(["eq", "neq", "not_contains"]).optional(),
+  value: z.string().max(500),
+  values: z.array(z.string().max(500)).min(1).max(200).optional(),
+});
 const attributeValuesSchema = attributeKeysSchema.extend({
+  // Other filters, as JSON: [{ key, value, values? }].
+  filters: z
+    .string()
+    .max(20_000)
+    .optional()
+    .transform((text, context) => {
+      if (!text) return undefined;
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
+      const parsed = z.array(filterValuesSchema).max(50).safeParse(json);
+      if (parsed.success) return parsed.data;
+      context.addIssue({ code: "custom", message: "Invalid filters" });
+      return z.NEVER;
+    }),
   key: z.string().trim().min(1).max(200),
   prefix: z.string().max(200).optional(),
 });
@@ -173,9 +205,14 @@ const widgetDataSchema = z.object({
   config: dashboardWidgetConfigSchema,
   projectId: z.uuid(),
   range: windowSchema.shape.range,
+  since: windowSchema.shape.since,
   type: z.enum(["timeseries_count", "timeseries_metric", "log_table", "trace_table"]),
-  // Selected dashboard variable values, substituted into filter values.
-  variables: z.record(z.string().max(60), z.string().max(500)).default({}),
+  until: windowSchema.shape.until,
+  // Selected dashboard variable values, substituted into filter values. A
+  // multi-value variable sends its selection as a list.
+  variables: z
+    .record(z.string().max(60), z.union([z.string().max(500), z.array(z.string().max(500)).max(200)]))
+    .default({}),
 });
 
 export type WidgetData =
@@ -193,11 +230,21 @@ const logsSchema = windowSchema.extend({
   severity: z.string().trim().max(32).optional(),
 });
 
-function windowFor(range: TelemetryRange, now: Date): Required<TimeRange> {
-  return {
-    since: new Date(now.getTime() - rangeMinutes[range] * 60_000).toISOString(),
-    until: now.toISOString(),
-  };
+function windowFor(
+  query: { range: TelemetryRange; since?: string | undefined; until?: string | undefined },
+  now: Date,
+): Required<TimeRange> | null {
+  if (query.since === undefined && query.until === undefined) {
+    return {
+      since: new Date(now.getTime() - rangeMinutes[query.range] * 60_000).toISOString(),
+      until: now.toISOString(),
+    };
+  }
+  if (query.since === undefined || query.until === undefined) return null;
+  const since = Date.parse(query.since);
+  const until = Date.parse(query.until);
+  if (!(until > since) || until - since > maximumWindowMs) return null;
+  return { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
 }
 
 export function createTelemetryRoutes(
@@ -228,12 +275,14 @@ export function createTelemetryRoutes(
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = logsSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid log query" }, 400);
+      const timeWindow = windowFor(query.data, dependencies.now());
+      if (!timeWindow) return context.json({ error: "Invalid log query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
       const logs = await dependencies.queryLogs(granted.client, query.data.projectId, {
         limit: query.data.limit,
-        range: windowFor(query.data.range, dependencies.now()),
+        range: timeWindow,
         ...(query.data.search ? { search: query.data.search } : {}),
         ...(query.data.service ? { service: query.data.service } : {}),
         ...(query.data.severity ? { severity: query.data.severity } : {}),
@@ -245,6 +294,8 @@ export function createTelemetryRoutes(
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = servicesSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid service query" }, 400);
+      const timeWindow = windowFor(query.data, dependencies.now());
+      if (!timeWindow) return context.json({ error: "Invalid service query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
@@ -252,7 +303,7 @@ export function createTelemetryRoutes(
         services: await dependencies.listServices(
           granted.client,
           query.data.projectId,
-          windowFor(query.data.range, dependencies.now()),
+          timeWindow,
           query.data.signal === "all" ? undefined : query.data.signal,
         ),
       });
@@ -262,12 +313,14 @@ export function createTelemetryRoutes(
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = tracesSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid trace query" }, 400);
+      const timeWindow = windowFor(query.data, dependencies.now());
+      if (!timeWindow) return context.json({ error: "Invalid trace query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
       const traces = await dependencies.queryTraces(granted.client, query.data.projectId, {
         limit: query.data.limit,
-        range: windowFor(query.data.range, dependencies.now()),
+        range: timeWindow,
         ...(query.data.minDurationMs ? { minDurationMs: query.data.minDurationMs } : {}),
         ...(query.data.service ? { service: query.data.service } : {}),
         ...(query.data.status === "error" ? { statusCode: "STATUS_CODE_ERROR" } : {}),
@@ -279,6 +332,8 @@ export function createTelemetryRoutes(
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = attributeKeysSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid attribute query" }, 400);
+      const timeWindow = windowFor(query.data, dependencies.now());
+      if (!timeWindow) return context.json({ error: "Invalid attribute query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
@@ -286,7 +341,7 @@ export function createTelemetryRoutes(
         keys: await dependencies.attributeKeys(
           granted.client,
           query.data.projectId,
-          windowFor(query.data.range, dependencies.now()),
+          timeWindow,
           query.data.source,
         ),
       });
@@ -296,14 +351,17 @@ export function createTelemetryRoutes(
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = attributeValuesSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid attribute query" }, 400);
+      const timeWindow = windowFor(query.data, dependencies.now());
+      if (!timeWindow) return context.json({ error: "Invalid attribute query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
       return context.json({
         values: await dependencies.attributeValues(granted.client, query.data.projectId, {
           key: query.data.key,
-          range: windowFor(query.data.range, dependencies.now()),
+          range: timeWindow,
           source: query.data.source,
+          ...(query.data.filters ? { filters: query.data.filters } : {}),
           ...(query.data.prefix ? { prefix: query.data.prefix } : {}),
         }),
       });
@@ -313,6 +371,8 @@ export function createTelemetryRoutes(
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = windowSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid metric query" }, 400);
+      const timeWindow = windowFor(query.data, dependencies.now());
+      if (!timeWindow) return context.json({ error: "Invalid metric query" }, 400);
       if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
@@ -320,7 +380,7 @@ export function createTelemetryRoutes(
         metrics: await dependencies.metricNames(
           granted.client,
           query.data.projectId,
-          windowFor(query.data.range, dependencies.now()),
+          timeWindow,
         ),
       });
     })
@@ -333,6 +393,8 @@ export function createTelemetryRoutes(
       }
       const body = widgetDataSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Invalid widget" }, 400);
+      const range = windowFor(body.data, dependencies.now());
+      if (!range) return context.json({ error: "Invalid widget" }, 400);
       const { config, projectId, type, variables } = body.data;
       if (type === "timeseries_metric" && !config.metricName) {
         return context.json({ error: "Choose a metric" }, 400);
@@ -340,7 +402,6 @@ export function createTelemetryRoutes(
       if (!(await dependencies.findProject(granted.organizationId, projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
-      const range = windowFor(body.data.range, dependencies.now());
       const resourceAttrs = resolveWidgetFilters(config.filter.resourceAttrs, variables);
       const limit = config.limit;
       if (type === "log_table") {

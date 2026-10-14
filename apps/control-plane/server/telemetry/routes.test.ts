@@ -162,6 +162,40 @@ describe("telemetry routes", () => {
     expect((await app.request(`/attribute-values?projectId=${projectId}`)).status).toBe(400);
   });
 
+  it("lists attribute values that match other filters", async () => {
+    const { app, dependencies } = routes();
+    const filters = [{ key: "service.name", value: "checkout" }, { key: "env", value: "prod", values: ["prod", "staging"] }];
+
+    const response = await app.request(
+      `/attribute-values?projectId=${projectId}&key=http.route&filters=${encodeURIComponent(JSON.stringify(filters))}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(dependencies.attributeValues).toHaveBeenCalledWith(expect.anything(), projectId, expect.objectContaining({ filters }));
+    for (const invalid of ["nope", JSON.stringify([{ key: "" }])]) {
+      const rejected = await app.request(`/attribute-values?projectId=${projectId}&key=k&filters=${encodeURIComponent(invalid)}`);
+      expect(rejected.status).toBe(400);
+    }
+  });
+
+  it("queries an explicit window up to 30 days long", async () => {
+    const { app, dependencies } = routes();
+    const since = "2026-10-06T22:00:00.000Z";
+    const until = "2026-10-09T21:59:59.000Z";
+
+    expect((await app.request(`/metric-names?projectId=${projectId}&since=${since}&until=${until}`)).status).toBe(200);
+    expect(dependencies.metricNames).toHaveBeenCalledWith(expect.anything(), projectId, { since, until });
+
+    for (const window of [
+      `since=${since}`,
+      `since=${until}&until=${since}`,
+      "since=2026-09-01T00:00:00.000Z&until=2026-10-13T00:00:00.000Z",
+      "since=yesterday&until=now",
+    ]) {
+      expect((await app.request(`/metric-names?projectId=${projectId}&${window}`)).status).toBe(400);
+    }
+  });
+
   describe("widget data", () => {
     function post(app: ReturnType<typeof routes>["app"], body: unknown) {
       return app.request("/widget-data", {
@@ -205,6 +239,42 @@ describe("telemetry routes", () => {
         expect.objectContaining({ name: "api", other: false }),
         expect.objectContaining({ name: "Other", other: true }),
       ]);
+    });
+
+    it("charts an explicit window, matching any selected value of a multi-value variable", async () => {
+      const { app, dependencies } = routes();
+
+      const response = await post(app, {
+        config: {
+          filter: {
+            resourceAttrs: [
+              { key: "http.route", value: "$route" },
+              { key: "region", value: "$region" },
+            ],
+          },
+        },
+        projectId,
+        since: "2026-10-12T10:00:00.000Z",
+        type: "timeseries_count",
+        until: "2026-10-12T12:00:00.000Z",
+        variables: { region: [], route: ["POST /checkout", "POST /refunds"] },
+      });
+
+      expect(response.status).toBe(200);
+      expect(dependencies.countSeries).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        "logs",
+        {
+          range: { since: "2026-10-12T10:00:00.000Z", until: "2026-10-12T12:00:00.000Z" },
+          resourceAttrs: [{ key: "http.route", value: "POST /checkout", values: ["POST /checkout", "POST /refunds"] }],
+        },
+        undefined,
+        { n: 1, unit: "MINUTE" },
+      );
+      expect(
+        (await post(app, { config: {}, projectId, since: "2026-10-12T10:00:00.000Z", type: "log_table" })).status,
+      ).toBe(400);
     });
 
     it("charts a metric and leaves its gaps empty", async () => {

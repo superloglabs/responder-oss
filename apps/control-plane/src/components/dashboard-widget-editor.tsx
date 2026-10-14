@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, SegmentedControl, SelectField, Switch, TextAreaField, TextField } from "../design-system";
+import { resolveTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
 import {
   emptyWidgetForm,
   widgetDraft,
@@ -13,9 +14,9 @@ import {
   fetchMetricNames,
   type DashboardVariable,
   type MetricName,
+  type VariableValues,
   type WidgetDraft,
 } from "../dashboards-api";
-import type { TelemetryRange } from "../telemetry-api";
 import { DashboardDialog } from "./dashboard-dialog";
 import { AttributeFilters } from "./attribute-filters";
 import { DashboardWidgetBody } from "./dashboard-widget";
@@ -64,6 +65,7 @@ export function DashboardWidgetEditor({
   onSave,
   projectId,
   range,
+  timeZone,
   variables,
   variableValues,
 }: {
@@ -71,9 +73,10 @@ export function DashboardWidgetEditor({
   onClose: () => void;
   onSave: (draft: WidgetDraft) => Promise<void>;
   projectId: string;
-  range: TelemetryRange;
+  range: DashboardTimeRange;
+  timeZone: string;
   variables: DashboardVariable[];
-  variableValues: Record<string, string>;
+  variableValues: VariableValues;
 }) {
   const [form, setForm] = useState<WidgetForm>(() => (initial ? widgetForm(initial) : emptyWidgetForm));
   const [metrics, setMetrics] = useState<MetricName[]>([]);
@@ -84,24 +87,26 @@ export function DashboardWidgetEditor({
   const preview = useDebounced(draft, 400);
   const attributeSource = form.source === "metric" && form.kind === "chart" ? "metrics" : form.source === "traces" ? "traces" : "logs";
   const update = (change: Partial<WidgetForm>) => setForm((current) => ({ ...current, ...change }));
+  // Metrics and attributes seen in the dashboard's range when the editor opened.
+  const [seenIn] = useState(() => resolveTimeRange(range, Date.now()));
 
   useEffect(() => {
     if (form.kind !== "chart" || form.source !== "metric") return;
     let cancelled = false;
-    fetchMetricNames(projectId, range)
+    fetchMetricNames(projectId, seenIn)
       .then((loaded) => { if (!cancelled) setMetrics(loaded); })
       .catch(() => { if (!cancelled) setMetrics([]); });
     return () => { cancelled = true; };
-  }, [form.kind, form.source, projectId, range]);
+  }, [form.kind, form.source, projectId, seenIn]);
 
   useEffect(() => {
     if (form.kind === "note") return;
     let cancelled = false;
-    fetchAttributeKeys(projectId, range, attributeSource)
+    fetchAttributeKeys(projectId, seenIn, attributeSource)
       .then((loaded) => { if (!cancelled) setKeys(loaded); })
       .catch(() => { if (!cancelled) setKeys([]); });
     return () => { cancelled = true; };
-  }, [attributeSource, form.kind, projectId, range]);
+  }, [attributeSource, form.kind, projectId, seenIn]);
 
   async function save() {
     if (draft.type === "timeseries_metric" && !draft.config.metricName) {
@@ -277,6 +282,7 @@ export function DashboardWidgetEditor({
                 projectId={projectId}
                 range={range}
                 refresh={0}
+                timeZone={timeZone}
                 title={preview.title}
                 type={preview.type}
                 variables={variableValues}
