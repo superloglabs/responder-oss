@@ -12,7 +12,7 @@ import {
 } from "../../../../packages/core/src/db/telemetry-alerts.js";
 import { findTelemetryProject } from "../../../../packages/core/src/db/telemetry-projects.js";
 import { refreshSlackChannelResources } from "../../../../packages/core/src/integrations/slack-channels.js";
-import { alertValues, alertWindow } from "../../../../packages/core/src/telemetry/alert-values.js";
+import { alertMetricIdentity, alertValues, alertWindow } from "../../../../packages/core/src/telemetry/alert-values.js";
 import {
   alertCreateSchema,
   alertPreviewSchema,
@@ -81,6 +81,7 @@ async function defaultSeries(client: TelemetryClient, projectId: string, rule: A
       groupBy,
       step,
       rule.aggregation === "avg" ? "avg" : "sum",
+      alertMetricIdentity(rule.filter),
     );
   }
   const rows = await countSeries(

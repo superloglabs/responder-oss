@@ -11,7 +11,7 @@ export type ResourceAttrFilter = {
   values?: string[];
 };
 
-type AttributeColumn = "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
+type AttributeColumn = "Attributes" | "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
 // `field` is not an attribute map — it routes a `field.<name>` filter key to a
 // top-level column (TraceId, SpanId, SeverityNumber) via the fieldColumnExpr
 // allowlist below, so the explore UI can filter on identifiers, not just attrs.
@@ -1786,7 +1786,8 @@ async function listMetricNamesFromRollup(
   untilExpr: string,
   sinceSql: string,
   untilSql: string,
-): Promise<MetricName[]> {
+  limitPerKind: number,
+): Promise<CountedMetricName[]> {
   const r = await ch.query({
     query: `
       SELECT kind, name, unit, sum(c) AS total
@@ -1796,7 +1797,7 @@ async function listMetricNamesFromRollup(
         AND hour <= ${untilExpr}
       GROUP BY kind, name, unit
       ORDER BY total DESC
-      LIMIT 200 BY kind
+      LIMIT ${Math.trunc(limitPerKind)} BY kind
     `,
     query_params: { projectId, since: sinceSql, until: untilSql },
     format: "JSONEachRow",
@@ -1817,14 +1818,27 @@ async function listMetricNamesFromRollup(
         (METRIC_KIND_ORDER.get(a.kind) ?? 0) - (METRIC_KIND_ORDER.get(b.kind) ?? 0) ||
         Number(b.total) - Number(a.total),
     )
-    .map((row) => ({ name: row.name, kind: row.kind as MetricKind, unit: row.unit }));
+    .map((row) => ({ name: row.name, kind: row.kind as MetricKind, points: Number(row.total), unit: row.unit }));
 }
 
+// The metric picker lists the busiest 200 names of each kind.
 export async function listMetricNames(
   ch: ClickHouseClient,
   projectId: string,
   range?: TimeRange,
 ): Promise<MetricName[]> {
+  return (await listCountedMetricNames(ch, projectId, range, 200)).map(({ kind, name, unit }) => ({ kind, name, unit }));
+}
+
+// A metric with how many points it has in the window.
+type CountedMetricName = MetricName & { points: number };
+
+async function listCountedMetricNames(
+  ch: ClickHouseClient,
+  projectId: string,
+  range: TimeRange | undefined,
+  limitPerKind: number,
+): Promise<CountedMetricName[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
 
   // Fast path: the picker only needs distinct MetricName/MetricUnit pairs, but
@@ -1844,7 +1858,7 @@ export async function listMetricNames(
       // make the already-available rollup result fail. De-duplication also makes
       // this forward-safe if a later rollup migration starts populating that kind.
       const [rolledUp, exponentialHistograms] = await Promise.all([
-        listMetricNamesFromRollup(ch, projectId, sinceExpr, untilExpr, sinceSql, untilSql),
+        listMetricNamesFromRollup(ch, projectId, sinceExpr, untilExpr, sinceSql, untilSql, limitPerKind),
         listMetricNamesFromRawTable(
           ch,
           projectId,
@@ -1856,11 +1870,12 @@ export async function listMetricNames(
           "exponential_histogram",
           {
             bestEffort: true,
+            limit: limitPerKind,
             maxExecutionTimeSeconds: METRIC_NAME_SUPPLEMENTAL_SCAN_TIMEOUT_SECONDS,
           },
         ),
       ]);
-      const byIdentity = new Map<string, MetricName>();
+      const byIdentity = new Map<string, CountedMetricName>();
       for (const metric of [...rolledUp, ...exponentialHistograms]) {
         byIdentity.set(`${metric.kind}\0${metric.name}\0${metric.unit}`, metric);
       }
@@ -1881,6 +1896,7 @@ export async function listMetricNames(
         untilSql,
         table,
         kind,
+        { limit: limitPerKind },
       ),
     ),
   );
@@ -1896,8 +1912,8 @@ async function listMetricNamesFromRawTable(
   untilSql: string,
   table: string,
   kind: MetricKind,
-  options: { bestEffort?: boolean; maxExecutionTimeSeconds?: number } = {},
-): Promise<MetricName[]> {
+  options: { bestEffort?: boolean; limit?: number; maxExecutionTimeSeconds?: number } = {},
+): Promise<CountedMetricName[]> {
   try {
     const r = await ch.query({
       query: `
@@ -1908,7 +1924,7 @@ async function listMetricNamesFromRawTable(
           AND TimeUnix <= ${untilExpr}
         GROUP BY name, unit
         ORDER BY c DESC
-        LIMIT 200
+        LIMIT ${Math.trunc(options.limit ?? 200)}
       `,
       query_params: { projectId, since: sinceSql, until: untilSql },
       format: "JSONEachRow",
@@ -1917,9 +1933,317 @@ async function listMetricNamesFromRawTable(
         : {}),
     });
     const rows = (await r.json()) as { name: string; unit: string; c: string | number }[];
-    return rows.map((row) => ({ name: row.name, kind, unit: row.unit }));
+    return rows.map((row) => ({ name: row.name, kind, points: Number(row.c), unit: row.unit }));
   } catch (err) {
     if (!options.bestEffort && !isMissingMetricTableError(err)) throw err;
+    return [];
+  }
+}
+
+export type MetricCatalogEntry = MetricName & {
+  // Data-point attribute keys, most frequent first.
+  attributes: string[];
+  description: string;
+  // Distinct resource and data-point attribute sets: the lines the metric
+  // draws when grouped by everything. Null when details were not read.
+  series: number | null;
+  services: string[];
+  // Whether the details read every point of the metric. Sampled details can
+  // miss services, so only complete ones rule a service out.
+  servicesComplete: boolean;
+};
+
+type MetricDetail = Pick<MetricCatalogEntry, "attributes" | "description" | "series" | "services"> & {
+  // Points the details were read from.
+  points: number;
+};
+
+// Catalog details and dimensions describe metrics; they never decide which
+// metrics exist. Their reads sample the window and stop early with what they
+// have, so a high-volume project still opens the catalog quickly.
+const METRIC_DETAIL_SCAN_ROW_CAP = 1_000_000;
+const METRIC_DIMENSION_SCAN_ROW_CAP = 200_000;
+// The catalog lists every metric a project sends, within reason.
+const METRIC_CATALOG_NAMES_PER_KIND = 5_000;
+// Services kept per metric; a list this long may have been cut.
+const METRIC_CATALOG_SERVICES = 20;
+const METRIC_DETAIL_SCAN_SECONDS = 4;
+const METRIC_POINT_COUNT_SECONDS = 1;
+const METRIC_DETAIL_SETTINGS = {
+  max_execution_time: METRIC_DETAIL_SCAN_SECONDS,
+  timeout_overflow_mode: "break",
+} as const;
+
+function isMissingDescriptionError(err: unknown): boolean {
+  return err instanceof Error && /MetricDescription/u.test(err.message);
+}
+
+// Details are kept per name and unit: a name can be sent in several units.
+function metricDetailKey(metric: { name: string; unit: string }): string {
+  return `${metric.name}\0${metric.unit}`;
+}
+
+async function metricDetailsFromTable(
+  ch: ClickHouseClient,
+  projectId: string,
+  window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
+  table: string,
+  withDescription = true,
+): Promise<{ details: Map<string, MetricDetail>; sampled: boolean }> {
+  try {
+    const started = Date.now();
+    const r = await ch.query({
+      query: `
+        SELECT
+          MetricName AS name,
+          MetricUnit AS unit,
+          ${withDescription ? "anyIf(MetricDescription, MetricDescription != '')" : "''"} AS description,
+          groupUniqArray(${METRIC_CATALOG_SERVICES})(ServiceName) AS services,
+          topKArray(30)(mapKeys(Attributes)) AS attributes,
+          uniq(ResourceAttributes, Attributes) AS series,
+          count() AS points
+        FROM (
+          SELECT MetricName, MetricUnit, ${withDescription ? "MetricDescription, " : ""}ServiceName, Attributes, ResourceAttributes
+          FROM ${table}
+          WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+            AND TimeUnix >= ${window.sinceExpr}
+            AND TimeUnix <= ${window.untilExpr}
+          LIMIT ${METRIC_DETAIL_SCAN_ROW_CAP}
+        )
+        GROUP BY name, unit
+      `,
+      query_params: { projectId, since: window.sinceSql, until: window.untilSql },
+      format: "JSONEachRow",
+      clickhouse_settings: METRIC_DETAIL_SETTINGS,
+    });
+    const rows = (await r.json()) as {
+      attributes: string[];
+      description: string;
+      name: string;
+      points: string | number;
+      series: string | number;
+      services: string[];
+      unit: string;
+    }[];
+    const details = new Map(
+      rows.map((row) => [
+        metricDetailKey(row),
+        {
+          attributes: row.attributes.filter(Boolean),
+          description: row.description,
+          points: Number(row.points),
+          series: Number(row.series),
+          services: row.services.filter(Boolean).sort(),
+        },
+      ]),
+    );
+    // The scan stopped early when it reached its row cap or its time limit.
+    const read = [...details.values()].reduce((total, detail) => total + detail.points, 0);
+    const sampled = read >= METRIC_DETAIL_SCAN_ROW_CAP || Date.now() - started >= METRIC_DETAIL_SCAN_SECONDS * 1000 - 250;
+    return { details, sampled };
+  } catch (err) {
+    // Collectors that predate descriptions do not write the column.
+    if (withDescription && isMissingDescriptionError(err)) {
+      return metricDetailsFromTable(ch, projectId, window, table, false);
+    }
+    // Details are optional: without them the metric is still listed.
+    return { details: new Map(), sampled: true };
+  }
+}
+
+// Every metric in the window, with what the catalog shows about each.
+export async function listMetricCatalog(
+  ch: ClickHouseClient,
+  projectId: string,
+  range?: TimeRange,
+): Promise<MetricCatalogEntry[]> {
+  const window = resolveRange(range);
+  const [names, details] = await Promise.all([
+    listCountedMetricNames(ch, projectId, range, METRIC_CATALOG_NAMES_PER_KIND),
+    Promise.all(METRIC_TABLES.map(({ table }) => metricDetailsFromTable(ch, projectId, window, table))),
+  ]);
+  const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
+  return names.flatMap(({ points, ...metric }) => {
+    const table = detailsByKind.get(metric.kind);
+    const detail = table?.details.get(metricDetailKey(metric));
+    // Names counted by the hour can come from before the window starts. A
+    // complete scan of the window that found no point of one drops it.
+    if (!detail && table && !table.sampled) return [];
+    return [{
+      ...metric,
+      attributes: detail?.attributes ?? [],
+      description: detail?.description ?? "",
+      series: detail?.series ?? null,
+      services: detail?.services ?? [],
+      // A scan that stopped early read some metrics only in part. A complete
+      // scan read every point, even where the name count, rounded out to whole
+      // hours, holds more.
+      servicesComplete:
+        detail !== undefined &&
+        detail.services.length < METRIC_CATALOG_SERVICES &&
+        (!table!.sampled || detail.points >= points),
+    }];
+  });
+}
+
+export type MetricDimension = {
+  cardinality: number;
+  // How a filter or grouping names it: `attr:<key>` for a data-point
+  // attribute, `resource.<key>` for a resource attribute.
+  key: string;
+  name: string;
+  scope: "point" | "resource";
+  // The most frequent values, each with its share of the points that carry
+  // the attribute.
+  values: { share: number; value: string }[];
+};
+
+// How many points one metric has in the window. The hourly rollup answers in
+// milliseconds when it covers the window; it does not cover exponential
+// histograms, a window older than its backfill, or every deployment,
+// so a short raw count stands in, and a count cut short still thins a busy
+// metric. Zero when neither answers, so the caller reads points unthinned.
+async function metricPointCount(
+  ch: ClickHouseClient,
+  projectId: string,
+  metric: { kind: MetricKind; name: string; unit?: string },
+  table: string,
+  window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
+): Promise<number> {
+  const query_params = {
+    kind: metric.kind,
+    metricName: metric.name,
+    metricUnit: metric.unit ?? "",
+    projectId,
+    since: window.sinceSql,
+    until: window.untilSql,
+  };
+  const count = async (query: string, settings?: { max_execution_time: number; timeout_overflow_mode: "break" }) => {
+    try {
+      const r = await ch.query({
+        query,
+        query_params,
+        format: "JSONEachRow",
+        ...(settings ? { clickhouse_settings: settings } : {}),
+      });
+      const rows = (await r.json()) as { points: string | number | null }[];
+      return Number(rows[0]?.points ?? 0) || 0;
+    } catch {
+      return 0;
+    }
+  };
+  if (
+    (await tableExists(ch, "metric_names_per_hour")) &&
+    (await metricNamesRollupCoversWindow(ch, projectId, window.sinceExpr, window.sinceSql).catch(() => false))
+  ) {
+    // An hour the window covers in part counts for that part.
+    const since = `toFloat64(toUnixTimestamp64Milli(toDateTime64(${window.sinceExpr}, 3))) / 1000`;
+    const until = `toFloat64(toUnixTimestamp64Milli(toDateTime64(${window.untilExpr}, 3))) / 1000`;
+    const start = "toFloat64(toUnixTimestamp(hour))";
+    const rolledUp = await count(`
+      SELECT sum(c * greatest(0, least(${start} + 3600, ${until}) - greatest(${start}, ${since})) / 3600) AS points
+      FROM metric_names_per_hour
+      WHERE project_id = {projectId:String}
+        AND kind = {kind:String}
+        AND name = {metricName:String}
+        ${metric.unit === undefined ? "" : "AND unit = {metricUnit:String}"}
+        AND hour >= toStartOfHour(${window.sinceExpr})
+        AND hour <= ${window.untilExpr}
+    `);
+    if (rolledUp > 0) return rolledUp;
+  }
+  return count(
+    `
+      SELECT count() AS points
+      FROM ${table}
+      WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+        AND MetricName = {metricName:String}
+        ${metric.unit === undefined ? "" : "AND MetricUnit = {metricUnit:String}"}
+        AND TimeUnix >= ${window.sinceExpr}
+        AND TimeUnix <= ${window.untilExpr}
+    `,
+    { max_execution_time: METRIC_POINT_COUNT_SECONDS, timeout_overflow_mode: "break" },
+  );
+}
+
+// The attributes one metric's points carry, with how many values each takes.
+export async function listMetricDimensions(
+  ch: ClickHouseClient,
+  projectId: string,
+  metric: { kind: MetricKind; name: string; unit?: string },
+  range?: TimeRange,
+): Promise<MetricDimension[]> {
+  const table = METRIC_TABLES.find(({ kind }) => kind === metric.kind)?.table;
+  if (!table) return [];
+  const window = resolveRange(range);
+  const { sinceSql, untilSql, sinceExpr, untilExpr } = window;
+  // The tables sort by service and attributes, so the first rows of a scan
+  // come from a few services and series. A busy metric keeps every stride-th
+  // point by hash instead, so the capped scan spans the whole window.
+  const stride = Math.ceil((await metricPointCount(ch, projectId, metric, table, window)) / METRIC_DIMENSION_SCAN_ROW_CAP);
+  try {
+    const r = await ch.query({
+      query: `
+        SELECT
+          scope,
+          key,
+          uniqExact(value) AS cardinality,
+          sum(c) AS points,
+          arraySlice(arraySort(pair -> -pair.2, groupArray((value, c))), 1, 5) AS top
+        FROM (
+          SELECT pair.1 AS scope, pair.2 AS key, pair.3 AS value, count() AS c
+          FROM (
+            SELECT arrayConcat(
+              arrayMap((k, v) -> ('point', k, v), mapKeys(Attributes), mapValues(Attributes)),
+              arrayMap((k, v) -> ('resource', k, v), mapKeys(ResourceAttributes), mapValues(ResourceAttributes))
+            ) AS pairs
+            FROM ${table}
+            WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+              AND MetricName = {metricName:String}
+              ${metric.unit === undefined ? "" : "AND MetricUnit = {metricUnit:String}"}
+              AND TimeUnix >= ${sinceExpr}
+              AND TimeUnix <= ${untilExpr}
+              ${stride > 1 ? "AND cityHash64(TimeUnix, ResourceAttributes, Attributes) % {stride:UInt64} = 0" : ""}
+            LIMIT ${METRIC_DIMENSION_SCAN_ROW_CAP}
+          )
+          ARRAY JOIN pairs AS pair
+          WHERE NOT (pair.1 = 'resource' AND pair.2 = 'superlog.project_id')
+          GROUP BY scope, key, value
+        )
+        GROUP BY scope, key
+        ORDER BY scope = 'resource', points DESC, key
+        LIMIT 100
+      `,
+      query_params: {
+        metricName: metric.name,
+        metricUnit: metric.unit ?? "",
+        projectId,
+        since: sinceSql,
+        stride,
+        until: untilSql,
+      },
+      format: "JSONEachRow",
+      clickhouse_settings: METRIC_DETAIL_SETTINGS,
+    });
+    const rows = (await r.json()) as {
+      cardinality: string | number;
+      key: string;
+      points: string | number;
+      scope: "point" | "resource";
+      top: [string, string | number][];
+    }[];
+    return rows.map((row) => {
+      const points = Number(row.points) || 1;
+      return {
+        cardinality: Number(row.cardinality),
+        key: row.scope === "point" ? `attr:${row.key}` : `resource.${row.key}`,
+        name: row.key,
+        scope: row.scope,
+        values: row.top.map(([value, count]) => ({ share: Number(count) / points, value })),
+      };
+    });
+  } catch (err) {
+    if (!isMissingMetricTableError(err)) throw err;
     return [];
   }
 }
@@ -1937,6 +2261,23 @@ function metricResourceAttrs(
   return attrs?.map((attr) => ({ ...attr, key: metricResourceKey(attr.key) }));
 }
 
+// Conditions for metric filters. `attr:<key>` filters a data-point attribute,
+// matching how `attr:<key>` groups; any other key is a resource attribute.
+function metricAttrConds(attrs: ResourceAttrFilter[] | undefined): {
+  conds: string[];
+  params: Record<string, string | string[]>;
+} {
+  const point = (attrs ?? [])
+    .filter((attr) => attr.key.startsWith("attr:"))
+    .map((attr) => ({ ...attr, key: attr.key.slice("attr:".length) }));
+  const resource = attrConds(metricResourceAttrs(attrs?.filter((attr) => !attr.key.startsWith("attr:"))));
+  const points = attrConds(point, "Attributes", "pattr");
+  return {
+    conds: [...resource.conds, ...points.conds],
+    params: { ...resource.params, ...points.params },
+  };
+}
+
 export type MetricSeriesFilter = {
   range?: TimeRange;
   service?: string;
@@ -1945,6 +2286,10 @@ export type MetricSeriesFilter = {
 
 type MetricSeriesQueryOptions = {
   bucketAnchorNs?: string;
+  // Read only this kind's table, and only points in this unit: a name can be
+  // sent as more than one kind or unit.
+  kind?: MetricKind;
+  unit?: string;
   rawBucketExpr?: string;
   rowLimit?: number | null;
 };
@@ -1960,7 +2305,7 @@ export async function metricSeries(
   queryOptions: MetricSeriesQueryOptions = {},
 ): Promise<MetricSeriesRow[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(filter.range);
-  const attr = attrConds(metricResourceAttrs(filter.resourceAttrs));
+  const attr = metricAttrConds(filter.resourceAttrs);
 
   let groupExpr = "''";
   const groupParams: Record<string, string> = {};
@@ -1980,6 +2325,7 @@ export async function metricSeries(
 
   const perTable = await Promise.all(
     METRIC_TABLES.map(async ({ table, kind }): Promise<MetricSeriesRow[]> => {
+      if (queryOptions.kind && queryOptions.kind !== kind) return [];
       const valueExpr = aggregation ? AGG_EXPR[aggregation][kind] : DEFAULT_AGG_EXPR[kind];
       if (!valueExpr) return [];
       const baseConds: string[] = [
@@ -1988,6 +2334,7 @@ export async function metricSeries(
         ...attr.conds,
       ];
       if (filter.service) baseConds.push("ServiceName = {service:String}");
+      if (queryOptions.unit !== undefined) baseConds.push("MetricUnit = {metricUnit:String}");
       const conds = [...baseConds, `TimeUnix >= ${sinceExpr}`, `TimeUnix <= ${untilExpr}`];
       // Cumulative histogram min/max describe the entire start-to-current
       // population. They cannot be converted into extrema for the latest
@@ -2119,6 +2466,7 @@ export async function metricSeries(
             since: sinceSql,
             until: untilSql,
             metricName,
+            metricUnit: queryOptions.unit ?? "",
             service: filter.service ?? "",
             ...attr.params,
             ...groupParams,
@@ -2163,6 +2511,7 @@ export async function metricAggregate(
   filter: MetricSeriesFilter,
   groupBy: string | undefined,
   aggregation: "sum" | "avg",
+  metric: Pick<MetricSeriesQueryOptions, "kind" | "unit"> = {},
 ): Promise<MetricAggregateRow[]> {
   const { sinceExpr } = resolveRange(filter.range);
   const rows = await metricSeries(
@@ -2174,6 +2523,7 @@ export async function metricAggregate(
     { n: 1, unit: "DAY" },
     aggregation,
     {
+      ...metric,
       bucketAnchorNs: unixTimestamp64NanoExpr(sinceExpr),
       rawBucketExpr: sinceExpr,
       rowLimit: 1000,

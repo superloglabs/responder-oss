@@ -60,7 +60,7 @@ export function TelemetryProjectsGate({
   state,
 }: {
   children: (projects: TelemetryProject[]) => ReactNode;
-  signal: "Logs" | "Traces";
+  signal: "Logs" | "Metrics" | "Traces";
   state: TelemetryProjectsState;
 }) {
   if (state.projects === undefined) {

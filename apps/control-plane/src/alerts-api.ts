@@ -14,6 +14,7 @@ import type {
   AlertUpdate,
 } from "../../../packages/core/src/telemetry/alerts";
 import type { ChartData } from "./dashboards-api";
+import { metricPickerChoice, metricPickerOptions, metricPickerValue } from "./metric-picker";
 
 export type {
   AlertComparator,
@@ -92,7 +93,11 @@ export interface AlertForm {
   filters: NonNullable<AlertFilter["resourceAttrs"]>;
   groupBy: string;
   intervalSeconds: number;
+  // With the name, the one metric read; empty and null read every kind and
+  // unit, as a metric picked by name does.
+  metricKind: NonNullable<AlertFilter["metricKind"]> | "";
   metricName: string;
+  metricUnit: string | null;
   name: string;
   perGroup: boolean;
   projectId: string;
@@ -116,7 +121,9 @@ export function emptyAlertForm(projectId: string): AlertForm {
     filters: [],
     groupBy: "",
     intervalSeconds: 60,
+    metricKind: "",
     metricName: "",
+    metricUnit: null,
     name: "",
     perGroup: false,
     projectId,
@@ -131,7 +138,7 @@ export function emptyAlertForm(projectId: string): AlertForm {
 }
 
 export function alertForm(alert: TelemetryAlert): AlertForm {
-  const { minDurationMs, resourceAttrs, service, severity, spanName, statusCode } = alert.filter;
+  const { metricKind, metricUnit, minDurationMs, resourceAttrs, service, severity, spanName, statusCode } = alert.filter;
   return {
     aggregation: alert.aggregation,
     comparator: alert.comparator,
@@ -145,7 +152,9 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
     filters: resourceAttrs ?? [],
     groupBy: alert.groupBy ?? "",
     intervalSeconds: alert.evaluationIntervalSeconds,
+    metricKind: metricKind ?? "",
     metricName: alert.metricName ?? "",
+    metricUnit: metricUnit ?? null,
     name: alert.name,
     perGroup: alert.groupMode === "per_group",
     projectId: alert.projectId,
@@ -158,6 +167,19 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
     windowMinutes: alert.windowMinutes,
   };
 }
+
+type AlertMetric = Pick<AlertForm, "metricKind" | "metricName" | "metricUnit">;
+
+export function alertMetricValue(metric: AlertMetric): string {
+  return metricPickerValue({ kind: metric.metricKind, name: metric.metricName, unit: metric.metricUnit });
+}
+
+export function alertMetricChoice(value: string): AlertMetric {
+  const { kind, name, unit } = metricPickerChoice(value);
+  return { metricKind: kind, metricName: name, metricUnit: unit };
+}
+
+export const alertMetricOptions = metricPickerOptions;
 
 // The rule a form describes, or what to fix first.
 export function alertRequest(form: AlertForm): { error: string } | { body: AlertUpdate & { projectId: string } } {
@@ -174,6 +196,8 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
     ...(form.service ? { service: form.service } : {}),
     ...(form.source === "logs" && form.severity ? { severity: form.severity } : {}),
     ...(form.source === "traces" && form.spanErrors ? { statusCode: "STATUS_CODE_ERROR" } : {}),
+    ...(form.source === "metric" && form.metricKind ? { metricKind: form.metricKind } : {}),
+    ...(form.source === "metric" && form.metricUnit !== null ? { metricUnit: form.metricUnit } : {}),
   };
   if (form.source !== "traces") {
     delete filter.minDurationMs;

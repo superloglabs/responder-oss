@@ -1,9 +1,12 @@
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import {
   alertForm,
+  alertMetricChoice,
+  alertMetricOptions,
+  alertMetricValue,
   alertRequest,
   createAlert,
   deleteAlert,
@@ -18,6 +21,7 @@ import {
   type TelemetryAlertEpisode,
   type TelemetryAlertSlackChannel,
 } from "../alerts-api";
+import { pickedMetricLabel } from "../metric-picker";
 import { AppShell } from "../components/app-shell";
 import { AttributeFilters } from "../components/attribute-filters";
 import { DashboardDialog } from "../components/dashboard-dialog";
@@ -60,6 +64,12 @@ const intervals = [
 
 function withCurrent<T extends { value: string }>(options: T[], value: string, label: string): Array<T | { label: string; value: string }> {
   return value && !options.some((option) => option.value === value) ? [{ label, value }, ...options] : options;
+}
+
+// The day up to now, which the editor lists metrics and attributes from.
+function lastDayWindow(): { since: number; until: number } {
+  const now = Date.now();
+  return { since: now - 86_400_000, until: now };
 }
 
 function useDebounced<T>(value: T, delay: number): T {
@@ -173,6 +183,8 @@ export function AlertPage() {
   const { alertId } = useParams();
   const navigate = useNavigate();
   const telemetry = useTelemetryProjects();
+  // A new alert may start from a graph, such as one in the metrics explorer.
+  const draft = (useLocation().state as { alertDraft?: Partial<AlertForm> } | null)?.alertDraft;
   // What was loaded and edited, for the alert it belongs to. Moving to
   // another alert shows nothing of the previous one.
   const [loaded, setLoaded] = useState<{
@@ -221,9 +233,14 @@ export function AlertPage() {
     void Promise.resolve().then(load);
   }, [alertId, load]);
 
-  // A new alert starts on the first linked project.
-  const firstProjectId = telemetry.projects?.[0]?.projectId;
-  const form = edited ?? (!alertId && firstProjectId ? emptyAlertForm(firstProjectId) : null);
+  // A new alert starts from the draft when its project is linked, and empty
+  // on the first linked project otherwise: a draft's metric and filters
+  // belong to its own project.
+  const draftProjectLinked = telemetry.projects?.some((project) => project.projectId === draft?.projectId) ?? false;
+  const newProjectId = draftProjectLinked ? draft?.projectId : telemetry.projects?.[0]?.projectId;
+  const form = edited ?? (!alertId && newProjectId
+    ? { ...emptyAlertForm(newProjectId), ...(draftProjectLinked ? draft : {}), projectId: newProjectId }
+    : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,8 +256,7 @@ export function AlertPage() {
     if (!projectId) return;
     let cancelled = false;
     const attributeSource = source === "metric" ? "metrics" : source;
-    const now = Date.now();
-    const lastDay = { since: now - 86_400_000, until: now };
+    const lastDay = lastDayWindow();
     void Promise.all([
       source === "metric" ? fetchMetricNames(projectId, lastDay).catch(() => []) : Promise.resolve([]),
       fetchAttributeKeys(projectId, lastDay, attributeSource).catch(() => []),
@@ -333,7 +349,8 @@ export function AlertPage() {
       value: `${channel.integrationAccountId}:${channel.channelId}`,
     })),
   ];
-  const metricOptions = metrics.map((metric) => ({ label: metric.unit ? `${metric.name} (${metric.unit})` : metric.name, value: metric.name }));
+  const metricOptions = alertMetricOptions(metrics);
+  const metricValue = form?.metricName ? alertMetricValue(form) : "";
   const projects = telemetry.projects ?? [];
 
   return (
@@ -370,7 +387,18 @@ export function AlertPage() {
             {!saved && projects.length > 1 ? (
               <SelectField
                 label="Project"
-                onChange={(value) => update({ filters: [], groupBy: "", metricName: "", perGroup: false, projectId: value, service: "" })}
+                onChange={(value) =>
+                  update({
+                    filters: [],
+                    groupBy: "",
+                    metricKind: "",
+                    metricName: "",
+                    metricUnit: null,
+                    perGroup: false,
+                    projectId: value,
+                    service: "",
+                  })
+                }
                 options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
                 value={form.projectId}
               />
@@ -398,13 +426,17 @@ export function AlertPage() {
                 <div className="widgetEditor__row">
                   <SelectField
                     label="Metric"
-                    onChange={(metricName) => update({ metricName })}
+                    onChange={(value) => update(value ? alertMetricChoice(value) : { metricKind: "", metricName: "", metricUnit: null })}
                     options={[
                       ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
-                      ...withCurrent(metricOptions, form.metricName, form.metricName),
+                      ...withCurrent(
+                        metricOptions,
+                        metricValue,
+                        pickedMetricLabel({ kind: form.metricKind, name: form.metricName, unit: form.metricUnit }),
+                      ),
                     ]}
                     searchable
-                    value={form.metricName}
+                    value={metricValue}
                   />
                   <SegmentedControl
                     aria-label="Aggregation"

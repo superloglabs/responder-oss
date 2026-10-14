@@ -6,6 +6,7 @@ export type NavigationSection =
   | "integrations"
   | "issues"
   | "logs"
+  | "metrics"
   | "pull-requests"
   | "scans"
   | "settings"
@@ -54,6 +55,7 @@ export function primaryNavigation(options: {
           section: "traces",
           to: "/traces",
         },
+        { label: "Metrics", section: "metrics", to: "/metrics" },
         ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
         ...(options.alerts ? [{ label: "Alerts", section: "alerts" as const, to: "/alerts" }] : []),
       ]

@@ -13,6 +13,9 @@ export const alertGroupModes = ["single", "per_group"] as const;
 export type AlertGroupMode = (typeof alertGroupModes)[number];
 
 export const alertFilterSchema = z.object({
+  // A metric's kind and unit, when its name is sent as more than one.
+  metricKind: z.enum(["gauge", "sum", "histogram", "exponential_histogram", "summary"]).optional(),
+  metricUnit: z.string().max(100).optional(),
   minDurationMs: z.number().nonnegative().max(3_600_000).optional(),
   // Keys may be prefixed with resource., span., log. or field.; a bare key is
   // a resource attribute.

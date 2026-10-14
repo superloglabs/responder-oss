@@ -20,6 +20,8 @@ const widgetFilterSchema = z.object({
   value: z.string().max(500),
 });
 export type DashboardWidgetFilter = z.infer<typeof widgetFilterSchema>;
+// The most filters a widget, and so a metrics explorer graph, can carry.
+export const maxWidgetFilters = 50;
 
 export const metricAggregations = ["sum", "avg", "min", "max", "p95", "p99"] as const;
 export const widgetUnits = ["none", "duration_ms", "duration_s", "bytes", "percent"] as const;
@@ -29,13 +31,16 @@ export const dashboardWidgetConfigSchema = z.object({
   aggregation: z.enum(metricAggregations).optional(),
   chartType: z.enum(["line", "bar"]).optional(),
   description: z.string().max(500).optional(),
-  filter: z.object({ resourceAttrs: z.array(widgetFilterSchema).max(50).optional() }).default({}),
+  filter: z.object({ resourceAttrs: z.array(widgetFilterSchema).max(maxWidgetFilters).optional() }).default({}),
   groupBy: z.string().trim().max(200).optional(),
   legendPosition: z.enum(["side", "bottom"]).optional(),
   // Series kept before the rest roll into "Other", or rows in a table.
   limit: z.number().int().positive().max(500).optional(),
   markdown: z.string().max(20_000).optional(),
+  // The kind and unit pick one metric when a name is sent as several.
+  metricKind: z.enum(["gauge", "sum", "histogram", "exponential_histogram", "summary"]).optional(),
   metricName: z.string().trim().max(200).optional(),
+  metricUnit: z.string().max(100).optional(),
   showLegend: z.boolean().optional(),
   showXAxis: z.boolean().optional(),
   showYAxis: z.boolean().optional(),

@@ -2,7 +2,9 @@ import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { axisTicks, formatWidgetValue, type ChartData, type WidgetUnit } from "../dashboards-api";
 import "./timeseries-chart.css";
 
-const seriesColors = 8;
+// Series take `timeseriesChart__color--<index % seriesColors>`, also in
+// legends drawn outside the chart.
+export const seriesColors = 8;
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -39,6 +41,7 @@ function seriesTotal(values: Array<number | null>): number {
 export function TimeseriesChart({
   chart,
   chartType = "bar",
+  hiddenSeries,
   label,
   legendPosition = "bottom",
   onZoom,
@@ -51,6 +54,9 @@ export function TimeseriesChart({
 }: {
   chart: ChartData;
   chartType?: "bar" | "line";
+  // Series hidden by a legend outside the chart, which replaces the chart's
+  // own legend. Without it the chart's own legend hides and shows series.
+  hiddenSeries?: ReadonlySet<string>;
   label: string;
   legendPosition?: "bottom" | "side";
   // Dragging across the plot selects a window, in milliseconds.
@@ -65,7 +71,8 @@ export function TimeseriesChart({
   unit?: WidgetUnit;
 }) {
   const { ref, size } = useSize<HTMLDivElement>();
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [ownHidden, setHidden] = useState<Set<string>>(new Set());
+  const hidden = hiddenSeries ?? ownHidden;
   const [hover, setHover] = useState<number | null>(null);
   // Plot offsets, in pixels, where a drag started and where the pointer is.
   const [drag, setDrag] = useState<{ current: number; start: number } | null>(null);
@@ -199,7 +206,7 @@ export function TimeseriesChart({
     if (tooltipRef.current) setTooltipWidth(tooltipRef.current.offsetWidth);
   }, [hover, hoverRows.length]);
 
-  const legend = showLegend && chart.series.length > 0 ? (
+  const legend = showLegend && !hiddenSeries && chart.series.length > 0 ? (
     <ul aria-label="Series" className="timeseriesChart__legend">
       {chart.series.map((series) => (
         <li key={series.name}>

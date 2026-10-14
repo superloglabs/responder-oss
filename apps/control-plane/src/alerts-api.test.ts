@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { alertForm, alertRequest, emptyAlertForm, type TelemetryAlert } from "./alerts-api";
+import {
+  alertForm,
+  alertMetricChoice,
+  alertMetricOptions,
+  alertMetricValue,
+  alertRequest,
+  emptyAlertForm,
+  type TelemetryAlert,
+} from "./alerts-api";
 
 const projectId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const accountId = "22222222-2222-4222-8222-222222222222";
@@ -46,6 +54,21 @@ describe("alertRequest", () => {
     expect(spans).toMatchObject({ body: { aggregation: "count", filter: { statusCode: "STATUS_CODE_ERROR" } } });
   });
 
+  it("keeps the metric's kind and unit, and drops them for other sources", () => {
+    const form = {
+      ...emptyAlertForm(projectId),
+      metricKind: "histogram" as const,
+      metricName: "rpc.duration",
+      metricUnit: "ms",
+      name: "Slow RPCs",
+      source: "metric" as const,
+      threshold: "250",
+    };
+    expect(alertRequest(form)).toMatchObject({ body: { filter: { metricKind: "histogram", metricUnit: "ms" } } });
+    const logs = alertRequest({ ...form, source: "logs" });
+    expect("body" in logs && logs.body.filter).toEqual({ severity: "ERROR" });
+  });
+
   it("says what to fix first", () => {
     expect(alertRequest({ ...emptyAlertForm(projectId), threshold: "1" })).toEqual({ error: "Name the alert." });
     expect(alertRequest({ ...emptyAlertForm(projectId), name: "x", threshold: "" })).toEqual({ error: "Set a threshold." });
@@ -54,6 +77,40 @@ describe("alertRequest", () => {
     expect(alertRequest({ ...emptyAlertForm(projectId), name: "x", perGroup: true, threshold: "1" })).toEqual({
       error: "Choose what to group by.",
     });
+  });
+});
+
+describe("choosing an alert's metric", () => {
+  it("picks one metric when a name is sent as several kinds or units", () => {
+    const options = alertMetricOptions([
+      { kind: "histogram", name: "rpc.duration", unit: "ms" },
+      { kind: "gauge", name: "rpc.duration", unit: "s" },
+      { kind: "sum", name: "jobs", unit: "" },
+    ]);
+
+    expect(options.map((option) => option.label)).toEqual(["rpc.duration (ms)", "rpc.duration (s)", "jobs"]);
+    expect(new Set(options.map((option) => option.value)).size).toBe(3);
+    expect(alertMetricChoice(options[1]!.value)).toEqual({ metricKind: "gauge", metricName: "rpc.duration", metricUnit: "s" });
+    expect(alertMetricChoice(options[2]!.value)).toEqual({ metricKind: "sum", metricName: "jobs", metricUnit: "" });
+  });
+
+  it("names the kind of metrics that share a name and unit", () => {
+    const options = alertMetricOptions([
+      { kind: "gauge", name: "queue.size", unit: "" },
+      { kind: "sum", name: "queue.size", unit: "" },
+      { kind: "gauge", name: "cpu", unit: "%" },
+    ]);
+
+    expect(options.map((option) => option.label)).toEqual(["queue.size · Gauge", "queue.size · Sum", "cpu (%)"]);
+  });
+
+  it("keeps an alert's metric selected, with or without its kind and unit", () => {
+    const options = alertMetricOptions([{ kind: "gauge", name: "rpc.duration", unit: "s" }]);
+    const chosen = { metricKind: "gauge" as const, metricName: "rpc.duration", metricUnit: "s" };
+
+    expect(alertMetricValue(chosen)).toBe(options[0]!.value);
+    const byName = { metricKind: "" as const, metricName: "rpc.duration", metricUnit: null };
+    expect(alertMetricChoice(alertMetricValue(byName))).toEqual(byName);
   });
 });
 

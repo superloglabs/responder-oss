@@ -43,4 +43,20 @@ describe("alertValues", () => {
     const many = Array.from({ length: maximumAlertGroups + 1 }, (_, index) => ({ c: 1, group_key: `g${index}` }));
     await expect(alertValues(recordingClient(() => many, []), "p", perGroup, now)).rejects.toThrow(/more than 1,000 groups/u);
   });
+
+  it("reads only the metric of the rule's kind and unit", async () => {
+    const queries: string[] = [];
+    const metricRule = {
+      ...rule,
+      aggregation: "avg" as const,
+      filter: { metricKind: "gauge" as const, metricUnit: "ms" },
+      metricName: "rpc.duration",
+      source: "metric" as const,
+    };
+    await alertValues(recordingClient(() => [], queries), "p", metricRule, now);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatch(/FROM otel_metrics_gauge/u);
+    expect(queries[0]).toMatch(/MetricUnit = \{metricUnit:String\}/u);
+  });
 });
