@@ -12,10 +12,11 @@ describe("telemetry ingest keys", () => {
     expect(migration).toMatch(
       /FOREIGN KEY \("organization_id","project_id"\) REFERENCES "public"\."telemetry_projects"\("organization_id","project_id"\) ON DELETE cascade/u,
     );
-    // The unique key the foreign key needs is created first.
-    expect(migration.indexOf("telemetry_projects_organization_project_unique")).toBeLessThan(
-      migration.indexOf("telemetry_ingest_keys_project_fk"),
-    );
+    // The unique key the foreign key needs exists and is created first.
+    const uniqueKey = migration.indexOf("telemetry_projects_organization_project_unique");
+    const foreignKey = migration.indexOf("telemetry_ingest_keys_project_fk");
+    expect(uniqueKey).toBeGreaterThanOrEqual(0);
+    expect(foreignKey).toBeGreaterThan(uniqueKey);
   });
 
   it("recognizes only well-formed keys and hashes them", () => {

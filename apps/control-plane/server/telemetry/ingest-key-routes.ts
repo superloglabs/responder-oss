@@ -84,7 +84,7 @@ export function createIngestKeyRoutes(dependencies: IngestKeyRouteDependencies =
       });
       if (result === "revoked") return context.body(null, 204);
       return result === "forbidden"
-        ? context.json({ error: "Only the key's creator or an admin can revoke it" }, 403)
+        ? context.json({ error: "Only the key's creator, a workspace owner, or an admin can revoke it" }, 403)
         : context.json({ error: "Key not found" }, 404);
     });
 }
