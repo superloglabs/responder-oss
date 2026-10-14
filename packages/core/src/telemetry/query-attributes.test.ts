@@ -1,6 +1,6 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import { describe, expect, it } from "vitest";
-import { listAttributeValues, metricSeries, queryMetrics } from "./query.js";
+import { listAttributeValues, listMetricDimensions, metricSeries, queryMetrics } from "./query.js";
 
 type RecordedQuery = { query: string; params: Record<string, unknown> };
 
@@ -83,7 +83,7 @@ describe("metric attribute filters", () => {
     }
   });
 
-  it("filters series by a data-point attribute named like its grouping", async () => {
+  it("filters series by a data-point attribute written as attr:<key>", async () => {
     const queries: RecordedQuery[] = [];
 
     await metricSeries(
@@ -111,5 +111,45 @@ describe("metric attribute filters", () => {
         pattr_v_0: "POST /checkout",
       });
     }
+  });
+});
+
+describe("metric dimension sampling", () => {
+  const range = { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" };
+
+  // Answers the rollup probes, records every query, and returns no dimensions.
+  function rollupClient(queries: RecordedQuery[], rollupPoints: number | null): ClickHouseClient {
+    return {
+      query: async ({ query, query_params }: { query: string; query_params?: Record<string, unknown> }) => {
+        queries.push({ query, params: query_params ?? {} });
+        if (query.startsWith("EXISTS TABLE")) return { json: async () => [{ result: rollupPoints === null ? 0 : 1 }] };
+        if (query.includes("FROM metric_names_per_hour")) return { json: async () => [{ points: rollupPoints }] };
+        return { json: async () => [] };
+      },
+    } as unknown as ClickHouseClient;
+  }
+
+  function dimensionScan(queries: RecordedQuery[]): RecordedQuery {
+    const scan = queries.find(({ query }) => query.includes("ARRAY JOIN pairs"));
+    expect(scan).toBeDefined();
+    return scan!;
+  }
+
+  it("thins a busy metric's points evenly before the row cap", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listMetricDimensions(rollupClient(queries, 1_000_000), "project-1", { kind: "gauge", name: "queue.depth" }, range);
+
+    const { params, query } = dimensionScan(queries);
+    expect(query).toContain("% {stride:UInt64} = 0");
+    expect(params.stride).toBe(5);
+  });
+
+  it("reads every point of a metric under the row cap", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listMetricDimensions(rollupClient(queries, 150_000), "project-1", { kind: "gauge", name: "queue.depth" }, range);
+
+    expect(dimensionScan(queries).query).not.toContain("stride");
   });
 });

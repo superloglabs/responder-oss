@@ -48,8 +48,8 @@ export function TimeseriesChart({
 }: {
   chart: ChartData;
   chartType?: "bar" | "line";
-  // Series hidden by a legend outside the chart. Without it the chart's own
-  // legend hides and shows series.
+  // Series hidden by a legend outside the chart, which replaces the chart's
+  // own legend. Without it the chart's own legend hides and shows series.
   hiddenSeries?: ReadonlySet<string>;
   label: string;
   legendPosition?: "bottom" | "side";
@@ -168,7 +168,7 @@ export function TimeseriesChart({
     if (tooltipRef.current) setTooltipWidth(tooltipRef.current.offsetWidth);
   }, [hover, hoverRows.length]);
 
-  const legend = showLegend && chart.series.length > 0 ? (
+  const legend = showLegend && !hiddenSeries && chart.series.length > 0 ? (
     <ul aria-label="Series" className="timeseriesChart__legend">
       {chart.series.map((series) => (
         <li key={series.name}>

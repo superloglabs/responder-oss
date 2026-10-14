@@ -20,6 +20,8 @@ const widgetFilterSchema = z.object({
   value: z.string().max(500),
 });
 export type DashboardWidgetFilter = z.infer<typeof widgetFilterSchema>;
+// The most filters a widget, and so a metrics explorer graph, can carry.
+export const maxWidgetFilters = 50;
 
 export const metricAggregations = ["sum", "avg", "min", "max", "p95", "p99"] as const;
 export const widgetUnits = ["none", "duration_ms", "duration_s", "bytes", "percent"] as const;
@@ -29,7 +31,7 @@ export const dashboardWidgetConfigSchema = z.object({
   aggregation: z.enum(metricAggregations).optional(),
   chartType: z.enum(["line", "bar"]).optional(),
   description: z.string().max(500).optional(),
-  filter: z.object({ resourceAttrs: z.array(widgetFilterSchema).max(50).optional() }).default({}),
+  filter: z.object({ resourceAttrs: z.array(widgetFilterSchema).max(maxWidgetFilters).optional() }).default({}),
   groupBy: z.string().trim().max(200).optional(),
   legendPosition: z.enum(["side", "bottom"]).optional(),
   // Series kept before the rest roll into "Other", or rows in a table.

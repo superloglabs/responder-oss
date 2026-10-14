@@ -223,12 +223,14 @@ export function AlertPage() {
     void Promise.resolve().then(load);
   }, [alertId, load]);
 
-  // A new alert starts on the first linked project, or the draft's project
-  // when it is linked.
-  const newProjectId = telemetry.projects?.some((project) => project.projectId === draft?.projectId)
-    ? draft?.projectId
-    : telemetry.projects?.[0]?.projectId;
-  const form = edited ?? (!alertId && newProjectId ? { ...emptyAlertForm(newProjectId), ...draft, projectId: newProjectId } : null);
+  // A new alert starts from the draft when its project is linked, and empty
+  // on the first linked project otherwise: a draft's metric and filters
+  // belong to its own project.
+  const draftProjectLinked = telemetry.projects?.some((project) => project.projectId === draft?.projectId) ?? false;
+  const newProjectId = draftProjectLinked ? draft?.projectId : telemetry.projects?.[0]?.projectId;
+  const form = edited ?? (!alertId && newProjectId
+    ? { ...emptyAlertForm(newProjectId), ...(draftProjectLinked ? draft : {}), projectId: newProjectId }
+    : null);
 
   useEffect(() => {
     let cancelled = false;

@@ -13,6 +13,7 @@ import {
 import {
   chartSeries,
   dashboardWidgetConfigSchema,
+  maxWidgetFilters,
   type ChartData,
   type DashboardWidgetConfig,
   resolveWidgetFilters,
@@ -198,7 +199,7 @@ const metricSeriesSchema = z.object({
     key: z.string().trim().min(1).max(200),
     op: z.enum(["eq", "neq", "not_contains"]).optional(),
     value: z.string().max(500),
-  })).max(20).default([]),
+  })).max(maxWidgetFilters).default([]),
   groupBy: z.string().trim().max(200).optional(),
   limit: z.number().int().min(1).max(50).optional(),
   metricName: z.string().trim().min(1).max(200),

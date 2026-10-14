@@ -152,10 +152,9 @@ export function MetricsPage() {
                 <p>{error}</p>
                 <button onClick={() => void load()} type="button">Retry</button>
               </div>
-            ) : null}
-            {catalog === null ? (
+            ) : catalog === null ? (
               <p className="telemetryPage__status">Loading metrics…</p>
-            ) : catalog.length === 0 && !error ? (
+            ) : catalog.length === 0 ? (
               <section className="emptyState emptyState--list">
                 <h2>No metrics in this time range</h2>
                 <p>Metrics appear here once an application sends them to this project.</p>

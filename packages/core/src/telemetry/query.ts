@@ -1955,6 +1955,36 @@ export type MetricDimension = {
   values: { share: number; value: string }[];
 };
 
+// How many points one metric has in the window, from the hourly rollup. Zero
+// without the rollup, so the caller reads points unthinned.
+async function metricPointCount(
+  ch: ClickHouseClient,
+  projectId: string,
+  metric: { kind: MetricKind; name: string },
+  window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
+): Promise<number> {
+  if (!(await tableExists(ch, "metric_names_per_hour"))) return 0;
+  try {
+    const r = await ch.query({
+      query: `
+        SELECT sum(c) AS points
+        FROM metric_names_per_hour
+        WHERE project_id = {projectId:String}
+          AND kind = {kind:String}
+          AND name = {metricName:String}
+          AND hour >= toStartOfHour(${window.sinceExpr})
+          AND hour <= ${window.untilExpr}
+      `,
+      query_params: { kind: metric.kind, metricName: metric.name, projectId, since: window.sinceSql, until: window.untilSql },
+      format: "JSONEachRow",
+    });
+    const rows = (await r.json()) as { points: string | number | null }[];
+    return Number(rows[0]?.points ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 // The attributes one metric's points carry, with how many values each takes.
 export async function listMetricDimensions(
   ch: ClickHouseClient,
@@ -1964,7 +1994,12 @@ export async function listMetricDimensions(
 ): Promise<MetricDimension[]> {
   const table = METRIC_TABLES.find(({ kind }) => kind === metric.kind)?.table;
   if (!table) return [];
-  const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
+  const window = resolveRange(range);
+  const { sinceSql, untilSql, sinceExpr, untilExpr } = window;
+  // The tables sort by service and attributes, so the first rows of a scan
+  // come from a few services and series. A busy metric keeps every stride-th
+  // point by hash instead, so the capped scan spans the whole window.
+  const stride = Math.ceil((await metricPointCount(ch, projectId, metric, window)) / METRIC_DIMENSION_SCAN_ROW_CAP);
   try {
     const r = await ch.query({
       query: `
@@ -1986,6 +2021,7 @@ export async function listMetricDimensions(
               AND MetricName = {metricName:String}
               AND TimeUnix >= ${sinceExpr}
               AND TimeUnix <= ${untilExpr}
+              ${stride > 1 ? "AND cityHash64(TimeUnix, ResourceAttributes, Attributes) % {stride:UInt64} = 0" : ""}
             LIMIT ${METRIC_DIMENSION_SCAN_ROW_CAP}
           )
           ARRAY JOIN pairs AS pair
@@ -1996,7 +2032,7 @@ export async function listMetricDimensions(
         ORDER BY scope = 'resource', points DESC, key
         LIMIT 100
       `,
-      query_params: { projectId, metricName: metric.name, since: sinceSql, until: untilSql },
+      query_params: { projectId, metricName: metric.name, since: sinceSql, stride, until: untilSql },
       format: "JSONEachRow",
       clickhouse_settings: METRIC_DETAIL_SETTINGS,
     });

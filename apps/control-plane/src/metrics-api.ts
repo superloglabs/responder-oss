@@ -196,6 +196,9 @@ export interface MetricQuery {
   range: TelemetryRange;
 }
 
+// The most filters a graph can carry, as for a dashboard widget.
+export const maxMetricFilters = 50;
+
 const rangeValues = new Set<string>(telemetryRanges.map((range) => range.value));
 const aggregationValues = new Set<string>(Object.keys(aggregationLabels));
 
@@ -215,7 +218,7 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
     filters: params.getAll("filter").flatMap((filter) => {
       const separator = filter.indexOf("=");
       return separator > 0 ? [{ key: filter.slice(0, separator), value: filter.slice(separator + 1) }] : [];
-    }),
+    }).slice(0, maxMetricFilters),
     groupBy: params.get("by") ?? "",
     kind: kind as MetricKind,
     name,

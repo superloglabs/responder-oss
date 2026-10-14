@@ -5,7 +5,7 @@ import { metricKindLabel, type MetricKind } from "../metrics-api";
 export function MetricKindIcon({ kind }: { kind: MetricKind }) {
   const Icon = kind === "gauge" ? GaugeIcon : kind === "sum" ? SigmaIcon : ChartBarIcon;
   return (
-    <span className="metricKindIcon" title={metricKindLabel(kind)}>
+    <span aria-label={metricKindLabel(kind)} className="metricKindIcon" role="img" title={metricKindLabel(kind)}>
       <Icon aria-hidden="true" size={14} />
     </span>
   );

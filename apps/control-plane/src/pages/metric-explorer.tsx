@@ -49,6 +49,7 @@ import {
   metricQueryParams,
   metricWidgetDraft,
   metricWidgetUnit,
+  maxMetricFilters,
   searchMetrics,
   seriesStats,
   type MetricCatalogEntry,
@@ -94,10 +95,12 @@ function useLoaded<T>(key: string | null, read: () => Promise<T>) {
 function MetricList({
   catalog,
   context,
+  error,
   selected,
 }: {
   catalog: MetricCatalogEntry[] | null;
   context: { projectId: string; range: TelemetryRange };
+  error: string | null;
   selected: { kind: string; name: string };
 }) {
   const [search, setSearch] = useState("");
@@ -115,7 +118,8 @@ function MetricList({
           value={search}
         />
       </label>
-      {catalog === null ? <p className="telemetryPage__status">Loading metrics…</p> : null}
+      {error ? <p className="formError" role="alert">{error}</p> : null}
+      {catalog === null && !error ? <p className="telemetryPage__status">Loading metrics…</p> : null}
       {catalog !== null && groups.length === 0 ? <p className="telemetryPage__status">No metrics match.</p> : null}
       {groups.map((group) => {
         // A search shows every match.
@@ -292,12 +296,14 @@ function SeriesTable({
 
 function DimensionsRail({
   dimensions,
+  error,
   loading,
   onFilter,
   onGroup,
   query,
 }: {
   dimensions: MetricDimension[] | null;
+  error: string | null;
   loading: boolean;
   onFilter: (filter: DashboardWidgetFilter) => void;
   onGroup: (key: string) => void;
@@ -317,6 +323,7 @@ function DimensionsRail({
       </header>
       <p className="metricDimensionsRail__hint">Attributes on this metric's points in the time range.</p>
       {loading ? <p className="telemetryPage__status">Loading…</p> : null}
+      {error ? <p className="formError" role="alert">{error}</p> : null}
       {!loading && dimensions?.length === 0 ? <p className="telemetryPage__status">This metric has no attributes.</p> : null}
       {sections.map((section) => (
         <section className="metricDimensionsRail__section" key={section.label}>
@@ -459,6 +466,7 @@ export function MetricExplorerPage() {
   }
   function addFilter(filter: DashboardWidgetFilter) {
     const filters = query!.filters.filter((existing) => existing.key !== filter.key);
+    if (filters.length >= maxMetricFilters) return;
     update({ filters: [...filters, filter] });
   }
   const dimensionOptions = (dimensions.value ?? []).map((entry) => ({
@@ -481,7 +489,7 @@ export function MetricExplorerPage() {
       <TelemetryProjectsGate signal="Metrics" state={telemetry}>
         {() => (
           <div className="metricExplorer">
-            <MetricList catalog={catalog.value} context={context} selected={query} />
+            <MetricList catalog={catalog.value} context={context} error={catalog.error} selected={query} />
             <section aria-label={query.name} className="metricExplorer__main">
               <header className="automationCreate__header">
                 <div className="metricExplorer__topRow">
@@ -545,7 +553,9 @@ export function MetricExplorerPage() {
                       </button>
                     </span>
                   ))}
-                  <AddFilter dimensions={dimensions.value ?? []} onAdd={addFilter} />
+                  {query.filters.length < maxMetricFilters ? (
+                    <AddFilter dimensions={dimensions.value ?? []} onAdd={addFilter} />
+                  ) : null}
                   <span aria-hidden="true" className="metricQuery__divider" />
                   <span className="metricQuery__word">by</span>
                   <SelectField
@@ -620,6 +630,7 @@ export function MetricExplorerPage() {
             </section>
             <DimensionsRail
               dimensions={dimensions.value}
+              error={dimensions.error}
               loading={dimensions.loading}
               onFilter={addFilter}
               onGroup={(groupBy) => update({ groupBy })}
