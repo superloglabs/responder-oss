@@ -307,6 +307,8 @@ describe("metric dimension sampling", () => {
       query: async ({ query, query_params }: { query: string; query_params?: Record<string, unknown> }) => {
         queries.push({ query, params: query_params ?? {} });
         if (query.startsWith("EXISTS TABLE")) return { json: async () => [{ result: rollupPoints === null ? 0 : 1 }] };
+        // The rollup holds hours from before the window, so it covers it.
+        if (query.includes("hour < ")) return { json: async () => [{ c: 1 }] };
         if (query.includes("FROM metric_names_per_hour")) return { json: async () => [{ points: rollupPoints }] };
         if (query.includes("count() AS points")) return { json: async () => [{ points: rawPoints }] };
         return { json: async () => [] };
@@ -328,6 +330,25 @@ describe("metric dimension sampling", () => {
     const { params, query } = dimensionScan(queries);
     expect(query).toContain("% {stride:UInt64} = 0");
     expect(params.stride).toBe(5);
+  });
+
+  it("counts from the table when the rollup does not reach back over the window", async () => {
+    const queries: RecordedQuery[] = [];
+    const client = {
+      query: async ({ query, query_params }: { query: string; query_params?: Record<string, unknown> }) => {
+        queries.push({ query, params: query_params ?? {} });
+        if (query.startsWith("EXISTS TABLE")) return { json: async () => [{ result: 1 }] };
+        if (query.includes("hour < ")) return { json: async () => [{ c: 0 }] };
+        if (query.includes("FROM metric_names_per_hour")) return { json: async () => [{ points: 10 }] };
+        if (query.includes("count() AS points")) return { json: async () => [{ points: 1_000_000 }] };
+        return { json: async () => [] };
+      },
+    } as unknown as ClickHouseClient;
+
+    await listMetricDimensions(client, "project-1", { kind: "gauge", name: "queue.depth" }, range);
+
+    expect(queries.some(({ query }) => /sum\(c\) AS points\s+FROM metric_names_per_hour/u.test(query))).toBe(false);
+    expect(dimensionScan(queries).params.stride).toBe(5);
   });
 
   it("counts a metric the rollup does not cover from its table", async () => {

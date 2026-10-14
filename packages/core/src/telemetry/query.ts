@@ -2099,7 +2099,8 @@ export type MetricDimension = {
 };
 
 // How many points one metric has in the window. The hourly rollup answers in
-// milliseconds; it does not cover exponential histograms or every deployment,
+// milliseconds when it covers the window; it does not cover exponential
+// histograms, a window older than its backfill, or every deployment,
 // so a short raw count stands in, and a count cut short still thins a busy
 // metric. Zero when neither answers, so the caller reads points unthinned.
 async function metricPointCount(
@@ -2131,7 +2132,10 @@ async function metricPointCount(
       return 0;
     }
   };
-  if (await tableExists(ch, "metric_names_per_hour")) {
+  if (
+    (await tableExists(ch, "metric_names_per_hour")) &&
+    (await metricNamesRollupCoversWindow(ch, projectId, window.sinceExpr, window.sinceSql).catch(() => false))
+  ) {
     const rolledUp = await count(`
       SELECT sum(c) AS points
       FROM metric_names_per_hour
