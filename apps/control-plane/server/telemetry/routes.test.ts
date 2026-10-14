@@ -225,7 +225,7 @@ describe("telemetry routes", () => {
       const { app, dependencies } = routes();
 
       const response = await post(app, {
-        config: { aggregation: "p95", metricName: "http.server.duration" },
+        config: { aggregation: "p95", metricKind: "histogram", metricName: "http.server.duration", metricUnit: "ms" },
         projectId,
         range: "1h",
         type: "timeseries_metric",
@@ -236,8 +236,10 @@ describe("telemetry routes", () => {
         aggregation: "p95",
         filter: { range: expect.anything(), resourceAttrs: [] },
         groupBy: undefined,
+        kind: "histogram",
         metricName: "http.server.duration",
         step: { n: 30, unit: "SECOND" },
+        unit: "ms",
       });
       expect(body.chart.series[0]!.values.filter((value) => value !== null)).toEqual([12.5]);
       expect(
@@ -331,6 +333,7 @@ describe("telemetry routes", () => {
         metricName: "http.server.duration",
         projectId,
         range: "1h",
+        unit: "s",
       });
 
       expect(response.status).toBe(200);
@@ -346,6 +349,7 @@ describe("telemetry routes", () => {
         kind: "histogram",
         metricName: "http.server.duration",
         step: expect.anything(),
+        unit: "s",
       });
     });
 

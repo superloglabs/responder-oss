@@ -74,7 +74,7 @@ export type TelemetryRouteDependencies = {
   metricDimensions: (
     client: ClickHouseClient,
     projectId: string,
-    metric: { kind: MetricKind; name: string },
+    metric: { kind: MetricKind; name: string; unit?: string },
     range: TimeRange,
   ) => Promise<unknown>;
   metricNames: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
@@ -89,6 +89,7 @@ export type TelemetryRouteDependencies = {
       kind?: MetricKind;
       metricName: string;
       step: Step;
+      unit?: string;
     },
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
   // Services that sent the signal in the window, or any signal.
@@ -147,7 +148,10 @@ const defaultDependencies: TelemetryRouteDependencies = {
       params.groupBy,
       params.step,
       params.aggregation,
-      params.kind ? { kind: params.kind } : {},
+      {
+        ...(params.kind ? { kind: params.kind } : {}),
+        ...(params.unit !== undefined ? { unit: params.unit } : {}),
+      },
     ),
   now: () => new Date(),
   queryLogs,
@@ -196,9 +200,13 @@ const attributeValuesSchema = attributeKeysSchema.extend({
 
 const metricKinds = ["gauge", "sum", "histogram", "exponential_histogram", "summary"] as const satisfies readonly MetricKind[];
 
+// A metric is a name, kind and unit; without a unit every unit is read.
+const metricUnitSchema = z.string().max(100).optional();
+
 const metricDimensionsSchema = windowSchema.extend({
   kind: z.enum(metricKinds),
   name: z.string().trim().min(1).max(200),
+  unit: metricUnitSchema,
 });
 
 // One metric over the window, for the metrics explorer.
@@ -216,6 +224,7 @@ const metricSeriesSchema = z.object({
   metricName: z.string().trim().min(1).max(200),
   projectId: z.uuid(),
   range: windowSchema.shape.range,
+  unit: metricUnitSchema,
 });
 
 const widgetDataSchema = z.object({
@@ -264,6 +273,7 @@ export function createTelemetryRoutes(
       limit: number | undefined;
       metricName: string;
       range: TelemetryRange;
+      unit?: string;
     },
   ): Promise<ChartData> {
     const range = windowFor(query.range, dependencies.now());
@@ -277,6 +287,7 @@ export function createTelemetryRoutes(
       ...(query.kind ? { kind: query.kind } : {}),
       metricName: query.metricName,
       step,
+      ...(query.unit !== undefined ? { unit: query.unit } : {}),
     });
     return chartSeries(rows, {
       fill: "null",
@@ -436,7 +447,11 @@ export function createTelemetryRoutes(
         dimensions: await dependencies.metricDimensions(
           granted.client,
           query.data.projectId,
-          { kind: query.data.kind, name: query.data.name },
+          {
+            kind: query.data.kind,
+            name: query.data.name,
+            ...(query.data.unit !== undefined ? { unit: query.data.unit } : {}),
+          },
           windowFor(query.data.range, dependencies.now()),
         ),
       });
@@ -458,6 +473,7 @@ export function createTelemetryRoutes(
         limit: body.data.limit,
         metricName: body.data.metricName,
         range: body.data.range,
+        ...(body.data.unit !== undefined ? { unit: body.data.unit } : {}),
       });
       return context.json({ chart });
     })
@@ -498,9 +514,11 @@ export function createTelemetryRoutes(
           ...(config.aggregation ? { aggregation: config.aggregation } : {}),
           filters: resourceAttrs,
           groupBy,
+          ...(config.metricKind ? { kind: config.metricKind } : {}),
           limit,
           metricName: config.metricName!,
           range: body.data.range,
+          ...(config.metricUnit !== undefined ? { unit: config.metricUnit } : {}),
         });
         return context.json({ chart, kind: "chart" } satisfies WidgetData);
       }

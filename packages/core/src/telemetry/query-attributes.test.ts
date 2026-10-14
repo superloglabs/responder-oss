@@ -1,6 +1,6 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import { describe, expect, it } from "vitest";
-import { listAttributeValues, listMetricDimensions, metricSeries, queryMetrics } from "./query.js";
+import { listAttributeValues, listMetricCatalog, listMetricDimensions, metricSeries, queryMetrics } from "./query.js";
 
 type RecordedQuery = { query: string; params: Record<string, unknown> };
 
@@ -116,6 +116,25 @@ describe("metric attribute filters", () => {
 });
 
 describe("metric series of one kind", () => {
+  it("reads only the points of the chosen unit", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await metricSeries(
+      recordingClient(queries),
+      "project-1",
+      "rpc.duration",
+      { range: { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" }, resourceAttrs: [] },
+      undefined,
+      { n: 1, unit: "MINUTE" },
+      undefined,
+      { kind: "gauge", unit: "ms" },
+    );
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.query).toContain("MetricUnit = {metricUnit:String}");
+    expect(queries[0]!.params.metricUnit).toBe("ms");
+  });
+
   it("reads only the table of the chosen kind", async () => {
     const queries: RecordedQuery[] = [];
 
@@ -132,6 +151,21 @@ describe("metric series of one kind", () => {
 
     const tables = new Set(queries.flatMap(({ query }) => query.match(/FROM otel_metrics_\w+/gu) ?? []));
     expect([...tables]).toEqual(["FROM otel_metrics_histogram"]);
+  });
+});
+
+describe("the metric catalog", () => {
+  it("lists more metric names than the picker", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listMetricCatalog(recordingClient(queries), "project-1", {
+      since: "2026-07-23T00:00:00.000Z",
+      until: "2026-07-23T01:00:00.000Z",
+    });
+
+    const nameQueries = queries.filter(({ query }) => query.includes("GROUP BY name, unit"));
+    expect(nameQueries.length).toBeGreaterThan(0);
+    for (const { query } of nameQueries) expect(query).toMatch(/LIMIT 5000\s*$/u);
   });
 });
 

@@ -155,7 +155,7 @@ test("dimensions list a metric's attributes with their values", { skip: !clickho
   const dimensions = await listMetricDimensions(
     ch,
     "project-1",
-    { kind: "gauge", name: "http.server.active_requests" },
+    { kind: "gauge", name: "http.server.active_requests", unit: "{request}" },
     range,
   );
 

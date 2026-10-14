@@ -101,7 +101,7 @@ function MetricList({
   catalog: MetricCatalogEntry[] | null;
   context: { projectId: string; range: TelemetryRange };
   error: string | null;
-  selected: { kind: string; name: string };
+  selected: { kind: string; name: string; unit: string | null };
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -146,7 +146,8 @@ function MetricList({
             {open ? (
               <ul>
                 {group.metrics.map((metric) => {
-                  const current = metric.name === selected.name && metric.kind === selected.kind;
+                  const current = metric.name === selected.name && metric.kind === selected.kind &&
+                    (selected.unit === null || metric.unit === selected.unit);
                   const rest = metric.name.slice(group.namespace.length + 1) || metric.name;
                   return (
                     <li key={`${metric.kind}:${metric.name}:${metric.unit}`}>
@@ -441,19 +442,21 @@ export function MetricExplorerPage() {
     fetchMetricCatalog(projectId, query!.range),
   );
   const dimensions = useLoaded(
-    projectId && query ? `${projectId}:${query.range}:${query.kind}:${query.name}` : null,
+    projectId && query ? JSON.stringify([projectId, query.range, query.kind, query.name, query.unit]) : null,
     () => fetchMetricDimensions(projectId, query!.range, query!),
   );
   const chartKey = projectId && query
-    ? JSON.stringify([projectId, query.range, query.kind, query.name, query.aggregation, query.groupBy, query.filters])
+    ? JSON.stringify([projectId, query.range, query.kind, query.name, query.unit, query.aggregation, query.groupBy, query.filters])
     : null;
   const chart = useLoaded(chartKey, () => fetchMetricChart(query!));
   const hidden = hiddenState.key === chartKey ? hiddenState.names : new Set<string>();
 
   if (!query) return <Navigate replace to="/metrics" />;
 
-  const metric = catalog.value?.find((entry) => entry.name === query.name && entry.kind === query.kind);
-  const unit = metric?.unit ?? "";
+  const metric = catalog.value?.find(
+    (entry) => entry.name === query.name && entry.kind === query.kind && (query.unit === null || entry.unit === query.unit),
+  );
+  const unit = query.unit ?? metric?.unit ?? "";
   const chartUnit = metricWidgetUnit({ kind: query.kind, unit }, query.aggregation);
   const context = { projectId, range: query.range };
   const catalogHref = `/metrics?${new URLSearchParams({

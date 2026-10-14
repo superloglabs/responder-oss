@@ -37,7 +37,10 @@ export const dashboardWidgetConfigSchema = z.object({
   // Series kept before the rest roll into "Other", or rows in a table.
   limit: z.number().int().positive().max(500).optional(),
   markdown: z.string().max(20_000).optional(),
+  // The kind and unit pick one metric when a name is sent as several.
+  metricKind: z.enum(["gauge", "sum", "histogram", "exponential_histogram", "summary"]).optional(),
   metricName: z.string().trim().max(200).optional(),
+  metricUnit: z.string().max(100).optional(),
   showLegend: z.boolean().optional(),
   showXAxis: z.boolean().optional(),
   showYAxis: z.boolean().optional(),
