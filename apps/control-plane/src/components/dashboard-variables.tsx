@@ -6,6 +6,7 @@ import { isLive, relativeParam, resolveTimeRange, type DashboardTimeRange } from
 import {
   fetchAttributeValueCounts,
   selectedValues,
+  variableControl,
   variableFilters,
   variableRow,
   variablesFromRows,
@@ -167,7 +168,9 @@ function VariableMenu({
             );
           })}
           {loaded && !loaded.error && visible.length === 0 && !canUseTyped ? (
-            <p className="dashboardVariableMenu__empty">{query ? "No values match." : "No values in this time range."}</p>
+            <p className="dashboardVariableMenu__empty">
+              {query ? "No values match." : variable.attributeKey ? "No values in this time range." : "Type a value to add it."}
+            </p>
           ) : null}
         </div>
       </div>
@@ -243,7 +246,8 @@ function VariableControl({
 }
 
 // One control per variable, then a button to add one. A variable with
-// options or an attribute opens a list of values; one without is typed.
+// options, an attribute, or several values opens a list of values, where
+// values can also be typed; any other variable is a text field.
 export function DashboardVariableBar({
   onAdd,
   onChange,
@@ -262,7 +266,7 @@ export function DashboardVariableBar({
   return (
     <div aria-label="Variables" className="dashboardVariables" role="group">
       {variables.map((variable) =>
-        variable.options.length > 0 || variable.attributeKey ? (
+        variableControl(variable) === "list" ? (
           <VariableControl
             key={variable.name}
             onChange={(value) => onChange(variable.name, value)}

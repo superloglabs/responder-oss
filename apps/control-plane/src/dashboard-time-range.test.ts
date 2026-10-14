@@ -101,6 +101,18 @@ describe("URL parameters", () => {
     expect(timeRangeFromParams(new URLSearchParams("range=90d"))).toEqual({ kind: "relative", minutes: 60 });
     expect(timeRangeFromParams(new URLSearchParams("from=nope"))).toEqual({ kind: "relative", minutes: 60 });
   });
+
+  it("falls back to the last hour for a fixed range longer than 30 days", () => {
+    const fallback = { kind: "relative", minutes: 60 };
+    expect(timeRangeFromParams(new URLSearchParams("from=2026-08-01T00:00:00Z&to=2026-10-01T00:00:00Z"), now)).toEqual(fallback);
+    // An open range, such as an old "Today so far" link, ends now.
+    expect(timeRangeFromParams(new URLSearchParams("from=2026-08-01T00:00:00Z"), now)).toEqual(fallback);
+    expect(timeRangeFromParams(new URLSearchParams("from=2026-10-01T00:00:00Z"), now)).toEqual({
+      from: at("2026-10-01T00:00:00Z"),
+      kind: "absolute",
+      to: null,
+    });
+  });
 });
 
 describe("moving the range", () => {

@@ -5,6 +5,7 @@ import {
   defaultVariableValues,
   formatWidgetValue,
   nextVariableValues,
+  variableControl,
   variableFilters,
   variableParams,
   variablesFromRows,
@@ -120,6 +121,13 @@ describe("multi-value variables", () => {
       ],
       names: ["service", "route"],
     });
+  });
+
+  it("lists values for a variable with options, an attribute, or several values, and types the rest", () => {
+    expect(variableControl({ name: "a", options: ["x"] })).toBe("list");
+    expect(variableControl({ attributeKey: "k", name: "a", options: [] })).toBe("list");
+    expect(variableControl({ multi: true, name: "a", options: [] })).toBe("list");
+    expect(variableControl({ name: "a", options: [] })).toBe("typed");
   });
 
   it("saves the several-values choice from the editor", () => {

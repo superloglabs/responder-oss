@@ -983,13 +983,18 @@ export async function listAttributeValues(
   const resourceFilter = attrConds(split.resource, "ResourceAttributes", "fattr_r");
   const logFilter = attrConds(split.log, "LogAttributes", "fattr_l");
   const spanFilter = attrConds(split.span, "SpanAttributes", "fattr_s");
+  const logFields = fieldConds(split.field, "logs", "fattr_f");
+  const traceFields = fieldConds(split.field, "traces", "fattr_f");
   const searchLogs = split.span.length === 0;
   const searchTraces = split.log.length === 0;
   // Capped like listAttributeKeys: grouping the values of a map column across
   // a high-volume window reads as many rows as the key scan did. Counts become
   // approximate, which is fine for ordering the dropdown.
   const valueScan = (table: "otel_logs" | "otel_traces", column: AttributeColumn): string => {
-    const conds = [...resourceFilter.conds, ...(table === "otel_logs" ? logFilter.conds : spanFilter.conds)];
+    const conds = [
+      ...resourceFilter.conds,
+      ...(table === "otel_logs" ? [...logFilter.conds, ...logFields.conds] : [...spanFilter.conds, ...traceFields.conds]),
+    ];
     return `
       SELECT v, count() AS c FROM (
         SELECT ${column}[{key:String}] AS v
@@ -1038,6 +1043,8 @@ export async function listAttributeValues(
       ...resourceFilter.params,
       ...logFilter.params,
       ...spanFilter.params,
+      ...traceFields.params,
+      ...logFields.params,
     },
     format: "JSONEachRow",
   });

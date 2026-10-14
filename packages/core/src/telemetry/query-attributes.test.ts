@@ -45,6 +45,24 @@ describe("attribute values filtered by other attributes", () => {
     expect(params).toMatchObject({ fattr_r_k_1: "deployment.environment", fattr_r_v_0: "checkout", fattr_r_v_1: ["prod", "staging"] });
   });
 
+  it("applies field filters to each table that has the field", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await listAttributeValues(recordingClient(queries), "project-1", "service.name", undefined, 200, undefined, undefined, [
+      { key: "field.trace_id", value: "a", values: ["a", "b"] },
+      { key: "field.severity_number", value: "17" },
+    ]);
+
+    const [{ params, query }] = queries;
+    const logs = query.slice(query.indexOf("FROM otel_logs"), query.indexOf("FROM otel_traces"));
+    const traces = query.slice(query.indexOf("FROM otel_traces"));
+    expect(logs).toContain("TraceId IN {fattr_f_v_0:Array(String)}");
+    expect(logs).toContain("toString(SeverityNumber) = {fattr_f_v_1:String}");
+    expect(traces).toContain("TraceId IN {fattr_f_v_0:Array(String)}");
+    expect(traces).not.toContain("SeverityNumber");
+    expect(params).toMatchObject({ fattr_f_v_0: ["a", "b"], fattr_f_v_1: "17" });
+  });
+
   it("leaves out traces when a filter is on a log attribute", async () => {
     const queries: RecordedQuery[] = [];
 

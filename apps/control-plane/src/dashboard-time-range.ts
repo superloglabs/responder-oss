@@ -32,13 +32,16 @@ export function relativeParam(minutes: number): string {
   return `${minutes}m`;
 }
 
-export function timeRangeFromParams(params: URLSearchParams): DashboardTimeRange {
+// A range the URL describes. One the telemetry API would refuse, such as a
+// window longer than 30 days, falls back to the last hour.
+export function timeRangeFromParams(params: URLSearchParams, now = Date.now()): DashboardTimeRange {
   const from = Date.parse(params.get("from") ?? "");
   if (Number.isFinite(from)) {
     const toParam = params.get("to");
     const to = toParam === null ? null : Date.parse(toParam);
-    if (to === null) return { from, kind: "absolute", to: null };
-    if (Number.isFinite(to) && to > from) return { from, kind: "absolute", to };
+    const end = to ?? now;
+    const fits = Number.isFinite(end) && end > from && end - from <= maximumRangeMinutes * minuteMs;
+    if (fits) return { from, kind: "absolute", to };
   }
   const match = /^(\d{1,5})([mhd])$/u.exec(params.get("range") ?? "");
   if (match) {

@@ -258,6 +258,12 @@ export function nextVariableValues(variables: DashboardVariable[], current: Vari
   );
 }
 
+// A variable picks from a list when it has options or an attribute to read
+// values from, or allows several values. Otherwise its value is typed.
+export function variableControl(variable: DashboardVariable): "list" | "typed" {
+  return variable.options.length > 0 || variable.attributeKey || variable.multi ? "list" : "typed";
+}
+
 // The selected values of a variable as a list; an empty one matches every value.
 export function selectedValues(value: DashboardVariableValue | undefined): string[] {
   if (value === undefined) return [];
