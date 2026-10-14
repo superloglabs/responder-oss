@@ -339,6 +339,14 @@ interface Point {
 
 const monthPattern = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec";
 
+// A calendar date that exists, such as not February 30.
+function realDate(date: { day: number; month: number; year: number }): Point["day"] | undefined {
+  const check = new Date(Date.UTC(date.year, date.month - 1, date.day));
+  const exists =
+    date.month >= 1 && date.month <= 12 && check.getUTCMonth() === date.month - 1 && check.getUTCDate() === date.day;
+  return exists ? date : undefined;
+}
+
 function parseDay(text: string, now: number, timeZone: string): Point["day"] | undefined {
   const today = zonedParts(now, timeZone);
   if (text === "today") return { day: today.day, month: today.month, year: today.year };
@@ -347,7 +355,7 @@ function parseDay(text: string, now: number, timeZone: string): Point["day"] | u
     return { day: yesterday.day, month: yesterday.month, year: yesterday.year };
   }
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/u.exec(text);
-  if (iso) return { day: Number(iso[3]), month: Number(iso[2]), year: Number(iso[1]) };
+  if (iso) return realDate({ day: Number(iso[3]), month: Number(iso[2]), year: Number(iso[1]) });
   const named =
     new RegExp(`^(${monthPattern})[a-z]*\\.? (\\d{1,2})$`, "u").exec(text) ??
     new RegExp(`^(\\d{1,2}) (${monthPattern})[a-z]*\\.?$`, "u").exec(text);
@@ -357,7 +365,7 @@ function parseDay(text: string, now: number, timeZone: string): Point["day"] | u
   const month = monthPattern.split("|").indexOf(monthText.slice(0, 3)) + 1;
   // A date without a year is the most recent one.
   const year = month > today.month || (month === today.month && day > today.day) ? today.year - 1 : today.year;
-  return { day, month, year };
+  return realDate({ day, month, year });
 }
 
 function parseClock(text: string, bareHour: boolean): Point["time"] | undefined {
@@ -554,6 +562,18 @@ export function previewTitle(range: DashboardTimeRange, now: number, timeZone: s
 
 function futureStart(): ParsedRangeInput {
   return { hint: "Pick a start time before now.", kind: "invalid", message: "The range starts in the future", suggestions: [] };
+}
+
+// A day picked on the calendar: from its midnight to the next, or to now
+// for today. The end is the next midnight so the day's last moments count.
+export function calendarDay(
+  date: { day: number; month: number; year: number },
+  now: number,
+  timeZone: string,
+): { from: number; to: number | null } {
+  const from = zonedTime(date, timeZone);
+  const to = zonedTime({ ...date, day: date.day + 1 }, timeZone);
+  return { from, to: to > now ? null : to };
 }
 
 // Weeks of a month, Monday first, with null for days of other months.

@@ -14,6 +14,7 @@ import {
 import { Popover } from "radix-ui";
 import { type KeyboardEvent, useRef, useState } from "react";
 import {
+  calendarDay,
   formatFieldTime,
   isLive,
   maximumRangeMinutes,
@@ -275,9 +276,8 @@ function TimePickerPanel({
   }
 
   function pickDay(day: number) {
-    const start = zonedTime({ day, month: month.month, year: month.year }, timeZone);
-    const end = Math.min(zonedTime({ day: day + 1, month: month.month, year: month.year }, timeZone) - 1000, now);
-    const endText = end === now ? "now" : formatFieldTime(end, timeZone);
+    const { from: start, to: end } = calendarDay({ day, month: month.month, year: month.year }, now, timeZone);
+    const endText = end === null ? "now" : formatFieldTime(end, timeZone);
     const first = pickingEnd ? fromTime : null;
     if (first === null || start < startOfDay(first, timeZone)) {
       setFromText(formatFieldTime(start, timeZone));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarDay,
   compactDuration,
   formatFieldTime,
   monthWeeks,
@@ -196,9 +197,25 @@ describe("parseRangeInput", () => {
     ]);
   });
 
+  it("rejects dates that do not exist", () => {
+    expect(parseRangeInput("2026-02-30", now, paris)).toMatchObject({ kind: "invalid", message: "That is not a time range" });
+    expect(parseRangeInput("feb 30", now, paris)).toMatchObject({ kind: "invalid" });
+    expect(parseRangeInput("2026-13-01 to 2026-13-02", now, paris)).toMatchObject({ kind: "invalid" });
+  });
+
   it("rejects text it cannot read and starts in the future", () => {
     expect(parseRangeInput("whenever", now, paris)).toMatchObject({ kind: "invalid", message: "That is not a time range" });
     expect(parseRangeInput("16:00 to 17:00", now, paris)).toMatchObject({ message: "The range starts in the future" });
+  });
+});
+
+describe("calendarDay", () => {
+  it("covers a whole day up to the next midnight, or up to now for today", () => {
+    expect(calendarDay({ day: 9, month: 10, year: 2026 }, now, paris)).toEqual({
+      from: at("2026-10-08T22:00:00Z"),
+      to: at("2026-10-09T22:00:00Z"),
+    });
+    expect(calendarDay({ day: 14, month: 10, year: 2026 }, now, paris)).toEqual({ from: startOfDay(now, paris), to: null });
   });
 });
 
