@@ -6,12 +6,14 @@ import {
   runAutomation,
   saveAutomation,
   setAutomationEnabled,
+  sharedAutomationTemplatePath,
   type AutomationConfiguration,
   type AutomationDetail,
   type AutomationOptions,
   type SharedAutomationTemplate,
 } from "../automations-api";
 import { automationTriggersNotify, defaultAutomationModelSettings } from "../../../../packages/core/src/automations/config";
+import { copyToClipboard } from "../copy-to-clipboard";
 import { BookOpenTextIcon, ChatCircleIcon, FloppyDiskIcon, PencilSimpleIcon, PlayIcon, ShareNetworkIcon, SquaresFourIcon, TrashIcon, GithubLogoIcon, KeyIcon } from "@phosphor-icons/react";
 import { AutomationConnectorPicker } from "../components/automation-connector-picker";
 import type { AutomationConnectorProvider } from "../components/automation-connectors";
@@ -123,6 +125,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const [runsRefreshKey, setRunsRefreshKey] = useState(0);
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templateLinkCopied, setTemplateLinkCopied] = useState(false);
   useDocumentTitle(automationId ? savedName : "New automation");
   // A saved automation saves every change. Handlers read the latest values
   // from these refs because a save can queue before React re-renders.
@@ -319,6 +322,18 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     }
   }
 
+  // Every built-in and shared template has a public page to send to others.
+  async function copyTemplateLink() {
+    if (!template) return;
+    const path = sharedAutomationTemplatePath(isSharedTemplate(template) ? template.slug : template.id);
+    try {
+      await copyToClipboard(new URL(path, window.location.origin).toString());
+      setTemplateLinkCopied(true);
+    } catch {
+      setError("Unable to copy the template link.");
+    }
+  }
+
   // Clears what the template filled in and keeps the model and repositories.
   // Connectors return to every connected one.
   function startBlank() {
@@ -412,6 +427,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         {template && !automationId ? <div className="automationCreate__template" role="status">
           <SquaresFourIcon aria-hidden="true" size={16} />
           <p>Started from the {template.name} template{isSharedTemplate(template) ? ` shared by ${template.workspaceName}` : ""}. Choose {automationTemplateMissingFields(template)}, then save.</p>
+          <button onClick={() => void copyTemplateLink()} type="button">{templateLinkCopied ? "Link copied" : "Copy link"}</button>
           <button onClick={startBlank} type="button">Start blank</button>
         </div> : null}
         {error ? <p className="formError" role="alert">{error}</p> : null}

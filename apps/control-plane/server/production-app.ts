@@ -3,10 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { sharedAutomationTemplateSlugSchema } from "../../../packages/core/src/automations/shared-template.js";
-import { getSharedAutomationTemplate } from "../../../packages/core/src/db/shared-automation-templates.js";
 import { app } from "./app.js";
-import { sharedTemplateDocument } from "./automations/shared-templates.js";
+import { sharedTemplateDocument, templatePreview } from "./automations/shared-templates.js";
 import { controlPlaneBaseUrl } from "./integrations/urls.js";
 import { isSourceMapPath } from "./static-assets.js";
 
@@ -26,15 +24,10 @@ export const productionApp = new Hono()
   })
   .use("*", serveAsset)
   .get("/templates/:slug", async (context, next) => {
+    // The path names a built-in template id or a shared template slug.
     // Unknown or stopped templates fall through to the application, which
     // shows its own not-found state.
-    const slug = sharedAutomationTemplateSlugSchema.safeParse(
-      context.req.param("slug"),
-    );
-    if (!slug.success) return next();
-    const template = await getSharedAutomationTemplate(slug.data).catch(
-      () => null,
-    );
+    const template = await templatePreview(context.req.param("slug"));
     if (!template) return next();
     appShell ??= readFile(path.join(staticRoot, "app.html"), "utf8");
     const shell = await appShell.catch(() => {
