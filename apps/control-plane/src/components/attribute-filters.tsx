@@ -1,5 +1,5 @@
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Button, IconButton, SelectField, TextField } from "../design-system";
 import "./attribute-filters.css";
 
@@ -33,11 +33,24 @@ export function AttributeFilters({
 }) {
   const change = (index: number, update: Partial<AttributeFilter>) =>
     onChange(filters.map((filter, at) => (at === index ? { ...filter, ...update } : filter)));
+  // A key per row that survives removing another row, so an open menu stays
+  // with its own filter. Rows added from outside get new keys.
+  const [rowKeys, setRowKeys] = useState<number[]>(() => filters.map((_, index) => index));
+  if (rowKeys.length !== filters.length) {
+    const next = rowKeys.slice(0, filters.length);
+    let key = Math.max(-1, ...rowKeys);
+    while (next.length < filters.length) next.push((key += 1));
+    setRowKeys(next);
+  }
+  const remove = (index: number) => {
+    setRowKeys((keys) => keys.filter((_, at) => at !== index));
+    onChange(filters.filter((_, at) => at !== index));
+  };
   return (
     <fieldset className="attributeFilters">
       <legend>Filters</legend>
       {filters.map((filter, index) => (
-        <div className="attributeFilters__row" key={index}>
+        <div className="attributeFilters__row" key={rowKeys[index] ?? `new-${index}`}>
           <SelectField
             label="Attribute"
             onChange={(key) => change(index, { key })}
@@ -55,7 +68,7 @@ export function AttributeFilters({
             value={filter.op ?? "eq"}
           />
           <TextField label="Value" maxLength={500} onChange={(event) => change(index, { value: event.target.value })} value={filter.value} />
-          <IconButton aria-label="Remove filter" onClick={() => onChange(filters.filter((_, at) => at !== index))} size="small" variant="ghost">
+          <IconButton aria-label="Remove filter" onClick={() => remove(index)} size="small" variant="ghost">
             <TrashIcon size={14} />
           </IconButton>
         </div>

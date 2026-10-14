@@ -58,6 +58,12 @@ describe("alertRequest", () => {
 });
 
 describe("alertForm", () => {
+  it("keeps a span status other than error", () => {
+    const form = { ...emptyAlertForm(projectId), extraFilter: { statusCode: "STATUS_CODE_OK" }, name: "OK spans", source: "traces" as const, spanErrors: false, threshold: "1" };
+    expect(alertRequest(form)).toMatchObject({ body: { filter: { statusCode: "STATUS_CODE_OK" } } });
+    expect(alertRequest({ ...form, spanErrors: true })).toMatchObject({ body: { filter: { statusCode: "STATUS_CODE_ERROR" } } });
+  });
+
   it("round-trips a copied Superlog alert, keeping filters the form does not edit", () => {
     const alert: TelemetryAlert = {
       aggregation: "count",

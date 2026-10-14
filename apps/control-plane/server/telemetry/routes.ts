@@ -77,12 +77,12 @@ export type TelemetryRouteDependencies = {
       step: Step;
     },
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
-  // Services that sent the signal in the window.
+  // Services that sent the signal in the window, or any signal.
   listServices: (
     client: ClickHouseClient,
     projectId: string,
     range: TimeRange,
-    signal: TelemetrySignal,
+    signal: TelemetrySignal | undefined,
   ) => Promise<unknown>;
   now: () => Date;
   queryLogs: (
@@ -145,8 +145,9 @@ const windowSchema = z.object({
 const signals = ["logs", "traces"] as const;
 export type TelemetrySignal = (typeof signals)[number];
 
+// "all" includes services that only send metrics.
 const servicesSchema = windowSchema.extend({
-  signal: z.enum(signals).default("logs"),
+  signal: z.enum([...signals, "all"]).default("logs"),
 });
 
 const tracesSchema = windowSchema.extend({
@@ -252,7 +253,7 @@ export function createTelemetryRoutes(
           granted.client,
           query.data.projectId,
           windowFor(query.data.range, dependencies.now()),
-          query.data.signal,
+          query.data.signal === "all" ? undefined : query.data.signal,
         ),
       });
     })

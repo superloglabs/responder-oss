@@ -226,9 +226,6 @@ export function TimeseriesChart({
                   ) : null,
                 )
               : null}
-            {threshold !== undefined ? (
-              <line className="timeseriesChart__threshold" x1={left} x2={left + width} y1={y(threshold)} y2={y(threshold)} />
-            ) : null}
             {hover !== null ? (
               stacked ? (
                 <rect className="timeseriesChart__hover" height={height} width={band} x={left + hover * band} y={6} />
@@ -267,6 +264,10 @@ export function TimeseriesChart({
                     />
                   );
                 })}
+            {/* Drawn last, so bars crossing it do not hide it. */}
+            {threshold !== undefined ? (
+              <line className="timeseriesChart__threshold" x1={left} x2={left + width} y1={y(threshold)} y2={y(threshold)} />
+            ) : null}
           </svg>
         ) : null}
         {hover !== null && hoverRows.length > 0 ? (

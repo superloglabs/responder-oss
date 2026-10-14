@@ -1,5 +1,5 @@
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import {
@@ -76,14 +76,22 @@ function AlertPreview({ form }: { form: AlertForm }) {
   const request = alertRequest({ ...form, name: form.name || "Preview" });
   const key = "body" in request ? JSON.stringify(request.body) : null;
   const debouncedKey = useDebounced(key, 600);
-  const [state, setState] = useState<{ chart: ChartData; evaluations: AlertEvaluation[] } | { error: string } | null>(null);
+  // The result and the rule it is for, so an older result is not shown
+  // beside a newer rule.
+  const [result, setResult] = useState<{
+    key: string;
+    value: { chart: ChartData; evaluations: AlertEvaluation[] } | { error: string };
+  } | null>(null);
+  const state = result && result.key === key ? result.value : null;
 
   useEffect(() => {
     if (!debouncedKey) return;
     let cancelled = false;
     previewAlert(JSON.parse(debouncedKey) as Parameters<typeof previewAlert>[0])
-      .then((result) => { if (!cancelled) setState(result); })
-      .catch((cause: unknown) => { if (!cancelled) setState({ error: cause instanceof Error ? cause.message : "Unable to preview" }); });
+      .then((value) => { if (!cancelled) setResult({ key: debouncedKey, value }); })
+      .catch((cause: unknown) => {
+        if (!cancelled) setResult({ key: debouncedKey, value: { error: cause instanceof Error ? cause.message : "Unable to preview" } });
+      });
     return () => { cancelled = true; };
   }, [debouncedKey]);
 
@@ -165,8 +173,23 @@ export function AlertPage() {
   const { alertId } = useParams();
   const navigate = useNavigate();
   const telemetry = useTelemetryProjects();
-  const [saved, setSaved] = useState<{ alert: TelemetryAlert; episodes: TelemetryAlertEpisode[] } | null>(null);
-  const [edited, setForm] = useState<AlertForm | null>(null);
+  // What was loaded and edited, for the alert it belongs to. Moving to
+  // another alert shows nothing of the previous one.
+  const [loaded, setLoaded] = useState<{
+    alertId: string | undefined;
+    form: AlertForm | null;
+    saved: { alert: TelemetryAlert; episodes: TelemetryAlertEpisode[] } | null;
+  }>({ alertId, form: null, saved: null });
+  const current = loaded.alertId === alertId ? loaded : { alertId, form: null, saved: null };
+  const saved = current.saved;
+  const edited = current.form;
+  const setSaved = (next: { alert: TelemetryAlert; episodes: TelemetryAlertEpisode[] }) =>
+    setLoaded((state) => (state.alertId === alertId ? { ...state, saved: next } : state));
+  const setForm = (next: AlertForm | null | ((form: AlertForm | null) => AlertForm | null)) =>
+    setLoaded((state) => {
+      const base = state.alertId === alertId ? state : { alertId, form: null, saved: null };
+      return { ...base, form: typeof next === "function" ? next(base.form) : next };
+    });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -178,21 +201,25 @@ export function AlertPage() {
   const [services, setServices] = useState<string[]>([]);
   useDocumentTitle(saved ? `${saved.alert.name} · Alerts` : alertId ? "Alerts" : "New alert · Alerts");
 
+  // The alert the page shows now, read when a load finishes.
+  const latestAlertId = useRef(alertId);
   const load = useCallback(async () => {
     if (!alertId) return;
     setLoadError(null);
     try {
-      const loaded = await fetchAlert(alertId);
-      setSaved(loaded);
-      setForm(alertForm(loaded.alert));
+      const result = await fetchAlert(alertId);
+      // A response for an alert the page has moved away from is dropped.
+      if (latestAlertId.current !== alertId) return;
+      setLoaded({ alertId, form: alertForm(result.alert), saved: result });
     } catch (cause) {
       setLoadError(cause instanceof Error ? cause.message : "Unable to load the alert");
     }
   }, [alertId]);
 
   useEffect(() => {
+    latestAlertId.current = alertId;
     void Promise.resolve().then(load);
-  }, [load]);
+  }, [alertId, load]);
 
   // A new alert starts on the first linked project.
   const firstProjectId = telemetry.projects?.[0]?.projectId;
@@ -215,7 +242,7 @@ export function AlertPage() {
     void Promise.all([
       source === "metric" ? fetchMetricNames(projectId, "24h").catch(() => []) : Promise.resolve([]),
       fetchAttributeKeys(projectId, "24h", attributeSource).catch(() => []),
-      fetchServices(projectId, "24h", source === "traces" ? "traces" : "logs").catch(() => []),
+      fetchServices(projectId, "24h", source === "metric" ? "all" : source).catch(() => []),
     ]).then(([loadedMetrics, loadedKeys, loadedServices]) => {
       if (cancelled) return;
       setMetrics(loadedMetrics);
@@ -341,7 +368,7 @@ export function AlertPage() {
             {!saved && projects.length > 1 ? (
               <SelectField
                 label="Project"
-                onChange={(value) => update({ filters: [], groupBy: "", metricName: "", projectId: value, service: "" })}
+                onChange={(value) => update({ filters: [], groupBy: "", metricName: "", perGroup: false, projectId: value, service: "" })}
                 options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
                 value={form.projectId}
               />
@@ -351,7 +378,7 @@ export function AlertPage() {
               <h2>What to watch</h2>
               <SegmentedControl
                 aria-label="Measure"
-                onChange={(value) => update({ aggregation: value === "metric" ? "avg" : "count", groupBy: "", source: value })}
+                onChange={(value) => update({ aggregation: value === "metric" ? "avg" : "count", groupBy: "", perGroup: false, source: value })}
                 options={[
                   { label: "Log count", value: "logs" },
                   { label: "Span count", value: "traces" },

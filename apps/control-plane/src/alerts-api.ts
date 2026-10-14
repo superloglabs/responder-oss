@@ -88,7 +88,7 @@ export interface AlertForm {
   comparator: AlertComparator;
   enabled: boolean;
   // Filter fields the form does not edit, kept from a copied Superlog alert.
-  extraFilter: Pick<AlertFilter, "minDurationMs" | "spanName">;
+  extraFilter: Pick<AlertFilter, "minDurationMs" | "spanName" | "statusCode">;
   filters: NonNullable<AlertFilter["resourceAttrs"]>;
   groupBy: string;
   intervalSeconds: number;
@@ -136,7 +136,12 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
     aggregation: alert.aggregation,
     comparator: alert.comparator,
     enabled: alert.enabled,
-    extraFilter: { ...(minDurationMs !== undefined ? { minDurationMs } : {}), ...(spanName ? { spanName } : {}) },
+    extraFilter: {
+      ...(minDurationMs !== undefined ? { minDurationMs } : {}),
+      ...(spanName ? { spanName } : {}),
+      // Another status, such as OK, is kept as it was.
+      ...(statusCode && statusCode !== "STATUS_CODE_ERROR" ? { statusCode } : {}),
+    },
     filters: resourceAttrs ?? [],
     groupBy: alert.groupBy ?? "",
     intervalSeconds: alert.evaluationIntervalSeconds,
@@ -173,6 +178,7 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
   if (form.source !== "traces") {
     delete filter.minDurationMs;
     delete filter.spanName;
+    delete filter.statusCode;
   }
   return {
     body: {
