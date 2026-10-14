@@ -2061,10 +2061,13 @@ export async function listMetricCatalog(
     Promise.all(METRIC_TABLES.map(({ table }) => metricDetailsFromTable(ch, projectId, window, table))),
   ]);
   const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
-  return names.map(({ points, ...metric }) => {
+  return names.flatMap(({ points, ...metric }) => {
     const table = detailsByKind.get(metric.kind);
     const detail = table?.details.get(metricDetailKey(metric));
-    return {
+    // Names counted by the hour can come from before the window starts. A
+    // complete scan of the window that found no point of one drops it.
+    if (!detail && table && !table.sampled) return [];
+    return [{
       ...metric,
       attributes: detail?.attributes ?? [],
       description: detail?.description ?? "",
@@ -2074,7 +2077,7 @@ export async function listMetricCatalog(
       // scan read every point, even where the name count, rounded out to whole
       // hours, holds more.
       servicesComplete: detail !== undefined && (!table!.sampled || detail.points >= points),
-    };
+    }];
   });
 }
 

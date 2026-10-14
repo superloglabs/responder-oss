@@ -232,6 +232,8 @@ describe("the metric catalog", () => {
             return [
               { c: names.busy, name: "busy", unit: "" },
               { c: names.quiet, name: "quiet", unit: "" },
+              // Counted in the hour the window starts in, before its start.
+              { c: 2, name: "earlier", unit: "" },
             ];
           }
           return [
@@ -250,6 +252,7 @@ describe("the metric catalog", () => {
     expect(catalog.map((metric) => [metric.name, metric.servicesComplete])).toEqual([
       ["busy", false],
       ["quiet", true],
+      ["earlier", false],
     ]);
   });
 
@@ -259,6 +262,8 @@ describe("the metric catalog", () => {
     const catalog = await listMetricCatalog(catalogClient({ busy: 10, quiet: 3 }, 4), "project-1", window);
 
     expect(catalog.every((metric) => metric.servicesComplete)).toBe(true);
+    // A complete scan of the window found no point of it.
+    expect(catalog.map((metric) => metric.name)).not.toContain("earlier");
   });
 
   it("lists more metric names than the picker", async () => {
