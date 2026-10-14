@@ -873,6 +873,8 @@ export interface DataTableProps<Row, Filter extends string = string> {
   onFilterChange?: (value: Filter) => void;
   onRowClick?: (row: Row) => void;
   rows: Array<Row>;
+  // The row shown as selected, such as the one a details drawer shows.
+  selectedRowKey?: string | number | null;
   variant?: "workspace";
 }
 
@@ -908,6 +910,7 @@ export function DataTable<Row, Filter extends string = string>({
   onFilterChange,
   onRowClick,
   rows,
+  selectedRowKey,
   variant,
 }: DataTableProps<Row, Filter>) {
   const rowGroups = getRowGroup ? groupDataTableRows(rows, getRowGroup) : [];
@@ -939,7 +942,10 @@ export function DataTable<Row, Filter extends string = string>({
   function renderedRows(groupRows: Array<Row>) {
     return groupRows.map((row) => (
       <tr
-        className={onRowClick ? "dsDataTable__row--interactive" : undefined}
+        className={classNames(
+          onRowClick && "dsDataTable__row--interactive",
+          selectedRowKey !== undefined && getRowKey(row) === selectedRowKey && "dsDataTable__row--selected",
+        ) || undefined}
         key={getRowKey(row)}
         onClick={
           onRowClick

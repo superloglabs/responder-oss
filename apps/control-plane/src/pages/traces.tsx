@@ -1,251 +1,399 @@
-import { CaretRightIcon, TreeStructureIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { TreeStructureIcon } from "@phosphor-icons/react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
 import { TelemetryProjectsGate } from "../components/telemetry";
-import { DataTable, SegmentedControl, SelectField } from "../design-system";
 import {
-  fetchServices,
-  fetchTraces,
+  AddFacet,
+  ExplorerFacet,
+  ExplorerFilterBar,
+  ExplorerTimeControls,
+  type FilterChip,
+} from "../components/telemetry-explorer";
+import { TraceDrawer } from "../components/trace-drawer";
+import { fetchAttributeKeys, fetchAttributeValues } from "../dashboards-api";
+import { Badge, DataTable, SelectField } from "../design-system";
+import {
+  environmentFilter,
+  explorerFilterText,
+  fetchExplorerTraces,
+  fetchTraceFacets,
+  fetchTraceHistogram,
   formatDuration,
-  formatTelemetryTime,
+  formatExplorerTime,
+  histogramBars,
   logTimestamp,
-  telemetryRanges,
-  traceHref,
-  type TelemetryRange,
+  parseExplorerFilter,
+  traceExplorerParams,
+  traceExplorerQuery,
+  withEnvironment,
+  type ExplorerFilter,
+  type TraceExplorerQuery,
   type TraceListState,
-  type TraceQuery,
   type TraceSummary,
 } from "../telemetry-api";
-import { useTelemetryProjects } from "../use-telemetry-projects";
 import { useDocumentTitle } from "../use-document-title";
+import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryQuery } from "../use-telemetry-query";
 import "../components/automation-run-history.css";
 
-const statuses: Array<{ label: string; value: TraceQuery["status"] }> = [
-  { label: "All statuses", value: "" },
-  { label: "With errors", value: "error" },
+type StatusSeries = "error" | "other";
+
+const statusChart: Array<HistogramSeries<StatusSeries>> = [
+  { color: "#e07b73", label: "Error", name: "error" },
+  { color: "#c9c9c9", label: "OK or unset", name: "other" },
 ];
+const statusSeriesNames = statusChart.map((series) => series.name);
+const statusSeries = (group: string): StatusSeries => (group === "STATUS_CODE_ERROR" ? "error" : "other");
+
+const statusLabels: Record<string, string> = {
+  STATUS_CODE_ERROR: "Error",
+  STATUS_CODE_OK: "OK",
+  STATUS_CODE_UNSET: "Unset",
+};
 
 const durations = [
-  { label: "Any duration", value: "0" },
   { label: "Over 100 ms", value: "100" },
   { label: "Over 500 ms", value: "500" },
   { label: "Over 1 s", value: "1000" },
   { label: "Over 5 s", value: "5000" },
 ];
 
-const rangeValues = new Set<string>(telemetryRanges.map((range) => range.value));
-
-// Filters live in the URL, so returning from a trace restores them.
-function traceFilters(params: URLSearchParams): TraceQuery {
-  const range = params.get("range") ?? "";
-  const minDurationMs = Number(params.get("minDurationMs"));
-  return {
-    minDurationMs: durations.some((option) => Number(option.value) === minDurationMs) ? minDurationMs : 0,
-    projectId: params.get("projectId") ?? "",
-    range: rangeValues.has(range) ? (range as TelemetryRange) : "1h",
-    service: params.get("service") ?? "",
-    status: params.get("status") === "error" ? "error" : "",
-  };
-}
+const traceIdPattern = /^[0-9a-f]{32}$/iu;
 
 function count(value: number | string): number {
   return Number(value) || 0;
 }
 
-export function TracesPage() {
-  useDocumentTitle("Traces");
-  const navigate = useNavigate();
-  const telemetry = useTelemetryProjects();
-  const [params, setParams] = useSearchParams();
-  const filters = traceFilters(params);
-  const projectId = filters.projectId || telemetry.projects?.[0]?.projectId || "";
-  const { minDurationMs, range, service, status } = filters;
-  const listState: TraceListState = { traceList: params.toString() };
-  const [services, setServices] = useState<string[]>([]);
-  const [traces, setTraces] = useState<TraceSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const request = useRef(0);
+function filterChipLabel(filter: ExplorerFilter): string {
+  const key = filter.key.replace(/^(span|resource|field)\./u, "");
+  return filter.op === "neq" ? `not ${key}` : key;
+}
 
-  function setFilter(key: keyof TraceQuery, value: string) {
-    setParams((current) => {
-      const next = new URLSearchParams(current);
-      if (value && value !== "0") next.set(key, value);
-      else next.delete(key);
-      // A service from one project means nothing in another.
-      if (key === "projectId") next.delete("service");
-      return next;
-    }, { replace: true });
+function TraceExplorer({
+  live,
+  onOpenTrace,
+  openTrace,
+  projects,
+  query,
+  setQuery,
+}: {
+  live: boolean;
+  onOpenTrace: (traceId: string | null) => void;
+  openTrace: string | null;
+  projects: Array<{ name: string; projectId: string }>;
+  query: TraceExplorerQuery;
+  setQuery: (update: Partial<TraceExplorerQuery>) => void;
+}) {
+  const key = traceExplorerParams(query).toString();
+  const traces = useTelemetryQuery(key, () => fetchExplorerTraces(query), live);
+  const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(query), live);
+  const facets = useTelemetryQuery(key, () => fetchTraceFacets(query), live);
+  const keyQuery = `${query.projectId}|${query.range}`;
+  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, query.range, "traces"));
+  const environments = useTelemetryQuery(keyQuery, () =>
+    fetchAttributeValues(query.projectId, query.range, "traces", "resource.deployment.environment"),
+  );
+  const bars = useMemo(
+    () => (histogram.data ? histogramBars(histogram.data, statusSeriesNames, statusSeries) : null),
+    [histogram.data],
+  );
+  const total = bars?.reduce((sum, bar) => sum + bar.total, 0);
+  const environment = environmentFilter(query.filters);
+  const withDate = query.range === "7d" || query.range === "24h";
+  const longest = Math.max(1, ...(traces.data ?? []).map((trace) => trace.duration_ms));
+  const listState: TraceListState = { traceList: key };
+
+  function toggle(list: "operations" | "services" | "statuses", value: string) {
+    const current = query[list];
+    setQuery({ [list]: current.includes(value) ? current.filter((item) => item !== value) : [...current, value] });
   }
 
-  useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    fetchServices(projectId, range, "traces")
-      .then((loaded) => { if (!cancelled) setServices(loaded); })
-      .catch(() => { if (!cancelled) setServices([]); });
-    return () => { cancelled = true; };
-  }, [projectId, range]);
+  function addFilter(filter: ExplorerFilter) {
+    const text = explorerFilterText(filter);
+    setQuery({ filters: [...query.filters.filter((item) => explorerFilterText(item) !== text), filter] });
+  }
 
-  const load = useCallback(async () => {
-    if (!projectId) return;
-    const generation = ++request.current;
-    setTraces(null);
-    try {
-      const loaded = await fetchTraces({ minDurationMs, projectId, range, service, status });
-      if (request.current !== generation) return;
-      setTraces(loaded);
-      setError(null);
-    } catch (cause) {
-      if (request.current !== generation) return;
-      setTraces([]);
-      setError(cause instanceof Error ? cause.message : "Unable to load traces");
+  function submitText(text: string): boolean {
+    if (!text) return true;
+    if (traceIdPattern.test(text)) {
+      onOpenTrace(text.toLowerCase());
+      return true;
     }
-  }, [minDurationMs, projectId, range, service, status]);
+    const filter = /^[\w.-]+!?=/u.test(text) ? parseExplorerFilter(text) : null;
+    if (filter) addFilter(filter);
+    else if (!query.operations.includes(text)) setQuery({ operations: [...query.operations, text] });
+    return true;
+  }
 
-  useEffect(() => {
-    void Promise.resolve().then(load);
-    return () => { request.current += 1; };
-  }, [load]);
-
-  const serviceOptions = [
-    { label: "All services", value: "" },
-    // Keep a chosen service listed after it leaves the window.
-    ...[...new Set([...services, ...(service ? [service] : [])])]
-      .sort()
-      .map((name) => ({ label: name, value: name })),
+  const chips: FilterChip[] = [
+    ...query.services.map((value) => ({ id: `service-${value}`, label: "service", onRemove: () => toggle("services", value), value })),
+    ...query.operations.map((value) => ({ id: `operation-${value}`, label: "span", onRemove: () => toggle("operations", value), value })),
+    ...query.statuses.map((value) => ({
+      id: `status-${value}`,
+      label: "status",
+      onRemove: () => toggle("statuses", value),
+      value: statusLabels[value] ?? value,
+    })),
+    ...(query.minDurationMs > 0
+      ? [{ id: "duration", label: "duration", onRemove: () => setQuery({ minDurationMs: 0 }), value: `> ${formatDuration(query.minDurationMs)}` }]
+      : []),
+    ...query.filters
+      .filter((filter) => filter.value !== environment || filter.key !== "resource.deployment.environment")
+      .map((filter) => ({
+        id: `filter-${explorerFilterText(filter)}`,
+        label: filterChipLabel(filter),
+        onRemove: () => setQuery({ filters: query.filters.filter((item) => item !== filter) }),
+        value: filter.value,
+      })),
+  ];
+  const environmentOptions = [
+    ...(environments.data ?? []),
+    ...(environment && !environments.data?.includes(environment) ? [environment] : []),
   ];
 
   return (
-    <AppShell active="traces" redesigned>
-      <header className="workspaceHeading">
-        <h1><TreeStructureIcon aria-hidden="true" size={16} weight="bold" />Traces</h1>
-      </header>
-      <TelemetryProjectsGate signal="Traces" state={telemetry}>
-        {(projects) => (
-          <section aria-label="Traces" className="telemetryPage">
-            <div className="telemetryPage__toolbar">
-              {projects.length > 1 ? (
-                <SelectField
-                  className="telemetryPage__select"
-                  label="Project"
-                  onChange={(value) => setFilter("projectId", value)}
-                  options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-                  value={projectId}
-                />
-              ) : null}
-              <SelectField
-                className="telemetryPage__select"
-                label="Service"
-                onChange={(value) => setFilter("service", value)}
-                options={serviceOptions}
-                searchable={serviceOptions.length > 8}
-                value={service}
-              />
-              <SelectField
-                className="telemetryPage__select"
-                label="Status"
-                onChange={(value) => setFilter("status", value)}
-                options={statuses}
-                value={status}
-              />
-              <SelectField
-                className="telemetryPage__select"
-                label="Duration"
-                onChange={(value) => setFilter("minDurationMs", value)}
-                options={durations}
-                value={String(minDurationMs)}
-              />
-              <SegmentedControl
-                aria-label="Time range"
-                onChange={(value) => setFilter("range", value)}
-                options={telemetryRanges}
-                value={range}
-              />
-            </div>
-            {error ? (
-              <div className="automationRuns__message" role="alert">
-                <p>{error}</p>
-                <button onClick={() => void load()} type="button">Retry</button>
-              </div>
-            ) : null}
-            <div className="agentListTable telemetryPage__table">
-              {traces === null ? (
-                <p className="telemetryPage__status">Loading traces…</p>
-              ) : (
-                <DataTable<TraceSummary>
-                  aria-label="Traces"
-                  columns={[
-                    {
-                      header: "Started",
-                      key: "time",
-                      render: (trace) => (
-                        <time className="telemetryPage__time" dateTime={logTimestamp(trace.start_time)?.toISOString()}>
-                          {formatTelemetryTime(trace.start_time)}
-                        </time>
-                      ),
-                      width: "130px",
-                    },
-                    {
-                      header: "Service",
-                      key: "service",
-                      render: (trace) => <span className="telemetryPage__service">{trace.root_service || "—"}</span>,
-                      width: "140px",
-                    },
-                    {
-                      header: "Root span",
-                      key: "root",
-                      render: (trace) => (
-                        <Link
-                          className="telemetryPage__message"
-                          state={listState}
+    <>
+      <div className="explorerToolbar">
+        <ExplorerFilterBar
+          chips={chips}
+          label="Filter traces"
+          onSubmit={submitText}
+          placeholder="Span name, key=value or a trace ID"
+        />
+        {projects.length > 1 ? (
+          <SelectField
+            className="explorerSelect"
+            label="Project"
+            onChange={(projectId) => setQuery({ facets: [], filters: [], operations: [], projectId, services: [] })}
+            options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
+            value={query.projectId}
+          />
+        ) : null}
+        {environmentOptions.length > 0 ? (
+          <SelectField
+            className="explorerSelect"
+            label="Environment"
+            onChange={(value) => setQuery({ filters: withEnvironment(query.filters, value) })}
+            options={[{ label: "All environments", value: "" }, ...environmentOptions.map((value) => ({ label: value, value }))]}
+            value={environment}
+          />
+        ) : null}
+      </div>
+      <section aria-label="Span volume" className="explorerVolume">
+        <div className="explorerVolume__summary">
+          <strong>{total === undefined ? "…" : `${total.toLocaleString()} ${total === 1 ? "span" : "spans"}`}</strong>
+          <HistogramLegend bars={bars} series={statusChart} />
+        </div>
+        <CountHistogram bars={bars} label="Matching spans over time, by status" series={statusChart} />
+      </section>
+      {traces.error || histogram.error || facets.error ? (
+        <div className="automationRuns__message" role="alert">
+          <p>{traces.error ?? histogram.error ?? facets.error}</p>
+          <button onClick={() => { traces.retry(); histogram.retry(); facets.retry(); }} type="button">Retry</button>
+        </div>
+      ) : null}
+      <div className="explorerBody">
+        <div aria-label="Trace filters" className="explorerFacets" role="group">
+          <ExplorerFacet
+            loading={!facets.data}
+            onToggle={(value) => toggle("statuses", value)}
+            options={[...(facets.data?.statuses ?? [])]
+              .sort((a, b) => Object.keys(statusLabels).indexOf(a.group) - Object.keys(statusLabels).indexOf(b.group))
+              .map((item) => ({ count: item.value, label: statusLabels[item.group] ?? item.group, value: item.group }))}
+            selected={query.statuses}
+            title="Status"
+          />
+          <ExplorerFacet
+            loading={!facets.data}
+            onToggle={(value) => toggle("services", value)}
+            options={(facets.data?.services ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
+            selected={query.services}
+            title="Service"
+          />
+          <ExplorerFacet
+            loading={!facets.data}
+            onToggle={(value) => toggle("operations", value)}
+            options={(facets.data?.operations ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
+            selected={query.operations}
+            title="Span name"
+          />
+          <ExplorerFacet
+            loading={false}
+            onToggle={(value) => setQuery({ minDurationMs: Number(value) === query.minDurationMs ? 0 : Number(value) })}
+            options={durations}
+            selected={query.minDurationMs > 0 ? [String(query.minDurationMs)] : []}
+            title="Trace duration"
+          />
+          {query.facets.map((facetKey) => (
+            <ExplorerFacet
+              key={facetKey}
+              loading={!facets.data}
+              onRemove={() => setQuery({
+                facets: query.facets.filter((item) => item !== facetKey),
+                filters: query.filters.filter((filter) => filter.key !== facetKey),
+              })}
+              onToggle={(value) => {
+                const existing = query.filters.find((filter) => filter.key === facetKey && filter.op === "eq" && filter.value === value);
+                // One value per key: attribute filters on a key must all match.
+                setQuery({
+                  filters: existing
+                    ? query.filters.filter((filter) => filter !== existing)
+                    : [...query.filters.filter((filter) => filter.key !== facetKey), { key: facetKey, op: "eq", value }],
+                });
+              }}
+              options={(facets.data?.attributes[facetKey] ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
+              selected={query.filters.filter((filter) => filter.key === facetKey && filter.op === "eq").map((filter) => filter.value)}
+              title={facetKey.replace(/^(span|resource)\./u, "")}
+            />
+          ))}
+          <AddFacet
+            keys={(attributeKeys.data ?? []).filter((item) => !query.facets.includes(item))}
+            onAdd={(facetKey) => setQuery({ facets: [...query.facets, facetKey] })}
+          />
+        </div>
+        <div className="agentListTable explorerTableWrap">
+          {traces.data === null ? (
+            traces.error ? null : <p className="explorerStatus">Loading traces…</p>
+          ) : (
+            <DataTable<TraceSummary>
+              aria-label="Traces"
+              columns={[
+                {
+                  header: "Started",
+                  key: "time",
+                  render: (trace) => (
+                    <time className="explorerCell--muted" dateTime={logTimestamp(trace.start_time)?.toISOString()}>
+                      {formatExplorerTime(trace.start_time, withDate)}
+                    </time>
+                  ),
+                  width: withDate ? "176px" : "124px",
+                },
+                {
+                  header: "Root span",
+                  key: "root",
+                  render: (trace) => {
+                    const services = count(trace.service_count);
+                    return (
+                      <span className="traceRow__root">
+                        <button
+                          aria-expanded={trace.trace_id === openTrace}
+                          className="explorerCell--message"
+                          onClick={() => onOpenTrace(trace.trace_id === openTrace ? null : trace.trace_id)}
                           title={trace.root_span_name}
-                          to={traceHref(projectId, trace.trace_id)}
+                          type="button"
                         >
                           {trace.root_span_name || trace.trace_id}
-                        </Link>
-                      ),
-                    },
-                    {
-                      align: "right",
-                      header: "Duration",
-                      key: "duration",
-                      render: (trace) => <span className="telemetryPage__number">{formatDuration(trace.duration_ms)}</span>,
-                      width: "96px",
-                    },
-                    {
-                      align: "right",
-                      header: "Spans",
-                      key: "spans",
-                      render: (trace) => <span className="telemetryPage__number">{count(trace.span_count).toLocaleString()}</span>,
-                      width: "72px",
-                    },
-                    {
-                      header: "Errors",
-                      key: "errors",
-                      render: (trace) => count(trace.error_count) > 0
-                        ? <span className="telemetryPage__errors">{count(trace.error_count).toLocaleString()}</span>
-                        : <span className="telemetryPage__service">—</span>,
-                      width: "80px",
-                    },
-                    {
-                      header: "",
-                      key: "open",
-                      render: () => <CaretRightIcon aria-hidden="true" className="automationRuns__open" size={14} />,
-                      width: "44px",
-                    },
-                  ]}
-                  emptyMessage="No traces match these filters in this time range."
-                  getRowKey={(trace) => trace.trace_id}
-                  onRowClick={(trace) => navigate(traceHref(projectId, trace.trace_id), { state: listState })}
-                  rows={traces}
-                  variant="workspace"
-                />
-              )}
+                        </button>
+                        <span>{trace.root_service || "—"} · {services} {services === 1 ? "service" : "services"}</span>
+                      </span>
+                    );
+                  },
+                },
+                {
+                  header: "Duration",
+                  key: "duration",
+                  render: (trace) => (
+                    <span className="traceRow__duration">
+                      <span className={count(trace.error_count) > 0 ? "traceRow__durationTrack traceRow__durationTrack--error" : "traceRow__durationTrack"}>
+                        <span style={{ width: `${Math.max(1, (trace.duration_ms / longest) * 100)}%` }} />
+                      </span>
+                      <span className="explorerCell--number">{formatDuration(trace.duration_ms)}</span>
+                    </span>
+                  ),
+                  width: "26%",
+                },
+                {
+                  align: "right",
+                  header: "Spans",
+                  key: "spans",
+                  render: (trace) => <span className="explorerCell--number">{count(trace.span_count).toLocaleString()}</span>,
+                  width: "72px",
+                },
+                {
+                  header: "Status",
+                  key: "status",
+                  render: (trace) => count(trace.error_count) > 0
+                    ? <Badge tone="danger">{count(trace.error_count) === 1 ? "Error" : `${count(trace.error_count)} errors`}</Badge>
+                    : <Badge tone="live">OK</Badge>,
+                  width: "104px",
+                },
+              ]}
+              emptyMessage="No traces match these filters in this time range."
+              getRowKey={(trace) => trace.trace_id}
+              onRowClick={(trace) => onOpenTrace(trace.trace_id === openTrace ? null : trace.trace_id)}
+              rows={traces.data}
+              selectedRowKey={openTrace}
+              variant="workspace"
+            />
+          )}
+          {(traces.data?.length ?? 0) >= 50 ? <p className="explorerMore">Showing the newest 50 traces. Narrow the filters to see others.</p> : null}
+        </div>
+      </div>
+      {openTrace ? (
+        <TraceDrawer
+          key={openTrace}
+          listState={listState}
+          onClose={() => onOpenTrace(null)}
+          onFilter={(filter) => { addFilter(filter); onOpenTrace(null); }}
+          projectId={query.projectId}
+          traceId={openTrace}
+        />
+      ) : null}
+    </>
+  );
+}
+
+export function TracesPage() {
+  useDocumentTitle("Trace search");
+  const telemetry = useTelemetryProjects();
+  const [params, setParams] = useSearchParams();
+  const query = traceExplorerQuery(params);
+  const openTrace = params.get("trace");
+  const [live, setLive] = useState(false);
+
+  function navigate(next: TraceExplorerQuery, trace: string | null) {
+    const nextParams = traceExplorerParams(next);
+    if (trace) nextParams.set("trace", trace);
+    setParams(nextParams, { replace: true });
+  }
+
+  return (
+    <AppShell active="traces" activePage="/traces/search" redesigned wide>
+      <div className="explorer">
+        <header className="workspaceHeading">
+          <h1><TreeStructureIcon aria-hidden="true" size={16} weight="bold" />Trace search</h1>
+          {telemetry.projects && telemetry.projects.length > 0 ? (
+            <div className="workspaceHeading__actions">
+              <ExplorerTimeControls
+                live={live}
+                onLiveChange={setLive}
+                onRangeChange={(range) => navigate({ ...query, range }, openTrace)}
+                range={query.range}
+              />
             </div>
-          </section>
-        )}
-      </TelemetryProjectsGate>
+          ) : null}
+        </header>
+        <TelemetryProjectsGate signal="Traces" state={telemetry}>
+          {(projects) => {
+            const resolved = {
+              ...query,
+              projectId: projects.some((project) => project.projectId === query.projectId) ? query.projectId : projects[0]!.projectId,
+            };
+            return (
+              <TraceExplorer
+                live={live}
+                onOpenTrace={(trace) => navigate(resolved, trace)}
+                openTrace={openTrace}
+                projects={projects}
+                query={resolved}
+                setQuery={(update) => navigate({ ...resolved, ...update }, openTrace)}
+              />
+            );
+          }}
+        </TelemetryProjectsGate>
+      </div>
     </AppShell>
   );
 }

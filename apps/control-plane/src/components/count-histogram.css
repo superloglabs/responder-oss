@@ -1,0 +1,9 @@
+.countHistogram { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.countHistogram__bars { display: flex; align-items: stretch; gap: min(5px, .35%); height: 64px; }
+.countHistogram__track { display: flex; flex: 1 1 0; flex-direction: column; justify-content: flex-end; gap: 1px; min-width: 1px; overflow: clip; border-radius: 2px; background: #f0f0f0; }
+.countHistogram__bars--loading .countHistogram__track { opacity: .6; }
+.countHistogram__segment { flex-shrink: 0; border-radius: 2px; }
+.countHistogram__axis { display: flex; justify-content: space-between; color: #999; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 14px; }
+.countHistogram__legend { display: inline-flex; align-items: center; gap: 6px; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 16px; white-space: nowrap; }
+.countHistogram__legend > span { flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; }
+.countHistogram--compact .countHistogram__bars { gap: min(3px, .4%); height: 36px; }

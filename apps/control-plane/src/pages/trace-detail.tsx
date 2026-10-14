@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { TelemetryAttributes, TelemetryException, TelemetryProjectsGate } from "../components/telemetry";
+import { TraceWaterfall } from "../components/trace-waterfall";
 import { Badge, DataTable, IconButton } from "../design-system";
 import {
   fetchTrace,
@@ -63,9 +64,6 @@ function SpanDetail({ logs, onClose, span }: { logs: TraceLog[]; onClose: () => 
     </aside>
   );
 }
-
-// Marks at each quarter of the trace's duration.
-const ticks = [0, 25, 50, 75, 100];
 
 function TraceView({ projectId, traceId }: { projectId: string; traceId: string }) {
   const location = useLocation();
@@ -138,42 +136,7 @@ function TraceView({ projectId, traceId }: { projectId: string; traceId: string 
         </p>
       </header>
       <div className={selectedSpan ? "telemetryPage__body telemetryPage__body--detail" : "telemetryPage__body"}>
-        <section aria-label="Spans" className="traceWaterfall">
-          <div aria-hidden="true" className="traceWaterfall__axis">
-            <span className="traceWaterfall__name">Span</span>
-            <span className="traceWaterfall__track">
-              {ticks.map((tick) => (
-                <span key={tick} style={{ left: `${tick}%` }}>{tick === 0 ? "0" : formatDuration((durationMs * tick) / 100)}</span>
-              ))}
-            </span>
-          </div>
-          <ul className="traceWaterfall__rows">
-            {rows.map((row) => {
-              const isError = row.span.status_code === "STATUS_CODE_ERROR";
-              const isSelected = row.span.span_id === selected;
-              return (
-                <li id={`span-${row.span.span_id}`} key={row.span.span_id}>
-                  <button
-                    aria-pressed={isSelected}
-                    className={`traceWaterfall__row${isSelected ? " traceWaterfall__row--selected" : ""}${isError ? " traceWaterfall__row--error" : ""}`}
-                    onClick={() => setSelected(isSelected ? null : row.span.span_id)}
-                    type="button"
-                  >
-                    <span className="traceWaterfall__name" style={{ paddingLeft: `${Math.min(row.depth, 12) * 12}px` }}>
-                      <span className="traceWaterfall__service">{row.span.service}</span>
-                      <span className="traceWaterfall__spanName">{row.span.span_name}</span>
-                      {isError ? <span className="traceWaterfall__srOnly">, error</span> : null}
-                    </span>
-                    <span className="traceWaterfall__track">
-                      <span className="traceWaterfall__bar" style={{ left: `${row.offset}%`, width: `${row.width}%` }} />
-                    </span>
-                    <span className="traceWaterfall__duration">{formatDuration(row.span.duration_ms)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <TraceWaterfall durationMs={durationMs} onSelect={setSelected} rows={rows} selected={selected} />
         {selectedSpan ? (
           <SpanDetail
             logs={trace.logs.filter((log) => log.span_id === selectedSpan.span_id)}
@@ -236,7 +199,7 @@ export function TraceDetailPage() {
   const { traceId = "" } = useParams();
   const [params] = useSearchParams();
   return (
-    <AppShell active="traces" redesigned>
+    <AppShell active="traces" activePage="/traces/search" redesigned>
       <div className="automationCreate traceDetail">
         <TelemetryProjectsGate signal="Traces" state={telemetry}>
           {(projects) => (
