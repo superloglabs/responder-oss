@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dimensionLabel,
+  filterMetricCatalog,
   groupMetrics,
   metricAggregationOptions,
   metricAlertDraft,
@@ -89,6 +90,21 @@ describe("the metric catalog", () => {
     expect(searchMetrics(metrics, "route").map((entry) => entry.name)).toEqual(["http.server.request.duration"]);
     expect(searchMetrics(metrics, "resident MEMORY").map((entry) => entry.name)).toEqual(["process.memory.usage"]);
     expect(searchMetrics(metrics, "  ")).toHaveLength(2);
+  });
+
+  it("keeps metrics without read details under a service filter", () => {
+    const metrics = [
+      metric("checkout.orders", { services: ["checkout-api"] }),
+      metric("inventory.stock", { services: ["inventory"] }),
+      metric("queue.depth", { kind: "sum", series: null, services: [] }),
+    ];
+
+    expect(filterMetricCatalog(metrics, { kind: "", search: "", service: "checkout-api" }).map((entry) => entry.name))
+      .toEqual(["checkout.orders", "queue.depth"]);
+    expect(filterMetricCatalog(metrics, { kind: "gauge", search: "", service: "" }).map((entry) => entry.name))
+      .toEqual(["checkout.orders", "inventory.stock"]);
+    expect(filterMetricCatalog(metrics, { kind: "", search: "stock", service: "" }).map((entry) => entry.name))
+      .toEqual(["inventory.stock"]);
   });
 
   it("names dimensions by their attribute key", () => {

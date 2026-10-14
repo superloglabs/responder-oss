@@ -7,10 +7,10 @@ import { SendTelemetryLink, TelemetryProjectsGate } from "../components/telemetr
 import { DataTable, SegmentedControl, SelectField } from "../design-system";
 import {
   fetchMetricCatalog,
+  filterMetricCatalog,
   metricExplorerHref,
   metricKindLabel,
   metricKinds,
-  searchMetrics,
   type MetricCatalogEntry,
 } from "../metrics-api";
 import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
@@ -80,10 +80,7 @@ export function MetricsPage() {
     [catalog, service],
   );
   const shown = useMemo(
-    () =>
-      searchMetrics(catalog ?? [], search).filter(
-        (metric) => (!kind || metric.kind === kind) && (!service || metric.services.includes(service)),
-      ),
+    () => filterMetricCatalog(catalog ?? [], { kind, search, service }),
     [catalog, kind, search, service],
   );
   const attributeKeys = new Set(shown.flatMap((metric) => metric.attributes)).size;

@@ -158,6 +158,20 @@ export function searchMetrics(metrics: MetricCatalogEntry[], search: string): Me
   });
 }
 
+// The catalog rows a search, type and service select. Services come from
+// sampled details, so a metric whose details were not read stays listed
+// under every service rather than disappearing from it.
+export function filterMetricCatalog(
+  metrics: MetricCatalogEntry[],
+  filters: { kind: string; search: string; service: string },
+): MetricCatalogEntry[] {
+  return searchMetrics(metrics, filters.search).filter(
+    (metric) =>
+      (!filters.kind || metric.kind === filters.kind) &&
+      (!filters.service || metric.series === null || metric.services.includes(filters.service)),
+  );
+}
+
 // "attr:http.route" and "resource.service.name" read as their attribute key.
 export function dimensionLabel(key: string): string {
   if (key.startsWith("attr:")) return key.slice("attr:".length);
