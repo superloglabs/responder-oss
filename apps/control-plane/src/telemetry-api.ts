@@ -110,7 +110,8 @@ export async function fetchLogs(query: LogQuery): Promise<LogRecord[]> {
 export async function fetchServices(
   projectId: string,
   range: TelemetryRange,
-  signal: TelemetrySignal = "logs",
+  // "all" includes services that only send metrics.
+  signal: TelemetrySignal | "all" = "logs",
 ): Promise<string[]> {
   const params = new URLSearchParams({ projectId, range, signal });
   const body = await telemetryJson<{ services: string[] }>(`/api/telemetry/services?${params}`);

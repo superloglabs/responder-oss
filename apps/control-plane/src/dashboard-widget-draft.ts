@@ -34,9 +34,6 @@ export interface WidgetForm {
   unit: WidgetUnit;
 }
 
-// The most filters a widget can have.
-export const maximumWidgetFilters = 50;
-
 export const emptyWidgetForm: WidgetForm = {
   aggregation: "",
   chartType: "bar",

@@ -35,6 +35,16 @@ describe("primaryNavigation", () => {
     ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Integrations", "Tag mode", "Settings"]);
   });
 
+  it("lists alerts only with telemetry and the alerts capability", () => {
+    expect(
+      primaryNavigation({ alerts: true, automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),
+    ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Dashboards", "Alerts", "Integrations", "Tag mode", "Settings"]);
+    expect(primaryNavigation({ alerts: true, automations: true, simplified: true }).map((item) => item.label)).not.toContain("Alerts");
+    expect(
+      primaryNavigation({ alerts: false, automations: true, simplified: true, telemetry: true }).map((item) => item.label),
+    ).not.toContain("Alerts");
+  });
+
   it("lists dashboards only with telemetry", () => {
     expect(
       primaryNavigation({ automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),

@@ -1,0 +1,11 @@
+.attributeFilters { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.attributeFilters legend { margin-bottom: 6px; padding: 0; color: var(--ds-text-secondary); font-size: 12px; font-weight: 500; }
+.attributeFilters__row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.attributeFilters__row .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.attributeFilters__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.attributeFilters__hint { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
+/* Narrow forms stack the attribute above its comparison and value. */
+@media (max-width: 640px) {
+  .attributeFilters__row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .attributeFilters__row > :first-child { grid-column: 1 / -1; }
+}

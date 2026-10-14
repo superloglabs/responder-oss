@@ -40,6 +40,7 @@ export function TimeseriesChart({
   showLegend = true,
   showXAxis = true,
   showYAxis = true,
+  threshold,
   unit = "none",
 }: {
   chart: ChartData;
@@ -49,6 +50,8 @@ export function TimeseriesChart({
   showLegend?: boolean;
   showXAxis?: boolean;
   showYAxis?: boolean;
+  // Drawn as a dashed line, for an alert's condition.
+  threshold?: number;
   unit?: WidgetUnit;
 }) {
   const { ref, size } = useSize<HTMLDivElement>();
@@ -85,8 +88,12 @@ export function TimeseriesChart({
         low = Math.min(low, negative);
       }
     }
+    if (threshold !== undefined) {
+      high = Math.max(high, threshold);
+      low = Math.min(low, threshold);
+    }
     return { maximum: high, minimum: low };
-  }, [count, stacked, visible]);
+  }, [count, stacked, threshold, visible]);
 
   const ticks = axisTicks(minimum, maximum);
   const top = ticks[ticks.length - 1]!;
@@ -257,6 +264,10 @@ export function TimeseriesChart({
                     />
                   );
                 })}
+            {/* Drawn last, so bars crossing it do not hide it. */}
+            {threshold !== undefined ? (
+              <line className="timeseriesChart__threshold" x1={left} x2={left + width} y1={y(threshold)} y2={y(threshold)} />
+            ) : null}
           </svg>
         ) : null}
         {hover !== null && hoverRows.length > 0 ? (

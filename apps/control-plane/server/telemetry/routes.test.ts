@@ -76,6 +76,9 @@ describe("telemetry routes", () => {
       "logs",
     );
 
+    await app.request(`/services?projectId=${projectId}&signal=all`);
+    expect(dependencies.listServices).toHaveBeenLastCalledWith(expect.anything(), projectId, expect.anything(), undefined);
+
     await app.request(`/services?projectId=${projectId}&signal=traces`);
     expect(dependencies.listServices).toHaveBeenLastCalledWith(
       expect.anything(),

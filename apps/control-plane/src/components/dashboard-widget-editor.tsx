@@ -1,9 +1,7 @@
-import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-import { Button, IconButton, SegmentedControl, SelectField, Switch, TextAreaField, TextField } from "../design-system";
+import { Button, SegmentedControl, SelectField, Switch, TextAreaField, TextField } from "../design-system";
 import {
   emptyWidgetForm,
-  maximumWidgetFilters,
   widgetDraft,
   widgetForm,
   type WidgetForm,
@@ -19,6 +17,7 @@ import {
 } from "../dashboards-api";
 import type { TelemetryRange } from "../telemetry-api";
 import { DashboardDialog } from "./dashboard-dialog";
+import { AttributeFilters } from "./attribute-filters";
 import { DashboardWidgetBody } from "./dashboard-widget";
 
 const kinds: Array<{ label: string; value: WidgetKind }> = [
@@ -43,12 +42,6 @@ const units = [
   { label: "Seconds", value: "duration_s" },
   { label: "Bytes", value: "bytes" },
   { label: "Percent", value: "percent" },
-] as const;
-
-const operators = [
-  { label: "is", value: "eq" },
-  { label: "is not", value: "neq" },
-  { label: "does not contain", value: "not_contains" },
 ] as const;
 
 function withCurrent(options: string[], current: string): string[] {
@@ -214,69 +207,23 @@ export function DashboardWidgetEditor({
             />
           ) : null}
           {form.kind !== "note" ? (
-            <fieldset className="widgetEditor__filters">
-              <legend>Filters</legend>
-              {form.filters.map((filter, index) => (
-                <div className="widgetEditor__filter" key={index}>
-                  <SelectField
-                    label="Attribute"
-                    onChange={(key) => update({ filters: form.filters.map((item, at) => (at === index ? { ...item, key } : item)) })}
-                    options={[
-                      ...(filter.key ? [] : [{ label: "Attribute", value: "" }]),
-                      ...withCurrent(keys, filter.key).map((key) => ({ label: key, value: key })),
-                    ]}
-                    searchable
-                    value={filter.key}
-                  />
-                  <SelectField
-                    label="Comparison"
-                    onChange={(op) =>
-                      update({
-                        filters: form.filters.map((item, at) => (at === index ? { ...item, ...(op === "eq" ? { op: undefined } : { op }) } : item)),
-                      })
-                    }
-                    options={[...operators]}
-                    value={filter.op ?? "eq"}
-                  />
-                  <TextField
-                    label="Value"
-                    maxLength={500}
-                    onChange={(event) =>
-                      update({ filters: form.filters.map((item, at) => (at === index ? { ...item, value: event.target.value } : item)) })
-                    }
-                    value={filter.value}
-                  />
-                  <IconButton
-                    aria-label="Remove filter"
-                    onClick={() => update({ filters: form.filters.filter((_, at) => at !== index) })}
-                    size="small"
-                    variant="ghost"
-                  >
-                    <TrashIcon size={14} />
-                  </IconButton>
-                </div>
-              ))}
-              {form.filters.length >= maximumWidgetFilters ? (
-                <p className="dashboardDialog__hint">A widget can have up to {maximumWidgetFilters} filters.</p>
-              ) : null}
-              <div className="widgetEditor__filterActions" hidden={form.filters.length >= maximumWidgetFilters}>
-                <Button onClick={() => update({ filters: [...form.filters, { key: "", value: "" }] })} size="small" variant="secondary">
-                  <PlusIcon size={12} />Add filter
+            <AttributeFilters
+              actions={variables.map((variable) => (
+                <Button
+                  key={variable.name}
+                  onClick={() =>
+                    update({ filters: [...form.filters, { key: variable.attributeKey || variable.name, value: `$${variable.name}` }] })
+                  }
+                  size="small"
+                  variant="ghost"
+                >
+                  Filter by ${variable.name}
                 </Button>
-                {variables.map((variable) => (
-                  <Button
-                    key={variable.name}
-                    onClick={() =>
-                      update({ filters: [...form.filters, { key: variable.attributeKey || variable.name, value: `$${variable.name}` }] })
-                    }
-                    size="small"
-                    variant="ghost"
-                  >
-                    Filter by ${variable.name}
-                  </Button>
-                ))}
-              </div>
-            </fieldset>
+              ))}
+              filters={form.filters}
+              keys={keys}
+              onChange={(filters) => update({ filters })}
+            />
           ) : null}
           {form.kind === "chart" ? (
             <div className="widgetEditor__row">
