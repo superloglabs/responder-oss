@@ -830,6 +830,8 @@ export const telemetryAlerts = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     source: text("source").$type<AlertSource>().notNull(),
     metricName: text("metric_name"),
+    // The log or span field an aggregation other than a count reads.
+    field: text("field"),
     filter: jsonb("filter").$type<AlertFilter>().notNull().default({}),
     groupBy: text("group_by"),
     groupMode: text("group_mode").$type<AlertGroupMode>().notNull().default("single"),

@@ -1,5 +1,5 @@
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import {
@@ -27,8 +27,21 @@ import { AttributeFilters } from "../components/attribute-filters";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button, IconButton, SegmentedControl, SelectField, Switch, TextField } from "../design-system";
-import { fetchAttributeKeys, fetchMetricNames, type ChartData, type MetricName } from "../dashboards-api";
-import { describeAlertCondition, formatAlertValue } from "../../../../packages/core/src/telemetry/alert-text";
+import {
+  aiGroupFields,
+  aiMeasureFields,
+  fetchAttributeKeys,
+  fetchMetricNames,
+  widgetAggregationLabels,
+  type ChartData,
+  type MetricName,
+} from "../dashboards-api";
+import {
+  alertValueUnit,
+  describeAlertCondition,
+  formatAlertValue,
+  type AlertValueUnit,
+} from "../../../../packages/core/src/telemetry/alert-text";
 import { fetchServices, formatDuration, formatTelemetryTime } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
@@ -61,6 +74,18 @@ const intervals = [
   { label: "Every 15 minutes", value: "900" },
   { label: "Every hour", value: "3600" },
 ];
+
+// Logs and spans are counted, or summed up from a field.
+const measures = (["count", "count_distinct", "sum", "avg", "min", "max", "p50", "p90", "p95", "p99"] as const).map((value) => ({
+  label: widgetAggregationLabels[value],
+  value,
+}));
+
+const chartUnits: Record<AlertValueUnit, "duration_ms" | "none" | "usd"> = { ms: "duration_ms", none: "none", usd: "usd" };
+
+function formUnit(form: Pick<AlertForm, "aggregation" | "field" | "source">): AlertValueUnit {
+  return alertValueUnit({ aggregation: form.aggregation, field: form.field || null, source: form.source });
+}
 
 function withCurrent<T extends { value: string }>(options: T[], value: string, label: string): Array<T | { label: string; value: string }> {
   return value && !options.some((option) => option.value === value) ? [{ label, value }, ...options] : options;
@@ -106,6 +131,9 @@ function AlertPreview({ form }: { form: AlertForm }) {
   }, [debouncedKey]);
 
   const threshold = Number(form.threshold);
+  const unit = formUnit(form);
+  // Averages and percentiles do not add up, so they are not stacked.
+  const additive = form.aggregation === "count" || form.aggregation === "sum";
   return (
     <section aria-label="Preview" className="alertPreview">
       <h2>Preview</h2>
@@ -122,7 +150,7 @@ function AlertPreview({ form }: { form: AlertForm }) {
             {state.evaluations.slice(0, 8).map((evaluation) => (
               <li key={evaluation.groupKey}>
                 <span className="alertPreview__group">{evaluation.groupKey || (form.perGroup ? "(none)" : "Now")}</span>
-                <strong>{formatAlertValue(evaluation.value)}</strong>
+                <strong>{formatAlertValue(evaluation.value, unit)}</strong>
                 <Badge tone={evaluation.breaching ? "danger" : "live"}>{evaluation.breaching ? "Would fire" : "OK"}</Badge>
               </li>
             ))}
@@ -133,10 +161,11 @@ function AlertPreview({ form }: { form: AlertForm }) {
                 chart={state.chart}
                 // Groups are compared with the threshold one by one, so they
                 // are drawn as lines rather than stacked.
-                chartType={form.source === "metric" || form.perGroup ? "line" : "bar"}
+                chartType={form.source === "metric" || form.perGroup || !additive ? "line" : "bar"}
                 label="Recent values"
                 showLegend={state.chart.series.length > 1}
                 {...(Number.isFinite(threshold) && form.threshold.trim() ? { threshold } : {})}
+                unit={chartUnits[unit]}
               />
             ) : (
               <p className="dashboardWidget__status">No data in the last {24} windows.</p>
@@ -149,7 +178,15 @@ function AlertPreview({ form }: { form: AlertForm }) {
   );
 }
 
-function Episodes({ episodes, perGroup }: { episodes: TelemetryAlertEpisode[]; perGroup: boolean }) {
+function Episodes({
+  episodes,
+  perGroup,
+  unit,
+}: {
+  episodes: TelemetryAlertEpisode[];
+  perGroup: boolean;
+  unit: AlertValueUnit;
+}) {
   if (episodes.length === 0) return <p className="dashboardWidget__status">The alert has not fired yet.</p>;
   return (
     <table className="dashboardWidget__table alertEpisodes">
@@ -171,7 +208,7 @@ function Episodes({ episodes, perGroup }: { episodes: TelemetryAlertEpisode[]; p
             <td className="dashboardWidget__number">
               {episode.endedAt ? formatDuration(Date.parse(episode.endedAt) - Date.parse(episode.startedAt)) : "—"}
             </td>
-            <td className="dashboardWidget__number">{formatAlertValue(episode.peakValue)}</td>
+            <td className="dashboardWidget__number">{formatAlertValue(episode.peakValue, unit)}</td>
           </tr>
         ))}
       </tbody>
@@ -269,14 +306,19 @@ export function AlertPage() {
       const base = current ?? form;
       return base ? { ...base, ...change } : current;
     });
-  const groupOptions = useMemo(
-    () => [
-      { label: "No grouping", value: "" },
-      { label: "Service", value: "service" },
-      ...keys.filter((key) => key !== "service").map((key) => ({ label: key, value: key })),
-    ],
-    [keys],
-  );
+  const groupOptions = [
+    { label: "No grouping", value: "" },
+    { label: "Service", value: "service" },
+    ...(source === "traces" ? aiGroupFields : []),
+    ...keys.filter((key) => key !== "service").map((key) => ({ label: key, value: key })),
+  ];
+  // Spans offer their duration and AI usage before their attributes.
+  const fieldOptions = [
+    ...(source === "traces"
+      ? [{ label: "Duration", value: "duration" }, ...aiMeasureFields.map((field) => ({ ...field, description: "AI usage" }))]
+      : []),
+    ...keys.map((key) => ({ label: key, value: key })),
+  ];
 
   async function save() {
     if (!form) return;
@@ -380,15 +422,42 @@ export function AlertPage() {
             <section className="alertForm__section">
               <h2>What to watch</h2>
               <SegmentedControl
-                aria-label="Measure"
-                onChange={(value) => update({ aggregation: value === "metric" ? "avg" : "count", groupBy: "", perGroup: false, source: value })}
+                aria-label="Data"
+                onChange={(value) =>
+                  update({ aggregation: value === "metric" ? "avg" : "count", field: "", groupBy: "", perGroup: false, source: value })
+                }
                 options={[
-                  { label: "Log count", value: "logs" },
-                  { label: "Span count", value: "traces" },
+                  { label: "Logs", value: "logs" },
+                  { label: "Spans", value: "traces" },
                   { label: "Metric", value: "metric" },
                 ]}
                 value={form.source}
               />
+              {form.source !== "metric" ? (
+                <div className="widgetEditor__row">
+                  <SelectField
+                    label="Measure"
+                    onChange={(aggregation) =>
+                      // Error-only spans suit a count; other measures start from every span.
+                      update(form.aggregation === "count" && aggregation !== "count" ? { aggregation, spanErrors: false } : { aggregation })
+                    }
+                    options={measures}
+                    value={form.aggregation}
+                  />
+                  {form.aggregation !== "count" ? (
+                    <SelectField
+                      label="Field"
+                      onChange={(field) => update({ field })}
+                      options={[
+                        ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
+                        ...withCurrent(fieldOptions, form.field, form.field),
+                      ]}
+                      searchable={fieldOptions.length > 8}
+                      value={form.field}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
               {form.source === "logs" ? (
                 <SelectField label="Severity" onChange={(severity) => update({ severity })} options={severities} value={form.severity} />
               ) : null}
@@ -458,7 +527,7 @@ export function AlertPage() {
                 <TextField
                   className="alertForm__threshold"
                   inputMode="decimal"
-                  label="Threshold"
+                  label={formUnit(form) === "usd" ? "Threshold (USD)" : formUnit(form) === "ms" ? "Threshold (ms)" : "Threshold"}
                   onChange={(event) => update({ threshold: event.target.value })}
                   value={form.threshold}
                 />
@@ -469,7 +538,7 @@ export function AlertPage() {
               </div>
               {form.threshold.trim() && Number.isFinite(Number(form.threshold)) ? (
                 <p className="dashboardDialog__hint">
-                  Fires when the value is {describeAlertCondition(form.comparator, Number(form.threshold))}, and recovers when it is not.
+                  Fires when the value is {describeAlertCondition(form.comparator, Number(form.threshold), formUnit(form))}, and recovers when it is not.
                 </p>
               ) : null}
             </section>
@@ -503,7 +572,7 @@ export function AlertPage() {
         {saved ? (
           <section aria-label="Recent episodes" className="alertForm__section alertPage__episodes">
             <h2>Recent episodes</h2>
-            <Episodes episodes={saved.episodes} perGroup={saved.alert.groupMode === "per_group"} />
+            <Episodes episodes={saved.episodes} perGroup={saved.alert.groupMode === "per_group"} unit={alertValueUnit(saved.alert)} />
           </section>
         ) : null}
       </div>

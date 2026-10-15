@@ -16,13 +16,15 @@ import {
   alertCreateSchema,
   alertPreviewSchema,
   alertUpdateSchema,
+  alertCountsEmptyAsZero,
   evaluateAlert,
   type AlertRule,
   type AlertSlackTarget,
 } from "../../../../packages/core/src/telemetry/alerts.js";
 import { getTelemetryClient, type TelemetryClient } from "../../../../packages/core/src/telemetry/client.js";
 import { chartSeries } from "../../../../packages/core/src/telemetry/dashboards.js";
-import { countSeries, metricSeries } from "../../../../packages/core/src/telemetry/query.js";
+import { aiPriceParamsFor } from "../../../../packages/core/src/telemetry/ai-price-params.js";
+import { countSeries, eventSeries, metricSeries } from "../../../../packages/core/src/telemetry/query.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Threshold alerts on a workspace's telemetry. They need the
@@ -80,6 +82,20 @@ async function defaultSeries(client: TelemetryClient, organizationId: string, ru
       step,
       rule.aggregation === "avg" ? "avg" : "sum",
       alertMetricIdentity(rule.filter),
+    );
+  }
+  if (rule.aggregation !== "count" && rule.field) {
+    const filter = { ...rule.filter, range, resourceAttrs: rule.filter.resourceAttrs ?? [] };
+    const aiPrices = rule.field === "ai:cost" ? await aiPriceParamsFor(client, organizationId, filter) : undefined;
+    return eventSeries(
+      client,
+      organizationId,
+      rule.source,
+      filter,
+      { aggregation: rule.aggregation, field: rule.field },
+      groupBy,
+      step,
+      aiPrices,
     );
   }
   const rows = await countSeries(
@@ -193,7 +209,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const stepMs = rule.windowMinutes * 60_000;
       return context.json({
         chart: chartSeries(series, {
-          fill: rule.source === "metric" ? "null" : "zero",
+          fill: alertCountsEmptyAsZero(rule) ? "zero" : "null",
           limit: 5,
           sinceMs: Date.parse(range.since),
           stepMs,

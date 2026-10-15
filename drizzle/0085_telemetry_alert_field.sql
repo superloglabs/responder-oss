@@ -1,0 +1,1 @@
+ALTER TABLE "telemetry_alerts" ADD COLUMN "field" text;

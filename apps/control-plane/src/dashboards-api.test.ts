@@ -166,6 +166,7 @@ describe("dollars and AI fields", () => {
   it("formats dollars, keeping fractions of a cent readable", () => {
     expect(formatWidgetValue(1234.5, "usd")).toBe("$1,234.50");
     expect(formatWidgetValue(0.0041, "usd")).toBe("$0.0041");
+    expect(formatWidgetValue(0.1, "usd")).toBe("$0.10");
     expect(formatWidgetValue(0, "usd")).toBe("$0.00");
     expect(formatWidgetValue(2_500_000, "usd")).toBe("$2.5M");
   });

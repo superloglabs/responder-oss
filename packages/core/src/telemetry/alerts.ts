@@ -1,11 +1,14 @@
 import { z } from "zod";
+import { widgetFieldSource } from "./dashboards.js";
 
 // Threshold alerts on a workspace's telemetry. Rules keep the shape Superlog
 // alerts stored, so existing alerts can be copied over unchanged.
 
 export const alertSources = ["logs", "traces", "metric"] as const;
 export type AlertSource = (typeof alertSources)[number];
-export const alertAggregations = ["count", "sum", "avg"] as const;
+// Logs and spans are counted, or summed up from a field as dashboard widgets
+// do; metrics are summed or averaged.
+export const alertAggregations = ["count", "count_distinct", "sum", "avg", "min", "max", "p50", "p90", "p95", "p99"] as const;
 export type AlertAggregation = (typeof alertAggregations)[number];
 export const alertComparators = ["gt", "lt"] as const;
 export type AlertComparator = (typeof alertComparators)[number];
@@ -46,6 +49,9 @@ export type AlertSlackTarget = z.infer<typeof alertSlackSchema>;
 export const alertRuleSchema = z.object({
   aggregation: z.enum(alertAggregations),
   comparator: z.enum(alertComparators),
+  // What a log or span aggregation other than a count reads: `duration`, an
+  // AI usage field such as `ai:cost`, or an attribute key.
+  field: z.string().trim().max(200).nullable().default(null),
   filter: alertFilterSchema.default({}),
   groupBy: z.string().trim().max(200).nullable().default(null),
   groupMode: z.enum(alertGroupModes).default("single"),
@@ -56,14 +62,20 @@ export const alertRuleSchema = z.object({
 });
 export type AlertRule = z.infer<typeof alertRuleSchema>;
 
-// The rule is consistent: counts for logs and traces, a sum or average of a
-// named metric, and a grouping key when evaluated per group.
+// The rule is consistent: a count of logs or spans or an aggregation of one
+// of their fields, a sum or average of a named metric, and a grouping key
+// when evaluated per group.
 export function alertRuleProblem(rule: AlertRule): string | null {
   if (rule.source === "metric") {
     if (!rule.metricName) return "Choose a metric";
-    if (rule.aggregation === "count") return "Use the sum or average of a metric";
+    if (rule.aggregation !== "sum" && rule.aggregation !== "avg") return "Use the sum or average of a metric";
   } else if (rule.aggregation !== "count") {
-    return "Logs and traces are counted";
+    if (!rule.field) return "Choose a field to aggregate";
+    const fieldSource = widgetFieldSource(rule.field);
+    if (fieldSource && fieldSource !== rule.source) {
+      return fieldSource === "traces" ? "This field is on spans, not logs" : "This field is on logs, not spans";
+    }
+    if (rule.field.startsWith("ai:") && rule.aggregation === "count_distinct") return "Sum or average AI usage";
   }
   if (rule.groupMode === "per_group" && !rule.groupBy) return "Choose what to group by";
   return null;
@@ -104,15 +116,22 @@ export interface AlertEvaluation {
   value: number;
 }
 
+// Whether a rule with no matching data reads zero: counts and sums of logs
+// and spans do. Metrics, averages and percentiles have no value then.
+export function alertCountsEmptyAsZero(rule: Pick<AlertRule, "aggregation" | "source">): boolean {
+  return rule.source !== "metric" && (rule.aggregation === "count" || rule.aggregation === "sum");
+}
+
 // One value per group, or one total. `rows` are what the store returned for
-// the window: one row per group, or a single ungrouped row for a total. Counts with no rows are zero; metrics with no rows have no
+// the window: one row per group, or a single ungrouped row for a total.
+// Counts and sums with no rows are zero; other values with no rows have no
 // data and give no evaluation, so an open episode stays as it is.
 export function evaluateAlert(
   rule: Pick<AlertRule, "aggregation" | "comparator" | "groupBy" | "groupMode" | "source" | "threshold">,
   rows: Array<{ group: string; value: number }>,
   openGroups: readonly string[],
 ): AlertEvaluation[] {
-  const counted = rule.source !== "metric";
+  const counted = alertCountsEmptyAsZero(rule);
   const evaluation = (groupKey: string, value: number) => ({
     breaching: isBreaching(value, rule.comparator, rule.threshold),
     groupKey,

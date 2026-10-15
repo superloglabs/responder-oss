@@ -90,6 +90,8 @@ export interface AlertForm {
   enabled: boolean;
   // Filter fields the form does not edit, kept from a copied Superlog alert.
   extraFilter: Pick<AlertFilter, "minDurationMs" | "spanName" | "statusCode">;
+  // What a log or span aggregation other than a count reads.
+  field: string;
   filters: NonNullable<AlertFilter["resourceAttrs"]>;
   groupBy: string;
   intervalSeconds: number;
@@ -117,6 +119,7 @@ export function emptyAlertForm(): AlertForm {
     comparator: "gt",
     enabled: true,
     extraFilter: {},
+    field: "",
     filters: [],
     groupBy: "",
     intervalSeconds: 60,
@@ -147,6 +150,7 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
       // Another status, such as OK, is kept as it was.
       ...(statusCode && statusCode !== "STATUS_CODE_ERROR" ? { statusCode } : {}),
     },
+    field: alert.field ?? "",
     filters: resourceAttrs ?? [],
     groupBy: alert.groupBy ?? "",
     intervalSeconds: alert.evaluationIntervalSeconds,
@@ -184,6 +188,8 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
   const threshold = Number(form.threshold);
   if (form.threshold.trim() === "" || !Number.isFinite(threshold)) return { error: "Set a threshold." };
   if (form.source === "metric" && !form.metricName) return { error: "Choose a metric." };
+  const measured = form.source !== "metric" && form.aggregation !== "count";
+  if (measured && !form.field) return { error: "Choose a field to aggregate." };
   if (form.perGroup && !form.groupBy) return { error: "Choose what to group by." };
   const filters = form.filters.filter((filter) => filter.key.trim());
   const [integrationAccountId, channelId] = form.slack ? form.slack.split(":") : [];
@@ -203,10 +209,12 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
   }
   return {
     body: {
-      aggregation: form.source === "metric" ? (form.aggregation === "count" ? "avg" : form.aggregation) : "count",
+      aggregation:
+        form.source === "metric" ? (form.aggregation === "sum" ? "sum" : "avg") : form.aggregation,
       comparator: form.comparator,
       enabled: form.enabled,
       evaluationIntervalSeconds: form.intervalSeconds,
+      field: measured ? form.field : null,
       filter,
       groupBy: form.groupBy || null,
       groupMode: form.perGroup ? "per_group" : "single",
