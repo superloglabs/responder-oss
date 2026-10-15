@@ -21,14 +21,17 @@ export const defaultAlertAutomationDependencies: Omit<AlertAutomationDependencie
 };
 
 // Slack does not deliver the app's own messages as events that start
-// automations, so an alert starts the automations watching its channel
-// itself, as if the message had arrived from Slack. Each automation runs once
-// per episode, and its replies go in the alert's thread.
+// automations, so an alert, or a failing synthetic check, starts the
+// automations watching its channel itself, as if the message had arrived
+// from Slack. Each automation runs once per episode, and its replies go in
+// the message's thread.
 export async function startAlertAutomations(
   input: {
     body: string;
     channelId: string;
     episodeId: string;
+    // What opened the episode. Each automation runs once per episode.
+    episodeSource?: "synthetic-check-episode" | "telemetry-alert-episode";
     integrationAccountId: string;
     organizationId: string;
     timestamp: string;
@@ -74,7 +77,7 @@ export async function startAlertAutomations(
             timestamp: input.timestamp,
           },
           body: input.body,
-          externalEventId: `telemetry-alert-episode:${input.episodeId}:${match.automationId}`,
+          externalEventId: `${input.episodeSource ?? "telemetry-alert-episode"}:${input.episodeId}:${match.automationId}`,
           provider: "slack",
           sourceUrl: `https://slack.com/archives/${input.channelId}/p${input.timestamp.replace(".", "")}`,
           title: input.title,

@@ -15,6 +15,7 @@ export interface WorkerErrorContext {
     | "remediation"
     | "sandbox_cleanup"
     | "slack_delivery"
+    | "synthetic_checks"
     | "telemetry_alerts"
     | "worker";
   investigationId?: string;

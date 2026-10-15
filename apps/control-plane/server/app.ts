@@ -29,6 +29,7 @@ import { billingRoutes } from "./billing/routes.js";
 import { consentBasePath, handleConsentRequest } from "./consent.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
+import { createSyntheticRoutes } from "./synthetics/routes.js";
 import { createAlertRoutes } from "./telemetry/alert-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createIngestKeyRoutes } from "./telemetry/ingest-key-routes.js";
@@ -485,6 +486,7 @@ export const app = instrumentedApp
   .route("/api/ingest", createIngestRoutes())
   .route("/api/telemetry/ingest-keys", createIngestKeyRoutes())
   .route("/api/telemetry/alerts", createAlertRoutes())
+  .route("/api/synthetic-checks", createSyntheticRoutes())
   .route("/api/telemetry/dashboards", createDashboardRoutes())
   .route("/api/telemetry", createTelemetryRoutes())
   .route("/api/automation-model-broker", automationModelBrokerRoutes)

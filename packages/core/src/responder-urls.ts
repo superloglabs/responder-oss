@@ -53,3 +53,11 @@ export function responderAlertUrl(alertId: string, origin: string): string {
   url.hash = "";
   return url.toString();
 }
+
+export function responderSyntheticCheckUrl(checkId: string, origin: string): string {
+  const url = responderUrl(origin);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/synthetics/${encodeURIComponent(checkId)}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}

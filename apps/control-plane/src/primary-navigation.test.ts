@@ -44,14 +44,17 @@ describe("primaryNavigation", () => {
     ]);
   });
 
-  it("lists alerts only with telemetry and the alerts capability", () => {
+  it("lists alerts and synthetic checks only with telemetry and the alerts capability", () => {
     expect(
       primaryNavigation({ alerts: true, automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),
-    ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Metrics", "AI models", "Dashboards", "Alerts", "Integrations", "Tag mode", "Settings"]);
+    ).toEqual(["Automations", "PRs", "Skills", "Logs", "Traces", "Metrics", "AI models", "Dashboards", "Alerts", "Synthetics", "Integrations", "Tag mode", "Settings"]);
     expect(primaryNavigation({ alerts: true, automations: true, simplified: true }).map((item) => item.label)).not.toContain("Alerts");
     expect(
       primaryNavigation({ alerts: false, automations: true, simplified: true, telemetry: true }).map((item) => item.label),
     ).not.toContain("Alerts");
+    expect(
+      primaryNavigation({ alerts: false, automations: true, simplified: true, telemetry: true }).map((item) => item.label),
+    ).not.toContain("Synthetics");
   });
 
   it("lists dashboards only with telemetry", () => {

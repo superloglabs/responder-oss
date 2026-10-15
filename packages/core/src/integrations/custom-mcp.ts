@@ -17,12 +17,11 @@ import type {
 import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch } from "undici";
 import { z } from "zod";
+import { addressIsPublic, localHostname } from "../network/public-address.js";
 
 const MAX_REDIRECTS = 5;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
-const IPV4_COMPATIBLE_IPV6_RANGE = ipaddr.parseCIDR("::/96");
-const GLOBAL_UNICAST_IPV6_RANGE = ipaddr.parseCIDR("2000::/3");
 
 export interface StoredCustomMcpOAuthState {
   clientInformation?: OAuthClientInformationMixed;
@@ -158,30 +157,6 @@ export class CustomMcpOAuthProvider implements OAuthClientProvider {
     this.options.stored ??= {};
     return this.options.stored;
   }
-}
-
-function addressIsPublic(address: string): boolean {
-  if (!ipaddr.isValid(address)) return false;
-  const parsed = ipaddr.parse(address);
-  if (
-    parsed.kind() === "ipv6" &&
-    (parsed.match(IPV4_COMPATIBLE_IPV6_RANGE) ||
-      !parsed.match(GLOBAL_UNICAST_IPV6_RANGE))
-  ) {
-    return false;
-  }
-  return parsed.range() === "unicast";
-}
-
-function localHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/, "");
-  return (
-    normalized === "localhost" ||
-    normalized === "127.0.0.1" ||
-    normalized === "::1" ||
-    normalized.endsWith(".localhost") ||
-    normalized.endsWith(".local")
-  );
 }
 
 export async function validateCustomMcpUrl(

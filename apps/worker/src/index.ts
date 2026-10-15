@@ -101,6 +101,11 @@ import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
+import {
+  createSyntheticCheckScheduler,
+  defaultSyntheticCheckDependencies,
+  purgeSyntheticCheckRuns,
+} from "./synthetic-checks.js";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -136,27 +141,46 @@ const pollers: {
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
   replayRequest?: NodeJS.Timeout;
+  syntheticCheckPurge?: NodeJS.Timeout;
+  syntheticChecks?: NodeJS.Timeout;
   telemetryAlerts?: NodeJS.Timeout;
 } = {};
 
 let telemetryAlertPass: Promise<void> | undefined;
-// Alerts start the Slack automations watching their channel through this
-// worker's job queue.
+// Alerts and failing synthetic checks start the Slack automations watching
+// their channel through this worker's job queue.
+const startChannelAutomations = (input: Parameters<typeof startAlertAutomations>[0]) =>
+  startAlertAutomations(input, {
+    ...defaultAlertAutomationDependencies,
+    queue: async (run) => {
+      const queued = await boss.send(automationRunQueue, {
+        kind: "automation_run",
+        queuedAt: new Date().toISOString(),
+        runId: run.runId,
+      }, automationRunJobOptions(run.organizationId));
+      if (!queued) throw new Error("Automation run job was not created");
+    },
+  });
 const telemetryAlertDependencies = {
   ...defaultTelemetryAlertDependencies,
-  startAutomations: (input: Parameters<typeof startAlertAutomations>[0]) =>
-    startAlertAutomations(input, {
-      ...defaultAlertAutomationDependencies,
-      queue: async (run) => {
-        const queued = await boss.send(automationRunQueue, {
-          kind: "automation_run",
-          queuedAt: new Date().toISOString(),
-          runId: run.runId,
-        }, automationRunJobOptions(run.organizationId));
-        if (!queued) throw new Error("Automation run job was not created");
-      },
-    }),
+  startAutomations: startChannelAutomations,
 };
+const syntheticChecks = createSyntheticCheckScheduler(
+  { ...defaultSyntheticCheckDependencies, startAutomations: startChannelAutomations },
+  { onError: (error) => void reportWorkerException(error, { operation: "synthetic_checks" }) },
+);
+
+function runSyntheticChecks(): void {
+  syntheticChecks.tick().catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "synthetic_checks" });
+  });
+}
+
+function purgeSyntheticChecks(): void {
+  purgeSyntheticCheckRuns().catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "synthetic_checks" });
+  });
+}
 
 // Runs at most one alert pass at a time; a slow pass delays the next.
 function checkTelemetryAlerts(): Promise<void> {
@@ -523,12 +547,15 @@ async function shutdown(signal: string): Promise<void> {
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
   if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
+  if (pollers.syntheticChecks) clearInterval(pollers.syntheticChecks);
+  if (pollers.syntheticCheckPurge) clearInterval(pollers.syntheticCheckPurge);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
   await replayRequestDrain;
   await linearTicketDrain;
   await remediationRecoveryDrain;
   await telemetryAlertPass;
+  await syntheticChecks.stop();
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
     await boss.stop({
@@ -1090,5 +1117,9 @@ pollers.remediationRecovery = setInterval(
 pollers.remediationRecovery.unref();
 pollers.telemetryAlerts = setInterval(() => void checkTelemetryAlerts(), 15_000);
 pollers.telemetryAlerts.unref();
+pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);
+pollers.syntheticChecks.unref();
+pollers.syntheticCheckPurge = setInterval(purgeSyntheticChecks, 10 * 60 * 1_000);
+pollers.syntheticCheckPurge.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));
