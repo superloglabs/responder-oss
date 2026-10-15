@@ -3,6 +3,7 @@ import {
   type DashboardWidgetConfig,
   type DashboardWidgetFilter,
   type DashboardWidgetType,
+  type WidgetDisplay,
   type WidgetDraft,
   type WidgetUnit,
 } from "./dashboards-api";
@@ -15,8 +16,13 @@ export type WidgetSource = "logs" | "metric" | "traces";
 // chosen kind are kept, so switching kinds back and forth loses nothing. A
 // saved widget keeps only the settings its type uses.
 export interface WidgetForm {
+  // Empty counts logs and spans, or takes a metric's default.
   aggregation: "" | NonNullable<DashboardWidgetConfig["aggregation"]>;
   chartType: "bar" | "line";
+  compare: boolean;
+  display: WidgetDisplay;
+  // What a log or span aggregation reads.
+  field: string;
   filters: DashboardWidgetFilter[];
   groupBy: string;
   kind: WidgetKind;
@@ -42,6 +48,9 @@ export interface WidgetForm {
 export const emptyWidgetForm: WidgetForm = {
   aggregation: "",
   chartType: "bar",
+  compare: false,
+  display: "timeseries",
+  field: "",
   filters: [],
   groupBy: "",
   kind: "chart",
@@ -66,6 +75,8 @@ export function widgetType(form: Pick<WidgetForm, "kind" | "source">): Dashboard
   return form.source === "metric" ? "timeseries_metric" : "timeseries_count";
 }
 
+const metricAggregations = new Set(["sum", "avg", "min", "max", "p95", "p99"]);
+
 // The saved widget for a form: only the settings its type uses, and the
 // suggested title when none is typed.
 export function widgetDraft(form: WidgetForm): WidgetDraft {
@@ -78,22 +89,36 @@ export function widgetDraft(form: WidgetForm): WidgetDraft {
   } else if (type === "log_table" || type === "trace_table") {
     config = { filter, limit: Math.min(form.rows, type === "trace_table" ? 200 : 500) };
   } else {
+    const overTime = form.display === "timeseries";
+    const grouped = form.display !== "number" && Boolean(form.groupBy);
+    const aggregation =
+      type === "timeseries_count"
+        ? form.aggregation && form.aggregation !== "count" && form.field
+          ? { aggregation: form.aggregation, field: form.field }
+          : {}
+        : form.aggregation && metricAggregations.has(form.aggregation)
+          ? { aggregation: form.aggregation }
+          : {};
     config = {
-      chartType: form.chartType,
       filter,
-      legendPosition: form.legendPosition,
-      showLegend: form.showLegend,
-      showXAxis: form.showXAxis,
-      showYAxis: form.showYAxis,
-      ...(form.groupBy ? { groupBy: form.groupBy, limit: form.limit } : {}),
+      ...(overTime
+        ? {
+            chartType: form.chartType,
+            legendPosition: form.legendPosition,
+            showLegend: form.showLegend,
+            showXAxis: form.showXAxis,
+            showYAxis: form.showYAxis,
+          }
+        : { display: form.display, ...(form.compare ? { compare: "previous_period" as const } : {}) }),
+      ...(grouped ? { groupBy: form.groupBy, limit: form.limit } : {}),
       ...(form.unit === "none" ? {} : { unit: form.unit }),
       ...(type === "timeseries_count"
-        ? { source: form.source === "traces" ? ("traces" as const) : ("logs" as const) }
+        ? { source: form.source === "traces" ? ("traces" as const) : ("logs" as const), ...aggregation }
         : {
             metricName: form.metricName,
             ...(form.metricKind ? { metricKind: form.metricKind } : {}),
             ...(form.metricUnit !== null ? { metricUnit: form.metricUnit } : {}),
-            ...(form.aggregation ? { aggregation: form.aggregation } : {}),
+            ...aggregation,
           }),
     };
   }
@@ -109,6 +134,9 @@ export function widgetForm(widget: WidgetDraft): WidgetForm {
   return {
     aggregation: config.aggregation ?? "",
     chartType: config.chartType ?? (type === "timeseries_metric" ? "line" : "bar"),
+    compare: config.compare === "previous_period",
+    display: config.display ?? "timeseries",
+    field: config.field ?? "",
     filters: config.filter.resourceAttrs ?? [],
     groupBy: config.groupBy ?? "",
     kind,

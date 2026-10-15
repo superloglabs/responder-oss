@@ -12,6 +12,8 @@ import {
   variableValuesFromParams,
   placeWidget,
   suggestedWidgetTitle,
+  valueChange,
+  widgetChartType,
 } from "./dashboards-api";
 
 describe("formatWidgetValue", () => {
@@ -143,12 +145,49 @@ describe("suggestedWidgetTitle", () => {
     expect(
       suggestedWidgetTitle({ config: { aggregation: "p99", filter: {}, metricName: "rpc.duration" }, type: "timeseries_metric" }),
     ).toBe("rpc.duration (p99)");
+    expect(
+      suggestedWidgetTitle({
+        config: { aggregation: "p95", field: "duration", filter: {}, groupBy: "service", source: "traces" },
+        type: "timeseries_count",
+      }),
+    ).toBe("95th percentile of duration by service");
+    expect(
+      suggestedWidgetTitle({
+        config: { aggregation: "sum", display: "number", field: "span.gen_ai.usage.output_tokens", filter: {}, groupBy: "service" },
+        type: "timeseries_count",
+      }),
+    ).toBe("Sum of gen_ai.usage.output_tokens");
     expect(suggestedWidgetTitle({ config: { filter: {}, markdown: "no heading" }, type: "markdown" })).toBe("Note");
     expect(suggestedWidgetTitle({ config: { filter: {}, markdown: "#\nbody" }, type: "markdown" })).toBe("Note");
   });
 });
 
+describe("valueChange", () => {
+  it("describes how a value moved since the previous period", () => {
+    expect(valueChange(112, 100)).toBe("▲ 12% vs previous period");
+    expect(valueChange(75, 100, "none", { short: true })).toBe("▼ 25%");
+    expect(valueChange(100, 100)).toBe("No change");
+    expect(valueChange(5, 0)).toBe("Up from 0");
+    expect(valueChange(5, 0, "none", { short: true })).toBe("New");
+    expect(valueChange(null, 250, "duration_ms")).toBe("Previously 250 ms");
+    expect(valueChange(4, null, "none", { short: true })).toBe("—");
+  });
+});
+
+describe("widgetChartType", () => {
+  it("draws grouped percentiles as lines and keeps the chosen type otherwise", () => {
+    expect(widgetChartType("timeseries_count", { aggregation: "p95", chartType: "bar", filter: {}, groupBy: "service" })).toBe("line");
+    expect(widgetChartType("timeseries_count", { aggregation: "p95", chartType: "bar", filter: {} })).toBe("bar");
+    expect(widgetChartType("timeseries_count", { aggregation: "sum", chartType: "bar", filter: {}, groupBy: "service" })).toBe("bar");
+    expect(widgetChartType("timeseries_metric", { filter: {}, metricName: "queue.depth" })).toBe("line");
+  });
+});
+
 describe("placeWidget", () => {
+  it("places a single number as a small tile", () => {
+    expect(placeWidget("timeseries_count", [], "number")).toEqual({ h: 2, w: 3, x: 0, y: 0 });
+  });
+
   it("fills the space beside a half-width chart, then goes below", () => {
     expect(placeWidget("timeseries_count", [])).toEqual({ h: 4, w: 6, x: 0, y: 0 });
     expect(placeWidget("timeseries_metric", [{ h: 4, w: 6, x: 0, y: 0 }])).toEqual({ h: 4, w: 6, x: 6, y: 0 });

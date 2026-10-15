@@ -24,13 +24,26 @@ export type DashboardWidgetFilter = z.infer<typeof widgetFilterSchema>;
 export const maxWidgetFilters = 50;
 
 export const metricAggregations = ["sum", "avg", "min", "max", "p95", "p99"] as const;
+// Logs and spans are counted by default, or summed up from a field. Metrics
+// take the subset above.
+export const widgetAggregations = ["count", "count_distinct", "sum", "avg", "min", "max", "p50", "p90", "p95", "p99"] as const;
+export type WidgetAggregation = (typeof widgetAggregations)[number];
 export const widgetUnits = ["none", "duration_ms", "duration_s", "bytes", "percent"] as const;
 export type WidgetUnit = (typeof widgetUnits)[number];
+// How a chart widget shows its query: over time, as one number for the
+// window, or as one value per group.
+export const widgetDisplays = ["timeseries", "number", "bar_list", "table"] as const;
+export type WidgetDisplay = (typeof widgetDisplays)[number];
 
 export const dashboardWidgetConfigSchema = z.object({
-  aggregation: z.enum(metricAggregations).optional(),
+  aggregation: z.enum(widgetAggregations).optional(),
   chartType: z.enum(["line", "bar"]).optional(),
+  // A number or a table of groups can show the window before this one too.
+  compare: z.enum(["previous_period"]).optional(),
   description: z.string().max(500).optional(),
+  display: z.enum(widgetDisplays).optional(),
+  // What a log or span aggregation reads: `duration`, or an attribute key.
+  field: z.string().trim().max(200).optional(),
   filter: z.object({ resourceAttrs: z.array(widgetFilterSchema).max(maxWidgetFilters).optional() }).default({}),
   groupBy: z.string().trim().max(200).optional(),
   legendPosition: z.enum(["side", "bottom"]).optional(),
@@ -114,10 +127,28 @@ export const dashboardWidgetCreateSchema = z
     title: widgetTitleSchema,
     type: z.enum(dashboardWidgetTypes),
   })
-  .refine((widget) => widget.type !== "timeseries_metric" || Boolean(widget.config.metricName), {
-    message: "Choose a metric",
-    path: ["config", "metricName"],
+  .superRefine((widget, context) => {
+    const problem = widgetConfigProblem(widget.type, widget.config);
+    if (problem) context.addIssue({ code: "custom", message: problem.message, path: ["config", problem.field] });
   });
+
+// Why a chart widget's settings cannot be queried, or null when they can.
+export function widgetConfigProblem(
+  type: DashboardWidgetType,
+  config: DashboardWidgetConfig,
+): { field: keyof DashboardWidgetConfig; message: string } | null {
+  const aggregation = config.aggregation;
+  if (type === "timeseries_metric") {
+    if (!config.metricName) return { field: "metricName", message: "Choose a metric" };
+    if (aggregation && !(metricAggregations as readonly string[]).includes(aggregation)) {
+      return { field: "aggregation", message: "Metrics are summed, averaged, or read as a minimum, maximum or percentile" };
+    }
+  }
+  if (type === "timeseries_count" && aggregation && aggregation !== "count" && !config.field) {
+    return { field: "field", message: "Choose a field to aggregate" };
+  }
+  return null;
+}
 
 export const dashboardWidgetUpdateSchema = z
   .object({
@@ -211,10 +242,11 @@ function bucketTime(bucket: string): number {
 
 // Groups rows into at most `limit` series by total, plus one "Other" series
 // for the rest. Every bucket in the window is on the axis. Counts fill missing
-// buckets with zero; metrics leave them null.
+// buckets with zero; metrics leave them null. Values that do not add up, such
+// as averages and percentiles, get no "Other" series.
 export function chartSeries(
   rows: Array<{ bucket: string; group: string; value: number }>,
-  options: { fill: "null" | "zero"; limit?: number; sinceMs: number; stepMs: number; untilMs: number },
+  options: { fill: "null" | "zero"; limit?: number; other?: boolean; sinceMs: number; stepMs: number; untilMs: number },
 ): ChartData {
   const { sinceMs, stepMs, untilMs } = options;
   const limit = options.limit ?? defaultSeriesLimit;
@@ -236,7 +268,7 @@ export function chartSeries(
   const kept = new Set(ranked.slice(0, limit));
   const empty = () => new Array<number | null>(buckets.length).fill(options.fill === "zero" ? 0 : null);
   const values = new Map([...kept].map((name) => [name, empty()]));
-  const rest = ranked.length > kept.size ? empty() : null;
+  const rest = ranked.length > kept.size && options.other !== false ? empty() : null;
   for (const row of rows) {
     const position = index.get(bucketTime(row.bucket));
     if (position === undefined) continue;

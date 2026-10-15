@@ -78,3 +78,18 @@
   .widgetEditor { grid-template-columns: minmax(0, 1fr); }
   .widgetEditor__preview { position: static; }
 }
+
+/* A single value that scales with its tile. */
+.widgetNumber { container-type: size; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 100%; min-height: 48px; }
+.widgetNumber__value { margin: 0; overflow: hidden; color: var(--ds-text-primary); font-size: clamp(20px, 34cqh, 40px); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+.widgetNumber__change { margin: 0; overflow: hidden; color: var(--ds-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+.widgetBars { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.widgetBars__row { display: grid; grid-template-columns: minmax(0, 32%) minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 24px; }
+.widgetBars__name { overflow: hidden; color: var(--ds-text-primary); text-overflow: ellipsis; white-space: nowrap; }
+.widgetBars__track { display: block; min-width: 0; height: 10px; }
+.widgetBars__bar { display: block; min-width: 2px; height: 100%; border-radius: 0 4px 4px 0; background: var(--chart-0); }
+.widgetBars__value { color: var(--ds-text-primary); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+.widgetValueTable th:first-child { width: auto; }
+.widgetValueTable th:nth-child(2) { width: auto; }

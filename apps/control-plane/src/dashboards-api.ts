@@ -7,6 +7,8 @@ import type {
   DashboardWidgetFilter,
   DashboardWidgetLayout,
   DashboardWidgetType,
+  WidgetAggregation,
+  WidgetDisplay,
   WidgetUnit,
 } from "../../../packages/core/src/telemetry/dashboards";
 import type {
@@ -28,12 +30,24 @@ export type {
   TelemetryDashboard,
   TelemetryDashboardSummary,
   TelemetryDashboardWidget,
+  WidgetAggregation,
+  WidgetDisplay,
   WidgetUnit,
 };
+
+// A group's value over the window, and over the window before when the
+// widget compares with it. Null means nothing had a value.
+export interface WidgetValueRow {
+  group: string;
+  previous?: number | null;
+  value: number | null;
+}
 
 export type WidgetData =
   | { chart: ChartData; kind: "chart" }
   | { kind: "logs"; logs: LogRecord[] }
+  | { kind: "number"; previous?: number | null; value: number | null }
+  | { kind: "rows"; rows: WidgetValueRow[] }
   | { kind: "traces"; traces: TraceSummary[] };
 
 // The instants a query covers, in milliseconds.
@@ -227,9 +241,13 @@ const widgetSizes: Record<DashboardWidgetType, { h: number; w: number }> = {
 };
 
 // The first free spot for a new widget of this type, reading the grid left to
-// right and top to bottom.
-export function placeWidget(type: DashboardWidgetType, taken: DashboardWidgetLayout[]): DashboardWidgetLayout {
-  const { h, w } = widgetSizes[type];
+// right and top to bottom. A single number takes a small tile.
+export function placeWidget(
+  type: DashboardWidgetType,
+  taken: DashboardWidgetLayout[],
+  display?: WidgetDisplay,
+): DashboardWidgetLayout {
+  const { h, w } = display === "number" ? { h: 2, w: 3 } : widgetSizes[type];
   const overlaps = (x: number, y: number) =>
     taken.some((other) => x < other.x + other.w && other.x < x + w && y < other.y + other.h && other.y < y + h);
   for (let y = 0; ; y += 1) {
@@ -349,6 +367,28 @@ export function formatWidgetValue(value: number | null, unit: WidgetUnit = "none
   return unit === "percent" ? `${number}%` : number;
 }
 
+const changePercent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+
+// How a value moved since the window before. The short form fits a table
+// column.
+export function valueChange(
+  value: number | null,
+  previous: number | null,
+  unit: WidgetUnit = "none",
+  options: { short?: boolean } = {},
+): string {
+  if (previous === null) return options.short ? "—" : "No value in the previous period";
+  if (value === null) return options.short ? "—" : `Previously ${formatWidgetValue(previous, unit)}`;
+  if (value === previous) return "No change";
+  if (previous === 0) {
+    if (options.short) return "New";
+    return `${value > 0 ? "Up" : "Down"} from ${formatWidgetValue(0, unit)}`;
+  }
+  const change = ((value - previous) / Math.abs(previous)) * 100;
+  if (Math.abs(change) < 0.05) return "No change";
+  return `${change > 0 ? "▲" : "▼"} ${changePercent.format(Math.abs(change))}%${options.short ? "" : " vs previous period"}`;
+}
+
 // Round axis marks from zero (or the lowest value) to at least the highest.
 export function axisTicks(minimum: number, maximum: number, count = 4): number[] {
   const low = Math.min(0, minimum);
@@ -365,13 +405,44 @@ export function axisTicks(minimum: number, maximum: number, count = 4): number[]
   return ticks;
 }
 
+// Grouped values that do not add up, such as percentiles, are drawn as lines:
+// stacking them would show a total that means nothing.
+export function widgetChartType(type: DashboardWidgetType, config: DashboardWidgetConfig): "bar" | "line" {
+  const additive = !config.aggregation || config.aggregation === "count" || config.aggregation === "sum";
+  if (!additive && config.groupBy) return "line";
+  return config.chartType ?? (type === "timeseries_metric" ? "line" : "bar");
+}
+
+// How each aggregation of logs or spans is named.
+export const widgetAggregationLabels: Record<WidgetAggregation, string> = {
+  avg: "Average",
+  count: "Count",
+  count_distinct: "Distinct values",
+  max: "Maximum",
+  min: "Minimum",
+  p50: "Median",
+  p90: "90th percentile",
+  p95: "95th percentile",
+  p99: "99th percentile",
+  sum: "Sum",
+};
+
+// A field as people read it: span duration, or an attribute key without its
+// scope prefix.
+export function widgetFieldLabel(field: string): string {
+  return field === "duration" ? "duration" : field.replace(/^(?:attr:|resource\.|span\.|log\.)/u, "");
+}
+
 // A title from the widget's settings, used until someone names it.
 export function suggestedWidgetTitle(widget: { config: DashboardWidgetConfig; type: DashboardWidgetType }): string {
   const { config, type } = widget;
-  const by = config.groupBy ? ` by ${config.groupBy.replace(/^attr:/u, "")}` : "";
+  const by = config.groupBy && config.display !== "number" ? ` by ${widgetFieldLabel(config.groupBy)}` : "";
   switch (type) {
-    case "timeseries_count":
-      return `${config.source === "traces" ? "Spans" : "Logs"}${by}`;
+    case "timeseries_count": {
+      const counted = config.source === "traces" ? "Spans" : "Logs";
+      if (!config.aggregation || config.aggregation === "count" || !config.field) return `${counted}${by}`;
+      return `${widgetAggregationLabels[config.aggregation]} of ${widgetFieldLabel(config.field)}${by}`;
+    }
     case "timeseries_metric":
       return `${config.metricName || "Metric"}${config.aggregation ? ` (${config.aggregation})` : ""}${by}`;
     case "log_table":

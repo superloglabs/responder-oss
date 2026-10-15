@@ -5,6 +5,8 @@ import { Badge } from "../design-system";
 import { resolveTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
 import {
   fetchWidgetData,
+  widgetAggregationLabels,
+  widgetChartType,
   type DashboardWidgetConfig,
   type DashboardWidgetType,
   type VariableValues,
@@ -12,6 +14,7 @@ import {
 } from "../dashboards-api";
 import { formatDuration, formatTelemetryTime, severityTone, traceHref } from "../telemetry-api";
 import { TimeseriesChart } from "./timeseries-chart";
+import { BarListValues, NumberValue, ValueTable } from "./widget-values";
 
 type DataWidgetType = Exclude<DashboardWidgetType, "markdown">;
 
@@ -77,7 +80,7 @@ function WidgetData({
     return (
       <TimeseriesChart
         chart={data.chart}
-        chartType={config.chartType ?? (type === "timeseries_metric" ? "line" : "bar")}
+        chartType={widgetChartType(type, config)}
         label={title}
         legendPosition={config.legendPosition ?? "bottom"}
         {...(onZoom ? { onZoom } : {})}
@@ -86,6 +89,21 @@ function WidgetData({
         showYAxis={config.showYAxis ?? true}
         {...(timeZone ? { timeZone } : {})}
         unit={config.unit ?? "none"}
+      />
+    );
+  }
+  if (data.kind === "number") {
+    return <NumberValue {...(data.previous !== undefined ? { previous: data.previous } : {})} unit={config.unit ?? "none"} value={data.value} />;
+  }
+  if (data.kind === "rows") {
+    if (data.rows.length === 0) return <p className="dashboardWidget__status">No data in this time range.</p>;
+    if (config.display === "bar_list") return <BarListValues rows={data.rows} unit={config.unit ?? "none"} />;
+    return (
+      <ValueTable
+        groupBy={config.groupBy ?? ""}
+        rows={data.rows}
+        unit={config.unit ?? "none"}
+        valueLabel={config.aggregation ? widgetAggregationLabels[config.aggregation] : type === "timeseries_metric" ? "Value" : "Count"}
       />
     );
   }

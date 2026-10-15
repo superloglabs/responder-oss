@@ -11,10 +11,17 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     attributeKeys: vi.fn(async () => [{ count: 3, key: "resource.deployment.environment" }]),
     attributeValues: vi.fn(async () => [{ count: 3, value: "production" }]),
     client: () => ({}) as never,
-    countAggregate: vi.fn(async (_client, _projectId, _source, _filter, groupBy: string) => [{ group: `${groupBy}-top`, value: 7 }]),
+    countAggregate: vi.fn(async (_client, _projectId, _source, _filter, groupBy: string | undefined) => [{ group: groupBy ? `${groupBy}-top` : "", value: 7 }]),
     countSeries: vi.fn(async () => [
       { bucket: "2026-10-13 11:00:00", count: 2, group: "api" },
       { bucket: "2026-10-13 11:30:00", count: 1, group: "web" },
+    ]),
+    eventAggregate: vi.fn(async (_client, _projectId, _source, _filter, _measure, groupBy: string | undefined) => [
+      { group: groupBy ? `${groupBy}-top` : "", value: 4.5 },
+    ]),
+    eventSeries: vi.fn(async () => [
+      { bucket: "2026-10-13 11:00:00", group: "api", value: 120 },
+      { bucket: "2026-10-13 11:30:00", group: "web", value: 80 },
     ]),
     findProject: vi.fn(async () => ({ name: "Default", projectId })),
     hasDashboards: vi.fn(async () => true),
@@ -37,6 +44,7 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     ]),
     metricNames: vi.fn(async () => [{ kind: "histogram", name: "http.server.duration", unit: "ms" }]),
     metricSeries: vi.fn(async () => [{ bucket: "2026-10-13 11:00:00", group: "", value: 12.5 }]),
+    metricWindowAggregate: vi.fn(async () => [{ group: "", value: 12.5 }]),
     now: () => now,
     queryLogs: vi.fn(async () => [{ body: "hello", service: "checkout" }]),
     queryTrace: vi.fn(async () => ({ logs: [], spans: [{ span_id: "a1" }] })),
@@ -488,6 +496,136 @@ describe("telemetry routes", () => {
       expect(
         (await post(app, { config: {}, projectId, range: "1h", type: "timeseries_metric" })).status,
       ).toBe(400);
+    });
+
+    it("charts a percentile of a span field without an Other series or zero fill", async () => {
+      const { app, dependencies } = routes();
+
+      const response = await post(app, {
+        config: { aggregation: "p95", field: "duration", groupBy: "service", limit: 1, source: "traces" },
+        projectId,
+        range: "1h",
+        type: "timeseries_count",
+      });
+
+      const body = (await response.json()) as { chart: { series: Array<{ name: string; values: Array<number | null> }> } };
+      expect(dependencies.eventSeries).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        "traces",
+        { range: expect.anything(), resourceAttrs: [] },
+        { aggregation: "p95", field: "duration" },
+        "service",
+        { n: 30, unit: "SECOND" },
+      );
+      expect(dependencies.countSeries).not.toHaveBeenCalled();
+      expect(body.chart.series.map((series) => series.name)).toEqual(["api"]);
+      expect(body.chart.series[0]!.values.filter((value) => value !== null)).toEqual([120]);
+      expect(
+        (await post(app, { config: { aggregation: "p95", source: "traces" }, projectId, range: "1h", type: "timeseries_count" }))
+          .status,
+      ).toBe(400);
+    });
+
+    it("shows one number for the window, compared with the window before", async () => {
+      const { app, dependencies } = routes();
+
+      const response = await post(app, {
+        config: {
+          aggregation: "sum",
+          compare: "previous_period",
+          display: "number",
+          field: "span.gen_ai.usage.output_tokens",
+          groupBy: "service",
+          source: "traces",
+        },
+        projectId,
+        range: "1h",
+        type: "timeseries_count",
+      });
+
+      expect(await response.json()).toEqual({ kind: "number", previous: 4.5, value: 4.5 });
+      const measure = { aggregation: "sum", field: "span.gen_ai.usage.output_tokens" };
+      expect(dependencies.eventAggregate).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        "traces",
+        { range: { since: "2026-10-13T11:00:00.000Z", until: "2026-10-13T12:00:00.000Z" }, resourceAttrs: [] },
+        measure,
+        undefined,
+        1,
+      );
+      expect(dependencies.eventAggregate).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        "traces",
+        { range: { since: "2026-10-13T10:00:00.000Z", until: "2026-10-13T11:00:00.000Z" }, resourceAttrs: [] },
+        measure,
+        undefined,
+        1,
+      );
+    });
+
+    it("counts nothing as zero, and leaves other measures empty", async () => {
+      const empty = vi.fn(async () => []);
+      const { app } = routes({ countAggregate: empty, eventAggregate: empty });
+
+      const count = await post(app, { config: { display: "number" }, projectId, range: "1h", type: "timeseries_count" });
+      const average = await post(app, {
+        config: { aggregation: "avg", display: "number", field: "duration", source: "traces" },
+        projectId,
+        range: "1h",
+        type: "timeseries_count",
+      });
+
+      expect(await count.json()).toEqual({ kind: "number", value: 0 });
+      expect(await average.json()).toEqual({ kind: "number", value: null });
+    });
+
+    it("lists a value per group, with each group's value the window before", async () => {
+      const { app, dependencies } = routes({
+        countAggregate: vi.fn(async (_client, _projectId, _source, filter) =>
+          filter.range?.since === "2026-10-13T11:00:00.000Z"
+            ? [{ group: "api", value: 7 }, { group: "web", value: 3 }]
+            : [{ group: "api", value: 5 }],
+        ),
+      });
+
+      const response = await post(app, {
+        config: { compare: "previous_period", display: "table", groupBy: "service", limit: 5 },
+        projectId,
+        range: "1h",
+        type: "timeseries_count",
+      });
+
+      expect(await response.json()).toEqual({
+        kind: "rows",
+        rows: [
+          { group: "api", previous: 5, value: 7 },
+          { group: "web", previous: 0, value: 3 },
+        ],
+      });
+      expect(dependencies.countAggregate).toHaveBeenCalledWith(expect.anything(), projectId, "logs", expect.anything(), "service", 5);
+    });
+
+    it("lists a metric per group over the whole window", async () => {
+      const { app, dependencies } = routes();
+
+      const response = await post(app, {
+        config: { aggregation: "p99", display: "bar_list", groupBy: "service", limit: 3, metricName: "http.server.duration" },
+        projectId,
+        range: "1h",
+        type: "timeseries_metric",
+      });
+
+      expect(await response.json()).toEqual({ kind: "rows", rows: [{ group: "", value: 12.5 }] });
+      expect(dependencies.metricWindowAggregate).toHaveBeenCalledWith(expect.anything(), projectId, {
+        aggregation: "p99",
+        filter: { range: expect.anything(), resourceAttrs: [] },
+        groupBy: "service",
+        limit: 3,
+        metricName: "http.server.duration",
+      });
     });
 
     it("lists logs and traces for table widgets", async () => {
