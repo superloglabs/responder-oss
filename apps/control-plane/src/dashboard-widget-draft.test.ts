@@ -81,6 +81,53 @@ describe("widgetDraft", () => {
   });
 });
 
+describe("measures and displays", () => {
+  it("saves a span aggregation shown as a number compared with the previous period", () => {
+    const draft = widgetDraft({
+      ...emptyWidgetForm,
+      aggregation: "sum",
+      compare: true,
+      display: "number",
+      field: "span.gen_ai.usage.output_tokens",
+      groupBy: "service",
+      source: "traces",
+    });
+    expect(draft.config).toEqual({
+      aggregation: "sum",
+      compare: "previous_period",
+      display: "number",
+      field: "span.gen_ai.usage.output_tokens",
+      filter: {},
+      source: "traces",
+    });
+  });
+
+  it("counts until a field is chosen, and keeps metric aggregations only for metrics", () => {
+    expect(widgetDraft({ ...emptyWidgetForm, aggregation: "p95" }).config).not.toHaveProperty("aggregation");
+    expect(
+      widgetDraft({ ...emptyWidgetForm, aggregation: "p50", metricName: "queue.depth", source: "metric" }).config,
+    ).not.toHaveProperty("aggregation");
+  });
+
+  it("round-trips a grouped table", () => {
+    const saved = {
+      config: {
+        aggregation: "p99" as const,
+        display: "table" as const,
+        field: "duration",
+        filter: {},
+        groupBy: "span.gen_ai.request.model",
+        limit: 5,
+        source: "traces" as const,
+        unit: "duration_ms" as const,
+      },
+      title: "Slowest models",
+      type: "timeseries_count" as const,
+    };
+    expect(widgetDraft(widgetForm(saved))).toEqual(saved);
+  });
+});
+
 describe("widgetForm", () => {
   it("round-trips a saved widget, keeping its axis settings", () => {
     const saved = {

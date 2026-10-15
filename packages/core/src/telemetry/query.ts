@@ -195,6 +195,7 @@ function anyOfConds(
 function groupExprForAttribute(
   groupBy: string | undefined,
   source: SeriesSource,
+  paramName = "groupKey",
 ): { expr: string; params: Record<string, string> } {
   if (groupBy === "service.name" || groupBy === "service") {
     return { expr: "ServiceName", params: {} };
@@ -213,21 +214,21 @@ function groupExprForAttribute(
     return {
       expr:
         source === "logs"
-          ? "LogAttributes[{groupKey:String}]"
-          : "SpanAttributes[{groupKey:String}]",
-      params: { groupKey: groupBy.slice("attr:".length) },
+          ? `LogAttributes[{${paramName}:String}]`
+          : `SpanAttributes[{${paramName}:String}]`,
+      params: { [paramName]: groupBy.slice("attr:".length) },
     };
   }
   if (groupBy) {
     const parsed = parseAttributeKey(groupBy);
     if (parsed.scope === "resource") {
-      return { expr: "ResourceAttributes[{groupKey:String}]", params: { groupKey: parsed.key } };
+      return { expr: `ResourceAttributes[{${paramName}:String}]`, params: { [paramName]: parsed.key } };
     }
     if (parsed.scope === "log" && source === "logs") {
-      return { expr: "LogAttributes[{groupKey:String}]", params: { groupKey: parsed.key } };
+      return { expr: `LogAttributes[{${paramName}:String}]`, params: { [paramName]: parsed.key } };
     }
     if (parsed.scope === "span" && source === "traces") {
-      return { expr: "SpanAttributes[{groupKey:String}]", params: { groupKey: parsed.key } };
+      return { expr: `SpanAttributes[{${paramName}:String}]`, params: { [paramName]: parsed.key } };
     }
   }
   return { expr: "''", params: {} };
@@ -1298,7 +1299,7 @@ function histogramQuantileQuery(args: {
                       current,
                       if(
                         current >= previous_counts[indexOf(previous_keys, key)],
-                        current - previous_counts[indexOf(previous_keys, key)],
+                        toUInt64(current - previous_counts[indexOf(previous_keys, key)]),
                         toUInt64(0)
                       )
                     ),
@@ -2911,6 +2912,161 @@ export async function countAggregate(
     const rows = (await r.json()) as { group_key: string; c: string | number }[];
     return rows.map((row) => ({ group: row.group_key, value: Number(row.c) }));
   });
+}
+
+// How logs or spans are summed up. A count needs no field; the others read a
+// number from the field, and a distinct count reads its text.
+export const EVENT_AGGREGATIONS = ["count", "count_distinct", "sum", "avg", "min", "max", "p50", "p90", "p95", "p99"] as const;
+export type EventAggregation = (typeof EVENT_AGGREGATIONS)[number];
+// The field is `duration`, a span's duration in milliseconds, or an attribute
+// key as grouping takes it, such as `span.gen_ai.usage.input_tokens`.
+export type EventMeasure = { aggregation: EventAggregation; field?: string };
+
+const QUANTILES: Partial<Record<EventAggregation, number>> = { p50: 0.5, p90: 0.9, p95: 0.95, p99: 0.99 };
+
+// Sums and counts add up across groups and buckets; the others do not.
+export function isAdditiveAggregation(aggregation: string | undefined): boolean {
+  return aggregation === undefined || aggregation === "count" || aggregation === "sum";
+}
+
+// The aggregate expression for a measure, and the condition that keeps only
+// rows the field has a value on. Null when the field cannot be read from this
+// source.
+function measureExprs(
+  measure: EventMeasure,
+  source: SeriesSource,
+): { condition: string | null; expr: string; params: Record<string, string> } | null {
+  if (measure.aggregation === "count") return { condition: null, expr: "count()", params: {} };
+  if (!measure.field) return null;
+  let text: string;
+  let number: string;
+  let params: Record<string, string> = {};
+  if (measure.field === "duration") {
+    if (source !== "traces") return null;
+    text = "toString(Duration)";
+    number = "Duration / 1e6";
+  } else {
+    const attribute = groupExprForAttribute(measure.field, source, "fieldKey");
+    if (attribute.expr === "''") return null;
+    text = attribute.expr;
+    number = `toFloat64OrNull(${attribute.expr})`;
+    params = attribute.params;
+  }
+  if (measure.aggregation === "count_distinct") {
+    return { condition: `${text} != ''`, expr: `uniq(${text})`, params };
+  }
+  const quantile = QUANTILES[measure.aggregation];
+  const expr = quantile === undefined ? `${measure.aggregation}(${number})` : `quantile(${quantile})(${number})`;
+  return { condition: measure.field === "duration" ? null : `isNotNull(${number})`, expr, params };
+}
+
+// The measure per bucket and group. Counts use the per-minute rollup when they
+// can; a group with no value in a bucket has no row.
+export async function eventSeries(
+  ch: ClickHouseClient,
+  projectId: string,
+  source: SeriesSource,
+  filter: SeriesFilter,
+  measure: EventMeasure,
+  groupBy: string | undefined,
+  step: Step,
+): Promise<MetricSeriesRow[]> {
+  if (measure.aggregation === "count") {
+    const rows = await countSeries(ch, projectId, source, filter, groupBy, step);
+    return rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
+  }
+  const measured = measureExprs(measure, source);
+  if (!measured) return [];
+  const { conds, params, table } = countConditions(projectId, source, filter);
+  const group = groupExprForAttribute(groupBy, source);
+  if (measured.condition) conds.push(measured.condition);
+  const r = await ch.query({
+    query: `
+      SELECT
+        toString(toStartOfInterval(Timestamp, INTERVAL ${step.n} ${step.unit})) AS bucket,
+        ${group.expr} AS group_key,
+        ${measured.expr} AS v
+      FROM ${table}
+      WHERE ${conds.join(" AND ")}
+      GROUP BY bucket, group_key
+      ORDER BY bucket ASC
+      LIMIT 10000
+    `,
+    query_params: { ...params, ...group.params, ...measured.params },
+    format: "JSONEachRow",
+  });
+  const rows = (await r.json()) as { bucket: string; group_key: string; v: string | number | null }[];
+  return rows.flatMap((row) =>
+    row.v === null ? [] : [{ bucket: row.bucket, group: row.group_key, value: Number(row.v) }],
+  );
+}
+
+// The measure per group over exactly the window, largest first, at most
+// `limit` groups. Without grouping there is one row, or none when nothing has
+// a value.
+export async function eventAggregate(
+  ch: ClickHouseClient,
+  projectId: string,
+  source: SeriesSource,
+  filter: SeriesFilter,
+  measure: EventMeasure,
+  groupBy: string | undefined,
+  limit: number,
+): Promise<{ group: string; value: number }[]> {
+  if (measure.aggregation === "count") return countAggregate(ch, projectId, source, filter, groupBy, limit);
+  const measured = measureExprs(measure, source);
+  if (!measured) return [];
+  const { conds, params, table } = countConditions(projectId, source, filter);
+  const group = groupExprForAttribute(groupBy, source);
+  if (measured.condition) conds.push(measured.condition);
+  return retryOneConnectionReset(async () => {
+    const r = await ch.query({
+      query: `
+        SELECT ${group.expr} AS group_key, ${measured.expr} AS v
+        FROM ${table}
+        WHERE ${conds.join(" AND ")}
+        GROUP BY group_key
+        ORDER BY v DESC
+        LIMIT {limit:UInt32}
+      `,
+      query_params: { ...params, ...group.params, ...measured.params, limit },
+      format: "JSONEachRow",
+    });
+    const rows = (await r.json()) as { group_key: string; v: string | number | null }[];
+    return rows.flatMap((row) => (row.v === null ? [] : [{ group: row.group_key, value: Number(row.v) }]));
+  });
+}
+
+// One bucket covering any window. Some metric paths align buckets to the
+// epoch rather than the window start, so the bucket is long enough that no
+// boundary falls between 1970 and 2200.
+const WHOLE_WINDOW_STEP: Step = { n: 84_000, unit: "DAY" };
+
+// One metric per group over the whole window, largest first, at most `limit`
+// groups. One bucket covers the window, so percentiles and averages are taken
+// over every point rather than per bucket.
+export async function metricWindowAggregate(
+  ch: ClickHouseClient,
+  projectId: string,
+  metricName: string,
+  filter: MetricSeriesFilter,
+  groupBy: string | undefined,
+  aggregation: MetricAggregation | undefined,
+  limit: number,
+  metric: Pick<MetricSeriesQueryOptions, "kind" | "unit"> = {},
+): Promise<MetricAggregateRow[]> {
+  const { sinceExpr } = resolveRange(filter.range);
+  const rows = await metricSeries(ch, projectId, metricName, filter, groupBy, WHOLE_WINDOW_STEP, aggregation, {
+    ...metric,
+    bucketAnchorNs: unixTimestamp64NanoExpr(sinceExpr),
+    rawBucketExpr: sinceExpr,
+    rowLimit: 1000,
+  });
+  return rows
+    .filter((row) => Number.isFinite(row.value))
+    .map((row) => ({ group: row.group, value: row.value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
 }
 
 // -----------------------------------------------------------------------------

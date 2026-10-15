@@ -7,6 +7,7 @@ import {
   dashboardWidgetLayoutSchema,
   defaultWidgetLayout,
   resolveWidgetFilters,
+  widgetConfigProblem,
 } from "./dashboards.js";
 
 const minute = 60_000;
@@ -51,6 +52,45 @@ describe("dashboard widgets", () => {
         type: "timeseries_metric",
       }).success,
     ).toBe(true);
+  });
+
+  it("needs a field to aggregate logs or spans other than by counting", () => {
+    expect(widgetConfigProblem("timeseries_count", { filter: {} })).toBeNull();
+    expect(widgetConfigProblem("timeseries_count", { aggregation: "count", filter: {} })).toBeNull();
+    expect(widgetConfigProblem("timeseries_count", { aggregation: "p95", filter: {} })).toEqual({
+      field: "field",
+      message: "Choose a field to aggregate",
+    });
+    expect(widgetConfigProblem("timeseries_count", { aggregation: "p95", field: "duration", filter: {}, source: "traces" })).toBeNull();
+    expect(
+      dashboardWidgetCreateSchema.safeParse({
+        config: { aggregation: "sum", display: "number", field: "span.gen_ai.usage.output_tokens", source: "traces" },
+        title: "Output tokens",
+        type: "timeseries_count",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("reads a field only from the signal that has it", () => {
+    const sum = { aggregation: "sum" as const, filter: {} };
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "duration", source: "logs" })?.message).toBe(
+      "This field is on spans, not logs",
+    );
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "log.bytes", source: "traces" })?.message).toBe(
+      "This field is on logs, not spans",
+    );
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "span.tokens", source: "traces" })).toBeNull();
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "deployment.replicas", source: "logs" })).toBeNull();
+  });
+
+  it("aggregates metrics only in the ways a metric supports", () => {
+    expect(widgetConfigProblem("timeseries_metric", { aggregation: "count", filter: {}, metricName: "queue.depth" })?.field).toBe(
+      "aggregation",
+    );
+    expect(widgetConfigProblem("timeseries_metric", { aggregation: "p50", filter: {}, metricName: "queue.depth" })?.field).toBe(
+      "aggregation",
+    );
+    expect(widgetConfigProblem("timeseries_metric", { aggregation: "p99", filter: {}, metricName: "queue.depth" })).toBeNull();
   });
 
   it("sizes new widgets by type and places them last", () => {
@@ -143,6 +183,17 @@ describe("chartSeries", () => {
       ["Other (2)", true],
     ]);
     expect(data.series[2]!.values).toEqual([1, 2, 0, 0]);
+  });
+
+  it("leaves out Other for values that do not add up", () => {
+    const data = chartSeries(
+      [
+        { bucket: "2026-10-13 12:00:00", group: "a", value: 1 },
+        { bucket: "2026-10-13 12:00:00", group: "b", value: 10 },
+      ],
+      { ...window, fill: "null", limit: 1, other: false },
+    );
+    expect(data.series.map((series) => series.name)).toEqual(["b"]);
   });
 
   it("skips the window fill when the step does not fit it", () => {

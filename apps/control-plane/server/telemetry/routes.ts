@@ -14,15 +14,19 @@ import {
   chartSeries,
   dashboardWidgetConfigSchema,
   maxWidgetFilters,
+  metricAggregations,
   type ChartData,
-  type DashboardWidgetConfig,
   type ResolvedWidgetFilter,
   resolveWidgetFilters,
+  widgetConfigProblem,
 } from "../../../../packages/core/src/telemetry/dashboards.js";
 import {
   countAggregate,
   countSeries,
+  eventAggregate,
+  eventSeries,
   getTraceDetail,
+  isAdditiveAggregation,
   listAttributeKeys,
   listAttributeValues,
   listMetricCatalog,
@@ -30,10 +34,13 @@ import {
   listMetricNames,
   listServices,
   metricSeries,
+  metricWindowAggregate,
   pickStep,
   queryLogs,
   queryTracesAggregated,
   traceOverview,
+  type EventMeasure,
+  type MetricAggregation,
   type MetricKind,
   type ResourceAttrFilter,
   type SeriesFilter,
@@ -67,9 +74,30 @@ export type TelemetryRouteDependencies = {
     projectId: string,
     source: TelemetrySignal,
     filter: SeriesFilter,
-    groupBy: string,
+    groupBy: string | undefined,
     limit: number,
   ) => Promise<Array<{ group: string; value: number }>>;
+  // Logs or spans summed up from a field, per group over the whole window,
+  // largest first.
+  eventAggregate: (
+    client: ClickHouseClient,
+    projectId: string,
+    source: TelemetrySignal,
+    filter: SeriesFilter,
+    measure: EventMeasure,
+    groupBy: string | undefined,
+    limit: number,
+  ) => Promise<Array<{ group: string; value: number }>>;
+  // Logs or spans summed up from a field, per bucket and group.
+  eventSeries: (
+    client: ClickHouseClient,
+    projectId: string,
+    source: TelemetrySignal,
+    filter: SeriesFilter,
+    measure: EventMeasure,
+    groupBy: string | undefined,
+    step: Step,
+  ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
   // Log or span counts per bucket and group.
   countSeries: (
     client: ClickHouseClient,
@@ -98,7 +126,7 @@ export type TelemetryRouteDependencies = {
     client: ClickHouseClient,
     projectId: string,
     params: {
-      aggregation?: DashboardWidgetConfig["aggregation"];
+      aggregation?: MetricAggregation;
       filter: { range: TimeRange; resourceAttrs: ResolvedWidgetFilter[] };
       groupBy: string | undefined;
       kind?: MetricKind;
@@ -107,6 +135,20 @@ export type TelemetryRouteDependencies = {
       unit?: string;
     },
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
+  // One metric per group over the whole window, largest first.
+  metricWindowAggregate: (
+    client: ClickHouseClient,
+    projectId: string,
+    params: {
+      aggregation?: MetricAggregation;
+      filter: { range: TimeRange; resourceAttrs: ResolvedWidgetFilter[] };
+      groupBy: string | undefined;
+      kind?: MetricKind;
+      limit: number;
+      metricName: string;
+      unit?: string;
+    },
+  ) => Promise<Array<{ group: string; value: number }>>;
   // Services that sent the signal in the window, or any signal.
   listServices: (
     client: ClickHouseClient,
@@ -153,6 +195,8 @@ const defaultDependencies: TelemetryRouteDependencies = {
   client: getTelemetryClient,
   countAggregate,
   countSeries,
+  eventAggregate,
+  eventSeries,
   findProject: findTelemetryProject,
   hasDashboards: (organizationId) => organizationHasCapability(organizationId, "dashboards"),
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
@@ -170,6 +214,20 @@ const defaultDependencies: TelemetryRouteDependencies = {
       params.groupBy,
       params.step,
       params.aggregation,
+      {
+        ...(params.kind ? { kind: params.kind } : {}),
+        ...(params.unit !== undefined ? { unit: params.unit } : {}),
+      },
+    ),
+  metricWindowAggregate: (client, projectId, params) =>
+    metricWindowAggregate(
+      client,
+      projectId,
+      params.metricName,
+      params.filter,
+      params.groupBy,
+      params.aggregation,
+      params.limit,
       {
         ...(params.kind ? { kind: params.kind } : {}),
         ...(params.unit !== undefined ? { unit: params.unit } : {}),
@@ -267,7 +325,7 @@ const metricDimensionsSchema = windowSchema.extend({
 
 // One metric over the window, for the metrics explorer.
 const metricSeriesSchema = z.object({
-  aggregation: dashboardWidgetConfigSchema.shape.aggregation,
+  aggregation: z.enum(metricAggregations).optional(),
   // `attr:<key>` keys are data-point attributes; others are resource attributes.
   filters: z.array(z.object({
     key: z.string().trim().min(1).max(200),
@@ -299,9 +357,15 @@ const widgetDataSchema = z.object({
     .default({}),
 });
 
+// A number or group also carries its value over the window before, when the
+// widget compares with it. Null means nothing had a value.
+export type WidgetValueRow = { group: string; previous?: number | null; value: number | null };
+
 export type WidgetData =
   | { chart: ChartData; kind: "chart" }
   | { kind: "logs"; logs: unknown }
+  | { kind: "number"; previous?: number | null; value: number | null }
+  | { kind: "rows"; rows: WidgetValueRow[] }
   | { kind: "traces"; traces: unknown };
 
 const stepMilliseconds = { DAY: 86_400_000, HOUR: 3_600_000, MINUTE: 60_000, SECOND: 1_000 } as const;
@@ -385,6 +449,13 @@ function windowFor(
   return { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
 }
 
+// The window of the same length that ends where this one starts.
+function previousWindow(range: Required<TimeRange>): Required<TimeRange> {
+  const since = Date.parse(range.since);
+  const length = Date.parse(range.until) - since;
+  return { since: new Date(since - length).toISOString(), until: new Date(since).toISOString() };
+}
+
 export function createTelemetryRoutes(
   dependencies: TelemetryRouteDependencies = defaultDependencies,
 ) {
@@ -393,7 +464,7 @@ export function createTelemetryRoutes(
     client: ClickHouseClient,
     projectId: string,
     query: {
-      aggregation?: DashboardWidgetConfig["aggregation"];
+      aggregation?: MetricAggregation;
       filters: ResolvedWidgetFilter[];
       groupBy: string | undefined;
       kind?: MetricKind;
@@ -419,6 +490,7 @@ export function createTelemetryRoutes(
     return chartSeries(rows, {
       fill: "null",
       limit: query.limit,
+      other: isAdditiveAggregation(query.aggregation),
       sinceMs,
       stepMs: step.n * stepMilliseconds[step.unit],
       untilMs,
@@ -778,9 +850,8 @@ export function createTelemetryRoutes(
       const range = windowFor(body.data, dependencies.now());
       if (!range) return context.json({ error: "Invalid widget" }, 400);
       const { config, projectId, type, variables } = body.data;
-      if (type === "timeseries_metric" && !config.metricName) {
-        return context.json({ error: "Choose a metric" }, 400);
-      }
+      const problem = type === "timeseries_count" || type === "timeseries_metric" ? widgetConfigProblem(type, config) : null;
+      if (problem) return context.json({ error: problem.message }, 400);
       if (!(await dependencies.findProject(granted.organizationId, projectId))) {
         return context.json({ error: "Telemetry project not found" }, 404);
       }
@@ -799,33 +870,85 @@ export function createTelemetryRoutes(
         return context.json({ kind: "traces", traces } satisfies WidgetData);
       }
       const groupBy = config.groupBy || undefined;
-      if (type === "timeseries_metric") {
-        const chart = await metricChart(granted.client, projectId, {
-          ...(config.aggregation ? { aggregation: config.aggregation } : {}),
-          filters: resourceAttrs,
-          groupBy,
-          ...(config.metricKind ? { kind: config.metricKind } : {}),
-          limit,
-          metricName: config.metricName!,
-          range,
-          ...(config.metricUnit !== undefined ? { unit: config.metricUnit } : {}),
-        });
-        return context.json({ chart, kind: "chart" } satisfies WidgetData);
+      const display = config.display ?? "timeseries";
+      const additive = isAdditiveAggregation(config.aggregation);
+      const metricAggregation = type === "timeseries_metric" ? (config.aggregation as MetricAggregation | undefined) : undefined;
+      const measure: EventMeasure = {
+        aggregation: config.aggregation ?? "count",
+        ...(config.field ? { field: config.field } : {}),
+      };
+      const source = config.source ?? "logs";
+      if (display === "timeseries") {
+        if (type === "timeseries_metric") {
+          const chart = await metricChart(granted.client, projectId, {
+            ...(metricAggregation ? { aggregation: metricAggregation } : {}),
+            filters: resourceAttrs,
+            groupBy,
+            ...(config.metricKind ? { kind: config.metricKind } : {}),
+            limit,
+            metricName: config.metricName!,
+            range,
+            ...(config.metricUnit !== undefined ? { unit: config.metricUnit } : {}),
+          });
+          return context.json({ chart, kind: "chart" } satisfies WidgetData);
+        }
+        const sinceMs = Date.parse(range.since);
+        const untilMs = Date.parse(range.until);
+        const step = pickStep((untilMs - sinceMs) / 1000);
+        const window = { limit, other: additive, sinceMs, stepMs: step.n * stepMilliseconds[step.unit], untilMs };
+        const filter = { range, resourceAttrs };
+        const rows = measure.aggregation === "count"
+          ? (await dependencies.countSeries(granted.client, projectId, source, filter, groupBy, step))
+              .map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }))
+          : await dependencies.eventSeries(granted.client, projectId, source, filter, measure, groupBy, step);
+        return context.json({ chart: chartSeries(rows, { ...window, fill: additive ? "zero" : "null" }), kind: "chart" } satisfies WidgetData);
       }
-      const sinceMs = Date.parse(range.since);
-      const untilMs = Date.parse(range.until);
-      const step = pickStep((untilMs - sinceMs) / 1000);
-      const window = { limit, sinceMs, stepMs: step.n * stepMilliseconds[step.unit], untilMs };
-      const rows = await dependencies.countSeries(
-        granted.client,
-        projectId,
-        config.source ?? "logs",
-        { range, resourceAttrs },
-        groupBy,
-        step,
-      );
-      const values = rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
-      return context.json({ chart: chartSeries(values, { ...window, fill: "zero" }), kind: "chart" } satisfies WidgetData);
+      // One value for the window, or one per group.
+      const grouped = display !== "number" && groupBy !== undefined;
+      const rowLimit = grouped ? Math.min(limit ?? 10, 50) : 1;
+      const aggregate = async (window: Required<TimeRange>) => {
+        const filter = { range: window, resourceAttrs };
+        if (type === "timeseries_metric") {
+          return dependencies.metricWindowAggregate(granted.client, projectId, {
+            ...(metricAggregation ? { aggregation: metricAggregation } : {}),
+            filter,
+            groupBy: grouped ? groupBy : undefined,
+            ...(config.metricKind ? { kind: config.metricKind } : {}),
+            limit: rowLimit,
+            metricName: config.metricName!,
+            ...(config.metricUnit !== undefined ? { unit: config.metricUnit } : {}),
+          });
+        }
+        const by = grouped ? groupBy : undefined;
+        return measure.aggregation === "count"
+          ? dependencies.countAggregate(granted.client, projectId, source, filter, by, rowLimit)
+          : dependencies.eventAggregate(granted.client, projectId, source, filter, measure, by, rowLimit);
+      };
+      const comparing = config.compare === "previous_period";
+      const [current, previous] = await Promise.all([
+        aggregate(range),
+        comparing ? aggregate(previousWindow(range)) : Promise.resolve(null),
+      ]);
+      // Counted and summed logs and spans are zero when nothing matched; other
+      // values have no value then.
+      const empty = type === "timeseries_count" && additive ? 0 : null;
+      if (!grouped) {
+        const value = current[0]?.value ?? empty;
+        return context.json({
+          kind: "number",
+          value,
+          ...(previous ? { previous: previous[0]?.value ?? empty } : {}),
+        } satisfies WidgetData);
+      }
+      const before = new Map(previous?.map((row) => [row.group, row.value]));
+      return context.json({
+        kind: "rows",
+        rows: current.map((row) => ({
+          group: row.group,
+          value: row.value,
+          ...(previous ? { previous: before.get(row.group) ?? empty } : {}),
+        })),
+      } satisfies WidgetData);
     })
     .get("/traces/:traceId", async (context) => {
       const granted = await access(context.req.raw.headers);

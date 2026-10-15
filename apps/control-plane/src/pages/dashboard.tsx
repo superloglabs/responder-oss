@@ -294,7 +294,7 @@ export function DashboardPage() {
       ? await updateWidget(dashboard.id, editing.widget.id, draft)
       : await addWidget(dashboard.id, {
           ...draft,
-          layout: placeWidget(draft.type, dashboard.widgets.map((widget) => widget.layout)),
+          layout: placeWidget(draft.type, dashboard.widgets.map((widget) => widget.layout), draft.config.display),
         });
     setDashboard((current) =>
       current

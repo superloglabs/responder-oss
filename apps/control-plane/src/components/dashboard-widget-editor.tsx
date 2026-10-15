@@ -12,11 +12,15 @@ import {
 import {
   fetchAttributeKeys,
   fetchMetricNames,
+  widgetAggregationLabels,
+  widgetChartType,
   type DashboardVariable,
   type MetricName,
   type VariableValues,
+  type WidgetDisplay,
   type WidgetDraft,
 } from "../dashboards-api";
+import { widgetFieldSource } from "../../../../packages/core/src/telemetry/dashboards";
 import { DashboardDialog } from "./dashboard-dialog";
 import { AttributeFilters } from "./attribute-filters";
 import { DashboardWidgetBody } from "./dashboard-widget";
@@ -24,9 +28,21 @@ import { metricPickerChoice, metricPickerOptions, metricPickerValue, pickedMetri
 
 const kinds: Array<{ label: string; value: WidgetKind }> = [
   { label: "Chart", value: "chart" },
-  { label: "Table", value: "table" },
+  { label: "List", value: "table" },
   { label: "Note", value: "note" },
 ];
+
+const displays: Array<{ label: string; value: WidgetDisplay }> = [
+  { label: "Over time", value: "timeseries" },
+  { label: "Number", value: "number" },
+  { label: "Bars", value: "bar_list" },
+  { label: "Table", value: "table" },
+];
+
+// Logs and spans are counted, or summed up from a field.
+const eventAggregations = (["count", "count_distinct", "sum", "avg", "min", "max", "p50", "p90", "p95", "p99"] as const).map(
+  (value) => ({ label: widgetAggregationLabels[value], value: value === "count" ? ("" as const) : value }),
+);
 
 const aggregations = [
   { label: "Default for the metric", value: "" },
@@ -109,9 +125,16 @@ export function DashboardWidgetEditor({
     return () => { cancelled = true; };
   }, [attributeSource, form.kind, projectId, seenIn]);
 
+  // An aggregation other than a count needs a field to read.
+  const needsField = form.kind === "chart" && form.source !== "metric" && form.aggregation !== "" && form.aggregation !== "count" && !form.field;
+
   async function save() {
     if (draft.type === "timeseries_metric" && !draft.config.metricName) {
       setError("Choose a metric.");
+      return;
+    }
+    if (needsField) {
+      setError("Choose a field to aggregate.");
       return;
     }
     setSaving(true);
@@ -134,7 +157,13 @@ export function DashboardWidgetEditor({
     { label: "Service", value: "service" },
     ...withCurrent(keys, form.groupBy === "service" ? "" : form.groupBy).map((key) => ({ label: key, value: key })),
   ];
-  const previewReady = preview.type !== "timeseries_metric" || Boolean(preview.config.metricName);
+  const previewReady = (preview.type !== "timeseries_metric" || Boolean(preview.config.metricName)) && !needsField;
+  const overTime = form.display === "timeseries";
+  const fieldOptions = [
+    ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
+    ...(form.source === "traces" ? [{ label: "Duration", value: "duration" }] : []),
+    ...withCurrent(keys, form.field === "duration" ? "" : form.field).map((key) => ({ label: key, value: key })),
+  ];
   const picked = { kind: form.metricKind, name: form.metricName, unit: form.metricUnit };
   const metricValue = form.metricName ? metricPickerValue(picked) : "";
   const metricOptions = metricPickerOptions(metrics);
@@ -160,7 +189,16 @@ export function DashboardWidgetEditor({
         <div className="widgetEditor__form">
           <SegmentedControl aria-label="Widget kind" onChange={(kind) => update({ kind })} options={kinds} value={form.kind} />
           {form.kind !== "note" ? (
-            <SegmentedControl aria-label="Data" onChange={(value) => update({ source: value })} options={sources} value={source} />
+            <SegmentedControl
+              aria-label="Data"
+              onChange={(value) => {
+                // A field only one signal has is cleared when switching to the other.
+                const fieldSource = widgetFieldSource(form.field);
+                update(fieldSource && fieldSource !== value ? { field: "", source: value } : { source: value });
+              }}
+              options={sources}
+              value={source}
+            />
           ) : null}
           {form.kind === "chart" && form.source === "metric" ? (
             <>
@@ -185,7 +223,34 @@ export function DashboardWidgetEditor({
               />
             </>
           ) : null}
+          {form.kind === "chart" && form.source !== "metric" ? (
+            <div className="widgetEditor__row">
+              <SelectField
+                label="Measure"
+                onChange={(aggregation) => update({ aggregation })}
+                options={eventAggregations}
+                value={form.aggregation === "count" ? "" : form.aggregation}
+              />
+              {form.aggregation && form.aggregation !== "count" ? (
+                <SelectField
+                  label="Field"
+                  onChange={(field) =>
+                    // A duration's distinct count is a count, not a duration.
+                    update(field === "duration" && form.unit === "none" && form.aggregation !== "count_distinct"
+                      ? { field, unit: "duration_ms" }
+                      : { field })
+                  }
+                  options={fieldOptions}
+                  searchable={fieldOptions.length > 8}
+                  value={form.field}
+                />
+              ) : null}
+            </div>
+          ) : null}
           {form.kind === "chart" ? (
+            <SegmentedControl aria-label="Display" onChange={(display) => update({ display })} options={displays} value={form.display} />
+          ) : null}
+          {form.kind === "chart" && form.display !== "number" ? (
             <div className="widgetEditor__row">
               <SelectField
                 label="Group by"
@@ -197,7 +262,7 @@ export function DashboardWidgetEditor({
               {form.groupBy ? (
                 <TextField
                   className="widgetEditor__number"
-                  label="Series"
+                  label={overTime ? "Series" : "Rows"}
                   max={50}
                   min={1}
                   onChange={(event) => update({ limit: Math.max(1, Math.min(50, Number(event.target.value) || 1)) })}
@@ -239,16 +304,25 @@ export function DashboardWidgetEditor({
           ) : null}
           {form.kind === "chart" ? (
             <div className="widgetEditor__row">
-              <SegmentedControl
-                aria-label="Chart type"
-                onChange={(chartType) => update({ chartType })}
-                options={[{ label: "Bars", value: "bar" }, { label: "Lines", value: "line" }]}
-                value={form.chartType}
-              />
+              {overTime && widgetChartType(draft.type, { ...draft.config, chartType: "bar" }) === "bar" ? (
+                <SegmentedControl
+                  aria-label="Chart type"
+                  onChange={(chartType) => update({ chartType })}
+                  options={[{ label: "Bars", value: "bar" }, { label: "Lines", value: "line" }]}
+                  value={form.chartType}
+                />
+              ) : null}
               <SelectField label="Unit" onChange={(unit) => update({ unit })} options={[...units]} value={form.unit} />
             </div>
           ) : null}
-          {form.kind === "chart" ? (
+          {form.kind === "chart" && !overTime ? (
+            <Switch
+              checked={form.compare}
+              label="Compare with the previous period"
+              onCheckedChange={(compare) => update({ compare })}
+            />
+          ) : null}
+          {form.kind === "chart" && overTime ? (
             <div className="widgetEditor__row">
               <Switch checked={form.showLegend} label="Legend" onCheckedChange={(showLegend) => update({ showLegend })} />
               {form.showLegend ? (
@@ -295,7 +369,9 @@ export function DashboardWidgetEditor({
                 variables={variableValues}
               />
             ) : (
-              <p className="dashboardWidget__status">Choose a metric to preview it.</p>
+              <p className="dashboardWidget__status">
+                {needsField ? "Choose a field to preview it." : "Choose a metric to preview it."}
+              </p>
             )}
           </div>
         </section>
