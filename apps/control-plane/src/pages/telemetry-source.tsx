@@ -1,15 +1,17 @@
-import { CodeIcon } from "@phosphor-icons/react";
+import { CheckCircleIcon, CheckIcon, CodeIcon, CopyIcon, WarningIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { ProviderGlyph } from "../components/icons";
 import { useIntegrationConnect } from "../components/use-integration-connect";
+import { copyToClipboard } from "../copy-to-clipboard";
 import { Badge, Button, CodeBlock, DataTable, SelectField, TextField } from "../design-system";
 import {
   createIngestKey,
   fetchIngestKeys,
   openTelemetryPrompt,
+  otlpEnvironment,
   revokeIngestKey,
   type TelemetryIngestKeySummary,
 } from "../ingest-keys-api";
@@ -68,6 +70,8 @@ function OpenTelemetrySetup() {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<{ key: TelemetryIngestKeySummary; token: string } | null>(null);
+  // Shows the form again while keeping the last key on screen until a new one replaces it.
+  const [addingAnother, setAddingAnother] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +97,7 @@ function OpenTelemetrySetup() {
     try {
       const result = await createIngestKey({ name: name.trim() });
       setCreated(result);
+      setAddingAnother(false);
       setName("");
       await load();
     } catch (cause) {
@@ -124,23 +129,26 @@ function OpenTelemetrySetup() {
         OTLP/HTTP with an ingest key.
       </p>
       <section aria-labelledby="otel-key-title" className="telemetrySetup__section">
-        <h2 id="otel-key-title">1. Create an ingest key</h2>
-        <form className="telemetrySetup__form" onSubmit={(event) => void create(event)}>
-          <TextField label="Key name" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="checkout-api production" value={name} />
-          <Button loading={saving} type="submit" variant="primary">Create key</Button>
-        </form>
-        {error ? <p className="formError" role="alert">{error}</p> : null}
-        {created ? (
-          <p className="telemetryPage__status">
-            Key {created.key.name} is in the prompt below. Copy it now; it is not shown again.
-          </p>
+        <div className="telemetrySetup__sectionHeading">
+          <h2 id="otel-key-title">1. Create an ingest key</h2>
+          {created && !addingAnother ? (
+            <Button onClick={() => setAddingAnother(true)} size="small" variant="ghost">Create another key</Button>
+          ) : null}
+        </div>
+        {!created || addingAnother ? (
+          <form className="telemetrySetup__form" onSubmit={(event) => void create(event)}>
+            <TextField label="Key name" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="checkout-api production" value={name} />
+            <Button loading={saving} type="submit" variant="primary">Create key</Button>
+          </form>
         ) : null}
+        {error ? <p className="formError" role="alert">{error}</p> : null}
+        {created ? <CreatedIngestKey created={created} /> : null}
       </section>
       <section aria-labelledby="otel-prompt-title" className="telemetrySetup__section">
         <h2 id="otel-prompt-title">2. Paste this prompt into your coding agent</h2>
         <p>
           Claude Code, Cursor, Codex or any other agent adds the SDK, instruments the app and connects its logger.
-          {created ? null : " Create a key first to fill it in."}
+          {created ? " The prompt already contains your new key." : " Create a key first to fill it in."}
         </p>
         <CodeBlock code={openTelemetryPrompt(window.location.origin, created?.token)} language="prompt" />
       </section>
@@ -154,7 +162,10 @@ function OpenTelemetrySetup() {
                 key: "name",
                 render: (key) => (
                   <span className="agentTableTitle">
-                    <strong>{key.name}</strong>
+                    <span className="telemetrySetup__keyName">
+                      <strong>{key.name}</strong>
+                      {created?.key.id === key.id ? <Badge tone="live">New</Badge> : null}
+                    </span>
                     <small><code>{key.prefix}…</code></small>
                   </span>
                 ),
@@ -179,6 +190,61 @@ function OpenTelemetrySetup() {
         </section>
       ) : null}
     </>
+  );
+}
+
+// The new key in full, once. It stays selectable when the clipboard is unavailable.
+function CreatedIngestKey({ created }: { created: { key: TelemetryIngestKeySummary; token: string } }) {
+  const [copied, setCopied] = useState<"key" | "env" | null>(null);
+  const [copyError, setCopyError] = useState(false);
+
+  async function copy(target: "key" | "env") {
+    const text = target === "key" ? created.token : otlpEnvironment(window.location.origin, created.token);
+    try {
+      await copyToClipboard(text);
+    } catch {
+      setCopyError(true);
+      return;
+    }
+    setCopyError(false);
+    setCopied(target);
+    window.setTimeout(() => setCopied((current) => (current === target ? null : current)), 1600);
+  }
+
+  return (
+    <div aria-labelledby="otel-created-title" className="telemetrySetup__created" role="group">
+      <div className="telemetrySetup__createdTitle">
+        <CheckCircleIcon aria-hidden="true" className="telemetrySetup__createdIcon" size={16} weight="fill" />
+        <h3 id="otel-created-title">{created.key.name}</h3>
+        <span>created just now</span>
+      </div>
+      <div className="telemetrySetup__keyRow">
+        <input
+          aria-label="New ingest key"
+          className="dsField__control telemetrySetup__keyValue"
+          onFocus={(event) => event.currentTarget.select()}
+          readOnly
+          spellCheck={false}
+          value={created.token}
+        />
+        <Button className="telemetrySetup__copyKey" onClick={() => void copy("key")} size="small" variant="primary">
+          {copied === "key" ? <CheckIcon aria-hidden="true" size={14} weight="bold" /> : <CopyIcon aria-hidden="true" size={14} />}
+          {copied === "key" ? "Copied" : "Copy key"}
+        </Button>
+      </div>
+      <div className="telemetrySetup__createdFooter">
+        <p>
+          <WarningIcon aria-hidden="true" size={14} />
+          {copyError
+            ? "Unable to copy. Select the key and copy it manually."
+            : "Shown once. Store it in your secret manager before you leave this page."}
+        </p>
+        <Button onClick={() => void copy("env")} size="small" variant="secondary">
+          {copied === "env" ? <CheckIcon aria-hidden="true" size={14} weight="bold" /> : <CopyIcon aria-hidden="true" size={14} />}
+          {copied === "env" ? "Copied" : "Copy as env vars"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

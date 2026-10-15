@@ -109,3 +109,17 @@ a.telemetryPage__message:hover { text-decoration: underline; }
 .telemetrySources__body span { color: var(--ds-text-muted); font-size: 12px; line-height: 18px; }
 .telemetrySources__chevron { color: var(--ds-text-muted); }
 .telemetrySetup__created a:not(.dsButton) { color: inherit; text-decoration: underline; }
+.telemetrySetup__sectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin-block: -8px; }
+.telemetrySetup__created { gap: 14px; }
+.telemetrySetup__createdTitle { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.telemetrySetup__createdTitle h3 { margin: 0; overflow: hidden; font-size: 13px; font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.telemetrySetup__createdTitle span { flex-shrink: 0; color: var(--ds-text-muted); font-size: 12px; }
+.telemetrySetup__createdIcon { flex-shrink: 0; color: var(--ds-positive); }
+.telemetrySetup__keyRow { display: flex; align-items: center; gap: 8px; }
+.telemetrySetup__keyRow .telemetrySetup__keyValue { flex: 1 1 auto; min-width: 0; height: 36px; font-family: var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace); text-overflow: ellipsis; }
+.telemetrySetup__keyRow .telemetrySetup__copyKey { flex-shrink: 0; min-width: 112px; height: 36px; min-height: 36px; }
+.telemetrySetup__createdFooter { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.telemetrySetup__created .telemetrySetup__createdFooter p { display: flex; align-items: center; gap: 6px; color: var(--ds-text-secondary); line-height: 16px; }
+.telemetrySetup__createdFooter svg { flex-shrink: 0; color: var(--ds-warning); }
+.telemetrySetup__keyName { display: inline-flex; align-items: center; gap: 8px; }
+.telemetrySetup__keyName .dsBadge { min-height: 20px; padding: 1px 7px; font-size: 11px; }
