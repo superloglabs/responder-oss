@@ -84,7 +84,7 @@ a.telemetryPage__message:hover { text-decoration: underline; }
   .telemetryPage__toolbar .dsSegmentedControl { margin-left: 0; }
 }
 
-.telemetrySetup { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.telemetrySetup { display: flex; flex-direction: column; gap: 16px; }
 .telemetrySetup__intro { margin: 0; color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }
 .telemetrySetup__created { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
 .telemetrySetup__created h2 { margin: 0; font-size: 13px; font-weight: 600; }
