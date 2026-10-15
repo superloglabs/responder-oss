@@ -20,7 +20,6 @@ type DataWidgetType = Exclude<DashboardWidgetType, "markdown">;
 
 function useWidgetData(input: {
   config: DashboardWidgetConfig;
-  projectId: string;
   range: DashboardTimeRange;
   refresh: number;
   type: DataWidgetType;
@@ -36,8 +35,8 @@ function useWidgetData(input: {
   const key = JSON.stringify(input);
   useEffect(() => {
     let cancelled = false;
-    const { config, projectId, range, type, variables } = JSON.parse(key) as typeof input;
-    fetchWidgetData({ config, projectId, type, variables, window: resolveTimeRange(range, Date.now()) })
+    const { config, range, type, variables } = JSON.parse(key) as typeof input;
+    fetchWidgetData({ config, type, variables, window: resolveTimeRange(range, Date.now()) })
       .then((data) => { if (!cancelled) setState({ data, error: null, key }); })
       .catch((cause: unknown) => {
         if (!cancelled) setState({ data: null, error: cause instanceof Error ? cause.message : "Unable to load", key });
@@ -52,7 +51,6 @@ interface WidgetBodyProps {
   config: DashboardWidgetConfig;
   // Called with the window someone drags across a chart.
   onZoom?: (since: number, until: number) => void;
-  projectId: string;
   range: DashboardTimeRange;
   refresh: number;
   timeZone?: string;
@@ -64,7 +62,6 @@ interface WidgetBodyProps {
 function WidgetData({
   config,
   onZoom,
-  projectId,
   range,
   refresh,
   timeZone,
@@ -72,7 +69,7 @@ function WidgetData({
   type,
   variables,
 }: WidgetBodyProps & { type: DataWidgetType }) {
-  const { data, error, loading } = useWidgetData({ config, projectId, range, refresh, type, variables });
+  const { data, error, loading } = useWidgetData({ config, range, refresh, type, variables });
   if (error) return <p className="dashboardWidget__status" role="alert">{error}</p>;
   if (!data) return <p className="dashboardWidget__status">{loading ? "Loading…" : ""}</p>;
   if (data.kind === "chart") {
@@ -119,7 +116,7 @@ function WidgetData({
               <td><Badge tone={severityTone(log.severity_number)}>{log.severity || "Unset"}</Badge></td>
               <td className="dashboardWidget__muted">{log.service || "—"}</td>
               <td className="dashboardWidget__mono" title={log.body}>
-                {log.trace_id ? <Link to={traceHref(projectId, log.trace_id)}>{log.body}</Link> : log.body}
+                {log.trace_id ? <Link to={traceHref(log.trace_id)}>{log.body}</Link> : log.body}
               </td>
             </tr>
           ))}
@@ -137,7 +134,7 @@ function WidgetData({
             <td className="dashboardWidget__muted">{formatTelemetryTime(trace.start_time, timeZone)}</td>
             <td className="dashboardWidget__muted">{trace.root_service || "—"}</td>
             <td className="dashboardWidget__mono">
-              <Link title={trace.root_span_name} to={traceHref(projectId, trace.trace_id)}>{trace.root_span_name || trace.trace_id}</Link>
+              <Link title={trace.root_span_name} to={traceHref(trace.trace_id)}>{trace.root_span_name || trace.trace_id}</Link>
             </td>
             <td className={Number(trace.error_count) > 0 ? "dashboardWidget__number dashboardWidget__error" : "dashboardWidget__number"}>
               {formatDuration(trace.duration_ms)}

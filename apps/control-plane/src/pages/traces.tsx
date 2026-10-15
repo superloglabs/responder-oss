@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
-import { TelemetryProjectsGate } from "../components/telemetry";
+import { TelemetryGate } from "../components/telemetry";
 import {
   AddFacet,
   ExplorerFacet,
@@ -35,7 +35,7 @@ import {
   type TraceSummary,
 } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import { useTelemetryQuery } from "../use-telemetry-query";
 import "../components/automation-run-history.css";
 
@@ -76,14 +76,12 @@ function TraceExplorer({
   live,
   onOpenTrace,
   openTrace,
-  projects,
   query,
   setQuery,
 }: {
   live: boolean;
   onOpenTrace: (traceId: string | null) => void;
   openTrace: string | null;
-  projects: Array<{ name: string; projectId: string }>;
   query: TraceExplorerQuery;
   setQuery: (update: Partial<TraceExplorerQuery>) => void;
 }) {
@@ -91,10 +89,9 @@ function TraceExplorer({
   const traces = useTelemetryQuery(key, () => fetchExplorerTraces(query), live);
   const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(query), live);
   const facets = useTelemetryQuery(key, () => fetchTraceFacets(query), live);
-  const keyQuery = `${query.projectId}|${query.range}`;
-  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, telemetryRangeWindow(query.range), "traces"));
-  const environments = useTelemetryQuery(keyQuery, () =>
-    fetchAttributeValues(query.projectId, telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
+  const attributeKeys = useTelemetryQuery(query.range, () => fetchAttributeKeys(telemetryRangeWindow(query.range), "traces"));
+  const environments = useTelemetryQuery(query.range, () =>
+    fetchAttributeValues(telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
   );
   const bars = useMemo(
     () => (histogram.data ? histogramBars(histogram.data, statusSeriesNames, statusSeries) : null),
@@ -163,15 +160,6 @@ function TraceExplorer({
           onSubmit={submitText}
           placeholder="Span name, key=value or a trace ID"
         />
-        {projects.length > 1 ? (
-          <SelectField
-            className="explorerSelect"
-            label="Project"
-            onChange={(projectId) => setQuery({ facets: [], filters: [], operations: [], projectId, services: [] })}
-            options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-            value={query.projectId}
-          />
-        ) : null}
         {environmentOptions.length > 0 ? (
           <SelectField
             className="explorerSelect"
@@ -338,7 +326,6 @@ function TraceExplorer({
           listState={listState}
           onClose={() => onOpenTrace(null)}
           onFilter={(filter) => { addFilter(filter); onOpenTrace(null); }}
-          projectId={query.projectId}
           traceId={openTrace}
         />
       ) : null}
@@ -348,7 +335,7 @@ function TraceExplorer({
 
 export function TracesPage() {
   useDocumentTitle("Trace search");
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   const [params, setParams] = useSearchParams();
   const query = traceExplorerQuery(params);
   const openTrace = params.get("trace");
@@ -365,7 +352,7 @@ export function TracesPage() {
       <div className="explorer">
         <header className="workspaceHeading">
           <h1><TreeStructureIcon aria-hidden="true" size={16} weight="bold" />Trace search</h1>
-          {telemetry.projects && telemetry.projects.length > 0 ? (
+          {telemetry.available ? (
             <div className="workspaceHeading__actions">
               <ExplorerTimeControls
                 live={live}
@@ -376,28 +363,15 @@ export function TracesPage() {
             </div>
           ) : null}
         </header>
-        <TelemetryProjectsGate signal="Traces" state={telemetry}>
-          {(projects) => {
-            const resolved = {
-              ...query,
-              projectId: projects.some((project) => project.projectId === query.projectId) ? query.projectId : projects[0]!.projectId,
-            };
-            return (
-              <TraceExplorer
-                live={live}
-                onOpenTrace={(trace) => navigate(resolved, trace)}
-                openTrace={openTrace}
-                projects={projects}
-                query={resolved}
-                // A trace ID from one project means nothing in another.
-                setQuery={(update) => navigate(
-                  { ...resolved, ...update },
-                  update.projectId && update.projectId !== resolved.projectId ? null : openTrace,
-                )}
-              />
-            );
-          }}
-        </TelemetryProjectsGate>
+        <TelemetryGate signal="Traces" state={telemetry}>
+          <TraceExplorer
+            live={live}
+            onOpenTrace={(trace) => navigate(query, trace)}
+            openTrace={openTrace}
+            query={query}
+            setQuery={(update) => navigate({ ...query, ...update }, openTrace)}
+          />
+        </TelemetryGate>
       </div>
     </AppShell>
   );

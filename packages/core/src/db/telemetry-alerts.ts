@@ -7,7 +7,6 @@ import {
   organizationCapabilities,
   telemetryAlertEpisodes,
   telemetryAlerts,
-  telemetryProjects,
 } from "./schema.js";
 
 export type TelemetryAlert = AlertRule & {
@@ -18,8 +17,6 @@ export type TelemetryAlert = AlertRule & {
   lastError: string | null;
   lastEvaluatedAt: string | null;
   name: string;
-  projectId: string;
-  projectName: string;
   slack: AlertSlackTarget | null;
   updatedAt: string;
 };
@@ -51,8 +48,6 @@ const alertColumns = {
   lastEvaluatedAt: telemetryAlerts.lastEvaluatedAt,
   metricName: telemetryAlerts.metricName,
   name: telemetryAlerts.name,
-  projectId: telemetryAlerts.projectId,
-  projectName: telemetryProjects.name,
   slackChannelId: telemetryAlerts.slackChannelId,
   slackIntegrationAccountId: telemetryAlerts.slackIntegrationAccountId,
   source: telemetryAlerts.source,
@@ -83,11 +78,6 @@ function toAlert(row: AlertRow): TelemetryAlert {
   };
 }
 
-const linkedProject = and(
-  eq(telemetryProjects.projectId, telemetryAlerts.projectId),
-  eq(telemetryProjects.organizationId, telemetryAlerts.organizationId),
-);
-
 export async function listTelemetryAlerts(organizationId: string): Promise<TelemetryAlertSummary[]> {
   const firing = getDatabase()
     .select({ alertId: telemetryAlertEpisodes.alertId, firingGroups: count().as("firing_groups") })
@@ -98,7 +88,6 @@ export async function listTelemetryAlerts(organizationId: string): Promise<Telem
   const rows = await getDatabase()
     .select({ ...alertColumns, firingGroups: firing.firingGroups })
     .from(telemetryAlerts)
-    .innerJoin(telemetryProjects, linkedProject)
     .leftJoin(firing, eq(firing.alertId, telemetryAlerts.id))
     .where(eq(telemetryAlerts.organizationId, organizationId))
     .orderBy(asc(telemetryAlerts.name), asc(telemetryAlerts.id));
@@ -109,7 +98,6 @@ export async function findTelemetryAlert(organizationId: string, alertId: string
   const rows = await getDatabase()
     .select(alertColumns)
     .from(telemetryAlerts)
-    .innerJoin(telemetryProjects, linkedProject)
     .where(and(eq(telemetryAlerts.organizationId, organizationId), eq(telemetryAlerts.id, alertId)))
     .limit(1);
   return rows[0] ? toAlert(rows[0]) : null;
@@ -157,26 +145,15 @@ function ruleValues(input: AlertUpdate) {
   };
 }
 
-// Null when the project is not linked to the workspace. The link is checked
-// and held in the insert's transaction.
 export async function createTelemetryAlert(
   organizationId: string,
   input: AlertCreate & { createdBy: string },
-): Promise<TelemetryAlert | null> {
-  const id = await getDatabase().transaction(async (transaction) => {
-    const [project] = await transaction
-      .select({ name: telemetryProjects.name })
-      .from(telemetryProjects)
-      .where(and(eq(telemetryProjects.organizationId, organizationId), eq(telemetryProjects.projectId, input.projectId)))
-      .for("share");
-    if (!project) return null;
-    const [row] = await transaction
-      .insert(telemetryAlerts)
-      .values({ ...ruleValues(input), createdBy: input.createdBy, organizationId, projectId: input.projectId })
-      .returning({ id: telemetryAlerts.id });
-    return row!.id;
-  });
-  return id ? findTelemetryAlert(organizationId, id) : null;
+): Promise<TelemetryAlert> {
+  const [row] = await getDatabase()
+    .insert(telemetryAlerts)
+    .values({ ...ruleValues(input), createdBy: input.createdBy, organizationId })
+    .returning(alertColumns);
+  return toAlert(row!);
 }
 
 // Ends open episodes without posting a recovery, for a rule that changed or
@@ -251,10 +228,10 @@ export async function deleteTelemetryAlert(organizationId: string, alertId: stri
   return deleted.length > 0;
 }
 
-export type DueTelemetryAlert = Omit<TelemetryAlert, "projectName"> & { organizationId: string };
+export type DueTelemetryAlert = TelemetryAlert & { organizationId: string };
 
 // Claims enabled alerts whose interval has passed, for workspaces that can
-// use alerts and still link the project. Claiming stamps the check time, so
+// use alerts. Claiming stamps the check time, so
 // another worker skips them; a failed check waits for the next interval.
 export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemetryAlert[]> {
   const result = await getDatabase().execute<{
@@ -272,7 +249,6 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     metric_name: string | null;
     name: string;
     organization_id: string;
-    project_id: string;
     slack_channel_id: string | null;
     slack_integration_account_id: string | null;
     source: AlertRule["source"];
@@ -283,8 +259,6 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     update ${telemetryAlerts} set last_evaluated_at = now()
     where ${telemetryAlerts.id} in (
       select alert.id from ${telemetryAlerts} alert
-      join ${telemetryProjects} project
-        on project.project_id = alert.project_id and project.organization_id = alert.organization_id
       join ${organizationCapabilities} telemetry
         on telemetry.organization_id = alert.organization_id and telemetry.capability = 'telemetry' and telemetry.enabled
       join ${organizationCapabilities} alerts
@@ -314,7 +288,6 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     metricName: row.metric_name,
     name: row.name,
     organizationId: row.organization_id,
-    projectId: row.project_id,
     slack:
       row.slack_channel_id && row.slack_integration_account_id
         ? { channelId: row.slack_channel_id, integrationAccountId: row.slack_integration_account_id }

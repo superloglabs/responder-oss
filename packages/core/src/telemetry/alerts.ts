@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Threshold alerts on a telemetry project. Rules keep the shape Superlog
+// Threshold alerts on a workspace's telemetry. Rules keep the shape Superlog
 // alerts stored, so existing alerts can be copied over unchanged.
 
 export const alertSources = ["logs", "traces", "metric"] as const;
@@ -84,16 +84,14 @@ const alertSettingsSchema = z.object({
   slack: alertSlackSchema.nullable().default(null),
 });
 
-export const alertCreateSchema = refinedRule(
-  alertRuleSchema.extend(alertSettingsSchema.shape).extend({ projectId: z.uuid() }),
-);
+export const alertCreateSchema = refinedRule(alertRuleSchema.extend(alertSettingsSchema.shape));
 export type AlertCreate = z.infer<typeof alertCreateSchema>;
 
 // A full replacement of the rule and settings.
-export const alertUpdateSchema = refinedRule(alertRuleSchema.extend(alertSettingsSchema.shape));
+export const alertUpdateSchema = alertCreateSchema;
 export type AlertUpdate = z.infer<typeof alertUpdateSchema>;
 
-export const alertPreviewSchema = refinedRule(alertRuleSchema.extend({ projectId: z.uuid() }));
+export const alertPreviewSchema = refinedRule(alertRuleSchema);
 
 export function isBreaching(value: number, comparator: AlertComparator, threshold: number): boolean {
   return comparator === "gt" ? value > threshold : value < threshold;

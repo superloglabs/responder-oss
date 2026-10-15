@@ -4,18 +4,16 @@ import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { DashboardDialog } from "../components/dashboard-dialog";
-import { Button, DataTable, SelectField, TextField } from "../design-system";
+import { Button, DataTable, TextField } from "../design-system";
 import { createDashboard, fetchDashboards, type TelemetryDashboardSummary } from "../dashboards-api";
-import type { TelemetryProject } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import "../components/automation-run-history.css";
 import "../components/dashboards.css";
 
-function NewDashboardDialog({ onClose, projects }: { onClose: () => void; projects: TelemetryProject[] }) {
+function NewDashboardDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [projectId, setProjectId] = useState(projects[0]?.projectId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +27,7 @@ function NewDashboardDialog({ onClose, projects }: { onClose: () => void; projec
     setSaving(true);
     setError(null);
     try {
-      const dashboard = await createDashboard({ name: name.trim(), projectId });
+      const dashboard = await createDashboard({ name: name.trim() });
       navigate(`/dashboards/${dashboard.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to create the dashboard");
@@ -50,14 +48,6 @@ function NewDashboardDialog({ onClose, projects }: { onClose: () => void; projec
     >
       <form className="dashboardDialog__form" onSubmit={(event) => void submit(event)}>
         <TextField autoFocus label="Name" maxLength={120} onChange={(event) => setName(event.target.value)} value={name} />
-        {projects.length > 1 ? (
-          <SelectField
-            label="Project"
-            onChange={setProjectId}
-            options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-            value={projectId}
-          />
-        ) : null}
         {error ? <p className="formError" role="alert">{error}</p> : null}
       </form>
     </DashboardDialog>
@@ -67,7 +57,7 @@ function NewDashboardDialog({ onClose, projects }: { onClose: () => void; projec
 export function DashboardsPage() {
   useDocumentTitle("Dashboards");
   const navigate = useNavigate();
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   // Undefined while loading; null when the workspace cannot use dashboards.
   const [dashboards, setDashboards] = useState<TelemetryDashboardSummary[] | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -86,10 +76,9 @@ export function DashboardsPage() {
     void Promise.resolve().then(load);
   }, [load]);
 
-  const projects = telemetry.projects ?? [];
-  const canCreate = projects.length > 0;
-  // Without the project list, creating a dashboard is not possible yet.
-  const projectsError = telemetry.error ? (
+  const canCreate = telemetry.available === true;
+  // Until telemetry is known to be readable, creating a dashboard is not possible.
+  const telemetryError = telemetry.error ? (
     <div className="automationRuns__message" role="alert">
       <p>{telemetry.error}</p>
       <button onClick={telemetry.retry} type="button">Retry</button>
@@ -107,7 +96,7 @@ export function DashboardsPage() {
         <h1><ChartLineIcon aria-hidden="true" size={16} weight="bold" />Dashboards</h1>
         {dashboards && dashboards.length > 0 ? <div className="workspaceHeading__actions">{newButton}</div> : null}
       </header>
-      {projectsError}
+      {telemetryError}
       {dashboards === undefined ? (
         error ? (
           <div className="automationRuns__message" role="alert">
@@ -126,9 +115,9 @@ export function DashboardsPage() {
         <section className="emptyState emptyState--list">
           <h2>No dashboards yet</h2>
           <p>
-            {canCreate || telemetry.projects === undefined
-              ? "Chart logs, spans and metrics from your telemetry projects."
-              : "Dashboards need a telemetry project linked to this workspace."}
+            {canCreate || telemetry.available === undefined
+              ? "Chart logs, spans and metrics from this workspace's telemetry."
+              : "This workspace cannot read telemetry yet."}
           </p>
           {newButton}
         </section>
@@ -143,7 +132,6 @@ export function DashboardsPage() {
                 render: (dashboard) => (
                   <span className="agentTableTitle">
                     <Link to={`/dashboards/${dashboard.id}`}><strong>{dashboard.name}</strong></Link>
-                    {projects.length > 1 ? <small>{dashboard.projectName}</small> : null}
                   </span>
                 ),
               },
@@ -178,7 +166,7 @@ export function DashboardsPage() {
           />
         </section>
       )}
-      {creating ? <NewDashboardDialog onClose={() => setCreating(false)} projects={projects} /> : null}
+      {creating ? <NewDashboardDialog onClose={() => setCreating(false)} /> : null}
     </AppShell>
   );
 }

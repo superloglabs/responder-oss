@@ -10,7 +10,6 @@ import {
   listTelemetryAlertSlackChannels,
   updateTelemetryAlert,
 } from "../../../../packages/core/src/db/telemetry-alerts.js";
-import { findTelemetryProject } from "../../../../packages/core/src/db/telemetry-projects.js";
 import { refreshSlackChannelResources } from "../../../../packages/core/src/integrations/slack-channels.js";
 import { alertMetricIdentity, alertValues, alertWindow } from "../../../../packages/core/src/telemetry/alert-values.js";
 import {
@@ -26,7 +25,7 @@ import { chartSeries } from "../../../../packages/core/src/telemetry/dashboards.
 import { countSeries, metricSeries } from "../../../../packages/core/src/telemetry/query.js";
 import { getActiveTenant } from "../tenant.js";
 
-// Threshold alerts on a workspace's telemetry projects. They need the
+// Threshold alerts on a workspace's telemetry. They need the
 // telemetry and alerts capabilities and a configured telemetry store.
 export type AlertRouteDependencies = {
   client: () => TelemetryClient | null;
@@ -34,14 +33,13 @@ export type AlertRouteDependencies = {
   deleteAlert: typeof deleteTelemetryAlert;
   episodes: typeof listTelemetryAlertEpisodes;
   findAlert: typeof findTelemetryAlert;
-  findProject: typeof findTelemetryProject;
   hasCapability: (organizationId: string, capability: "alerts" | "telemetry") => Promise<boolean>;
   listAlerts: typeof listTelemetryAlerts;
   now: () => Date;
   // The rule's value per bucket over recent windows, for its chart.
   series: (
     client: TelemetryClient,
-    projectId: string,
+    organizationId: string,
     rule: AlertRule,
     now: Date,
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
@@ -68,14 +66,14 @@ function windowStep(windowMinutes: number) {
       : { n: windowMinutes, unit: "MINUTE" as const };
 }
 
-async function defaultSeries(client: TelemetryClient, projectId: string, rule: AlertRule, now: Date) {
+async function defaultSeries(client: TelemetryClient, organizationId: string, rule: AlertRule, now: Date) {
   const range = alertWindow(rule.windowMinutes * chartWindows, now);
   const groupBy = rule.groupMode === "per_group" && rule.groupBy ? rule.groupBy : undefined;
   const step = windowStep(rule.windowMinutes);
   if (rule.source === "metric") {
     return metricSeries(
       client,
-      projectId,
+      organizationId,
       rule.metricName!,
       { range, resourceAttrs: rule.filter.resourceAttrs ?? [], ...(rule.filter.service ? { service: rule.filter.service } : {}) },
       groupBy,
@@ -86,7 +84,7 @@ async function defaultSeries(client: TelemetryClient, projectId: string, rule: A
   }
   const rows = await countSeries(
     client,
-    projectId,
+    organizationId,
     rule.source,
     { ...rule.filter, range, resourceAttrs: rule.filter.resourceAttrs ?? [] },
     groupBy,
@@ -101,7 +99,6 @@ const defaultDependencies: AlertRouteDependencies = {
   deleteAlert: deleteTelemetryAlert,
   episodes: listTelemetryAlertEpisodes,
   findAlert: findTelemetryAlert,
-  findProject: findTelemetryProject,
   hasCapability: organizationHasCapability,
   listAlerts: listTelemetryAlerts,
   now: () => new Date(),
@@ -161,7 +158,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const problem = await slackProblem(granted.organizationId, body.data.slack);
       if (problem) return context.json({ error: problem }, 400);
       const alert = await dependencies.createAlert(granted.organizationId, { ...body.data, createdBy: granted.userId });
-      return alert ? context.json({ alert }, 201) : context.json({ error: "Telemetry project not found" }, 404);
+      return context.json({ alert }, 201);
     })
     .get("/slack-channels", async (context) => {
       const granted = await access(context.req.raw.headers);
@@ -180,14 +177,11 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const body = alertPreviewSchema.safeParse(await jsonBody(context.req.raw));
       if (!body.success) return context.json({ error: body.error.issues[0]?.message ?? "Invalid alert" }, 400);
-      const { projectId, ...rule } = body.data;
-      if (!(await dependencies.findProject(granted.organizationId, projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
+      const rule = body.data;
       const now = dependencies.now();
       const [values, series] = await Promise.all([
-        dependencies.values(granted.client, projectId, rule, now),
-        dependencies.series(granted.client, projectId, rule, now),
+        dependencies.values(granted.client, granted.organizationId, rule, now),
+        dependencies.series(granted.client, granted.organizationId, rule, now),
       ]);
       // Breaching groups first, then furthest past the threshold.
       const severity = rule.comparator === "gt" ? 1 : -1;

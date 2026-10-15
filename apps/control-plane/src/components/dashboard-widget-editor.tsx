@@ -83,7 +83,6 @@ export function DashboardWidgetEditor({
   initial,
   onClose,
   onSave,
-  projectId,
   range,
   timeZone,
   variables,
@@ -92,7 +91,6 @@ export function DashboardWidgetEditor({
   initial: WidgetDraft | null;
   onClose: () => void;
   onSave: (draft: WidgetDraft) => Promise<void>;
-  projectId: string;
   range: DashboardTimeRange;
   timeZone: string;
   variables: DashboardVariable[];
@@ -113,20 +111,20 @@ export function DashboardWidgetEditor({
   useEffect(() => {
     if (form.kind !== "chart" || form.source !== "metric") return;
     let cancelled = false;
-    fetchMetricNames(projectId, seenIn)
+    fetchMetricNames(seenIn)
       .then((loaded) => { if (!cancelled) setMetrics(loaded); })
       .catch(() => { if (!cancelled) setMetrics([]); });
     return () => { cancelled = true; };
-  }, [form.kind, form.source, projectId, seenIn]);
+  }, [form.kind, form.source, seenIn]);
 
   useEffect(() => {
     if (form.kind === "note") return;
     let cancelled = false;
-    fetchAttributeKeys(projectId, seenIn, attributeSource)
+    fetchAttributeKeys(seenIn, attributeSource)
       .then((loaded) => { if (!cancelled) setKeys(loaded); })
       .catch(() => { if (!cancelled) setKeys([]); });
     return () => { cancelled = true; };
-  }, [attributeSource, form.kind, projectId, seenIn]);
+  }, [attributeSource, form.kind, seenIn]);
 
   // An aggregation other than a count needs a field to read.
   const needsField = form.kind === "chart" && form.source !== "metric" && form.aggregation !== "" && form.aggregation !== "count" && !form.field;
@@ -372,7 +370,6 @@ export function DashboardWidgetEditor({
             {previewReady ? (
               <DashboardWidgetBody
                 config={preview.config}
-                projectId={projectId}
                 range={range}
                 refresh={0}
                 timeZone={timeZone}

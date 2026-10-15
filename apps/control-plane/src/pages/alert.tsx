@@ -31,7 +31,7 @@ import { fetchAttributeKeys, fetchMetricNames, type ChartData, type MetricName }
 import { describeAlertCondition, formatAlertValue } from "../../../../packages/core/src/telemetry/alert-text";
 import { fetchServices, formatDuration, formatTelemetryTime } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import "../components/alerts.css";
 import "../components/dashboards.css";
 import "./automation-create.css";
@@ -182,7 +182,7 @@ function Episodes({ episodes, perGroup }: { episodes: TelemetryAlertEpisode[]; p
 export function AlertPage() {
   const { alertId } = useParams();
   const navigate = useNavigate();
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   // A new alert may start from a graph, such as one in the metrics explorer.
   const draft = (useLocation().state as { alertDraft?: Partial<AlertForm> } | null)?.alertDraft;
   // What was loaded and edited, for the alert it belongs to. Moving to
@@ -233,14 +233,8 @@ export function AlertPage() {
     void Promise.resolve().then(load);
   }, [alertId, load]);
 
-  // A new alert starts from the draft when its project is linked, and empty
-  // on the first linked project otherwise: a draft's metric and filters
-  // belong to its own project.
-  const draftProjectLinked = telemetry.projects?.some((project) => project.projectId === draft?.projectId) ?? false;
-  const newProjectId = draftProjectLinked ? draft?.projectId : telemetry.projects?.[0]?.projectId;
-  const form = edited ?? (!alertId && newProjectId
-    ? { ...emptyAlertForm(newProjectId), ...(draftProjectLinked ? draft : {}), projectId: newProjectId }
-    : null);
+  // A new alert starts from the draft, if any, once telemetry is readable.
+  const form = edited ?? (!alertId && telemetry.available ? { ...emptyAlertForm(), ...draft } : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -250,17 +244,17 @@ export function AlertPage() {
     return () => { cancelled = true; };
   }, []);
 
-  const projectId = form?.projectId ?? "";
+  const hasForm = form !== null;
   const source = form?.source ?? "logs";
   useEffect(() => {
-    if (!projectId) return;
+    if (!hasForm) return;
     let cancelled = false;
     const attributeSource = source === "metric" ? "metrics" : source;
     const lastDay = lastDayWindow();
     void Promise.all([
-      source === "metric" ? fetchMetricNames(projectId, lastDay).catch(() => []) : Promise.resolve([]),
-      fetchAttributeKeys(projectId, lastDay, attributeSource).catch(() => []),
-      fetchServices(projectId, "24h", source === "metric" ? "all" : source).catch(() => []),
+      source === "metric" ? fetchMetricNames(lastDay).catch(() => []) : Promise.resolve([]),
+      fetchAttributeKeys(lastDay, attributeSource).catch(() => []),
+      fetchServices("24h", source === "metric" ? "all" : source).catch(() => []),
     ]).then(([loadedMetrics, loadedKeys, loadedServices]) => {
       if (cancelled) return;
       setMetrics(loadedMetrics);
@@ -268,7 +262,7 @@ export function AlertPage() {
       setServices(loadedServices);
     });
     return () => { cancelled = true; };
-  }, [projectId, source]);
+  }, [hasForm, source]);
 
   const update = (change: Partial<AlertForm>) =>
     setForm((current) => {
@@ -295,7 +289,6 @@ export function AlertPage() {
     setError(null);
     try {
       if (saved) {
-        // The project of a saved alert does not change; the server ignores it.
         const alert = await updateAlert(saved.alert.id, request.body);
         setSaved({ ...saved, alert });
         setForm(alertForm(alert));
@@ -330,10 +323,10 @@ export function AlertPage() {
             <p>{problem}</p>
             <button onClick={() => (loadError ? void load() : telemetry.retry())} type="button">Retry</button>
           </div>
-        ) : telemetry.projects && telemetry.projects.length === 0 && !alertId ? (
+        ) : telemetry.available === false && !alertId ? (
           <section className="emptyState emptyState--list">
-            <h2>No telemetry projects</h2>
-            <p>Alerts need a telemetry project linked to this workspace.</p>
+            <h2>Alerts are not available</h2>
+            <p>This workspace cannot read telemetry yet.</p>
           </section>
         ) : (
           <p className="telemetryPage__status">Loading…</p>
@@ -351,7 +344,6 @@ export function AlertPage() {
   ];
   const metricOptions = alertMetricOptions(metrics);
   const metricValue = form?.metricName ? alertMetricValue(form) : "";
-  const projects = telemetry.projects ?? [];
 
   return (
     <AppShell active="alerts" redesigned>
@@ -384,25 +376,6 @@ export function AlertPage() {
         <div className="alertPage__body">
           <form className="alertForm" onSubmit={(event) => { event.preventDefault(); void save(); }}>
             <TextField label="Name" maxLength={200} onChange={(event) => update({ name: event.target.value })} placeholder="Checkout errors" value={form.name} />
-            {!saved && projects.length > 1 ? (
-              <SelectField
-                label="Project"
-                onChange={(value) =>
-                  update({
-                    filters: [],
-                    groupBy: "",
-                    metricKind: "",
-                    metricName: "",
-                    metricUnit: null,
-                    perGroup: false,
-                    projectId: value,
-                    service: "",
-                  })
-                }
-                options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-                value={form.projectId}
-              />
-            ) : null}
 
             <section className="alertForm__section">
               <h2>What to watch</h2>

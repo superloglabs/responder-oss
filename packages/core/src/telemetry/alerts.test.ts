@@ -9,7 +9,6 @@ import {
   worseValue,
 } from "./alerts.js";
 
-const projectId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const errorLogs = {
   aggregation: "count" as const,
   comparator: "gt" as const,
@@ -32,7 +31,6 @@ describe("alert rules", () => {
       groupMode: "per_group",
       metricName: "queue.depth",
       name: "Queue drained",
-      projectId,
       source: "metric",
       threshold: 1,
     });
@@ -40,7 +38,7 @@ describe("alert rules", () => {
   });
 
   it("rejects inconsistent rules", () => {
-    const base = { comparator: "gt", name: "x", projectId, threshold: 1 };
+    const base = { comparator: "gt", name: "x", threshold: 1 };
     for (const rule of [
       { ...base, aggregation: "sum", source: "logs" },
       { ...base, aggregation: "count", metricName: "m", source: "metric" },

@@ -168,9 +168,9 @@ describe("trace overview", () => {
     });
     expect(calls).toHaveLength(5);
     for (const call of calls) {
-      expect(call.query).toMatch(/SuperlogProjectId = \{projectId:String\}/u);
+      expect(call.query).toMatch(/SuperlogProjectId = \{organizationId:String\}/u);
       expect(call.query).toMatch(/ServiceName = \{service:String\}/u);
-      expect(call.params).toMatchObject({ projectId: "project-1", service: "checkout-api" });
+      expect(call.params).toMatchObject({ organizationId: "project-1", service: "checkout-api" });
     }
   });
 

@@ -97,7 +97,7 @@ export async function fetchDashboard(dashboardId: string): Promise<TelemetryDash
   return (await request<{ dashboard: TelemetryDashboard }>(`${base}/${encodeURIComponent(dashboardId)}`)).dashboard;
 }
 
-export async function createDashboard(input: { name: string; projectId: string }): Promise<TelemetryDashboard> {
+export async function createDashboard(input: { name: string }): Promise<TelemetryDashboard> {
   return (await request<{ dashboard: TelemetryDashboard }>(base, { body: input, method: "POST" })).dashboard;
 }
 
@@ -170,7 +170,6 @@ export function updateLayout(
 
 export function fetchWidgetData(input: {
   config: DashboardWidgetConfig;
-  projectId: string;
   type: Exclude<DashboardWidgetType, "markdown">;
   variables: VariableValues;
   window: QueryWindow;
@@ -179,41 +178,38 @@ export function fetchWidgetData(input: {
   return request<WidgetData>("/api/telemetry/widget-data", { body: { ...rest, ...windowParams(window) }, method: "POST" });
 }
 
-export async function fetchMetricNames(projectId: string, window: QueryWindow): Promise<MetricName[]> {
-  const params = new URLSearchParams({ projectId, ...windowParams(window) });
+export async function fetchMetricNames(window: QueryWindow): Promise<MetricName[]> {
+  const params = new URLSearchParams(windowParams(window));
   return (await request<{ metrics: MetricName[] }>(`/api/telemetry/metric-names?${params}`)).metrics;
 }
 
 export async function fetchAttributeKeys(
-  projectId: string,
   window: QueryWindow,
   source: AttributeSource,
 ): Promise<string[]> {
-  const params = new URLSearchParams({ projectId, source, ...windowParams(window) });
+  const params = new URLSearchParams({ source, ...windowParams(window) });
   const body = await request<{ keys: Array<{ key: string }> }>(`/api/telemetry/attribute-keys?${params}`);
   return body.keys.map((entry) => entry.key);
 }
 
 export async function fetchAttributeValues(
-  projectId: string,
   window: QueryWindow,
   source: AttributeSource,
   key: string,
 ): Promise<string[]> {
-  return (await fetchAttributeValueCounts(projectId, window, key, [], source)).map((entry) => entry.value);
+  return (await fetchAttributeValueCounts(window, key, [], source)).map((entry) => entry.value);
 }
 
 // Values of an attribute with how often each was seen, counting only rows
 // that match the filters. A resource attribute is counted across logs and
 // spans, which the "metrics" source selects.
 export async function fetchAttributeValueCounts(
-  projectId: string,
   window: QueryWindow,
   key: string,
   filters: Array<{ key: string; value: string; values?: string[] }>,
   source: AttributeSource = key.startsWith("log.") ? "logs" : key.startsWith("span.") ? "traces" : "metrics",
 ): Promise<Array<{ count: number; value: string }>> {
-  const params = new URLSearchParams({ key, projectId, source, ...windowParams(window) });
+  const params = new URLSearchParams({ key, source, ...windowParams(window) });
   if (filters.length > 0) params.set("filters", JSON.stringify(filters));
   return (await request<{ values: Array<{ count: number; value: string }> }>(`/api/telemetry/attribute-values?${params}`)).values;
 }

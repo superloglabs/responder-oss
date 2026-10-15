@@ -1,8 +1,8 @@
 import { XIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
-import { TelemetryAttributes, TelemetryException, TelemetryProjectsGate } from "../components/telemetry";
+import { TelemetryAttributes, TelemetryException, TelemetryGate } from "../components/telemetry";
 import { TraceWaterfall } from "../components/trace-waterfall";
 import { Badge, DataTable, IconButton } from "../design-system";
 import {
@@ -18,7 +18,7 @@ import {
   type Span,
   type TraceDetail,
 } from "../telemetry-api";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import { useDocumentTitle } from "../use-document-title";
 import "../components/automation-run-history.css";
 import "./automation-create.css";
@@ -65,7 +65,7 @@ function SpanDetail({ logs, onClose, span }: { logs: TraceLog[]; onClose: () => 
   );
 }
 
-function TraceView({ projectId, traceId }: { projectId: string; traceId: string }) {
+function TraceView({ traceId }: { traceId: string }) {
   const location = useLocation();
   const [trace, setTrace] = useState<TraceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,12 +78,12 @@ function TraceView({ projectId, traceId }: { projectId: string; traceId: string 
     setError(null);
     setSelected(null);
     try {
-      const loaded = await fetchTrace(projectId, traceId);
+      const loaded = await fetchTrace(traceId);
       if (request.current === generation) setTrace(loaded);
     } catch (cause) {
       if (request.current === generation) setError(cause instanceof Error ? cause.message : "Unable to load trace");
     }
-  }, [projectId, traceId]);
+  }, [traceId]);
 
   useEffect(() => {
     void Promise.resolve().then(load);
@@ -118,7 +118,7 @@ function TraceView({ projectId, traceId }: { projectId: string; traceId: string 
     <>
       <header className="automationCreate__header">
         <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
-          <Link to={traceListHref(location.state, projectId)}>Traces</Link>
+          <Link to={traceListHref(location.state)}>Traces</Link>
           <span aria-hidden="true">›</span>
           <span aria-current="page">{traceId.slice(0, 8)}</span>
         </nav>
@@ -195,18 +195,14 @@ function TraceView({ projectId, traceId }: { projectId: string; traceId: string 
 }
 
 export function TraceDetailPage() {
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   const { traceId = "" } = useParams();
-  const [params] = useSearchParams();
   return (
     <AppShell active="traces" activePage="/traces/search" redesigned>
       <div className="automationCreate traceDetail">
-        <TelemetryProjectsGate signal="Traces" state={telemetry}>
-          {(projects) => (
-            // A link without a project opens the trace in the first linked project.
-            <TraceView projectId={params.get("projectId") || projects[0]!.projectId} traceId={traceId} />
-          )}
-        </TelemetryProjectsGate>
+        <TelemetryGate signal="Traces" state={telemetry}>
+          <TraceView traceId={traceId} />
+        </TelemetryGate>
       </div>
     </AppShell>
   );

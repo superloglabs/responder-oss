@@ -10,8 +10,6 @@ const key = {
   lastUsedAt: null,
   name: "Production",
   prefix: "sl_ingest_abcdef",
-  projectId: "b925b1df-5b78-43c8-a816-6f00afb174af",
-  projectName: "Default",
 };
 
 function routes(overrides: Partial<IngestKeyRouteDependencies> = {}) {
@@ -51,17 +49,16 @@ describe("ingest key routes", () => {
     expect((await missing.app.request(`/${keyId}`, { method: "DELETE" })).status).toBe(404);
   });
 
-  it("rejects unnamed keys and another workspace's project", async () => {
-    const otherProject = "33333333-3333-4333-8333-333333333333";
-    const { app, dependencies } = routes({
-      createKey: vi.fn(async (input) => (input.projectId === otherProject ? null : { key, token: "sl_ingest_secret" })),
+  it("rejects unnamed keys", async () => {
+    const { app, dependencies } = routes();
+    const created = await app.request("/", {
+      body: JSON.stringify({ name: " " }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
     });
-    const post = (body: unknown) =>
-      app.request("/", { body: JSON.stringify(body), headers: { "content-type": "application/json" }, method: "POST" });
 
-    expect((await post({ name: " " })).status).toBe(400);
-    expect((await post({ name: "x", projectId: otherProject })).status).toBe(404);
-    expect(dependencies.createKey).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: otherProject }));
+    expect(created.status).toBe(400);
+    expect(dependencies.createKey).not.toHaveBeenCalled();
   });
 
   it("is not there without telemetry or a collector", async () => {

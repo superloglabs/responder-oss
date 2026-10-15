@@ -4,7 +4,6 @@ import { createAlertRoutes, type AlertRouteDependencies } from "./alert-routes.j
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const userId = "00000000-0000-4000-8000-000000000002";
-const projectId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const alertId = "11111111-1111-4111-8111-111111111111";
 const accountId = "22222222-2222-4222-8222-222222222222";
 const now = new Date("2026-10-14T12:00:00.000Z");
@@ -30,8 +29,6 @@ const alert: TelemetryAlert = {
   lastEvaluatedAt: null,
   metricName: null,
   name: "Checkout errors",
-  projectId,
-  projectName: "Shop",
   slack: null,
   source: "logs",
   threshold: 10,
@@ -46,7 +43,6 @@ function routes(overrides: Partial<AlertRouteDependencies> = {}) {
     deleteAlert: vi.fn(async () => true),
     episodes: vi.fn(async () => []),
     findAlert: vi.fn(async () => alert),
-    findProject: vi.fn(async () => ({ name: "Shop", projectId })),
     hasCapability: vi.fn(async () => true),
     listAlerts: vi.fn(async () => [{ ...alert, firingGroups: 0 }]),
     now: () => now,
@@ -84,7 +80,6 @@ describe("alert routes", () => {
 
     const response = await send(app, "POST", "/", {
       ...rule,
-      projectId,
       slack: { channelId: "C1", integrationAccountId: accountId },
     });
 
@@ -103,18 +98,12 @@ describe("alert routes", () => {
 
     const unknownChannel = await send(app, "POST", "/", {
       ...rule,
-      projectId,
       slack: { channelId: "C9", integrationAccountId: accountId },
     });
     expect(unknownChannel.status).toBe(400);
-    const summed = await send(app, "POST", "/", { ...rule, aggregation: "sum", projectId });
+    const summed = await send(app, "POST", "/", { ...rule, aggregation: "sum" });
     expect(await summed.json()).toEqual({ error: "Logs and traces are counted" });
     expect(dependencies.createAlert).not.toHaveBeenCalled();
-  });
-
-  it("returns 404 for an unlinked project", async () => {
-    const { app } = routes({ createAlert: vi.fn(async () => null) });
-    expect((await send(app, "POST", "/", { ...rule, projectId })).status).toBe(404);
   });
 
   it("replaces and deletes alerts", async () => {
@@ -134,7 +123,7 @@ describe("alert routes", () => {
   it("previews the current value and a chart one window per bucket", async () => {
     const { app, dependencies } = routes();
 
-    const response = await send(app, "POST", "/preview", { ...rule, projectId });
+    const response = await send(app, "POST", "/preview", rule);
     const body = (await response.json()) as {
       chart: { buckets: number[]; stepMs: number };
       evaluations: unknown[];
@@ -143,9 +132,7 @@ describe("alert routes", () => {
     expect(body.evaluations).toEqual([{ breaching: true, groupKey: "", value: 12 }]);
     expect(body.chart.stepMs).toBe(300_000);
     expect(body.chart.buckets).toHaveLength(25);
-    expect(dependencies.values).toHaveBeenCalledWith(expect.anything(), projectId, expect.objectContaining({ windowMinutes: 5 }), now);
-    const unlinked = routes({ findProject: vi.fn(async () => null) });
-    expect((await send(unlinked.app, "POST", "/preview", { ...rule, projectId })).status).toBe(404);
+    expect(dependencies.values).toHaveBeenCalledWith(expect.anything(), organizationId, expect.objectContaining({ windowMinutes: 5 }), now);
   });
 
   it("lists the lowest values first for an alert on falling values", async () => {
@@ -157,7 +144,6 @@ describe("alert routes", () => {
       comparator: "lt",
       groupBy: "service",
       groupMode: "per_group",
-      projectId,
       threshold: 6,
     });
     const body = (await response.json()) as { evaluations: Array<{ groupKey: string }> };
@@ -180,7 +166,7 @@ describe("alert routes", () => {
     ]) {
       const { app, dependencies } = routes(overrides);
       expect((await app.request("/")).status).toBe(404);
-      expect((await send(app, "POST", "/", { ...rule, projectId })).status).toBe(404);
+      expect((await send(app, "POST", "/", rule)).status).toBe(404);
       expect(dependencies.createAlert).not.toHaveBeenCalled();
     }
   });

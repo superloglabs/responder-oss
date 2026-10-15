@@ -55,7 +55,7 @@ export function fetchAlert(alertId: string): Promise<{ alert: TelemetryAlert; ep
   return request(`${base}/${encodeURIComponent(alertId)}`);
 }
 
-export async function createAlert(input: AlertUpdate & { projectId: string }): Promise<TelemetryAlert> {
+export async function createAlert(input: AlertUpdate): Promise<TelemetryAlert> {
   return (await request<{ alert: TelemetryAlert }>(base, { body: input, method: "POST" })).alert;
 }
 
@@ -70,7 +70,7 @@ export function deleteAlert(alertId: string): Promise<void> {
 // The rule's current value per group, and a chart of its recent windows. The
 // server reads only the rule's fields.
 export function previewAlert(
-  input: AlertUpdate & { projectId: string },
+  input: AlertUpdate,
 ): Promise<{ chart: ChartData; evaluations: AlertEvaluation[] }> {
   return request(`${base}/preview`, { body: input, method: "POST" });
 }
@@ -100,7 +100,6 @@ export interface AlertForm {
   metricUnit: string | null;
   name: string;
   perGroup: boolean;
-  projectId: string;
   service: string;
   severity: string;
   // "integrationAccountId:channelId", or "" for no channel.
@@ -112,7 +111,7 @@ export interface AlertForm {
   windowMinutes: number;
 }
 
-export function emptyAlertForm(projectId: string): AlertForm {
+export function emptyAlertForm(): AlertForm {
   return {
     aggregation: "count",
     comparator: "gt",
@@ -126,7 +125,6 @@ export function emptyAlertForm(projectId: string): AlertForm {
     metricUnit: null,
     name: "",
     perGroup: false,
-    projectId,
     service: "",
     severity: "ERROR",
     slack: "",
@@ -157,7 +155,6 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
     metricUnit: metricUnit ?? null,
     name: alert.name,
     perGroup: alert.groupMode === "per_group",
-    projectId: alert.projectId,
     service: service ?? "",
     severity: severity?.toUpperCase() ?? "",
     slack: alert.slack ? `${alert.slack.integrationAccountId}:${alert.slack.channelId}` : "",
@@ -182,7 +179,7 @@ export function alertMetricChoice(value: string): AlertMetric {
 export const alertMetricOptions = metricPickerOptions;
 
 // The rule a form describes, or what to fix first.
-export function alertRequest(form: AlertForm): { error: string } | { body: AlertUpdate & { projectId: string } } {
+export function alertRequest(form: AlertForm): { error: string } | { body: AlertUpdate } {
   if (!form.name.trim()) return { error: "Name the alert." };
   const threshold = Number(form.threshold);
   if (form.threshold.trim() === "" || !Number.isFinite(threshold)) return { error: "Set a threshold." };
@@ -215,7 +212,6 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
       groupMode: form.perGroup ? "per_group" : "single",
       metricName: form.source === "metric" ? form.metricName : null,
       name: form.name.trim(),
-      projectId: form.projectId,
       slack: integrationAccountId && channelId ? { channelId, integrationAccountId } : null,
       source: form.source,
       threshold,

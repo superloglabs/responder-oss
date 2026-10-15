@@ -55,7 +55,6 @@ function VariableMenu({
   filteredBy,
   filters,
   onApply,
-  projectId,
   range,
   selected,
   variable,
@@ -63,7 +62,6 @@ function VariableMenu({
   filteredBy: string[];
   filters: Array<{ key: string; value: string; values?: string[] }>;
   onApply: (value: DashboardVariableValue) => void;
-  projectId: string;
   range: DashboardTimeRange;
   selected: string[];
   variable: DashboardVariable;
@@ -78,14 +76,14 @@ function VariableMenu({
   useEffect(() => {
     if (!variable.attributeKey) return;
     let cancelled = false;
-    fetchAttributeValueCounts(projectId, resolveTimeRange(range, Date.now()), variable.attributeKey, JSON.parse(filtersKey) as typeof filters)
+    fetchAttributeValueCounts(resolveTimeRange(range, Date.now()), variable.attributeKey, JSON.parse(filtersKey) as typeof filters)
       .then((values) => {
         if (cancelled) return;
         setLoaded({ counts: new Map(values.map((entry) => [entry.value, entry.count])), error: false, values: values.map((entry) => entry.value) });
       })
       .catch(() => { if (!cancelled) setLoaded({ counts: new Map(), error: true, values: [] }); });
     return () => { cancelled = true; };
-  }, [filtersKey, projectId, range, variable.attributeKey]);
+  }, [filtersKey, range, variable.attributeKey]);
 
   // Fixed options keep their order; values seen in the data are listed by
   // how often they were seen. A selected value stays listed even when unseen.
@@ -191,14 +189,12 @@ function VariableMenu({
 
 function VariableControl({
   onChange,
-  projectId,
   range,
   values,
   variable,
   variables,
 }: {
   onChange: (value: DashboardVariableValue) => void;
-  projectId: string;
   range: DashboardTimeRange;
   values: VariableValues;
   variable: DashboardVariable;
@@ -235,7 +231,6 @@ function VariableControl({
             onChange(value);
             setOpen(false);
           }}
-          projectId={projectId}
           range={range}
           selected={selected}
           variable={variable}
@@ -251,14 +246,12 @@ function VariableControl({
 export function DashboardVariableBar({
   onAdd,
   onChange,
-  projectId,
   range,
   values,
   variables,
 }: {
   onAdd: () => void;
   onChange: (name: string, value: DashboardVariableValue) => void;
-  projectId: string;
   range: DashboardTimeRange;
   values: VariableValues;
   variables: DashboardVariable[];
@@ -270,7 +263,6 @@ export function DashboardVariableBar({
           <VariableControl
             key={variable.name}
             onChange={(value) => onChange(variable.name, value)}
-            projectId={projectId}
             range={range}
             values={values}
             variable={variable}

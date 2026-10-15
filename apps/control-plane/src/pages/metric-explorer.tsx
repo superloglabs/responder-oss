@@ -12,7 +12,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { MetricKindIcon } from "../components/metric-kind-icon";
-import { TelemetryProjectsGate } from "../components/telemetry";
+import { TelemetryGate } from "../components/telemetry";
 import { seriesColors, TimeseriesChart } from "../components/timeseries-chart";
 import {
   DropdownMenu,
@@ -59,7 +59,7 @@ import {
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import "../components/automation-run-history.css";
 import "../components/metrics.css";
 import "./automation-create.css";
@@ -99,7 +99,7 @@ function MetricList({
   selected,
 }: {
   catalog: MetricCatalogEntry[] | null;
-  context: { projectId: string; range: TelemetryRange };
+  context: { range: TelemetryRange };
   error: string | null;
   selected: { kind: string; name: string; unit: string | null };
 }) {
@@ -387,7 +387,7 @@ function AddToDashboard({ query, unit }: { query: MetricQuery; unit: string }) {
   async function add(dashboardId: string | null) {
     setError(null);
     try {
-      const target = dashboardId ?? (await createDashboard({ name: query.name, projectId: query.projectId })).id;
+      const target = dashboardId ?? (await createDashboard({ name: query.name })).id;
       await addWidget(target, metricWidgetDraft(query, unit));
       navigate(`/dashboards/${encodeURIComponent(target)}`);
     } catch (cause) {
@@ -395,7 +395,6 @@ function AddToDashboard({ query, unit }: { query: MetricQuery; unit: string }) {
     }
   }
 
-  const ofProject = (dashboards ?? []).filter((dashboard) => dashboard.projectId === query.projectId);
   return (
     <>
       <DropdownMenu
@@ -411,10 +410,10 @@ function AddToDashboard({ query, unit }: { query: MetricQuery; unit: string }) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Add this graph to</DropdownMenuLabel>
           {dashboards === null ? <DropdownMenuItem disabled>Loading…</DropdownMenuItem> : null}
-          {ofProject.map((dashboard) => (
+          {(dashboards ?? []).map((dashboard) => (
             <DropdownMenuItem key={dashboard.id} onSelect={() => void add(dashboard.id)}>{dashboard.name}</DropdownMenuItem>
           ))}
-          {ofProject.length > 0 ? <DropdownMenuSeparator /> : null}
+          {dashboards && dashboards.length > 0 ? <DropdownMenuSeparator /> : null}
           <DropdownMenuItem onSelect={() => void add(null)}>New dashboard</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -424,13 +423,12 @@ function AddToDashboard({ query, unit }: { query: MetricQuery; unit: string }) {
 }
 
 export function MetricExplorerPage() {
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   const capabilities = useOrganizationCapabilities();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const parsed = metricQueryFromParams(params);
-  const projectId = parsed?.projectId || telemetry.projects?.[0]?.projectId || "";
-  const query = parsed ? { ...parsed, projectId } : null;
+  const query = metricQueryFromParams(params);
+  const available = telemetry.available === true;
   useDocumentTitle(query ? `${query.name} · Metrics` : "Metrics");
   // Series hidden from the graph shown now; a new graph shows all its series.
   const [hiddenState, setHiddenState] = useState<{ key: string | null; names: Set<string> }>({
@@ -438,15 +436,15 @@ export function MetricExplorerPage() {
     names: new Set(),
   });
 
-  const catalog = useLoaded(projectId && query ? `${projectId}:${query.range}` : null, () =>
-    fetchMetricCatalog(projectId, query!.range),
+  const catalog = useLoaded(available && query ? query.range : null, () =>
+    fetchMetricCatalog(query!.range),
   );
   const dimensions = useLoaded(
-    projectId && query ? JSON.stringify([projectId, query.range, query.kind, query.name, query.unit]) : null,
-    () => fetchMetricDimensions(projectId, query!.range, query!),
+    available && query ? JSON.stringify([query.range, query.kind, query.name, query.unit]) : null,
+    () => fetchMetricDimensions(query!.range, query!),
   );
-  const chartKey = projectId && query
-    ? JSON.stringify([projectId, query.range, query.kind, query.name, query.unit, query.aggregation, query.groupBy, query.filters])
+  const chartKey = available && query
+    ? JSON.stringify([query.range, query.kind, query.name, query.unit, query.aggregation, query.groupBy, query.filters])
     : null;
   const chart = useLoaded(chartKey, () => fetchMetricChart(query!));
   const hidden = hiddenState.key === chartKey ? hiddenState.names : new Set<string>();
@@ -458,11 +456,8 @@ export function MetricExplorerPage() {
   );
   const unit = query.unit ?? metric?.unit ?? "";
   const chartUnit = metricWidgetUnit({ kind: query.kind, unit }, query.aggregation);
-  const context = { projectId, range: query.range };
-  const catalogHref = `/metrics?${new URLSearchParams({
-    ...(params.get("projectId") ? { projectId } : {}),
-    ...(query.range !== "1h" ? { range: query.range } : {}),
-  })}`.replace(/\?$/u, "");
+  const context = { range: query.range };
+  const catalogHref = query.range !== "1h" ? `/metrics?${new URLSearchParams({ range: query.range })}` : "/metrics";
 
   function update(change: Partial<MetricQuery>) {
     setParams(metricQueryParams({ ...query!, ...change }), { replace: true });
@@ -489,159 +484,157 @@ export function MetricExplorerPage() {
 
   return (
     <AppShell active="metrics" redesigned wide>
-      <TelemetryProjectsGate signal="Metrics" state={telemetry}>
-        {() => (
-          <div className="metricExplorer">
-            <MetricList catalog={catalog.value} context={context} error={catalog.error} selected={query} />
-            <section aria-label={query.name} className="metricExplorer__main">
-              <header className="automationCreate__header">
-                <div className="metricExplorer__topRow">
-                  <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
-                    <Link to={catalogHref}>Metrics</Link>
-                    <span aria-hidden="true">›</span>
-                    <span aria-current="page">{query.name}</span>
-                  </nav>
-                  <span className="automationCreate__spacer" />
-                  <SegmentedControl
-                    aria-label="Time range"
-                    onChange={(range) => update({ range })}
-                    options={telemetryRanges}
-                    value={query.range}
-                  />
-                  {capabilities.includes("alerts") ? (
-                    <Button
-                      onClick={() => navigate("/alerts/new", { state: { alertDraft: metricAlertDraft(query) } })}
-                      size="small"
-                    >
-                      <BellIcon size={12} />Create alert
-                    </Button>
-                  ) : null}
-                  {capabilities.includes("dashboards") ? <AddToDashboard query={query} unit={unit} /> : null}
-                </div>
-                <div className="metricExplorer__titleRow">
-                  <h1>{query.name}</h1>
-                  <Badge tone="info">{metricKindLabel(query.kind)}</Badge>
-                  {unit ? <Badge tone="neutral">{unit}</Badge> : null}
-                </div>
-                <p className="metricExplorer__meta">
-                  {[
-                    metric?.description,
-                    metric && metric.services.length > 0
-                      ? `Reported by ${metric.services.length === 1 ? metric.services[0] : `${metric.services.length} services`}`
-                      : null,
-                    dimensions.value ? `${dimensions.value.length} ${dimensions.value.length === 1 ? "attribute" : "attributes"}` : null,
-                  ].filter(Boolean).join(" · ")}
-                </p>
-              </header>
-              <div className="metricQuery">
-                <div className="metricQuery__bar">
-                  <SelectField
-                    className="metricQuery__select metricQuery__aggregation"
-                    label="Aggregation"
-                    onChange={(aggregation) => update({ aggregation })}
-                    options={metricAggregationOptions(query.kind)}
-                    value={query.aggregation}
-                  />
-                  <span className="metricQuery__word">where</span>
-                  {query.filters.map((filter) => (
-                    <span className="metricQuery__chip" key={filter.key}>
-                      <code>{dimensionLabel(filter.key)} {filter.op === "neq" ? "≠" : "="}</code>
-                      <strong>{filter.value}</strong>
-                      <button
-                        aria-label={`Remove filter on ${dimensionLabel(filter.key)}`}
-                        onClick={() => update({ filters: query.filters.filter((existing) => existing !== filter) })}
-                        type="button"
-                      >
-                        <XIcon size={11} />
-                      </button>
-                    </span>
-                  ))}
-                  {query.filters.length < maxMetricFilters ? (
-                    <AddFilter dimensions={dimensions.value ?? []} onAdd={addFilter} />
-                  ) : null}
-                  <span aria-hidden="true" className="metricQuery__divider" />
-                  <span className="metricQuery__word">by</span>
-                  <SelectField
-                    className="metricQuery__select metricQuery__group"
-                    label="Group by"
-                    onChange={(groupBy) => update({ groupBy })}
-                    options={groupOptions}
-                    searchable={groupOptions.length > 8}
-                    value={query.groupBy}
-                  />
-                </div>
-                <div aria-label="Chart type" className="dsSegmentedControl metricQuery__chartType" role="radiogroup">
-                  {([
-                    { icon: ChartLineIcon, label: "Lines", value: "line" },
-                    { icon: ChartBarIcon, label: "Bars", value: "bar" },
-                  ] as const).map((option) => (
+      <TelemetryGate signal="Metrics" state={telemetry}>
+        <div className="metricExplorer">
+          <MetricList catalog={catalog.value} context={context} error={catalog.error} selected={query} />
+          <section aria-label={query.name} className="metricExplorer__main">
+            <header className="automationCreate__header">
+              <div className="metricExplorer__topRow">
+                <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
+                  <Link to={catalogHref}>Metrics</Link>
+                  <span aria-hidden="true">›</span>
+                  <span aria-current="page">{query.name}</span>
+                </nav>
+                <span className="automationCreate__spacer" />
+                <SegmentedControl
+                  aria-label="Time range"
+                  onChange={(range) => update({ range })}
+                  options={telemetryRanges}
+                  value={query.range}
+                />
+                {capabilities.includes("alerts") ? (
+                  <Button
+                    onClick={() => navigate("/alerts/new", { state: { alertDraft: metricAlertDraft(query) } })}
+                    size="small"
+                  >
+                    <BellIcon size={12} />Create alert
+                  </Button>
+                ) : null}
+                {capabilities.includes("dashboards") ? <AddToDashboard query={query} unit={unit} /> : null}
+              </div>
+              <div className="metricExplorer__titleRow">
+                <h1>{query.name}</h1>
+                <Badge tone="info">{metricKindLabel(query.kind)}</Badge>
+                {unit ? <Badge tone="neutral">{unit}</Badge> : null}
+              </div>
+              <p className="metricExplorer__meta">
+                {[
+                  metric?.description,
+                  metric && metric.services.length > 0
+                    ? `Reported by ${metric.services.length === 1 ? metric.services[0] : `${metric.services.length} services`}`
+                    : null,
+                  dimensions.value ? `${dimensions.value.length} ${dimensions.value.length === 1 ? "attribute" : "attributes"}` : null,
+                ].filter(Boolean).join(" · ")}
+              </p>
+            </header>
+            <div className="metricQuery">
+              <div className="metricQuery__bar">
+                <SelectField
+                  className="metricQuery__select metricQuery__aggregation"
+                  label="Aggregation"
+                  onChange={(aggregation) => update({ aggregation })}
+                  options={metricAggregationOptions(query.kind)}
+                  value={query.aggregation}
+                />
+                <span className="metricQuery__word">where</span>
+                {query.filters.map((filter) => (
+                  <span className="metricQuery__chip" key={filter.key}>
+                    <code>{dimensionLabel(filter.key)} {filter.op === "neq" ? "≠" : "="}</code>
+                    <strong>{filter.value}</strong>
                     <button
-                      aria-checked={query.chartType === option.value}
-                      className="dsSegmentedControl__option"
-                      key={option.value}
-                      onClick={() => update({ chartType: option.value })}
-                      role="radio"
+                      aria-label={`Remove filter on ${dimensionLabel(filter.key)}`}
+                      onClick={() => update({ filters: query.filters.filter((existing) => existing !== filter) })}
                       type="button"
                     >
-                      <option.icon aria-hidden="true" size={13} />{option.label}
+                      <XIcon size={11} />
                     </button>
-                  ))}
-                </div>
+                  </span>
+                ))}
+                {query.filters.length < maxMetricFilters ? (
+                  <AddFilter dimensions={dimensions.value ?? []} onAdd={addFilter} />
+                ) : null}
+                <span aria-hidden="true" className="metricQuery__divider" />
+                <span className="metricQuery__word">by</span>
+                <SelectField
+                  className="metricQuery__select metricQuery__group"
+                  label="Group by"
+                  onChange={(groupBy) => update({ groupBy })}
+                  options={groupOptions}
+                  searchable={groupOptions.length > 8}
+                  value={query.groupBy}
+                />
               </div>
-              <section aria-label="Graph" className="metricChart">
-                <header>
-                  <h2>{metricChartTitle(query)}</h2>
-                  {chart.value ? (
-                    <span>
-                      {seriesCount} series{chart.value.stepMs ? ` · ${formatStep(chart.value.stepMs)} step` : ""}
-                    </span>
-                  ) : null}
-                </header>
-                {chart.error ? (
-                  <div className="automationRuns__message" role="alert"><p>{chart.error}</p></div>
-                ) : chart.value === null ? (
-                  <p className="telemetryPage__status metricChart__plot">Loading…</p>
-                ) : seriesCount === 0 ? (
-                  <p className="telemetryPage__status metricChart__plot">No data points match in this time range.</p>
-                ) : (
-                  <>
-                    <div className="metricChart__plot">
-                      <TimeseriesChart
-                        chart={chart.value}
-                        chartType={query.chartType}
-                        hiddenSeries={hidden}
-                        label={metricChartTitle(query)}
-                        showLegend={false}
-                        unit={chartUnit}
-                      />
-                    </div>
-                    <SeriesTable
+              <div aria-label="Chart type" className="dsSegmentedControl metricQuery__chartType" role="radiogroup">
+                {([
+                  { icon: ChartLineIcon, label: "Lines", value: "line" },
+                  { icon: ChartBarIcon, label: "Bars", value: "bar" },
+                ] as const).map((option) => (
+                  <button
+                    aria-checked={query.chartType === option.value}
+                    className="dsSegmentedControl__option"
+                    key={option.value}
+                    onClick={() => update({ chartType: option.value })}
+                    role="radio"
+                    type="button"
+                  >
+                    <option.icon aria-hidden="true" size={13} />{option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <section aria-label="Graph" className="metricChart">
+              <header>
+                <h2>{metricChartTitle(query)}</h2>
+                {chart.value ? (
+                  <span>
+                    {seriesCount} series{chart.value.stepMs ? ` · ${formatStep(chart.value.stepMs)} step` : ""}
+                  </span>
+                ) : null}
+              </header>
+              {chart.error ? (
+                <div className="automationRuns__message" role="alert"><p>{chart.error}</p></div>
+              ) : chart.value === null ? (
+                <p className="telemetryPage__status metricChart__plot">Loading…</p>
+              ) : seriesCount === 0 ? (
+                <p className="telemetryPage__status metricChart__plot">No data points match in this time range.</p>
+              ) : (
+                <>
+                  <div className="metricChart__plot">
+                    <TimeseriesChart
                       chart={chart.value}
-                      hidden={hidden}
-                      label={query.groupBy ? dimensionLabel(query.groupBy) : "Series"}
-                      onToggle={(name) => {
-                        const next = new Set(hidden);
-                        if (next.has(name)) next.delete(name);
-                        else next.add(name);
-                        setHiddenState({ key: chartKey, names: next });
-                      }}
+                      chartType={query.chartType}
+                      hiddenSeries={hidden}
+                      label={metricChartTitle(query)}
+                      showLegend={false}
                       unit={chartUnit}
                     />
-                  </>
-                )}
-              </section>
+                  </div>
+                  <SeriesTable
+                    chart={chart.value}
+                    hidden={hidden}
+                    label={query.groupBy ? dimensionLabel(query.groupBy) : "Series"}
+                    onToggle={(name) => {
+                      const next = new Set(hidden);
+                      if (next.has(name)) next.delete(name);
+                      else next.add(name);
+                      setHiddenState({ key: chartKey, names: next });
+                    }}
+                    unit={chartUnit}
+                  />
+                </>
+              )}
             </section>
-            <DimensionsRail
-              dimensions={dimensions.value}
-              error={dimensions.error}
-              loading={dimensions.loading}
-              onFilter={addFilter}
-              onGroup={(groupBy) => update({ groupBy })}
-              query={query}
-            />
-          </div>
-        )}
-      </TelemetryProjectsGate>
+          </section>
+          <DimensionsRail
+            dimensions={dimensions.value}
+            error={dimensions.error}
+            loading={dimensions.loading}
+            onFilter={addFilter}
+            onGroup={(groupBy) => update({ groupBy })}
+            query={query}
+          />
+        </div>
+      </TelemetryGate>
     </AppShell>
   );
 }

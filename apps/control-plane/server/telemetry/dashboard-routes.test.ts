@@ -3,15 +3,12 @@ import { createDashboardRoutes, type DashboardRouteDependencies } from "./dashbo
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const userId = "00000000-0000-4000-8000-000000000002";
-const projectId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const dashboardId = "11111111-1111-4111-8111-111111111111";
 const widgetId = "22222222-2222-4222-8222-222222222222";
 
 const dashboard = {
   id: dashboardId,
   name: "Checkout",
-  projectId,
-  projectName: "Shop",
   updatedAt: "2026-10-13T12:00:00.000Z",
   variables: [],
   widgets: [],
@@ -60,19 +57,15 @@ describe("dashboard routes", () => {
     expect(dependencies.findDashboard).toHaveBeenCalledWith(organizationId, dashboardId);
   });
 
-  it("creates a dashboard on a linked project only", async () => {
+  it("creates a dashboard in the workspace", async () => {
     const { app, dependencies } = routes();
 
-    const created = await send(app, "POST", "/", { name: "Checkout", projectId });
+    const created = await send(app, "POST", "/", { name: "Checkout" });
     expect(created.status).toBe(201);
     expect(dependencies.createDashboard).toHaveBeenCalledWith(organizationId, {
       createdBy: userId,
       name: "Checkout",
-      projectId,
     });
-
-    const unlinked = routes({ createDashboard: vi.fn(async () => null) });
-    expect((await send(unlinked.app, "POST", "/", { name: "Checkout", projectId })).status).toBe(404);
   });
 
   it("renames, sets variables, and deletes", async () => {
@@ -167,7 +160,7 @@ describe("dashboard routes", () => {
     ]) {
       const { app, dependencies } = routes(overrides);
       expect((await app.request("/")).status).toBe(404);
-      expect((await send(app, "POST", "/", { name: "x", projectId })).status).toBe(404);
+      expect((await send(app, "POST", "/", { name: "x" })).status).toBe(404);
       expect(dependencies.createDashboard).not.toHaveBeenCalled();
     }
   });

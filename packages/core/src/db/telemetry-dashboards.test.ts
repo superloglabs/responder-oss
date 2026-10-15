@@ -15,8 +15,4 @@ describe("telemetry dashboards", () => {
       /FOREIGN KEY \("dashboard_id"\) REFERENCES "public"\."telemetry_dashboards"\("id"\) ON DELETE cascade/u,
     );
   });
-
-  it("keeps dashboards when their project is unlinked", () => {
-    expect(migration).not.toContain('REFERENCES "public"."telemetry_projects"');
-  });
 });

@@ -113,7 +113,6 @@ function WidgetTile({
   onDelete,
   onEdit,
   onZoom,
-  projectId,
   range,
   refresh,
   timeZone,
@@ -123,7 +122,6 @@ function WidgetTile({
   onDelete: () => void;
   onEdit: () => void;
   onZoom: (since: number, until: number) => void;
-  projectId: string;
   range: DashboardTimeRange;
   refresh: number;
   timeZone: string;
@@ -147,7 +145,6 @@ function WidgetTile({
         <DashboardWidgetBody
           config={widget.config}
           onZoom={onZoom}
-          projectId={projectId}
           range={range}
           refresh={refresh}
           timeZone={timeZone}
@@ -361,7 +358,6 @@ export function DashboardPage() {
       onDelete={() => setRemoving(widget)}
       onEdit={() => setEditing({ widget })}
       onZoom={zoomInto}
-      projectId={dashboard.projectId}
       range={range}
       refresh={refresh}
       timeZone={timeZone}
@@ -438,12 +434,10 @@ export function DashboardPage() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          {dashboard.projectName ? <p className="dashboardPage__meta">{dashboard.projectName}</p> : null}
         </header>
         <DashboardVariableBar
           onAdd={() => setEditingVariables(true)}
           onChange={(name, value) => changeValues({ ...values, [name]: value })}
-          projectId={dashboard.projectId}
           range={range}
           values={values}
           variables={dashboard.variables}
@@ -467,7 +461,6 @@ export function DashboardPage() {
           initial={editing.widget}
           onClose={() => setEditing(null)}
           onSave={saveWidget}
-          projectId={dashboard.projectId}
           range={range}
           timeZone={timeZone}
           variableValues={values}

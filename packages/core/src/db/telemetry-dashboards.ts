@@ -6,13 +6,11 @@ import type {
   DashboardWidgetType,
 } from "../telemetry/dashboards.js";
 import { getDatabase } from "./client.js";
-import { telemetryDashboards, telemetryDashboardWidgets, telemetryProjects } from "./schema.js";
+import { telemetryDashboards, telemetryDashboardWidgets } from "./schema.js";
 
 export type TelemetryDashboardSummary = {
   id: string;
   name: string;
-  projectId: string;
-  projectName: string;
   updatedAt: string;
   widgetCount: number;
 };
@@ -40,27 +38,18 @@ const widgetColumns = {
   type: telemetryDashboardWidgets.type,
 };
 
-// A dashboard is visible only while its project is linked to the workspace.
-const linkedProject = and(
-  eq(telemetryProjects.projectId, telemetryDashboards.projectId),
-  eq(telemetryProjects.organizationId, telemetryDashboards.organizationId),
-);
-
 export async function listTelemetryDashboards(organizationId: string): Promise<TelemetryDashboardSummary[]> {
   const rows = await getDatabase()
     .select({
       id: telemetryDashboards.id,
       name: telemetryDashboards.name,
-      projectId: telemetryDashboards.projectId,
-      projectName: telemetryProjects.name,
       updatedAt: telemetryDashboards.updatedAt,
       widgetCount: count(telemetryDashboardWidgets.id),
     })
     .from(telemetryDashboards)
-    .innerJoin(telemetryProjects, linkedProject)
     .leftJoin(telemetryDashboardWidgets, eq(telemetryDashboardWidgets.dashboardId, telemetryDashboards.id))
     .where(eq(telemetryDashboards.organizationId, organizationId))
-    .groupBy(telemetryDashboards.id, telemetryProjects.name)
+    .groupBy(telemetryDashboards.id)
     .orderBy(desc(telemetryDashboards.updatedAt), asc(telemetryDashboards.id));
   return rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() }));
 }
@@ -70,13 +59,10 @@ async function findDashboardRow(organizationId: string, dashboardId: string) {
     .select({
       id: telemetryDashboards.id,
       name: telemetryDashboards.name,
-      projectId: telemetryDashboards.projectId,
-      projectName: telemetryProjects.name,
       updatedAt: telemetryDashboards.updatedAt,
       variables: telemetryDashboards.variables,
     })
     .from(telemetryDashboards)
-    .innerJoin(telemetryProjects, linkedProject)
     .where(and(eq(telemetryDashboards.organizationId, organizationId), eq(telemetryDashboards.id, dashboardId)))
     .limit(1);
   const row = rows[0];
@@ -97,38 +83,25 @@ export async function findTelemetryDashboard(
   return { ...dashboard, widgets };
 }
 
-// Null when the project is not linked to the workspace. The link is checked
-// and held in the same transaction as the insert, so an unlink cannot slip
-// between them.
 export async function createTelemetryDashboard(
   organizationId: string,
-  input: { createdBy: string; name: string; projectId: string; variables?: DashboardVariable[] },
-): Promise<TelemetryDashboard | null> {
-  return getDatabase().transaction(async (transaction) => {
-    const [project] = await transaction
-      .select({ name: telemetryProjects.name })
-      .from(telemetryProjects)
-      .where(and(eq(telemetryProjects.organizationId, organizationId), eq(telemetryProjects.projectId, input.projectId)))
-      .for("share");
-    if (!project) return null;
-    const [row] = await transaction
-      .insert(telemetryDashboards)
-      .values({
-        createdBy: input.createdBy,
-        name: input.name,
-        organizationId,
-        projectId: input.projectId,
-        variables: input.variables ?? [],
-      })
-      .returning({
-        id: telemetryDashboards.id,
-        name: telemetryDashboards.name,
-        projectId: telemetryDashboards.projectId,
-        updatedAt: telemetryDashboards.updatedAt,
-        variables: telemetryDashboards.variables,
-      });
-    return { ...row!, projectName: project.name, updatedAt: row!.updatedAt.toISOString(), widgets: [] };
-  });
+  input: { createdBy: string; name: string; variables?: DashboardVariable[] },
+): Promise<TelemetryDashboard> {
+  const [row] = await getDatabase()
+    .insert(telemetryDashboards)
+    .values({
+      createdBy: input.createdBy,
+      name: input.name,
+      organizationId,
+      variables: input.variables ?? [],
+    })
+    .returning({
+      id: telemetryDashboards.id,
+      name: telemetryDashboards.name,
+      updatedAt: telemetryDashboards.updatedAt,
+      variables: telemetryDashboards.variables,
+    });
+  return { ...row!, updatedAt: row!.updatedAt.toISOString(), widgets: [] };
 }
 
 export async function updateTelemetryDashboard(

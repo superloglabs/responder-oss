@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { TelemetryProject } from "../telemetry-api";
 import { useIngestAvailable } from "../use-ingest-available";
-import type { TelemetryProjectsState } from "../use-telemetry-projects";
+import type { TelemetryAvailableState } from "../use-telemetry-available";
 import "./telemetry.css";
 
 // Shown only where the workspace can send telemetry to this cell.
@@ -52,18 +51,18 @@ export function TelemetryException({
   );
 }
 
-// Renders the page once the workspace has linked telemetry projects, and the
-// loading, unavailable and empty states before that.
-export function TelemetryProjectsGate({
+// Renders the page once the workspace can read telemetry, and the loading
+// and unavailable states before that.
+export function TelemetryGate({
   children,
   signal,
   state,
 }: {
-  children: (projects: TelemetryProject[]) => ReactNode;
+  children: ReactNode;
   signal: "AI models" | "Logs" | "Metrics" | "Traces";
-  state: TelemetryProjectsState;
+  state: TelemetryAvailableState;
 }) {
-  if (state.projects === undefined) {
+  if (state.available === undefined) {
     return state.error ? (
       <div className="automationRuns__message" role="alert">
         <p>{state.error}</p>
@@ -73,7 +72,7 @@ export function TelemetryProjectsGate({
       <p className="telemetryPage__status">Loading…</p>
     );
   }
-  if (state.projects === null) {
+  if (!state.available) {
     return (
       <section className="emptyState emptyState--list">
         <h2>{signal} are not available</h2>
@@ -81,14 +80,5 @@ export function TelemetryProjectsGate({
       </section>
     );
   }
-  if (state.projects.length === 0) {
-    return (
-      <section className="emptyState emptyState--list">
-        <h2>No telemetry projects</h2>
-        <p>{signal} appear here once a telemetry project is linked to this workspace, or once an app sends data.</p>
-        <SendTelemetryLink variant="primary" />
-      </section>
-    );
-  }
-  return children(state.projects);
+  return children;
 }

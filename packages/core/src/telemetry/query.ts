@@ -1,5 +1,7 @@
 // Shared read-only OpenTelemetry query adapter used by multiple application
-// surfaces.
+// surfaces. Every query is scoped to one workspace: the ingest endpoint stores
+// its organization ID in the superlog.project_id resource attribute, which the
+// tables also keep as SuperlogProjectId or project_id.
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
   AI_MODEL_EXPR,
@@ -250,7 +252,7 @@ function groupExprForAttribute(
 
 export async function queryLogs(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   params: {
     range?: TimeRange;
     service?: string;
@@ -275,7 +277,7 @@ export async function queryLogs(
     { expr: "upper(SeverityText)", param: "severities", values: params.severities?.map((value) => value.toUpperCase()) },
   ]);
   const conds: string[] = [
-    "SuperlogProjectId = {projectId:String}",
+    "SuperlogProjectId = {organizationId:String}",
     `Timestamp >= ${sinceExpr}`,
     `Timestamp <= ${untilExpr}`,
     // otel_logs is partitioned by toDate(TimestampTime) and sorted by
@@ -321,7 +323,7 @@ export async function queryLogs(
     const r = await ch.query({
       query,
       query_params: {
-        projectId,
+        organizationId,
         since: sinceSql,
         until: untilSql,
         service: params.service ?? "",
@@ -342,7 +344,7 @@ export async function queryLogs(
 
 export async function queryTraces(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   params: {
     range?: TimeRange;
     service?: string;
@@ -364,7 +366,7 @@ export async function queryTraces(
   );
   const field = fieldConds(split.field, "traces");
   const conds: string[] = [
-    "SuperlogProjectId = {projectId:String}",
+    "SuperlogProjectId = {organizationId:String}",
     `Timestamp >= ${sinceExpr}`,
     `Timestamp <= ${untilExpr}`,
     ...attr.conds,
@@ -405,7 +407,7 @@ export async function queryTraces(
     const r = await ch.query({
       query,
       query_params: {
-        projectId,
+        organizationId,
         since: sinceSql,
         until: untilSql,
         service: params.service ?? "",
@@ -480,7 +482,7 @@ function traceSummaryEligible(params: TracesAggregatedParams): boolean {
 // the raw scan is fast there.
 async function traceRollupCoversWindow(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   sinceExpr: string,
   sinceSql: string,
 ): Promise<boolean> {
@@ -491,11 +493,11 @@ async function traceRollupCoversWindow(
       FROM (
         SELECT 1
         FROM otel_traces_recent
-        WHERE project_id = {projectId:String} AND ts < ${sinceExpr}
+        WHERE project_id = {organizationId:String} AND ts < ${sinceExpr}
         LIMIT 1
       )
     `,
-      query_params: { projectId, since: sinceSql },
+      query_params: { organizationId, since: sinceSql },
       format: "JSONEachRow",
     });
     return (await r.json()) as { c: string | number }[];
@@ -519,7 +521,7 @@ async function traceRollupCoversWindow(
 // that a long trace straddles — negligible for the short traces this serves.
 async function queryTracesAggregatedFromSummary(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   params: TracesAggregatedParams,
 ) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
@@ -530,7 +532,7 @@ async function queryTracesAggregatedFromSummary(
       FROM (
         SELECT ts, trace_id
         FROM otel_traces_recent
-        WHERE project_id = {projectId:String}
+        WHERE project_id = {organizationId:String}
           AND ts >= ${sinceExpr}
           AND ts <= ${untilExpr}
         ORDER BY ts DESC
@@ -551,7 +553,7 @@ async function queryTracesAggregatedFromSummary(
       uniqExactMerge(services) AS service_count,
       toFloat64(max(end_unix_nano) - min(start_unix_nano)) / 1000000 AS duration_ms
     FROM otel_traces_summary
-    WHERE project_id = {projectId:String}
+    WHERE project_id = {organizationId:String}
       AND trace_id IN (recent_ids)
       AND start >= ${sinceExpr}
       AND start <= ${untilExpr}
@@ -562,7 +564,7 @@ async function queryTracesAggregatedFromSummary(
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
       query,
-      query_params: { projectId, since: sinceSql, until: untilSql, limit: params.limit },
+      query_params: { organizationId, since: sinceSql, until: untilSql, limit: params.limit },
       format: "JSONEachRow",
     });
     return r.json();
@@ -571,7 +573,7 @@ async function queryTracesAggregatedFromSummary(
 
 export async function queryTracesAggregated(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   params: TracesAggregatedParams,
 ) {
   // Fast path only when it is both available and complete for this window: both
@@ -584,8 +586,8 @@ export async function queryTracesAggregated(
     (await tableExists(ch, "otel_traces_summary"))
   ) {
     const { sinceExpr, sinceSql } = resolveRange(params.range);
-    if (await traceRollupCoversWindow(ch, projectId, sinceExpr, sinceSql)) {
-      return queryTracesAggregatedFromSummary(ch, projectId, params);
+    if (await traceRollupCoversWindow(ch, organizationId, sinceExpr, sinceSql)) {
+      return queryTracesAggregatedFromSummary(ch, organizationId, params);
     }
   }
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
@@ -597,7 +599,7 @@ export async function queryTracesAggregated(
   // trace in the window so span_count / duration_ms / error_count describe the
   // whole trace rather than only the spans matching span-level filters.
   const outerConds: string[] = [
-    "SuperlogProjectId = {projectId:String}",
+    "SuperlogProjectId = {organizationId:String}",
     `Timestamp >= ${sinceExpr}`,
     `Timestamp <= ${untilExpr}`,
     ...attr.conds,
@@ -661,7 +663,7 @@ export async function queryTracesAggregated(
     const r = await ch.query({
       query,
       query_params: {
-        projectId,
+        organizationId,
         since: sinceSql,
         until: untilSql,
         service: params.service ?? "",
@@ -679,7 +681,7 @@ export async function queryTracesAggregated(
   });
 }
 
-export async function getTraceDetail(ch: ClickHouseClient, projectId: string, traceId: string) {
+export async function getTraceDetail(ch: ClickHouseClient, organizationId: string, traceId: string) {
   // otel_traces / otel_logs are partitioned by day and sorted by
   // (ServiceName, SpanName, Timestamp), so a bare `TraceId = …` predicate can't
   // use the primary index — it scans every partition (all retained days, every
@@ -742,12 +744,12 @@ export async function getTraceDetail(ch: ClickHouseClient, projectId: string, tr
         if(exception_event_index = 0, '', Events.Attributes[exception_event_index]['exception.message']) AS exception_message,
         if(exception_event_index = 0, '', Events.Attributes[exception_event_index]['exception.stacktrace']) AS exception_stacktrace
       FROM otel_traces
-      WHERE SuperlogProjectId = {projectId:String}
+      WHERE SuperlogProjectId = {organizationId:String}
         AND TraceId = {traceId:String}${traceWindow}
       ORDER BY Timestamp ASC, SpanId ASC
       LIMIT 5000
     `,
-        query_params: { projectId, traceId },
+        query_params: { organizationId, traceId },
         format: "JSONEachRow",
       });
       return result.json();
@@ -771,12 +773,12 @@ export async function getTraceDetail(ch: ClickHouseClient, projectId: string, tr
         LogAttributes['exception.message'] AS exception_message,
         LogAttributes['exception.stacktrace'] AS exception_stacktrace
       FROM otel_logs
-      WHERE SuperlogProjectId = {projectId:String}
+      WHERE SuperlogProjectId = {organizationId:String}
         AND TraceId = {traceId:String}${logWindow}
       ORDER BY Timestamp ASC
       LIMIT 5000
     `,
-        query_params: { projectId, traceId },
+        query_params: { organizationId, traceId },
         format: "JSONEachRow",
       });
       return result.json();
@@ -788,7 +790,7 @@ export async function getTraceDetail(ch: ClickHouseClient, projectId: string, tr
 
 export async function queryMetrics(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   params: {
     metricName?: string;
     service?: string;
@@ -803,7 +805,7 @@ export async function queryMetrics(
   const perTable = await Promise.all(
     METRIC_TABLES.map(async ({ table, kind }): Promise<Record<string, unknown>[]> => {
       const conds: string[] = [
-        "ResourceAttributes['superlog.project_id'] = {projectId:String}",
+        "ResourceAttributes['superlog.project_id'] = {organizationId:String}",
         `TimeUnix >= ${sinceExpr}`,
         `TimeUnix <= ${untilExpr}`,
         ...attr.conds,
@@ -845,7 +847,7 @@ export async function queryMetrics(
           const r = await ch.query({
             query,
             query_params: {
-              projectId,
+              organizationId,
               since: sinceSql,
               until: untilSql,
               metricName: params.metricName ?? "",
@@ -903,7 +905,7 @@ const SERVICE_SOURCES = [
 // Services seen in any signal, or only in logs or traces.
 export async function listServices(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   range?: TimeRange,
   signal?: "logs" | "traces",
 ) {
@@ -923,8 +925,8 @@ export async function listServices(
           AND TimestampTime <= ${untilExpr}`
           : "";
       const projectFilter = source.table.startsWith("otel_metrics_")
-        ? "ResourceAttributes['superlog.project_id'] = {projectId:String}"
-        : "SuperlogProjectId = {projectId:String}";
+        ? "ResourceAttributes['superlog.project_id'] = {organizationId:String}"
+        : "SuperlogProjectId = {organizationId:String}";
       const query = `
         SELECT DISTINCT ${source.service} AS service
         FROM ${source.table}
@@ -938,7 +940,7 @@ export async function listServices(
       try {
         const r = await ch.query({
           query,
-          query_params: { projectId, since: sinceSql, until: untilSql },
+          query_params: { organizationId, since: sinceSql, until: untilSql },
           format: "JSONEachRow",
         });
         const rows = (await r.json()) as { service: string }[];
@@ -966,7 +968,7 @@ const ATTRIBUTE_KEY_SCAN_ROW_CAP = 1_000_000;
 
 export async function listAttributeKeys(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   range?: TimeRange,
   source?: SeriesSource | "metrics",
 ): Promise<{ key: string; count: number }[]> {
@@ -982,7 +984,7 @@ export async function listAttributeKeys(
       SELECT ${keyExpr} AS k, count() AS c FROM (
         SELECT mapKeys(${column}) AS mk
         FROM ${table}
-        WHERE SuperlogProjectId = {projectId:String}
+        WHERE SuperlogProjectId = {organizationId:String}
           AND Timestamp >= ${sinceExpr}
           AND Timestamp <= ${untilExpr}
         LIMIT ${ATTRIBUTE_KEY_SCAN_ROW_CAP}
@@ -1018,7 +1020,7 @@ export async function listAttributeKeys(
   `;
   const r = await ch.query({
     query,
-    query_params: { projectId, since: sinceSql, until: untilSql },
+    query_params: { organizationId, since: sinceSql, until: untilSql },
     format: "JSONEachRow",
   });
   const rows = (await r.json()) as { k: string; c: string | number }[];
@@ -1027,7 +1029,7 @@ export async function listAttributeKeys(
 
 export async function listAttributeValues(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   key: string,
   range?: TimeRange,
   limit = 200,
@@ -1060,7 +1062,7 @@ export async function listAttributeValues(
       SELECT v, count() AS c FROM (
         SELECT ${column}[{key:String}] AS v
         FROM ${table}
-        WHERE SuperlogProjectId = {projectId:String}
+        WHERE SuperlogProjectId = {organizationId:String}
           AND Timestamp >= ${sinceExpr}
           AND Timestamp <= ${untilExpr}
           AND mapContains(${column}, {key:String})
@@ -1095,7 +1097,7 @@ export async function listAttributeValues(
   const r = await ch.query({
     query,
     query_params: {
-      projectId,
+      organizationId,
       key: keyParam,
       since: sinceSql,
       until: untilSql,
@@ -1763,7 +1765,7 @@ function temporalityAwareHistogramAverageQuery(
 // fast there.
 async function metricNamesRollupCoversWindow(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   sinceExpr: string,
   sinceSql: string,
 ): Promise<boolean> {
@@ -1774,11 +1776,11 @@ async function metricNamesRollupCoversWindow(
       FROM (
         SELECT 1
         FROM metric_names_per_hour
-        WHERE project_id = {projectId:String} AND hour < ${sinceExpr}
+        WHERE project_id = {organizationId:String} AND hour < ${sinceExpr}
         LIMIT 1
       )
     `,
-      query_params: { projectId, since: sinceSql },
+      query_params: { organizationId, since: sinceSql },
       format: "JSONEachRow",
     });
     return (await r.json()) as { c: string | number }[];
@@ -1796,7 +1798,7 @@ const METRIC_NAME_SUPPLEMENTAL_SCAN_TIMEOUT_SECONDS = 1;
 // names from it are included rather than dropped.
 async function listMetricNamesFromRollup(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   sinceExpr: string,
   untilExpr: string,
   sinceSql: string,
@@ -1807,14 +1809,14 @@ async function listMetricNamesFromRollup(
     query: `
       SELECT kind, name, unit, sum(c) AS total
       FROM metric_names_per_hour
-      WHERE project_id = {projectId:String}
+      WHERE project_id = {organizationId:String}
         AND hour >= toStartOfHour(${sinceExpr})
         AND hour <= ${untilExpr}
       GROUP BY kind, name, unit
       ORDER BY total DESC
       LIMIT ${Math.trunc(limitPerKind)} BY kind
     `,
-    query_params: { projectId, since: sinceSql, until: untilSql },
+    query_params: { organizationId, since: sinceSql, until: untilSql },
     format: "JSONEachRow",
   });
   const rows = (await r.json()) as {
@@ -1839,10 +1841,10 @@ async function listMetricNamesFromRollup(
 // The metric picker lists the busiest 200 names of each kind.
 export async function listMetricNames(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   range?: TimeRange,
 ): Promise<MetricName[]> {
-  return (await listCountedMetricNames(ch, projectId, range, 200)).map(({ kind, name, unit }) => ({ kind, name, unit }));
+  return (await listCountedMetricNames(ch, organizationId, range, 200)).map(({ kind, name, unit }) => ({ kind, name, unit }));
 }
 
 // A metric with how many points it has in the window.
@@ -1850,7 +1852,7 @@ type CountedMetricName = MetricName & { points: number };
 
 async function listCountedMetricNames(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   range: TimeRange | undefined,
   limitPerKind: number,
 ): Promise<CountedMetricName[]> {
@@ -1866,17 +1868,17 @@ async function listCountedMetricNames(
   // systematically drops metrics late in the sort order. The rollup answers
   // exactly, in milliseconds; anything without it falls back to the raw scan.
   if (await tableExists(ch, "metric_names_per_hour")) {
-    if (await metricNamesRollupCoversWindow(ch, projectId, sinceExpr, sinceSql)) {
+    if (await metricNamesRollupCoversWindow(ch, organizationId, sinceExpr, sinceSql)) {
       // The original rollup predates exponential-histogram support. Keep its
       // fast path for the four covered tables, then supplement it with a short,
       // best-effort exponential-histogram scan. A high-volume raw scan must not
       // make the already-available rollup result fail. De-duplication also makes
       // this forward-safe if a later rollup migration starts populating that kind.
       const [rolledUp, exponentialHistograms] = await Promise.all([
-        listMetricNamesFromRollup(ch, projectId, sinceExpr, untilExpr, sinceSql, untilSql, limitPerKind),
+        listMetricNamesFromRollup(ch, organizationId, sinceExpr, untilExpr, sinceSql, untilSql, limitPerKind),
         listMetricNamesFromRawTable(
           ch,
-          projectId,
+          organizationId,
           sinceExpr,
           untilExpr,
           sinceSql,
@@ -1904,7 +1906,7 @@ async function listCountedMetricNames(
     METRIC_TABLES.map(({ table, kind }) =>
       listMetricNamesFromRawTable(
         ch,
-        projectId,
+        organizationId,
         sinceExpr,
         untilExpr,
         sinceSql,
@@ -1920,7 +1922,7 @@ async function listCountedMetricNames(
 
 async function listMetricNamesFromRawTable(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   sinceExpr: string,
   untilExpr: string,
   sinceSql: string,
@@ -1934,14 +1936,14 @@ async function listMetricNamesFromRawTable(
       query: `
         SELECT MetricName AS name, MetricUnit AS unit, count() AS c
         FROM ${table}
-        WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+        WHERE ResourceAttributes['superlog.project_id'] = {organizationId:String}
           AND TimeUnix >= ${sinceExpr}
           AND TimeUnix <= ${untilExpr}
         GROUP BY name, unit
         ORDER BY c DESC
         LIMIT ${Math.trunc(options.limit ?? 200)}
       `,
-      query_params: { projectId, since: sinceSql, until: untilSql },
+      query_params: { organizationId, since: sinceSql, until: untilSql },
       format: "JSONEachRow",
       ...(options.maxExecutionTimeSeconds
         ? { clickhouse_settings: { max_execution_time: options.maxExecutionTimeSeconds } }
@@ -2000,7 +2002,7 @@ function metricDetailKey(metric: { name: string; unit: string }): string {
 
 async function metricDetailsFromTable(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
   table: string,
   withDescription = true,
@@ -2020,14 +2022,14 @@ async function metricDetailsFromTable(
         FROM (
           SELECT MetricName, MetricUnit, ${withDescription ? "MetricDescription, " : ""}ServiceName, Attributes, ResourceAttributes
           FROM ${table}
-          WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+          WHERE ResourceAttributes['superlog.project_id'] = {organizationId:String}
             AND TimeUnix >= ${window.sinceExpr}
             AND TimeUnix <= ${window.untilExpr}
           LIMIT ${METRIC_DETAIL_SCAN_ROW_CAP}
         )
         GROUP BY name, unit
       `,
-      query_params: { projectId, since: window.sinceSql, until: window.untilSql },
+      query_params: { organizationId, since: window.sinceSql, until: window.untilSql },
       format: "JSONEachRow",
       clickhouse_settings: METRIC_DETAIL_SETTINGS,
     });
@@ -2059,7 +2061,7 @@ async function metricDetailsFromTable(
   } catch (err) {
     // Collectors that predate descriptions do not write the column.
     if (withDescription && isMissingDescriptionError(err)) {
-      return metricDetailsFromTable(ch, projectId, window, table, false);
+      return metricDetailsFromTable(ch, organizationId, window, table, false);
     }
     // Details are optional: without them the metric is still listed.
     return { details: new Map(), sampled: true };
@@ -2069,13 +2071,13 @@ async function metricDetailsFromTable(
 // Every metric in the window, with what the catalog shows about each.
 export async function listMetricCatalog(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   range?: TimeRange,
 ): Promise<MetricCatalogEntry[]> {
   const window = resolveRange(range);
   const [names, details] = await Promise.all([
-    listCountedMetricNames(ch, projectId, range, METRIC_CATALOG_NAMES_PER_KIND),
-    Promise.all(METRIC_TABLES.map(({ table }) => metricDetailsFromTable(ch, projectId, window, table))),
+    listCountedMetricNames(ch, organizationId, range, METRIC_CATALOG_NAMES_PER_KIND),
+    Promise.all(METRIC_TABLES.map(({ table }) => metricDetailsFromTable(ch, organizationId, window, table))),
   ]);
   const detailsByKind = new Map(METRIC_TABLES.map(({ kind }, index) => [kind, details[index]!]));
   return names.flatMap(({ points, ...metric }) => {
@@ -2120,7 +2122,7 @@ export type MetricDimension = {
 // metric. Zero when neither answers, so the caller reads points unthinned.
 async function metricPointCount(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   metric: { kind: MetricKind; name: string; unit?: string },
   table: string,
   window: { sinceExpr: string; sinceSql: string; untilExpr: string; untilSql: string },
@@ -2129,7 +2131,7 @@ async function metricPointCount(
     kind: metric.kind,
     metricName: metric.name,
     metricUnit: metric.unit ?? "",
-    projectId,
+    organizationId,
     since: window.sinceSql,
     until: window.untilSql,
   };
@@ -2149,7 +2151,7 @@ async function metricPointCount(
   };
   if (
     (await tableExists(ch, "metric_names_per_hour")) &&
-    (await metricNamesRollupCoversWindow(ch, projectId, window.sinceExpr, window.sinceSql).catch(() => false))
+    (await metricNamesRollupCoversWindow(ch, organizationId, window.sinceExpr, window.sinceSql).catch(() => false))
   ) {
     // An hour the window covers in part counts for that part.
     const since = `toFloat64(toUnixTimestamp64Milli(toDateTime64(${window.sinceExpr}, 3))) / 1000`;
@@ -2158,7 +2160,7 @@ async function metricPointCount(
     const rolledUp = await count(`
       SELECT sum(c * greatest(0, least(${start} + 3600, ${until}) - greatest(${start}, ${since})) / 3600) AS points
       FROM metric_names_per_hour
-      WHERE project_id = {projectId:String}
+      WHERE project_id = {organizationId:String}
         AND kind = {kind:String}
         AND name = {metricName:String}
         ${metric.unit === undefined ? "" : "AND unit = {metricUnit:String}"}
@@ -2171,7 +2173,7 @@ async function metricPointCount(
     `
       SELECT count() AS points
       FROM ${table}
-      WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+      WHERE ResourceAttributes['superlog.project_id'] = {organizationId:String}
         AND MetricName = {metricName:String}
         ${metric.unit === undefined ? "" : "AND MetricUnit = {metricUnit:String}"}
         AND TimeUnix >= ${window.sinceExpr}
@@ -2184,7 +2186,7 @@ async function metricPointCount(
 // The attributes one metric's points carry, with how many values each takes.
 export async function listMetricDimensions(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   metric: { kind: MetricKind; name: string; unit?: string },
   range?: TimeRange,
 ): Promise<MetricDimension[]> {
@@ -2195,7 +2197,7 @@ export async function listMetricDimensions(
   // The tables sort by service and attributes, so the first rows of a scan
   // come from a few services and series. A busy metric keeps every stride-th
   // point by hash instead, so the capped scan spans the whole window.
-  const stride = Math.ceil((await metricPointCount(ch, projectId, metric, table, window)) / METRIC_DIMENSION_SCAN_ROW_CAP);
+  const stride = Math.ceil((await metricPointCount(ch, organizationId, metric, table, window)) / METRIC_DIMENSION_SCAN_ROW_CAP);
   try {
     const r = await ch.query({
       query: `
@@ -2213,7 +2215,7 @@ export async function listMetricDimensions(
               arrayMap((k, v) -> ('resource', k, v), mapKeys(ResourceAttributes), mapValues(ResourceAttributes))
             ) AS pairs
             FROM ${table}
-            WHERE ResourceAttributes['superlog.project_id'] = {projectId:String}
+            WHERE ResourceAttributes['superlog.project_id'] = {organizationId:String}
               AND MetricName = {metricName:String}
               ${metric.unit === undefined ? "" : "AND MetricUnit = {metricUnit:String}"}
               AND TimeUnix >= ${sinceExpr}
@@ -2232,7 +2234,7 @@ export async function listMetricDimensions(
       query_params: {
         metricName: metric.name,
         metricUnit: metric.unit ?? "",
-        projectId,
+        organizationId,
         since: sinceSql,
         stride,
         until: untilSql,
@@ -2311,7 +2313,7 @@ type MetricSeriesQueryOptions = {
 
 export async function metricSeries(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   metricName: string,
   filter: MetricSeriesFilter,
   groupBy: string | undefined,
@@ -2344,7 +2346,7 @@ export async function metricSeries(
       const valueExpr = aggregation ? AGG_EXPR[aggregation][kind] : DEFAULT_AGG_EXPR[kind];
       if (!valueExpr) return [];
       const baseConds: string[] = [
-        "ResourceAttributes['superlog.project_id'] = {projectId:String}",
+        "ResourceAttributes['superlog.project_id'] = {organizationId:String}",
         "MetricName = {metricName:String}",
         ...attr.conds,
       ];
@@ -2477,7 +2479,7 @@ export async function metricSeries(
         const r = await ch.query({
           query,
           query_params: {
-            projectId,
+            organizationId,
             since: sinceSql,
             until: untilSql,
             metricName,
@@ -2521,7 +2523,7 @@ export type MetricAggregateRow = { group: string; value: number };
 // because they use the shared normalized Sum/Count query before this reduction.
 export async function metricAggregate(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   metricName: string,
   filter: MetricSeriesFilter,
   groupBy: string | undefined,
@@ -2531,7 +2533,7 @@ export async function metricAggregate(
   const { sinceExpr } = resolveRange(filter.range);
   const rows = await metricSeries(
     ch,
-    projectId,
+    organizationId,
     metricName,
     filter,
     groupBy,
@@ -2708,7 +2710,7 @@ function rollupGroupColumn(groupBy: string): "service" | "severity" | "status_co
 
 async function countSeriesFromRollup(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   source: SeriesSource,
   filter: SeriesFilter,
   groupBy: string | undefined,
@@ -2716,7 +2718,7 @@ async function countSeriesFromRollup(
 ): Promise<{ bucket: string; group: string; count: number }[]> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(filter.range);
   const conds = [
-    "project_id = {projectId:String}",
+    "project_id = {organizationId:String}",
     "signal = {signal:String}",
     // Rollup cells are whole minutes, so a sub-minute `since` cannot be
     // honored exactly. Round the lower bound down to the cell boundary so the
@@ -2767,7 +2769,7 @@ async function countSeriesFromRollup(
   const r = await ch.query({
     query,
     query_params: {
-      projectId,
+      organizationId,
       signal: source,
       since: sinceSql,
       until: untilSql,
@@ -2784,7 +2786,7 @@ async function countSeriesFromRollup(
 
 export async function countSeries(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   source: SeriesSource,
   filter: SeriesFilter,
   groupBy: string | undefined,
@@ -2792,9 +2794,9 @@ export async function countSeries(
 ): Promise<{ bucket: string; group: string; count: number }[]> {
   const folded = foldServiceAttrFilter(filter);
   if (folded && rollupEligible(folded, groupBy, step) && (await rollupAvailable(ch))) {
-    return countSeriesFromRollup(ch, projectId, source, folded, groupBy, step);
+    return countSeriesFromRollup(ch, organizationId, source, folded, groupBy, step);
   }
-  const { conds, params, table } = countConditions(projectId, source, filter);
+  const { conds, params, table } = countConditions(organizationId, source, filter);
   const group = groupExprForAttribute(groupBy, source);
 
   const query = `
@@ -2819,7 +2821,7 @@ export async function countSeries(
 }
 
 // Filters on raw logs or spans for the window, shared by the count queries.
-function countConditions(projectId: string, source: SeriesSource, filter: SeriesFilter) {
+function countConditions(organizationId: string, source: SeriesSource, filter: SeriesFilter) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(filter.range);
   const split = splitAttrs(filter.resourceAttrs);
   const attr = attrConds(split.resource);
@@ -2842,7 +2844,7 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
         ],
   );
   const conds: string[] = [
-    "SuperlogProjectId = {projectId:String}",
+    "SuperlogProjectId = {organizationId:String}",
     `Timestamp >= ${sinceExpr}`,
     `Timestamp <= ${untilExpr}`,
     ...attr.conds,
@@ -2866,7 +2868,7 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
     if (filter.minTraceDurationMs) {
       conds.push(`TraceId IN (
         SELECT TraceId FROM otel_traces
-        WHERE SuperlogProjectId = {projectId:String}
+        WHERE SuperlogProjectId = {organizationId:String}
           AND Timestamp >= ${sinceExpr}
           AND Timestamp <= ${untilExpr}
         GROUP BY TraceId
@@ -2878,7 +2880,7 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
   return {
     conds,
     params: {
-      projectId,
+      organizationId,
       since: sinceSql,
       until: untilSql,
       service: filter.service ?? "",
@@ -2907,7 +2909,7 @@ function aiCallConditions(sinceExpr: string, untilExpr: string): string[] {
     AI_USAGE_CONDITION,
     `SpanId NOT IN (
       SELECT ParentSpanId FROM otel_traces
-      WHERE SuperlogProjectId = {projectId:String}
+      WHERE SuperlogProjectId = {organizationId:String}
         AND Timestamp >= ${sinceExpr}
         AND Timestamp <= ${untilExpr}
         AND ParentSpanId != ''
@@ -2921,13 +2923,13 @@ function aiCallConditions(sinceExpr: string, untilExpr: string): string[] {
 // `limit` groups are returned, largest first.
 export async function countAggregate(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   source: SeriesSource,
   filter: SeriesFilter,
   groupBy: string | undefined,
   limit: number,
 ): Promise<{ group: string; value: number }[]> {
-  const { conds, params, table } = countConditions(projectId, source, filter);
+  const { conds, params, table } = countConditions(organizationId, source, filter);
   const group = groupExprForAttribute(groupBy, source);
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
@@ -3003,7 +3005,7 @@ function measureExprs(
 // The filters, grouping and aggregate for a measure other than a count. An AI
 // field reads only model calls, and its cost reads the prices passed in.
 function measuredConditions(
-  projectId: string,
+  organizationId: string,
   source: SeriesSource,
   filter: SeriesFilter,
   measure: EventMeasure,
@@ -3012,7 +3014,7 @@ function measuredConditions(
 ) {
   const measured = measureExprs(measure, source);
   if (!measured) return null;
-  const { conds, params, sinceExpr, table, untilExpr } = countConditions(projectId, source, filter);
+  const { conds, params, sinceExpr, table, untilExpr } = countConditions(organizationId, source, filter);
   const group = groupExprForAttribute(groupBy, source);
   if (measured.condition) conds.push(measured.condition);
   const ai = isAiMeasureField(measure.field);
@@ -3035,7 +3037,7 @@ function measuredConditions(
 // can; a group with no value in a bucket has no row.
 export async function eventSeries(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   source: SeriesSource,
   filter: SeriesFilter,
   measure: EventMeasure,
@@ -3044,10 +3046,10 @@ export async function eventSeries(
   aiPrices?: AiPriceParams,
 ): Promise<MetricSeriesRow[]> {
   if (measure.aggregation === "count") {
-    const rows = await countSeries(ch, projectId, source, filter, groupBy, step);
+    const rows = await countSeries(ch, organizationId, source, filter, groupBy, step);
     return rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
   }
-  const measured = measuredConditions(projectId, source, filter, measure, groupBy, aiPrices);
+  const measured = measuredConditions(organizationId, source, filter, measure, groupBy, aiPrices);
   if (!measured) return [];
   const { conds, expr, group, params, table } = measured;
   const r = await ch.query({
@@ -3076,7 +3078,7 @@ export async function eventSeries(
 // a value.
 export async function eventAggregate(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   source: SeriesSource,
   filter: SeriesFilter,
   measure: EventMeasure,
@@ -3084,8 +3086,8 @@ export async function eventAggregate(
   limit: number,
   aiPrices?: AiPriceParams,
 ): Promise<{ group: string; value: number }[]> {
-  if (measure.aggregation === "count") return countAggregate(ch, projectId, source, filter, groupBy, limit);
-  const measured = measuredConditions(projectId, source, filter, measure, groupBy, aiPrices);
+  if (measure.aggregation === "count") return countAggregate(ch, organizationId, source, filter, groupBy, limit);
+  const measured = measuredConditions(organizationId, source, filter, measure, groupBy, aiPrices);
   if (!measured) return [];
   const { conds, expr, group, params, table } = measured;
   return retryOneConnectionReset(async () => {
@@ -3116,11 +3118,11 @@ export type AiModelUsage = AiModelKey & {
 // called first. Spans that only repeat their calls' usage are left out.
 export async function aiModelsInWindow(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   filter: SeriesFilter,
   limit = 500,
 ): Promise<AiModelUsage[]> {
-  const { conds, params, sinceExpr, untilExpr } = countConditions(projectId, "traces", filter);
+  const { conds, params, sinceExpr, untilExpr } = countConditions(organizationId, "traces", filter);
   conds.push(...aiCallConditions(sinceExpr, untilExpr));
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
@@ -3162,8 +3164,8 @@ export async function aiModelsInWindow(
 
 // Model calls in the window whose span reports no token counts, such as an
 // OpenAI stream started without usage reporting. Their cost is unknown.
-export async function aiCallsWithoutUsage(ch: ClickHouseClient, projectId: string, filter: SeriesFilter): Promise<number> {
-  const { conds, params } = countConditions(projectId, "traces", filter);
+export async function aiCallsWithoutUsage(ch: ClickHouseClient, organizationId: string, filter: SeriesFilter): Promise<number> {
+  const { conds, params } = countConditions(organizationId, "traces", filter);
   conds.push(
     "SpanAttributes['gen_ai.operation.name'] IN ('chat', 'text_completion', 'generate_content', 'embeddings')",
     `NOT ${AI_USAGE_CONDITION}`,
@@ -3187,7 +3189,7 @@ const WHOLE_WINDOW_STEP: Step = { n: 84_000, unit: "DAY" };
 // over every point rather than per bucket.
 export async function metricWindowAggregate(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   metricName: string,
   filter: MetricSeriesFilter,
   groupBy: string | undefined,
@@ -3196,7 +3198,7 @@ export async function metricWindowAggregate(
   metric: Pick<MetricSeriesQueryOptions, "kind" | "unit"> = {},
 ): Promise<MetricAggregateRow[]> {
   const { sinceExpr } = resolveRange(filter.range);
-  const rows = await metricSeries(ch, projectId, metricName, filter, groupBy, WHOLE_WINDOW_STEP, aggregation, {
+  const rows = await metricSeries(ch, organizationId, metricName, filter, groupBy, WHOLE_WINDOW_STEP, aggregation, {
     ...metric,
     bucketAnchorNs: unixTimestamp64NanoExpr(sinceExpr),
     rawBucketExpr: sinceExpr,
@@ -3248,13 +3250,13 @@ const DEPENDENCY_NAME_EXPR = `multiIf(
 
 export async function traceOverview(
   ch: ClickHouseClient,
-  projectId: string,
+  organizationId: string,
   params: { range?: TimeRange; resourceAttrs?: ResourceAttrFilter[]; service?: string; step: Step },
 ): Promise<TraceOverview> {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
   const attr = attrConds(splitAttrs(params.resourceAttrs).resource);
   const conds = [
-    "SuperlogProjectId = {projectId:String}",
+    "SuperlogProjectId = {organizationId:String}",
     `Timestamp >= ${sinceExpr}`,
     `Timestamp <= ${untilExpr}`,
     ...attr.conds,
@@ -3262,7 +3264,7 @@ export async function traceOverview(
   if (params.service) conds.push("ServiceName = {service:String}");
   const where = conds.join(" AND ");
   const queryParams = {
-    projectId,
+    organizationId,
     since: sinceSql,
     until: untilSql,
     service: params.service ?? "",

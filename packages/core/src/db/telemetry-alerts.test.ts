@@ -20,6 +20,5 @@ describe("telemetry alerts", () => {
         ),
       );
     }
-    expect(migration).not.toContain('REFERENCES "public"."telemetry_projects"');
   });
 });

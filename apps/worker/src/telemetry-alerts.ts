@@ -162,7 +162,7 @@ export async function checkTelemetryAlert(
   }
 
   try {
-    const rows = await dependencies.values(client, alert.projectId, alert, now);
+    const rows = await dependencies.values(client, alert.organizationId, alert, now);
     const open = await dependencies.openEpisodes(alert.id);
     const openByGroup = new Map(open.map((episode) => [episode.groupKey, episode]));
     for (const evaluation of evaluateAlert(alert, rows, [...openByGroup.keys()])) {

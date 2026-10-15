@@ -36,13 +36,11 @@ function startOffsetMs(span: Span, traceStart: bigint): number {
 function SpanPanel({
   logs,
   onFilter,
-  projectId,
   span,
   traceStart,
 }: {
   logs: TraceLog[];
   onFilter?: (filter: ExplorerFilter) => void;
-  projectId: string;
   span: Span;
   traceStart: bigint;
 }) {
@@ -53,7 +51,6 @@ function SpanPanel({
       { key: "field.trace_id", op: "eq", value: span.trace_id },
       { key: "field.span_id", op: "eq", value: span.span_id },
     ],
-    projectId,
     range: "7d",
     search: "",
     services: [],
@@ -114,17 +111,15 @@ export function TraceDrawer({
   listState,
   onClose,
   onFilter,
-  projectId,
   traceId,
 }: {
   listState: TraceListState;
   onClose: () => void;
   // Adds a filter on a span attribute to the trace list.
   onFilter?: (filter: ExplorerFilter) => void;
-  projectId: string;
   traceId: string;
 }) {
-  const trace = useTelemetryQuery(`${projectId}/${traceId}`, () => fetchTrace(projectId, traceId));
+  const trace = useTelemetryQuery(traceId, () => fetchTrace(traceId));
   const [tab, setTab] = useState<TraceTab>("waterfall");
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -167,7 +162,7 @@ export function TraceDrawer({
           {errors.length > 0 ? <Badge tone="danger">{errors.length} {errors.length === 1 ? "error" : "errors"}</Badge> : null}
           <strong className="traceDrawer__title">{root?.span_name ?? "Trace"}</strong>
           <span className="explorerDrawer__spacer" />
-          <Link className="dsButton dsButton--secondary dsButton--small" state={listState} to={traceHref(projectId, traceId)}>
+          <Link className="dsButton dsButton--secondary dsButton--small" state={listState} to={traceHref(traceId)}>
             Open full page
           </Link>
         </>
@@ -216,7 +211,6 @@ export function TraceDrawer({
                 <SpanPanel
                   logs={trace.data.logs.filter((log) => log.span_id === selected.span_id)}
                   onFilter={onFilter}
-                  projectId={projectId}
                   span={selected}
                   traceStart={traceStart}
                 />

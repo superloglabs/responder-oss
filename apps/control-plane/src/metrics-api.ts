@@ -20,17 +20,16 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
   return parsed as T;
 }
 
-export async function fetchMetricCatalog(projectId: string, range: TelemetryRange): Promise<MetricCatalogEntry[]> {
-  const params = new URLSearchParams({ projectId, range });
+export async function fetchMetricCatalog(range: TelemetryRange): Promise<MetricCatalogEntry[]> {
+  const params = new URLSearchParams({ range });
   return (await request<{ metrics: MetricCatalogEntry[] }>(`/api/telemetry/metric-catalog?${params}`)).metrics;
 }
 
 export async function fetchMetricDimensions(
-  projectId: string,
   range: TelemetryRange,
   metric: { kind: MetricKind; name: string; unit: string | null },
 ): Promise<MetricDimension[]> {
-  const params = new URLSearchParams({ kind: metric.kind, name: metric.name, projectId, range });
+  const params = new URLSearchParams({ kind: metric.kind, name: metric.name, range });
   if (metric.unit !== null) params.set("unit", metric.unit);
   return (await request<{ dimensions: MetricDimension[] }>(`/api/telemetry/metric-dimensions?${params}`)).dimensions;
 }
@@ -44,7 +43,6 @@ export async function fetchMetricChart(query: MetricQuery): Promise<ChartData> {
     // chosen one.
     kind: query.kind,
     metricName: query.name,
-    projectId: query.projectId,
     range: query.range,
     ...(query.unit !== null ? { unit: query.unit } : {}),
   };
@@ -214,7 +212,6 @@ export interface MetricQuery {
   groupBy: string;
   kind: MetricKind;
   name: string;
-  projectId: string;
   range: TelemetryRange;
   // With the name and kind, picks one metric. Null reads every unit, for
   // links that predate it.
@@ -248,7 +245,6 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
     groupBy: params.get("by") ?? "",
     kind: kind as MetricKind,
     name,
-    projectId: params.get("projectId") ?? "",
     range: rangeValues.has(range) ? (range as TelemetryRange) : "1h",
     unit: params.get("unit"),
   };
@@ -257,7 +253,6 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
 export function metricQueryParams(query: MetricQuery): URLSearchParams {
   const params = new URLSearchParams({ kind: query.kind, metric: query.name });
   if (query.unit !== null) params.set("unit", query.unit);
-  if (query.projectId) params.set("projectId", query.projectId);
   if (query.range !== "1h") params.set("range", query.range);
   if (query.aggregation !== initialAggregation(query.kind)) params.set("aggregation", query.aggregation);
   if (query.groupBy) params.set("by", query.groupBy);
@@ -268,7 +263,7 @@ export function metricQueryParams(query: MetricQuery): URLSearchParams {
 
 export function metricExplorerHref(
   metric: { kind: MetricKind; name: string; unit: string },
-  context: { projectId: string; range: TelemetryRange },
+  context: { range: TelemetryRange },
 ): string {
   const params = metricQueryParams({
     aggregation: initialAggregation(metric.kind),
@@ -277,7 +272,6 @@ export function metricExplorerHref(
     groupBy: "",
     kind: metric.kind,
     name: metric.name,
-    projectId: context.projectId,
     range: context.range,
     unit: metric.unit,
   });
@@ -320,7 +314,6 @@ export function metricAlertDraft(query: MetricQuery): Partial<AlertForm> {
     metricUnit: query.unit,
     name: query.name,
     perGroup: Boolean(query.groupBy),
-    projectId: query.projectId,
     source: "metric",
   };
 }
