@@ -233,6 +233,7 @@ export async function runProposedRemediation(
         baseSha: checkout.sha,
         body: pullRequest.body,
         installationId: selected.repository.installationId,
+        organizationId: job.config.organizationId,
         repository: selected.repository.fullName,
         repositoryPath: checkout.path,
         requestId: request.requestId,

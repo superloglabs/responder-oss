@@ -4,16 +4,24 @@ import { disableAgentsWithUnavailableRepositories } from "../../../../packages/c
 import {
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
+  listConnectedIntegrationAccounts,
   listOrganizationIntegrationAccounts,
   replaceGitHubInstallationAccount,
   replaceRepositories,
   upsertGitHubInstallationAccount,
 } from "../../../../packages/core/src/db/integrations.js";
+import {
+  getGitHubPullRequestAuthor,
+  removeGitHubPullRequestAuthor,
+  setGitHubPullRequestAuthor,
+} from "../../../../packages/core/src/db/github-pull-request-authors.js";
+import { getGitHubUser } from "../../../../packages/core/src/integrations/github-user-tokens.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   exchangeGitHubCode,
   listGitHubRepositories,
+  listGitHubUserInstallations,
   verifyGitHubUserInstallation,
 } from "./github.js";
 import { GitHubInstallationNotFoundError } from "../../../../packages/core/src/integrations/github.js";
@@ -32,6 +40,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
+  listConnectedIntegrationAccounts: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
   replaceGitHubInstallationAccount: vi.fn(),
   replaceIntegrationResources: vi.fn(),
@@ -39,6 +48,17 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   setIntegrationAccountStatus: vi.fn(),
   upsertGitHubInstallationAccount: vi.fn(),
   upsertIntegrationAccount: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/db/github-pull-request-authors.js", () => ({
+  getGitHubPullRequestAuthor: vi.fn(),
+  removeGitHubPullRequestAuthor: vi.fn(),
+  setGitHubPullRequestAuthor: vi.fn(),
+}));
+
+vi.mock("../../../../packages/core/src/integrations/github-user-tokens.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../packages/core/src/integrations/github-user-tokens.js")>()),
+  getGitHubUser: vi.fn(),
 }));
 
 vi.mock("../tenant.js", () => ({
@@ -380,5 +400,117 @@ describe("GitHub integration routing", () => {
     expect(response.headers.get("location")).toContain("status=error");
     expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
     expect(replaceRepositories).not.toHaveBeenCalled();
+  });
+
+});
+
+describe("GitHub pull request author", () => {
+  const authorState = {
+    codeVerifier: null,
+    metadata: { purpose: "pull_request_author" },
+    organizationId: tenant.organizationId,
+    returnTo: "/settings/workspace",
+    userId: tenant.user.id,
+  };
+
+  beforeEach(() => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("asks the member to authorize the GitHub App", async () => {
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("author-state");
+
+    const response = await app.request("/api/integrations/github/pull-request-author/start");
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location")!);
+    expect(location.origin + location.pathname).toBe("https://github.com/login/oauth/authorize");
+    expect(location.searchParams.get("state")).toBe("author-state");
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: { purpose: "pull_request_author" },
+      provider: "github",
+      returnTo: "/settings/workspace",
+      userId: tenant.user.id,
+    }));
+  });
+
+  it("saves the member's token when their account reaches the workspace's installation", async () => {
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(authorState);
+    vi.mocked(exchangeGitHubCode).mockResolvedValue({
+      access_token: "ghu_member",
+      expires_in: 28_800,
+      refresh_token: "ghr_member",
+      refresh_token_expires_in: 15_811_200,
+      token_type: "bearer",
+    });
+    vi.mocked(getGitHubUser).mockResolvedValue({ id: 583231, login: "octocat" });
+    vi.mocked(listGitHubUserInstallations).mockResolvedValue([
+      { account: { id: 98, login: "example", type: "Organization" }, id: 12345, repository_selection: "all" },
+    ]);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { externalAccountId: "12345", id: "30000000-0000-4000-8000-000000000000" },
+    ]);
+
+    const response = await app.request(
+      "/api/integrations/github/callback?code=one-time-code&state=author-state",
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings/workspace?integration=github&status=connected",
+    );
+    expect(setGitHubPullRequestAuthor).toHaveBeenCalledWith({
+      credentials: expect.objectContaining({ accessToken: "ghu_member", refreshToken: "ghr_member" }),
+      githubLogin: "octocat",
+      githubUserId: 583231,
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+    });
+    expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
+  });
+
+  it("refuses an account that cannot reach the workspace's installation", async () => {
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(authorState);
+    vi.mocked(exchangeGitHubCode).mockResolvedValue({ access_token: "ghu_member", token_type: "bearer" });
+    vi.mocked(getGitHubUser).mockResolvedValue({ id: 583231, login: "octocat" });
+    vi.mocked(listGitHubUserInstallations).mockResolvedValue([
+      { account: { id: 99, login: "elsewhere", type: "Organization" }, id: 67890, repository_selection: "all" },
+    ]);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { externalAccountId: "12345", id: "30000000-0000-4000-8000-000000000000" },
+    ]);
+
+    const response = await app.request(
+      "/api/integrations/github/callback?code=one-time-code&state=author-state",
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings/workspace?integration=github&status=error&reason=no_shared_installation",
+    );
+    expect(setGitHubPullRequestAuthor).not.toHaveBeenCalled();
+  });
+
+  it("lets only the member or an admin stop it", async () => {
+    vi.mocked(getGitHubPullRequestAuthor).mockResolvedValue({
+      githubLogin: "octocat",
+      status: "connected",
+      updatedAt: new Date("2026-10-15T12:00:00Z"),
+      user: { email: "other@example.com", id: "40000000-0000-4000-8000-000000000000", name: "Other" },
+    });
+
+    const member = await app.request("/api/integrations/github/pull-request-author", { method: "DELETE" });
+    expect(member.status).toBe(403);
+    expect(removeGitHubPullRequestAuthor).not.toHaveBeenCalled();
+
+    vi.mocked(getActiveTenant).mockResolvedValue({ ...tenant, role: "admin" });
+    const admin = await app.request("/api/integrations/github/pull-request-author", { method: "DELETE" });
+    expect(admin.status).toBe(204);
+    expect(removeGitHubPullRequestAuthor).toHaveBeenCalledWith(tenant.organizationId);
   });
 });

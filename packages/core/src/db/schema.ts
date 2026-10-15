@@ -1810,6 +1810,50 @@ export const pullRequestOrigins = pgTable(
   ],
 );
 
+// The member whose GitHub account opens the workspace's pull requests, so a
+// review bot that bills per pull request author counts a seat the workspace
+// already pays for. Without a row, or when the member's token cannot push to
+// the repository, the GitHub App opens them. The row stops applying when the
+// member leaves the workspace.
+export const githubPullRequestAuthors = pgTable("github_pull_request_authors", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  githubUserId: bigint("github_user_id", { mode: "number" }).notNull(),
+  githubLogin: text("github_login").notNull(),
+  // The GitHub App user access token and, when tokens expire, its refresh
+  // token and both expiry times.
+  encryptedCredentials: text("encrypted_credentials").notNull(),
+  // "connected", or "error" once GitHub rejected the token. A member
+  // connects again to fix it.
+  status: text("status").notNull().default("connected"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Branches Responder created for pull requests a member's account opens.
+// GitHub reports those pull requests as the member's, so the branch is how
+// the pull_request webhook tells them apart from the member's own.
+export const githubMemberPullRequestBranches = pgTable(
+  "github_member_pull_request_branches",
+  {
+    // Lowercase owner/name.
+    repositoryFullName: text("repository_full_name").notNull(),
+    branch: text("branch").notNull(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.repositoryFullName, table.branch] }),
+    index("github_member_pull_request_branches_organization_idx").on(table.organizationId),
+  ],
+);
+
 /**
  * Durable bindings between Slack issue cards and their originating
  * investigation. These cover both Slack-sourced alert threads and issue

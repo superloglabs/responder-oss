@@ -1,4 +1,5 @@
 import { findAutomationsForGitHubPullRequest } from "@responder/core/db/automations";
+import { isMemberPullRequestBranch } from "@responder/core/db/github-pull-request-authors";
 import { z } from "zod";
 import { queueAutomationRun } from "../automations/queue.js";
 
@@ -92,11 +93,13 @@ export type PullRequestAutomationOutcome =
 
 interface PullRequestAutomationDependencies {
   findAutomations: typeof findAutomationsForGitHubPullRequest;
+  isMemberPullRequestBranch: typeof isMemberPullRequestBranch;
   queueAutomationRun: typeof queueAutomationRun;
 }
 
 const defaultDependencies: PullRequestAutomationDependencies = {
   findAutomations: findAutomationsForGitHubPullRequest,
+  isMemberPullRequestBranch,
   queueAutomationRun,
 };
 
@@ -134,6 +137,18 @@ export async function startPullRequestAutomations(
     installationId,
     repositoryExternalId: String(event.repository.id),
   });
+  // A pull request Responder opened with a member's account is reported as
+  // the member's. Its branch tells it apart.
+  if (
+    kind === "opened" &&
+    matches.length > 0 &&
+    await dependencies.isMemberPullRequestBranch({
+      branch: pullRequest.head.ref,
+      repositoryFullName: event.repository.full_name,
+    })
+  ) {
+    return { outcome: "ignored" };
+  }
   await Promise.all(
     matches.map((match) =>
       dependencies.queueAutomationRun({

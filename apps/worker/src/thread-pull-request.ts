@@ -119,6 +119,7 @@ export function createThreadPullRequestTool(input: {
         baseSha: checkout.sha,
         body: request.body,
         installationId: repository.installationId,
+        organizationId: input.organizationId,
         repository: repository.fullName,
         repositoryPath: checkout.path,
         requestId: requestId(input.investigationId, request.repository, request.title),

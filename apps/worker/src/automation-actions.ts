@@ -562,6 +562,7 @@ export function createAutomationToolHandler(input: {
         baseSha: checkout.sha,
         body: action.body,
         installationId: repository.installationId,
+        organizationId: input.organizationId,
         repository: checkout.repository,
         repositoryPath: checkout.path,
         requestId: attempt.id,

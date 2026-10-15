@@ -1,5 +1,10 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import {
+  githubPullRequestAuthorToken,
+  markGitHubPullRequestAuthorRejected,
+  recordMemberPullRequestBranch,
+} from "@responder/core/db/github-pull-request-authors";
+import {
   createGitHubInstallationToken,
   githubAppHeaders,
 } from "@responder/core/integrations/github";
@@ -17,15 +22,70 @@ const githubPullRequestSchema = z.object({
   html_url: z.string().url(),
 });
 
+const repositoryPermissionsSchema = z.object({
+  permissions: z.object({ push: z.boolean() }).optional(),
+});
+
 interface PullRequestDependencies {
   createInstallationToken: (installationId: number) => Promise<string>;
   fetch: typeof fetch;
+  markMemberTokenRejected: typeof markGitHubPullRequestAuthorRejected;
+  memberToken: typeof githubPullRequestAuthorToken;
+  recordMemberBranch: typeof recordMemberPullRequestBranch;
 }
 
 const defaultDependencies: PullRequestDependencies = {
   createInstallationToken: createGitHubInstallationToken,
   fetch,
+  markMemberTokenRejected: markGitHubPullRequestAuthorRejected,
+  memberToken: githubPullRequestAuthorToken,
+  recordMemberBranch: recordMemberPullRequestBranch,
 };
+
+export type PullRequestOpener =
+  | { githubLogin: string; kind: "member"; token: string }
+  | { kind: "app"; token: string };
+
+// The workspace's chosen member opens the pull request when their token can
+// push to the repository. Otherwise the GitHub App does, as it does without
+// a chosen member.
+export async function pullRequestOpener(
+  input: { installationId: number; organizationId: string; repository: string },
+  dependencies: PullRequestDependencies = defaultDependencies,
+): Promise<PullRequestOpener> {
+  const log = (outcome: string) =>
+    console.info(JSON.stringify({
+      event: "github_pull_request_member_opener_skipped",
+      organizationId: input.organizationId,
+      outcome,
+    }));
+  const member = await dependencies.memberToken(input.organizationId).catch(() => {
+    log("token_unavailable");
+    return null;
+  });
+  if (member) {
+    const response = await dependencies.fetch(
+      `https://api.github.com/repos/${repositoryApiPath(input.repository)}`,
+      { headers: githubAppHeaders(member.token), signal: AbortSignal.timeout(30_000) },
+    ).catch(() => null);
+    const repository = response?.ok
+      ? repositoryPermissionsSchema.safeParse(await response.json().catch(() => null))
+      : null;
+    if (repository?.success && repository.data.permissions?.push) {
+      return { githubLogin: member.githubLogin, kind: "member", token: member.token };
+    }
+    if (response?.status === 401) {
+      await dependencies.markMemberTokenRejected(input.organizationId);
+      log("token_rejected");
+    } else {
+      log(response ? "no_push_access" : "repository_unavailable");
+    }
+  }
+  return {
+    kind: "app",
+    token: await dependencies.createInstallationToken(input.installationId),
+  };
+}
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -187,6 +247,7 @@ export async function createPullRequestFromSandbox(
     baseSha: string;
     body: string;
     installationId: number;
+    organizationId: string;
     repository: string;
     repositoryPath: string;
     requestId: string;
@@ -213,7 +274,8 @@ export async function createPullRequestFromSandbox(
       );
     }
   }
-  const token = await dependencies.createInstallationToken(input.installationId);
+  const opener = await pullRequestOpener(input, dependencies);
+  const token = opener.token;
   const apiRepository = repositoryApiPath(input.repository);
   const apiBase = `https://api.github.com/repos/${apiRepository}`;
   const baseCommit = githubCommitDetailsSchema.parse(
@@ -265,6 +327,13 @@ export async function createPullRequestFromSandbox(
     }),
   );
   const branch = `fix/${branchSlug(input.title)}-${input.requestId.slice(0, 8)}`;
+  if (opener.kind === "member") {
+    await dependencies.recordMemberBranch({
+      branch,
+      organizationId: input.organizationId,
+      repositoryFullName: input.repository,
+    });
+  }
   await githubJson(dependencies.fetch, token, `${apiBase}/git/refs`, {
     method: "POST",
     body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }),
