@@ -37,6 +37,40 @@ function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
+// The error of the result message that ended the run, if any.
+function claudeError(output: string): string | null {
+  for (const line of output.split("\n").reverse()) {
+    if (!line.includes("\"result\"")) continue;
+    let event: { errors?: unknown; is_error?: unknown; result?: unknown; subtype?: unknown; type?: unknown };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type !== "result") continue;
+    if (event.is_error !== true && event.subtype === "success") return null;
+    const errors = Array.isArray(event.errors)
+      ? event.errors.filter((error): error is string => typeof error === "string" && error.trim() !== "")
+      : [];
+    if (errors.length > 0) return errors.map((error) => error.trim()).join("; ");
+    if (typeof event.result === "string" && event.result.trim()) return event.result.trim();
+    return typeof event.subtype === "string" ? event.subtype : null;
+  }
+  return null;
+}
+
+function harnessFailure(output: string): string {
+  const exitCode = /(?:^|\n)Process exited with code (\d+)(?:\n|$)/u.exec(output)?.[1];
+  // A process killed without a result message was most often stopped by the
+  // sandbox's memory limit.
+  const reason = claudeError(output) ?? (
+    exitCode === "137"
+      ? "Claude was killed with exit code 137, most likely because the sandbox ran out of memory"
+      : exitCode ? `Claude exited with code ${exitCode}` : null
+  );
+  return reason ? `Claude automation harness failed: ${reason}` : "Claude automation harness failed";
+}
+
 const runner = (modulePath: string) => `import { readFile } from "node:fs/promises";
 import { query } from ${JSON.stringify(modulePath)};
 
@@ -144,6 +178,6 @@ export async function runClaudeAutomation(
     maxOutputTokens: automationHarnessMaxOutputTokens,
     workdir: automationWorkspaceRoot,
   });
-  if (!commandSucceeded(output)) throw new AutomationHarnessError("Claude automation harness failed", output);
+  if (!commandSucceeded(output)) throw new AutomationHarnessError(harnessFailure(output), output);
   return { eventStream: output };
 }
