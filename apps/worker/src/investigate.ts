@@ -542,7 +542,7 @@ export function investigationInstructions(input: {
       ? prompt("cloudflare", { value1: cloudflareAccountNames.join(", ") })
       : null,
     input.axiomConnected
-      ? prompt("axiom")
+      ? prompt(assistant ? "axiomAssistant" : "axiom")
       : null,
     input.clickStackConnected
       ? prompt("clickstack")
@@ -840,7 +840,7 @@ export async function runInvestigationAgent(
     ? createDatadogMcpServer(datadogConnection)
     : null;
   const axiomServer = axiomConnection
-    ? createAxiomMcpServer(axiomConnection)
+    ? createAxiomMcpServer(axiomConnection, { alerting: assistant })
     : null;
   const dash0Servers = dash0Connections.map(createDash0McpServer);
   const postHogServers = postHogConnections.map(createPostHogMcpServer);

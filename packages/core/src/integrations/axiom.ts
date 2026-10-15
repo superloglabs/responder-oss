@@ -4,14 +4,14 @@ import type { StoredCustomMcpOAuthState } from "./custom-mcp.js";
 
 export const AXIOM_MCP_URL = "https://mcp.axiom.co/mcp";
 
-// The Axiom MCP tools runs may call. Dashboard, monitor, and notifier
-// mutation tools are left out.
+// The read-only Axiom MCP tools every run may call.
 export const AXIOM_READ_ONLY_MCP_TOOLS = [
   "checkMonitors",
   "exportDashboard",
   "getDashboard",
-  "getDatasetSchema",
+  "getDatasetFields",
   "getMetricTagValues",
+  "getMonitor",
   "getMonitorHistory",
   "getSavedQueries",
   "listDashboards",
@@ -19,13 +19,34 @@ export const AXIOM_READ_ONLY_MCP_TOOLS = [
   "listMetricTags",
   "listMetrics",
   "listNotifiers",
-  "queryApl",
+  "queryDataset",
   "queryMetrics",
   "searchMetrics",
+  "services-getChanges",
+  "services-getEdgeHistory",
+  "services-getMap",
+] as const;
+
+// Tools that set up alerts. Automations and tag mode may call them; alert
+// investigations and scans may not. Delete tools and dashboard and dataset
+// writes are left out everywhere.
+export const AXIOM_ALERTING_MCP_TOOLS = [
+  "createMonitor",
+  "createNotifier",
+  "updateMonitor",
+  "updateNotifier",
 ] as const;
 
 export function isAxiomReadOnlyTool(name: string): boolean {
   return (AXIOM_READ_ONLY_MCP_TOOLS as readonly string[]).includes(name);
+}
+
+export function isAxiomAllowedTool(
+  name: string,
+  access: { alerting: boolean },
+): boolean {
+  return isAxiomReadOnlyTool(name) ||
+    (access.alerting && (AXIOM_ALERTING_MCP_TOOLS as readonly string[]).includes(name));
 }
 
 const axiomCredentialsSchema = z.object({

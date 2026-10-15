@@ -469,8 +469,12 @@ Slack channel or a schedule.
 
 Connect Axiom from Settings through the hosted MCP server's browser OAuth flow.
 Responder stores the OAuth session encrypted, refreshes it outside the sandbox,
-and exposes only an explicit allowlist of read-only Axiom tools to investigation
-runs. Dashboard, monitor, and notifier mutation tools are blocked.
+and exposes only an explicit allowlist of Axiom tools. Every run may call the
+read-only query, dataset, metrics, dashboard, monitor, notifier, and service
+map tools. Automations and tag mode may also create and update monitors and
+notifiers, so they can set up alerts. Alert investigations and scans stay
+read-only. Delete tools and dashboard and dataset writes are blocked for all
+runs.
 
 Agents use Axiom as investigation context. Use a watched Slack channel as the
 agent input, then add Axiom under Context so the investigation can query
@@ -478,7 +482,7 @@ relevant logs, traces, metrics, dashboards, and monitor history.
 
 Automations can use Axiom both ways. As a connector, the run reaches Axiom
 through the run-scoped context broker, which refreshes the OAuth session and
-lists and accepts calls only to the same read-only tool allowlist. As a
+lists and accepts calls only to the read-only and alerting tools. As a
 trigger, an Axiom monitor alert starts the automation. Each Axiom connection
 has its own webhook:
 

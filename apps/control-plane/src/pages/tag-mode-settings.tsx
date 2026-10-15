@@ -119,7 +119,7 @@ function accountDetail(account: ContextAccount): string {
     case "grafana":
       return `${prefix}Dashboards, alerts, metrics, logs, and traces`;
     case "axiom":
-      return `${prefix}Logs, traces, metrics, and monitor history`;
+      return `${prefix}Logs, traces, metrics, and alerts`;
     case "linear":
       return `${prefix}Projects and issues · Context only`;
     case "custom_mcp":

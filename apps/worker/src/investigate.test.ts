@@ -321,6 +321,27 @@ describe("sandbox agent configuration", () => {
     expect(investigationInstructions(base)).not.toContain("GitHub review");
   });
 
+  it("lets assistant turns set up Axiom alerts and keeps investigations read-only", () => {
+    const base = {
+      agentPrompt: "",
+      axiomConnected: true,
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+    };
+
+    const assistant = investigationInstructions({
+      ...base,
+      assistant: { integrationsUrl: "https://app.example.com/settings", pullRequests: true },
+      threadMode: true,
+    });
+    expect(assistant).toContain("you may create or update Axiom monitors and notifiers");
+    expect(assistant).not.toContain("Never create, update, or delete Axiom resources");
+
+    expect(investigationInstructions(base)).toContain("Never create, update, or delete Axiom resources");
+  });
+
   it("words Linear assistant turns for the agent session", () => {
     const instructions = investigationInstructions({
       agentPrompt: "",

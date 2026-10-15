@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { isAxiomReadOnlyTool } from "../../../../packages/core/src/integrations/axiom.js";
+import { isAxiomAllowedTool } from "../../../../packages/core/src/integrations/axiom.js";
 import { rpcMessages } from "./mcp-messages.js";
 
-// Automation runs reach Axiom through the broker with the same read-only tool
-// allowlist as investigations. Calls to other tools are refused, and tool
-// listings are filtered before they reach the run.
+// Automation runs reach Axiom through the broker. They may call the read-only
+// tools and create or update monitors and notifiers. Calls to other tools are
+// refused, and tool listings are filtered before they reach the run.
 
 export type AxiomContextDecision =
   | { kind: "forward" }
@@ -16,12 +16,12 @@ export function axiomContextDecision(input: {
 }): AxiomContextDecision {
   if (input.method !== "tools/call") return { kind: "forward" };
   const name = z.string().safeParse(input.params?.name);
-  return name.success && isAxiomReadOnlyTool(name.data)
+  return name.success && isAxiomAllowedTool(name.data, { alerting: true })
     ? { kind: "forward" }
     : {
         code: -32602,
         kind: "reject",
-        message: "Unknown or non-read-only tool",
+        message: "Unknown or blocked Axiom tool",
         status: 400,
       };
 }
@@ -71,7 +71,8 @@ export async function filterAxiomToolList(
     ...listing.data,
     result: {
       ...listing.data.result,
-      tools: listing.data.result.tools.filter((tool) => isAxiomReadOnlyTool(tool.name)),
+      tools: listing.data.result.tools.filter((tool) =>
+        isAxiomAllowedTool(tool.name, { alerting: true })),
     },
   }), { headers, status: response.status });
 }

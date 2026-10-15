@@ -955,9 +955,15 @@ describe("automation context broker", () => {
       });
     }
 
-    it("lists only read-only Axiom tools with a refreshed token", async () => {
+    it("lists read-only and alerting Axiom tools with a refreshed token", async () => {
       const { app, dependencies } = appFor(axiomClaim());
-      const result = { tools: [{ name: "queryApl" }, { name: "updateMonitor" }, { name: "listDatasets" }] };
+      const result = { tools: [
+        { name: "queryDataset" },
+        { name: "createMonitor" },
+        { name: "deleteMonitor" },
+        { name: "updateDashboard" },
+        { name: "listDatasets" },
+      ] };
       dependencies.providerFetch.mockResolvedValue(new Response(
         `event: message\ndata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\n\n`,
         { headers: { "content-type": "text/event-stream", "mcp-session-id": "axiom-session" } },
@@ -973,7 +979,7 @@ describe("automation context broker", () => {
       expect(await response.json()).toEqual({
         id: 1,
         jsonrpc: "2.0",
-        result: { tools: [{ name: "queryApl" }, { name: "listDatasets" }] },
+        result: { tools: [{ name: "queryDataset" }, { name: "createMonitor" }, { name: "listDatasets" }] },
       });
       expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
         mcpUrl: "https://mcp.axiom.co/mcp",
@@ -985,7 +991,7 @@ describe("automation context broker", () => {
 
     it("filters listings sent with an uppercase media type and CR line endings", async () => {
       const { app, dependencies } = appFor(axiomClaim());
-      const result = { tools: [{ name: "queryApl" }, { name: "deleteMonitor" }] };
+      const result = { tools: [{ name: "queryDataset" }, { name: "deleteMonitor" }] };
       dependencies.providerFetch.mockResolvedValue(new Response(
         `event: message\rdata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\r\r`,
         { headers: { "content-type": "Text/Event-Stream" } },
@@ -997,7 +1003,7 @@ describe("automation context broker", () => {
       );
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ result: { tools: [{ name: "queryApl" }] } });
+      expect(await response.json()).toMatchObject({ result: { tools: [{ name: "queryDataset" }] } });
     });
 
     it("refuses a successful listing it cannot read instead of passing it through", async () => {
@@ -1018,7 +1024,7 @@ describe("automation context broker", () => {
       expect(body).not.toContain("deleteMonitor");
     });
 
-    it("refuses Axiom tools outside the read-only allowlist without calling Axiom", async () => {
+    it("refuses Axiom tools outside the allowlist without calling Axiom", async () => {
       const { app, dependencies } = appFor(axiomClaim());
 
       const response = await app.request(
@@ -1032,7 +1038,10 @@ describe("automation context broker", () => {
       expect(dependencies.refreshCustomMcp).not.toHaveBeenCalled();
     });
 
-    it("forwards read-only Axiom tool calls", async () => {
+    it.each([
+      ["queryDataset", { apl: "['logs'] | take 1" }],
+      ["createMonitor", { name: "High error rate" }],
+    ])("forwards %s calls", async (name, args) => {
       const { app, dependencies } = appFor(axiomClaim());
       dependencies.providerFetch.mockResolvedValue(new Response(
         JSON.stringify({ id: 3, jsonrpc: "2.0", result: { content: [{ text: "rows", type: "text" }] } }),
@@ -1041,7 +1050,7 @@ describe("automation context broker", () => {
 
       const response = await app.request(
         `/api/automation-context-broker/v1/${accountId}`,
-        rpcRequest({ id: 3, jsonrpc: "2.0", method: "tools/call", params: { arguments: { apl: "['logs'] | take 1" }, name: "queryApl" } }),
+        rpcRequest({ id: 3, jsonrpc: "2.0", method: "tools/call", params: { arguments: args, name } }),
       );
 
       expect(response.status).toBe(200);
