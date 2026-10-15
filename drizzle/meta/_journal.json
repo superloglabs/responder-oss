@@ -575,6 +575,13 @@
       "when": 1792056225824,
       "tag": "0081_workspace_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1792057088715,
+      "tag": "0082_synthetic_checks",
+      "breakpoints": true
     }
   ]
 }

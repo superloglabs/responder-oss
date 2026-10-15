@@ -15,6 +15,9 @@ import { ResetPasswordPage } from "./pages/reset-password";
 import { OnboardingPage } from "./pages/onboarding";
 import { AlertPage } from "./pages/alert";
 import { AlertsPage } from "./pages/alerts";
+import { SyntheticCheckPage } from "./pages/synthetic-check";
+import { SyntheticCheckEditPage } from "./pages/synthetic-check-edit";
+import { SyntheticsPage } from "./pages/synthetics";
 import { DashboardPage } from "./pages/dashboard";
 import { AiModelsPage } from "./pages/ai-models";
 import { DashboardsPage } from "./pages/dashboards";
@@ -169,6 +172,10 @@ export function App() {
         <Route element={<AlertsPage />} path="/alerts" />
         <Route element={<AlertPage />} path="/alerts/new" />
         <Route element={<AlertPage />} path="/alerts/:alertId" />
+        <Route element={<SyntheticsPage />} path="/synthetics" />
+        <Route element={<SyntheticCheckEditPage />} path="/synthetics/new" />
+        <Route element={<SyntheticCheckPage />} path="/synthetics/:checkId" />
+        <Route element={<SyntheticCheckEditPage />} path="/synthetics/:checkId/edit" />
         <Route element={<TraceDetailPage />} path="/traces/:traceId" />
         <Route element={<ScansPage />} path="/scans" />
         <Route element={<ScanDetailPage />} path="/scans/:scanId" />

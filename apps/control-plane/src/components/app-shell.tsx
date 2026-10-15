@@ -21,6 +21,7 @@ import {
   FlagIcon,
   GearIcon,
   GitPullRequestIcon,
+  GlobeIcon,
   LightningIcon,
   ListIcon,
   ListBulletsIcon,
@@ -53,6 +54,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   settings: GearIcon,
   skills: BookOpenTextIcon,
   suggestions: FlagIcon,
+  synthetics: GlobeIcon,
   "tag-mode": TagIcon,
   traces: TreeStructureIcon,
 };

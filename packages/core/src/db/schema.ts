@@ -47,6 +47,15 @@ import type {
   AutomationNotification,
   AutomationTrigger,
 } from "../automations/config.js";
+import type {
+  SyntheticAssertion,
+  SyntheticAssertionResult,
+  SyntheticHeader,
+  SyntheticMethod,
+  SyntheticResponse,
+  SyntheticRunStatus,
+  SyntheticTimings,
+} from "../synthetics/types.js";
 import { organization, user } from "./auth-schema.js";
 
 /**
@@ -845,6 +854,120 @@ export const telemetryAlertEpisodes = pgTable(
     uniqueIndex("telemetry_alert_episodes_open_idx")
       .on(table.alertId, table.groupKey)
       .where(sql`${table.state} = 'firing'`),
+  ],
+);
+
+// An HTTP request the worker makes on a schedule, with assertions on the
+// response.
+export const syntheticChecks = pgTable(
+  "synthetic_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    method: text("method").$type<SyntheticMethod>().notNull().default("GET"),
+    url: text("url").notNull(),
+    // Secret header values are blank here and kept in encrypted_secrets.
+    headers: jsonb("headers").$type<SyntheticHeader[]>().notNull().default([]),
+    // The secret header values, by lowercased name, encrypted.
+    encryptedSecrets: text("encrypted_secrets"),
+    body: text("body"),
+    timeoutMs: integer("timeout_ms").notNull().default(10_000),
+    followRedirects: boolean("follow_redirects").notNull().default(true),
+    assertions: jsonb("assertions").$type<SyntheticAssertion[]>().notNull().default([]),
+    intervalSeconds: integer("interval_seconds").notNull().default(300),
+    retries: integer("retries").notNull().default(1),
+    // Consecutive failed runs before the check alerts.
+    failuresToAlert: integer("failures_to_alert").notNull().default(1),
+    slackIntegrationAccountId: uuid("slack_integration_account_id").references(() => integrationAccounts.id, {
+      onDelete: "set null",
+    }),
+    slackChannelId: text("slack_channel_id"),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    // When the check was last claimed to run.
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastStatus: text("last_status").$type<SyntheticRunStatus>(),
+    // When the check last started or stopped failing.
+    statusSince: timestamp("status_since", { withTimezone: true }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("synthetic_checks_organization_idx").on(table.organizationId),
+    index("synthetic_checks_due_idx").on(table.lastRunAt).where(sql`${table.enabled}`),
+  ],
+);
+
+// One run of a check, kept for 30 days.
+export const syntheticCheckRuns = pgTable(
+  "synthetic_check_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    checkId: uuid("check_id")
+      .notNull()
+      .references(() => syntheticChecks.id, { onDelete: "cascade" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    status: text("status").$type<SyntheticRunStatus>().notNull(),
+    // Where the run was made from, such as the cell's region.
+    location: text("location").notNull(),
+    attempts: integer("attempts").notNull().default(1),
+    durationMs: doublePrecision("duration_ms").notNull(),
+    timings: jsonb("timings").$type<SyntheticTimings>().notNull(),
+    statusCode: integer("status_code"),
+    error: text("error"),
+    assertions: jsonb("assertions").$type<SyntheticAssertionResult[]>().notNull().default([]),
+    // The response's headers and the start of its body, kept for runs that
+    // did not pass.
+    response: jsonb("response").$type<SyntheticResponse>(),
+  },
+  (table) => [
+    index("synthetic_check_runs_check_idx").on(table.checkId, table.startedAt),
+    index("synthetic_check_runs_started_idx").on(table.startedAt),
+  ],
+);
+
+// One stretch of failing runs of a check.
+export const syntheticCheckEpisodes = pgTable(
+  "synthetic_check_episodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    checkId: uuid("check_id")
+      .notNull()
+      .references(() => syntheticChecks.id, { onDelete: "cascade" }),
+    state: text("state").$type<"failing" | "resolved">().notNull().default("failing"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    // Why the run that opened the episode failed.
+    reason: text("reason").notNull(),
+    failedRuns: integer("failed_runs").notNull().default(1),
+    // The channel and message that announced the episode; recovery replies
+    // in its thread.
+    slackIntegrationAccountId: uuid("slack_integration_account_id").references(() => integrationAccounts.id, {
+      onDelete: "set null",
+    }),
+    slackChannelId: text("slack_channel_id"),
+    slackMessageTs: text("slack_message_ts"),
+    // Set once the recovery is posted, or when there is nothing to post.
+    recoveryNotifiedAt: timestamp("recovery_notified_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("synthetic_check_episodes_check_idx").on(table.checkId, table.startedAt),
+    uniqueIndex("synthetic_check_episodes_open_idx")
+      .on(table.checkId)
+      .where(sql`${table.state} = 'failing'`),
   ],
 );
 

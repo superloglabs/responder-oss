@@ -13,6 +13,7 @@ export type NavigationSection =
   | "settings"
   | "skills"
   | "suggestions"
+  | "synthetics"
   | "tag-mode"
   | "traces";
 
@@ -59,7 +60,12 @@ export function primaryNavigation(options: {
         { label: "Metrics", section: "metrics", to: "/metrics" },
         { label: "AI models", section: "ai-models", to: "/ai-models" },
         ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
-        ...(options.alerts ? [{ label: "Alerts", section: "alerts" as const, to: "/alerts" }] : []),
+        ...(options.alerts
+          ? [
+              { label: "Alerts", section: "alerts" as const, to: "/alerts" },
+              { label: "Synthetics", section: "synthetics" as const, to: "/synthetics" },
+            ]
+          : []),
       ]
     : [];
   if (options.simplified) {
