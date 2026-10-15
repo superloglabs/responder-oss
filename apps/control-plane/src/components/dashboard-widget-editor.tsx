@@ -20,6 +20,7 @@ import {
   type WidgetDisplay,
   type WidgetDraft,
 } from "../dashboards-api";
+import { widgetFieldSource } from "../../../../packages/core/src/telemetry/dashboards";
 import { DashboardDialog } from "./dashboard-dialog";
 import { AttributeFilters } from "./attribute-filters";
 import { DashboardWidgetBody } from "./dashboard-widget";
@@ -188,7 +189,16 @@ export function DashboardWidgetEditor({
         <div className="widgetEditor__form">
           <SegmentedControl aria-label="Widget kind" onChange={(kind) => update({ kind })} options={kinds} value={form.kind} />
           {form.kind !== "note" ? (
-            <SegmentedControl aria-label="Data" onChange={(value) => update({ source: value })} options={sources} value={source} />
+            <SegmentedControl
+              aria-label="Data"
+              onChange={(value) => {
+                // A field only one signal has is cleared when switching to the other.
+                const fieldSource = widgetFieldSource(form.field);
+                update(fieldSource && fieldSource !== value ? { field: "", source: value } : { source: value });
+              }}
+              options={sources}
+              value={source}
+            />
           ) : null}
           {form.kind === "chart" && form.source === "metric" ? (
             <>
@@ -225,7 +235,10 @@ export function DashboardWidgetEditor({
                 <SelectField
                   label="Field"
                   onChange={(field) =>
-                    update(field === "duration" && form.unit === "none" ? { field, unit: "duration_ms" } : { field })
+                    // A duration's distinct count is a count, not a duration.
+                    update(field === "duration" && form.unit === "none" && form.aggregation !== "count_distinct"
+                      ? { field, unit: "duration_ms" }
+                      : { field })
                   }
                   options={fieldOptions}
                   searchable={fieldOptions.length > 8}

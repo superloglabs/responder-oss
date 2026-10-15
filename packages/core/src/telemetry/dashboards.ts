@@ -132,6 +132,14 @@ export const dashboardWidgetCreateSchema = z
     if (problem) context.addIssue({ code: "custom", message: problem.message, path: ["config", problem.field] });
   });
 
+// The only signal a field can be read from, or null for a field both have,
+// such as a resource attribute.
+export function widgetFieldSource(field: string): "logs" | "traces" | null {
+  if (field === "duration" || field.startsWith("span.")) return "traces";
+  if (field.startsWith("log.")) return "logs";
+  return null;
+}
+
 // Why a chart widget's settings cannot be queried, or null when they can.
 export function widgetConfigProblem(
   type: DashboardWidgetType,
@@ -144,8 +152,12 @@ export function widgetConfigProblem(
       return { field: "aggregation", message: "Metrics are summed, averaged, or read as a minimum, maximum or percentile" };
     }
   }
-  if (type === "timeseries_count" && aggregation && aggregation !== "count" && !config.field) {
-    return { field: "field", message: "Choose a field to aggregate" };
+  if (type === "timeseries_count" && aggregation && aggregation !== "count") {
+    if (!config.field) return { field: "field", message: "Choose a field to aggregate" };
+    const fieldSource = widgetFieldSource(config.field);
+    if (fieldSource && fieldSource !== (config.source ?? "logs")) {
+      return { field: "field", message: fieldSource === "traces" ? "This field is on spans, not logs" : "This field is on logs, not spans" };
+    }
   }
   return null;
 }

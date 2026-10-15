@@ -1299,7 +1299,7 @@ function histogramQuantileQuery(args: {
                       current,
                       if(
                         current >= previous_counts[indexOf(previous_keys, key)],
-                        current - previous_counts[indexOf(previous_keys, key)],
+                        toUInt64(current - previous_counts[indexOf(previous_keys, key)]),
                         toUInt64(0)
                       )
                     ),
@@ -3037,9 +3037,14 @@ export async function eventAggregate(
   });
 }
 
+// One bucket covering any window. Some metric paths align buckets to the
+// epoch rather than the window start, so the bucket is long enough that no
+// boundary falls between 1970 and 2200.
+const WHOLE_WINDOW_STEP: Step = { n: 84_000, unit: "DAY" };
+
 // One metric per group over the whole window, largest first, at most `limit`
-// groups. A bucket longer than any window keeps each group in one row, so
-// percentiles and averages are taken over every point rather than per day.
+// groups. One bucket covers the window, so percentiles and averages are taken
+// over every point rather than per bucket.
 export async function metricWindowAggregate(
   ch: ClickHouseClient,
   projectId: string,
@@ -3051,7 +3056,7 @@ export async function metricWindowAggregate(
   metric: Pick<MetricSeriesQueryOptions, "kind" | "unit"> = {},
 ): Promise<MetricAggregateRow[]> {
   const { sinceExpr } = resolveRange(filter.range);
-  const rows = await metricSeries(ch, projectId, metricName, filter, groupBy, { n: 31, unit: "DAY" }, aggregation, {
+  const rows = await metricSeries(ch, projectId, metricName, filter, groupBy, WHOLE_WINDOW_STEP, aggregation, {
     ...metric,
     bucketAnchorNs: unixTimestamp64NanoExpr(sinceExpr),
     rawBucketExpr: sinceExpr,

@@ -61,7 +61,7 @@ describe("dashboard widgets", () => {
       field: "field",
       message: "Choose a field to aggregate",
     });
-    expect(widgetConfigProblem("timeseries_count", { aggregation: "p95", field: "duration", filter: {} })).toBeNull();
+    expect(widgetConfigProblem("timeseries_count", { aggregation: "p95", field: "duration", filter: {}, source: "traces" })).toBeNull();
     expect(
       dashboardWidgetCreateSchema.safeParse({
         config: { aggregation: "sum", display: "number", field: "span.gen_ai.usage.output_tokens", source: "traces" },
@@ -69,6 +69,18 @@ describe("dashboard widgets", () => {
         type: "timeseries_count",
       }).success,
     ).toBe(true);
+  });
+
+  it("reads a field only from the signal that has it", () => {
+    const sum = { aggregation: "sum" as const, filter: {} };
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "duration", source: "logs" })?.message).toBe(
+      "This field is on spans, not logs",
+    );
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "log.bytes", source: "traces" })?.message).toBe(
+      "This field is on logs, not spans",
+    );
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "span.tokens", source: "traces" })).toBeNull();
+    expect(widgetConfigProblem("timeseries_count", { ...sum, field: "deployment.replicas", source: "logs" })).toBeNull();
   });
 
   it("aggregates metrics only in the ways a metric supports", () => {

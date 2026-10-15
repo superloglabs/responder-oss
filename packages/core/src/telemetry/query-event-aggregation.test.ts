@@ -130,6 +130,20 @@ describe("metric window aggregate", () => {
   });
 });
 
+describe("histogram percentiles over a window", () => {
+  it("read one bucket that no epoch-aligned boundary splits", async () => {
+    const calls: Call[] = [];
+    const ch = client(calls);
+
+    await metricWindowAggregate(ch, "project-1", "http.server.duration", { range }, undefined, "p95", 1, { kind: "histogram" });
+
+    const query = calls.find((call) => /quantileExactWeighted/u.test(call.query))!.query;
+    expect(query).toMatch(/INTERVAL 84000 DAY/u);
+    // Count deltas stay unsigned, which ClickHouse 25 needs to pick one type.
+    expect(query).toMatch(/toUInt64\(current - previous_counts/u);
+  });
+});
+
 describe("additive aggregations", () => {
   it("adds up counts and sums only", () => {
     expect(isAdditiveAggregation(undefined)).toBe(true);
