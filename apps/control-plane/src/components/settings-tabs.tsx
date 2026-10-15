@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { billingEnabled as loadBillingEnabled } from "../billing-api";
+import { useIngestAvailable } from "../use-ingest-available";
 
 export type SettingsSection =
   | "api-keys"
   | "billing"
+  | "ingest-keys"
   | "integrations"
   | "mcp"
   | "models"
@@ -19,6 +21,7 @@ export function SettingsTabs({
   capabilities: string[];
 }) {
   const [billingEnabled, setBillingEnabled] = useState(false);
+  const ingestAvailable = useIngestAvailable();
   const automationsEnabled = capabilities.includes("automations");
   // Simplified navigation lists integrations and tag mode in the sidebar.
   const sidebarSections = capabilities.includes("simplified_navigation");
@@ -83,6 +86,15 @@ export function SettingsTabs({
       >
         API keys
       </Link>
+      {ingestAvailable || active === "ingest-keys" ? (
+        <Link
+          aria-current={active === "ingest-keys" ? "page" : undefined}
+          className={active === "ingest-keys" ? "isActive" : undefined}
+          to="/settings/ingest-keys"
+        >
+          Ingest keys
+        </Link>
+      ) : null}
       {billingEnabled || active === "billing" ? (
         <Link
           aria-current={active === "billing" ? "page" : undefined}
