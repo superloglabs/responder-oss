@@ -28,3 +28,20 @@ export function sentryRelease(
 ): string | undefined {
   return environment.SENTRY_RELEASE?.trim() || undefined;
 }
+
+// Sentry sets up its integrations only when it has a transport, and it makes
+// a transport only from a DSN. OTLP export without a Sentry DSN uses this
+// placeholder with a transport that discards everything, so Sentry still
+// instruments the process and nothing is sent to Sentry.
+export const instrumentationOnlySentryDsn =
+  "https://otlp@sentry.invalid/1";
+
+export function discardingSentryTransport(): {
+  flush: () => Promise<boolean>;
+  send: () => Promise<Record<string, never>>;
+} {
+  return {
+    flush: async () => true,
+    send: async () => ({}),
+  };
+}

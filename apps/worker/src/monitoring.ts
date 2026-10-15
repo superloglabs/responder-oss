@@ -1,11 +1,17 @@
 import * as Sentry from "@sentry/node";
-import { organizationErrorTags } from "@responder/core/observability/sentry-identity";
 import type { Event } from "@sentry/node";
 import {
+  otlpExportConfigured,
+  startNodeTelemetry,
+  type NodeTelemetry,
+} from "@responder/core/observability/opentelemetry";
+import {
+  discardingSentryTransport,
+  instrumentationOnlySentryDsn,
   sentryEnvironment,
   sentryRelease,
+  sentrySampleRate,
 } from "@responder/core/observability/sentry";
-import { slackErrorLogFields } from "@responder/core/integrations/slack-live-card";
 
 export interface WorkerErrorContext {
   operation:
@@ -29,6 +35,7 @@ export interface WorkerErrorContext {
 }
 
 let errorMonitoringEnabled = false;
+let telemetry: NodeTelemetry | null = null;
 let eventScrubbingConfigured = false;
 let eventScrubbingEnvironment: NodeJS.ProcessEnv = process.env;
 
@@ -198,28 +205,57 @@ function configureEventScrubbing(environment: NodeJS.ProcessEnv): void {
   eventScrubbingConfigured = true;
 }
 
+// Call before the worker's modules are imported, so that Postgres and the
+// other instrumented libraries are patched when they load.
 export function initializeErrorMonitoring(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const dsn = environment.SENTRY_DSN?.trim();
-  if (!dsn) return false;
+  const exportTelemetry = otlpExportConfigured(environment);
+  if (!dsn && !exportTelemetry) return false;
   if (Sentry.isInitialized()) {
     configureEventScrubbing(environment);
-    errorMonitoringEnabled = true;
+    errorMonitoringEnabled = Boolean(dsn);
     return true;
   }
 
   try {
-    Sentry.init({
+    const client = Sentry.init({
       defaultIntegrations: false,
-      dsn,
+      // Without a DSN, Sentry only instruments the process for OTLP export.
+      dsn: dsn || instrumentationOnlySentryDsn,
       environment: sentryEnvironment(environment),
+      // Spans for outgoing requests, Postgres queries, and OpenAI calls, inside
+      // the span of each queue job. Prompts and outputs are not recorded.
+      integrations: exportTelemetry
+        ? [
+          Sentry.httpIntegration(),
+          Sentry.nativeNodeFetchIntegration({ spans: true }),
+          Sentry.postgresIntegration(),
+          Sentry.openAIIntegration(),
+        ]
+        : [],
       release: sentryRelease(environment),
       sendDefaultPii: false,
-      tracesSampleRate: 0,
+      // OpenTelemetry export owns the tracer provider and sends the same
+      // spans to Sentry and the OTLP endpoint.
+      skipOpenTelemetrySetup: exportTelemetry,
+      tracesSampleRate: exportTelemetry
+        ? sentrySampleRate(environment.SENTRY_TRACES_SAMPLE_RATE, 1)
+        : 0,
+      ...(dsn ? {} : { transport: discardingSentryTransport }),
     });
+    if (exportTelemetry && client) {
+      telemetry = startNodeTelemetry({
+        environment,
+        sentryClient: client,
+        sentryContextManager: new Sentry.SentryContextManager(),
+        serviceName: "responder-worker",
+      });
+      Sentry.validateOpenTelemetrySetup();
+    }
     configureEventScrubbing(environment);
-    errorMonitoringEnabled = true;
+    errorMonitoringEnabled = Boolean(dsn);
     return true;
   } catch (error) {
     console.error(
@@ -239,6 +275,11 @@ export async function reportWorkerException(
   if (!errorMonitoringEnabled) return;
 
   try {
+    // Loaded here so that initialization does not import the database.
+    const [{ organizationErrorTags }, { slackErrorLogFields }] = await Promise.all([
+      import("@responder/core/observability/sentry-identity"),
+      import("@responder/core/integrations/slack-live-card"),
+    ]);
     const organizationTags = await organizationErrorTags(context.organizationId);
     Sentry.withScope((scope) => {
       for (const [key, value] of Object.entries(organizationTags)) {
@@ -275,6 +316,11 @@ export async function reportWorkerException(
 }
 
 export async function flushWorkerMonitoring(timeout = 2_000): Promise<boolean> {
-  if (!errorMonitoringEnabled) return false;
-  return Sentry.flush(timeout).catch(() => false);
+  const [sentryFlushed] = await Promise.all([
+    errorMonitoringEnabled
+      ? Sentry.flush(timeout).catch(() => false)
+      : Promise.resolve(false),
+    telemetry?.flush(timeout),
+  ]);
+  return sentryFlushed;
 }

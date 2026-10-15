@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { authClient } from "../auth-client";
-import { setBrowserMonitoringIdentity } from "../browser-monitoring";
+import {
+  setBrowserMonitoringIdentity,
+  startSignedInBrowserTelemetry,
+} from "../browser-monitoring";
 
 export function BrowserMonitoringIdentity() {
   const session = authClient.useSession();
@@ -25,6 +28,10 @@ export function BrowserMonitoringIdentity() {
     if (session.isPending) return;
     setBrowserMonitoringIdentity(userId, organizationId, userName, organizationName);
   }, [organizationId, organizationName, session.isPending, userId, userName]);
+
+  useEffect(() => {
+    if (userId) void startSignedInBrowserTelemetry();
+  }, [userId]);
 
   return null;
 }

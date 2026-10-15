@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   organization: { data: null as null | { id: string; name: string } },
   refetch: vi.fn().mockResolvedValue(undefined),
   setIdentity: vi.fn(),
+  startTelemetry: vi.fn().mockResolvedValue(false),
   session: { data: { user: { id: "user-1", name: "Ada" }, session: { id: "session-1", activeOrganizationId: "org-1" } }, isPending: false },
 }));
 vi.mock("react", () => ({ useEffect: (effect: () => void) => effect() }));
@@ -12,13 +13,22 @@ vi.mock("../auth-client", () => ({ authClient: {
   useSession: () => mocks.session,
   useActiveOrganization: () => ({ ...mocks.organization, refetch: mocks.refetch }),
 } }));
-vi.mock("../browser-monitoring", () => ({ setBrowserMonitoringIdentity: mocks.setIdentity }));
+vi.mock("../browser-monitoring", () => ({
+  setBrowserMonitoringIdentity: mocks.setIdentity,
+  startSignedInBrowserTelemetry: mocks.startTelemetry,
+}));
 
 describe("monitoring after sign-in with a restored organization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.organization.data = null;
     mocks.refetch.mockResolvedValue(undefined);
+    mocks.startTelemetry.mockResolvedValue(false);
+  });
+
+  it("starts browser telemetry for the signed-in user", () => {
+    BrowserMonitoringIdentity();
+    expect(mocks.startTelemetry).toHaveBeenCalledOnce();
   });
 
   it("sets the organization name when the refreshed response arrives", async () => {

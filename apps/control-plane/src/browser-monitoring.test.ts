@@ -13,6 +13,7 @@ vi.mock("@sentry/react", () => sentryMocks);
 import {
   initializeBrowserMonitoring,
   setBrowserMonitoringIdentity,
+  startSignedInBrowserTelemetry,
 } from "./browser-monitoring";
 
 describe("browser error monitoring", () => {
@@ -63,5 +64,36 @@ describe("browser error monitoring", () => {
     expect(sentryMocks.setUser).toHaveBeenLastCalledWith(null);
     expect(sentryMocks.setTag).toHaveBeenCalledWith("organization_id", "");
     expect(sentryMocks.setTag).toHaveBeenLastCalledWith("organization_name", "");
+  });
+
+  it("starts browser traces after sign-in only when a sample rate is set", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://superlog.sh" } });
+    const startBrowserTelemetry = vi.fn().mockReturnValue(true);
+    const load = vi.fn().mockResolvedValue({ startBrowserTelemetry });
+
+    await expect(startSignedInBrowserTelemetry({}, load)).resolves.toBe(false);
+    await expect(startSignedInBrowserTelemetry({ otelTracesSampleRate: "0" }, load)).resolves.toBe(false);
+    expect(load).not.toHaveBeenCalled();
+
+    await expect(
+      startSignedInBrowserTelemetry(
+        { environment: " production ", otelTracesSampleRate: "0.5", release: "web-1" },
+        load,
+      ),
+    ).resolves.toBe(true);
+    expect(startBrowserTelemetry).toHaveBeenCalledWith({
+      environment: "production",
+      origin: "https://superlog.sh",
+      release: "web-1",
+      sampleRate: 0.5,
+    });
+
+    await expect(
+      startSignedInBrowserTelemetry(
+        { otelTracesSampleRate: "1" },
+        vi.fn().mockRejectedValue(new Error("chunk failed")),
+      ),
+    ).resolves.toBe(false);
+    vi.unstubAllGlobals();
   });
 });

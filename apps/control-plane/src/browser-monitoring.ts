@@ -35,6 +35,35 @@ export function initializeBrowserMonitoring(
   return true;
 }
 
+type BrowserTelemetryModule = Pick<
+  typeof import("./browser-telemetry"),
+  "startBrowserTelemetry"
+>;
+
+// Browser traces go through a relay that accepts only signed-in users, so they
+// start after sign-in. The OpenTelemetry code is a separate chunk that loads
+// only when tracing is on.
+export function startSignedInBrowserTelemetry(
+  config: BrowserMonitoringConfig & { otelTracesSampleRate?: string } = {
+    ...defaultConfig,
+    otelTracesSampleRate: import.meta.env.VITE_OTEL_TRACES_SAMPLE_RATE,
+  },
+  load: () => Promise<BrowserTelemetryModule> = () => import("./browser-telemetry"),
+): Promise<boolean> {
+  const sampleRate = sentrySampleRate(config.otelTracesSampleRate);
+  if (sampleRate <= 0) return Promise.resolve(false);
+  return load()
+    .then(({ startBrowserTelemetry }) =>
+      startBrowserTelemetry({
+        environment: config.environment?.trim() || undefined,
+        origin: window.location.origin,
+        release: config.release?.trim() || undefined,
+        sampleRate,
+      }),
+    )
+    .catch(() => false);
+}
+
 export function setBrowserMonitoringIdentity(
   userId?: string,
   organizationId?: string | null,

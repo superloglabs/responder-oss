@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_LEGACY_AUTH_ORIGIN?: string;
   readonly VITE_LEGACY_COOKIE_DOMAIN?: string;
   readonly VITE_LEGACY_PRODUCT_ORIGIN?: string;
+  readonly VITE_OTEL_TRACES_SAMPLE_RATE?: string;
   readonly VITE_POSTHOG_HOST?: string;
   readonly VITE_POSTHOG_PROJECT_TOKEN?: string;
   readonly VITE_REDDIT_PIXEL_ID?: string;

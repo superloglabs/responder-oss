@@ -1,0 +1,1152 @@
+import {
+  automationRunGroupConcurrency,
+  automationRunJobOptions,
+  automationRunJobSchema,
+  automationRunLocalConcurrency,
+  automationRunQueue,
+  createJobBoss,
+  gcpProjectSetupJobSchema,
+  gcpProjectSetupQueue,
+  investigationLocalConcurrency,
+  investigationQueue,
+  legacyAutomationRunQueue,
+  linearTicketJobSchema,
+  linearTicketQueue,
+  migrateLegacyAutomationRunJobs,
+  migrateLegacyInvestigationHeartbeats,
+  prepareWorkerQueues,
+  remediationJobSchema,
+  remediationQueue as remediationQueueName,
+  type LinearTicketJob,
+  type RemediationJob,
+  responderJobSchema,
+  slackThreadInvestigationJobSchema,
+  slackThreadInvestigationQueue,
+  workerHealthJobSchema,
+  workerHealthQueue,
+} from "@responder/core/jobs";
+import {
+  appendInvestigationTraceEvent,
+  completeInvestigation,
+  completeSlackThreadInvestigationTurn,
+  failInvestigation,
+  failInvestigationReplayRequest,
+  markInvestigationStarted,
+  getInvestigationReportMarkdown,
+} from "@responder/core/db/investigations";
+import {
+  failPendingInvestigationPullRequests,
+} from "@responder/core/db/pull-requests";
+import {
+  queueIssueRemediationJob,
+  queueSuggestionRemediationJob,
+  recoverAbandonedIssueRemediations,
+  recoverAbandonedSuggestionRemediations,
+} from "@responder/core/remediation-queue";
+import { listQueuedSuggestionPullRequestIds } from "@responder/core/db/suggestions";
+import {
+  queueLinearTicketJob,
+  queuePendingLinearTicketJobs,
+} from "@responder/core/linear-ticket-queue";
+import {
+  failInvestigationSlackCard,
+  updateInvestigationSlackProgress,
+} from "@responder/core/integrations/slack-live-card";
+import {
+  applySlackTraceUpdate,
+  slackProgressFromTrace,
+  type SlackInvestigationTraceItem,
+} from "@responder/core/integrations/slack-live-progress";
+import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
+import { linearAgentDelivery } from "./linear-agent-delivery.js";
+import {
+  deliverSlackIssueFollowupResponse,
+  deliverSlackThreadInvestigationResponse,
+} from "@responder/core/integrations/slack-delivery";
+import {
+  completeInvestigationRun,
+  deliverPersistedInvestigationAfterFailure,
+} from "./investigation-completion.js";
+import {
+  legacyHeartbeatHandoffWaitMs,
+  onShutdownSignal,
+  workerGracefulShutdownTimeoutMs,
+} from "./shutdown-policy.js";
+import {
+  runInvestigationAgent,
+  safeInvestigationError,
+} from "./investigate.js";
+import { runLinearTicketJob } from "./linear-ticket-job.js";
+import {
+  InvestigationReplayRequestProcessingError,
+  processNextInvestigationReplayRequest,
+} from "./replay-requests.js";
+import {
+  flushWorkerMonitoring,
+  monitoringErrorMessage,
+  reportWorkerException,
+} from "./monitoring.js";
+import { tracedJobHandler } from "./job-tracing.js";
+import { processRemediationJob } from "./remediation-job.js";
+import { runInitialTriage } from "./initial-triage.js";
+import {
+  defaultAutomationRunDependencies,
+  processAutomationRun,
+} from "./automation-run.js";
+import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setup-job";
+import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
+import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
+import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
+import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
+import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
+import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
+import { generateDueAutomationSuggestions } from "./automation-template-suggestions.js";
+import {
+  createSyntheticCheckScheduler,
+  defaultSyntheticCheckDependencies,
+  purgeSyntheticCheckRuns,
+} from "./synthetic-checks.js";
+import { pullGcpTelemetrySources } from "./telemetry-sources.js";
+import { sendUsageNotices } from "@responder/core/billing/usage-notices";
+import {
+  creditWaivedUsage,
+  usageWaiverStart,
+  waiveJobUsage,
+} from "@responder/core/billing/usage-waivers";
+
+const boss = createJobBoss();
+const remediationJobQueue = {
+  send: (
+    name: string,
+    data: RemediationJob,
+    options: { singletonKey: string },
+  ) => boss.send(name, data, options),
+};
+const linearTicketJobQueue = {
+  send: (
+    name: string,
+    data: LinearTicketJob,
+    options: { singletonKey: string },
+  ) => boss.send(name, data, options),
+};
+let stopping = false;
+let replayRequestDrain: Promise<void> | undefined;
+let linearTicketDrain: Promise<void> | undefined;
+let remediationRecoveryDrain: Promise<void> | undefined;
+const pollers: {
+  automationSuggestions?: NodeJS.Timeout;
+  automationUsageBilling?: NodeJS.Timeout;
+  brokerGrantCleanup?: NodeJS.Timeout;
+  gcpTelemetry?: NodeJS.Timeout;
+  linearTicket?: NodeJS.Timeout;
+  remediationRecovery?: NodeJS.Timeout;
+  replayRequest?: NodeJS.Timeout;
+  syntheticCheckPurge?: NodeJS.Timeout;
+  syntheticChecks?: NodeJS.Timeout;
+  telemetryAlerts?: NodeJS.Timeout;
+} = {};
+
+let telemetryAlertPass: Promise<void> | undefined;
+// Alerts and failing synthetic checks start the Slack automations watching
+// their channel through this worker's job queue.
+const startChannelAutomations = (input: Parameters<typeof startAlertAutomations>[0]) =>
+  startAlertAutomations(input, {
+    ...defaultAlertAutomationDependencies,
+    queue: async (run) => {
+      const queued = await boss.send(automationRunQueue, {
+        kind: "automation_run",
+        queuedAt: new Date().toISOString(),
+        runId: run.runId,
+      }, automationRunJobOptions(run.organizationId));
+      if (!queued) throw new Error("Automation run job was not created");
+    },
+  });
+let gcpTelemetryPass: Promise<void> | undefined;
+const telemetryAlertDependencies = {
+  ...defaultTelemetryAlertDependencies,
+  startAutomations: startChannelAutomations,
+};
+const syntheticChecks = createSyntheticCheckScheduler(
+  { ...defaultSyntheticCheckDependencies, startAutomations: startChannelAutomations },
+  { onError: (error) => void reportWorkerException(error, { operation: "synthetic_checks" }) },
+);
+
+function runSyntheticChecks(): void {
+  syntheticChecks.tick().catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "synthetic_checks" });
+  });
+}
+
+function purgeSyntheticChecks(): void {
+  purgeSyntheticCheckRuns().catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "synthetic_checks" });
+  });
+}
+
+// Runs at most one alert pass at a time; a slow pass delays the next.
+function checkTelemetryAlerts(): Promise<void> {
+  telemetryAlertPass ??= checkDueTelemetryAlerts(telemetryAlertDependencies)
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "telemetry_alerts" });
+    })
+    .finally(() => {
+      telemetryAlertPass = undefined;
+    });
+  return telemetryAlertPass;
+}
+
+// Runs at most one Google Cloud telemetry pass at a time.
+function pullGcpTelemetry(): Promise<void> {
+  gcpTelemetryPass ??= pullGcpTelemetrySources()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "gcp_telemetry_pull" });
+    })
+    .finally(() => {
+      gcpTelemetryPass = undefined;
+    });
+  return gcpTelemetryPass;
+}
+
+async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
+  try {
+    const deleted = await purgeAutomationModelBrokerGrants();
+    if (deleted > 0) {
+      console.log(JSON.stringify({
+        deleted,
+        event: "automation_broker_grants_purged",
+      }));
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+}
+
+// An investigation recorded as failed is not charged. A waiver that fails is
+// reported and leaves it charged.
+async function waiveFailedInvestigationUsage(
+  payload: { config: { organizationId: string }; investigationId: string },
+  jobId: string,
+  since: Date,
+): Promise<void> {
+  await waiveJobUsage({
+    since,
+    workload: "investigation",
+    workloadId: payload.investigationId,
+  }).catch((error: unknown) =>
+    reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId,
+      operation: "investigation",
+      organizationId: payload.config.organizationId,
+    }).catch(() => undefined));
+}
+
+let automationUsageBillingPass: Promise<void> | undefined;
+// Each pass rereads a short overlap, since billing times come from the clocks
+// of several processes. A new worker first checks the whole retry window, so
+// a check that was still failing when the last worker stopped is not lost.
+const usageNoticeOverlapMs = 2 * 60 * 1_000;
+let usageNoticesCheckedAt = new Date(Date.now() - BILLING_NOTICE_RETRY_WINDOW_MS);
+// Organizations whose last check failed, checked again on the next pass even
+// without further usage.
+let usageNoticeRetries: string[] = [];
+
+// Runs at most one settlement pass at a time; a slow pass delays the next.
+function settleAutomationUsageBilling(): Promise<void> {
+  automationUsageBillingPass ??= runAutomationUsageBillingPass().finally(() => {
+    automationUsageBillingPass = undefined;
+  });
+  return automationUsageBillingPass;
+}
+
+async function runAutomationUsageBillingPass(): Promise<void> {
+  try {
+    const result = await settleUnbilledAutomationModelUsage();
+    if (result.abandoned > 0 || result.failed > 0 || result.settled > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "automation_usage_billing_settled",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} automation usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+    if (result.abandoned > 0) {
+      await reportWorkerException(
+        new Error(`${result.abandoned} automation usage reservations were never completed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  try {
+    const result = await settleUnbilledUsage();
+    if (result.failed > 0 || result.settled > 0 || result.staleSandboxes > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "usage_billing_settled",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} sandbox or agent usage records could not be billed`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  try {
+    const result = await creditWaivedUsage();
+    if (result.credited > 0 || result.failed > 0) {
+      console.log(JSON.stringify({
+        ...result,
+        event: "waived_usage_credited",
+      }));
+    }
+    if (result.failed > 0) {
+      await reportWorkerException(
+        new Error(`${result.failed} waived usage records could not be credited`),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+  // After waived usage is credited, so a refunded balance is not reported as
+  // used up.
+  try {
+    const startedAt = new Date();
+    const result = await sendUsageNotices(
+      new Date(usageNoticesCheckedAt.getTime() - usageNoticeOverlapMs),
+      usageNoticeRetries,
+    );
+    usageNoticesCheckedAt = startedAt;
+    usageNoticeRetries = result.failedOrganizationIds;
+    if (result.failedOrganizationIds.length > 0) {
+      await reportWorkerException(
+        new Error(
+          `${result.failedOrganizationIds.length} organizations could not be checked for usage notices`,
+        ),
+        { operation: "worker" },
+      ).catch(() => undefined);
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+}
+
+const replayRequestQueue = {
+  send: (
+    name: string,
+    data: Record<string, unknown>,
+    options: { singletonKey: string },
+  ) => boss.send(name, data, options),
+};
+
+function drainInvestigationReplayRequests(): Promise<void> {
+  if (replayRequestDrain) return replayRequestDrain;
+  replayRequestDrain = (async () => {
+    while (
+      !stopping &&
+      (await processNextInvestigationReplayRequest(replayRequestQueue))
+    ) {
+      // Drain every currently available request before returning to polling.
+    }
+  })()
+    .catch(async (error: unknown) => {
+      console.error(
+        JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          event: "investigation_replay_request_failed",
+          ...(error instanceof InvestigationReplayRequestProcessingError
+            ? {
+                investigationId: error.investigationId,
+                sourceInvestigationId: error.sourceInvestigationId,
+              }
+            : {}),
+        }),
+      );
+      await reportWorkerException(error, {
+        operation: "worker",
+        ...(error instanceof InvestigationReplayRequestProcessingError
+          ? {
+              investigationId: error.investigationId,
+              sourceInvestigationId: error.sourceInvestigationId,
+            }
+          : {}),
+      }).catch(
+        (reportError: unknown) => {
+          console.error(
+            JSON.stringify({
+              error:
+                reportError instanceof Error
+                  ? reportError.message
+                  : String(reportError),
+              event: "replay_drain_error_reporting_failed",
+              ...(error instanceof InvestigationReplayRequestProcessingError
+                ? {
+                    investigationId: error.investigationId,
+                    sourceInvestigationId: error.sourceInvestigationId,
+                  }
+                : {}),
+            }),
+          );
+        },
+      );
+    })
+    .finally(() => {
+      replayRequestDrain = undefined;
+    });
+  return replayRequestDrain;
+}
+
+function drainLinearTicketRequests(): Promise<void> {
+  if (linearTicketDrain) return linearTicketDrain;
+  linearTicketDrain = queuePendingLinearTicketJobs(linearTicketJobQueue)
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "linear_ticket_queue_drain_failed",
+      }));
+      return reportWorkerException(error, { operation: "linear_ticket" });
+    })
+    .finally(() => {
+      linearTicketDrain = undefined;
+    });
+  return linearTicketDrain;
+}
+
+function drainAbandonedRemediationRequests(): Promise<void> {
+  if (remediationRecoveryDrain) return remediationRecoveryDrain;
+  remediationRecoveryDrain = Promise.all([
+    recoverAbandonedIssueRemediations(boss),
+    recoverAbandonedSuggestionRemediations(boss),
+    listQueuedSuggestionPullRequestIds().then(async (requestIds) => {
+      const results = await Promise.allSettled(
+        requestIds.map((requestId) =>
+          queueSuggestionRemediationJob(remediationJobQueue, requestId),
+        ),
+      );
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") continue;
+        console.error(
+          JSON.stringify({
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            event: "suggestion_remediation_recovery_queue_failed",
+            requestId: requestIds[index],
+          }),
+        );
+        await reportWorkerException(result.reason, {
+          operation: "remediation",
+          requestId: requestIds[index]!,
+        });
+      }
+      return requestIds;
+    }),
+  ])
+    .then((groups) => groups.flat())
+    .then((requestIds) => {
+      if (requestIds.length === 0) return;
+      console.error(JSON.stringify({
+        event: "abandoned_remediations_recovered",
+        requestIds,
+      }));
+    })
+    .catch(async (error: unknown) => {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "abandoned_remediation_recovery_failed",
+      }));
+      await reportWorkerException(error, { operation: "remediation" }).catch(
+        (reportError: unknown) => {
+          console.error(JSON.stringify({
+            error:
+              reportError instanceof Error
+                ? reportError.message
+                : String(reportError),
+            event: "abandoned_remediation_recovery_reporting_failed",
+          }));
+        },
+      );
+    })
+    .finally(() => {
+      remediationRecoveryDrain = undefined;
+    });
+  return remediationRecoveryDrain;
+}
+
+async function reportIncompleteSlackDelivery(input: {
+  deliveryWarnings: string[];
+  investigationId: string;
+  jobId: string;
+  organizationId: string;
+}): Promise<void> {
+  if (input.deliveryWarnings.length === 0) return;
+  console.error(
+    JSON.stringify({
+      deliveryWarnings: input.deliveryWarnings,
+      event: "investigation_slack_delivery_incomplete",
+      investigationId: input.investigationId,
+    }),
+  );
+  await reportWorkerException(
+    new AggregateError(
+      input.deliveryWarnings.map((warning) => new Error(warning)),
+      "Slack investigation delivery incomplete",
+    ),
+    {
+      investigationId: input.investigationId,
+      jobId: input.jobId,
+      operation: "slack_delivery",
+      organizationId: input.organizationId,
+    },
+  );
+}
+
+boss.on("error", (error: unknown) => {
+  const queue =
+    typeof error === "object" &&
+    error !== null &&
+    "queue" in error &&
+    typeof error.queue === "string"
+      ? error.queue
+      : undefined;
+  console.error(
+    JSON.stringify({
+      error: monitoringErrorMessage(error),
+      event: "worker_error",
+      ...(queue ? { queue } : {}),
+    }),
+  );
+  // Jobs cut off by shutdown are retried by the next worker.
+  if (stopping) return;
+  void reportWorkerException(error, {
+    operation: "worker",
+    ...(queue ? { diagnostics: { queue } } : {}),
+  });
+});
+
+async function shutdown(signal: string): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  if (pollers.replayRequest) clearInterval(pollers.replayRequest);
+  if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
+  if (pollers.automationUsageBilling) {
+    clearInterval(pollers.automationUsageBilling);
+  }
+  // Unsettled rows are retried by the next worker, so do not hold shutdown.
+  await Promise.race([
+    automationUsageBillingPass,
+    new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
+  ]);
+  if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
+  if (pollers.automationSuggestions) clearInterval(pollers.automationSuggestions);
+  if (pollers.gcpTelemetry) clearInterval(pollers.gcpTelemetry);
+  if (pollers.syntheticChecks) clearInterval(pollers.syntheticChecks);
+  if (pollers.syntheticCheckPurge) clearInterval(pollers.syntheticCheckPurge);
+  if (pollers.linearTicket) clearInterval(pollers.linearTicket);
+  if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
+  await replayRequestDrain;
+  await linearTicketDrain;
+  await remediationRecoveryDrain;
+  await telemetryAlertPass;
+  // A pass that sent data saves its cursors before the worker exits.
+  await gcpTelemetryPass;
+  await syntheticChecks.stop();
+  console.log(JSON.stringify({ event: "worker_stopping", signal }));
+  try {
+    await boss.stop({
+      graceful: true,
+      timeout: workerGracefulShutdownTimeoutMs(),
+    });
+  } finally {
+    await flushWorkerMonitoring();
+  }
+}
+
+onShutdownSignal((signal) => {
+  void shutdown(signal)
+    .then(() => process.exit(0))
+    .catch((error: unknown) => {
+      console.error(
+        JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          event: "worker_shutdown_failed",
+        }),
+      );
+      process.exit(1);
+    });
+});
+
+await boss.start();
+await prepareWorkerQueues(boss);
+await boss.work(workerHealthQueue, { localConcurrency: 1 }, tracedJobHandler(workerHealthQueue, async ([job]) => {
+  const payload = workerHealthJobSchema.parse(job.data);
+  const processedAt = new Date().toISOString();
+
+  console.log(
+    JSON.stringify({
+      event: "worker_health_job_complete",
+      jobId: job.id,
+      marker: payload.marker,
+      processedAt,
+      requestedAt: payload.requestedAt,
+    }),
+  );
+
+  return { marker: payload.marker, processedAt };
+}));
+const automationRunDependencies = {
+  ...defaultAutomationRunDependencies,
+  requeueRun: async (run: { organizationId: string; runId: string }) => {
+    const queued = await boss.send(automationRunQueue, {
+      kind: "automation_run",
+      queuedAt: new Date().toISOString(),
+      runId: run.runId,
+    }, automationRunJobOptions(run.organizationId));
+    if (!queued) throw new Error("Automation run job was not created");
+  },
+};
+const automationRunHandler = async ([job]: Array<{ data: unknown; id: string }>) => {
+  const payload = automationRunJobSchema.parse(job.data);
+  return processAutomationRun(job.id, payload, process.env, automationRunDependencies);
+};
+await migrateLegacyAutomationRunJobs(boss);
+await boss.work(
+  automationRunQueue,
+  {
+    groupConcurrency: automationRunGroupConcurrency,
+    localConcurrency: automationRunLocalConcurrency,
+  },
+  tracedJobHandler(automationRunQueue, automationRunHandler),
+);
+// Drains jobs sent by control-plane tasks that predate the unordered queue.
+await boss.work(
+  legacyAutomationRunQueue,
+  { localConcurrency: 1 },
+  tracedJobHandler(legacyAutomationRunQueue, automationRunHandler),
+);
+await boss.work(linearTicketQueue, { localConcurrency: 2 }, tracedJobHandler(linearTicketQueue, async ([job]) => {
+  const payload = linearTicketJobSchema.parse(job.data);
+  try {
+    await runLinearTicketJob(payload, process.env);
+    console.log(JSON.stringify({
+      event: "linear_ticket_job_complete",
+      jobId: job.id,
+      requestId: payload.requestId,
+    }));
+    return { requestId: payload.requestId };
+  } catch (error) {
+    await reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      operation: "linear_ticket",
+      organizationId: payload.config.organizationId,
+      requestId: payload.requestId,
+    });
+    throw error;
+  }
+}));
+await boss.work(gcpProjectSetupQueue, { localConcurrency: 2 }, tracedJobHandler(gcpProjectSetupQueue, async ([job]) => {
+  const payload = gcpProjectSetupJobSchema.parse(job.data);
+  const status = await processGcpProjectSetupJob(payload, {
+    enqueue: async (next, delaySeconds) => {
+      const queued = await boss.send(gcpProjectSetupQueue, next, {
+        startAfter: delaySeconds,
+      });
+      if (!queued) throw new Error("The next Google Cloud setup round was not queued");
+    },
+  });
+  return { status };
+}));
+await boss.work(remediationQueueName, { localConcurrency: 1 }, tracedJobHandler(remediationQueueName, async ([job]) => {
+  const payload = remediationJobSchema.parse(job.data);
+  return processRemediationJob(job.id, payload, process.env);
+}));
+await boss.work(
+  slackThreadInvestigationQueue,
+  { localConcurrency: 1 },
+  tracedJobHandler(slackThreadInvestigationQueue, async ([job]) => {
+    const payload = slackThreadInvestigationJobSchema.parse(job.data);
+    const linear = linearAgentDelivery({
+      investigationId: payload.investigationId,
+      organizationId: payload.config.organizationId,
+      request: payload.request,
+    });
+    const investigationState = await markInvestigationStarted(
+      payload.investigationId,
+      `openai-daytona:${job.id}`,
+    );
+    if (investigationState === "completed") {
+      const response = await getInvestigationReportMarkdown(
+        payload.investigationId,
+      );
+      if (response && linear) {
+        // The reply has a fixed activity ID. If the earlier attempt posted
+        // it, Linear rejects this one as a duplicate.
+        await linear.respond(response).catch((error: unknown) => {
+          console.error(JSON.stringify({
+            error: safeInvestigationError(error),
+            event: "linear_agent_response_redelivery_failed",
+            investigationId: payload.investigationId,
+            jobId: job.id,
+          }));
+        });
+      } else if (response) {
+        await deliverSlackThreadInvestigationResponse({
+          deliveryRunId: job.id,
+          investigationId: payload.investigationId,
+          response,
+        });
+      }
+      return { investigationId: payload.investigationId };
+    }
+
+    let lastSlackProgressAt = 0;
+    let slackTraceItems: SlackInvestigationTraceItem[] = [];
+    const assistant = isSlackAssistantRequest(payload.request);
+    const usageSince = await usageWaiverStart();
+    try {
+      const result = await runInvestigationAgent(
+        payload,
+        process.env,
+        async (event) => {
+          await appendInvestigationTraceEvent(payload.investigationId, event);
+          const progress = slackProgressFromTrace(event, { assistant });
+          if (!progress) return;
+          if (linear) {
+            await linear
+              .progress(progress.detail, { force: progress.finalizing })
+              .catch(() => undefined);
+            return;
+          }
+          slackTraceItems = applySlackTraceUpdate(slackTraceItems, progress);
+          const now = Date.now();
+          if (!progress.finalizing && now - lastSlackProgressAt < 3_000) return;
+          lastSlackProgressAt = now;
+          await updateInvestigationSlackProgress(
+            payload.investigationId,
+            progress.detail,
+            slackTraceItems,
+          ).catch(() => undefined);
+        },
+        { jobId: job.id },
+      );
+      if (!result.sandboxSessionState) {
+        throw new Error("Slack investigation sandbox state was not returned");
+      }
+      await completeSlackThreadInvestigationTurn({
+        investigationId: payload.investigationId,
+        sessionId: payload.slackInvestigationSessionId,
+        reportMarkdown: result.report,
+        sandboxSessionState: result.sandboxSessionState,
+        previousResponseId: result.previousResponseId,
+        threadContextTimestamp: result.threadContextTimestamp,
+      });
+      if (linear) {
+        await linear.respond(result.report);
+      } else {
+        await deliverSlackThreadInvestigationResponse({
+          deliveryRunId: job.id,
+          investigationId: payload.investigationId,
+          response: result.report,
+        });
+      }
+      return { investigationId: payload.investigationId };
+    } catch (error) {
+      const message = safeInvestigationError(error);
+      await reportWorkerException(error, {
+        investigationId: payload.investigationId,
+        jobId: job.id,
+        operation: "investigation",
+        organizationId: payload.config.organizationId,
+      });
+      const investigationFailed = await failInvestigation(
+        payload.investigationId,
+        message,
+      );
+      if (investigationFailed) {
+        await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+      }
+      if (investigationFailed && linear) {
+        await linear.fail().catch(() => undefined);
+      } else if (investigationFailed) {
+        await failInvestigationSlackCard(
+          payload.investigationId,
+          slackTraceItems.length > 0 ? slackTraceItems : undefined,
+        ).catch(() => undefined);
+      }
+      throw new Error(message, { cause: error });
+    }
+  }),
+);
+// Only investigation consumption waits for the one-time legacy handoff. The
+// other queues above remain available, with shutdown handling already active.
+await migrateLegacyInvestigationHeartbeats(boss, {
+  handoffWaitMs: legacyHeartbeatHandoffWaitMs(),
+});
+await boss.work(investigationQueue, { localConcurrency: investigationLocalConcurrency }, tracedJobHandler(investigationQueue, async ([job]) => {
+  const payload = responderJobSchema.parse(job.data);
+  if (payload.kind === "remediation") {
+    // Drain jobs queued by older workers while all new remediations use the
+    // versioned exclusive queue above.
+    return processRemediationJob(job.id, payload, process.env);
+  }
+  const investigationState = await markInvestigationStarted(
+    payload.investigationId,
+    `openai-daytona:${job.id}`,
+  );
+  if (investigationState === "completed") {
+    let deliveryWarnings: string[] = [];
+    if (payload.slackIssueFollowup?.issueIds.length) {
+      const report = await getInvestigationReportMarkdown(payload.investigationId);
+      if (report) {
+        await deliverSlackIssueFollowupResponse({
+          channelId: payload.slackIssueFollowup.channelId,
+          deliveryRunId: job.id,
+          originalInvestigationId: payload.slackIssueFollowup.originalInvestigationId,
+          response: report,
+          threadTimestamp: payload.slackIssueFollowup.threadTimestamp,
+          updatedIssueIds: payload.slackIssueFollowup.issueIds,
+        });
+      }
+    } else {
+      deliveryWarnings = await deliverPersistedInvestigationAfterFailure({
+        deliveryRunId: job.id,
+        investigationFailed: false,
+        investigationId: payload.investigationId,
+        replay: payload.replay,
+      });
+    }
+    await reportIncompleteSlackDelivery({
+      deliveryWarnings,
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      organizationId: payload.config.organizationId,
+    });
+    console.log(
+      JSON.stringify({
+        event: "investigation_job_recovered",
+        investigationId: payload.investigationId,
+        jobId: job.id,
+      }),
+    );
+    return { investigationId: payload.investigationId };
+  }
+  console.log(
+    JSON.stringify({
+      event: "investigation_job_started",
+      investigationId: payload.investigationId,
+      jobId: job.id,
+    }),
+  );
+
+  let finalizingSlackCard = false;
+  let lastSlackProgressAt = 0;
+  let slackProgressFailureReported = false;
+  let slackTraceItems: SlackInvestigationTraceItem[] = [];
+  const usageSince = await usageWaiverStart();
+
+  try {
+    if (
+      payload.request.provider === "slack" &&
+      !payload.replay &&
+      !payload.slackIssueFollowup
+    ) {
+      await runInitialTriage(payload.investigationId, process.env).catch(
+        async (error: unknown) => {
+          console.error(
+            JSON.stringify({
+              error: safeInvestigationError(error),
+              event: "initial_triage_failed",
+              investigationId: payload.investigationId,
+              jobId: job.id,
+            }),
+          );
+          await reportWorkerException(error, {
+            investigationId: payload.investigationId,
+            jobId: job.id,
+            operation: "investigation",
+            organizationId: payload.config.organizationId,
+          }).catch(() => undefined);
+        },
+      );
+    }
+    const result = await runInvestigationAgent(
+      payload,
+      process.env,
+      async (event) => {
+        await appendInvestigationTraceEvent(payload.investigationId, event);
+        if (payload.replay || finalizingSlackCard) return;
+        const progress = slackProgressFromTrace(event);
+        if (!progress) return;
+        slackTraceItems = applySlackTraceUpdate(slackTraceItems, progress);
+        const now = Date.now();
+        if (!progress.finalizing && now - lastSlackProgressAt < 3_000) return;
+        lastSlackProgressAt = now;
+        await updateInvestigationSlackProgress(
+          payload.investigationId,
+          progress.detail,
+          slackTraceItems,
+        ).catch(async (error: unknown) => {
+          if (slackProgressFailureReported) return;
+          slackProgressFailureReported = true;
+          await reportWorkerException(error, {
+            investigationId: payload.investigationId,
+            jobId: job.id,
+            operation: "slack_delivery",
+            organizationId: payload.config.organizationId,
+          });
+        });
+        if (progress.finalizing) finalizingSlackCard = true;
+      },
+      { jobId: job.id },
+      async (requestIds) => {
+        const queued = await Promise.allSettled(
+          requestIds.map(async (requestId) => {
+            const result = await queueIssueRemediationJob(
+              remediationJobQueue,
+              requestId,
+            );
+            console.log(
+              JSON.stringify({
+                event: "automatic_remediation_queued",
+                investigationId: payload.investigationId,
+                jobId: result.jobId,
+                requestId: result.requestId,
+              }),
+            );
+            return result;
+          }),
+        );
+        await Promise.all(
+          queued.map(async (result, index) => {
+            if (result.status === "fulfilled") return;
+            const requestId = requestIds[index]!;
+            const error = result.reason;
+            console.error(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : String(error),
+                event: "automatic_remediation_queue_failed",
+                investigationId: payload.investigationId,
+                requestId,
+              }),
+            );
+            await reportWorkerException(error, {
+              investigationId: payload.investigationId,
+              operation: "remediation",
+              organizationId: payload.config.organizationId,
+              requestId,
+            });
+          }),
+        );
+      },
+      async (requestIds) => {
+        await Promise.all(requestIds.map(async (requestId) => {
+          const result = await queueLinearTicketJob(linearTicketJobQueue, {
+            config: payload.config,
+            investigationId: payload.investigationId,
+            requestId,
+          });
+          console.log(JSON.stringify({
+            event: "linear_ticket_queued",
+            investigationId: payload.investigationId,
+            jobId: result.jobId,
+            requestId,
+          }));
+        }));
+      },
+      async (error) => {
+        await reportWorkerException(error, {
+          diagnostics: {
+            contextProvider: "sentry",
+            degradedContext: true,
+            errorCode: error.errorCode,
+            failureKind: error.failureKind,
+            ...(error.httpStatus === undefined
+              ? {}
+              : { httpStatus: error.httpStatus }),
+            requestDurationMs: error.requestDurationMs,
+            retryable: error.retryable,
+          },
+          investigationId: payload.investigationId,
+          jobId: job.id,
+          operation: "investigation",
+          organizationId: payload.config.organizationId,
+        });
+      },
+      async (requestIds) => {
+        const queued = await Promise.allSettled(
+          requestIds.map((requestId) =>
+            queueSuggestionRemediationJob(remediationJobQueue, requestId),
+          ),
+        );
+        await Promise.all(
+          queued.map(async (result, index) => {
+            if (result.status === "fulfilled") return;
+            const requestId = requestIds[index]!;
+            const error = result.reason;
+            console.error(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : String(error),
+                event: "automatic_suggestion_remediation_queue_failed",
+                investigationId: payload.investigationId,
+                requestId,
+              }),
+            );
+            await reportWorkerException(error, {
+              investigationId: payload.investigationId,
+              operation: "remediation",
+              organizationId: payload.config.organizationId,
+              requestId,
+            });
+          }),
+        );
+      },
+    );
+    let deliveryWarnings: string[] = [];
+    if (payload.slackIssueFollowup?.issueIds.length) {
+      await completeInvestigation(payload.investigationId, result.report);
+      await deliverSlackIssueFollowupResponse({
+        channelId: payload.slackIssueFollowup.channelId,
+        deliveryRunId: job.id,
+        originalInvestigationId: payload.slackIssueFollowup.originalInvestigationId,
+        response: result.report,
+        threadTimestamp: payload.slackIssueFollowup.threadTimestamp,
+        updatedIssueIds: result.updatedIssueIds ?? [],
+      });
+    } else {
+      deliveryWarnings = await completeInvestigationRun({
+        deliveryRunId: job.id,
+        investigationId: payload.investigationId,
+        replay: payload.replay,
+        report: result.report,
+      });
+    }
+    await reportIncompleteSlackDelivery({
+      deliveryWarnings,
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      organizationId: payload.config.organizationId,
+    });
+    console.log(
+      JSON.stringify({
+        event: "investigation_job_complete",
+        investigationId: payload.investigationId,
+        jobId: job.id,
+      }),
+    );
+    return { investigationId: payload.investigationId };
+  } catch (error) {
+    const message = safeInvestigationError(error);
+    await reportWorkerException(error, {
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      operation: "investigation",
+      organizationId: payload.config.organizationId,
+    });
+    const investigationFailed = await failInvestigation(
+      payload.investigationId,
+      message,
+    );
+    if (investigationFailed) {
+      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+    }
+    await failInvestigationReplayRequest(payload.investigationId, message);
+    await failPendingInvestigationPullRequests(
+      payload.investigationId,
+      "Investigation failed before remediation could be queued",
+    );
+    const deliveryWarnings = await deliverPersistedInvestigationAfterFailure({
+      deliveryRunId: job.id,
+      investigationFailed,
+      investigationId: payload.investigationId,
+      replay: payload.replay,
+    });
+    await reportIncompleteSlackDelivery({
+      deliveryWarnings,
+      investigationId: payload.investigationId,
+      jobId: job.id,
+      organizationId: payload.config.organizationId,
+    });
+    if (!payload.replay && investigationFailed) {
+      await failInvestigationSlackCard(
+        payload.investigationId,
+        slackTraceItems.length > 0 ? slackTraceItems : undefined,
+      ).catch(() => undefined);
+    }
+    console.error(
+      JSON.stringify({
+        error: message,
+        event: "investigation_job_failed",
+        investigationId: payload.investigationId,
+        jobId: job.id,
+      }),
+    );
+    throw new Error(message, { cause: error });
+  }
+}));
+
+void drainInvestigationReplayRequests();
+void drainLinearTicketRequests();
+void drainAbandonedRemediationRequests();
+void purgeExpiredAutomationBrokerGrants();
+pollers.brokerGrantCleanup = setInterval(
+  () => void purgeExpiredAutomationBrokerGrants(),
+  60 * 60 * 1_000,
+);
+pollers.brokerGrantCleanup.unref();
+pollers.automationUsageBilling = setInterval(
+  () => void settleAutomationUsageBilling(),
+  60 * 1_000,
+);
+pollers.automationUsageBilling.unref();
+pollers.replayRequest = setInterval(
+  () => void drainInvestigationReplayRequests(),
+  2_000,
+);
+pollers.replayRequest.unref();
+pollers.linearTicket = setInterval(
+  () => void drainLinearTicketRequests(),
+  10_000,
+);
+pollers.linearTicket.unref();
+pollers.remediationRecovery = setInterval(
+  () => void drainAbandonedRemediationRequests(),
+  5 * 60 * 1_000,
+);
+pollers.remediationRecovery.unref();
+pollers.telemetryAlerts = setInterval(() => void checkTelemetryAlerts(), 15_000);
+pollers.telemetryAlerts.unref();
+pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);
+pollers.syntheticChecks.unref();
+pollers.syntheticCheckPurge = setInterval(purgeSyntheticChecks, 10 * 60 * 1_000);
+pollers.syntheticCheckPurge.unref();
+pollers.gcpTelemetry = setInterval(() => void pullGcpTelemetry(), 60_000);
+pollers.gcpTelemetry.unref();
+void generateDueAutomationSuggestions();
+pollers.automationSuggestions = setInterval(() => void generateDueAutomationSuggestions(), 10 * 60 * 1_000);
+pollers.automationSuggestions.unref();
+
+console.log(JSON.stringify({ event: "worker_ready" }));

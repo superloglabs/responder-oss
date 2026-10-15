@@ -230,6 +230,37 @@ Production operators are responsible for TLS termination, network isolation,
 database backups, secret injection, observability, scaling, and rollbacks. The
 application does not depend on one infrastructure provider.
 
+### Telemetry of the application
+
+The API and worker send their own traces, metrics, and logs over OTLP/HTTP
+when `OTEL_EXPORTER_OTLP_ENDPOINT` (or a per-signal endpoint) is set, with the
+standard OpenTelemetry exporter variables for headers and resource
+attributes. Each service runs one tracer provider. Sentry's integrations
+instrument HTTP, `fetch`, Postgres, Hono, and the OpenAI client, and Sentry's
+sampler decides which traces are kept, so Sentry, when it has a DSN, receives
+the same spans as the OTLP endpoint. `SENTRY_TRACES_SAMPLE_RATE` sets that
+share and defaults to 1 while OTLP export is on.
+
+- Each worker job runs in a root span named for its queue. Database queries
+  and middleware outside a traced request or job, such as queue polling, are
+  not recorded.
+- Health checks, telemetry ingest, and the browser relay are not traced, so a
+  service that sends to its own ingest endpoint does not trace its exports.
+- Every console line is also sent as a log record with the active trace. A
+  JSON line's `event` becomes the body and its fields become attributes.
+- Metrics are the Node.js runtime metrics and `http.server.request.duration`
+  by route template, exported every 60 seconds.
+- With `VITE_OTEL_TRACES_SAMPLE_RATE` above 0, the browser traces page loads
+  and same-origin `fetch` calls for signed-in users. It posts OTLP JSON to
+  `/api/telemetry/browser/v1/traces`, and the API forwards the body to its own
+  traces endpoint with its own headers. The browser holds no ingest key.
+  Requests carry `traceparent` and `sentry-trace`, so API spans join the
+  browser's trace.
+
+The entry points of both services load secrets and start monitoring before
+they import the rest of the application, so instrumented libraries are
+patched when they load.
+
 ### Automation subscription credentials
 
 New automations start with “Choose model”. API-key credentials use the model
