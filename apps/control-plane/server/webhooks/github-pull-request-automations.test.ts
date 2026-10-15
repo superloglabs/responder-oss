@@ -5,6 +5,10 @@ vi.mock("@responder/core/db/automations", () => ({
   findAutomationsForGitHubPullRequest: vi.fn(),
 }));
 
+vi.mock("@responder/core/db/github-pull-request-authors", () => ({
+  isMemberPullRequestBranch: vi.fn(),
+}));
+
 vi.mock("../automations/queue.js", () => ({
   queueAutomationRun: vi.fn(),
 }));
@@ -48,6 +52,7 @@ function event(overrides: {
 function dependencies(matches = [{ automationId: "automation-1", integrationAccountId, repositoryId }]) {
   return {
     findAutomations: vi.fn().mockResolvedValue(matches),
+    isMemberPullRequestBranch: vi.fn().mockResolvedValue(false),
     queueAutomationRun: vi.fn().mockResolvedValue({ duplicate: false, runId: "run-1" }),
   };
 }
@@ -150,6 +155,30 @@ describe("GitHub pull request automations", () => {
 
     expect(outcome).toEqual({ outcome: "ignored" });
     expect(deps.queueAutomationRun).not.toHaveBeenCalled();
+  });
+
+  it("does not start runs for pull requests Responder opens with a member's account", async () => {
+    const deps = dependencies();
+    deps.isMemberPullRequestBranch.mockResolvedValue(true);
+
+    const outcome = await startPullRequestAutomations(event(), deps, appEnvironment);
+
+    expect(outcome).toEqual({ outcome: "ignored" });
+    expect(deps.isMemberPullRequestBranch).toHaveBeenCalledWith({
+      branch: "feature/retries",
+      repositoryFullName: "acme/api",
+    });
+    expect(deps.queueAutomationRun).not.toHaveBeenCalled();
+  });
+
+  it("starts runs when a pull request Responder opened with a member's account is merged", async () => {
+    const deps = dependencies();
+    deps.isMemberPullRequestBranch.mockResolvedValue(true);
+
+    await startPullRequestAutomations(event({ action: "closed", merged: true }), deps, appEnvironment);
+
+    expect(deps.isMemberPullRequestBranch).not.toHaveBeenCalled();
+    expect(deps.queueAutomationRun).toHaveBeenCalledTimes(1);
   });
 
   it("starts runs when Responder's pull request is merged", async () => {

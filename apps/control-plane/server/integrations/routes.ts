@@ -84,6 +84,12 @@ import {
   verifyGitHubUserInstallation,
 } from "./github.js";
 import {
+  completeGitHubPullRequestAuthorConnection,
+  GitHubPullRequestAuthorError,
+  githubPullRequestAuthorPurpose,
+  githubPullRequestAuthorRoutes,
+} from "./github-pull-request-author.js";
+import {
   exchangeSlackCode,
   listSlackChannels,
   slackAuthorizeUrl,
@@ -464,6 +470,7 @@ async function consumeBrowserOAuthConnectionState(input: {
 }
 
 function callbackErrorReason(error: unknown): string {
+  if (error instanceof GitHubPullRequestAuthorError) return error.reason;
   if (error instanceof GitHubOAuthError) {
     if (error.githubCode === "incorrect_client_credentials") {
       return "integration_misconfigured";
@@ -1101,6 +1108,7 @@ export async function startIntegrationConnection(input: {
 
 export const integrationRoutes = new Hono()
   .route("/chat", chatConnectionRoutes)
+  .route("/github/pull-request-author", githubPullRequestAuthorRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -4128,6 +4136,35 @@ export const integrationRoutes = new Hono()
       return context.redirect(
         settingsRedirect(connectionState.returnTo, "github", "error", "cancelled"),
       );
+    }
+
+    if (connectionState.metadata.purpose === githubPullRequestAuthorPurpose) {
+      const code = context.req.query("code");
+      if (!code) {
+        return context.redirect(
+          settingsRedirect(connectionState.returnTo, "github", "error", "invalid_callback"),
+        );
+      }
+      try {
+        await completeGitHubPullRequestAuthorConnection({
+          code,
+          organizationId: connectionState.organizationId,
+          userId: connectionState.userId,
+        });
+        return context.redirect(
+          settingsRedirect(connectionState.returnTo, "github", "connected"),
+        );
+      } catch (error) {
+        logCallbackError("GitHub", error, { stage: "pull_request_author" });
+        return context.redirect(
+          settingsRedirect(
+            connectionState.returnTo,
+            "github",
+            "error",
+            callbackErrorReason(error),
+          ),
+        );
+      }
     }
 
     const parsedCallback = z

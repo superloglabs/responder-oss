@@ -1,5 +1,5 @@
 import { EnvelopeIcon } from "@phosphor-icons/react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { AppShell } from "../components/app-shell";
@@ -42,6 +42,21 @@ function initials(name: string): string {
     .slice(0, 2)
     .toUpperCase();
 }
+
+interface PullRequestAuthorState {
+  author: {
+    githubLogin: string;
+    status: "connected" | "error";
+    user: { id: string; name: string };
+  } | null;
+  canRemove: boolean;
+}
+
+const pullRequestAuthorErrors: Record<string, string> = {
+  cancelled: "GitHub authorization was cancelled.",
+  no_shared_installation:
+    "Your GitHub account cannot access the GitHub installation connected to this workspace.",
+};
 
 function invitationUrl(invitationId: string): string {
   return `${window.location.origin}/invite/${invitationId}`;
@@ -424,7 +439,130 @@ export function WorkspaceSettingsPage() {
             </div>
           </div>
         ) : null}
+
+        <PullRequestAuthorSection currentUserId={session.data?.user.id} />
       </section>
     </AppShell>
+  );
+}
+
+// Chooses whose GitHub account opens the workspace's pull requests. Review
+// bots that bill per pull request author then count a seat the workspace
+// already pays for, instead of a seat for the GitHub App.
+function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | undefined }) {
+  const [state, setState] = useState<PullRequestAuthorState | null>(null);
+  const [removing, setRemoving] = useState(false);
+  // GitHub authorization returns here with its outcome in the address.
+  const [returned] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("integration") === "github"
+      ? { reason: params.get("reason") ?? "", status: params.get("status") }
+      : null;
+  });
+  const [error, setError] = useState<string | null>(() =>
+    returned?.status === "error"
+      ? pullRequestAuthorErrors[returned.reason] ?? "Could not connect your GitHub account."
+      : null,
+  );
+  const [notice, setNotice] = useState<string | null>(() =>
+    returned?.status === "connected"
+      ? "Responder now opens pull requests from your GitHub account."
+      : null,
+  );
+
+  async function load() {
+    const response = await fetch("/api/integrations/github/pull-request-author");
+    if (!response.ok) throw new Error("Could not load the pull request author");
+    return (await response.json()) as PullRequestAuthorState;
+  }
+
+  useEffect(() => {
+    if (returned) window.history.replaceState(null, "", window.location.pathname);
+    load().then(setState, (cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : "Could not load the pull request author");
+    });
+  }, [returned]);
+
+  async function remove() {
+    setError(null);
+    setNotice(null);
+    setRemoving(true);
+    try {
+      const response = await fetch("/api/integrations/github/pull-request-author", {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Could not change the pull request author");
+      }
+      setState(await load());
+      setNotice("The Responder GitHub App now opens pull requests.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not change the pull request author");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  const author = state?.author ?? null;
+  const isCurrentUser = author?.user.id === currentUserId;
+  const connectUrl = "/api/integrations/github/pull-request-author/start?returnTo=/settings/workspace";
+
+  return (
+    <div className="memberSection">
+      <div className="memberSection__heading">
+        <h3>Pull requests</h3>
+      </div>
+      <p className="memberAccessNote">
+        Responder opens pull requests from its GitHub App unless a member's
+        account is chosen here. Review bots that bill per pull request author
+        then count that member's seat. When the member cannot push to a
+        repository, the GitHub App opens the pull request instead.
+      </p>
+      {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+      {notice ? <p className="settingsNotice settingsNotice--success">{notice}</p> : null}
+      {state ? (
+        <div className="memberList">
+          <div className="memberRow">
+            <span className="memberAvatar">
+              {author ? initials(author.githubLogin) : "GH"}
+            </span>
+            <span className="memberIdentity">
+              <strong>
+                {author ? `@${author.githubLogin}` : "Responder GitHub App"}
+                {isCurrentUser ? <small>You</small> : null}
+              </strong>
+              <span>
+                {author
+                  ? author.status === "error"
+                    ? `GitHub no longer accepts ${author.user.name}'s authorization. The GitHub App opens pull requests until a member connects again.`
+                    : `${author.user.name}'s GitHub account opens pull requests.`
+                  : "Opens pull requests as the app's bot account."}
+              </span>
+            </span>
+            <span className="roleLabel">
+              {author?.status === "error" ? "Reconnect" : author ? "Connected" : "Default"}
+            </span>
+            <span className="invitationActions">
+              {!author || !isCurrentUser || author.status === "error" ? (
+                <a className="memberAction" href={connectUrl}>
+                  {isCurrentUser ? "Reconnect" : "Use my account"}
+                </a>
+              ) : null}
+              {author && state.canRemove ? (
+                <button
+                  className="memberAction memberAction--danger"
+                  disabled={removing}
+                  onClick={() => void remove()}
+                  type="button"
+                >
+                  {removing ? "Stopping…" : "Use the app"}
+                </button>
+              ) : null}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

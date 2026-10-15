@@ -294,6 +294,34 @@ the turn on its run page.
   patch file beside it.
 - Pull requests from remediation and suggestion jobs are not continued.
 
+### Pull request author
+
+By default the GitHub App opens pull requests, so GitHub shows its bot account
+as their author. Review bots such as CodeRabbit and Greptile bill per pull
+request author, and some charge extra for a bot author. A member can choose
+**Use my account** under **Settings → Workspace → Pull requests** to have
+Responder open the workspace's pull requests from their GitHub account
+instead. GitHub then shows the member as the author, opened through the app.
+
+- The member authorizes the GitHub App on GitHub. Responder keeps the
+  resulting user access token encrypted, with its refresh token, and
+  refreshes it before it expires. Enable **Expire user authorization tokens**
+  on the GitHub App so the token can be refreshed; a token that does not
+  expire also works.
+- The member's GitHub account must reach one of the workspace's GitHub App
+  installations. A user token can only do what both the member and the app
+  may do.
+- Before opening a pull request, the worker checks that the member can push
+  to the repository. Otherwise, or when the token cannot be loaded, the
+  GitHub App opens it as before. When GitHub rejects the token, the setting
+  shows **Reconnect** and the app opens pull requests until a member
+  connects again.
+- Only opening the pull request and its first commit use the member's
+  account. Later pushes and review replies come from the app, so the app's
+  replies are still ignored as reviews.
+- The setting stops applying when the member leaves the workspace. The member
+  or a workspace admin can switch back to the app with **Use the app**.
+
 ### Pull request triggers
 
 In workspaces with the `automations` capability, a GitHub trigger starts a run
@@ -310,7 +338,9 @@ subscription.
 - Pull requests the app opens do not start a run when opened, so an
   automation that opens pull requests cannot start itself. Their merges do
   start runs. Without `GITHUB_APP_SLUG`, opened pull requests do not start
-  runs, because the app's own cannot be told apart.
+  runs, because the app's own cannot be told apart. A pull request Responder
+  opens from a member's account is recognized by its branch, which Responder
+  records before creating it.
 - The agent is told to treat the pull request's title, body, diff, and
   comments as untrusted data.
 - The run's trigger payload is the pull request as it was when the event

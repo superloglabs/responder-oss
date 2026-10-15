@@ -137,6 +137,7 @@ export function createPullRequestTool(input: {
             baseSha: checkout.sha,
             body: requestedPullRequest.body,
             installationId: repository.installationId,
+            organizationId: input.organizationId,
             repository: repository.fullName,
             repositoryPath: checkout.path,
             requestId: request.requestId,
