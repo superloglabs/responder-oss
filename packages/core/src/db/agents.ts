@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, inArray, or } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, or, sql, type AnyColumn } from "drizzle-orm";
 import {
   contextIntegrationProviders,
   defaultSlackThreadModeConfiguration,
@@ -14,6 +14,7 @@ import { organizationHasCapability } from "./organization-capabilities.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agentConfigVersions,
+  agentModelUsage,
   agents,
   agentVersionRepositories,
   agentVersionSecrets,
@@ -21,6 +22,7 @@ import {
   integrationResources,
   investigations,
   repositories,
+  sandboxUsage,
   workspaceSecrets,
   type AgentReportConfig,
   type AgentTriggerConfig,
@@ -1020,6 +1022,9 @@ export async function getAgent(
       .orderBy(desc(investigations.createdAt))
       .limit(50),
   ]);
+  const costs = await summarizeInvestigationCosts(
+    investigationRows.map((investigation) => investigation.id),
+  );
 
   return {
     ...agent,
@@ -1050,6 +1055,7 @@ export async function getAgent(
     investigations: investigationRows.map(
       ({ structuredReport, replayReport, ...investigation }) => ({
         ...investigation,
+        costMicros: costs.get(investigation.id) ?? null,
         finding:
           (investigation.finding
             ? { summary: investigation.finding.summary }
@@ -1059,6 +1065,49 @@ export async function getAgent(
       }),
     ),
   };
+}
+
+// What each investigation's model usage and sandbox time cost, whether or not
+// it was billed. Null while any part is unpriced, which includes a sandbox
+// that is still running, and for an investigation with no recorded usage.
+export async function summarizeInvestigationCosts(
+  investigationIds: string[],
+): Promise<Map<string, number | null>> {
+  if (investigationIds.length === 0) return new Map();
+  const db = getDatabase();
+  const charge = (column: AnyColumn) =>
+    sql<string | null>`case when bool_or(${column} is null) then null else sum(${column}) end`;
+  const [modelRows, sandboxRows] = await Promise.all([
+    db
+      .select({ micros: charge(agentModelUsage.chargeMicros), workloadId: agentModelUsage.workloadId })
+      .from(agentModelUsage)
+      .where(
+        and(
+          eq(agentModelUsage.workload, "investigation"),
+          inArray(agentModelUsage.workloadId, investigationIds),
+        ),
+      )
+      .groupBy(agentModelUsage.workloadId),
+    db
+      .select({ micros: charge(sandboxUsage.chargeMicros), workloadId: sandboxUsage.workloadId })
+      .from(sandboxUsage)
+      .where(
+        and(
+          eq(sandboxUsage.workload, "investigation"),
+          inArray(sandboxUsage.workloadId, investigationIds),
+        ),
+      )
+      .groupBy(sandboxUsage.workloadId),
+  ]);
+  const costs = new Map<string, number | null>();
+  for (const row of [...modelRows, ...sandboxRows]) {
+    const previous = costs.get(row.workloadId);
+    costs.set(
+      row.workloadId,
+      previous === null || row.micros === null ? null : (previous ?? 0) + Number(row.micros),
+    );
+  }
+  return costs;
 }
 
 export async function getSlackThreadModeConfiguration(

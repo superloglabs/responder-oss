@@ -10,6 +10,7 @@ const agent = {
   id: agentId,
   investigations: [{
     completedAt: null,
+    costMicros: null,
     createdAt: new Date().toISOString(),
     failureReason: null,
     finding: null,
@@ -19,6 +20,18 @@ const agent = {
     replayOfInvestigationId: null,
     status: "investigating",
     title: "TypeError in checkout handler",
+  }, {
+    completedAt: new Date().toISOString(),
+    costMicros: 1_234_567,
+    createdAt: new Date().toISOString(),
+    failureReason: null,
+    finding: { summary: "A null cart reached the payment step" },
+    id: "finished-investigation",
+    input: { body: "", externalEventId: "earlier-event", provider: "sentry", title: "Payment step crashed" },
+    isReplay: false,
+    replayOfInvestigationId: null,
+    status: "resolved",
+    title: "Payment step crashed",
   }],
   name: "Checkout errors",
   repositories: [],
@@ -51,6 +64,8 @@ test("opens an agent on its run history and gives each tab its own URL", async (
   await expect(page.getByRole("tab")).toHaveText(["Run history", "Settings"]);
   await expect(page.getByRole("tab", { name: "Run history" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("table", { name: "Agent investigations" })).toContainText("TypeError in checkout handler");
+  await expect(page.getByRole("row").filter({ hasText: "TypeError in checkout handler" }).getByRole("cell").nth(2)).toHaveText("—");
+  await expect(page.getByRole("row").filter({ hasText: "Payment step crashed" }).getByRole("cell").nth(2)).toHaveText("$1.23");
 
   await page.getByRole("tab", { name: "Settings" }).click();
   await expect(page).toHaveURL(new RegExp(`/agents/${agentId}/settings$`));
