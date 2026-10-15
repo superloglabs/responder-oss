@@ -149,6 +149,35 @@ export async function getIntegrationConnectionState(
   return rows[0] ?? null;
 }
 
+// Finds the user's live flow for a provider without its state. Only use it to
+// recover where a flow should return when the provider dropped the state; it
+// does not prove that a callback belongs to the flow.
+export async function getPendingIntegrationConnectionState(
+  provider: IntegrationProvider,
+  tenant: { organizationId: string; userId: string },
+): Promise<{
+  metadata: Record<string, unknown>;
+  returnTo: string;
+} | null> {
+  const rows = await getDatabase()
+    .select({
+      metadata: integrationConnectionStates.metadata,
+      returnTo: integrationConnectionStates.returnTo,
+    })
+    .from(integrationConnectionStates)
+    .where(
+      and(
+        eq(integrationConnectionStates.provider, provider),
+        eq(integrationConnectionStates.organizationId, tenant.organizationId),
+        eq(integrationConnectionStates.userId, tenant.userId),
+        gt(integrationConnectionStates.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function updateIntegrationConnectionStateMetadata(input: {
   metadata: Record<string, unknown>;
   organizationId: string;

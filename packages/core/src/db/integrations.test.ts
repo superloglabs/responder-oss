@@ -8,6 +8,7 @@ import {
   consumeIntegrationConnectionState,
   deleteIntegrationAccount,
   getIntegrationConnectionState,
+  getPendingIntegrationConnectionState,
   IntegrationAccountCredentialSupersededError,
   removeGitHubInstallationAccount,
   replaceGitHubInstallationAccount,
@@ -337,6 +338,31 @@ describe("integration account tenancy", () => {
       "supabase",
       account.organizationId,
       stateRow.userId,
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
+  });
+
+  it("reads the owner's live flow for a provider without its state", async () => {
+    const stateRow = { metadata: { installationId: 12345 }, returnTo: "/agents/new" };
+    const limit = vi.fn().mockResolvedValue([stateRow]);
+    const where = vi.fn((condition: unknown) => {
+      void condition;
+      return { limit };
+    });
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => ({ from: vi.fn(() => ({ where })) })),
+    } as never);
+
+    await expect(getPendingIntegrationConnectionState("github", {
+      organizationId: account.organizationId,
+      userId: "20000000-0000-4000-8000-000000000000",
+    })).resolves.toEqual(stateRow);
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0] as never);
+    expect(query.params).toEqual([
+      "github",
+      account.organizationId,
+      "20000000-0000-4000-8000-000000000000",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     ]);
   });
