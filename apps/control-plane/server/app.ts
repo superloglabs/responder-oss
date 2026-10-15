@@ -34,6 +34,7 @@ import { createAlertRoutes } from "./telemetry/alert-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createIngestKeyRoutes } from "./telemetry/ingest-key-routes.js";
 import { createIngestRoutes } from "./telemetry/ingest-routes.js";
+import { createSourceRoutes } from "./telemetry/source-routes.js";
 import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
 import { getActiveTenant } from "./tenant.js";
@@ -485,6 +486,7 @@ export const app = instrumentedApp
   .route("/api/suggestions", suggestionRoutes)
   .route("/api/ingest", createIngestRoutes())
   .route("/api/telemetry/ingest-keys", createIngestKeyRoutes())
+  .route("/api/telemetry/sources", createSourceRoutes())
   .route("/api/telemetry/alerts", createAlertRoutes())
   .route("/api/synthetic-checks", createSyntheticRoutes())
   .route("/api/telemetry/dashboards", createDashboardRoutes())

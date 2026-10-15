@@ -1,0 +1,284 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Streams this region's CloudWatch metrics and CloudWatch Logs to Superlog
+  through Amazon Data Firehose. Metric Streams, Firehose and CloudWatch Logs
+  delivery are billed to this AWS account; the metric namespaces and the log
+  filter pattern control the volume.
+
+# Builds the log subscription policy with Fn::ToJsonString.
+Transform: AWS::LanguageExtensions
+
+Parameters:
+  IngestUrl:
+    Type: String
+    Description: Superlog's Firehose intake base URL, without a trailing slash.
+    AllowedPattern: "^https://[A-Za-z0-9.-]+(:[0-9]+)?$"
+  IngestKey:
+    Type: String
+    Description: Superlog ingest key the Firehose streams send.
+    AllowedPattern: "^sl_ingest_[A-Za-z0-9_-]{43}$"
+  ResourcePrefix:
+    Type: String
+    Description: Name prefix for the created resources.
+    Default: superlog-telemetry
+    AllowedPattern: "^[a-z0-9][a-z0-9-]{2,24}$"
+  EnableMetrics:
+    Type: String
+    Description: Stream CloudWatch metrics with a metric stream.
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  EnableLogs:
+    Type: String
+    Description: Forward every CloudWatch Logs log group with an account-level subscription.
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  LogsFilterPattern:
+    Type: String
+    Description: CloudWatch Logs filter pattern. Empty forwards every event.
+    Default: ""
+
+Conditions:
+  CreateMetrics: !Equals [!Ref EnableMetrics, "true"]
+  CreateLogs: !Equals [!Ref EnableLogs, "true"]
+
+Resources:
+  # Holds the records Firehose could not deliver, for a week.
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-backups
+            Status: Enabled
+            ExpirationInDays: 7
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Firehose delivery errors. The log subscription excludes this group.
+  DeliveryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/kinesisfirehose/${ResourcePrefix}"
+      RetentionInDays: 7
+
+  MetricsDeliveryLogStream:
+    Type: AWS::Logs::LogStream
+    Condition: CreateMetrics
+    Properties:
+      LogGroupName: !Ref DeliveryLogGroup
+      LogStreamName: MetricsDelivery
+
+  LogsDeliveryLogStream:
+    Type: AWS::Logs::LogStream
+    Condition: CreateLogs
+    Properties:
+      LogGroupName: !Ref DeliveryLogGroup
+      LogStreamName: LogsDelivery
+
+  FirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: SuperlogFirehoseDelivery
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BackupBucketWrite
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt BackupBucket.Arn
+                  - !Sub "${BackupBucket.Arn}/*"
+              - Sid: DeliveryErrorLogs
+                Effect: Allow
+                Action: logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/${ResourcePrefix}:log-stream:*"
+
+  MetricsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Condition: CreateMetrics
+    Properties:
+      DeliveryStreamName: !Sub "${ResourcePrefix}-metrics"
+      DeliveryStreamType: DirectPut
+      HttpEndpointDestinationConfiguration:
+        EndpointConfiguration:
+          Name: Superlog
+          Url: !Sub "${IngestUrl}/api/ingest/aws/firehose/metrics"
+          AccessKey: !Ref IngestKey
+        RequestConfiguration:
+          ContentEncoding: GZIP
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        RetryOptions:
+          DurationInSeconds: 300
+        S3BackupMode: FailedDataOnly
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Ref DeliveryLogGroup
+          LogStreamName: !Ref MetricsDeliveryLogStream
+        RoleARN: !GetAtt FirehoseRole.Arn
+        S3Configuration:
+          BucketARN: !GetAtt BackupBucket.Arn
+          RoleARN: !GetAtt FirehoseRole.Arn
+          Prefix: metrics/
+          CompressionFormat: GZIP
+
+  MetricStreamRole:
+    Type: AWS::IAM::Role
+    Condition: CreateMetrics
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: streams.metrics.cloudwatch.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: SuperlogMetricStreamToFirehose
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - firehose:PutRecord
+                  - firehose:PutRecordBatch
+                Resource: !GetAtt MetricsDeliveryStream.Arn
+
+  MetricStream:
+    Type: AWS::CloudWatch::MetricStream
+    Condition: CreateMetrics
+    Properties:
+      Name: !Sub "${ResourcePrefix}-metrics"
+      FirehoseArn: !GetAtt MetricsDeliveryStream.Arn
+      RoleArn: !GetAtt MetricStreamRole.Arn
+      OutputFormat: opentelemetry1.0
+      # ECS and Container Insights have the most series; remove them to cut cost.
+      IncludeFilters:
+        - Namespace: AWS/EC2
+        - Namespace: AWS/EBS
+        - Namespace: AWS/RDS
+        - Namespace: AWS/ApplicationELB
+        - Namespace: AWS/NetworkELB
+        - Namespace: AWS/ELB
+        - Namespace: AWS/Lambda
+        - Namespace: AWS/ECS
+        - Namespace: ECS/ContainerInsights
+        - Namespace: AWS/DynamoDB
+        - Namespace: AWS/SQS
+        - Namespace: AWS/SNS
+        - Namespace: AWS/S3
+        - Namespace: AWS/ElastiCache
+        - Namespace: AWS/ApiGateway
+        - Namespace: AWS/CloudFront
+
+  LogsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Condition: CreateLogs
+    Properties:
+      DeliveryStreamName: !Sub "${ResourcePrefix}-logs"
+      DeliveryStreamType: DirectPut
+      HttpEndpointDestinationConfiguration:
+        EndpointConfiguration:
+          Name: Superlog
+          Url: !Sub "${IngestUrl}/api/ingest/aws/firehose/logs"
+          AccessKey: !Ref IngestKey
+        RequestConfiguration:
+          ContentEncoding: GZIP
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        RetryOptions:
+          DurationInSeconds: 300
+        S3BackupMode: FailedDataOnly
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Ref DeliveryLogGroup
+          LogStreamName: !Ref LogsDeliveryLogStream
+        RoleARN: !GetAtt FirehoseRole.Arn
+        S3Configuration:
+          BucketARN: !GetAtt BackupBucket.Arn
+          RoleARN: !GetAtt FirehoseRole.Arn
+          Prefix: logs/
+          CompressionFormat: GZIP
+
+  LogsToFirehoseRole:
+    Type: AWS::IAM::Role
+    Condition: CreateLogs
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: SuperlogLogsToFirehose
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - firehose:PutRecord
+                  - firehose:PutRecordBatch
+                Resource: !GetAtt LogsDeliveryStream.Arn
+
+  # One account-level subscription covers every log group in the region,
+  # current and future, except the Firehose delivery errors.
+  LogsSubscription:
+    Type: AWS::Logs::AccountPolicy
+    Condition: CreateLogs
+    Properties:
+      PolicyName: !Sub "${ResourcePrefix}-logs"
+      PolicyType: SUBSCRIPTION_FILTER_POLICY
+      Scope: ALL
+      SelectionCriteria: !Sub 'LogGroupName NOT IN ["/aws/kinesisfirehose/${ResourcePrefix}"]'
+      PolicyDocument:
+        Fn::ToJsonString:
+          DestinationArn: !GetAtt LogsDeliveryStream.Arn
+          RoleArn: !GetAtt LogsToFirehoseRole.Arn
+          FilterPattern: !Ref LogsFilterPattern
+          Distribution: Random
+
+Outputs:
+  MetricStreamArn:
+    Condition: CreateMetrics
+    Value: !GetAtt MetricStream.Arn
+  LogsDeliveryStreamArn:
+    Condition: CreateLogs
+    Value: !GetAtt LogsDeliveryStream.Arn

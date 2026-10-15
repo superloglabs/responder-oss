@@ -1,4 +1,5 @@
 export type NavigationSection =
+  | "add-telemetry"
   | "agents"
   | "ai-models"
   | "alerts"
@@ -66,6 +67,7 @@ export function primaryNavigation(options: {
               { label: "Synthetics", section: "synthetics" as const, to: "/synthetics" },
             ]
           : []),
+        { label: "Add telemetry", section: "add-telemetry", to: "/telemetry/setup" },
       ]
     : [];
   if (options.simplified) {

@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
-import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
+import { TelemetryGate } from "../components/telemetry";
 import {
   AddFacet,
   AttributeTable,
@@ -413,7 +413,6 @@ export function LogsPage() {
           <h1><ListMagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
           {telemetry.available ? (
             <div className="workspaceHeading__actions">
-              <SendTelemetryLink variant="secondary" />
               <ExplorerTimeControls live={live} onLiveChange={setLive} onRangeChange={(range) => setQuery({ range })} range={query.range} />
             </div>
           ) : null}

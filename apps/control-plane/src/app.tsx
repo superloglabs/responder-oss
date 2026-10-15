@@ -35,6 +35,7 @@ import { ScansPage } from "./pages/scans";
 import { SharedAutomationTemplatePage } from "./pages/shared-automation-template";
 import { TraceDetailPage } from "./pages/trace-detail";
 import { TelemetrySetupPage } from "./pages/telemetry-setup";
+import { TelemetrySourcePage } from "./pages/telemetry-source";
 import { TracesPage } from "./pages/traces";
 import { TracesOverviewPage } from "./pages/traces-overview";
 import { editionSeoMetadataForPath } from "./edition-metadata";
@@ -167,6 +168,7 @@ export function App() {
         <Route element={<MetricExplorerPage />} path="/metrics/explore" />
         <Route element={<AiModelsPage />} path="/ai-models" />
         <Route element={<TelemetrySetupPage />} path="/telemetry/setup" />
+        <Route element={<TelemetrySourcePage />} path="/telemetry/setup/:source" />
         <Route element={<DashboardsPage />} path="/dashboards" />
         <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />
         <Route element={<AlertsPage />} path="/alerts" />

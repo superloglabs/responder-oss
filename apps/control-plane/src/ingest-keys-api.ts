@@ -43,3 +43,26 @@ export function otlpEnvironment(origin: string, token: string): string {
     `export OTEL_EXPORTER_OTLP_HEADERS=x-api-key=${token}`,
   ].join("\n");
 }
+
+// Shown in the prompt until the member creates a key on the page.
+export const ingestKeyPlaceholder = "<ingest key>";
+
+// A prompt for a coding agent that instruments the open project with the
+// OpenTelemetry SDK and sends all three signals to this cell.
+export function openTelemetryPrompt(origin: string, token: string = ingestKeyPlaceholder): string {
+  return [
+    "Instrument this project with OpenTelemetry so it sends logs, traces and metrics to Superlog.",
+    "",
+    "1. Use the official OpenTelemetry SDK for this project's language and runtime, with its automatic instrumentation for the frameworks and libraries the project uses.",
+    "2. Export traces, metrics and logs over OTLP/HTTP with protobuf. Configure the exporters only through these environment variables, and add them to the project's example environment file:",
+    "",
+    otlpEnvironment(origin, token).replaceAll("export ", "   "),
+    "",
+    "3. Set the service.name and deployment.environment.name resource attributes.",
+    "4. Connect the project's existing logger to the OpenTelemetry logs SDK so each log record carries its trace and span IDs. Keep writing logs to the console.",
+    "5. Start the SDK before the application loads its other modules, and flush and shut it down when the process exits.",
+    "6. Never commit the ingest key. Read it from the environment.",
+    "",
+    "Run the project's checks, then summarize what you changed and how to set the variables where the app is deployed.",
+  ].join("\n");
+}

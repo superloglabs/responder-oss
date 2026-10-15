@@ -8,7 +8,7 @@ import "./telemetry.css";
 export function SendTelemetryLink({ variant }: { variant: "primary" | "secondary" }) {
   const available = useIngestAvailable();
   return available ? (
-    <Link className={`dsButton dsButton--${variant} dsButton--small`} to="/telemetry/setup">Send telemetry</Link>
+    <Link className={`dsButton dsButton--${variant} dsButton--small`} to="/telemetry/setup">Add telemetry</Link>
   ) : null;
 }
 

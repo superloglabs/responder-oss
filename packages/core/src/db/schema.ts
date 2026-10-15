@@ -704,6 +704,48 @@ export const telemetryIngestKeys = pgTable(
   ],
 );
 
+// A cloud provider that sends telemetry to the workspace:
+// Vercel drains, an AWS CloudFormation stack that streams through Firehose,
+// or a Google Cloud project that the worker reads. The external ID is the
+// Vercel installation, the AWS stack's resource prefix, or the Google Cloud
+// project ID. State holds what the provider needs, such as drain IDs or read
+// cursors.
+export const telemetrySources = pgTable(
+  "telemetry_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"aws" | "gcp" | "vercel">().notNull(),
+    externalId: text("external_id").notNull(),
+    displayName: text("display_name").notNull(),
+    integrationAccountId: uuid("integration_account_id").references(() => integrationAccounts.id, {
+      onDelete: "cascade",
+    }),
+    ingestKeyId: uuid("ingest_key_id").references(() => telemetryIngestKeys.id, { onDelete: "set null" }),
+    status: text("status").$type<"active" | "failed" | "pending">().notNull().default("pending"),
+    state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
+    lastError: text("last_error"),
+    lastReceivedAt: timestamp("last_received_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("telemetry_sources_organization_provider_external_idx").on(
+      table.organizationId,
+      table.provider,
+      table.externalId,
+    ),
+    index("telemetry_sources_provider_status_idx").on(table.provider, table.status),
+  ],
+);
+
 // A dashboard over the workspace's telemetry.
 export const telemetryDashboards = pgTable(
   "telemetry_dashboards",
