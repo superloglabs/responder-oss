@@ -102,6 +102,9 @@ describe("evaluating field aggregations", () => {
   it("reads a sum with no calls as zero, and an average with no calls as no value", () => {
     expect(evaluateAlert(cost, [], [])).toEqual([{ breaching: false, groupKey: "", value: 0 }]);
     expect(evaluateAlert({ ...cost, aggregation: "avg" }, [], [])).toEqual([]);
+    expect(evaluateAlert({ ...cost, aggregation: "count_distinct", comparator: "lt", threshold: 1 }, [], [])).toEqual([
+      { breaching: true, groupKey: "", value: 0 },
+    ]);
     expect(evaluateAlert({ ...cost, aggregation: "p95" }, [{ group: "", value: 60 }], [])).toEqual([
       { breaching: true, groupKey: "", value: 60 },
     ]);

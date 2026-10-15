@@ -1050,9 +1050,9 @@ export function createTelemetryRoutes(
         aggregate(range),
         comparing ? aggregate(previousWindow(range)) : Promise.resolve(null),
       ]);
-      // Counted and summed logs and spans are zero when nothing matched; other
-      // values have no value then.
-      const empty = type === "timeseries_count" && additive ? 0 : null;
+      // Counts, distinct counts and sums of logs and spans are zero when
+      // nothing matched; other measures have no value then.
+      const empty = type === "timeseries_count" && (additive || measure.aggregation === "count_distinct") ? 0 : null;
       if (!grouped) {
         const value = current[0]?.value ?? empty;
         return context.json({

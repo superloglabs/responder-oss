@@ -116,16 +116,21 @@ export interface AlertEvaluation {
   value: number;
 }
 
-// Whether a rule with no matching data reads zero: counts and sums of logs
-// and spans do. Metrics, averages and percentiles have no value then.
+// Whether a rule with no matching data reads zero: counts, distinct counts
+// and sums of logs and spans do. Metrics, averages, extremes and percentiles
+// have no value then.
 export function alertCountsEmptyAsZero(rule: Pick<AlertRule, "aggregation" | "source">): boolean {
-  return rule.source !== "metric" && (rule.aggregation === "count" || rule.aggregation === "sum");
+  return (
+    rule.source !== "metric" &&
+    (rule.aggregation === "count" || rule.aggregation === "count_distinct" || rule.aggregation === "sum")
+  );
 }
 
 // One value per group, or one total. `rows` are what the store returned for
 // the window: one row per group, or a single ungrouped row for a total.
-// Counts and sums with no rows are zero; other values with no rows have no
-// data and give no evaluation, so an open episode stays as it is.
+// Counts, distinct counts and sums with no rows are zero; other values with
+// no rows have no data and give no evaluation, so an open episode stays as
+// it is.
 export function evaluateAlert(
   rule: Pick<AlertRule, "aggregation" | "comparator" | "groupBy" | "groupMode" | "source" | "threshold">,
   rows: Array<{ group: string; value: number }>,
