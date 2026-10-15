@@ -74,6 +74,45 @@ describe("Slack channel search", () => {
     );
   });
 
+  it("keeps a bot's match, which Slack returns with a null user", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        ok: true,
+        messages: {
+          matches: [
+            {
+              channel: { id: "C123", name: "axiom" },
+              permalink: "https://example.slack.com/archives/C123/p1",
+              text: "Triggered: API 500s",
+              ts: "1.000001",
+              user: null,
+              username: "axiom",
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      searchSlackChannel({
+        accessToken: "xoxp-secret",
+        channel: { id: "C123", name: "axiom" },
+        fetchImpl: fetchMock,
+        limit: 10,
+        query: "500s",
+      }),
+    ).resolves.toMatchObject({
+      matches: [
+        {
+          permalink: "https://example.slack.com/archives/C123/p1",
+          text: "Triggered: API 500s",
+          timestamp: "1.000001",
+          username: "axiom",
+        },
+      ],
+    });
+  });
+
   it("searches several channels at once, scoped by Slack, and keeps only their matches", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json({

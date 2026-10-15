@@ -1,10 +1,12 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
+import { AutomationHarnessError } from "./automation-harness.js";
 import {
   buildClaudeAutomationCommand,
   claudeAgentSdkVersion,
   claudeMcpToolTimeoutMs,
   prepareClaudeAutomationHarness,
+  runClaudeAutomation,
 } from "./claude-automation-harness.js";
 
 const input = {
@@ -111,5 +113,51 @@ describe("Claude automation harness", () => {
         model: { ...input.model, provider: "openai" },
       })
     ).toThrow("require an Anthropic model");
+  });
+
+  const failedRun = (output: string) => ({
+    execCommand: vi
+      .fn()
+      .mockResolvedValueOnce("Chunk ID: workspace\nProcess exited with code 0\nOutput:\n")
+      .mockResolvedValueOnce("Chunk ID: install\nProcess exited with code 0\nOutput:\n")
+      .mockResolvedValue(output),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession);
+
+  it("names the error of the result message that ended the run", async () => {
+    const result = JSON.stringify({
+      errors: ["API Error: 529 Overloaded"],
+      is_error: true,
+      subtype: "error_during_execution",
+      type: "result",
+    });
+    const run = runClaudeAutomation(
+      failedRun(`Chunk ID: run\nProcess exited with code 1\nOutput:\n${result}\n`),
+      input,
+    );
+
+    await expect(run).rejects.toThrow(
+      /^Claude automation harness failed: API Error: 529 Overloaded$/u,
+    );
+    // The output stays available for the run transcript.
+    await expect(run).rejects.toBeInstanceOf(AutomationHarnessError);
+  });
+
+  it("names a run the sandbox killed before Claude reported a result", async () => {
+    const assistant = JSON.stringify({ message: { content: [] }, type: "assistant" });
+
+    await expect(runClaudeAutomation(
+      failedRun(`Chunk ID: run\nProcess exited with code 137\nOutput:\n${assistant}\n`),
+      input,
+    )).rejects.toThrow(
+      /^Claude automation harness failed: Claude was killed with exit code 137, most likely because the sandbox ran out of memory$/u,
+    );
+  });
+
+  it("names the exit code when Claude reported no error", async () => {
+    await expect(runClaudeAutomation(
+      failedRun("Chunk ID: run\nProcess exited with code 1\nOutput:\n"),
+      input,
+    )).rejects.toThrow(/^Claude automation harness failed: Claude exited with code 1$/u);
   });
 });

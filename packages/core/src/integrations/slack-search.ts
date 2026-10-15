@@ -12,8 +12,9 @@ const slackSearchResponseSchema = z.object({
         permalink: z.string().url(),
         text: z.string().default(""),
         ts: z.string().min(1),
-        user: z.string().optional(),
-        username: z.string().optional(),
+        // Slack returns a null user for a bot's message.
+        user: z.string().nullish(),
+        username: z.string().nullish(),
       }),
     ),
     paging: z
