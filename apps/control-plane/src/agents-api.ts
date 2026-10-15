@@ -187,6 +187,8 @@ export interface AgentDetail {
     failureReason: string | null;
     isReplay: boolean;
     replayOfInvestigationId: string | null;
+    // Model usage and sandbox time. Null until every part is priced.
+    costMicros: number | null;
     createdAt: string;
     completedAt: string | null;
   }>;
@@ -756,6 +758,14 @@ export function relativeTime(value: string): string {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
+}
+
+const runCost = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
+
+export function formatRunCost(costMicros: number | null): string {
+  if (costMicros === null) return "—";
+  const dollars = costMicros / 1_000_000;
+  return dollars > 0 && dollars < 0.01 ? "<$0.01" : runCost.format(dollars);
 }
 
 export async function refreshSentryAgentOptions(accountId: string): Promise<AgentOptions> {

@@ -58,10 +58,12 @@
 .agentRunHistory h2 { margin: 0; font-size: 13px; font-weight: 500; color: #202020; }
 .agentRunHistory > header small { margin-left: auto; font-size: 12px; }
 .agentHistoryTable { border: 1px solid #e6e8ec; border-radius: 10px; overflow-x: auto; background: #fff; }
-.agentHistoryRow { display: flex; align-items: center; min-width: 620px; border-top: 1px solid #e6e8ec; font-size: 13px; line-height: 20px; }
+.agentHistoryRow { display: flex; align-items: center; min-width: 700px; border-top: 1px solid #e6e8ec; font-size: 13px; line-height: 20px; }
 .agentHistoryRow > :first-child { flex: 1; min-width: 0; }
 .agentHistoryRow > :nth-child(2) { width: 120px; flex-shrink: 0; }
-.agentHistoryRow > :nth-child(3) { width: 100px; flex-shrink: 0; }
+.agentHistoryRow > :nth-child(3) { width: 80px; flex-shrink: 0; }
+.agentHistoryRow > :nth-child(4) { width: 100px; flex-shrink: 0; }
+.agentHistoryRow > .agentHistoryCost { text-align: right; font-variant-numeric: tabular-nums; }
 .agentHistoryRow > :last-child { width: 36px; flex-shrink: 0; }
 .agentHistoryRow > * { padding: 12px; }
 .agentHistoryRow strong { display: block; color: #202020; font-weight: 400; }

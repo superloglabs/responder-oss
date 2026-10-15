@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiErrorMessage, fetchIntegrations, refreshSentryAgentOptions } from "./agents-api";
+import { apiErrorMessage, fetchIntegrations, formatRunCost, refreshSentryAgentOptions } from "./agents-api";
 
 describe("API error messages", () => {
   it("surfaces specific validation issues instead of the generic error", () => {
@@ -66,5 +66,17 @@ describe("editor context integrations", () => {
     expect(result).toEqual(integrationCatalog.filter(({ id }) => id !== "devrev" && id !== "discord"));
     expect(result.some(({ id }) => id === "sentry")).toBe(true);
     expect(result.some(({ id }) => id === "custom_mcp")).toBe(true);
+  });
+});
+
+describe("run costs", () => {
+  it("shows dollars and cents, and marks costs under a cent", () => {
+    expect(formatRunCost(1_234_567)).toBe("$1.23");
+    expect(formatRunCost(0)).toBe("$0.00");
+    expect(formatRunCost(4_000)).toBe("<$0.01");
+  });
+
+  it("shows a dash for a cost that is not priced yet", () => {
+    expect(formatRunCost(null)).toBe("—");
   });
 });

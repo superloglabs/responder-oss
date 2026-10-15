@@ -5,6 +5,7 @@ import {
   findAgentsForSentryIssue,
   findAgentsForSlackEvent,
   saveSlackThreadModeConfiguration,
+  summarizeInvestigationCosts,
 } from "./agents.js";
 import { getDatabase } from "./client.js";
 
@@ -348,5 +349,57 @@ describe("tag mode saves", () => {
 
     await expect(saveSlackThreadModeConfiguration(startingTagMode)).resolves.toBeUndefined();
     expect(database.transaction).toHaveBeenCalledOnce();
+  });
+});
+
+describe("investigation costs", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // The first `select` returns model usage, the second sandbox usage.
+  function returnUsage(modelRows: unknown[], sandboxRows: unknown[]) {
+    const results = [modelRows, sandboxRows];
+    vi.mocked(getDatabase).mockReturnValue({
+      select: vi.fn(() => {
+        const rows = results.shift() ?? [];
+        const query = {
+          from: vi.fn(() => query),
+          groupBy: vi.fn().mockResolvedValue(rows),
+          where: vi.fn(() => query),
+        };
+        return query;
+      }),
+    } as never);
+  }
+
+  it("adds model usage and sandbox time", async () => {
+    returnUsage(
+      [{ micros: "120000", workloadId: "both" }, { micros: "5000", workloadId: "model-only" }],
+      [{ micros: "30000", workloadId: "both" }],
+    );
+
+    const costs = await summarizeInvestigationCosts(["both", "model-only", "none"]);
+
+    expect(costs.get("both")).toBe(150_000);
+    expect(costs.get("model-only")).toBe(5_000);
+    expect(costs.get("none")).toBeUndefined();
+  });
+
+  it("leaves a cost unknown while any part is unpriced", async () => {
+    returnUsage(
+      [{ micros: null, workloadId: "unpriced-model" }, { micros: "120000", workloadId: "running" }],
+      [{ micros: "30000", workloadId: "unpriced-model" }, { micros: null, workloadId: "running" }],
+    );
+
+    const costs = await summarizeInvestigationCosts(["unpriced-model", "running"]);
+
+    expect(costs.get("unpriced-model")).toBeNull();
+    expect(costs.get("running")).toBeNull();
+  });
+
+  it("does not query without investigations", async () => {
+    await expect(summarizeInvestigationCosts([])).resolves.toEqual(new Map());
+    expect(getDatabase).not.toHaveBeenCalled();
   });
 });
