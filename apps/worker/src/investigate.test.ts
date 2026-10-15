@@ -321,7 +321,7 @@ describe("sandbox agent configuration", () => {
     expect(investigationInstructions(base)).not.toContain("GitHub review");
   });
 
-  it("lets assistant turns set up Axiom alerts and keeps investigations read-only", () => {
+  it("lets assistant turns change Axiom resources and keeps investigations read-only", () => {
     const base = {
       agentPrompt: "",
       axiomConnected: true,
@@ -336,7 +336,7 @@ describe("sandbox agent configuration", () => {
       assistant: { integrationsUrl: "https://app.example.com/settings", pullRequests: true },
       threadMode: true,
     });
-    expect(assistant).toContain("you may create or update Axiom monitors and notifiers");
+    expect(assistant).toContain("you may create, update, or delete Axiom datasets, dashboards, monitors, and notifiers");
     expect(assistant).not.toContain("Never create, update, or delete Axiom resources");
 
     expect(investigationInstructions(base)).toContain("Never create, update, or delete Axiom resources");

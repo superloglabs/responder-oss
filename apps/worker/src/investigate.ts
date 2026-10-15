@@ -840,7 +840,7 @@ export async function runInvestigationAgent(
     ? createDatadogMcpServer(datadogConnection)
     : null;
   const axiomServer = axiomConnection
-    ? createAxiomMcpServer(axiomConnection, { alerting: assistant })
+    ? createAxiomMcpServer(axiomConnection, { readOnly: !assistant })
     : null;
   const dash0Servers = dash0Connections.map(createDash0McpServer);
   const postHogServers = postHogConnections.map(createPostHogMcpServer);

@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  AXIOM_ALERTING_MCP_TOOLS,
   AXIOM_READ_ONLY_MCP_TOOLS,
-  axiomToolFilter,
+  axiomReadOnlyToolFilter,
   createAxiomMcpServer,
 } from "./axiom.js";
 
@@ -19,32 +18,34 @@ vi.mock("@openai/agents", () => ({
 }));
 
 describe("Axiom MCP", () => {
-  it("allows only inspection tools without alerting access", async () => {
-    const filter = axiomToolFilter({ alerting: false });
-
-    await expect(filter(null, { name: "queryDataset" })).resolves.toBe(true);
-    await expect(filter(null, { name: "createMonitor" })).resolves.toBe(false);
-    await expect(filter(null, { name: "deleteDashboard" })).resolves.toBe(false);
+  it("allows inspection tools and rejects mutation tools", async () => {
+    await expect(
+      axiomReadOnlyToolFilter(null, { name: "queryDataset" }),
+    ).resolves.toBe(true);
+    await expect(
+      axiomReadOnlyToolFilter(null, { name: "createMonitor" }),
+    ).resolves.toBe(false);
+    await expect(
+      axiomReadOnlyToolFilter(null, { name: "deleteDashboard" }),
+    ).resolves.toBe(false);
     expect(AXIOM_READ_ONLY_MCP_TOOLS).not.toContain("updateMonitor");
   });
 
-  it("adds monitor and notifier writes with alerting access", async () => {
-    const filter = axiomToolFilter({ alerting: true });
+  it("filters tools only for read-only runs", () => {
+    const connection = { accessToken: "token", mcpUrl: "https://mcp.axiom.co/mcp" };
 
-    await expect(filter(null, { name: "queryDataset" })).resolves.toBe(true);
-    await expect(filter(null, { name: "createMonitor" })).resolves.toBe(true);
-    await expect(filter(null, { name: "updateNotifier" })).resolves.toBe(true);
-    await expect(filter(null, { name: "deleteMonitor" })).resolves.toBe(false);
-    await expect(filter(null, { name: "createDashboard" })).resolves.toBe(false);
-    await expect(filter(null, { name: "createDataset" })).resolves.toBe(false);
-    expect(AXIOM_ALERTING_MCP_TOOLS).not.toContain("deleteNotifier");
+    createAxiomMcpServer(connection, { readOnly: false });
+    expect(serverConstructor.mock.lastCall?.[0]).not.toHaveProperty("toolFilter");
+
+    createAxiomMcpServer(connection, { readOnly: true });
+    expect(serverConstructor.mock.lastCall?.[0]).toMatchObject({ toolFilter: axiomReadOnlyToolFilter });
   });
 
   it("authenticates the hosted MCP connection with OAuth", () => {
     createAxiomMcpServer({
       accessToken: "oauth-access-token",
       mcpUrl: "https://mcp.axiom.co/mcp",
-    }, { alerting: false });
+    }, { readOnly: true });
 
     expect(serverConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -53,7 +54,7 @@ describe("Axiom MCP", () => {
             authorization: "Bearer oauth-access-token",
           },
         },
-        toolFilter: expect.any(Function),
+        toolFilter: axiomReadOnlyToolFilter,
         url: "https://mcp.axiom.co/mcp",
       }),
     );

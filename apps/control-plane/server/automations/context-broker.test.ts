@@ -955,17 +955,12 @@ describe("automation context broker", () => {
       });
     }
 
-    it("lists read-only and alerting Axiom tools with a refreshed token", async () => {
+    it("lists every Axiom tool with a refreshed token", async () => {
       const { app, dependencies } = appFor(axiomClaim());
-      const result = { tools: [
-        { name: "queryDataset" },
-        { name: "createMonitor" },
-        { name: "deleteMonitor" },
-        { name: "updateDashboard" },
-        { name: "listDatasets" },
-      ] };
+      const result = { tools: [{ name: "queryDataset" }, { name: "createMonitor" }, { name: "deleteDashboard" }] };
+      const body = `event: message\ndata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\n\n`;
       dependencies.providerFetch.mockResolvedValue(new Response(
-        `event: message\ndata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\n\n`,
+        body,
         { headers: { "content-type": "text/event-stream", "mcp-session-id": "axiom-session" } },
       ));
 
@@ -976,11 +971,7 @@ describe("automation context broker", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("mcp-session-id")).toBe("axiom-session");
-      expect(await response.json()).toEqual({
-        id: 1,
-        jsonrpc: "2.0",
-        result: { tools: [{ name: "queryDataset" }, { name: "createMonitor" }, { name: "listDatasets" }] },
-      });
+      expect(await response.text()).toBe(body);
       expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
         mcpUrl: "https://mcp.axiom.co/mcp",
       }));
@@ -989,58 +980,10 @@ describe("automation context broker", () => {
       expect(new Headers(request.headers).get("authorization")).toBe("Bearer fresh-oauth-token");
     });
 
-    it("filters listings sent with an uppercase media type and CR line endings", async () => {
-      const { app, dependencies } = appFor(axiomClaim());
-      const result = { tools: [{ name: "queryDataset" }, { name: "deleteMonitor" }] };
-      dependencies.providerFetch.mockResolvedValue(new Response(
-        `event: message\rdata: ${JSON.stringify({ id: 1, jsonrpc: "2.0", result })}\r\r`,
-        { headers: { "content-type": "Text/Event-Stream" } },
-      ));
-
-      const response = await app.request(
-        `/api/automation-context-broker/v1/${accountId}`,
-        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
-      );
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ result: { tools: [{ name: "queryDataset" }] } });
-    });
-
-    it("refuses a successful listing it cannot read instead of passing it through", async () => {
-      const { app, dependencies } = appFor(axiomClaim());
-      dependencies.providerFetch.mockResolvedValue(new Response(
-        "data: not json\n\n{\"tools\":[{\"name\":\"deleteMonitor\"}]}",
-        { headers: { "content-type": "text/event-stream" } },
-      ));
-
-      const response = await app.request(
-        `/api/automation-context-broker/v1/${accountId}`,
-        rpcRequest({ id: 7, jsonrpc: "2.0", method: "tools/list" }),
-      );
-
-      expect(response.status).toBe(502);
-      const body = await response.text();
-      expect(JSON.parse(body)).toMatchObject({ error: { code: -32603 }, id: 7 });
-      expect(body).not.toContain("deleteMonitor");
-    });
-
-    it("refuses Axiom tools outside the allowlist without calling Axiom", async () => {
-      const { app, dependencies } = appFor(axiomClaim());
-
-      const response = await app.request(
-        `/api/automation-context-broker/v1/${accountId}`,
-        rpcRequest({ id: 2, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name: "deleteMonitor" } }),
-      );
-
-      expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ error: { code: -32602 } });
-      expect(dependencies.providerFetch).not.toHaveBeenCalled();
-      expect(dependencies.refreshCustomMcp).not.toHaveBeenCalled();
-    });
-
     it.each([
       ["queryDataset", { apl: "['logs'] | take 1" }],
       ["createMonitor", { name: "High error rate" }],
+      ["deleteDashboard", { uid: "abc123" }],
     ])("forwards %s calls", async (name, args) => {
       const { app, dependencies } = appFor(axiomClaim());
       dependencies.providerFetch.mockResolvedValue(new Response(
