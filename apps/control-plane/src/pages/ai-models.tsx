@@ -15,11 +15,11 @@ import {
 import { AppShell } from "../components/app-shell";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { DashboardDialog } from "../components/dashboard-dialog";
-import { TelemetryProjectsGate } from "../components/telemetry";
-import { Alert, Badge, Button, DataTable, SegmentedControl, SelectField, TextField } from "../design-system";
+import { TelemetryGate } from "../components/telemetry";
+import { Alert, Badge, Button, DataTable, SegmentedControl, TextField } from "../design-system";
 import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import "../components/automation-run-history.css";
 import "../components/ai-models.css";
 
@@ -38,16 +38,15 @@ function priceNumber(text: string): number | null {
   return text.trim() === "" || !Number.isFinite(value) || value < 0 ? null : value;
 }
 
-// The models a project's applications called, with the price each call is
+// The models the workspace's applications called, with the price each call is
 // charged at. A model without a price is left out of cost until the
 // workspace sets one.
 export function AiModelsPage() {
   useDocumentTitle("AI models");
   const navigate = useNavigate();
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   const canCreateDashboards = useOrganizationCapabilities().includes("dashboards");
   const [params, setParams] = useSearchParams();
-  const projectId = params.get("projectId") || telemetry.projects?.[0]?.projectId || "";
   const rangeParam = params.get("range") ?? "";
   const range: TelemetryRange = rangeValues.has(rangeParam) ? (rangeParam as TelemetryRange) : "7d";
   const [data, setData] = useState<AiModels | null>(null);
@@ -66,10 +65,10 @@ export function AiModelsPage() {
   }
 
   const load = useCallback(async () => {
-    if (!projectId) return;
+    if (!telemetry.available) return;
     const generation = ++request.current;
     try {
-      const loaded = await fetchAiModels(projectId, range);
+      const loaded = await fetchAiModels(range);
       if (request.current !== generation) return;
       setData(loaded);
       setError(null);
@@ -77,7 +76,7 @@ export function AiModelsPage() {
       if (request.current !== generation) return;
       setError(cause instanceof Error ? cause.message : "Unable to load models");
     }
-  }, [projectId, range]);
+  }, [telemetry.available, range]);
 
   useEffect(() => {
     void Promise.resolve().then(load);
@@ -87,7 +86,7 @@ export function AiModelsPage() {
   async function createDashboard() {
     setCreating(true);
     try {
-      const dashboard = await createAiSpendDashboard(projectId);
+      const dashboard = await createAiSpendDashboard();
       navigate(`/dashboards/${dashboard.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to create the dashboard");
@@ -121,7 +120,7 @@ export function AiModelsPage() {
     <AppShell active="ai-models" redesigned>
       <header className="workspaceHeading">
         <h1><CoinsIcon aria-hidden="true" size={16} weight="bold" />AI models</h1>
-        {projectId && models.length > 0 && canCreateDashboards ? (
+        {models.length > 0 && canCreateDashboards ? (
           <div className="workspaceHeading__actions">
             <Button loading={creating} onClick={() => void createDashboard()} variant="primary">
               Create AI spend dashboard
@@ -129,151 +128,140 @@ export function AiModelsPage() {
           </div>
         ) : null}
       </header>
-      <TelemetryProjectsGate signal="AI models" state={telemetry}>
-        {(projects) => (
-          <section aria-label="AI models" className="telemetryPage">
-            <div className="telemetryPage__toolbar">
-              {projects.length > 1 ? (
-                <SelectField
-                  className="telemetryPage__select"
-                  label="Project"
-                  onChange={(value) => setFilter("projectId", value)}
-                  options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-                  value={projectId}
-                />
-              ) : null}
-              <SegmentedControl
-                aria-label="Time range"
-                onChange={(value) => setFilter("range", value === "7d" ? "" : value)}
-                options={telemetryRanges}
-                value={range}
-              />
+      <TelemetryGate signal="AI models" state={telemetry}>
+        <section aria-label="AI models" className="telemetryPage">
+          <div className="telemetryPage__toolbar">
+            <SegmentedControl
+              aria-label="Time range"
+              onChange={(value) => setFilter("range", value === "7d" ? "" : value)}
+              options={telemetryRanges}
+              value={range}
+            />
+          </div>
+          {error ? (
+            <div className="automationRuns__message" role="alert">
+              <p>{error}</p>
+              <button onClick={() => void load()} type="button">Retry</button>
             </div>
-            {error ? (
-              <div className="automationRuns__message" role="alert">
-                <p>{error}</p>
-                <button onClick={() => void load()} type="button">Retry</button>
-              </div>
-            ) : data === null ? (
-              <p className="telemetryPage__status">Loading models…</p>
-            ) : models.length === 0 ? (
-              <section className="emptyState emptyState--list">
-                <h2>No model calls in this time range</h2>
-                <p>
-                  Models appear here once an application sends spans with token usage, such as from the OpenTelemetry
-                  GenAI instrumentations, OpenLLMetry or the Vercel AI SDK.
-                </p>
-              </section>
-            ) : (
-              <>
-                <p className="aiModels__summary">
-                  <strong>{models.length} {models.length === 1 ? "model" : "models"}</strong>
-                  <span>{models.reduce((sum, model) => sum + model.calls, 0).toLocaleString()} calls</span>
-                  {data.callsWithoutUsage > 0 ? (
-                    <span>{data.callsWithoutUsage.toLocaleString()} calls without token counts</span>
-                  ) : null}
-                </p>
-                {unpriced.length > 0 ? (
-                  <Alert title={`${unpriced.length} ${unpriced.length === 1 ? "model has" : "models have"} no price`} tone="warning">
-                    Calls to {unpriced.map((model) => model.model || "an unnamed model").join(", ")} are left out of cost.
-                    Set a price for each to include them.
-                  </Alert>
+          ) : data === null ? (
+            <p className="telemetryPage__status">Loading models…</p>
+          ) : models.length === 0 ? (
+            <section className="emptyState emptyState--list">
+              <h2>No model calls in this time range</h2>
+              <p>
+                Models appear here once an application sends spans with token usage, such as from the OpenTelemetry
+                GenAI instrumentations, OpenLLMetry or the Vercel AI SDK.
+              </p>
+            </section>
+          ) : (
+            <>
+              <p className="aiModels__summary">
+                <strong>{models.length} {models.length === 1 ? "model" : "models"}</strong>
+                <span>{models.reduce((sum, model) => sum + model.calls, 0).toLocaleString()} calls</span>
+                {data.callsWithoutUsage > 0 ? (
+                  <span>{data.callsWithoutUsage.toLocaleString()} calls without token counts</span>
                 ) : null}
-                <div className="agentListTable telemetryPage__table">
-                  <DataTable<AiModel>
-                    aria-label="AI models"
-                    columns={[
-                      {
-                        header: "Model",
-                        key: "model",
-                        render: (model) => (
-                          <span className="aiModels__name">
-                            <span>{model.model || "Unnamed model"}</span>
-                            <span className="aiModels__provider">
-                              {[model.provider || "Unknown provider", model.tier].filter(Boolean).join(" · ")}
-                            </span>
+              </p>
+              {unpriced.length > 0 ? (
+                <Alert title={`${unpriced.length} ${unpriced.length === 1 ? "model has" : "models have"} no price`} tone="warning">
+                  Calls to {unpriced.map((model) => model.model || "an unnamed model").join(", ")} are left out of cost.
+                  Set a price for each to include them.
+                </Alert>
+              ) : null}
+              <div className="agentListTable telemetryPage__table">
+                <DataTable<AiModel>
+                  aria-label="AI models"
+                  columns={[
+                    {
+                      header: "Model",
+                      key: "model",
+                      render: (model) => (
+                        <span className="aiModels__name">
+                          <span>{model.model || "Unnamed model"}</span>
+                          <span className="aiModels__provider">
+                            {[model.provider || "Unknown provider", model.tier].filter(Boolean).join(" · ")}
                           </span>
+                        </span>
+                      ),
+                    },
+                    {
+                      align: "right",
+                      header: "Calls",
+                      key: "calls",
+                      render: (model) => <span className="telemetryPage__number">{model.calls.toLocaleString()}</span>,
+                      width: "80px",
+                    },
+                    {
+                      align: "right",
+                      header: "Input",
+                      key: "input",
+                      render: (model) => <span className="telemetryPage__number">{count.format(model.inputTokens)}</span>,
+                      width: "80px",
+                    },
+                    {
+                      align: "right",
+                      header: "Output",
+                      key: "output",
+                      render: (model) => <span className="telemetryPage__number">{count.format(model.outputTokens)}</span>,
+                      width: "80px",
+                    },
+                    {
+                      align: "right",
+                      header: "Per 1M: in · cached · out",
+                      key: "price",
+                      render: (model) =>
+                        model.price ? (
+                          <span className="telemetryPage__number">
+                            {formatTokenPrice(model.price.card.input)} · {formatTokenPrice(model.price.card.cacheRead)} ·{" "}
+                            {formatTokenPrice(model.price.card.output)}
+                          </span>
+                        ) : (
+                          <span className="aiModels__muted">—</span>
                         ),
-                      },
-                      {
-                        align: "right",
-                        header: "Calls",
-                        key: "calls",
-                        render: (model) => <span className="telemetryPage__number">{model.calls.toLocaleString()}</span>,
-                        width: "80px",
-                      },
-                      {
-                        align: "right",
-                        header: "Input",
-                        key: "input",
-                        render: (model) => <span className="telemetryPage__number">{count.format(model.inputTokens)}</span>,
-                        width: "80px",
-                      },
-                      {
-                        align: "right",
-                        header: "Output",
-                        key: "output",
-                        render: (model) => <span className="telemetryPage__number">{count.format(model.outputTokens)}</span>,
-                        width: "80px",
-                      },
-                      {
-                        align: "right",
-                        header: "Per 1M: in · cached · out",
-                        key: "price",
-                        render: (model) =>
-                          model.price ? (
-                            <span className="telemetryPage__number">
-                              {formatTokenPrice(model.price.card.input)} · {formatTokenPrice(model.price.card.cacheRead)} ·{" "}
-                              {formatTokenPrice(model.price.card.output)}
-                            </span>
-                          ) : (
-                            <span className="aiModels__muted">—</span>
-                          ),
-                        width: "216px",
-                      },
-                      {
-                        header: "Price from",
-                        key: "source",
-                        render: (model) =>
-                          model.price ? (
-                            <span className="aiModels__source" title={aiPriceSource(model)}>{aiPriceSource(model)}</span>
-                          ) : (
-                            <Badge tone="warning">No price</Badge>
-                          ),
-                        width: "176px",
-                      },
-                      {
-                        align: "right",
-                        header: "",
-                        key: "actions",
-                        render: (model) => (
-                          <Button onClick={() => editPrice(model)} size="small" variant="ghost">
-                            {model.price?.source === "workspace" ? "Edit price" : "Set price"}
-                          </Button>
+                      width: "216px",
+                    },
+                    {
+                      header: "Price from",
+                      key: "source",
+                      render: (model) =>
+                        model.price ? (
+                          <span className="aiModels__source" title={aiPriceSource(model)}>{aiPriceSource(model)}</span>
+                        ) : (
+                          <Badge tone="warning">No price</Badge>
                         ),
-                        width: "104px",
-                      },
-                    ]}
-                    getRowKey={modelKey}
-                    rows={models}
-                    variant="workspace"
-                  />
-                </div>
-                {otherOverrides.length > 0 ? (
-                  <p className="aiModels__note">
-                    Workspace prices for models not called in this range:{" "}
-                    {otherOverrides.map((override) => override.model).join(", ")}.
-                  </p>
-                ) : null}
+                      width: "176px",
+                    },
+                    {
+                      align: "right",
+                      header: "",
+                      key: "actions",
+                      render: (model) => (
+                        <Button onClick={() => editPrice(model)} size="small" variant="ghost">
+                          {model.price?.source === "workspace" ? "Edit price" : "Set price"}
+                        </Button>
+                      ),
+                      width: "104px",
+                    },
+                  ]}
+                  getRowKey={modelKey}
+                  rows={models}
+                  variant="workspace"
+                />
+              </div>
+              {otherOverrides.length > 0 ? (
                 <p className="aiModels__note">
-                  Prices come from the genai-prices catalogue and update daily. Calls above a model's long-context
-                  threshold are charged its long-context prices.
+                  Workspace prices for models not called in this range:{" "}
+                  {otherOverrides.map((override) => override.model).join(", ")}.
                 </p>
-              </>
-            )}
-          </section>
-        )}
-      </TelemetryProjectsGate>
+              ) : null}
+              <p className="aiModels__note">
+                Prices come from the genai-prices catalogue and update daily. Calls above a model's long-context
+                threshold are charged its long-context prices.
+              </p>
+            </>
+          )}
+        </section>
+      </TelemetryGate>
       {editing ? (
         <PriceDialog
           form={editing}

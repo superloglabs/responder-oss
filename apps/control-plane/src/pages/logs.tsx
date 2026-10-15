@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
-import { SendTelemetryLink, TelemetryProjectsGate } from "../components/telemetry";
+import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
 import {
   AddFacet,
   AttributeTable,
@@ -39,7 +39,7 @@ import {
   type LogRecord,
 } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import { useTelemetryQuery } from "../use-telemetry-query";
 import "../components/automation-run-history.css";
 
@@ -75,7 +75,6 @@ function LogDrawer({
   onClose,
   onFilter,
   onMove,
-  projectId,
   total,
 }: {
   index: number;
@@ -83,7 +82,6 @@ function LogDrawer({
   onClose: () => void;
   onFilter: (filter: ExplorerFilter) => void;
   onMove: (index: number) => void;
-  projectId: string;
   total: number;
 }) {
   const exception = [log.exception_type, log.exception_message].filter(Boolean).join(": ");
@@ -114,7 +112,7 @@ function LogDrawer({
         <pre className="explorerBlock">{log.body}</pre>
         {log.trace_id ? (
           <div className="explorerActions">
-            <Link className="dsButton dsButton--primary dsButton--small" to={traceHref(projectId, log.trace_id)}>
+            <Link className="dsButton dsButton--primary dsButton--small" to={traceHref(log.trace_id)}>
               <TreeStructureIcon aria-hidden="true" />Open trace
             </Link>
             <button
@@ -139,7 +137,7 @@ function LogDrawer({
       <AttributeTable
         key={logKeyForAttributes(log)}
         leading={[
-          ...(log.trace_id ? [{ key: "trace_id", value: <Link to={traceHref(projectId, log.trace_id)}>{log.trace_id}</Link> }] : []),
+          ...(log.trace_id ? [{ key: "trace_id", value: <Link to={traceHref(log.trace_id)}>{log.trace_id}</Link> }] : []),
           ...(log.span_id ? [{ key: "span_id", value: log.span_id }] : []),
         ]}
         onFilter={(key, op, value) => onFilter({ key, op, value })}
@@ -157,9 +155,8 @@ function logKeyForAttributes(log: LogRecord): string {
   return log.service;
 }
 
-function LogExplorer({ live, projects, query, setQuery }: {
+function LogExplorer({ live, query, setQuery }: {
   live: boolean;
-  projects: Array<{ name: string; projectId: string }>;
   query: LogExplorerQuery;
   setQuery: (update: Partial<LogExplorerQuery>) => void;
 }) {
@@ -168,10 +165,9 @@ function LogExplorer({ live, projects, query, setQuery }: {
   const logs = useTelemetryQuery(key, () => fetchExplorerLogs(query), live);
   const histogram = useTelemetryQuery(key, () => fetchLogHistogram(query), live);
   const facets = useTelemetryQuery(key, () => fetchLogFacets(query), live);
-  const keyQuery = `${query.projectId}|${query.range}`;
-  const attributeKeys = useTelemetryQuery(keyQuery, () => fetchAttributeKeys(query.projectId, telemetryRangeWindow(query.range), "logs"));
-  const environments = useTelemetryQuery(keyQuery, () =>
-    fetchAttributeValues(query.projectId, telemetryRangeWindow(query.range), "logs", "resource.deployment.environment"),
+  const attributeKeys = useTelemetryQuery(query.range, () => fetchAttributeKeys(telemetryRangeWindow(query.range), "logs"));
+  const environments = useTelemetryQuery(query.range, () =>
+    fetchAttributeValues(telemetryRangeWindow(query.range), "logs", "resource.deployment.environment"),
   );
 
   const bars = useMemo(
@@ -250,15 +246,6 @@ function LogExplorer({ live, projects, query, setQuery }: {
           onSubmit={submitText}
           placeholder="Search messages, key=value or a trace ID"
         />
-        {projects.length > 1 ? (
-          <SelectField
-            className="explorerSelect"
-            label="Project"
-            onChange={(projectId) => setQuery({ facets: [], filters: [], projectId, services: [] })}
-            options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-            value={query.projectId}
-          />
-        ) : null}
         {environmentOptions.length > 0 ? (
           <SelectField
             className="explorerSelect"
@@ -401,7 +388,6 @@ function LogExplorer({ live, projects, query, setQuery }: {
           onClose={() => setSelected(null)}
           onFilter={(filter) => { addFilter(filter); setSelected(null); }}
           onMove={(index) => setSelected(rows[index]?.key ?? null)}
-          projectId={query.projectId}
           total={rows.length}
         />
       ) : null}
@@ -411,7 +397,7 @@ function LogExplorer({ live, projects, query, setQuery }: {
 
 export function LogsPage() {
   useDocumentTitle("Logs");
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   const [params, setParams] = useSearchParams();
   const query = logExplorerQuery(params);
   const [live, setLive] = useState(false);
@@ -425,23 +411,16 @@ export function LogsPage() {
       <div className="explorer">
         <header className="workspaceHeading">
           <h1><ListMagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
-          {telemetry.projects && telemetry.projects.length > 0 ? (
+          {telemetry.available ? (
             <div className="workspaceHeading__actions">
               <SendTelemetryLink variant="secondary" />
               <ExplorerTimeControls live={live} onLiveChange={setLive} onRangeChange={(range) => setQuery({ range })} range={query.range} />
             </div>
           ) : null}
         </header>
-        <TelemetryProjectsGate signal="Logs" state={telemetry}>
-          {(projects) => (
-            <LogExplorer
-              live={live}
-              projects={projects}
-              query={{ ...query, projectId: projects.some((project) => project.projectId === query.projectId) ? query.projectId : projects[0]!.projectId }}
-              setQuery={setQuery}
-            />
-          )}
-        </TelemetryProjectsGate>
+        <TelemetryGate signal="Logs" state={telemetry}>
+          <LogExplorer live={live} query={query} setQuery={setQuery} />
+        </TelemetryGate>
       </div>
     </AppShell>
   );

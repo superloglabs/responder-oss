@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Dashboards over a telemetry project. Widget configs keep the shape Superlog
+// Dashboards over a workspace's telemetry. Widget configs keep the shape Superlog
 // dashboards stored, so existing dashboards can be copied over unchanged.
 
 export const dashboardWidgetTypes = [
@@ -110,7 +110,6 @@ const dashboardNameSchema = z.string().trim().min(1).max(120);
 
 export const dashboardCreateSchema = z.object({
   name: dashboardNameSchema,
-  projectId: z.uuid(),
   variables: dashboardVariablesSchema.optional(),
 });
 

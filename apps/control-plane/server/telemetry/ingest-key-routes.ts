@@ -36,7 +36,6 @@ const defaultDependencies: IngestKeyRouteDependencies = {
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  projectId: z.uuid().optional(),
 });
 
 export function createIngestKeyRoutes(dependencies: IngestKeyRouteDependencies = defaultDependencies) {
@@ -67,9 +66,8 @@ export function createIngestKeyRoutes(dependencies: IngestKeyRouteDependencies =
         createdBy: granted.userId,
         name: body.data.name,
         organizationId: granted.organizationId,
-        ...(body.data.projectId ? { projectId: body.data.projectId } : {}),
       });
-      return created ? context.json(created, 201) : context.json({ error: "Telemetry project not found" }, 404);
+      return context.json(created, 201);
     })
     .delete("/:keyId", async (context) => {
       const granted = await access(context.req.raw.headers);

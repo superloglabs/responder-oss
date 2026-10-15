@@ -10,11 +10,6 @@ import {
   type AiModelPriceOverride,
 } from "../../../../packages/core/src/db/ai-model-prices.js";
 import {
-  findTelemetryProject,
-  listTelemetryProjects,
-  type TelemetryProject,
-} from "../../../../packages/core/src/db/telemetry-projects.js";
-import {
   resolveAiPrices,
   startAiPriceUpdates,
   type AiPriceOverride,
@@ -69,14 +64,14 @@ import { getActiveTenant } from "../tenant.js";
 
 // Read-only access to a workspace's OpenTelemetry data. A workspace sees
 // telemetry only with the telemetry capability and a configured store, and
-// only for the projects linked to it.
+// only the data tagged with its organization ID.
 export type TelemetryRouteDependencies = {
   // Model calls in the window whose spans report no token counts.
-  aiCallsWithoutUsage: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<number>;
+  aiCallsWithoutUsage: (client: ClickHouseClient, organizationId: string, range: TimeRange) => Promise<number>;
   // The models called in the window that match the filters, most called first.
   aiModels: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     range: TimeRange,
     options?: { filters?: ResolvedWidgetFilter[]; limit?: number },
   ) => Promise<AiModelUsage[]>;
@@ -90,21 +85,21 @@ export type TelemetryRouteDependencies = {
   // Attribute keys seen in the window, for filters and grouping.
   attributeKeys: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     range: TimeRange,
     source: AttributeSource,
   ) => Promise<unknown>;
   // Values seen for one attribute key in the window.
   attributeValues: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     params: { filters?: ResourceAttrFilter[]; key: string; prefix?: string; range: TimeRange; source: AttributeSource },
   ) => Promise<unknown>;
   client: () => ClickHouseClient | null;
   // Log or span counts per group over the whole window, largest first.
   countAggregate: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     source: TelemetrySignal,
     filter: SeriesFilter,
     groupBy: string | undefined,
@@ -114,7 +109,7 @@ export type TelemetryRouteDependencies = {
   // largest first.
   eventAggregate: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     source: TelemetrySignal,
     filter: SeriesFilter,
     measure: EventMeasure,
@@ -125,7 +120,7 @@ export type TelemetryRouteDependencies = {
   // Logs or spans summed up from a field, per bucket and group.
   eventSeries: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     source: TelemetrySignal,
     filter: SeriesFilter,
     measure: EventMeasure,
@@ -136,30 +131,28 @@ export type TelemetryRouteDependencies = {
   // Log or span counts per bucket and group.
   countSeries: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     source: TelemetrySignal,
     filter: SeriesFilter,
     groupBy: string | undefined,
     step: Step,
   ) => Promise<Array<{ bucket: string; count: number; group: string }>>;
-  findProject: (organizationId: string, projectId: string) => Promise<TelemetryProject | null>;
   hasDashboards: (organizationId: string) => Promise<boolean>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
-  listProjects: (organizationId: string) => Promise<TelemetryProject[]>;
   // Every metric in the window, with its description, services and attributes.
-  metricCatalog: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
+  metricCatalog: (client: ClickHouseClient, organizationId: string, range: TimeRange) => Promise<unknown>;
   // The attributes one metric carries and their most frequent values.
   metricDimensions: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     metric: { kind: MetricKind; name: string; unit?: string },
     range: TimeRange,
   ) => Promise<unknown>;
-  metricNames: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<unknown>;
+  metricNames: (client: ClickHouseClient, organizationId: string, range: TimeRange) => Promise<unknown>;
   // One metric aggregated per bucket and group.
   metricSeries: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     params: {
       aggregation?: MetricAggregation;
       filter: { range: TimeRange; resourceAttrs: ResolvedWidgetFilter[] };
@@ -173,7 +166,7 @@ export type TelemetryRouteDependencies = {
   // One metric per group over the whole window, largest first.
   metricWindowAggregate: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     params: {
       aggregation?: MetricAggregation;
       filter: { range: TimeRange; resourceAttrs: ResolvedWidgetFilter[] };
@@ -187,32 +180,32 @@ export type TelemetryRouteDependencies = {
   // Services that sent the signal in the window, or any signal.
   listServices: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     range: TimeRange,
     signal: TelemetrySignal | undefined,
   ) => Promise<unknown>;
   now: () => Date;
   queryLogs: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     params: Parameters<typeof queryLogs>[2],
   ) => Promise<unknown>;
   // A trace's spans and logs.
   queryTrace: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     traceId: string,
   ) => Promise<{ logs: unknown[]; spans: unknown[] }>;
   // How requests into a service behaved over the window.
   traceOverview: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     params: Parameters<typeof traceOverview>[2],
   ) => Promise<TraceOverview>;
   // Traces that started in the window, newest first.
   queryTraces: (
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     params: Parameters<typeof queryTracesAggregated>[2],
   ) => Promise<unknown>;
   tenant: (
@@ -224,9 +217,9 @@ export type TelemetryRouteDependencies = {
 };
 
 const defaultDependencies: TelemetryRouteDependencies = {
-  aiCallsWithoutUsage: (client, projectId, range) => aiCallsWithoutUsage(client, projectId, { range }),
-  aiModels: (client, projectId, range, options) =>
-    aiModelsInWindow(client, projectId, { range, resourceAttrs: options?.filters ?? [] }, options?.limit),
+  aiCallsWithoutUsage: (client, organizationId, range) => aiCallsWithoutUsage(client, organizationId, { range }),
+  aiModels: (client, organizationId, range, options) =>
+    aiModelsInWindow(client, organizationId, { range, resourceAttrs: options?.filters ?? [] }, options?.limit),
   aiPriceOverrides: listAiPriceOverrides,
   deleteAiPriceOverride,
   resolveAiPrices: (models, window, overrides) => {
@@ -235,26 +228,24 @@ const defaultDependencies: TelemetryRouteDependencies = {
   },
   saveAiPriceOverride,
   updateAiPriceOverride,
-  attributeKeys: (client, projectId, range, source) => listAttributeKeys(client, projectId, range, source),
-  attributeValues: (client, projectId, params) =>
-    listAttributeValues(client, projectId, params.key, params.range, 200, params.source, params.prefix, params.filters),
+  attributeKeys: (client, organizationId, range, source) => listAttributeKeys(client, organizationId, range, source),
+  attributeValues: (client, organizationId, params) =>
+    listAttributeValues(client, organizationId, params.key, params.range, 200, params.source, params.prefix, params.filters),
   client: getTelemetryClient,
   countAggregate,
   countSeries,
   eventAggregate,
   eventSeries,
-  findProject: findTelemetryProject,
   hasDashboards: (organizationId) => organizationHasCapability(organizationId, "dashboards"),
   hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
-  listProjects: listTelemetryProjects,
   listServices,
   metricCatalog: listMetricCatalog,
   metricDimensions: listMetricDimensions,
   metricNames: listMetricNames,
-  metricSeries: (client, projectId, params) =>
+  metricSeries: (client, organizationId, params) =>
     metricSeries(
       client,
-      projectId,
+      organizationId,
       params.metricName,
       params.filter,
       params.groupBy,
@@ -265,10 +256,10 @@ const defaultDependencies: TelemetryRouteDependencies = {
         ...(params.unit !== undefined ? { unit: params.unit } : {}),
       },
     ),
-  metricWindowAggregate: (client, projectId, params) =>
+  metricWindowAggregate: (client, organizationId, params) =>
     metricWindowAggregate(
       client,
-      projectId,
+      organizationId,
       params.metricName,
       params.filter,
       params.groupBy,
@@ -281,8 +272,8 @@ const defaultDependencies: TelemetryRouteDependencies = {
     ),
   now: () => new Date(),
   queryLogs,
-  queryTrace: async (client, projectId, traceId) => {
-    const trace = await getTraceDetail(client, projectId, traceId);
+  queryTrace: async (client, organizationId, traceId) => {
+    const trace = await getTraceDetail(client, organizationId, traceId);
     return { logs: trace.logs as unknown[], spans: trace.spans as unknown[] };
   },
   queryTraces: queryTracesAggregated,
@@ -295,7 +286,6 @@ export type TelemetryRange = keyof typeof rangeMinutes;
 
 // A query covers the last `range`, or the window from `since` to `until`.
 const windowSchema = z.object({
-  projectId: z.uuid(),
   range: z.enum(Object.keys(rangeMinutes) as [TelemetryRange, ...TelemetryRange[]]).default("1h"),
   since: z.iso.datetime().optional(),
   until: z.iso.datetime().optional(),
@@ -322,8 +312,6 @@ const tracesSchema = traceFilterSchema.extend({
 });
 
 const overviewSchema = windowSchema.extend({ service: z.string().trim().max(200).optional() });
-
-const traceSchema = z.object({ projectId: z.uuid() });
 
 const attributeSources = ["logs", "traces", "metrics"] as const;
 export type AttributeSource = (typeof attributeSources)[number];
@@ -382,7 +370,6 @@ const metricSeriesSchema = z.object({
   kind: z.enum(metricKinds).optional(),
   limit: z.number().int().min(1).max(50).optional(),
   metricName: z.string().trim().min(1).max(200),
-  projectId: z.uuid(),
   range: windowSchema.shape.range,
   since: windowSchema.shape.since,
   unit: metricUnitSchema,
@@ -406,7 +393,6 @@ const aiPriceOverrideSchema = z.object({
 
 const widgetDataSchema = z.object({
   config: dashboardWidgetConfigSchema,
-  projectId: z.uuid(),
   range: windowSchema.shape.range,
   since: windowSchema.shape.since,
   type: z.enum(["timeseries_count", "timeseries_metric", "log_table", "trace_table"]),
@@ -523,7 +509,7 @@ export function createTelemetryRoutes(
   // One metric per bucket and group, with every bucket in the window.
   async function metricChart(
     client: ClickHouseClient,
-    projectId: string,
+    organizationId: string,
     query: {
       aggregation?: MetricAggregation;
       filters: ResolvedWidgetFilter[];
@@ -539,7 +525,7 @@ export function createTelemetryRoutes(
     const sinceMs = Date.parse(range.since);
     const untilMs = Date.parse(range.until);
     const step = pickStep((untilMs - sinceMs) / 1000);
-    const rows = await dependencies.metricSeries(client, projectId, {
+    const rows = await dependencies.metricSeries(client, organizationId, {
       ...(query.aggregation ? { aggregation: query.aggregation } : {}),
       filter: { range, resourceAttrs: query.filters },
       groupBy: query.groupBy,
@@ -563,12 +549,11 @@ export function createTelemetryRoutes(
   async function aiPriceParams(
     client: ClickHouseClient,
     organizationId: string,
-    projectId: string,
     range: Required<TimeRange>,
     filters: ResolvedWidgetFilter[],
   ) {
     const [models, overrides] = await Promise.all([
-      dependencies.aiModels(client, projectId, range, { filters, limit: maxPricedModels }),
+      dependencies.aiModels(client, organizationId, range, { filters, limit: maxPricedModels }),
       dependencies.aiPriceOverrides(organizationId),
     ]);
     return dependencies.resolveAiPrices(models, range, overrides).params;
@@ -591,14 +576,14 @@ export function createTelemetryRoutes(
   type ExplorerFilter = SeriesFilter & { range: Required<TimeRange>; resourceAttrs: ResourceAttrFilter[] };
   type QueryRequest = { queries: (name: string) => string[] | undefined; query: () => Record<string, string>; raw: Request };
 
-  // An explorer query on a linked project: its window, the filters every
-  // explorer endpoint shares, and the endpoint's own parameters.
+  // An explorer query: its window, the filters every explorer endpoint shares,
+  // and the endpoint's own parameters.
   async function explorerRequest<Query extends z.infer<typeof windowSchema>>(
     request: QueryRequest,
     signal: TelemetrySignal,
     schema: z.ZodType<Query>,
   ): Promise<
-    | { client: ClickHouseClient; filter: ExplorerFilter; ok: true; query: Query }
+    | { client: ClickHouseClient; filter: ExplorerFilter; ok: true; organizationId: string; query: Query }
     | { error: string; ok: false; status: 400 | 401 | 403 | 404 | 409 }
   > {
     const granted = await access(request.raw.headers);
@@ -608,9 +593,6 @@ export function createTelemetryRoutes(
     const lists = parseValueLists(signal, (name) => request.queries(name));
     if (!query.success || !attrs || !lists) {
       return { error: `Invalid ${signal === "logs" ? "log" : "trace"} query`, ok: false, status: 400 };
-    }
-    if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-      return { error: "Telemetry project not found", ok: false, status: 404 };
     }
     const range = windowFor(query.data, dependencies.now());
     if (!range) return { error: `Invalid ${signal === "logs" ? "log" : "trace"} query`, ok: false, status: 400 };
@@ -626,20 +608,21 @@ export function createTelemetryRoutes(
         ...(options.minDurationMs ? { minTraceDurationMs: options.minDurationMs } : {}),
       },
       ok: true,
+      organizationId: granted.organizationId,
       query: query.data,
     };
   }
 
   // Matching logs or spans per bucket and group, for an explorer's count chart.
   async function histogram(
-    request: { client: ClickHouseClient; filter: ExplorerFilter; query: z.infer<typeof windowSchema> },
+    request: { client: ClickHouseClient; filter: ExplorerFilter; organizationId: string },
     signal: TelemetrySignal,
     groupBy: string,
   ) {
     const step = windowStep(request.filter.range);
     const buckets = await dependencies.countSeries(
       request.client,
-      request.query.projectId,
+      request.organizationId,
       signal,
       request.filter,
       groupBy,
@@ -656,14 +639,14 @@ export function createTelemetryRoutes(
   // Counts per value of each facet. A facet ignores its own filter, so its
   // other values stay listed and can be added.
   function facet(
-    request: { client: ClickHouseClient; filter: ExplorerFilter; query: z.infer<typeof windowSchema> },
+    request: { client: ClickHouseClient; filter: ExplorerFilter; organizationId: string },
     signal: TelemetrySignal,
     groupBy: string,
     without: Partial<ExplorerFilter>,
   ) {
     return dependencies.countAggregate(
       request.client,
-      request.query.projectId,
+      request.organizationId,
       signal,
       { ...request.filter, ...without },
       groupBy,
@@ -673,7 +656,7 @@ export function createTelemetryRoutes(
 
   // Extra facets over attribute keys, each ignoring filters on its own key.
   function attributeFacets(
-    request: { client: ClickHouseClient; filter: ExplorerFilter; query: z.infer<typeof windowSchema> },
+    request: { client: ClickHouseClient; filter: ExplorerFilter; organizationId: string },
     signal: TelemetrySignal,
     keys: string[],
   ): Promise<Record<string, Array<{ group: string; value: number }>>> {
@@ -693,16 +676,17 @@ export function createTelemetryRoutes(
   }
 
   return new Hono()
-    .get("/projects", async (context) => {
+    // Whether the workspace can read telemetry.
+    .get("/status", async (context) => {
       const granted = await access(context.req.raw.headers);
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
-      return context.json({ projects: await dependencies.listProjects(granted.organizationId) });
+      return context.json({ available: true });
     })
     .get("/logs", async (context) => {
       const request = await explorerRequest(context.req, "logs", logsSchema);
       if (!request.ok) return context.json({ error: request.error }, request.status);
       const { filter } = request;
-      const logs = await dependencies.queryLogs(request.client, request.query.projectId, {
+      const logs = await dependencies.queryLogs(request.client, request.organizationId, {
         limit: request.query.limit,
         range: filter.range,
         ...(filter.resourceAttrs.length ? { resourceAttrs: filter.resourceAttrs } : {}),
@@ -737,13 +721,10 @@ export function createTelemetryRoutes(
       if (!query.success) return context.json({ error: "Invalid service query" }, 400);
       const timeWindow = windowFor(query.data, dependencies.now());
       if (!timeWindow) return context.json({ error: "Invalid service query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       return context.json({
         services: await dependencies.listServices(
           granted.client,
-          query.data.projectId,
+          granted.organizationId,
           timeWindow,
           query.data.signal === "all" ? undefined : query.data.signal,
         ),
@@ -753,7 +734,7 @@ export function createTelemetryRoutes(
       const request = await explorerRequest(context.req, "traces", tracesSchema);
       if (!request.ok) return context.json({ error: request.error }, request.status);
       const { filter } = request;
-      const traces = await dependencies.queryTraces(request.client, request.query.projectId, {
+      const traces = await dependencies.queryTraces(request.client, request.organizationId, {
         limit: request.query.limit,
         range: filter.range,
         ...(filter.resourceAttrs.length ? { resourceAttrs: filter.resourceAttrs } : {}),
@@ -788,7 +769,7 @@ export function createTelemetryRoutes(
       const request = await explorerRequest(context.req, "traces", overviewSchema);
       if (!request.ok) return context.json({ error: request.error }, request.status);
       const step = windowStep(request.filter.range);
-      const overview = await dependencies.traceOverview(request.client, request.query.projectId, {
+      const overview = await dependencies.traceOverview(request.client, request.organizationId, {
         range: request.filter.range,
         step,
         ...(request.filter.resourceAttrs.length ? { resourceAttrs: request.filter.resourceAttrs } : {}),
@@ -808,13 +789,10 @@ export function createTelemetryRoutes(
       if (!query.success) return context.json({ error: "Invalid attribute query" }, 400);
       const timeWindow = windowFor(query.data, dependencies.now());
       if (!timeWindow) return context.json({ error: "Invalid attribute query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       return context.json({
         keys: await dependencies.attributeKeys(
           granted.client,
-          query.data.projectId,
+          granted.organizationId,
           timeWindow,
           query.data.source,
         ),
@@ -827,11 +805,8 @@ export function createTelemetryRoutes(
       if (!query.success) return context.json({ error: "Invalid attribute query" }, 400);
       const timeWindow = windowFor(query.data, dependencies.now());
       if (!timeWindow) return context.json({ error: "Invalid attribute query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       return context.json({
-        values: await dependencies.attributeValues(granted.client, query.data.projectId, {
+        values: await dependencies.attributeValues(granted.client, granted.organizationId, {
           key: query.data.key,
           range: timeWindow,
           source: query.data.source,
@@ -847,13 +822,10 @@ export function createTelemetryRoutes(
       if (!query.success) return context.json({ error: "Invalid metric query" }, 400);
       const timeWindow = windowFor(query.data, dependencies.now());
       if (!timeWindow) return context.json({ error: "Invalid metric query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       return context.json({
         metrics: await dependencies.metricNames(
           granted.client,
-          query.data.projectId,
+          granted.organizationId,
           timeWindow,
         ),
       });
@@ -864,11 +836,8 @@ export function createTelemetryRoutes(
       const query = windowSchema.safeParse(context.req.query());
       const range = query.success ? windowFor(query.data, dependencies.now()) : null;
       if (!query.success || !range) return context.json({ error: "Invalid metric query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       return context.json({
-        metrics: await dependencies.metricCatalog(granted.client, query.data.projectId, range),
+        metrics: await dependencies.metricCatalog(granted.client, granted.organizationId, range),
       });
     })
     .get("/metric-dimensions", async (context) => {
@@ -877,13 +846,10 @@ export function createTelemetryRoutes(
       const query = metricDimensionsSchema.safeParse(context.req.query());
       const range = query.success ? windowFor(query.data, dependencies.now()) : null;
       if (!query.success || !range) return context.json({ error: "Invalid metric query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       return context.json({
         dimensions: await dependencies.metricDimensions(
           granted.client,
-          query.data.projectId,
+          granted.organizationId,
           {
             kind: query.data.kind,
             name: query.data.name,
@@ -900,10 +866,7 @@ export function createTelemetryRoutes(
       const body = metricSeriesSchema.safeParse(await context.req.json().catch(() => null));
       const range = body.success ? windowFor(body.data, dependencies.now()) : null;
       if (!body.success || !range) return context.json({ error: "Invalid metric query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, body.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
-      const chart = await metricChart(granted.client, body.data.projectId, {
+      const chart = await metricChart(granted.client, granted.organizationId, {
         ...(body.data.aggregation ? { aggregation: body.data.aggregation } : {}),
         filters: body.data.filters,
         groupBy: body.data.groupBy || undefined,
@@ -923,13 +886,10 @@ export function createTelemetryRoutes(
       const query = windowSchema.safeParse(context.req.query());
       const range = query.success ? windowFor(query.data, dependencies.now()) : null;
       if (!query.success || !range) return context.json({ error: "Invalid query" }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       const [models, overrides, callsWithoutUsage] = await Promise.all([
-        dependencies.aiModels(granted.client, query.data.projectId, range),
+        dependencies.aiModels(granted.client, granted.organizationId, range),
         dependencies.aiPriceOverrides(granted.organizationId),
-        dependencies.aiCallsWithoutUsage(granted.client, query.data.projectId, range),
+        dependencies.aiCallsWithoutUsage(granted.client, granted.organizationId, range),
       ]);
       const { prices } = dependencies.resolveAiPrices(models, range, overrides);
       const key = (model: { model: string; provider: string; tier: string }) => `${model.provider}|${model.model}|${model.tier}`;
@@ -1002,20 +962,18 @@ export function createTelemetryRoutes(
       if (!body.success) return context.json({ error: "Invalid widget" }, 400);
       const range = windowFor(body.data, dependencies.now());
       if (!range) return context.json({ error: "Invalid widget" }, 400);
-      const { config, projectId, type, variables } = body.data;
+      const { config, type, variables } = body.data;
+      const { organizationId } = granted;
       const problem = type === "timeseries_count" || type === "timeseries_metric" ? widgetConfigProblem(type, config) : null;
       if (problem) return context.json({ error: problem.message }, 400);
-      if (!(await dependencies.findProject(granted.organizationId, projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
       const resourceAttrs = resolveWidgetFilters(config.filter.resourceAttrs, variables);
       const limit = config.limit;
       if (type === "log_table") {
-        const logs = await dependencies.queryLogs(granted.client, projectId, { limit: limit ?? 50, range, resourceAttrs });
+        const logs = await dependencies.queryLogs(granted.client, organizationId, { limit: limit ?? 50, range, resourceAttrs });
         return context.json({ kind: "logs", logs } satisfies WidgetData);
       }
       if (type === "trace_table") {
-        const traces = await dependencies.queryTraces(granted.client, projectId, {
+        const traces = await dependencies.queryTraces(granted.client, organizationId, {
           limit: Math.min(limit ?? 50, 200),
           range,
           resourceAttrs,
@@ -1038,14 +996,13 @@ export function createTelemetryRoutes(
         ? await aiPriceParams(
             granted.client,
             granted.organizationId,
-            projectId,
             comparing ? { since: previousWindow(range).since, until: range.until } : range,
             resourceAttrs,
           )
         : undefined;
       if (display === "timeseries") {
         if (type === "timeseries_metric") {
-          const chart = await metricChart(granted.client, projectId, {
+          const chart = await metricChart(granted.client, organizationId, {
             ...(metricAggregation ? { aggregation: metricAggregation } : {}),
             filters: resourceAttrs,
             groupBy,
@@ -1063,9 +1020,9 @@ export function createTelemetryRoutes(
         const window = { limit, other: additive, sinceMs, stepMs: step.n * stepMilliseconds[step.unit], untilMs };
         const filter = { range, resourceAttrs };
         const rows = measure.aggregation === "count"
-          ? (await dependencies.countSeries(granted.client, projectId, source, filter, groupBy, step))
+          ? (await dependencies.countSeries(granted.client, organizationId, source, filter, groupBy, step))
               .map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }))
-          : await dependencies.eventSeries(granted.client, projectId, source, filter, measure, groupBy, step, aiPrices);
+          : await dependencies.eventSeries(granted.client, organizationId, source, filter, measure, groupBy, step, aiPrices);
         return context.json({ chart: chartSeries(rows, { ...window, fill: additive ? "zero" : "null" }), kind: "chart" } satisfies WidgetData);
       }
       // One value for the window, or one per group.
@@ -1074,7 +1031,7 @@ export function createTelemetryRoutes(
       const aggregate = async (window: Required<TimeRange>) => {
         const filter = { range: window, resourceAttrs };
         if (type === "timeseries_metric") {
-          return dependencies.metricWindowAggregate(granted.client, projectId, {
+          return dependencies.metricWindowAggregate(granted.client, organizationId, {
             ...(metricAggregation ? { aggregation: metricAggregation } : {}),
             filter,
             groupBy: grouped ? groupBy : undefined,
@@ -1086,8 +1043,8 @@ export function createTelemetryRoutes(
         }
         const by = grouped ? groupBy : undefined;
         return measure.aggregation === "count"
-          ? dependencies.countAggregate(granted.client, projectId, source, filter, by, rowLimit)
-          : dependencies.eventAggregate(granted.client, projectId, source, filter, measure, by, rowLimit, aiPrices);
+          ? dependencies.countAggregate(granted.client, organizationId, source, filter, by, rowLimit)
+          : dependencies.eventAggregate(granted.client, organizationId, source, filter, measure, by, rowLimit, aiPrices);
       };
       const [current, previous] = await Promise.all([
         aggregate(range),
@@ -1117,15 +1074,11 @@ export function createTelemetryRoutes(
     .get("/traces/:traceId", async (context) => {
       const granted = await access(context.req.raw.headers);
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
-      const query = traceSchema.safeParse(context.req.query());
       const traceId = context.req.param("traceId").toLowerCase();
-      if (!query.success || !traceIdPattern.test(traceId)) {
+      if (!traceIdPattern.test(traceId)) {
         return context.json({ error: "Invalid trace" }, 400);
       }
-      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
-        return context.json({ error: "Telemetry project not found" }, 404);
-      }
-      const trace = await dependencies.queryTrace(granted.client, query.data.projectId, traceId);
+      const trace = await dependencies.queryTrace(granted.client, granted.organizationId, traceId);
       if (trace.spans.length === 0) return context.json({ error: "Trace not found" }, 404);
       return context.json(trace);
     });

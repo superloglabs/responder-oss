@@ -14,7 +14,7 @@ export async function fetchIngestKeys(): Promise<TelemetryIngestKeySummary[] | n
   return body?.keys ?? [];
 }
 
-export async function createIngestKey(input: { name: string; projectId?: string }): Promise<{
+export async function createIngestKey(input: { name: string }): Promise<{
   key: TelemetryIngestKeySummary;
   token: string;
 }> {

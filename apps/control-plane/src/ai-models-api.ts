@@ -36,8 +36,8 @@ async function request<T>(url: string, init?: { body?: unknown; method?: string 
   return body as T;
 }
 
-export function fetchAiModels(projectId: string, range: TelemetryRange): Promise<AiModels> {
-  return request<AiModels>(`/api/telemetry/ai-models?${new URLSearchParams({ projectId, range })}`);
+export function fetchAiModels(range: TelemetryRange): Promise<AiModels> {
+  return request<AiModels>(`/api/telemetry/ai-models?${new URLSearchParams({ range })}`);
 }
 
 // Saves a price; with an ID it changes that price, including its model or
@@ -141,9 +141,9 @@ export const aiSpendWidgets: Array<WidgetDraft & { layout: DashboardWidgetLayout
   },
 ];
 
-// Creates the starter dashboard for a project and returns it.
-export async function createAiSpendDashboard(projectId: string): Promise<TelemetryDashboard> {
-  const dashboard = await createDashboard({ name: "AI spend", projectId });
+// Creates the starter dashboard and returns it.
+export async function createAiSpendDashboard(): Promise<TelemetryDashboard> {
+  const dashboard = await createDashboard({ name: "AI spend" });
   for (const widget of aiSpendWidgets) await addWidget(dashboard.id, widget);
   return dashboard;
 }

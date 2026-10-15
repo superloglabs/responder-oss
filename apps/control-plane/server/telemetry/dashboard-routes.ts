@@ -23,7 +23,7 @@ import {
 } from "../../../../packages/core/src/telemetry/dashboards.js";
 import { getActiveTenant } from "../tenant.js";
 
-// Dashboards over a workspace's telemetry projects. They need the telemetry
+// Dashboards over a workspace's telemetry. They need the telemetry
 // and dashboards capabilities and a configured telemetry store.
 export type DashboardRouteDependencies = {
   addWidget: typeof addTelemetryDashboardWidget;
@@ -100,9 +100,7 @@ export function createDashboardRoutes(dependencies: DashboardRouteDependencies =
         createdBy: granted.userId,
         ...body.data,
       });
-      return dashboard
-        ? context.json({ dashboard }, 201)
-        : context.json({ error: "Telemetry project not found" }, 404);
+      return context.json({ dashboard }, 201);
     })
     .get("/:dashboardId", async (context) => {
       const granted = await access(context.req.raw.headers);

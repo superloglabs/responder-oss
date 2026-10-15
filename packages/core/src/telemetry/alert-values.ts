@@ -26,7 +26,7 @@ export function alertWindow(windowMinutes: number, now: Date): { since: string; 
 // queried without grouping, so a metric average weighs every data point.
 export async function alertValues(
   client: TelemetryClient,
-  projectId: string,
+  organizationId: string,
   rule: Pick<AlertRule, "aggregation" | "filter" | "groupBy" | "groupMode" | "metricName" | "source" | "windowMinutes">,
   now: Date,
 ): Promise<AlertValueRow[]> {
@@ -37,7 +37,7 @@ export async function alertValues(
     if (!rule.metricName) throw new Error("The alert has no metric");
     rows = await metricAggregate(
       client,
-      projectId,
+      organizationId,
       rule.metricName,
       { range, resourceAttrs: rule.filter.resourceAttrs ?? [], ...(rule.filter.service ? { service: rule.filter.service } : {}) },
       groupBy,
@@ -49,7 +49,7 @@ export async function alertValues(
   } else {
     rows = await countAggregate(
       client,
-      projectId,
+      organizationId,
       rule.source,
       { ...rule.filter, range, resourceAttrs: rule.filter.resourceAttrs ?? [] },
       groupBy,

@@ -568,6 +568,13 @@
       "when": 1792053825167,
       "tag": "0080_ai_model_price_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1792056225824,
+      "tag": "0081_workspace_telemetry",
+      "breakpoints": true
     }
   ]
 }

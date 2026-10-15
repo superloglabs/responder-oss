@@ -20,7 +20,6 @@ const alert: DueTelemetryAlert = {
   metricName: null,
   name: "Checkout errors",
   organizationId: "org-1",
-  projectId: "project-1",
   slack,
   source: "logs",
   threshold: 10,
@@ -70,7 +69,7 @@ describe("checkTelemetryAlert", () => {
 
     await checkTelemetryAlert(alert, {} as never, deps);
 
-    expect(deps.values).toHaveBeenCalledWith(expect.anything(), "project-1", alert, now);
+    expect(deps.values).toHaveBeenCalledWith(expect.anything(), "org-1", alert, now);
     expect(deps.openEpisode).toHaveBeenCalledWith({
       alertId: "alert-1",
       groupKey: "",

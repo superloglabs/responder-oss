@@ -51,10 +51,10 @@ test("raw telemetry queries filter through the materialized project column", asy
   );
   assert.ok(logAndTraceQueries.length > 0);
   for (const query of logAndTraceQueries) {
-    assert.match(query, /SuperlogProjectId = \{projectId:String\}/);
+    assert.match(query, /SuperlogProjectId = \{organizationId:String\}/);
     assert.doesNotMatch(
       query,
-      /ResourceAttributes\['superlog\.project_id'\] = \{projectId:String\}/,
+      /ResourceAttributes\['superlog\.project_id'\] = \{organizationId:String\}/,
     );
   }
 
@@ -65,7 +65,7 @@ test("raw telemetry queries filter through the materialized project column", asy
   for (const query of metricQueries) {
     assert.match(
       query,
-      /ResourceAttributes\['superlog\.project_id'\] = \{projectId:String\}/,
+      /ResourceAttributes\['superlog\.project_id'\] = \{organizationId:String\}/,
     );
   }
 });

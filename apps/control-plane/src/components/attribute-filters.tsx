@@ -18,7 +18,7 @@ const operators = [
 // The most filters a widget or alert can have.
 const maximumFilters = 50;
 
-// Attribute filters: a key from the project's attributes, a comparison and
+// Attribute filters: a key from the workspace's attributes, a comparison and
 // a value. `actions` adds buttons beside "Add filter".
 export function AttributeFilters({
   actions,

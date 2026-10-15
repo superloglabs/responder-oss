@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { CountHistogram, type HistogramSeries } from "../components/count-histogram";
-import { TelemetryProjectsGate } from "../components/telemetry";
+import { TelemetryGate } from "../components/telemetry";
 import { ExplorerTimeControls } from "../components/telemetry-explorer";
 import { fetchAttributeValues } from "../dashboards-api";
 import { DataTable, SelectField } from "../design-system";
@@ -25,7 +25,7 @@ import {
   type TraceOverview,
 } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
-import { useTelemetryProjects } from "../use-telemetry-projects";
+import { useTelemetryAvailable } from "../use-telemetry-available";
 import { useTelemetryQuery } from "../use-telemetry-query";
 import "../components/automation-run-history.css";
 
@@ -84,14 +84,12 @@ function Sparkline({
 
 function OverviewBody({
   live,
-  projects,
   query,
   service,
   setQuery,
   setService,
 }: {
   live: boolean;
-  projects: Array<{ name: string; projectId: string }>;
   query: TraceExplorerQuery;
   service: string;
   setQuery: (update: Partial<TraceExplorerQuery>) => void;
@@ -101,13 +99,12 @@ function OverviewBody({
   const key = `${traceExplorerParams(query)}|${service}`;
   const overview = useTelemetryQuery(
     key,
-    () => fetchTraceOverview({ filters: query.filters, projectId: query.projectId, range: query.range, service }),
+    () => fetchTraceOverview({ filters: query.filters, range: query.range, service }),
     live,
   );
-  const keyQuery = `${query.projectId}|${query.range}`;
-  const services = useTelemetryQuery(keyQuery, () => fetchServices(query.projectId, query.range, "traces"));
-  const environments = useTelemetryQuery(keyQuery, () =>
-    fetchAttributeValues(query.projectId, telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
+  const services = useTelemetryQuery(query.range, () => fetchServices(query.range, "traces"));
+  const environments = useTelemetryQuery(query.range, () =>
+    fetchAttributeValues(telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
   );
   const data: TraceOverview | null = overview.data?.overview ?? null;
   const since = overview.data ? Date.parse(overview.data.since) : 0;
@@ -163,15 +160,6 @@ function OverviewBody({
             onChange={(value) => setQuery({ filters: withEnvironment(query.filters, value) })}
             options={[{ label: "All environments", value: "" }, ...environmentOptions.map((value) => ({ label: value, value }))]}
             value={environment}
-          />
-        ) : null}
-        {projects.length > 1 ? (
-          <SelectField
-            className="explorerSelect"
-            label="Project"
-            onChange={(projectId) => setQuery({ filters: [], projectId, services: [] })}
-            options={projects.map((project) => ({ label: project.name, value: project.projectId }))}
-            value={query.projectId}
           />
         ) : null}
       </div>
@@ -326,7 +314,7 @@ function OverviewBody({
 
 export function TracesOverviewPage() {
   useDocumentTitle("Traces overview");
-  const telemetry = useTelemetryProjects();
+  const telemetry = useTelemetryAvailable();
   const [params, setParams] = useSearchParams();
   const query = traceExplorerQuery(params);
   const service = query.services[0] ?? "";
@@ -341,30 +329,21 @@ export function TracesOverviewPage() {
       <div className="explorer">
         <header className="workspaceHeading">
           <h1><TreeStructureIcon aria-hidden="true" size={16} weight="bold" />Traces overview</h1>
-          {telemetry.projects && telemetry.projects.length > 0 ? (
+          {telemetry.available ? (
             <div className="workspaceHeading__actions">
               <ExplorerTimeControls live={live} onLiveChange={setLive} onRangeChange={(range) => navigate({ ...query, range })} range={query.range} />
             </div>
           ) : null}
         </header>
-        <TelemetryProjectsGate signal="Traces" state={telemetry}>
-          {(projects) => {
-            const resolved = {
-              ...query,
-              projectId: projects.some((project) => project.projectId === query.projectId) ? query.projectId : projects[0]!.projectId,
-            };
-            return (
-              <OverviewBody
-                live={live}
-                projects={projects}
-                query={resolved}
-                service={service}
-                setQuery={(update) => navigate({ ...resolved, ...update })}
-                setService={(value) => navigate({ ...resolved, services: value ? [value] : [] })}
-              />
-            );
-          }}
-        </TelemetryProjectsGate>
+        <TelemetryGate signal="Traces" state={telemetry}>
+          <OverviewBody
+            live={live}
+            query={query}
+            service={service}
+            setQuery={(update) => navigate({ ...query, ...update })}
+            setService={(value) => navigate({ ...query, services: value ? [value] : [] })}
+          />
+        </TelemetryGate>
       </div>
     </AppShell>
   );

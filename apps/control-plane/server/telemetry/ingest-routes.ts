@@ -7,9 +7,10 @@ import {
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
 
 // OTLP over HTTP from applications, at /api/ingest/v1/{logs,traces,metrics}.
-// The key decides the project; it is stamped as the collector request's
-// x-superlog-project-id header, and the collector writes it onto every
-// resource, replacing any superlog.* attribute the application sent.
+// The key decides the workspace. Its organization ID is stamped as the
+// collector request's x-superlog-project-id header, and the collector writes
+// it onto every resource as superlog.project_id, replacing any superlog.*
+// attribute the application sent.
 export type IngestRouteDependencies = {
   collectorUrl: () => string | null;
   findKey: typeof findTelemetryIngestKey;
@@ -38,22 +39,22 @@ function bearerToken(headers: Headers): string | null {
 }
 
 export function createIngestRoutes(dependencies: IngestRouteDependencies = defaultDependencies) {
-  const keys = new Map<string, { expires: number; projectId: string | null; keyId: string | null }>();
+  const keys = new Map<string, { expires: number; keyId: string | null; organizationId: string | null }>();
 
-  async function projectFor(token: string): Promise<{ keyId: string; projectId: string } | null> {
+  async function workspaceFor(token: string): Promise<{ keyId: string; organizationId: string } | null> {
     const hash = hashTelemetryIngestToken(token);
     const cached = keys.get(hash);
     if (cached && cached.expires > dependencies.now()) {
-      return cached.projectId && cached.keyId ? { keyId: cached.keyId, projectId: cached.projectId } : null;
+      return cached.organizationId && cached.keyId ? { keyId: cached.keyId, organizationId: cached.organizationId } : null;
     }
     const found = await dependencies.findKey(token);
     if (keys.size >= keyCacheLimit) keys.clear();
     keys.set(hash, {
       expires: dependencies.now() + keyCacheMs,
       keyId: found?.keyId ?? null,
-      projectId: found?.projectId ?? null,
+      organizationId: found?.organizationId ?? null,
     });
-    return found ? { keyId: found.keyId, projectId: found.projectId } : null;
+    return found ? { keyId: found.keyId, organizationId: found.organizationId } : null;
   }
 
   return new Hono().post("/v1/:signal", async (context) => {
@@ -61,12 +62,12 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
     const collector = dependencies.collectorUrl();
     if (!collector || !signals.has(signal)) return context.json({ error: "Not found" }, 404);
     const token = bearerToken(context.req.raw.headers);
-    const key = token ? await projectFor(token) : null;
+    const key = token ? await workspaceFor(token) : null;
     if (!key) return context.json({ error: "Send a valid ingest key as Authorization: Bearer <key>" }, 401);
 
     const headers = new Headers({
       "content-type": context.req.header("content-type") ?? "application/x-protobuf",
-      "x-superlog-project-id": key.projectId,
+      "x-superlog-project-id": key.organizationId,
     });
     const encoding = context.req.header("content-encoding");
     if (encoding) headers.set("content-encoding", encoding);

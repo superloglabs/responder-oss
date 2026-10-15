@@ -37,7 +37,6 @@ const query: MetricQuery = {
   groupBy: "attr:http.route",
   kind: "histogram",
   name: "http.server.request.duration",
-  projectId: "b925b1df-5b78-43c8-a816-6f00afb174af",
   range: "6h",
   unit: "s",
 };
@@ -131,15 +130,15 @@ describe("explorer URLs", () => {
   });
 
   it("opens a histogram on p95 and keeps defaults out of the URL", () => {
-    const href = metricExplorerHref({ kind: "histogram", name: "rpc.duration", unit: "ms" }, { projectId: "p", range: "1h" });
+    const href = metricExplorerHref({ kind: "histogram", name: "rpc.duration", unit: "ms" }, { range: "1h" });
 
-    expect(href).toBe("/metrics/explore?kind=histogram&metric=rpc.duration&unit=ms&projectId=p");
+    expect(href).toBe("/metrics/explore?kind=histogram&metric=rpc.duration&unit=ms");
     expect(metricQueryFromParams(new URL(href, "https://app.test").searchParams)?.aggregation).toBe("p95");
     expect(metricQueryFromParams(new URLSearchParams("kind=histogram&metric=a&aggregation="))?.aggregation).toBe("");
   });
 
   it("names a metric by its name, kind and unit, including an empty unit", () => {
-    const href = metricExplorerHref({ kind: "sum", name: "jobs", unit: "" }, { projectId: "p", range: "1h" });
+    const href = metricExplorerHref({ kind: "sum", name: "jobs", unit: "" }, { range: "1h" });
     const parsed = metricQueryFromParams(new URL(href, "https://app.test").searchParams);
 
     expect(parsed).toMatchObject({ kind: "sum", name: "jobs", unit: "" });

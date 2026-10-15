@@ -3,11 +3,6 @@ import type { TelemetryRange, TelemetrySignal } from "../server/telemetry/routes
 
 export type { TelemetryRange, TelemetrySignal };
 
-export interface TelemetryProject {
-  name: string;
-  projectId: string;
-}
-
 export interface LogRecord {
   body: string;
   exception_message: string;
@@ -67,22 +62,21 @@ async function telemetryJson<T>(url: string): Promise<T> {
   return body as T;
 }
 
-// Null when the workspace cannot read telemetry.
-export async function fetchTelemetryProjects(): Promise<TelemetryProject[] | null> {
-  const response = await fetch("/api/telemetry/projects");
-  if (response.status === 404) return null;
-  const body = (await response.json().catch(() => null)) as { projects: TelemetryProject[] } | null;
+// False when the workspace cannot read telemetry.
+export async function fetchTelemetryAvailable(): Promise<boolean> {
+  const response = await fetch("/api/telemetry/status");
+  if (response.status === 404) return false;
+  const body = (await response.json().catch(() => null)) as { available: boolean } | null;
   if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
-  return body?.projects ?? [];
+  return body?.available ?? false;
 }
 
 export async function fetchServices(
-  projectId: string,
   range: TelemetryRange,
   // "all" includes services that only send metrics.
   signal: TelemetrySignal | "all" = "logs",
 ): Promise<string[]> {
-  const params = new URLSearchParams({ projectId, range, signal });
+  const params = new URLSearchParams({ range, signal });
   const body = await telemetryJson<{ services: string[] }>(`/api/telemetry/services?${params}`);
   return body.services;
 }
@@ -149,27 +143,24 @@ export function spanKindLabel(kind: string): string {
   return name ? name[0]!.toUpperCase() + name.slice(1) : "—";
 }
 
-export function traceHref(projectId: string, traceId: string): string {
-  return `/traces/${encodeURIComponent(traceId)}?${new URLSearchParams({ projectId })}`;
+export function traceHref(traceId: string): string {
+  return `/traces/${encodeURIComponent(traceId)}`;
 }
 
 // The trace list passes its filters to a trace it opens, so the trace page's
 // breadcrumb returns to the same list. A trace opened any other way returns
-// to the list for its project.
+// to the unfiltered list.
 export interface TraceListState {
   traceList: string;
 }
 
-export function traceListHref(state: unknown, projectId: string): string {
+export function traceListHref(state: unknown): string {
   const traceList = (state as Partial<TraceListState> | null)?.traceList;
-  if (typeof traceList === "string") return traceList ? `/traces/search?${traceList}` : "/traces/search";
-  return `/traces/search?${new URLSearchParams({ projectId })}`;
+  return typeof traceList === "string" && traceList ? `/traces/search?${traceList}` : "/traces/search";
 }
 
-export function fetchTrace(projectId: string, traceId: string): Promise<TraceDetail> {
-  return telemetryJson<TraceDetail>(
-    `/api/telemetry/traces/${encodeURIComponent(traceId)}?${new URLSearchParams({ projectId })}`,
-  );
+export function fetchTrace(traceId: string): Promise<TraceDetail> {
+  return telemetryJson<TraceDetail>(`/api/telemetry/traces/${encodeURIComponent(traceId)}`);
 }
 
 export function formatDuration(milliseconds: number): string {
@@ -272,7 +263,6 @@ export interface LogExplorerQuery {
   // Attribute keys shown as extra facets.
   facets: string[];
   filters: ExplorerFilter[];
-  projectId: string;
   range: TelemetryRange;
   search: string;
   services: string[];
@@ -284,7 +274,6 @@ export interface TraceExplorerQuery {
   filters: ExplorerFilter[];
   minDurationMs: number;
   operations: string[];
-  projectId: string;
   range: TelemetryRange;
   services: string[];
   statuses: string[];
@@ -314,7 +303,6 @@ export function logExplorerQuery(params: URLSearchParams): LogExplorerQuery {
   return {
     facets: uniqueValues(params, "facet"),
     filters: explorerFilters(params),
-    projectId: params.get("projectId") ?? "",
     range: explorerRange(params),
     search: params.get("search")?.trim() ?? "",
     services: uniqueValues(params, "service"),
@@ -329,7 +317,6 @@ export function traceExplorerQuery(params: URLSearchParams): TraceExplorerQuery 
     filters: explorerFilters(params),
     minDurationMs: Number.isFinite(minDurationMs) && minDurationMs > 0 ? minDurationMs : 0,
     operations: uniqueValues(params, "operation"),
-    projectId: params.get("projectId") ?? "",
     range: explorerRange(params),
     services: uniqueValues(params, "service"),
     // The trace list's older links say `status=error`.
@@ -343,7 +330,6 @@ function appendAll(params: URLSearchParams, name: string, values: string[]) {
 
 export function logExplorerParams(query: LogExplorerQuery): URLSearchParams {
   const params = new URLSearchParams();
-  if (query.projectId) params.set("projectId", query.projectId);
   params.set("range", query.range);
   if (query.search) params.set("search", query.search);
   appendAll(params, "service", query.services);
@@ -355,7 +341,6 @@ export function logExplorerParams(query: LogExplorerQuery): URLSearchParams {
 
 export function traceExplorerParams(query: TraceExplorerQuery): URLSearchParams {
   const params = new URLSearchParams();
-  if (query.projectId) params.set("projectId", query.projectId);
   params.set("range", query.range);
   appendAll(params, "service", query.services);
   appendAll(params, "operation", query.operations);
@@ -439,7 +424,6 @@ export interface TraceOverview {
 
 export interface TraceOverviewQuery {
   filters: ExplorerFilter[];
-  projectId: string;
   range: TelemetryRange;
   service: string;
 }
@@ -447,7 +431,7 @@ export interface TraceOverviewQuery {
 export function fetchTraceOverview(
   query: TraceOverviewQuery,
 ): Promise<{ overview: TraceOverview; since: string; stepMs: number; until: string }> {
-  const params = new URLSearchParams({ projectId: query.projectId, range: query.range });
+  const params = new URLSearchParams({ range: query.range });
   if (query.service) params.set("service", query.service);
   appendAll(params, "filter", query.filters.map(explorerFilterText));
   return telemetryJson(`/api/telemetry/traces/overview?${params}`);

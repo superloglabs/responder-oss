@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createIngestRoutes, type IngestRouteDependencies } from "./ingest-routes.js";
 
 const token = `sl_ingest_${"a".repeat(43)}`;
-const projectId = "b925b1df-5b78-43c8-a816-6f00afb174af";
+const organizationId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 
 function routes(overrides: Partial<IngestRouteDependencies> = {}) {
   let now = 0;
   const dependencies: IngestRouteDependencies = {
     collectorUrl: () => "http://collector.telemetry.internal:4318",
-    findKey: vi.fn(async () => ({ keyId: "key-1", lastUsedAt: null, organizationId: "org-1", projectId })),
+    findKey: vi.fn(async () => ({ keyId: "key-1", lastUsedAt: null, organizationId })),
     forward: vi.fn(async () => new Response("{}", { headers: { "content-type": "application/json" }, status: 200 })),
     now: () => now,
     recordUse: vi.fn(async () => undefined),
@@ -26,7 +26,7 @@ function send(app: ReturnType<typeof routes>["app"], path: string, headers: Reco
 }
 
 describe("telemetry ingest", () => {
-  it("forwards the body to the collector with the key's project", async () => {
+  it("forwards the body to the collector with the key's workspace", async () => {
     const { app, dependencies } = routes();
 
     const response = await send(app, "/v1/traces");
@@ -35,7 +35,7 @@ describe("telemetry ingest", () => {
     const [url, init] = vi.mocked(dependencies.forward).mock.calls[0]!;
     expect(url).toBe("http://collector.telemetry.internal:4318/v1/traces");
     const headers = init!.headers as Headers;
-    expect(headers.get("x-superlog-project-id")).toBe(projectId);
+    expect(headers.get("x-superlog-project-id")).toBe(organizationId);
     expect(headers.get("content-encoding")).toBe("gzip");
     expect(headers.get("content-type")).toBe("application/x-protobuf");
     expect(new Uint8Array(init!.body as ArrayBuffer)).toEqual(new Uint8Array([10, 1, 2]));

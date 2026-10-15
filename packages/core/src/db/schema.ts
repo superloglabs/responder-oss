@@ -669,30 +669,8 @@ export const organizationCapabilities = pgTable(
   ],
 );
 
-// A workspace reads OpenTelemetry data stored under these project IDs. The
-// IDs come from the ingest pipeline, which tags every record with
-// `superlog.project_id`, so one project belongs to at most one workspace.
-export const telemetryProjects = pgTable(
-  "telemetry_projects",
-  {
-    projectId: uuid("project_id").primaryKey(),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [
-    index("telemetry_projects_organization_idx").on(table.organizationId),
-    // Lets an ingest key name its project and workspace together.
-    unique("telemetry_projects_organization_project_unique").on(table.organizationId, table.projectId),
-  ],
-);
-
-// A key an application sends telemetry with, for one of the workspace's
-// telemetry projects. Only its digest is stored.
+// A key an application sends telemetry with. The ingest endpoint tags what it
+// receives with the key's workspace. Only its digest is stored.
 export const telemetryIngestKeys = pgTable(
   "telemetry_ingest_keys",
   {
@@ -700,7 +678,6 @@ export const telemetryIngestKeys = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id").notNull(),
     name: text("name").notNull(),
     // The first characters of the key, shown so people can tell keys apart.
     prefix: text("prefix").notNull(),
@@ -715,17 +692,10 @@ export const telemetryIngestKeys = pgTable(
   (table) => [
     uniqueIndex("telemetry_ingest_keys_token_hash_idx").on(table.tokenHash),
     index("telemetry_ingest_keys_organization_idx").on(table.organizationId),
-    // The key's project belongs to the key's workspace.
-    foreignKey({
-      columns: [table.organizationId, table.projectId],
-      foreignColumns: [telemetryProjects.organizationId, telemetryProjects.projectId],
-      name: "telemetry_ingest_keys_project_fk",
-    }).onDelete("cascade"),
   ],
 );
 
-// The project is not a foreign key: unlinking a project hides its dashboards
-// rather than deleting them, and linking it again brings them back.
+// A dashboard over the workspace's telemetry.
 export const telemetryDashboards = pgTable(
   "telemetry_dashboards",
   {
@@ -733,7 +703,6 @@ export const telemetryDashboards = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id").notNull(),
     name: text("name").notNull(),
     variables: jsonb("variables").$type<DashboardVariable[]>().notNull().default([]),
     createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
@@ -798,8 +767,7 @@ export const aiModelPriceOverrides = pgTable(
   ],
 );
 
-// A threshold rule on one telemetry project. Like a dashboard, it is hidden
-// and not evaluated while its project is not linked to the workspace.
+// A threshold rule on the workspace's telemetry.
 export const telemetryAlerts = pgTable(
   "telemetry_alerts",
   {
@@ -807,7 +775,6 @@ export const telemetryAlerts = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id").notNull(),
     name: text("name").notNull(),
     enabled: boolean("enabled").notNull().default(true),
     source: text("source").$type<AlertSource>().notNull(),
