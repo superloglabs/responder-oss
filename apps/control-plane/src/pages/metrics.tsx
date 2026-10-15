@@ -97,11 +97,6 @@ export function MetricsPage() {
     <AppShell active="metrics" redesigned>
       <header className="workspaceHeading">
         <h1><ChartLineUpIcon aria-hidden="true" size={16} weight="bold" />Metrics</h1>
-        {available ? (
-          <div className="workspaceHeading__actions">
-            <SendTelemetryLink variant="secondary" />
-          </div>
-        ) : null}
       </header>
       <TelemetryGate signal="Metrics" state={telemetry}>
         <section aria-label="Metrics" className="telemetryPage">

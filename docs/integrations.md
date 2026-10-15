@@ -602,8 +602,8 @@ Create a Vercel Integration with:
 - Read access for Projects, Deployments, Deployment Checks, Domains, Teams,
   Logs, Security, and any other non-secret platform areas the investigation
   agent should inspect
-- No write access and no environment-variable, token, secret, credential, or
-  API-key scopes
+- No write access except to Drains, which telemetry sources use, and no
+  environment-variable, token, secret, credential, or API-key scopes
 - Environment: `VERCEL_INTEGRATION_SLUG`, `VERCEL_CLIENT_ID`, and
   `VERCEL_CLIENT_SECRET`
 
@@ -725,6 +725,43 @@ because Google charges the quota for setup requests made with user tokens to
 that project. Self-hosted deployments must run on AWS with
 permission to assume that role. Native Google Cloud alert ingestion is a
 separate integration boundary.
+
+## Telemetry sources
+
+Workspaces with the telemetry capability open **Add telemetry** in the sidebar
+to send logs, traces and metrics. Every option needs a cell with a collector
+(`TELEMETRY_COLLECTOR_URL`).
+
+- **OpenTelemetry**: create an ingest key and paste the generated prompt into a
+  coding agent. The prompt asks it to add the OpenTelemetry SDK, export all
+  three signals over OTLP/HTTP to `<public>/api/ingest`, and connect the app's
+  logger.
+- **AWS**: choose a region and deploy the generated CloudFormation stack. It
+  creates a CloudWatch metric stream in the OpenTelemetry 1.0 format and an
+  account-level CloudWatch Logs subscription, each delivered by its own
+  Firehose stream to `<cell>/api/ingest/aws/firehose/metrics` and `/logs`.
+  Firehose sends a new ingest key as its access key. Records Firehose cannot
+  deliver go to a bucket in the customer's account for seven days. One stack
+  covers one region; an account allows one account-level subscription policy
+  per region. Quick Create needs the template in the template bucket under
+  `AWS_TELEMETRY_TEMPLATE_KEY`; without it the page offers the template for
+  download and an AWS CLI command.
+- **Google Cloud**: choose a connected project. The worker reads Cloud Logging
+  every minute and a fixed set of Cloud Monitoring metrics every five minutes
+  with the connection's keyless identity, which already has Logs Viewer and
+  Monitoring Viewer. Reads stop one minute (logs) and five minutes (metrics)
+  behind the present, so late entries outside that window are not read. A
+  source that falls more than an hour behind skips ahead. Data Access audit
+  logs are skipped.
+- **Vercel**: choose a connected installation. Responder creates a trace drain
+  that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
+  NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the
+  installation shares. Drains need a Pro or Enterprise team, and the Vercel
+  Integration needs read and write access to **Drains**. Existing
+  installations must accept the new permission before drains can be created.
+
+Removing a source revokes its ingest key. Responder also removes Vercel
+drains; an AWS stack stays until the customer deletes it.
 
 ## Custom MCP servers
 

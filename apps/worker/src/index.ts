@@ -106,6 +106,7 @@ import {
   defaultSyntheticCheckDependencies,
   purgeSyntheticCheckRuns,
 } from "./synthetic-checks.js";
+import { pullGcpTelemetrySources } from "./telemetry-sources.js";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -138,6 +139,7 @@ let remediationRecoveryDrain: Promise<void> | undefined;
 const pollers: {
   automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
+  gcpTelemetry?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
   replayRequest?: NodeJS.Timeout;
@@ -161,6 +163,7 @@ const startChannelAutomations = (input: Parameters<typeof startAlertAutomations>
       if (!queued) throw new Error("Automation run job was not created");
     },
   });
+let gcpTelemetryPass: Promise<void> | undefined;
 const telemetryAlertDependencies = {
   ...defaultTelemetryAlertDependencies,
   startAutomations: startChannelAutomations,
@@ -193,6 +196,19 @@ function checkTelemetryAlerts(): Promise<void> {
       telemetryAlertPass = undefined;
     });
   return telemetryAlertPass;
+}
+
+// Runs at most one Google Cloud telemetry pass at a time.
+function pullGcpTelemetry(): Promise<void> {
+  gcpTelemetryPass ??= pullGcpTelemetrySources()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "gcp_telemetry_pull" });
+    })
+    .finally(() => {
+      gcpTelemetryPass = undefined;
+    });
+  return gcpTelemetryPass;
 }
 
 async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
@@ -547,6 +563,7 @@ async function shutdown(signal: string): Promise<void> {
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
   if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
+  if (pollers.gcpTelemetry) clearInterval(pollers.gcpTelemetry);
   if (pollers.syntheticChecks) clearInterval(pollers.syntheticChecks);
   if (pollers.syntheticCheckPurge) clearInterval(pollers.syntheticCheckPurge);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
@@ -555,6 +572,8 @@ async function shutdown(signal: string): Promise<void> {
   await linearTicketDrain;
   await remediationRecoveryDrain;
   await telemetryAlertPass;
+  // A pass that sent data saves its cursors before the worker exits.
+  await gcpTelemetryPass;
   await syntheticChecks.stop();
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
@@ -1121,5 +1140,7 @@ pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);
 pollers.syntheticChecks.unref();
 pollers.syntheticCheckPurge = setInterval(purgeSyntheticChecks, 10 * 60 * 1_000);
 pollers.syntheticCheckPurge.unref();
+pollers.gcpTelemetry = setInterval(() => void pullGcpTelemetry(), 60_000);
+pollers.gcpTelemetry.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));

@@ -10,6 +10,7 @@ import { slackErrorLogFields } from "@responder/core/integrations/slack-live-car
 export interface WorkerErrorContext {
   operation:
     | "automation"
+    | "gcp_telemetry_pull"
     | "investigation"
     | "linear_ticket"
     | "remediation"

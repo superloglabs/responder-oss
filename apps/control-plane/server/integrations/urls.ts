@@ -11,11 +11,17 @@ export type IntegrationCallbackProvider = Parameters<typeof integrationCallbackU
 // a callback that arrives at the shared public address can be sent to the cell
 // that started the flow.
 export function cellCallbackUrl(provider: IntegrationCallbackProvider): string {
+  return `${cellOrigin()}/api/integrations/${provider}/callback`;
+}
+
+// This cell's own public address. Providers that push telemetry send it here,
+// so it never depends on routing at the shared address.
+export function cellOrigin(): string {
   const directory = cellDirectory();
-  const origin =
+  return (
     directory?.cells.find((cell) => cell.id === directory.current)?.url ??
-    controlPlaneBaseUrl();
-  return `${origin}/api/integrations/${provider}/callback`;
+    controlPlaneBaseUrl()
+  ).replace(/\/+$/u, "");
 }
 
 export function integrationCallbackUrl(
