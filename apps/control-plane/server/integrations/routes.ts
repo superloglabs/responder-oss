@@ -14,6 +14,7 @@ import {
   getIntegrationConnectionState,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
+  getPendingIntegrationConnectionState,
   getRecoverableSentryIntegrationAccount,
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
@@ -474,6 +475,55 @@ function callbackErrorReason(error: unknown): string {
     }
   }
   return "connection_failed";
+}
+
+// GitHub can return from the setup page of an app that is already installed
+// without the state Responder sent, for example after the user changes the
+// installation's repositories. Without state, the callback's code and
+// installation cannot be trusted. When the signed-in user has a GitHub flow
+// pending, continue it through user authorization, which keeps the state and
+// checks that the user can access the installation.
+async function resumeGitHubSetupWithoutState(input: {
+  headers: Headers;
+  installationId: string | undefined;
+  setupAction: string | undefined;
+}): Promise<string> {
+  const invalidState = settingsRedirect("/settings", "github", "error", "invalid_state");
+  const log = (outcome: string) =>
+    console.info(JSON.stringify({ event: "github_setup_callback_without_state", outcome }));
+
+  const installationId = z.coerce.number().int().positive().safeParse(input.installationId);
+  if (
+    !installationId.success ||
+    (input.setupAction !== "install" && input.setupAction !== "update")
+  ) {
+    log("invalid_callback");
+    return invalidState;
+  }
+  const tenant = await getActiveTenant(input.headers);
+  if (tenant.ok === false) {
+    log("signed_out");
+    return invalidState;
+  }
+  const pending = await getPendingIntegrationConnectionState("github", {
+    organizationId: tenant.organizationId,
+    userId: tenant.user.id,
+  });
+  if (!pending) {
+    log("no_pending_flow");
+    return invalidState;
+  }
+
+  const state = await createIntegrationConnectionState({
+    metadata: { ...pending.metadata, installationId: installationId.data },
+    organizationId: tenant.organizationId,
+    provider: "github",
+    returnTo: pending.returnTo,
+    routingUrl: cellCallbackUrl("github"),
+    userId: tenant.user.id,
+  });
+  log("resumed");
+  return githubAuthorizeUrl(state);
 }
 
 function browserOAuthErrorReason(error: string | undefined): string {
@@ -4056,7 +4106,11 @@ export const integrationRoutes = new Hono()
     const state = context.req.query("state");
     if (!state) {
       return context.redirect(
-        settingsRedirect("/settings", "github", "error", "invalid_state"),
+        await resumeGitHubSetupWithoutState({
+          headers: context.req.raw.headers,
+          installationId: context.req.query("installation_id"),
+          setupAction: context.req.query("setup_action"),
+        }),
       );
     }
 

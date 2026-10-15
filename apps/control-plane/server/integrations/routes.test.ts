@@ -11,6 +11,7 @@ import {
   getIntegrationConnectionState,
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
+  getPendingIntegrationConnectionState,
   getRecoverableSentryIntegrationAccount,
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
@@ -88,6 +89,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   getIntegrationConnectionState: vi.fn(),
   getOrganizationIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccountByExternalId: vi.fn(),
+  getPendingIntegrationConnectionState: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
   listConnectedSentryIntegrationAccounts: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
@@ -1334,6 +1336,87 @@ describe("integration callback routing", () => {
     expect(errorLog).not.toHaveBeenCalledWith(
       expect.stringContaining("The client secret was rejected"),
     );
+  });
+
+  it("resumes a pending GitHub flow when GitHub drops the setup state", async () => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getPendingIntegrationConnectionState).mockResolvedValue({
+      metadata: { source: "onboarding" },
+      returnTo: "/agents/new",
+    });
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("fresh-state");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await app.request(
+      "/api/integrations/github/callback" +
+        "?code=untrusted-code" +
+        "&installation_id=12345" +
+        "&setup_action=update",
+    );
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin + location.pathname).toBe(
+      "https://github.com/login/oauth/authorize",
+    );
+    expect(location.searchParams.get("state")).toBe("fresh-state");
+    expect(getPendingIntegrationConnectionState).toHaveBeenCalledWith("github", {
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+    });
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+      metadata: { installationId: 12345, source: "onboarding" },
+      organizationId: tenant.organizationId,
+      provider: "github",
+      returnTo: "/agents/new",
+      routingUrl: "https://responder.example/api/integrations/github/callback",
+      userId: tenant.user.id,
+    });
+    expect(consumeIntegrationConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("rejects a GitHub setup callback without state when no flow is pending", async () => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getPendingIntegrationConnectionState).mockResolvedValue(null);
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await app.request(
+      "/api/integrations/github/callback" +
+        "?code=untrusted-code" +
+        "&installation_id=12345" +
+        "&setup_action=update",
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=github&status=error&reason=invalid_state",
+    );
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "github_setup_callback_without_state",
+        outcome: "no_pending_flow",
+      }),
+    );
+  });
+
+  it("rejects a GitHub callback without state or installation", async () => {
+    configureGitHub();
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await app.request(
+      "/api/integrations/github/callback?code=untrusted-code",
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=github&status=error&reason=invalid_state",
+    );
+    expect(getActiveTenant).not.toHaveBeenCalled();
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
   });
 
   it("offers the Datadog API key connection endpoint", async () => {
