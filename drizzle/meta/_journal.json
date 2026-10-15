@@ -561,6 +561,13 @@
       "when": 1791984947410,
       "tag": "0079_telemetry_ingest_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1792053825167,
+      "tag": "0080_ai_model_price_overrides",
+      "breakpoints": true
     }
   ]
 }

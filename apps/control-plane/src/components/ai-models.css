@@ -1,0 +1,9 @@
+.aiModels__summary { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; color: var(--ds-text-muted); font-size: 12px; }
+.aiModels__summary strong { color: var(--ds-text-primary); font-weight: 600; }
+.aiModels__name { display: flex; flex-direction: column; min-width: 0; }
+.aiModels__name > span:first-child { overflow: hidden; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.aiModels__provider, .aiModels__muted, .aiModels__source { overflow: hidden; color: var(--ds-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.aiModels__source { display: block; }
+.aiModels__note { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
+.aiModels__dialogText { margin: 0; color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }
+.aiModels__priceGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

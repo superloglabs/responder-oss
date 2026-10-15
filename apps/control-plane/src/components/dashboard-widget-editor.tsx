@@ -10,6 +10,8 @@ import {
   type WidgetSource,
 } from "../dashboard-widget-draft";
 import {
+  aiGroupFields,
+  aiMeasureFields,
   fetchAttributeKeys,
   fetchMetricNames,
   widgetAggregationLabels,
@@ -60,6 +62,7 @@ const units = [
   { label: "Seconds", value: "duration_s" },
   { label: "Bytes", value: "bytes" },
   { label: "Percent", value: "percent" },
+  { label: "US dollars", value: "usd" },
 ] as const;
 
 function withCurrent(options: string[], current: string): string[] {
@@ -152,17 +155,24 @@ export function DashboardWidgetEditor({
       ? [{ label: "Logs", value: "logs" }, { label: "Spans", value: "traces" }, { label: "Metric", value: "metric" }]
       : [{ label: "Logs", value: "logs" }, { label: "Traces", value: "traces" }];
   const source = form.kind === "table" && form.source === "metric" ? "logs" : form.source;
+  const aiGroups: Array<{ label: string; value: string }> = form.source === "traces" && form.kind === "chart" ? [...aiGroupFields] : [];
   const groupOptions = [
     { label: "No grouping", value: "" },
     { label: "Service", value: "service" },
-    ...withCurrent(keys, form.groupBy === "service" ? "" : form.groupBy).map((key) => ({ label: key, value: key })),
+    ...aiGroups,
+    ...withCurrent(keys, form.groupBy === "service" || aiGroups.some((group) => group.value === form.groupBy) ? "" : form.groupBy)
+      .map((key) => ({ label: key, value: key })),
   ];
   const previewReady = (preview.type !== "timeseries_metric" || Boolean(preview.config.metricName)) && !needsField;
   const overTime = form.display === "timeseries";
+  // Spans offer their duration and AI usage before their attributes.
+  const builtInFields: Array<{ description?: string; label: string; value: string }> = form.source === "traces"
+    ? [{ label: "Duration", value: "duration" }, ...aiMeasureFields.map((field) => ({ ...field, description: "AI usage" }))]
+    : [];
   const fieldOptions = [
     ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
-    ...(form.source === "traces" ? [{ label: "Duration", value: "duration" }] : []),
-    ...withCurrent(keys, form.field === "duration" ? "" : form.field).map((key) => ({ label: key, value: key })),
+    ...builtInFields,
+    ...withCurrent(keys, builtInFields.some((field) => field.value === form.field) ? "" : form.field).map((key) => ({ label: key, value: key })),
   ];
   const picked = { kind: form.metricKind, name: form.metricName, unit: form.metricUnit };
   const metricValue = form.metricName ? metricPickerValue(picked) : "";
@@ -234,12 +244,14 @@ export function DashboardWidgetEditor({
               {form.aggregation && form.aggregation !== "count" ? (
                 <SelectField
                   label="Field"
-                  onChange={(field) =>
-                    // A duration's distinct count is a count, not a duration.
-                    update(field === "duration" && form.unit === "none" && form.aggregation !== "count_distinct"
-                      ? { field, unit: "duration_ms" }
-                      : { field })
-                  }
+                  onChange={(field) => {
+                    // Suggest the unit a built-in field is in. A distinct
+                    // count is a count, whatever the field.
+                    const unit = form.aggregation === "count_distinct"
+                      ? null
+                      : field === "duration" ? "duration_ms" : field === "ai:cost" ? "usd" : null;
+                    update(unit && form.unit === "none" ? { field, unit } : { field });
+                  }}
                   options={fieldOptions}
                   searchable={fieldOptions.length > 8}
                   value={form.field}

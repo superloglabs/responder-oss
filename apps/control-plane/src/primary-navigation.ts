@@ -1,5 +1,6 @@
 export type NavigationSection =
   | "agents"
+  | "ai-models"
   | "alerts"
   | "automations"
   | "dashboards"
@@ -56,6 +57,7 @@ export function primaryNavigation(options: {
           to: "/traces",
         },
         { label: "Metrics", section: "metrics", to: "/metrics" },
+        { label: "AI models", section: "ai-models", to: "/ai-models" },
         ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
         ...(options.alerts ? [{ label: "Alerts", section: "alerts" as const, to: "/alerts" }] : []),
       ]

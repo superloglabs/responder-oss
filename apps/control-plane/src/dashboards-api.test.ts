@@ -162,6 +162,27 @@ describe("suggestedWidgetTitle", () => {
   });
 });
 
+describe("dollars and AI fields", () => {
+  it("formats dollars, keeping fractions of a cent readable", () => {
+    expect(formatWidgetValue(1234.5, "usd")).toBe("$1,234.50");
+    expect(formatWidgetValue(0.0041, "usd")).toBe("$0.0041");
+    expect(formatWidgetValue(0, "usd")).toBe("$0.00");
+    expect(formatWidgetValue(2_500_000, "usd")).toBe("$2.5M");
+  });
+
+  it("names AI fields in suggested titles", () => {
+    expect(
+      suggestedWidgetTitle({
+        config: { aggregation: "sum", field: "ai:cost", filter: {}, groupBy: "ai:model", source: "traces" },
+        type: "timeseries_count",
+      }),
+    ).toBe("Sum of cost by model");
+    expect(
+      suggestedWidgetTitle({ config: { aggregation: "avg", field: "ai:tokens.output", filter: {}, source: "traces" }, type: "timeseries_count" }),
+    ).toBe("Average of output tokens");
+  });
+});
+
 describe("valueChange", () => {
   it("describes how a value moved since the previous period", () => {
     expect(valueChange(112, 100)).toBe("▲ 12% vs previous period");

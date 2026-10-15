@@ -2,10 +2,22 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
+  deleteAiPriceOverride,
+  listAiPriceOverrides,
+  saveAiPriceOverride,
+  type AiModelPriceOverride,
+} from "../../../../packages/core/src/db/ai-model-prices.js";
+import {
   findTelemetryProject,
   listTelemetryProjects,
   type TelemetryProject,
 } from "../../../../packages/core/src/db/telemetry-projects.js";
+import {
+  resolveAiPrices,
+  startAiPriceUpdates,
+  type AiPriceOverride,
+  type AiPriceParams,
+} from "../../../../packages/core/src/telemetry/ai-cost.js";
 import {
   getTelemetryClient,
   type TelemetryClient as ClickHouseClient,
@@ -21,6 +33,8 @@ import {
   widgetConfigProblem,
 } from "../../../../packages/core/src/telemetry/dashboards.js";
 import {
+  aiCallsWithoutUsage,
+  aiModelsInWindow,
   countAggregate,
   countSeries,
   eventAggregate,
@@ -39,6 +53,7 @@ import {
   queryLogs,
   queryTracesAggregated,
   traceOverview,
+  type AiModelUsage,
   type EventMeasure,
   type MetricAggregation,
   type MetricKind,
@@ -54,6 +69,16 @@ import { getActiveTenant } from "../tenant.js";
 // telemetry only with the telemetry capability and a configured store, and
 // only for the projects linked to it.
 export type TelemetryRouteDependencies = {
+  // Model calls in the window whose spans report no token counts.
+  aiCallsWithoutUsage: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<number>;
+  // The models called in the window, most called first.
+  aiModels: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<AiModelUsage[]>;
+  // The workspace's own model prices.
+  aiPriceOverrides: (organizationId: string) => Promise<AiModelPriceOverride[]>;
+  deleteAiPriceOverride: (organizationId: string, id: string) => Promise<boolean>;
+  // Each model's price over the window, as query parameters and for display.
+  resolveAiPrices: typeof resolveAiPrices;
+  saveAiPriceOverride: (organizationId: string, price: AiPriceOverride) => Promise<AiModelPriceOverride>;
   // Attribute keys seen in the window, for filters and grouping.
   attributeKeys: (
     client: ClickHouseClient,
@@ -87,6 +112,7 @@ export type TelemetryRouteDependencies = {
     measure: EventMeasure,
     groupBy: string | undefined,
     limit: number,
+    aiPrices?: AiPriceParams,
   ) => Promise<Array<{ group: string; value: number }>>;
   // Logs or spans summed up from a field, per bucket and group.
   eventSeries: (
@@ -97,6 +123,7 @@ export type TelemetryRouteDependencies = {
     measure: EventMeasure,
     groupBy: string | undefined,
     step: Step,
+    aiPrices?: AiPriceParams,
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
   // Log or span counts per bucket and group.
   countSeries: (
@@ -189,6 +216,15 @@ export type TelemetryRouteDependencies = {
 };
 
 const defaultDependencies: TelemetryRouteDependencies = {
+  aiCallsWithoutUsage: (client, projectId, range) => aiCallsWithoutUsage(client, projectId, { range }),
+  aiModels: (client, projectId, range) => aiModelsInWindow(client, projectId, { range }),
+  aiPriceOverrides: listAiPriceOverrides,
+  deleteAiPriceOverride,
+  resolveAiPrices: (models, window, overrides) => {
+    startAiPriceUpdates();
+    return resolveAiPrices(models, window, overrides);
+  },
+  saveAiPriceOverride,
   attributeKeys: (client, projectId, range, source) => listAttributeKeys(client, projectId, range, source),
   attributeValues: (client, projectId, params) =>
     listAttributeValues(client, projectId, params.key, params.range, 200, params.source, params.prefix, params.filters),
@@ -343,6 +379,17 @@ const metricSeriesSchema = z.object({
   until: windowSchema.shape.until,
 });
 
+// USD per million tokens.
+const tokenPrice = z.number().finite().min(0).max(100_000);
+const aiPriceOverrideSchema = z.object({
+  cacheReadMtok: tokenPrice.nullable().optional(),
+  cacheWriteMtok: tokenPrice.nullable().optional(),
+  inputMtok: tokenPrice,
+  model: z.string().trim().min(1).max(200),
+  outputMtok: tokenPrice,
+  provider: z.string().trim().max(100).default(""),
+});
+
 const widgetDataSchema = z.object({
   config: dashboardWidgetConfigSchema,
   projectId: z.uuid(),
@@ -495,6 +542,20 @@ export function createTelemetryRoutes(
       stepMs: step.n * stepMilliseconds[step.unit],
       untilMs,
     });
+  }
+
+  // Prices of the models called in the window, with the workspace's own.
+  async function aiPriceParams(
+    client: ClickHouseClient,
+    organizationId: string,
+    projectId: string,
+    range: Required<TimeRange>,
+  ) {
+    const [models, overrides] = await Promise.all([
+      dependencies.aiModels(client, projectId, range),
+      dependencies.aiPriceOverrides(organizationId),
+    ]);
+    return dependencies.resolveAiPrices(models, range, overrides).params;
   }
 
   // The workspace's ID and store, or why the request is refused.
@@ -838,6 +899,61 @@ export function createTelemetryRoutes(
       });
       return context.json({ chart });
     })
+    // The models called in the window, with the price each call is charged
+    // at, and how many calls cannot be priced.
+    .get("/ai-models", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = windowSchema.safeParse(context.req.query());
+      const range = query.success ? windowFor(query.data, dependencies.now()) : null;
+      if (!query.success || !range) return context.json({ error: "Invalid query" }, 400);
+      if (!(await dependencies.findProject(granted.organizationId, query.data.projectId))) {
+        return context.json({ error: "Telemetry project not found" }, 404);
+      }
+      const [models, overrides, callsWithoutUsage] = await Promise.all([
+        dependencies.aiModels(granted.client, query.data.projectId, range),
+        dependencies.aiPriceOverrides(granted.organizationId),
+        dependencies.aiCallsWithoutUsage(granted.client, query.data.projectId, range),
+      ]);
+      const { prices } = dependencies.resolveAiPrices(models, range, overrides);
+      const key = (model: { model: string; provider: string; tier: string }) => `${model.provider}|${model.model}|${model.tier}`;
+      const priced = new Map(prices.map((price) => [key(price), price]));
+      return context.json({
+        callsWithoutUsage,
+        models: models.map((model) => {
+          const price = priced.get(key(model));
+          return {
+            ...model,
+            price: price ? { card: price.card, catalogModel: price.catalogModel, source: price.source } : null,
+          };
+        }),
+        overrides,
+      });
+    })
+    .put("/ai-price-overrides", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const body = aiPriceOverrideSchema.safeParse(await context.req.json().catch(() => null));
+      if (!body.success) return context.json({ error: "Invalid price" }, 400);
+      const override = await dependencies.saveAiPriceOverride(granted.organizationId, {
+        cacheReadMtok: body.data.cacheReadMtok ?? null,
+        cacheWriteMtok: body.data.cacheWriteMtok ?? null,
+        inputMtok: body.data.inputMtok,
+        model: body.data.model,
+        outputMtok: body.data.outputMtok,
+        provider: body.data.provider,
+      });
+      return context.json({ override });
+    })
+    .delete("/ai-price-overrides/:id", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const id = z.uuid().safeParse(context.req.param("id"));
+      if (!id.success || !(await dependencies.deleteAiPriceOverride(granted.organizationId, id.data))) {
+        return context.json({ error: "Price not found" }, 404);
+      }
+      return context.body(null, 204);
+    })
     // Data for one dashboard widget, saved or still being edited.
     .post("/widget-data", async (context) => {
       const granted = await access(context.req.raw.headers);
@@ -878,6 +994,17 @@ export function createTelemetryRoutes(
         ...(config.field ? { field: config.field } : {}),
       };
       const source = config.source ?? "logs";
+      const comparing = config.compare === "previous_period" && display !== "timeseries";
+      // Cost reads each model's price over the window, and the window before
+      // when compared.
+      const aiPrices = measure.field === "ai:cost"
+        ? await aiPriceParams(
+            granted.client,
+            granted.organizationId,
+            projectId,
+            comparing ? { since: previousWindow(range).since, until: range.until } : range,
+          )
+        : undefined;
       if (display === "timeseries") {
         if (type === "timeseries_metric") {
           const chart = await metricChart(granted.client, projectId, {
@@ -900,7 +1027,7 @@ export function createTelemetryRoutes(
         const rows = measure.aggregation === "count"
           ? (await dependencies.countSeries(granted.client, projectId, source, filter, groupBy, step))
               .map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }))
-          : await dependencies.eventSeries(granted.client, projectId, source, filter, measure, groupBy, step);
+          : await dependencies.eventSeries(granted.client, projectId, source, filter, measure, groupBy, step, aiPrices);
         return context.json({ chart: chartSeries(rows, { ...window, fill: additive ? "zero" : "null" }), kind: "chart" } satisfies WidgetData);
       }
       // One value for the window, or one per group.
@@ -922,9 +1049,8 @@ export function createTelemetryRoutes(
         const by = grouped ? groupBy : undefined;
         return measure.aggregation === "count"
           ? dependencies.countAggregate(granted.client, projectId, source, filter, by, rowLimit)
-          : dependencies.eventAggregate(granted.client, projectId, source, filter, measure, by, rowLimit);
+          : dependencies.eventAggregate(granted.client, projectId, source, filter, measure, by, rowLimit, aiPrices);
       };
-      const comparing = config.compare === "previous_period";
       const [current, previous] = await Promise.all([
         aggregate(range),
         comparing ? aggregate(previousWindow(range)) : Promise.resolve(null),

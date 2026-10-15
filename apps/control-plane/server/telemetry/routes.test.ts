@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { emptyAiPriceParams } from "../../../../packages/core/src/telemetry/ai-cost.js";
 import { createTelemetryRoutes, type TelemetryRouteDependencies } from "./routes.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
@@ -8,6 +9,28 @@ const traceId = "5255bbc393af888bdef2e83d0e0c2990";
 
 function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
   const dependencies: TelemetryRouteDependencies = {
+    aiCallsWithoutUsage: vi.fn(async () => 3),
+    aiModels: vi.fn(async () => [
+      { calls: 40, inputTokens: 90_000, model: "gpt-5-2025-08-07", outputTokens: 12_000, provider: "openai", tier: "" },
+      { calls: 2, inputTokens: 1_000, model: "ft:gpt-4o:acme", outputTokens: 100, provider: "openai", tier: "" },
+    ]),
+    aiPriceOverrides: vi.fn(async () => []),
+    deleteAiPriceOverride: vi.fn(async () => true),
+    resolveAiPrices: vi.fn(() => ({
+      params: { ...emptyAiPriceParams(), aiPriceKey: ["openai|gpt-5-2025-08-07|"] },
+      prices: [
+        {
+          card: { cacheRead: 0.125, cacheWrite: 1.25, input: 1.25, long: null, output: 10, threshold: null },
+          catalogModel: "gpt-5",
+          model: "gpt-5-2025-08-07",
+          provider: "openai",
+          source: "catalogue" as const,
+          tier: "",
+        },
+      ],
+      unpriced: [{ model: "ft:gpt-4o:acme", provider: "openai", tier: "" }],
+    })),
+    saveAiPriceOverride: vi.fn(async (_organizationId, price) => ({ ...price, id: "4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11" })),
     attributeKeys: vi.fn(async () => [{ count: 3, key: "resource.deployment.environment" }]),
     attributeValues: vi.fn(async () => [{ count: 3, value: "production" }]),
     client: () => ({}) as never,
@@ -517,6 +540,7 @@ describe("telemetry routes", () => {
         { aggregation: "p95", field: "duration" },
         "service",
         { n: 30, unit: "SECOND" },
+        undefined,
       );
       expect(dependencies.countSeries).not.toHaveBeenCalled();
       expect(body.chart.series.map((series) => series.name)).toEqual(["api"]);
@@ -554,6 +578,7 @@ describe("telemetry routes", () => {
         measure,
         undefined,
         1,
+        undefined,
       );
       expect(dependencies.eventAggregate).toHaveBeenCalledWith(
         expect.anything(),
@@ -563,6 +588,7 @@ describe("telemetry routes", () => {
         measure,
         undefined,
         1,
+        undefined,
       );
     });
 
@@ -626,6 +652,56 @@ describe("telemetry routes", () => {
         limit: 3,
         metricName: "http.server.duration",
       });
+    });
+
+    it("prices the models called over the window and the window before for a cost comparison", async () => {
+      const { app, dependencies } = routes();
+
+      const response = await post(app, {
+        config: { aggregation: "sum", compare: "previous_period", display: "number", field: "ai:cost", source: "traces" },
+        projectId,
+        range: "1h",
+        type: "timeseries_count",
+      });
+
+      expect(response.status).toBe(200);
+      const window = { since: "2026-10-13T10:00:00.000Z", until: "2026-10-13T12:00:00.000Z" };
+      expect(dependencies.aiModels).toHaveBeenCalledWith(expect.anything(), projectId, window);
+      expect(dependencies.aiPriceOverrides).toHaveBeenCalledWith(organizationId);
+      expect(dependencies.resolveAiPrices).toHaveBeenCalledWith(expect.any(Array), window, []);
+      expect(dependencies.eventAggregate).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        "traces",
+        expect.anything(),
+        { aggregation: "sum", field: "ai:cost" },
+        undefined,
+        1,
+        expect.objectContaining({ aiPriceKey: ["openai|gpt-5-2025-08-07|"] }),
+      );
+    });
+
+    it("reads no prices for widgets that do not show cost", async () => {
+      const { app, dependencies } = routes();
+
+      await post(app, {
+        config: { aggregation: "sum", field: "ai:tokens.output", source: "traces" },
+        projectId,
+        range: "1h",
+        type: "timeseries_count",
+      });
+
+      expect(dependencies.aiModels).not.toHaveBeenCalled();
+      expect(dependencies.eventSeries).toHaveBeenCalledWith(
+        expect.anything(),
+        projectId,
+        "traces",
+        expect.anything(),
+        { aggregation: "sum", field: "ai:tokens.output" },
+        undefined,
+        expect.anything(),
+        undefined,
+      );
     });
 
     it("lists logs and traces for table widgets", async () => {
@@ -778,5 +854,64 @@ describe("telemetry routes", () => {
     });
 
     expect((await app.request("/projects")).status).toBe(401);
+  });
+
+  describe("model prices", () => {
+    it("lists the models called with their prices, leaving unpriced models without one", async () => {
+      const { app } = routes();
+
+      const response = await app.request(`/ai-models?projectId=${projectId}&range=24h`);
+
+      expect(await response.json()).toEqual({
+        callsWithoutUsage: 3,
+        models: [
+          {
+            calls: 40,
+            inputTokens: 90_000,
+            model: "gpt-5-2025-08-07",
+            outputTokens: 12_000,
+            price: {
+              card: { cacheRead: 0.125, cacheWrite: 1.25, input: 1.25, long: null, output: 10, threshold: null },
+              catalogModel: "gpt-5",
+              source: "catalogue",
+            },
+            provider: "openai",
+            tier: "",
+          },
+          { calls: 2, inputTokens: 1_000, model: "ft:gpt-4o:acme", outputTokens: 100, price: null, provider: "openai", tier: "" },
+        ],
+        overrides: [],
+      });
+    });
+
+    it("sets and removes a workspace's own price", async () => {
+      const { app, dependencies } = routes();
+
+      const saved = await app.request("/ai-price-overrides", {
+        body: JSON.stringify({ inputMtok: 2, model: "ft:gpt-4o:acme", outputMtok: 8 }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      expect(saved.status).toBe(200);
+      expect(dependencies.saveAiPriceOverride).toHaveBeenCalledWith(organizationId, {
+        cacheReadMtok: null,
+        cacheWriteMtok: null,
+        inputMtok: 2,
+        model: "ft:gpt-4o:acme",
+        outputMtok: 8,
+        provider: "",
+      });
+      expect(
+        (await app.request("/ai-price-overrides", {
+          body: JSON.stringify({ inputMtok: -1, model: "x", outputMtok: 1 }),
+          headers: { "content-type": "application/json" },
+          method: "PUT",
+        })).status,
+      ).toBe(400);
+
+      const removed = await app.request("/ai-price-overrides/4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11", { method: "DELETE" });
+      expect(removed.status).toBe(204);
+      expect(dependencies.deleteAiPriceOverride).toHaveBeenCalledWith(organizationId, "4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11");
+    });
   });
 });
