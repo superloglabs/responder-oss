@@ -354,7 +354,7 @@ export function formatWidgetValue(value: number | null, unit: WidgetUnit = "none
     const size = Math.abs(value);
     // Fractions of a cent keep two significant digits, so a call's cost shows.
     if (size >= 100_000) return compactDollars.format(value);
-    return size > 0 && size < 1 ? centDollars.format(value) : dollars.format(value);
+    return size > 0 && size < 0.01 ? centDollars.format(value) : dollars.format(value);
   }
   if (unit === "duration_ms" || unit === "duration_s") {
     const milliseconds = unit === "duration_s" ? value * 1000 : value;

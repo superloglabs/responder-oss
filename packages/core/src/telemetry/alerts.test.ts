@@ -6,12 +6,15 @@ import {
   alertTransition,
   describeAlertRule,
   evaluateAlert,
+  formatAlertValue,
   worseValue,
 } from "./alerts.js";
+import { alertValueUnit } from "./alert-text.js";
 
 const errorLogs = {
   aggregation: "count" as const,
   comparator: "gt" as const,
+  field: null,
   filter: { severity: "error", service: "checkout" },
   groupBy: null,
   groupMode: "single" as const,
@@ -45,9 +48,20 @@ describe("alert rules", () => {
       { ...base, aggregation: "avg", source: "metric" },
       { ...base, aggregation: "count", groupMode: "per_group", source: "traces" },
       { ...base, aggregation: "count", evaluationIntervalSeconds: 15, source: "logs" },
+      { ...base, aggregation: "sum", field: "ai:cost", source: "logs" },
+      { ...base, aggregation: "count_distinct", field: "ai:cost", source: "traces" },
+      { ...base, aggregation: "p95", field: "duration", source: "logs" },
+      { ...base, aggregation: "p95", metricName: "m", source: "metric" },
     ]) {
       expect(alertCreateSchema.safeParse(rule).success).toBe(false);
     }
+  });
+
+  it("aggregates a span field such as AI cost", () => {
+    const rule = { aggregation: "sum", comparator: "gt", field: "ai:cost", groupBy: "ai:model", groupMode: "per_group", name: "AI spend", source: "traces", threshold: 50, windowMinutes: 60 };
+    expect(alertCreateSchema.safeParse(rule).success).toBe(true);
+    expect(alertCreateSchema.safeParse({ ...rule, aggregation: "p99", field: "duration" }).success).toBe(true);
+    expect(alertCreateSchema.parse({ comparator: "gt", aggregation: "count", name: "x", source: "logs", threshold: 1 }).field).toBeNull();
   });
 });
 
@@ -82,6 +96,27 @@ describe("evaluateAlert", () => {
   });
 });
 
+describe("evaluating field aggregations", () => {
+  const cost = { aggregation: "sum" as const, comparator: "gt" as const, groupBy: null, groupMode: "single" as const, source: "traces" as const, threshold: 50 };
+
+  it("reads a sum with no calls as zero, and an average with no calls as no value", () => {
+    expect(evaluateAlert(cost, [], [])).toEqual([{ breaching: false, groupKey: "", value: 0 }]);
+    expect(evaluateAlert({ ...cost, aggregation: "avg" }, [], [])).toEqual([]);
+    expect(evaluateAlert({ ...cost, aggregation: "count_distinct", comparator: "lt", threshold: 1 }, [], [])).toEqual([
+      { breaching: true, groupKey: "", value: 0 },
+    ]);
+    expect(evaluateAlert({ ...cost, aggregation: "p95" }, [{ group: "", value: 60 }], [])).toEqual([
+      { breaching: true, groupKey: "", value: 60 },
+    ]);
+  });
+
+  it("ends a model's cost episode when it stops being called, but not a percentile's", () => {
+    const perModel = { ...cost, groupBy: "ai:model", groupMode: "per_group" as const };
+    expect(evaluateAlert(perModel, [], ["gpt-5"])).toEqual([{ breaching: false, groupKey: "gpt-5", value: 0 }]);
+    expect(evaluateAlert({ ...perModel, aggregation: "p95" }, [], ["gpt-5"])).toEqual([]);
+  });
+});
+
 describe("alertTransition", () => {
   it("opens, continues and ends episodes", () => {
     expect(alertTransition(true, false)).toBe("opened");
@@ -108,6 +143,26 @@ describe("alert messages", () => {
     expect(firing.text.replaceAll("\u200b", "")).toBe("Checkout errors is firing for http.route /pay");
     expect(firing.markdown).toContain("**1,234.57**, above 50.");
     expect(firing.markdown).toContain("[View alert](https://us.superlog.sh/alerts/1)");
+  });
+
+  it("describes AI cost in dollars", () => {
+    const cost = { ...errorLogs, aggregation: "sum" as const, field: "ai:cost", filter: {}, source: "traces" as const, windowMinutes: 60 };
+    expect(describeAlertRule(cost)).toBe("Sum of AI cost in the last hour");
+    expect(describeAlertRule({ ...cost, aggregation: "p95", field: "duration" })).toBe("95th percentile of span duration over spans in the last hour");
+    const firing = alertFiringMessage({
+      alertName: "AI spend",
+      alertUrl: null,
+      groupBy: "ai:model",
+      groupKey: "gpt-5",
+      rule: { ...cost, threshold: 50 },
+      value: 61.234,
+    });
+    expect(firing.markdown).toContain("Sum of AI cost in the last hour: **$61.23**, above $50.00.");
+    expect(firing.text.replaceAll("\u200b", "")).toBe("AI spend is firing for model gpt-5");
+    expect(alertValueUnit(cost)).toBe("usd");
+    expect(formatAlertValue(0.0042, "usd")).toBe("$0.0042");
+    expect(formatAlertValue(0.1, "usd")).toBe("$0.10");
+    expect(alertValueUnit({ ...cost, aggregation: "count_distinct" })).toBe("none");
   });
 
   it("keeps names and group values from mentioning or formatting", () => {

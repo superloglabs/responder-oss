@@ -4,6 +4,7 @@ import type { TelemetryRange } from "./telemetry-api";
 import type { AiModelPriceOverride } from "../../../packages/core/src/db/ai-model-prices";
 import type { AiPriceCard, AiPriceOverride } from "../../../packages/core/src/telemetry/ai-cost";
 import type { DashboardWidgetLayout } from "../../../packages/core/src/telemetry/dashboards";
+import type { AlertForm } from "./alerts-api";
 
 export type { AiModelPriceOverride, AiPriceCard, AiPriceOverride };
 
@@ -147,3 +148,14 @@ export async function createAiSpendDashboard(): Promise<TelemetryDashboard> {
   for (const widget of aiSpendWidgets) await addWidget(dashboard.id, widget);
   return dashboard;
 }
+
+// A new alert on AI spend: the cost of every model call over the last hour.
+// The threshold is left for the person to set.
+export const aiCostAlertDraft: Partial<AlertForm> = {
+  aggregation: "sum",
+  field: "ai:cost",
+  name: "AI spend",
+  source: "traces",
+  spanErrors: false,
+  windowMinutes: 60,
+};

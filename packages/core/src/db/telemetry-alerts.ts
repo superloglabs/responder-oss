@@ -40,6 +40,7 @@ const alertColumns = {
   createdAt: telemetryAlerts.createdAt,
   enabled: telemetryAlerts.enabled,
   evaluationIntervalSeconds: telemetryAlerts.evaluationIntervalSeconds,
+  field: telemetryAlerts.field,
   filter: telemetryAlerts.filter,
   groupBy: telemetryAlerts.groupBy,
   groupMode: telemetryAlerts.groupMode,
@@ -132,6 +133,7 @@ function ruleValues(input: AlertUpdate) {
     comparator: input.comparator,
     enabled: input.enabled,
     evaluationIntervalSeconds: input.evaluationIntervalSeconds,
+    field: input.aggregation === "count" || input.source === "metric" ? null : input.field,
     filter: input.filter,
     groupBy: input.groupBy,
     groupMode: input.groupMode,
@@ -184,6 +186,7 @@ function sameValue(a: unknown, b: unknown): boolean {
 const evaluatedFields = [
   "aggregation",
   "comparator",
+  "field",
   "filter",
   "groupBy",
   "groupMode",
@@ -240,6 +243,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     created_at: Date | string;
     enabled: boolean;
     evaluation_interval_seconds: number;
+    field: string | null;
     filter: AlertRule["filter"];
     group_by: string | null;
     group_mode: AlertRule["groupMode"];
@@ -279,6 +283,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     createdAt: time(row.created_at),
     enabled: row.enabled,
     evaluationIntervalSeconds: row.evaluation_interval_seconds,
+    field: row.field,
     filter: row.filter,
     groupBy: row.group_by,
     groupMode: row.group_mode,

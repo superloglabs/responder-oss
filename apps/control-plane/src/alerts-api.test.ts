@@ -28,6 +28,7 @@ describe("alertRequest", () => {
         comparator: "gt",
         enabled: true,
         evaluationIntervalSeconds: 60,
+        field: null,
         filter: {
           resourceAttrs: [{ key: "deployment.environment", value: "production" }],
           service: "checkout",
@@ -123,6 +124,7 @@ describe("alertForm", () => {
     const alert: TelemetryAlert = {
       aggregation: "count",
       comparator: "lt",
+      field: null,
       createdAt: "",
       enabled: false,
       evaluationIntervalSeconds: 300,
@@ -147,6 +149,7 @@ describe("alertForm", () => {
         comparator: "lt",
         enabled: false,
         evaluationIntervalSeconds: 300,
+        field: null,
         filter: alert.filter,
         groupBy: "service",
         groupMode: "per_group",
@@ -158,5 +161,29 @@ describe("alertForm", () => {
         windowMinutes: 15,
       },
     });
+  });
+});
+
+describe("AI cost alerts", () => {
+  it("builds a cost rule over spans and needs a field for it", () => {
+    const form = {
+      ...emptyAlertForm(),
+      aggregation: "sum" as const,
+      field: "ai:cost",
+      groupBy: "ai:model",
+      name: "AI spend",
+      perGroup: true,
+      source: "traces" as const,
+      spanErrors: false,
+      threshold: "50",
+      windowMinutes: 60,
+    };
+    const request = alertRequest(form);
+    expect(request).toMatchObject({
+      body: { aggregation: "sum", field: "ai:cost", groupBy: "ai:model", groupMode: "per_group", source: "traces", threshold: 50 },
+    });
+    expect("body" in request && request.body.filter).toEqual({});
+    expect(alertRequest({ ...form, field: "" })).toEqual({ error: "Choose a field to aggregate." });
+    expect(alertRequest({ ...form, aggregation: "count" })).toMatchObject({ body: { aggregation: "count", field: null } });
   });
 });

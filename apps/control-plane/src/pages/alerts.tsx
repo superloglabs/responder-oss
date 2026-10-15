@@ -5,7 +5,7 @@ import { relativeTime } from "../agents-api";
 import { fetchAlerts, type TelemetryAlertSummary } from "../alerts-api";
 import { AppShell } from "../components/app-shell";
 import { Badge, DataTable } from "../design-system";
-import { describeAlertCondition, describeAlertRule } from "../../../../packages/core/src/telemetry/alert-text";
+import { alertFieldLabel, alertValueUnit, describeAlertCondition, describeAlertRule } from "../../../../packages/core/src/telemetry/alert-text";
 import { useDocumentTitle } from "../use-document-title";
 import "../components/automation-run-history.css";
 import "../components/alerts.css";
@@ -84,8 +84,8 @@ export function AlertsPage() {
                   <span className="agentTableTitle">
                     <Link to={`/alerts/${alert.id}`}><strong>{alert.name}</strong></Link>
                     <small>
-                      {describeAlertRule(alert)} {describeAlertCondition(alert.comparator, alert.threshold)}
-                      {alert.groupMode === "per_group" && alert.groupBy ? `, per ${alert.groupBy.replace(/^attr:/u, "")}` : ""}
+                      {describeAlertRule(alert)} {describeAlertCondition(alert.comparator, alert.threshold, alertValueUnit(alert))}
+                      {alert.groupMode === "per_group" && alert.groupBy ? `, per ${alertFieldLabel(alert.groupBy)}` : ""}
                     </small>
                   </span>
                 ),

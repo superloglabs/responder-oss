@@ -18,6 +18,7 @@ const rule = {
 const alert: TelemetryAlert = {
   aggregation: "count",
   comparator: "gt",
+  field: null,
   createdAt: now.toISOString(),
   enabled: true,
   evaluationIntervalSeconds: 60,
@@ -102,7 +103,7 @@ describe("alert routes", () => {
     });
     expect(unknownChannel.status).toBe(400);
     const summed = await send(app, "POST", "/", { ...rule, aggregation: "sum" });
-    expect(await summed.json()).toEqual({ error: "Logs and traces are counted" });
+    expect(await summed.json()).toEqual({ error: "Choose a field to aggregate" });
     expect(dependencies.createAlert).not.toHaveBeenCalled();
   });
 

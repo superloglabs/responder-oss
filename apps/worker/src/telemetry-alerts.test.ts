@@ -8,6 +8,7 @@ const slack = { channelId: "C123", integrationAccountId: "00000000-0000-4000-800
 const alert: DueTelemetryAlert = {
   aggregation: "count",
   comparator: "gt",
+  field: null,
   createdAt: now.toISOString(),
   enabled: true,
   evaluationIntervalSeconds: 60,

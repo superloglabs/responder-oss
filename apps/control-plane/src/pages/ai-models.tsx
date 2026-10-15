@@ -2,6 +2,7 @@ import { CoinsIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  aiCostAlertDraft,
   aiPriceSource,
   createAiSpendDashboard,
   deleteAiPriceOverride,
@@ -45,7 +46,9 @@ export function AiModelsPage() {
   useDocumentTitle("AI models");
   const navigate = useNavigate();
   const telemetry = useTelemetryAvailable();
-  const canCreateDashboards = useOrganizationCapabilities().includes("dashboards");
+  const capabilities = useOrganizationCapabilities();
+  const canCreateDashboards = capabilities.includes("dashboards");
+  const canCreateAlerts = capabilities.includes("alerts");
   const [params, setParams] = useSearchParams();
   const rangeParam = params.get("range") ?? "";
   const range: TelemetryRange = rangeValues.has(rangeParam) ? (rangeParam as TelemetryRange) : "7d";
@@ -120,11 +123,18 @@ export function AiModelsPage() {
     <AppShell active="ai-models" redesigned>
       <header className="workspaceHeading">
         <h1><CoinsIcon aria-hidden="true" size={16} weight="bold" />AI models</h1>
-        {models.length > 0 && canCreateDashboards ? (
+        {models.length > 0 && (canCreateDashboards || canCreateAlerts) ? (
           <div className="workspaceHeading__actions">
-            <Button loading={creating} onClick={() => void createDashboard()} variant="primary">
-              Create AI spend dashboard
-            </Button>
+            {canCreateAlerts ? (
+              <Button onClick={() => navigate("/alerts/new", { state: { alertDraft: aiCostAlertDraft } })} variant="secondary">
+                Create cost alert
+              </Button>
+            ) : null}
+            {canCreateDashboards ? (
+              <Button loading={creating} onClick={() => void createDashboard()} variant="primary">
+                Create AI spend dashboard
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </header>

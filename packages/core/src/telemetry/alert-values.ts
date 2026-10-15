@@ -1,6 +1,15 @@
+import type { AiPriceParams } from "./ai-cost.js";
+import { aiPriceParamsFor } from "./ai-price-params.js";
 import type { TelemetryClient } from "./client.js";
 import type { AlertFilter, AlertRule } from "./alerts.js";
-import { countAggregate, metricAggregate } from "./query.js";
+import { countAggregate, eventAggregate, metricAggregate, type SeriesFilter } from "./query.js";
+
+// Prices for the cost field over a filter's window.
+export type AlertPriceResolver = (
+  client: TelemetryClient,
+  organizationId: string,
+  filter: SeriesFilter & { range: { since: string; until: string } },
+) => Promise<AiPriceParams>;
 
 export type AlertValueRow = { group: string; value: number };
 
@@ -22,13 +31,15 @@ export function alertWindow(windowMinutes: number, now: Date): { since: string; 
 }
 
 // One value per group over exactly the alert's window: a count of logs or
-// spans, or the sum or average of a metric. A rule evaluated as one total is
-// queried without grouping, so a metric average weighs every data point.
+// spans, an aggregation of one of their fields such as AI cost, or the sum
+// or average of a metric. A rule evaluated as one total is queried without
+// grouping, so an average or percentile covers every point.
 export async function alertValues(
   client: TelemetryClient,
   organizationId: string,
-  rule: Pick<AlertRule, "aggregation" | "filter" | "groupBy" | "groupMode" | "metricName" | "source" | "windowMinutes">,
+  rule: Pick<AlertRule, "aggregation" | "field" | "filter" | "groupBy" | "groupMode" | "metricName" | "source" | "windowMinutes">,
   now: Date,
+  prices: AlertPriceResolver = aiPriceParamsFor,
 ): Promise<AlertValueRow[]> {
   const range = alertWindow(rule.windowMinutes, now);
   const groupBy = rule.groupMode === "per_group" && rule.groupBy ? rule.groupBy : undefined;
@@ -46,6 +57,20 @@ export async function alertValues(
     );
     // metricAggregate returns at most this many groups.
     if (groupBy && rows.length >= maximumAlertGroups) throw tooManyGroups();
+  } else if (rule.aggregation !== "count" && rule.field) {
+    const filter = { ...rule.filter, range, resourceAttrs: rule.filter.resourceAttrs ?? [] };
+    const aiPrices = rule.field === "ai:cost" ? await prices(client, organizationId, filter) : undefined;
+    rows = await eventAggregate(
+      client,
+      organizationId,
+      rule.source,
+      filter,
+      { aggregation: rule.aggregation, field: rule.field },
+      groupBy,
+      maximumAlertGroups + 1,
+      aiPrices,
+    );
+    if (rows.length > maximumAlertGroups) throw tooManyGroups();
   } else {
     rows = await countAggregate(
       client,
