@@ -33,6 +33,32 @@ export async function revokeIngestKey(keyId: string): Promise<void> {
   if (!response.ok) throw new Error(apiErrorMessage(await response.json().catch(() => null), response.status));
 }
 
+// Keys created from the OpenTelemetry setup page are named after when they were made,
+// for example "Created Oct 15, 14:32".
+export function defaultIngestKeyName(now = new Date(), timeZone?: string): string {
+  const created = new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    hour: "2-digit",
+    hourCycle: "h23",
+    minute: "2-digit",
+    month: "short",
+    timeZone,
+  }).format(now);
+  return `Created ${created}`;
+}
+
+// When the key last sent telemetry, for the key list in settings.
+export function ingestKeyUsage(key: Pick<TelemetryIngestKeySummary, "lastUsedAt">, now = new Date()): string {
+  if (!key.lastUsedAt) return "Never used";
+  const minutes = Math.floor((now.getTime() - new Date(key.lastUsedAt).getTime()) / 60_000);
+  if (minutes < 2) return "Used just now";
+  if (minutes < 60) return `Used ${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Used ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.floor(hours / 24);
+  return `Used ${days} ${days === 1 ? "day" : "days"} ago`;
+}
+
 // OpenTelemetry SDK settings for a key, exported so an app started from the
 // same shell sees them. The SDK adds /v1/logs, /v1/traces and /v1/metrics to
 // the endpoint.

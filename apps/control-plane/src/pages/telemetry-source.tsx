@@ -4,14 +4,15 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { ProviderGlyph } from "../components/icons";
+import { ScrambleText } from "../components/scramble-text";
 import { useIntegrationConnect } from "../components/use-integration-connect";
-import { Badge, Button, CodeBlock, DataTable, SelectField, TextField } from "../design-system";
+import { copyToClipboard } from "../copy-to-clipboard";
+import { Badge, Button, CodeBlock, DataTable, SelectField } from "../design-system";
 import {
   createIngestKey,
+  defaultIngestKeyName,
   fetchIngestKeys,
   openTelemetryPrompt,
-  revokeIngestKey,
-  type TelemetryIngestKeySummary,
 } from "../ingest-keys-api";
 import {
   type AwsStackLaunch,
@@ -28,6 +29,7 @@ import {
 } from "../telemetry-sources-api";
 import { telemetrySourceOption } from "../telemetry-source-options";
 import { useDocumentTitle } from "../use-document-title";
+import { useScrambledText } from "../use-scrambled-text";
 import "../components/automation-run-history.css";
 import "../components/telemetry.css";
 
@@ -62,16 +64,16 @@ export function TelemetrySourcePage() {
 }
 
 function OpenTelemetrySetup() {
-  // Undefined while loading; null when the cell does not accept telemetry.
-  const [keys, setKeys] = useState<TelemetryIngestKeySummary[] | null | undefined>(undefined);
+  // Undefined while loading; false when the cell does not accept telemetry.
+  const [available, setAvailable] = useState<boolean | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
-  const [created, setCreated] = useState<{ key: TelemetryIngestKeySummary; token: string } | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setKeys(await fetchIngestKeys());
+      setAvailable((await fetchIngestKeys()) !== null);
     } catch (cause) {
       setError(errorText(cause, "Unable to load ingest keys"));
     }
@@ -81,20 +83,12 @@ function OpenTelemetrySetup() {
     void Promise.resolve().then(load);
   }, [load]);
 
-  async function create(event: FormEvent) {
-    event.preventDefault();
+  async function create() {
     if (saving) return;
-    if (!name.trim()) {
-      setError("Name the key, for example after the app or environment that uses it.");
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
-      const result = await createIngestKey({ name: name.trim() });
-      setCreated(result);
-      setName("");
-      await load();
+      setToken((await createIngestKey({ name: defaultIngestKeyName() })).token);
     } catch (cause) {
       setError(errorText(cause, "Unable to create the key"));
     } finally {
@@ -102,84 +96,68 @@ function OpenTelemetrySetup() {
     }
   }
 
-  async function revoke(key: TelemetryIngestKeySummary) {
+  // The key stays in the field, so it can be copied by hand when the clipboard is unavailable.
+  async function copyKey(value: string) {
     setError(null);
     try {
-      await revokeIngestKey(key.id);
-      if (created?.key.id === key.id) setCreated(null);
-      await load();
-    } catch (cause) {
-      setError(errorText(cause, "Unable to revoke the key"));
+      await copyToClipboard(value);
+    } catch {
+      setError("Unable to copy. Select the key and copy it manually.");
+      return;
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
   }
 
-  if (keys === undefined) {
+  if (available === undefined) {
     return error ? <RetryMessage message={error} onRetry={() => { setError(null); void load(); }} /> : <p className="telemetryPage__status">Loading…</p>;
   }
-  if (keys === null) return <Unavailable />;
+  if (!available) return <Unavailable />;
   return (
     <>
       <p className="telemetrySetup__intro">
         Instrument your app with the OpenTelemetry SDK for its language. It sends logs, traces and metrics over
         OTLP/HTTP with an ingest key.
       </p>
-      <section aria-labelledby="otel-key-title" className="telemetrySetup__section">
-        <h2 id="otel-key-title">1. Create an ingest key</h2>
-        <form className="telemetrySetup__form" onSubmit={(event) => void create(event)}>
-          <TextField label="Key name" maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="checkout-api production" value={name} />
-          <Button loading={saving} type="submit" variant="primary">Create key</Button>
-        </form>
-        {error ? <p className="formError" role="alert">{error}</p> : null}
-        {created ? (
-          <p className="telemetryPage__status">
-            Key {created.key.name} is in the prompt below. Copy it now; it is not shown again.
-          </p>
-        ) : null}
-      </section>
-      <section aria-labelledby="otel-prompt-title" className="telemetrySetup__section">
-        <h2 id="otel-prompt-title">2. Paste this prompt into your coding agent</h2>
-        <p>
-          Claude Code, Cursor, Codex or any other agent adds the SDK, instruments the app and connects its logger.
-          {created ? null : " Create a key first to fill it in."}
-        </p>
-        <CodeBlock code={openTelemetryPrompt(window.location.origin, created?.token)} language="prompt" />
-      </section>
-      {keys.length > 0 ? (
-        <section aria-label="Ingest keys" className="agentListTable">
-          <DataTable<TelemetryIngestKeySummary>
-            aria-label="Ingest keys"
-            columns={[
-              {
-                header: "Key",
-                key: "name",
-                render: (key) => (
-                  <span className="agentTableTitle">
-                    <strong>{key.name}</strong>
-                    <small><code>{key.prefix}…</code></small>
-                  </span>
-                ),
-              },
-              {
-                header: "Last used",
-                key: "used",
-                render: (key) => <span className="agentTableCell">{key.lastUsedAt ? relativeTime(key.lastUsedAt) : "Never"}</span>,
-                width: "140px",
-              },
-              {
-                header: "",
-                key: "revoke",
-                render: (key) => <Button onClick={() => void revoke(key)} size="small" variant="ghost">Revoke</Button>,
-                width: "100px",
-              },
-            ]}
-            getRowKey={(key) => key.id}
-            rows={keys}
-            variant="workspace"
-          />
+      {token ? (
+        <>
+          <section aria-labelledby="otel-key-title" className="telemetrySetup__section">
+            <h2 id="otel-key-title">Your ingest key</h2>
+            <div className="telemetrySetup__keyControls">
+              <CreatedKeyField token={token} />
+              <Button onClick={() => void copyKey(token)} variant="secondary">
+                <ScrambleText text={copied ? "Copied" : "Copy key"} />
+              </Button>
+            </div>
+            {error ? <p className="formError" role="alert">{error}</p> : null}
+            <p className="telemetrySetup__note">
+              You can see this key only once. Manage keys in <Link to="/settings/ingest-keys">Settings → Ingest keys</Link>.
+            </p>
+          </section>
+          <section aria-labelledby="otel-prompt-title" className="telemetrySetup__section">
+            <h2 id="otel-prompt-title">Paste this prompt into your coding agent</h2>
+            <p>
+              Claude Code, Cursor, Codex or any other agent adds the SDK, instruments the app and connects its logger.
+              The prompt contains your key.
+            </p>
+            <CodeBlock code={openTelemetryPrompt(window.location.origin, token)} language="prompt" />
+          </section>
+        </>
+      ) : (
+        <section aria-label="Create an ingest key" className="telemetrySetup__section telemetrySetup__create">
+          <Button loading={saving} onClick={() => void create()} variant="primary">Create ingest key</Button>
+          {error ? <p className="formError" role="alert">{error}</p> : null}
+          <p className="telemetrySetup__note">You get the key and a setup prompt for your coding agent.</p>
         </section>
-      ) : null}
+      )}
     </>
   );
+}
+
+// The new key is revealed from behind symbols when it appears. Copying always uses the real key.
+function CreatedKeyField({ token }: { token: string }) {
+  const shown = useScrambledText(token, true);
+  return <input aria-label="New ingest key" readOnly value={shown} />;
 }
 
 function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "vercel" }) {

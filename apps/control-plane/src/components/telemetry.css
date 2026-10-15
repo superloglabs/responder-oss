@@ -84,7 +84,7 @@ a.telemetryPage__message:hover { text-decoration: underline; }
   .telemetryPage__toolbar .dsSegmentedControl { margin-left: 0; }
 }
 
-.telemetrySetup { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.telemetrySetup { display: flex; flex-direction: column; gap: 16px; }
 .telemetrySetup__intro { margin: 0; color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }
 .telemetrySetup__created { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
 .telemetrySetup__created h2 { margin: 0; font-size: 13px; font-weight: 600; }
@@ -109,3 +109,10 @@ a.telemetryPage__message:hover { text-decoration: underline; }
 .telemetrySources__body span { color: var(--ds-text-muted); font-size: 12px; line-height: 18px; }
 .telemetrySources__chevron { color: var(--ds-text-muted); }
 .telemetrySetup__created a:not(.dsButton) { color: inherit; text-decoration: underline; }
+.telemetrySetup__keyControls { display: flex; align-items: center; gap: 8px; }
+.telemetrySetup__create { align-items: flex-start; gap: 8px; }
+.telemetrySetup__section > .telemetrySetup__note { color: #666; }
+.telemetrySetup__note a { color: inherit; text-decoration: underline; }
+.telemetrySetup__keyControls input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #e6e8ec; border-radius: 6px; outline: none; background: #fff; color: #1a1a1a; font: inherit; font-size: 13px; }
+.telemetrySetup__keyControls input:focus { border-color: #4e58f9; }
+.appShell--workspace .telemetrySetup__keyControls .dsButton { flex-shrink: 0; min-width: 76px; height: 32px; min-height: 32px; padding: 3px 10px; white-space: nowrap; }
