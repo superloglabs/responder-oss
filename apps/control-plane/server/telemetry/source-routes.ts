@@ -262,17 +262,25 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
         drainTarget,
         vercelDrainIds(previous?.state).filter((id) => !Object.values(drains).includes(id)),
       );
-      const saved = await dependencies.saveSource({
-        createdBy: granted.userId,
-        displayName: target.credentials.teamId ? `Vercel team ${target.credentials.teamId}` : "Vercel",
-        externalId: target.credentials.configurationId,
-        ingestKeyId: created.key.id,
-        integrationAccountId: body.data.integrationAccountId,
-        organizationId: granted.organizationId,
-        provider: "vercel",
-        state: { drains, staleDrains: failed },
-        status: "active",
-      });
+      let saved: Awaited<ReturnType<typeof dependencies.saveSource>>;
+      try {
+        saved = await dependencies.saveSource({
+          createdBy: granted.userId,
+          displayName: target.credentials.teamId ? `Vercel team ${target.credentials.teamId}` : "Vercel",
+          externalId: target.credentials.configurationId,
+          ingestKeyId: created.key.id,
+          integrationAccountId: body.data.integrationAccountId,
+          organizationId: granted.organizationId,
+          provider: "vercel",
+          state: { drains, staleDrains: failed },
+          status: "active",
+        });
+      } catch (error) {
+        // Unsaved drains could not be removed later, so remove them now.
+        await deleteDrains(drainTarget, Object.values(drains));
+        await dependencies.revokeKey(created.key.id).catch(() => undefined);
+        throw error;
+      }
       if (saved.previousIngestKeyId) await dependencies.revokeKey(saved.previousIngestKeyId);
       return context.json({ sourceId: saved.id }, 201);
     })

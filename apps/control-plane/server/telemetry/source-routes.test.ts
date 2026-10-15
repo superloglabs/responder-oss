@@ -142,6 +142,15 @@ describe("telemetry source routes", () => {
     }));
   });
 
+  it("removes new Vercel drains and their key when the source cannot be saved", async () => {
+    const { app, dependencies } = routes({ saveSource: vi.fn(async () => { throw new Error("database unavailable"); }) });
+
+    expect((await post(app, "/vercel", { integrationAccountId: accountId })).status).toBe(500);
+    expect(dependencies.deleteVercelDrain).toHaveBeenCalledWith({ accessToken: "vercel-token", teamId: "team_1" }, "drn_traces");
+    expect(dependencies.deleteVercelDrain).toHaveBeenCalledWith({ accessToken: "vercel-token", teamId: "team_1" }, "drn_logs");
+    expect(dependencies.revokeKey).toHaveBeenCalledWith("key-1");
+  });
+
   it("explains a Vercel refusal and revokes the unused key", async () => {
     const { app, dependencies } = routes({
       createVercelDrains: vi.fn(async () => { throw new VercelDrainError("Forbidden", 403); }),

@@ -131,16 +131,16 @@ async function pullLogs(input: {
     });
 
   const resume = input.state.logsPage;
-  let window = resume ?? fresh;
+  let window: { end: string; start: string } = resume ?? fresh;
   let result: { count: number; page?: Page };
   try {
     if (!resume && fresh.start >= fresh.end) return { cursor: fresh.start, entries: 0 };
     result = await read(window, resume);
   } catch (error) {
-    // An expired page token restarts after the last entry sent.
+    // An expired page token restarts its window. Entries sent before are sent
+    // again, but none that share a timestamp with the last one are skipped.
     if (!resume || lastSent) throw error;
-    window = fresh;
-    if (fresh.start >= fresh.end) return { cursor: fresh.start, entries: 0 };
+    window = { end: resume.end, start: resume.start };
     result = await read(window);
   }
   return result.page

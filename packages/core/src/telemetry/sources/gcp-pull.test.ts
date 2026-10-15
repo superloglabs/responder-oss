@@ -63,7 +63,7 @@ describe("pullGcpSource", () => {
     expect(next.state.logsCursor).toBe("2026-10-15T09:59:00.000Z");
   });
 
-  it("restarts after the last entry sent when a saved page token no longer works", async () => {
+  it("restarts the saved window when its page token no longer works", async () => {
     const request = vi.fn<GcpRequest>(async (input) => {
       if ((input.data as { pageToken?: string }).pageToken) throw new Error("Invalid page token");
       return { entries: [] };
@@ -77,7 +77,9 @@ describe("pullGcpSource", () => {
     const result = await pullGcpSource({ forward: async () => true, gcpProjectId: "shop-prod", now, request, state });
 
     expect(result.error).toBeNull();
-    expect((request.mock.calls.at(-1)![0].data as { filter: string }).filter).toContain('timestamp > "2026-10-15T09:58:30Z"');
+    const restarted = request.mock.calls.at(-1)![0].data as { filter: string; pageToken?: string };
+    expect(restarted.filter).toContain('timestamp > "2026-10-15T09:57:00.000Z" AND timestamp <= "2026-10-15T09:58:00.000Z"');
+    expect(restarted.pageToken).toBeUndefined();
     expect(result.state.logsPage).toBeUndefined();
   });
 
