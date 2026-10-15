@@ -109,17 +109,11 @@ a.telemetryPage__message:hover { text-decoration: underline; }
 .telemetrySources__body span { color: var(--ds-text-muted); font-size: 12px; line-height: 18px; }
 .telemetrySources__chevron { color: var(--ds-text-muted); }
 .telemetrySetup__created a:not(.dsButton) { color: inherit; text-decoration: underline; }
-.telemetrySetup__sectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin-block: -8px; }
-.telemetrySetup__created { gap: 14px; }
-.telemetrySetup__createdTitle { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.telemetrySetup__createdTitle h3 { margin: 0; overflow: hidden; font-size: 13px; font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
-.telemetrySetup__createdTitle span { flex-shrink: 0; color: var(--ds-text-muted); font-size: 12px; }
-.telemetrySetup__createdIcon { flex-shrink: 0; color: var(--ds-positive); }
-.telemetrySetup__keyRow { display: flex; align-items: center; gap: 8px; }
-.telemetrySetup__keyRow .telemetrySetup__keyValue { flex: 1 1 auto; min-width: 0; height: 36px; font-family: var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace); text-overflow: ellipsis; }
-.telemetrySetup__keyRow .telemetrySetup__copyKey { flex-shrink: 0; min-width: 112px; height: 36px; min-height: 36px; }
-.telemetrySetup__createdFooter { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-.telemetrySetup__created .telemetrySetup__createdFooter p { display: flex; align-items: center; gap: 6px; color: var(--ds-text-secondary); line-height: 16px; }
-.telemetrySetup__createdFooter svg { flex-shrink: 0; color: var(--ds-warning); }
-.telemetrySetup__keyName { display: inline-flex; align-items: center; gap: 8px; }
-.telemetrySetup__keyName .dsBadge { min-height: 20px; padding: 1px 7px; font-size: 11px; }
+.telemetrySetup__keyCard { display: flex; flex-direction: column; gap: 16px; padding: 16px; border: .5px solid #e6e8ec; border-radius: 12px; background: #fff; }
+.telemetrySetup__keyCard p { margin: 0; color: #666; font-size: 13px; line-height: 20px; }
+.telemetrySetup__keyControls { display: flex; align-items: center; gap: 8px; }
+.telemetrySetup__keyControls--created { padding-top: 16px; border-top: .5px solid #e6e8ec; }
+.telemetrySetup__keyControls input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #e6e8ec; border-radius: 6px; outline: none; background: #fff; color: #1a1a1a; font: inherit; font-size: 13px; }
+.telemetrySetup__keyControls input::placeholder { color: #999; }
+.telemetrySetup__keyControls input:focus { border-color: #4e58f9; }
+.appShell--workspace .telemetrySetup__keyControls .dsButton { flex-shrink: 0; height: 32px; min-height: 32px; padding: 3px 10px; white-space: nowrap; }
