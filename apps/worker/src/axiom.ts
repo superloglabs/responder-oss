@@ -15,8 +15,10 @@ export function axiomReadOnlyToolFilter(
   );
 }
 
+// Tag mode may call every Axiom tool. Alert investigations and scans only read.
 export function createAxiomMcpServer(
   connection: RuntimeAxiomConnection,
+  access: { readOnly: boolean },
 ): MCPServerStreamableHttp {
   return new MCPServerStreamableHttp({
     cacheToolsList: true,
@@ -27,7 +29,7 @@ export function createAxiomMcpServer(
       headers: { authorization: `Bearer ${connection.accessToken}` },
     },
     timeout: 30_000,
-    toolFilter: axiomReadOnlyToolFilter,
+    ...(access.readOnly ? { toolFilter: axiomReadOnlyToolFilter } : {}),
     url: connection.mcpUrl,
     useStructuredContent: true,
   });

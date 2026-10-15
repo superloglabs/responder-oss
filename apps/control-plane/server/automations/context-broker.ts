@@ -42,7 +42,6 @@ import {
   awsContextServer,
   type AwsContextDependencies,
 } from "./aws-context.js";
-import { axiomContextDecision, filterAxiomToolList } from "./axiom-context.js";
 import { cloudflareContextServer } from "./cloudflare-context.js";
 import {
   gcpAuthHeaders,
@@ -773,26 +772,9 @@ export function createAutomationContextBrokerRoutes(
           rpc: parsed.data,
         });
       }
-      if (claim.account.provider === "axiom") {
-        const decision = axiomContextDecision(parsed.data);
-        if (decision.kind === "reject") {
-          return context.json(
-            rpcError(parsed.data.id, decision.code, decision.message),
-            decision.status,
-          );
-        }
-      }
       const target = await providerTarget(claim, dependencies);
       if (!target) {
         return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
-      }
-      if (claim.account.provider === "axiom" && parsed.data.method === "tools/list") {
-        return await filterAxiomToolList(await proxyMcpRequest({
-          dependencies,
-          rawBody,
-          request: context.req.raw,
-          target,
-        }), parsed.data.id);
       }
       return await proxyMcpRequest({
         dependencies,

@@ -4,14 +4,15 @@ import type { StoredCustomMcpOAuthState } from "./custom-mcp.js";
 
 export const AXIOM_MCP_URL = "https://mcp.axiom.co/mcp";
 
-// The Axiom MCP tools runs may call. Dashboard, monitor, and notifier
-// mutation tools are left out.
+// The Axiom MCP tools alert investigations and scans may call. Automations and
+// tag mode may call every Axiom tool.
 export const AXIOM_READ_ONLY_MCP_TOOLS = [
   "checkMonitors",
   "exportDashboard",
   "getDashboard",
-  "getDatasetSchema",
+  "getDatasetFields",
   "getMetricTagValues",
+  "getMonitor",
   "getMonitorHistory",
   "getSavedQueries",
   "listDashboards",
@@ -19,9 +20,12 @@ export const AXIOM_READ_ONLY_MCP_TOOLS = [
   "listMetricTags",
   "listMetrics",
   "listNotifiers",
-  "queryApl",
+  "queryDataset",
   "queryMetrics",
   "searchMetrics",
+  "services-getChanges",
+  "services-getEdgeHistory",
+  "services-getMap",
 ] as const;
 
 export function isAxiomReadOnlyTool(name: string): boolean {

@@ -20,7 +20,7 @@ vi.mock("@openai/agents", () => ({
 describe("Axiom MCP", () => {
   it("allows inspection tools and rejects mutation tools", async () => {
     await expect(
-      axiomReadOnlyToolFilter(null, { name: "queryApl" }),
+      axiomReadOnlyToolFilter(null, { name: "queryDataset" }),
     ).resolves.toBe(true);
     await expect(
       axiomReadOnlyToolFilter(null, { name: "createMonitor" }),
@@ -31,11 +31,21 @@ describe("Axiom MCP", () => {
     expect(AXIOM_READ_ONLY_MCP_TOOLS).not.toContain("updateMonitor");
   });
 
+  it("filters tools only for read-only runs", () => {
+    const connection = { accessToken: "token", mcpUrl: "https://mcp.axiom.co/mcp" };
+
+    createAxiomMcpServer(connection, { readOnly: false });
+    expect(serverConstructor.mock.lastCall?.[0]).not.toHaveProperty("toolFilter");
+
+    createAxiomMcpServer(connection, { readOnly: true });
+    expect(serverConstructor.mock.lastCall?.[0]).toMatchObject({ toolFilter: axiomReadOnlyToolFilter });
+  });
+
   it("authenticates the hosted MCP connection with OAuth", () => {
     createAxiomMcpServer({
       accessToken: "oauth-access-token",
       mcpUrl: "https://mcp.axiom.co/mcp",
-    });
+    }, { readOnly: true });
 
     expect(serverConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
