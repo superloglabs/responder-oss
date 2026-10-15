@@ -17,6 +17,7 @@ import {
   ChartLineIcon,
   ChartLineUpIcon,
   CheckIcon,
+  CoinsIcon,
   FlagIcon,
   GearIcon,
   GitPullRequestIcon,
@@ -39,6 +40,7 @@ import "./workspace.css";
 
 const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   agents: LightningIcon,
+  "ai-models": CoinsIcon,
   alerts: BellIcon,
   automations: RobotIcon,
   dashboards: ChartLineIcon,

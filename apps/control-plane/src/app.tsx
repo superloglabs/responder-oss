@@ -16,6 +16,7 @@ import { OnboardingPage } from "./pages/onboarding";
 import { AlertPage } from "./pages/alert";
 import { AlertsPage } from "./pages/alerts";
 import { DashboardPage } from "./pages/dashboard";
+import { AiModelsPage } from "./pages/ai-models";
 import { DashboardsPage } from "./pages/dashboards";
 import { DesignLibraryPage } from "./pages/design-library";
 import { InvestigationDetailPage } from "./pages/investigation-detail";
@@ -161,6 +162,7 @@ export function App() {
         <Route element={<TracesPage />} path="/traces/search" />
         <Route element={<MetricsPage />} path="/metrics" />
         <Route element={<MetricExplorerPage />} path="/metrics/explore" />
+        <Route element={<AiModelsPage />} path="/ai-models" />
         <Route element={<TelemetrySetupPage />} path="/telemetry/setup" />
         <Route element={<DashboardsPage />} path="/dashboards" />
         <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />

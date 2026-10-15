@@ -83,6 +83,16 @@ describe("dashboard widgets", () => {
     expect(widgetConfigProblem("timeseries_count", { ...sum, field: "deployment.replicas", source: "logs" })).toBeNull();
   });
 
+  it("reads AI usage from spans as numbers", () => {
+    expect(widgetConfigProblem("timeseries_count", { aggregation: "sum", field: "ai:cost", filter: {}, source: "traces" })).toBeNull();
+    expect(widgetConfigProblem("timeseries_count", { aggregation: "sum", field: "ai:cost", filter: {}, source: "logs" })?.message).toBe(
+      "This field is on spans, not logs",
+    );
+    expect(
+      widgetConfigProblem("timeseries_count", { aggregation: "count_distinct", field: "ai:cost", filter: {}, source: "traces" })?.field,
+    ).toBe("aggregation");
+  });
+
   it("aggregates metrics only in the ways a metric supports", () => {
     expect(widgetConfigProblem("timeseries_metric", { aggregation: "count", filter: {}, metricName: "queue.depth" })?.field).toBe(
       "aggregation",

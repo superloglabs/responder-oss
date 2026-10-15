@@ -28,7 +28,7 @@ export const metricAggregations = ["sum", "avg", "min", "max", "p95", "p99"] as 
 // take the subset above.
 export const widgetAggregations = ["count", "count_distinct", "sum", "avg", "min", "max", "p50", "p90", "p95", "p99"] as const;
 export type WidgetAggregation = (typeof widgetAggregations)[number];
-export const widgetUnits = ["none", "duration_ms", "duration_s", "bytes", "percent"] as const;
+export const widgetUnits = ["none", "duration_ms", "duration_s", "bytes", "percent", "usd"] as const;
 export type WidgetUnit = (typeof widgetUnits)[number];
 // How a chart widget shows its query: over time, as one number for the
 // window, or as one value per group.
@@ -135,7 +135,7 @@ export const dashboardWidgetCreateSchema = z
 // The only signal a field can be read from, or null for a field both have,
 // such as a resource attribute.
 export function widgetFieldSource(field: string): "logs" | "traces" | null {
-  if (field === "duration" || field.startsWith("span.")) return "traces";
+  if (field === "duration" || field.startsWith("span.") || field.startsWith("ai:")) return "traces";
   if (field.startsWith("log.")) return "logs";
   return null;
 }
@@ -158,6 +158,9 @@ export function widgetConfigProblem(
     if (fieldSource && fieldSource !== (config.source ?? "logs")) {
       return { field: "field", message: fieldSource === "traces" ? "This field is on spans, not logs" : "This field is on logs, not spans" };
     }
+  }
+  if (type === "timeseries_count" && config.field?.startsWith("ai:") && aggregation === "count_distinct") {
+    return { field: "aggregation", message: "Sum or average AI usage" };
   }
   return null;
 }

@@ -769,6 +769,35 @@ export const telemetryDashboardWidgets = pgTable(
   (table) => [index("telemetry_dashboard_widgets_dashboard_idx").on(table.dashboardId)],
 );
 
+// A workspace's own price for a model, used instead of the catalogue price
+// for every call to it, such as a negotiated rate or a fine-tuned model. An
+// empty provider matches the model from any provider.
+export const aiModelPriceOverrides = pgTable(
+  "ai_model_price_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull().default(""),
+    model: text("model").notNull(),
+    // USD per million tokens. Cached tokens without a price are charged as input.
+    inputMtok: doublePrecision("input_mtok").notNull(),
+    cacheReadMtok: doublePrecision("cache_read_mtok"),
+    cacheWriteMtok: doublePrecision("cache_write_mtok"),
+    outputMtok: doublePrecision("output_mtok").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("ai_model_price_overrides_model_unique").on(table.organizationId, table.provider, table.model),
+  ],
+);
+
 // A threshold rule on one telemetry project. Like a dashboard, it is hidden
 // and not evaluated while its project is not linked to the workspace.
 export const telemetryAlerts = pgTable(

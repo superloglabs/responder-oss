@@ -1,6 +1,18 @@
 // Shared read-only OpenTelemetry query adapter used by multiple application
 // surfaces.
 import type { ClickHouseClient } from "@clickhouse/client";
+import {
+  AI_MODEL_EXPR,
+  AI_PROVIDER_EXPR,
+  AI_TIER_EXPR,
+  AI_USAGE_CONDITION,
+  aiFieldExpr,
+  aiGroupExpr,
+  emptyAiPriceParams,
+  isAiMeasureField,
+  type AiModelKey,
+  type AiPriceParams,
+} from "./ai-cost.js";
 
 export type TimeRange = { since?: string; until?: string };
 export type ResourceAttrFilter = {
@@ -210,6 +222,8 @@ function groupExprForAttribute(
   if (groupBy === "operation" && source === "traces") {
     return { expr: "SpanName", params: {} };
   }
+  const aiGroup = source === "traces" && groupBy ? aiGroupExpr(groupBy) : null;
+  if (aiGroup) return { expr: aiGroup, params: {} };
   if (groupBy?.startsWith("attr:")) {
     return {
       expr:
@@ -2879,8 +2893,27 @@ function countConditions(projectId: string, source: SeriesSource, filter: Series
       ...field.params,
       ...anyOf.params,
     },
+    sinceExpr,
     table,
+    untilExpr,
   };
+}
+
+// Spans that report token usage and are not the parent of another such span.
+// Agent and framework spans often repeat their calls' usage; counting only
+// the innermost spans counts each call once.
+function aiCallConditions(sinceExpr: string, untilExpr: string): string[] {
+  return [
+    AI_USAGE_CONDITION,
+    `SpanId NOT IN (
+      SELECT ParentSpanId FROM otel_traces
+      WHERE SuperlogProjectId = {projectId:String}
+        AND Timestamp >= ${sinceExpr}
+        AND Timestamp <= ${untilExpr}
+        AND ParentSpanId != ''
+        AND ${AI_USAGE_CONDITION}
+    )`,
+  ];
 }
 
 // Logs or spans counted per group over exactly the window, from the raw
@@ -2938,6 +2971,13 @@ function measureExprs(
 ): { condition: string | null; expr: string; params: Record<string, string> } | null {
   if (measure.aggregation === "count") return { condition: null, expr: "count()", params: {} };
   if (!measure.field) return null;
+  if (isAiMeasureField(measure.field)) {
+    if (source !== "traces" || measure.aggregation === "count_distinct") return null;
+    const number = aiFieldExpr(measure.field);
+    const quantile = QUANTILES[measure.aggregation];
+    const expr = quantile === undefined ? `${measure.aggregation}(${number})` : `quantile(${quantile})(${number})`;
+    return { condition: `isNotNull(${number})`, expr, params: {} };
+  }
   let text: string;
   let number: string;
   let params: Record<string, string> = {};
@@ -2960,6 +3000,37 @@ function measureExprs(
   return { condition: measure.field === "duration" ? null : `isNotNull(${number})`, expr, params };
 }
 
+// The filters, grouping and aggregate for a measure other than a count. An AI
+// field reads only model calls, and its cost reads the prices passed in.
+function measuredConditions(
+  projectId: string,
+  source: SeriesSource,
+  filter: SeriesFilter,
+  measure: EventMeasure,
+  groupBy: string | undefined,
+  aiPrices: AiPriceParams | undefined,
+) {
+  const measured = measureExprs(measure, source);
+  if (!measured) return null;
+  const { conds, params, sinceExpr, table, untilExpr } = countConditions(projectId, source, filter);
+  const group = groupExprForAttribute(groupBy, source);
+  if (measured.condition) conds.push(measured.condition);
+  const ai = isAiMeasureField(measure.field);
+  if (ai) conds.push(...aiCallConditions(sinceExpr, untilExpr));
+  return {
+    conds,
+    expr: measured.expr,
+    group: group.expr,
+    params: {
+      ...params,
+      ...group.params,
+      ...measured.params,
+      ...(measure.field === "ai:cost" ? (aiPrices ?? emptyAiPriceParams()) : {}),
+    },
+    table,
+  };
+}
+
 // The measure per bucket and group. Counts use the per-minute rollup when they
 // can; a group with no value in a bucket has no row.
 export async function eventSeries(
@@ -2970,29 +3041,28 @@ export async function eventSeries(
   measure: EventMeasure,
   groupBy: string | undefined,
   step: Step,
+  aiPrices?: AiPriceParams,
 ): Promise<MetricSeriesRow[]> {
   if (measure.aggregation === "count") {
     const rows = await countSeries(ch, projectId, source, filter, groupBy, step);
     return rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
   }
-  const measured = measureExprs(measure, source);
+  const measured = measuredConditions(projectId, source, filter, measure, groupBy, aiPrices);
   if (!measured) return [];
-  const { conds, params, table } = countConditions(projectId, source, filter);
-  const group = groupExprForAttribute(groupBy, source);
-  if (measured.condition) conds.push(measured.condition);
+  const { conds, expr, group, params, table } = measured;
   const r = await ch.query({
     query: `
       SELECT
         toString(toStartOfInterval(Timestamp, INTERVAL ${step.n} ${step.unit})) AS bucket,
-        ${group.expr} AS group_key,
-        ${measured.expr} AS v
+        ${group} AS group_key,
+        ${expr} AS v
       FROM ${table}
       WHERE ${conds.join(" AND ")}
       GROUP BY bucket, group_key
       ORDER BY bucket ASC
       LIMIT 10000
     `,
-    query_params: { ...params, ...group.params, ...measured.params },
+    query_params: params,
     format: "JSONEachRow",
   });
   const rows = (await r.json()) as { bucket: string; group_key: string; v: string | number | null }[];
@@ -3012,29 +3082,99 @@ export async function eventAggregate(
   measure: EventMeasure,
   groupBy: string | undefined,
   limit: number,
+  aiPrices?: AiPriceParams,
 ): Promise<{ group: string; value: number }[]> {
   if (measure.aggregation === "count") return countAggregate(ch, projectId, source, filter, groupBy, limit);
-  const measured = measureExprs(measure, source);
+  const measured = measuredConditions(projectId, source, filter, measure, groupBy, aiPrices);
   if (!measured) return [];
-  const { conds, params, table } = countConditions(projectId, source, filter);
-  const group = groupExprForAttribute(groupBy, source);
-  if (measured.condition) conds.push(measured.condition);
+  const { conds, expr, group, params, table } = measured;
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
       query: `
-        SELECT ${group.expr} AS group_key, ${measured.expr} AS v
+        SELECT ${group} AS group_key, ${expr} AS v
         FROM ${table}
         WHERE ${conds.join(" AND ")}
         GROUP BY group_key
         ORDER BY v DESC
         LIMIT {limit:UInt32}
       `,
-      query_params: { ...params, ...group.params, ...measured.params, limit },
+      query_params: { ...params, limit },
       format: "JSONEachRow",
     });
     const rows = (await r.json()) as { group_key: string; v: string | number | null }[];
     return rows.flatMap((row) => (row.v === null ? [] : [{ group: row.group_key, value: Number(row.v) }]));
   });
+}
+
+export type AiModelUsage = AiModelKey & {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+};
+
+// The models, providers and service tiers of model calls in the window, most
+// called first. Spans that only repeat their calls' usage are left out.
+export async function aiModelsInWindow(
+  ch: ClickHouseClient,
+  projectId: string,
+  filter: SeriesFilter,
+  limit = 500,
+): Promise<AiModelUsage[]> {
+  const { conds, params, sinceExpr, untilExpr } = countConditions(projectId, "traces", filter);
+  conds.push(...aiCallConditions(sinceExpr, untilExpr));
+  return retryOneConnectionReset(async () => {
+    const r = await ch.query({
+      query: `
+        SELECT
+          ${AI_PROVIDER_EXPR} AS provider,
+          ${AI_MODEL_EXPR} AS model,
+          ${AI_TIER_EXPR} AS tier,
+          count() AS calls,
+          sum(${aiFieldExpr("ai:tokens.input")}) AS input_tokens,
+          sum(${aiFieldExpr("ai:tokens.output")}) AS output_tokens
+        FROM otel_traces
+        WHERE ${conds.join(" AND ")}
+        GROUP BY provider, model, tier
+        ORDER BY calls DESC
+        LIMIT {limit:UInt32}
+      `,
+      query_params: { ...params, limit },
+      format: "JSONEachRow",
+    });
+    const rows = (await r.json()) as Array<{
+      calls: number | string;
+      input_tokens: number | string;
+      model: string;
+      output_tokens: number | string;
+      provider: string;
+      tier: string;
+    }>;
+    return rows.map((row) => ({
+      calls: Number(row.calls),
+      inputTokens: Number(row.input_tokens),
+      model: row.model,
+      outputTokens: Number(row.output_tokens),
+      provider: row.provider,
+      tier: row.tier,
+    }));
+  });
+}
+
+// Model calls in the window whose span reports no token counts, such as an
+// OpenAI stream started without usage reporting. Their cost is unknown.
+export async function aiCallsWithoutUsage(ch: ClickHouseClient, projectId: string, filter: SeriesFilter): Promise<number> {
+  const { conds, params } = countConditions(projectId, "traces", filter);
+  conds.push(
+    "SpanAttributes['gen_ai.operation.name'] IN ('chat', 'text_completion', 'generate_content', 'embeddings')",
+    `NOT ${AI_USAGE_CONDITION}`,
+  );
+  const r = await ch.query({
+    query: `SELECT count() AS c FROM otel_traces WHERE ${conds.join(" AND ")}`,
+    query_params: params,
+    format: "JSONEachRow",
+  });
+  const rows = (await r.json()) as Array<{ c: number | string }>;
+  return Number(rows[0]?.c ?? 0);
 }
 
 // One bucket covering any window. Some metric paths align buckets to the

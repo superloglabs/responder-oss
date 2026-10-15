@@ -348,8 +348,18 @@ const plainNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 
 const compactNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact" });
 const byteUnits = ["B", "KB", "MB", "GB", "TB", "PB"];
 
+const dollars = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
+const compactDollars = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 1, notation: "compact", style: "currency" });
+const centDollars = new Intl.NumberFormat("en-US", { currency: "USD", maximumSignificantDigits: 2, style: "currency" });
+
 export function formatWidgetValue(value: number | null, unit: WidgetUnit = "none"): string {
   if (value === null || !Number.isFinite(value)) return "—";
+  if (unit === "usd") {
+    const size = Math.abs(value);
+    // Fractions of a cent keep two significant digits, so a call's cost shows.
+    if (size >= 100_000) return compactDollars.format(value);
+    return size > 0 && size < 1 ? centDollars.format(value) : dollars.format(value);
+  }
   if (unit === "duration_ms" || unit === "duration_s") {
     const milliseconds = unit === "duration_s" ? value * 1000 : value;
     return milliseconds < 0 ? `-${formatDuration(-milliseconds)}` : formatDuration(milliseconds);
@@ -427,10 +437,30 @@ export const widgetAggregationLabels: Record<WidgetAggregation, string> = {
   sum: "Sum",
 };
 
-// A field as people read it: span duration, or an attribute key without its
-// scope prefix.
+// AI usage read from GenAI spans, as fields to aggregate and to group by.
+export const aiMeasureFields = [
+  { label: "Cost", value: "ai:cost" },
+  { label: "Input tokens", value: "ai:tokens.input" },
+  { label: "Uncached input tokens", value: "ai:tokens.input_uncached" },
+  { label: "Cache read tokens", value: "ai:tokens.cache_read" },
+  { label: "Cache write tokens", value: "ai:tokens.cache_write" },
+  { label: "Output tokens", value: "ai:tokens.output" },
+  { label: "Reasoning tokens", value: "ai:tokens.reasoning" },
+  { label: "Total tokens", value: "ai:tokens.total" },
+] as const;
+export const aiGroupFields = [
+  { label: "AI model", value: "ai:model" },
+  { label: "AI provider", value: "ai:provider" },
+] as const;
+const aiFieldLabels = new Map<string, string>([...aiMeasureFields, ...aiGroupFields].map((field) => [field.value, field.label]));
+
+// A field as people read it: span duration, an AI usage field, or an
+// attribute key without its scope prefix.
 export function widgetFieldLabel(field: string): string {
-  return field === "duration" ? "duration" : field.replace(/^(?:attr:|resource\.|span\.|log\.)/u, "");
+  if (field === "duration") return "duration";
+  const ai = aiFieldLabels.get(field);
+  if (ai) return ai.replace(/^AI /u, "").toLowerCase();
+  return field.replace(/^(?:attr:|resource\.|span\.|log\.)/u, "");
 }
 
 // A title from the widget's settings, used until someone names it.
