@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
+  AiPriceOverrideConflictError,
   deleteAiPriceOverride,
   listAiPriceOverrides,
   saveAiPriceOverride,
+  updateAiPriceOverride,
   type AiModelPriceOverride,
 } from "../../../../packages/core/src/db/ai-model-prices.js";
 import {
@@ -71,14 +73,20 @@ import { getActiveTenant } from "../tenant.js";
 export type TelemetryRouteDependencies = {
   // Model calls in the window whose spans report no token counts.
   aiCallsWithoutUsage: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<number>;
-  // The models called in the window, most called first.
-  aiModels: (client: ClickHouseClient, projectId: string, range: TimeRange) => Promise<AiModelUsage[]>;
+  // The models called in the window that match the filters, most called first.
+  aiModels: (
+    client: ClickHouseClient,
+    projectId: string,
+    range: TimeRange,
+    options?: { filters?: ResolvedWidgetFilter[]; limit?: number },
+  ) => Promise<AiModelUsage[]>;
   // The workspace's own model prices.
   aiPriceOverrides: (organizationId: string) => Promise<AiModelPriceOverride[]>;
   deleteAiPriceOverride: (organizationId: string, id: string) => Promise<boolean>;
   // Each model's price over the window, as query parameters and for display.
   resolveAiPrices: typeof resolveAiPrices;
   saveAiPriceOverride: (organizationId: string, price: AiPriceOverride) => Promise<AiModelPriceOverride>;
+  updateAiPriceOverride: (organizationId: string, id: string, price: AiPriceOverride) => Promise<AiModelPriceOverride | null>;
   // Attribute keys seen in the window, for filters and grouping.
   attributeKeys: (
     client: ClickHouseClient,
@@ -217,7 +225,8 @@ export type TelemetryRouteDependencies = {
 
 const defaultDependencies: TelemetryRouteDependencies = {
   aiCallsWithoutUsage: (client, projectId, range) => aiCallsWithoutUsage(client, projectId, { range }),
-  aiModels: (client, projectId, range) => aiModelsInWindow(client, projectId, { range }),
+  aiModels: (client, projectId, range, options) =>
+    aiModelsInWindow(client, projectId, { range, resourceAttrs: options?.filters ?? [] }, options?.limit),
   aiPriceOverrides: listAiPriceOverrides,
   deleteAiPriceOverride,
   resolveAiPrices: (models, window, overrides) => {
@@ -225,6 +234,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
     return resolveAiPrices(models, window, overrides);
   },
   saveAiPriceOverride,
+  updateAiPriceOverride,
   attributeKeys: (client, projectId, range, source) => listAttributeKeys(client, projectId, range, source),
   attributeValues: (client, projectId, params) =>
     listAttributeValues(client, projectId, params.key, params.range, 200, params.source, params.prefix, params.filters),
@@ -378,6 +388,10 @@ const metricSeriesSchema = z.object({
   unit: metricUnitSchema,
   until: windowSchema.shape.until,
 });
+
+// Model, provider and tier combinations priced for one widget. A widget's
+// filters usually narrow them to a few.
+const maxPricedModels = 10_000;
 
 // USD per million tokens.
 const tokenPrice = z.number().finite().min(0).max(100_000);
@@ -544,15 +558,17 @@ export function createTelemetryRoutes(
     });
   }
 
-  // Prices of the models called in the window, with the workspace's own.
+  // Prices of every model the widget's filters select in the window, with the
+  // workspace's own. A call whose model has no price row has no cost.
   async function aiPriceParams(
     client: ClickHouseClient,
     organizationId: string,
     projectId: string,
     range: Required<TimeRange>,
+    filters: ResolvedWidgetFilter[],
   ) {
     const [models, overrides] = await Promise.all([
-      dependencies.aiModels(client, projectId, range),
+      dependencies.aiModels(client, projectId, range, { filters, limit: maxPricedModels }),
       dependencies.aiPriceOverrides(organizationId),
     ]);
     return dependencies.resolveAiPrices(models, range, overrides).params;
@@ -945,6 +961,27 @@ export function createTelemetryRoutes(
       });
       return context.json({ override });
     })
+    .put("/ai-price-overrides/:id", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const id = z.uuid().safeParse(context.req.param("id"));
+      const body = aiPriceOverrideSchema.safeParse(await context.req.json().catch(() => null));
+      if (!id.success || !body.success) return context.json({ error: "Invalid price" }, 400);
+      try {
+        const override = await dependencies.updateAiPriceOverride(granted.organizationId, id.data, {
+          cacheReadMtok: body.data.cacheReadMtok ?? null,
+          cacheWriteMtok: body.data.cacheWriteMtok ?? null,
+          inputMtok: body.data.inputMtok,
+          model: body.data.model,
+          outputMtok: body.data.outputMtok,
+          provider: body.data.provider,
+        });
+        return override ? context.json({ override }) : context.json({ error: "Price not found" }, 404);
+      } catch (error) {
+        if (error instanceof AiPriceOverrideConflictError) return context.json({ error: error.message }, 409);
+        throw error;
+      }
+    })
     .delete("/ai-price-overrides/:id", async (context) => {
       const granted = await access(context.req.raw.headers);
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
@@ -1003,6 +1040,7 @@ export function createTelemetryRoutes(
             granted.organizationId,
             projectId,
             comparing ? { since: previousWindow(range).since, until: range.until } : range,
+            resourceAttrs,
           )
         : undefined;
       if (display === "timeseries") {

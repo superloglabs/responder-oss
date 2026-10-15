@@ -13,6 +13,7 @@ import {
   type AiPriceOverride,
 } from "../ai-models-api";
 import { AppShell } from "../components/app-shell";
+import { useOrganizationCapabilities } from "../organization-capabilities";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { TelemetryProjectsGate } from "../components/telemetry";
 import { Alert, Badge, Button, DataTable, SegmentedControl, SelectField, TextField } from "../design-system";
@@ -44,6 +45,7 @@ export function AiModelsPage() {
   useDocumentTitle("AI models");
   const navigate = useNavigate();
   const telemetry = useTelemetryProjects();
+  const canCreateDashboards = useOrganizationCapabilities().includes("dashboards");
   const [params, setParams] = useSearchParams();
   const projectId = params.get("projectId") || telemetry.projects?.[0]?.projectId || "";
   const rangeParam = params.get("range") ?? "";
@@ -119,7 +121,7 @@ export function AiModelsPage() {
     <AppShell active="ai-models" redesigned>
       <header className="workspaceHeading">
         <h1><CoinsIcon aria-hidden="true" size={16} weight="bold" />AI models</h1>
-        {projectId && models.length > 0 ? (
+        {projectId && models.length > 0 && canCreateDashboards ? (
           <div className="workspaceHeading__actions">
             <Button loading={creating} onClick={() => void createDashboard()} variant="primary">
               Create AI spend dashboard
@@ -282,7 +284,7 @@ export function AiModelsPage() {
             await load();
           }}
           onSave={async (price) => {
-            await saveAiPriceOverride(price);
+            await saveAiPriceOverride(price, editing.id);
             setEditing(null);
             await load();
           }}

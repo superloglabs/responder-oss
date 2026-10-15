@@ -40,8 +40,11 @@ export function fetchAiModels(projectId: string, range: TelemetryRange): Promise
   return request<AiModels>(`/api/telemetry/ai-models?${new URLSearchParams({ projectId, range })}`);
 }
 
-export async function saveAiPriceOverride(price: AiPriceOverride): Promise<AiModelPriceOverride> {
-  return (await request<{ override: AiModelPriceOverride }>("/api/telemetry/ai-price-overrides", { body: price, method: "PUT" })).override;
+// Saves a price; with an ID it changes that price, including its model or
+// provider, rather than adding another.
+export async function saveAiPriceOverride(price: AiPriceOverride, id?: string | null): Promise<AiModelPriceOverride> {
+  const url = id ? `/api/telemetry/ai-price-overrides/${encodeURIComponent(id)}` : "/api/telemetry/ai-price-overrides";
+  return (await request<{ override: AiModelPriceOverride }>(url, { body: price, method: "PUT" })).override;
 }
 
 export function deleteAiPriceOverride(id: string): Promise<void> {

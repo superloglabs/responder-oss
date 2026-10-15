@@ -48,6 +48,51 @@ export async function saveAiPriceOverride(
   return saved!;
 }
 
+export class AiPriceOverrideConflictError extends Error {
+  constructor() {
+    super("The workspace already has a price for this model and provider");
+  }
+}
+
+// Drizzle wraps the Postgres error, so the violation is on its cause.
+function isModelConflict(error: unknown): boolean {
+  for (let current = error; current; current = (current as { cause?: unknown }).cause) {
+    if (typeof current !== "object") break;
+    if ("code" in current && current.code === "23505" && "constraint" in current && current.constraint === "ai_model_price_overrides_model_unique") {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Changes one of the workspace's prices, including the model or provider it
+// applies to. Null when the price does not exist.
+export async function updateAiPriceOverride(
+  organizationId: string,
+  id: string,
+  price: AiPriceOverride,
+): Promise<AiModelPriceOverride | null> {
+  try {
+    const [updated] = await getDatabase()
+      .update(aiModelPriceOverrides)
+      .set({
+        cacheReadMtok: price.cacheReadMtok,
+        cacheWriteMtok: price.cacheWriteMtok,
+        inputMtok: price.inputMtok,
+        model: price.model.trim().toLowerCase(),
+        outputMtok: price.outputMtok,
+        provider: price.provider.trim().toLowerCase(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(aiModelPriceOverrides.organizationId, organizationId), eq(aiModelPriceOverrides.id, id)))
+      .returning(columns);
+    return updated ?? null;
+  } catch (error) {
+    if (isModelConflict(error)) throw new AiPriceOverrideConflictError();
+    throw error;
+  }
+}
+
 export async function deleteAiPriceOverride(organizationId: string, id: string): Promise<boolean> {
   const deleted = await getDatabase()
     .delete(aiModelPriceOverrides)

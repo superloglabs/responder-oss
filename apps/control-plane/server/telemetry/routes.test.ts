@@ -31,6 +31,7 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
       unpriced: [{ model: "ft:gpt-4o:acme", provider: "openai", tier: "" }],
     })),
     saveAiPriceOverride: vi.fn(async (_organizationId, price) => ({ ...price, id: "4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11" })),
+    updateAiPriceOverride: vi.fn(async (_organizationId, id, price) => ({ ...price, id })),
     attributeKeys: vi.fn(async () => [{ count: 3, key: "resource.deployment.environment" }]),
     attributeValues: vi.fn(async () => [{ count: 3, value: "production" }]),
     client: () => ({}) as never,
@@ -658,7 +659,14 @@ describe("telemetry routes", () => {
       const { app, dependencies } = routes();
 
       const response = await post(app, {
-        config: { aggregation: "sum", compare: "previous_period", display: "number", field: "ai:cost", source: "traces" },
+        config: {
+          aggregation: "sum",
+          compare: "previous_period",
+          display: "number",
+          field: "ai:cost",
+          filter: { resourceAttrs: [{ key: "span.app.customer.id", value: "acme" }] },
+          source: "traces",
+        },
         projectId,
         range: "1h",
         type: "timeseries_count",
@@ -666,7 +674,10 @@ describe("telemetry routes", () => {
 
       expect(response.status).toBe(200);
       const window = { since: "2026-10-13T10:00:00.000Z", until: "2026-10-13T12:00:00.000Z" };
-      expect(dependencies.aiModels).toHaveBeenCalledWith(expect.anything(), projectId, window);
+      expect(dependencies.aiModels).toHaveBeenCalledWith(expect.anything(), projectId, window, {
+        filters: [{ key: "span.app.customer.id", value: "acme" }],
+        limit: 10_000,
+      });
       expect(dependencies.aiPriceOverrides).toHaveBeenCalledWith(organizationId);
       expect(dependencies.resolveAiPrices).toHaveBeenCalledWith(expect.any(Array), window, []);
       expect(dependencies.eventAggregate).toHaveBeenCalledWith(
@@ -908,6 +919,18 @@ describe("telemetry routes", () => {
           method: "PUT",
         })).status,
       ).toBe(400);
+
+      const moved = await app.request("/ai-price-overrides/4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11", {
+        body: JSON.stringify({ inputMtok: 2, model: "ft:gpt-4o:acme", outputMtok: 8, provider: "azure.ai.openai" }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      expect(moved.status).toBe(200);
+      expect(dependencies.updateAiPriceOverride).toHaveBeenCalledWith(
+        organizationId,
+        "4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11",
+        expect.objectContaining({ provider: "azure.ai.openai" }),
+      );
 
       const removed = await app.request("/ai-price-overrides/4d0c7c4e-8a51-4c62-9a0b-0f7d2b7f6a11", { method: "DELETE" });
       expect(removed.status).toBe(204);
