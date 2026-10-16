@@ -1,9 +1,19 @@
 .countHistogram { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.countHistogram__plot { position: relative; }
 .countHistogram__bars { display: flex; align-items: stretch; gap: min(5px, .35%); height: 64px; }
 .countHistogram__track { display: flex; flex: 1 1 0; flex-direction: column; justify-content: flex-end; gap: 1px; min-width: 1px; overflow: clip; border-radius: 2px; background: #f0f0f0; }
 .countHistogram__bars--loading .countHistogram__track { opacity: .6; }
+.countHistogram__track[data-hovered] { background: #e0e0e0; }
 .countHistogram__segment { flex-shrink: 0; border-radius: 2px; }
 .countHistogram__axis { display: flex; justify-content: space-between; color: #999; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 14px; }
 .countHistogram__legend { display: inline-flex; align-items: center; gap: 6px; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 16px; white-space: nowrap; }
 .countHistogram__legend > span { flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; }
 .countHistogram--compact .countHistogram__bars { gap: min(3px, .4%); height: 36px; }
+.countHistogram__tooltip { position: absolute; top: 4px; left: 0; z-index: 2; min-width: 150px; padding: 8px 10px; border-radius: 8px; background: var(--ds-surface-overlay); outline: .5px solid var(--ds-border-strong); box-shadow: 0 4px 12px #0000002e; color: var(--ds-text-primary); font-size: 11px; line-height: 14px; pointer-events: none; }
+.countHistogram__tooltip time { display: block; margin-bottom: 6px; color: var(--ds-text-muted); }
+.countHistogram__tooltip dl { display: flex; flex-direction: column; gap: 3px; margin: 0; }
+.countHistogram__tooltip dl > div { display: flex; align-items: center; gap: 12px; }
+.countHistogram__tooltip dt { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.countHistogram__tooltip dt > span { flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; }
+.countHistogram__tooltip dd { margin: 0 0 0 auto; font-variant-numeric: tabular-nums; }
+.countHistogram__total { margin-top: 2px; padding-top: 5px; border-top: .5px solid var(--ds-border-subtle); }

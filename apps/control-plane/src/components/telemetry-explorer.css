@@ -63,6 +63,11 @@
 .explorerCell--number { display: block; color: #1a1a1a; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .explorerCell--message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: #1a1a1a; cursor: pointer; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .explorerCell--message:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.explorerLevel { display: inline-flex; align-items: center; gap: 6px; color: #666; vertical-align: top; white-space: nowrap; }
+.explorerLevel > i { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
+.explorerLevel--danger { color: #b44545; }
+.explorerLevel--warning { color: #8b631d; }
+.explorerLevel--info { color: #4e58f9; }
 .explorerStatus { margin: 0; padding: 24px 8px; color: #666; font-size: 12px; }
 .explorerMore { display: flex; justify-content: center; padding: 12px 0 0; color: #666; font-size: 12px; }
 

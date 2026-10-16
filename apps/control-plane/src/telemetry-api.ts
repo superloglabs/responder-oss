@@ -1,4 +1,5 @@
 import { apiErrorMessage } from "./agents-api";
+import { resolveTimeRange, timeRangeFromParams, timeRangeParams, type DashboardTimeRange } from "./dashboard-time-range";
 import type { TelemetryRange, TelemetrySignal } from "../server/telemetry/routes";
 import type { TelemetryOverview } from "../../../packages/core/src/telemetry/overview";
 
@@ -271,7 +272,7 @@ export interface LogExplorerQuery {
   // Attribute keys shown as extra facets.
   facets: string[];
   filters: ExplorerFilter[];
-  range: TelemetryRange;
+  range: DashboardTimeRange;
   search: string;
   services: string[];
   severities: string[];
@@ -311,7 +312,7 @@ export function logExplorerQuery(params: URLSearchParams): LogExplorerQuery {
   return {
     facets: uniqueValues(params, "facet"),
     filters: explorerFilters(params),
-    range: explorerRange(params),
+    range: timeRangeFromParams(params),
     search: params.get("search")?.trim() ?? "",
     services: uniqueValues(params, "service"),
     severities: uniqueValues(params, "severity").map((value) => value.toUpperCase()),
@@ -337,8 +338,7 @@ function appendAll(params: URLSearchParams, name: string, values: string[]) {
 }
 
 export function logExplorerParams(query: LogExplorerQuery): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("range", query.range);
+  const params = timeRangeParams(query.range, new URLSearchParams());
   if (query.search) params.set("search", query.search);
   appendAll(params, "service", query.services);
   appendAll(params, "severity", query.severities);
@@ -390,16 +390,27 @@ export interface TraceFacets {
   statuses: FacetCount[];
 }
 
+// The log API takes the window as `since` and `until`; a range that ends now
+// resolves when the request is made.
+export function logApiParams(query: LogExplorerQuery, now = Date.now()): URLSearchParams {
+  const params = logExplorerParams(query);
+  const { since, until } = resolveTimeRange(query.range, now);
+  for (const name of ["range", "from", "to"]) params.delete(name);
+  params.set("since", new Date(since).toISOString());
+  params.set("until", new Date(until).toISOString());
+  return params;
+}
+
 export function fetchExplorerLogs(query: LogExplorerQuery): Promise<LogRecord[]> {
-  return telemetryJson<{ logs: LogRecord[] }>(`/api/telemetry/logs?${logExplorerParams(query)}`).then((body) => body.logs);
+  return telemetryJson<{ logs: LogRecord[] }>(`/api/telemetry/logs?${logApiParams(query)}`).then((body) => body.logs);
 }
 
 export function fetchLogHistogram(query: LogExplorerQuery): Promise<Histogram> {
-  return telemetryJson<Histogram>(`/api/telemetry/logs/histogram?${logExplorerParams(query)}`);
+  return telemetryJson<Histogram>(`/api/telemetry/logs/histogram?${logApiParams(query)}`);
 }
 
 export function fetchLogFacets(query: LogExplorerQuery): Promise<LogFacets> {
-  return telemetryJson<LogFacets>(`/api/telemetry/logs/facets?${logExplorerParams(query)}`);
+  return telemetryJson<LogFacets>(`/api/telemetry/logs/facets?${logApiParams(query)}`);
 }
 
 export function fetchExplorerTraces(query: TraceExplorerQuery): Promise<TraceSummary[]> {
@@ -499,17 +510,19 @@ export function levelLabel(severity: string): string {
 }
 
 // Time of day with milliseconds, and the date for windows over a day.
-export function formatExplorerTime(value: string, withDate: boolean): string {
+export function formatExplorerTime(value: string, withDate: boolean, timeZone?: string): string {
   const date = logTimestamp(value);
   if (!date) return value;
+  const zone = timeZone ? { timeZone } : {};
   const time = date.toLocaleTimeString(undefined, {
+    ...zone,
     hour: "2-digit",
     hour12: false,
     minute: "2-digit",
     second: "2-digit",
   });
   const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
-  const day = withDate ? `${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ` : "";
+  const day = withDate ? `${date.toLocaleDateString(undefined, { ...zone, day: "numeric", month: "short" })}, ` : "";
   return `${day}${time}.${milliseconds}`;
 }
 

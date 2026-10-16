@@ -51,7 +51,7 @@ function SpanPanel({
       { key: "field.trace_id", op: "eq", value: span.trace_id },
       { key: "field.span_id", op: "eq", value: span.span_id },
     ],
-    range: "7d",
+    range: { kind: "relative", minutes: 10_080 },
     search: "",
     services: [],
     severities: [],
