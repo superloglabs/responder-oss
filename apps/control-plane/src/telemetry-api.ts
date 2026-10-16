@@ -1,7 +1,15 @@
 import { apiErrorMessage } from "./agents-api";
 import type { TelemetryRange, TelemetrySignal } from "../server/telemetry/routes";
+import type { TelemetryOverview } from "../../../packages/core/src/telemetry/overview";
 
 export type { TelemetryRange, TelemetrySignal };
+export type {
+  OverviewAi,
+  OverviewLogBucket,
+  OverviewService,
+  OverviewTraceBucket,
+  TelemetryOverview,
+} from "../../../packages/core/src/telemetry/overview";
 
 export interface LogRecord {
   body: string;
@@ -435,6 +443,13 @@ export function fetchTraceOverview(
   if (query.service) params.set("service", query.service);
   appendAll(params, "filter", query.filters.map(explorerFilterText));
   return telemetryJson(`/api/telemetry/traces/overview?${params}`);
+}
+
+// What each service sent over the window, split into equal buckets.
+export function fetchTelemetryOverview(
+  range: TelemetryRange,
+): Promise<{ overview: TelemetryOverview; since: string; until: string }> {
+  return telemetryJson(`/api/telemetry/overview?${new URLSearchParams({ range })}`);
 }
 
 export interface HistogramBar<Series extends string> {

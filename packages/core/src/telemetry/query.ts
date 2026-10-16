@@ -34,7 +34,7 @@ type ParsedAttributeKey = { scope: AttributeScope; key: string };
 
 export type FieldFilterSource = "logs" | "traces";
 
-async function retryOneConnectionReset<T>(read: () => Promise<T>): Promise<T> {
+export async function retryOneConnectionReset<T>(read: () => Promise<T>): Promise<T> {
   try {
     return await read();
   } catch (error) {
@@ -77,7 +77,7 @@ function timeBoundExpr(value: string, paramName: "since" | "until"): string {
   return `parseDateTime64BestEffortOrZero({${paramName}:String})`;
 }
 
-function resolveRange(range?: TimeRange): {
+export function resolveRange(range?: TimeRange): {
   sinceSql: string;
   untilSql: string;
   sinceExpr: string;

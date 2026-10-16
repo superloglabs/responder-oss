@@ -60,6 +60,7 @@ import {
   type TimeRange,
   type TraceOverview,
 } from "../../../../packages/core/src/telemetry/query.js";
+import { telemetryOverview, type TelemetryOverview } from "../../../../packages/core/src/telemetry/overview.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Read-only access to a workspace's OpenTelemetry data. A workspace sees
@@ -185,6 +186,8 @@ export type TelemetryRouteDependencies = {
     signal: TelemetrySignal | undefined,
   ) => Promise<unknown>;
   now: () => Date;
+  // What each service sent over the window, and how model calls report usage.
+  overview: (client: ClickHouseClient, organizationId: string, range: Required<TimeRange>) => Promise<TelemetryOverview>;
   queryLogs: (
     client: ClickHouseClient,
     organizationId: string,
@@ -271,6 +274,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
       },
     ),
   now: () => new Date(),
+  overview: telemetryOverview,
   queryLogs,
   queryTrace: async (client, organizationId, traceId) => {
     const trace = await getTraceDetail(client, organizationId, traceId);
@@ -781,6 +785,16 @@ export function createTelemetryRoutes(
         stepMs: step.n * stepMilliseconds[step.unit],
         until: request.filter.range.until,
       });
+    })
+    // What each service sent over the window, for the telemetry overview.
+    .get("/overview", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = windowSchema.safeParse(context.req.query());
+      const range = query.success ? windowFor(query.data, dependencies.now()) : null;
+      if (!range) return context.json({ error: "Invalid overview query" }, 400);
+      const overview = await dependencies.overview(granted.client, granted.organizationId, range);
+      return context.json({ overview, since: range.since, until: range.until });
     })
     .get("/attribute-keys", async (context) => {
       const granted = await access(context.req.raw.headers);

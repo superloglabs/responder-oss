@@ -91,6 +91,10 @@ export const AI_MODEL_EXPR = `lower(${textOf(MODEL_KEYS)})`;
 export const AI_PROVIDER_EXPR = `lower(${textOf(PROVIDER_KEYS)})`;
 export const AI_TIER_EXPR = `lower(${textOf(TIER_KEYS)})`;
 
+// A span that reports input or output token counts.
+export const AI_INPUT_REPORTED_CONDITION = `isNotNull(${reportedInput})`;
+export const AI_OUTPUT_REPORTED_CONDITION = `isNotNull(${numberOf(TOKEN_KEYS.output)})`;
+
 // A span that reports token usage.
 export const AI_USAGE_CONDITION = `(isNotNull(${reportedInput}) OR isNotNull(${numberOf(TOKEN_KEYS.output)}))`;
 
