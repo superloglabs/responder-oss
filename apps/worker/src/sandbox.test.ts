@@ -917,6 +917,43 @@ describe("Daytona sandbox capacity", () => {
     consoleError.mockRestore();
   });
 
+  it("cleans up after a rate limit instead of treating it as full capacity", async () => {
+    const harness = capacityHarness([]);
+    harness.get.mockImplementation(async (name: string) => ({ id: name }));
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const rateLimited = Object.assign(
+      new Error("DaytonaSandboxClient failed to create sandbox: Rate limit exceeded"),
+      { statusCode: 429 },
+    );
+    const creator = {
+      create: vi.fn()
+        .mockRejectedValueOnce(rateLimited)
+        .mockResolvedValueOnce(createdSession),
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-automation-run-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    // The rate-limited sandbox may exist, so it is deleted and replaced.
+    expect(creator.create).toHaveBeenLastCalledWith({
+      options: { createTimeoutSec: 120, name: "responder-automation-run-1-2" },
+    });
+    expect(harness.deleteSandbox).toHaveBeenCalledWith(
+      { id: "responder-automation-run-1" },
+      60,
+      true,
+    );
+    expect(harness.list).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("archives paused sandboxes, deletes expired ones and logs usage", async () => {
     const paused = sandboxStopped("responder-automation-paused", 45);
     const recent = sandboxStopped("responder-automation-recent", 10);

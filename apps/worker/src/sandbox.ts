@@ -94,9 +94,11 @@ function isDaytonaStartFailure(error: unknown): boolean {
 
 // Daytona rejects a new sandbox outright while the organization is at its
 // disk, CPU or memory limit, for example "Total disk limit exceeded. Maximum
-// allowed: 2000GiB." Nothing is created.
+// allowed: 2000GiB." Nothing is created. A rate limit is not a quota: it can
+// arrive after the sandbox exists, so it keeps the normal cleanup.
 function isDaytonaQuotaError(error: unknown): boolean {
-  return error instanceof Error && /\blimit exceeded\b/i.test(error.message);
+  return error instanceof Error &&
+    /\btotal (?:cpu|memory|disk) limit exceeded\b/i.test(error.message);
 }
 
 function isDaytonaDiskQuotaError(error: unknown): boolean {
