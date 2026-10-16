@@ -159,6 +159,11 @@ export async function archiveStoppedSandboxes(
 // Paused sandboxes are kept for a day. Archived and failed sandboxes older
 // than that are deleted in case Daytona's own deletion interval missed them.
 const sandboxRetentionMs = 24 * 60 * 60_000;
+const expiringSandboxStates: ReadonlySet<string> = new Set([
+  SandboxState.ARCHIVED,
+  SandboxState.BUILD_FAILED,
+  SandboxState.ERROR,
+]);
 // Stopped sandboxes archived in one sweep.
 const sweepArchiveLimit = 100;
 
@@ -185,7 +190,7 @@ export async function sweepDaytonaSandboxes(
     for await (const sandbox of client.list({ name: "responder-" })) {
       sandboxes += 1;
       if (
-        (sandbox.state === SandboxState.ARCHIVED || sandbox.state === SandboxState.ERROR) &&
+        expiringSandboxStates.has(sandbox.state ?? "") &&
         Date.parse(sandbox.updatedAt ?? "") < expiredBefore
       ) {
         expired.push(sandbox);

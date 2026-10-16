@@ -923,8 +923,17 @@ describe("Daytona sandbox capacity", () => {
     const expiredArchive = sandboxStopped("responder-automation-expired", 25 * 60, "archived");
     const freshArchive = sandboxStopped("responder-automation-archived", 2 * 60, "archived");
     const failed = sandboxStopped("responder-automation-failed", 30 * 60, "error");
+    const buildFailed = sandboxStopped("responder-automation-build-failed", 30 * 60, "build_failed");
     const running = sandboxStopped("responder-automation-running", 0, "started");
-    const harness = capacityHarness([paused, recent, expiredArchive, freshArchive, failed, running]);
+    const harness = capacityHarness([
+      paused,
+      recent,
+      expiredArchive,
+      freshArchive,
+      failed,
+      buildFailed,
+      running,
+    ]);
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await sweepDaytonaSandboxes({ daytonaApiKey: "daytona-test" }, harness.dependencies);
@@ -934,15 +943,16 @@ describe("Daytona sandbox capacity", () => {
     expect(harness.deleteSandbox.mock.calls).toEqual([
       [expiredArchive, 60, false],
       [failed, 60, false],
+      [buildFailed, 60, false],
     ]);
     expect(JSON.parse(consoleLog.mock.calls[0]![0] as string)).toEqual({
       archived: 1,
       cpu: 2,
-      deleted: 2,
-      diskGiB: 40,
+      deleted: 3,
+      diskGiB: 50,
       event: "daytona_sandbox_sweep",
       memoryGiB: 4,
-      sandboxes: 6,
+      sandboxes: 7,
     });
     consoleLog.mockRestore();
   });
