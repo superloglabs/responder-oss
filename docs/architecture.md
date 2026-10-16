@@ -249,6 +249,11 @@ share and defaults to 1 while OTLP export is on.
   service that sends to its own ingest endpoint does not trace its exports.
 - Every console line is also sent as a log record with the active trace. A
   JSON line's `event` becomes the body and its fields become attributes.
+- Model calls are spans in the GenAI conventions, with the model, provider,
+  and token counts, so they appear on the AI models page. The model broker
+  writes one per forwarded call; the OpenAI client and AI SDK calls that pass
+  `modelCallTelemetry` are traced by their instrumentations. Prompts and
+  outputs are not recorded.
 - Metrics are the Node.js runtime metrics and `http.server.request.duration`
   by route template, exported every 60 seconds.
 - With `VITE_OTEL_TRACES_SAMPLE_RATE` above 0, the browser traces page loads

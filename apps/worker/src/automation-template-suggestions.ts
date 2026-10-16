@@ -15,6 +15,7 @@ import {
   getAutomationSuggestionContext,
   listOrganizationsDueForAutomationSuggestions,
 } from "@responder/core/db/automation-template-suggestions";
+import { modelCallTelemetry } from "./model-telemetry.js";
 
 const defaultModel = "anthropic/claude-sonnet-5.5";
 // Suggestions for a day are written from this UTC hour on, before the
@@ -48,6 +49,7 @@ export async function generateAutomationSuggestions(input: {
       output: Output.object({ schema: automationSuggestionOutputSchema }),
       prompt: automationSuggestionPrompt(context, builtInAutomationTemplates),
       system: automationSuggestionSystemPrompt,
+      telemetry: modelCallTelemetry("automation-suggestions"),
     });
     const templates = suggestedAutomationTemplates(output, {
       connectedProviders: context.connectedProviders,

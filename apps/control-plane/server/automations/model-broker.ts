@@ -1,3 +1,4 @@
+import { context as otelContext, SpanKind, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { Hono, type Context } from "hono";
 import { automationModelProviderSchema } from "../../../../packages/core/src/automations/config.js";
 import { modelProvider, type ModelProviderId } from "../../../../packages/core/src/automations/model-providers.js";
@@ -36,6 +37,7 @@ export const aiGatewayMessagesEndpoint = `${aiGatewayBaseUrl}/messages`;
 export const aiGatewayChatCompletionsEndpoint = `${aiGatewayBaseUrl}/chat/completions`;
 
 const providerRequestTimeoutMs = 10 * 60_000;
+const tracer = trace.getTracer("responder-model-broker");
 const modelIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u;
 
 type ClaimGrant = (input: {
@@ -192,6 +194,52 @@ function logBrokerError(
   }));
 }
 
+// GenAI provider names for the broker's providers, as the OpenTelemetry
+// conventions spell them.
+const genAiProviderNames: Record<string, string> = {
+  google: "gcp.gemini",
+  mistral: "mistral_ai",
+  xai: "x_ai",
+};
+
+// A span for one forwarded model call, in the GenAI conventions, so the call's
+// model and tokens show in Responder's own AI telemetry. It records no prompt
+// or output.
+function startModelCallSpan(grant: AutomationModelBrokerClaim): Span {
+  return tracer.startSpan(`chat ${grant.model}`, {
+    attributes: {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": genAiProviderNames[grant.provider] ?? grant.provider,
+      "gen_ai.request.max_tokens": grant.maxOutputTokens,
+      "gen_ai.request.model": grant.model,
+      "responder.automation.run_id": grant.runId,
+      "responder.inference.source": grant.inferenceSource,
+      "responder.organization.id": grant.organizationId,
+    },
+    kind: SpanKind.CLIENT,
+  });
+}
+
+// Input tokens in the conventions include cached reads and cache writes.
+function endModelCallSpan(span: Span, usage: AutomationModelUsage | null): void {
+  if (usage) {
+    span.setAttributes({
+      "gen_ai.usage.cache_creation.input_tokens": usage.cacheWriteTokens,
+      "gen_ai.usage.cache_read.input_tokens": usage.cachedInputTokens,
+      "gen_ai.usage.input_tokens": usage.inputTokens + usage.cachedInputTokens + usage.cacheWriteTokens,
+      "gen_ai.usage.output_tokens": usage.outputTokens,
+    });
+  }
+  span.end();
+}
+
+// `errorType` is the error's class name or the provider's HTTP status.
+function failModelCallSpan(span: Span, errorType: string): void {
+  span.setAttribute("error.type", errorType);
+  span.setStatus({ code: SpanStatusCode.ERROR });
+  span.end();
+}
+
 // Forwards the provider body unchanged while reading its token usage. When
 // `drainOnCancel` is set, a client disconnect does not stop the upstream read:
 // the provider still bills the whole response, so usage is read to the end.
@@ -253,8 +301,15 @@ function brokerResponse(
   grant: AutomationModelBrokerClaim,
   dependencies: AutomationModelBrokerDependencies,
   reservationId: string | undefined,
+  span: Span,
 ): Response {
   const headers = providerResponseHeaders(providerResponse.headers);
+  if (!providerResponse.ok) {
+    span.setAttribute("http.response.status_code", providerResponse.status);
+    failModelCallSpan(span, String(providerResponse.status));
+  } else if (!providerResponse.body) {
+    endModelCallSpan(span, null);
+  }
   if (reservationId && !providerResponse.body) {
     releaseReservation(reservationId, grant, dependencies);
   }
@@ -266,6 +321,7 @@ function brokerResponse(
           providerResponse.headers.get("content-type"),
         ),
         (usage) => {
+          endModelCallSpan(span, usage);
           const recorded = reservationId
             ? usage
               ? dependencies.completeInference({
@@ -514,6 +570,38 @@ function releaseReservation(
   });
 }
 
+// Calls the provider inside the model call's span.
+async function callProvider(
+  context: Context,
+  grant: AutomationModelBrokerClaim,
+  request: ProviderRequest,
+  dependencies: AutomationModelBrokerDependencies,
+): Promise<{ response: Response; span: Span }> {
+  const span = startModelCallSpan(grant);
+  try {
+    const response = await otelContext.with(trace.setSpan(otelContext.active(), span), () =>
+      dependencies.providerFetch(request.url, {
+        body: JSON.stringify(request.body),
+        headers: request.headers,
+        method: "POST",
+        redirect: "error",
+        // Responder-funded requests are not cancelled with the client, so the
+        // full response can be metered. Organization-funded requests stop
+        // when the client disconnects.
+        signal: grant.inferenceSource === "responder"
+          ? AbortSignal.timeout(providerRequestTimeoutMs)
+          : AbortSignal.any([
+              context.req.raw.signal,
+              AbortSignal.timeout(providerRequestTimeoutMs),
+            ]),
+      }));
+    return { response, span };
+  } catch (error) {
+    failModelCallSpan(span, error instanceof Error ? error.name : "unknown");
+    throw error;
+  }
+}
+
 async function forward(
   context: Context,
   format: AutomationModelWireFormat,
@@ -523,24 +611,11 @@ async function forward(
 ): Promise<Response> {
   let providerResponse: Response;
   let reservationId: string | undefined;
+  let span: Span;
   try {
     const request = await buildRequest();
     reservationId = request.reservationId;
-    providerResponse = await dependencies.providerFetch(request.url, {
-      body: JSON.stringify(request.body),
-      headers: request.headers,
-      method: "POST",
-      redirect: "error",
-      // Responder-funded requests are not cancelled with the client, so the
-      // full response can be metered. Organization-funded requests stop
-      // when the client disconnects.
-      signal: grant.inferenceSource === "responder"
-        ? AbortSignal.timeout(providerRequestTimeoutMs)
-        : AbortSignal.any([
-            context.req.raw.signal,
-            AbortSignal.timeout(providerRequestTimeoutMs),
-          ]),
-    });
+    ({ response: providerResponse, span } = await callProvider(context, grant, request, dependencies));
   } catch (error) {
     if (reservationId) releaseReservation(reservationId, grant, dependencies);
     if (error instanceof BrokerRequestError) {
@@ -554,7 +629,7 @@ async function forward(
     releaseReservation(reservationId, grant, dependencies);
     reservationId = undefined;
   }
-  return brokerResponse(providerResponse, format, grant, dependencies, reservationId);
+  return brokerResponse(providerResponse, format, grant, dependencies, reservationId, span);
 }
 
 export function createAutomationModelBrokerRoutes(
