@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.6.25",
-    "@better-auth/oauth-provider": "1.6.25",
+    "@better-auth/oauth-provider": "1.7.0",
     "@c15t/backend": "2.2.1",
     "@c15t/react": "2.2.1",
     "@c15t/scripts": "2.2.0",
