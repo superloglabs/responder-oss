@@ -74,6 +74,7 @@ interface AppShellProps {
     | "default"
     | "compact"
     | "create"
+    | "dashboard"
     | "edit"
     | "investigation"
     | "scans"

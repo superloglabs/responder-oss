@@ -244,18 +244,17 @@ function VariableControl({
 // options, an attribute, or several values opens a list of values, where
 // values can also be typed; any other variable is a text field.
 export function DashboardVariableBar({
-  onAdd,
   onChange,
   range,
   values,
   variables,
 }: {
-  onAdd: () => void;
   onChange: (name: string, value: DashboardVariableValue) => void;
   range: DashboardTimeRange;
   values: VariableValues;
   variables: DashboardVariable[];
 }) {
+  if (variables.length === 0) return null;
   return (
     <div aria-label="Variables" className="dashboardVariables" role="group">
       {variables.map((variable) =>
@@ -277,9 +276,6 @@ export function DashboardVariableBar({
           />
         ),
       )}
-      <button className="dashboardVariables__add" onClick={onAdd} type="button">
-        <PlusIcon size={11} />Variable
-      </button>
     </div>
   );
 }

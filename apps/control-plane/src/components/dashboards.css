@@ -1,4 +1,14 @@
-.dashboardPage { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The dashboard fills the panel: a plain band with the controls, then a dotted
+   canvas under the widgets. Each part centers its content like other pages. */
+.appShell--dashboard .workspaceContent { max-width: none; min-height: 100%; padding: 0; gap: 0; }
+.dashboardPage { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.dashboardPage__column { width: 100%; max-width: 1024px; margin: 0 auto; padding: 0 40px; }
+.dashboardPage__controls { padding: 32px 0 16px; border-bottom: .5px solid var(--ds-border-default); }
+.dashboardPage__canvas { flex: 1; padding: 24px 0 64px; background: #f8f8f8 radial-gradient(circle, #d6d6d6 1px, transparent 1.2px) 0 0 / 16px 16px; }
+.dashboardPage__canvas > .dashboardPage__column { display: flex; flex-direction: column; gap: 16px; }
+.dashboardPage__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; }
+@media (max-width: 900px) { .dashboardPage__column { padding: 0 24px; } }
+@media (max-width: 600px) { .dashboardPage__column { padding: 0 12px; } .dashboardPage__controls { padding-top: 24px; } }
 .dashboardPage__titleRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; }
 .dashboardPage__titleRow h1 { margin: 0; color: var(--ds-text-primary); font-size: 15px; font-weight: 600; line-height: 23px; overflow-wrap: anywhere; }
 .dashboardPage__titleRow .dsSegmentedControl { padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
