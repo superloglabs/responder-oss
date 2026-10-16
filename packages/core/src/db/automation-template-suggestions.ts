@@ -49,9 +49,10 @@ function settledDay(now: Date) {
   );
 }
 
-// Organizations with automations that a member used in the last week, which
-// have no suggestions for the day yet. Operator impersonation does not count
-// as use.
+// Organizations with automations and at least one repository that a member
+// used in the last week, which have no suggestions for the day yet. Without a
+// repository the model has nothing specific to suggest from. Operator
+// impersonation does not count as use.
 export async function listOrganizationsDueForAutomationSuggestions(input: {
   activeSince: Date;
   day: string;
@@ -63,6 +64,11 @@ export async function listOrganizationsDueForAutomationSuggestions(input: {
     .selectDistinct({ organizationId: session.activeOrganizationId })
     .from(session)
     .where(and(gt(session.updatedAt, input.activeSince), isNull(session.impersonatedBy)));
+  const withRepositories = db
+    .selectDistinct({ organizationId: integrationAccounts.organizationId })
+    .from(repositories)
+    .innerJoin(integrationAccounts, eq(repositories.integrationAccountId, integrationAccounts.id))
+    .where(and(eq(integrationAccounts.status, "connected"), eq(repositories.available, true)));
   const done = db
     .select({ organizationId: automationTemplateSuggestions.organizationId })
     .from(automationTemplateSuggestions)
@@ -74,6 +80,7 @@ export async function listOrganizationsDueForAutomationSuggestions(input: {
       eq(organizationCapabilities.capability, "automations"),
       eq(organizationCapabilities.enabled, true),
       inArray(sql`${organizationCapabilities.organizationId}::text`, active),
+      inArray(organizationCapabilities.organizationId, withRepositories),
       notInArray(organizationCapabilities.organizationId, done),
     ))
     .limit(input.limit);
