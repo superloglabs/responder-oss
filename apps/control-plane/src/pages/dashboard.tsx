@@ -1,10 +1,10 @@
-import { ArrowClockwiseIcon, DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardDialog } from "../components/dashboard-dialog";
-import { DashboardTimePicker, LiveStatus } from "../components/dashboard-time-picker";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { DashboardVariableBar, DashboardVariablesEditor } from "../components/dashboard-variables";
 import { DashboardWidgetBody } from "../components/dashboard-widget";
 import { DashboardWidgetEditor } from "../components/dashboard-widget-editor";
@@ -18,7 +18,6 @@ import {
 import { Button, IconButton, TextField } from "../design-system";
 import {
   browserTimeZone,
-  defaultTimeRange,
   isLive,
   liveRefreshInterval,
   timeRangeFromParams,
@@ -166,8 +165,6 @@ export function DashboardPage() {
   const range = useMemo(() => timeRangeFromParams(params), [rangeKey]);
   // The range before someone zoomed into a chart, which zooming out returns to.
   const [zoomedFrom, setZoomedFrom] = useState<DashboardTimeRange | null>(null);
-  // The live range Resume live returns to.
-  const [lastLive, setLastLive] = useState<DashboardTimeRange>(() => (isLive(range) ? range : defaultTimeRange));
   const [timeZonePreference, setTimeZonePreference] = useState(storedTimeZone);
   const timeZone = timeZonePreference === "browser" ? browserTimeZone() : timeZonePreference;
   const [now, setNow] = useState(() => Date.now());
@@ -217,7 +214,6 @@ export function DashboardPage() {
   }, [range]);
 
   const changeRange = useCallback((next: DashboardTimeRange, zoomed: DashboardTimeRange | null = null) => {
-    if (isLive(next)) setLastLive(next);
     setZoomedFrom(zoomed);
     setNow(Date.now());
     setParams((current) => timeRangeParams(next, current), { replace: true });
@@ -392,7 +388,6 @@ export function DashboardPage() {
               </form>
             )}
             <span className="automationCreate__spacer" />
-            <LiveStatus live={isLive(range)} onResume={() => changeRange(lastLive)} />
             <DashboardTimePicker
               now={now}
               onChange={(next) => changeRange(next)}
@@ -406,17 +401,6 @@ export function DashboardPage() {
               timeZonePreference={timeZonePreference}
               zoomed={zoomedFrom !== null}
             />
-            <IconButton
-              aria-label="Refresh"
-              onClick={() => {
-                setNow(Date.now());
-                setRefresh((count) => count + 1);
-              }}
-              size="small"
-              variant="ghost"
-            >
-              <ArrowClockwiseIcon size={14} />
-            </IconButton>
             <Button onClick={() => setEditing({ widget: null })} size="small" variant="primary">
               <PlusIcon size={12} />Add widget
             </Button>

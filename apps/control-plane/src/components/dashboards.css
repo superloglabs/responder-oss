@@ -11,23 +11,24 @@
 
 
 /* Grid placeholder and resize handle in the design's colors. */
-.dashboardPage .react-grid-item.react-grid-placeholder { border-radius: 12px; background: var(--ds-info); opacity: .15; }
+.dashboardPage .react-grid-item.react-grid-placeholder { border-radius: 14px; background: var(--ds-info); opacity: .15; }
 .dashboardPage .react-grid-item > .react-resizable-handle::after { border-color: var(--ds-text-muted); }
 .dashboardPage .react-grid-item.react-draggable-dragging { z-index: 3; }
 
-.dashboardWidget { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; }
-.dashboardWidget__header { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 0 14px; cursor: grab; }
+/* A gray shell holding the title, around a white card with the content. */
+.dashboardWidget { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; border-radius: 14px; background: color-mix(in srgb, var(--ds-text-primary) 5%, var(--ds-surface-raised)); }
+.dashboardWidget__header { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 6px 0 12px; cursor: grab; }
 .dashboardPage__stack .dashboardWidget__header { cursor: default; }
 .react-draggable-dragging .dashboardWidget__header { cursor: grabbing; }
-.dashboardWidget__handle { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ds-text-primary); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dashboardWidget__handle { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ds-text-primary); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .dashboardWidget__actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--ds-duration-fast) var(--ds-ease-standard); }
 .dashboardWidget:hover .dashboardWidget__actions, .dashboardWidget:focus-within .dashboardWidget__actions { opacity: 1; }
 @media (hover: none) { .dashboardWidget__actions { opacity: 1; } }
-.dashboardWidget__body { flex: 1; min-height: 0; padding: 8px 14px 12px; overflow: auto; cursor: default; }
+.dashboardWidget__body { flex: 1; min-height: 0; margin: 0 4px 4px; padding: 12px 12px 10px; overflow: auto; border-radius: 10px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); box-shadow: 0 1px 2px #0000000d; cursor: default; }
 .dashboardWidget__status { margin: 0; padding: 12px 0; color: var(--ds-text-muted); font-size: 12px; }
 
 .dashboardWidget__table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
-.dashboardWidget__table th { position: sticky; top: -8px; padding: 4px 8px 6px 0; overflow: hidden; background: var(--ds-surface-base); color: var(--ds-text-muted); font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.dashboardWidget__table th { position: sticky; top: -12px; padding: 4px 8px 6px 0; overflow: hidden; background: var(--ds-surface-base); color: var(--ds-text-muted); font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 /* Proportional columns, so the message or root span keeps room in a narrow widget. */
 .dashboardWidget__table th:first-child { width: 22%; }
 .dashboardWidget__table th:nth-child(2) { width: 16%; }
