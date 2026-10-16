@@ -237,7 +237,7 @@ export function TraceDrawer({
                   {
                     header: "Service",
                     key: "service",
-                    render: (log) => <span className="explorerCell--muted">{log.service || "—"}</span>,
+                    render: (log) => <span className="explorerCell--muted" title={log.service || undefined}>{log.service || "—"}</span>,
                     width: "128px",
                   },
                   {
