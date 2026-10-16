@@ -41,6 +41,10 @@ export const legacyAutomationRunQueue = "responder-automation-runs-v1";
 // Each job advances one Google Cloud project setup by one bounded round and
 // queues the next round until setup finishes, fails, or passes its deadline.
 export const gcpProjectSetupQueue = "responder-gcp-project-setup-v1";
+// Writes replacements for suggested automation templates a member used or
+// dismissed. Jobs are grouped by workspace and run one at a time per group, so
+// two jobs never write the same day's suggestions at once.
+export const automationSuggestionRefillQueue = "responder-automation-suggestion-refills-v1";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -159,6 +163,14 @@ export const gcpProjectSetupJobSchema = z.object({
   userId: z.string().min(1),
 });
 export type GcpProjectSetupJob = z.infer<typeof gcpProjectSetupJobSchema>;
+
+export const automationSuggestionRefillJobSchema = z.object({
+  generatedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  kind: z.literal("automation_suggestion_refill"),
+  organizationId: z.uuid(),
+  queuedAt: z.iso.datetime(),
+});
+export type AutomationSuggestionRefillJob = z.infer<typeof automationSuggestionRefillJobSchema>;
 export const responderJobSchema = z.union([
   investigationJobSchema,
   remediationJobSchema,
@@ -324,6 +336,14 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       retryBackoff: true,
       retryDelay: 5,
       retryLimit: 3,
+    }),
+    boss.createQueue(automationSuggestionRefillQueue, {
+      deleteAfterSeconds: 86_400,
+      // One model call with a two-minute timeout.
+      expireInSeconds: 300,
+      notify: true,
+      // A failed refill closes its request; the member can ask again.
+      retryLimit: 0,
     }),
     boss.createQueue(legacyAutomationRunQueue, {
       deleteAfterSeconds: 604_800,

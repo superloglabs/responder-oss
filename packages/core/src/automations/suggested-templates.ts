@@ -16,6 +16,8 @@ export const suggestedAutomationTemplateCount = 3;
 export interface AutomationSuggestionContext {
   automations: Array<{ description: string; name: string }>;
   connectedProviders: string[];
+  // Earlier suggestions a member dismissed instead of using.
+  dismissedSuggestions: string[];
   previousSuggestions: string[];
   recentIssues: Array<{ severity: string; title: string }>;
   repositories: string[];
@@ -87,15 +89,18 @@ function templateTrigger(trigger: SuggestionTrigger): AutomationTrigger {
 
 // Turns the model's answer into templates the create page can apply. Drops
 // suggestions that need a provider the workspace has not connected or that
-// repeat an existing automation or template name, and keeps the first three.
+// repeat an existing automation or template name, and keeps the first
+// `limit`, three by default.
 export function suggestedAutomationTemplates(
   output: AutomationSuggestionOutput,
-  input: { connectedProviders: string[]; takenNames: string[] },
+  input: { connectedProviders: string[]; limit?: number; takenNames: string[] },
   newId: () => string = randomUUID,
 ): SuggestedAutomationTemplate[] {
   const connected = new Set(input.connectedProviders);
   const taken = new Set(input.takenNames.map((name) => name.trim().toLowerCase()));
+  const limit = input.limit ?? suggestedAutomationTemplateCount;
   const templates: SuggestedAutomationTemplate[] = [];
+  if (limit <= 0) return templates;
   for (const suggestion of output.suggestions) {
     const { trigger } = suggestion;
     if (triggerProviders.has(trigger.kind) && !connected.has(trigger.kind)) continue;
@@ -116,19 +121,22 @@ export function suggestedAutomationTemplates(
       reason: clip(suggestion.reason, 160),
       triggers: [templateTrigger(trigger)],
     });
-    if (templates.length === suggestedAutomationTemplateCount) break;
+    if (templates.length === limit) break;
   }
   return templates;
 }
 
-export const automationSuggestionSystemPrompt = [
-  "You suggest automations for a Responder workspace. Responder runs a coding agent with the workspace's repositories and connected tools when a trigger fires.",
-  `Suggest ${suggestedAutomationTemplateCount + 2} automations this team would set up today. Base each one on something specific in the workspace: a connected tool, a repository, or a recent issue. Prefer automations that save the team recurring work over generic ones.`,
-  "Use only the connected providers for triggers and connectors. GitHub supplies repositories. A schedule trigger needs no provider.",
-  "Do not repeat an existing automation, a built-in template, or a suggestion from the previous days.",
-  "Write the prompt as direct instructions to the agent: what to look at, what to do, where to report, and what to do when it finds nothing. Do not invent channel names, project names, or people.",
-  "Write in plain, short sentences. No marketing language.",
-].join("\n");
+// Asks for two more than needed, since some answers are dropped.
+export function automationSuggestionSystemPrompt(count = suggestedAutomationTemplateCount): string {
+  return [
+    "You suggest automations for a Responder workspace. Responder runs a coding agent with the workspace's repositories and connected tools when a trigger fires.",
+    `Suggest ${count + 2} automations this team would set up today. Base each one on something specific in the workspace: a connected tool, a repository, or a recent issue. Prefer automations that save the team recurring work over generic ones.`,
+    "Use only the connected providers for triggers and connectors. GitHub supplies repositories. A schedule trigger needs no provider.",
+    "Do not repeat an existing automation, a built-in template, or an earlier suggestion. Do not suggest automations like the ones the team dismissed.",
+    "Write the prompt as direct instructions to the agent: what to look at, what to do, where to report, and what to do when it finds nothing. Do not invent channel names, project names, or people.",
+    "Write in plain, short sentences. No marketing language.",
+  ].join("\n");
+}
 
 export function automationSuggestionPrompt(
   context: AutomationSuggestionContext,
@@ -142,6 +150,7 @@ export function automationSuggestionPrompt(
     `Existing automations:\n${list(context.automations.map((automation) => automation.description ? `${automation.name}: ${automation.description}` : automation.name))}`,
     `Issues found in the last two weeks:\n${list(context.recentIssues.map((issue) => `${issue.title} (${issue.severity})`))}`,
     `Built-in templates:\n${list(builtInTemplates.map((template) => `${template.name}: ${template.description}`))}`,
-    `Suggested on previous days:\n${list(context.previousSuggestions)}`,
+    `Suggested before:\n${list(context.previousSuggestions)}`,
+    `Dismissed by the team:\n${list(context.dismissedSuggestions)}`,
   ].join("\n\n");
 }

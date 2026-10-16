@@ -617,6 +617,13 @@
       "when": 1792136363579,
       "tag": "0087_automation_template_suggestions",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1792147501845,
+      "tag": "0088_automation_suggestion_refills",
+      "breakpoints": true
     }
   ]
 }

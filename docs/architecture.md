@@ -211,7 +211,12 @@ investigation credits.
   workspace name, connected providers, repository names, automation names,
   and the titles of the last two weeks' issues. One row per organization and
   day holds the result; a failed day is retried up to three times, and rows
-  are kept for 14 days.
+  are kept for 14 days. A suggestion a member uses or dismisses leaves the
+  gallery, and Refresh replaces all shown suggestions. Either one queues a
+  refill job, grouped by organization so one runs at a time, that writes
+  replacements up to three shown. An organization gets ten refills a day.
+  The model also reads the day's earlier and dismissed suggestions, so it
+  does not repeat them.
 
 Postgres and pg-boss hold investigation, remediation, and follow-up work.
 Delivery may be at least once, so handlers use idempotency keys and state

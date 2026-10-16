@@ -261,7 +261,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       sharedTemplateSlug
         ? fetchSharedAutomationTemplate(sharedTemplateSlug).catch(() => null)
         : suggestionId
-          ? fetchAutomationSuggestions().then((suggestions) => suggestions.find((suggestion) => suggestion.id === suggestionId) ?? null, () => null)
+          ? fetchAutomationSuggestions().then(({ suggestions }) => suggestions.find((suggestion) => suggestion.id === suggestionId) ?? null, () => null)
           : null,
     ])
       .then(([loadedOptions, loadedTemplate]) => {

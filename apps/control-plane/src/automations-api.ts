@@ -250,10 +250,27 @@ export async function fetchSlackAuthors(accountId: string, channelIds: string[],
   return authors ?? [];
 }
 
-// Templates written for this workspace this morning.
-export async function fetchAutomationSuggestions(): Promise<SuggestedAutomationTemplate[]> {
-  const response = await automationJson<{ suggestions: SuggestedAutomationTemplate[] }>("/api/automations/suggestions");
-  return response.suggestions;
+export interface AutomationSuggestions {
+  // False once today's replacements are used up.
+  canRefresh: boolean;
+  // True while replacements are being written.
+  refreshing: boolean;
+  suggestions: SuggestedAutomationTemplate[];
+}
+
+// Templates written for this workspace this morning, without the ones
+// members used or dismissed.
+export function fetchAutomationSuggestions(): Promise<AutomationSuggestions> {
+  return automationJson<AutomationSuggestions>("/api/automations/suggestions");
+}
+
+export function dismissAutomationSuggestion(id: string): Promise<AutomationSuggestions> {
+  return automationJson<AutomationSuggestions>(`/api/automations/suggestions/${encodeURIComponent(id)}/dismiss`, { method: "POST" });
+}
+
+// Replaces every shown suggestion with new ones.
+export function refreshAutomationSuggestions(): Promise<AutomationSuggestions> {
+  return automationJson<AutomationSuggestions>("/api/automations/suggestions/refresh", { method: "POST" });
 }
 
 export function fetchAutomationOptions(): Promise<AutomationOptions> {
