@@ -10,12 +10,19 @@ const transport: NonNullable<NodeOptions["transport"]> = () => ({
   flush: async () => true,
   send: async (envelope) => {
     for (const [header, payload] of envelope[1]) {
-      if (header.type === "event") sent.push(payload as Event);
+      if (header.type === "event" || header.type === "transaction") {
+        sent.push(payload as Event);
+      }
     }
     return {};
   },
 });
-Sentry.init({ defaultIntegrations: false, dsn: "https://public@example.invalid/1", transport });
+Sentry.init({
+  defaultIntegrations: false,
+  dsn: "https://public@example.invalid/1",
+  tracesSampleRate: 1,
+  transport,
+});
 
 afterAll(async () => {
   await Sentry.close();
@@ -37,5 +44,18 @@ describe("worker error monitoring with the Sentry client", () => {
     expect(sent.at(-1)?.contexts?.aggregated_errors).toEqual({
       error_1: "Error: The usage allowance for this billing period is used up",
     });
+  });
+
+  it("sends transactions, whose metadata holds Sentry's live scopes and client", async () => {
+    initializeErrorMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    sent.length = 0;
+
+    Sentry.startSpan({ forceTransaction: true, name: "queue job" }, () => undefined);
+    await Sentry.flush(2_000);
+
+    expect(sent.map((event) => event.type ?? event.exception?.values?.[0]?.value)).toEqual([
+      "transaction",
+    ]);
+    expect(sent[0]?.transaction).toBe("queue job");
   });
 });
