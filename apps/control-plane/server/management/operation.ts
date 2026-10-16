@@ -34,6 +34,7 @@ export type ManagementTag =
   | "Runs"
   | "Secrets"
   | "Tag mode"
+  | "Telemetry"
   | "Workspace";
 
 // Responses are serialized as JSON before they are checked against the

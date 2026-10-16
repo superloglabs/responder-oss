@@ -1,4 +1,5 @@
 import { integrationConnectionOperations } from "./integration-connections.js";
+import { telemetryOperations } from "./telemetry-operations.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -1027,4 +1028,5 @@ export const managementOperations: ManagementOperation[] = [
       return { secret: stored.secret };
     },
   }),
+  ...telemetryOperations,
 ];

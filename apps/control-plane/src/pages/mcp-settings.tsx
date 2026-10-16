@@ -42,7 +42,7 @@ export function McpSettingsPage() {
           <a href={docsUrl} rel="noreferrer" target="_blank">MCP client</a>.
           The client asks you to sign in and choose a workspace, then acts as
           you there. It can read and change automations, their runs, tag mode,
-          and model access.
+          and model access, and search your logs, traces, and metrics.
         </p>
 
         {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}

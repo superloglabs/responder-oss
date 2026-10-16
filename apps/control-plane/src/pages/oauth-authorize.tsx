@@ -131,7 +131,8 @@ function Consent({
         <h1>Connect {clientName ?? "an MCP client"}</h1>
         <p>
           It will act as you in the workspace you choose. It can read and change
-          automations, their runs, tag mode, and model access.
+          automations, their runs, tag mode, and model access, and read logs,
+          traces, and metrics.
         </p>
       </div>
       {organizations.isPending ? (
