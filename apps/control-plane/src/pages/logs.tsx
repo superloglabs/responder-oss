@@ -1,8 +1,9 @@
-import { CaretDownIcon, CaretUpIcon, ListMagnifyingGlassIcon, TreeStructureIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, CaretDownIcon, CaretUpIcon, ListMagnifyingGlassIcon, TreeStructureIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { TelemetryGate } from "../components/telemetry";
 import {
   AddFacet,
@@ -10,13 +11,12 @@ import {
   ExplorerDrawer,
   ExplorerFacet,
   ExplorerFilterBar,
-  ExplorerTimeControls,
   type FilterChip,
 } from "../components/telemetry-explorer";
-import { fetchAttributeKeys, fetchAttributeValues } from "../dashboards-api";
-import { Badge, DataTable, IconButton, SelectField } from "../design-system";
+import { resolveTimeRange, zoomOutTimeRange } from "../dashboard-time-range";
+import { fetchAttributeKeys } from "../dashboards-api";
+import { DataTable, IconButton } from "../design-system";
 import {
-  environmentFilter,
   explorerFilterText,
   fetchExplorerLogs,
   fetchLogFacets,
@@ -30,9 +30,7 @@ import {
   logTimestamp,
   parseExplorerFilter,
   severityTextTone,
-  telemetryRangeWindow,
   traceHref,
-  withEnvironment,
   type ExplorerFilter,
   type LevelSeries,
   type LogExplorerQuery,
@@ -41,6 +39,7 @@ import {
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
 import { useTelemetryQuery } from "../use-telemetry-query";
+import { useTimeZonePreference } from "../use-time-zone-preference";
 import "../components/automation-run-history.css";
 
 const levelChart: Array<HistogramSeries<LevelSeries>> = [
@@ -69,12 +68,22 @@ function logKey(log: LogRecord, index: number): string {
   return `${log.timestamp}-${log.span_id}-${index}`;
 }
 
+// A log level as a coloured dot and its name.
+function LogLevel({ severity }: { severity: string }) {
+  return (
+    <span className={`explorerLevel explorerLevel--${severityTextTone(severity)}`}>
+      <i aria-hidden="true" />{levelLabel(severity)}
+    </span>
+  );
+}
+
 function LogDrawer({
   index,
   log,
   onClose,
   onFilter,
   onMove,
+  timeZone,
   total,
 }: {
   index: number;
@@ -82,6 +91,7 @@ function LogDrawer({
   onClose: () => void;
   onFilter: (filter: ExplorerFilter) => void;
   onMove: (index: number) => void;
+  timeZone: string;
   total: number;
 }) {
   const exception = [log.exception_type, log.exception_message].filter(Boolean).join(": ");
@@ -91,9 +101,9 @@ function LogDrawer({
     <ExplorerDrawer
       header={(
         <>
-          <Badge tone={severityTextTone(log.severity)}>{levelLabel(log.severity)}</Badge>
+          <LogLevel severity={log.severity} />
           <time className="explorerCell--number" dateTime={logTimestamp(log.timestamp)?.toISOString()}>
-            {formatExplorerTime(log.timestamp, true)}
+            {formatExplorerTime(log.timestamp, true, timeZone)}
           </time>
           <span className="explorerCell--muted">{log.service || "—"}</span>
           <span className="explorerDrawer__spacer" />
@@ -155,20 +165,21 @@ function logKeyForAttributes(log: LogRecord): string {
   return log.service;
 }
 
-function LogExplorer({ live, query, setQuery }: {
-  live: boolean;
+function LogExplorer({ query, refresh, setQuery, timeZone }: {
   query: LogExplorerQuery;
+  // Changes when someone asks to reload.
+  refresh: number;
   setQuery: (update: Partial<LogExplorerQuery>) => void;
+  timeZone: string;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const key = logExplorerParams(query).toString();
-  const logs = useTelemetryQuery(key, () => fetchExplorerLogs(query), live);
-  const histogram = useTelemetryQuery(key, () => fetchLogHistogram(query), live);
-  const facets = useTelemetryQuery(key, () => fetchLogFacets(query), live);
-  const attributeKeys = useTelemetryQuery(query.range, () => fetchAttributeKeys(telemetryRangeWindow(query.range), "logs"));
-  const environments = useTelemetryQuery(query.range, () =>
-    fetchAttributeValues(telemetryRangeWindow(query.range), "logs", "resource.deployment.environment"),
-  );
+  const params = logExplorerParams(query);
+  const key = `${params}#${refresh}`;
+  const rangeKey = `${["range", "from", "to"].map((name) => params.get(name) ?? "").join("|")}#${refresh}`;
+  const logs = useTelemetryQuery(key, () => fetchExplorerLogs(query));
+  const histogram = useTelemetryQuery(key, () => fetchLogHistogram(query));
+  const facets = useTelemetryQuery(key, () => fetchLogFacets(query));
+  const attributeKeys = useTelemetryQuery(rangeKey, () => fetchAttributeKeys(resolveTimeRange(query.range, Date.now()), "logs"));
 
   const bars = useMemo(
     () => (histogram.data ? histogramBars(histogram.data, levelSeriesNames, levelSeries) : null),
@@ -178,8 +189,8 @@ function LogExplorer({ live, query, setQuery }: {
   const rows = useMemo(() => (logs.data ?? []).map((log, index) => ({ ...log, key: logKey(log, index) })), [logs.data]);
   const selectedIndex = rows.findIndex((row) => row.key === selected);
   const selectedLog = selectedIndex >= 0 ? rows[selectedIndex] : null;
-  const environment = environmentFilter(query.filters);
-  const withDate = query.range === "7d" || query.range === "24h";
+  // Dates show for fixed windows and for the last day or more.
+  const withDate = query.range.kind === "absolute" || query.range.minutes >= 1_440;
 
   function toggle(list: "services" | "severities", value: string) {
     const current = query[list];
@@ -222,18 +233,12 @@ function LogExplorer({ live, query, setQuery }: {
       onRemove: () => toggle("severities", severity),
       value: levelLabel(severity),
     })),
-    ...query.filters
-      .filter((filter) => filter.value !== environment || filter.key !== "resource.deployment.environment")
-      .map((filter) => ({
-        id: `filter-${explorerFilterText(filter)}`,
-        label: filterChipLabel(filter),
-        onRemove: () => setQuery({ filters: query.filters.filter((item) => item !== filter) }),
-        value: filter.value,
-      })),
-  ];
-  const environmentOptions = [
-    ...(environments.data ?? []),
-    ...(environment && !environments.data?.includes(environment) ? [environment] : []),
+    ...query.filters.map((filter) => ({
+      id: `filter-${explorerFilterText(filter)}`,
+      label: filterChipLabel(filter),
+      onRemove: () => setQuery({ filters: query.filters.filter((item) => item !== filter) }),
+      value: filter.value,
+    })),
   ];
 
   return (
@@ -246,22 +251,13 @@ function LogExplorer({ live, query, setQuery }: {
           onSubmit={submitText}
           placeholder="Search messages, key=value or a trace ID"
         />
-        {environmentOptions.length > 0 ? (
-          <SelectField
-            className="explorerSelect"
-            label="Environment"
-            onChange={(value) => setQuery({ filters: withEnvironment(query.filters, value) })}
-            options={[{ label: "All environments", value: "" }, ...environmentOptions.map((value) => ({ label: value, value }))]}
-            value={environment}
-          />
-        ) : null}
       </div>
       <section aria-label="Log volume" className="explorerVolume">
         <div className="explorerVolume__summary">
           <strong>{total === undefined ? "…" : `${total.toLocaleString()} ${total === 1 ? "log" : "logs"}`}</strong>
           <HistogramLegend bars={bars} series={levelChart} />
         </div>
-        <CountHistogram bars={bars} label="Matching logs over time, by level" series={levelChart} />
+        <CountHistogram bars={bars} label="Matching logs over time, by level" series={levelChart} timeZone={timeZone} />
       </section>
       {logs.error || histogram.error || facets.error ? (
         <div className="automationRuns__message" role="alert">
@@ -336,7 +332,7 @@ function LogExplorer({ live, query, setQuery }: {
                   key: "time",
                   render: (log) => (
                     <time className="explorerCell--muted" dateTime={logTimestamp(log.timestamp)?.toISOString()}>
-                      {formatExplorerTime(log.timestamp, withDate)}
+                      {formatExplorerTime(log.timestamp, withDate, timeZone)}
                     </time>
                   ),
                   width: withDate ? "176px" : "124px",
@@ -344,7 +340,7 @@ function LogExplorer({ live, query, setQuery }: {
                 {
                   header: "Level",
                   key: "severity",
-                  render: (log) => <Badge tone={severityTextTone(log.severity)}>{levelLabel(log.severity)}</Badge>,
+                  render: (log) => <LogLevel severity={log.severity} />,
                   width: "76px",
                 },
                 {
@@ -388,6 +384,7 @@ function LogExplorer({ live, query, setQuery }: {
           onClose={() => setSelected(null)}
           onFilter={(filter) => { addFilter(filter); setSelected(null); }}
           onMove={(index) => setSelected(rows[index]?.key ?? null)}
+          timeZone={timeZone}
           total={rows.length}
         />
       ) : null}
@@ -400,10 +397,18 @@ export function LogsPage() {
   const telemetry = useTelemetryAvailable();
   const [params, setParams] = useSearchParams();
   const query = logExplorerQuery(params);
-  const [live, setLive] = useState(false);
+  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  const [now, setNow] = useState(() => Date.now());
+  const [refresh, setRefresh] = useState(0);
 
   function setQuery(update: Partial<LogExplorerQuery>) {
+    if (update.range) setNow(Date.now());
     setParams(logExplorerParams({ ...query, ...update }), { replace: true });
+  }
+
+  function reload() {
+    setNow(Date.now());
+    setRefresh((count) => count + 1);
   }
 
   return (
@@ -413,12 +418,24 @@ export function LogsPage() {
           <h1><ListMagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
           {telemetry.available ? (
             <div className="workspaceHeading__actions">
-              <ExplorerTimeControls live={live} onLiveChange={setLive} onRangeChange={(range) => setQuery({ range })} range={query.range} />
+              <IconButton aria-label="Refresh" onClick={reload} size="small" variant="ghost">
+                <ArrowClockwiseIcon size={14} />
+              </IconButton>
+              <DashboardTimePicker
+                now={now}
+                onChange={(range) => setQuery({ range })}
+                onTimeZoneChange={changeTimeZone}
+                onZoomOut={() => setQuery({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
+                range={query.range}
+                timeZone={timeZone}
+                timeZonePreference={timeZonePreference}
+                zoomed={false}
+              />
             </div>
           ) : null}
         </header>
         <TelemetryGate signal="Logs" state={telemetry}>
-          <LogExplorer live={live} query={query} setQuery={setQuery} />
+          <LogExplorer query={query} refresh={refresh} setQuery={setQuery} timeZone={timeZone} />
         </TelemetryGate>
       </div>
     </AppShell>

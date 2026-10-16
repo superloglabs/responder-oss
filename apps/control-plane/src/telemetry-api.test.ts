@@ -4,6 +4,7 @@ import {
   formatDuration,
   histogramBars,
   levelSeries,
+  logApiParams,
   logExplorerParams,
   logExplorerQuery,
   logTimestamp,
@@ -55,7 +56,7 @@ describe("explorer queries", () => {
         { key: "log.http.route", op: "eq", value: "/checkout" },
         { key: "resource.deployment.environment", op: "neq", value: "staging" },
       ],
-      range: "6h",
+      range: { kind: "relative", minutes: 360 },
       search: "timeout",
       services: ["api"],
       severities: ["ERROR", "WARN"],
@@ -63,6 +64,28 @@ describe("explorer queries", () => {
     expect(logExplorerParams(query).toString()).toBe(
       "range=6h&search=timeout&service=api&severity=ERROR&severity=WARN" +
         "&filter=log.http.route%3D%2Fcheckout&filter=resource.deployment.environment%21%3Dstaging&facet=log.http.route",
+    );
+  });
+
+  it("keeps a fixed log window in the URL and sends the API its bounds", () => {
+    const query = logExplorerQuery(new URLSearchParams(
+      "from=2026-10-14T13:00:00.000Z&to=2026-10-14T14:00:00.000Z&severity=error",
+    ));
+
+    expect(logExplorerParams(query).toString()).toBe(
+      "from=2026-10-14T13%3A00%3A00.000Z&to=2026-10-14T14%3A00%3A00.000Z&severity=ERROR",
+    );
+    expect(logApiParams(query).toString()).toBe(
+      "severity=ERROR&since=2026-10-14T13%3A00%3A00.000Z&until=2026-10-14T14%3A00%3A00.000Z",
+    );
+  });
+
+  it("resolves a log range that ends now when the request is made", () => {
+    const now = Date.parse("2026-10-14T14:00:00.000Z");
+    const query = logExplorerQuery(new URLSearchParams("range=30m"));
+
+    expect(logApiParams(query, now).toString()).toBe(
+      "since=2026-10-14T13%3A30%3A00.000Z&until=2026-10-14T14%3A00%3A00.000Z",
     );
   });
 

@@ -17,7 +17,6 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Button, IconButton, TextField } from "../design-system";
 import {
-  browserTimeZone,
   isLive,
   liveRefreshInterval,
   timeRangeFromParams,
@@ -44,23 +43,11 @@ import {
   type WidgetDraft,
 } from "../dashboards-api";
 import { useDocumentTitle } from "../use-document-title";
+import { useTimeZonePreference } from "../use-time-zone-preference";
 import "react-grid-layout/css/styles.css";
 import "../components/automation-run-history.css";
 import "../components/dashboards.css";
 import "./automation-create.css";
-
-const timeZoneKey = "responder.dashboardTimeZone";
-
-// "browser", or a time zone this browser knows.
-function storedTimeZone(): string {
-  try {
-    const stored = localStorage.getItem(timeZoneKey) ?? "browser";
-    if (stored !== "browser") new Intl.DateTimeFormat(undefined, { timeZone: stored });
-    return stored;
-  } catch {
-    return "browser";
-  }
-}
 
 // Below this width the grid stacks widgets in one column, without dragging.
 const gridMinimumWidth = 720;
@@ -165,8 +152,7 @@ export function DashboardPage() {
   const range = useMemo(() => timeRangeFromParams(params), [rangeKey]);
   // The range before someone zoomed into a chart, which zooming out returns to.
   const [zoomedFrom, setZoomedFrom] = useState<DashboardTimeRange | null>(null);
-  const [timeZonePreference, setTimeZonePreference] = useState(storedTimeZone);
-  const timeZone = timeZonePreference === "browser" ? browserTimeZone() : timeZonePreference;
+  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
   const [now, setNow] = useState(() => Date.now());
   const [dashboard, setDashboard] = useState<TelemetryDashboard | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -228,15 +214,6 @@ export function DashboardPage() {
     if (to <= from) return;
     changeRange({ from, kind: "absolute", to }, zoomedFrom ?? range);
   }, [changeRange, range, zoomedFrom]);
-
-  function changeTimeZone(preference: string) {
-    setTimeZonePreference(preference);
-    try {
-      localStorage.setItem(timeZoneKey, preference);
-    } catch {
-      // The choice still applies to this page.
-    }
-  }
 
   function changeValues(next: VariableValues) {
     setValues(next);
