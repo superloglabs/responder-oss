@@ -7,6 +7,7 @@ import {
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
+  DaytonaCapacityError,
   deleteDaytonaSandboxByName,
   type DaytonaCleanupDependencies,
   pauseDaytonaSandbox,
@@ -17,6 +18,7 @@ import {
   resumedSameDaytonaSandbox,
   sandboxDeletedAfterFailedCreation,
   sandboxesLeftAfterFailedCreation,
+  sweepDaytonaSandboxes,
 } from "./sandbox.js";
 
 function cleanupHarness(options?: {
@@ -477,7 +479,8 @@ describe("Daytona sandbox cleanup", () => {
       initialDeleteError,
     );
     expect(sandboxDeletedAfterFailedCreation(failedBeforeCreation)).toBe(false);
-    expect(failedCleanup).toBeInstanceOf(AggregateError);
+    // A sandbox that never appeared does not hide why creation failed.
+    expect(failedCleanup).toHaveProperty("message", "sandbox creation timed out");
     expect(sandboxDeletedAfterFailedCreation(failedCleanup)).toBe(false);
     expect(creator.create).toHaveBeenCalledOnce();
   });
@@ -639,9 +642,11 @@ describe("Daytona sandbox cleanup", () => {
 
   it("keeps a thread sandbox after it pauses", async () => {
     const harness = cleanupHarness();
+    const setAutoArchiveInterval = vi.fn().mockResolvedValue(undefined);
     const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
     harness.get.mockResolvedValue({
       id: "sandbox-1",
+      setAutoArchiveInterval,
       setAutoDeleteInterval,
     });
 
@@ -654,6 +659,36 @@ describe("Daytona sandbox cleanup", () => {
     );
 
     expect(setAutoDeleteInterval).toHaveBeenCalledWith(-1);
+  });
+
+  it("archives a paused sandbox so it stops counting toward Daytona's disk limit", async () => {
+    const harness = cleanupHarness();
+    const setAutoArchiveInterval = vi.fn().mockResolvedValue(undefined);
+    const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
+    harness.get.mockResolvedValue({
+      id: "sandbox-1",
+      setAutoArchiveInterval,
+      setAutoDeleteInterval,
+    });
+
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      24 * 60,
+      harness.dependencies,
+    );
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      0,
+      harness.dependencies,
+    );
+
+    expect(setAutoDeleteInterval.mock.calls).toEqual([[24 * 60], [0]]);
+    // A sandbox deleted when it stops is never archived.
+    expect(setAutoArchiveInterval.mock.calls).toEqual([[30]]);
   });
 
   it("retries transient lifecycle failures", async () => {
@@ -778,6 +813,138 @@ describe("Daytona sandbox cleanup", () => {
       expect.stringContaining("daytona_sandbox_cleanup_failed"),
     );
     consoleError.mockRestore();
+  });
+});
+
+describe("Daytona sandbox capacity", () => {
+  const now = Date.parse("2026-10-16T12:00:00.000Z");
+
+  function sandboxStopped(name: string, minutesAgo: number, state = "stopped") {
+    return {
+      archive: vi.fn().mockResolvedValue(undefined),
+      cpu: 2,
+      disk: 10,
+      memory: 4,
+      name,
+      state,
+      updatedAt: new Date(now - minutesAgo * 60_000).toISOString(),
+    };
+  }
+
+  function capacityHarness(sandboxes: Array<ReturnType<typeof sandboxStopped>>) {
+    const harness = cleanupHarness({ missing: true });
+    const list = vi.fn((query?: { states?: string[] }) =>
+      (async function* () {
+        for (const sandbox of sandboxes) {
+          if (!query?.states || query.states.includes(sandbox.state)) yield sandbox;
+        }
+      })());
+    const dependencies = {
+      ...harness.dependencies,
+      createClient: vi.fn(() => ({
+        delete: harness.deleteSandbox,
+        get: harness.get,
+        list,
+        [Symbol.asyncDispose]: harness.dispose,
+      })),
+      now: () => now,
+    } as unknown as DaytonaCleanupDependencies;
+    return { ...harness, dependencies, list };
+  }
+
+  it("archives the longest-stopped sandboxes and retries when Daytona's disk is full", async () => {
+    const longStopped = sandboxStopped("responder-automation-old", 120);
+    const justStopped = sandboxStopped("responder-automation-new", 2);
+    const harness = capacityHarness([longStopped, justStopped]);
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const diskFull = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Total disk limit exceeded. Maximum allowed: 2000GiB.",
+    );
+    const creator = {
+      create: vi.fn()
+        .mockRejectedValueOnce(diskFull)
+        .mockResolvedValueOnce(createdSession),
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-automation-run-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(longStopped.archive).toHaveBeenCalledOnce();
+    expect(justStopped.archive).not.toHaveBeenCalled();
+    // Daytona created nothing, so the name is reused and nothing waits for
+    // the rejected sandbox to appear.
+    expect(creator.create.mock.calls).toEqual([
+      [{ options: { createTimeoutSec: 120, name: "responder-automation-run-1" } }],
+      [{ options: { createTimeoutSec: 120, name: "responder-automation-run-1" } }],
+    ]);
+    expect(harness.get).toHaveBeenCalledTimes(2);
+    expect(harness.sleep).toHaveBeenCalledWith(5_000);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("daytona_sandbox_quota_retry"),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("waits for CPU to free up, then fails with a capacity error", async () => {
+    const harness = capacityHarness([sandboxStopped("responder-automation-old", 120)]);
+    const cpuFull = new Error(
+      "DaytonaSandboxClient failed to create sandbox: Total CPU limit exceeded. Maximum allowed: 500.",
+    );
+    const creator = { create: vi.fn().mockRejectedValue(cpuFull) };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const error = await createDaytonaSandboxSession(
+      creator,
+      { daytonaApiKey: "daytona-test" },
+      "responder-automation-run-1",
+      harness.dependencies,
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(DaytonaCapacityError);
+    expect((error as Error).cause).toBe(cpuFull);
+    expect(sandboxDeletedAfterFailedCreation(error)).toBe(true);
+    expect(creator.create).toHaveBeenCalledTimes(6);
+    expect(harness.sleep.mock.calls).toEqual([[5_000], [15_000], [30_000], [60_000], [120_000]]);
+    // Archiving frees disk, not CPU.
+    expect(harness.list).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("archives paused sandboxes, deletes expired ones and logs usage", async () => {
+    const paused = sandboxStopped("responder-automation-paused", 45);
+    const recent = sandboxStopped("responder-automation-recent", 10);
+    const expiredArchive = sandboxStopped("responder-automation-expired", 25 * 60, "archived");
+    const freshArchive = sandboxStopped("responder-automation-archived", 2 * 60, "archived");
+    const failed = sandboxStopped("responder-automation-failed", 30 * 60, "error");
+    const running = sandboxStopped("responder-automation-running", 0, "started");
+    const harness = capacityHarness([paused, recent, expiredArchive, freshArchive, failed, running]);
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await sweepDaytonaSandboxes({ daytonaApiKey: "daytona-test" }, harness.dependencies);
+
+    expect(paused.archive).toHaveBeenCalledOnce();
+    expect(recent.archive).not.toHaveBeenCalled();
+    expect(harness.deleteSandbox.mock.calls).toEqual([
+      [expiredArchive, 60, false],
+      [failed, 60, false],
+    ]);
+    expect(JSON.parse(consoleLog.mock.calls[0]![0] as string)).toEqual({
+      archived: 1,
+      cpu: 2,
+      deleted: 2,
+      diskGiB: 40,
+      event: "daytona_sandbox_sweep",
+      memoryGiB: 4,
+      sandboxes: 6,
+    });
+    consoleLog.mockRestore();
   });
 });
 

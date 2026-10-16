@@ -1,6 +1,7 @@
 import {
   Daytona,
   type Sandbox,
+  SandboxState,
 } from "@daytona/sdk";
 import type {
   DaytonaSandboxClient,
@@ -23,6 +24,7 @@ export interface DaytonaSandboxSecretMount {
 interface DaytonaCleanupClient {
   delete(sandbox: Sandbox, timeout?: number, wait?: boolean): Promise<void>;
   get(sandboxIdOrName: string): Promise<Sandbox>;
+  list(query?: Parameters<Daytona["list"]>[0]): AsyncIterableIterator<Sandbox>;
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -30,12 +32,14 @@ type DaytonaSandboxCreator = Pick<DaytonaSandboxClient, "create">;
 
 export interface DaytonaCleanupDependencies {
   createClient(config: DaytonaCleanupConfig): DaytonaCleanupClient;
+  now(): number;
   reportException: typeof reportWorkerException;
   sleep(delayMs: number): Promise<void>;
 }
 
 const defaultCleanupDependencies: DaytonaCleanupDependencies = {
   createClient: (config) => new Daytona(daytonaClientOptions(config)),
+  now: Date.now,
   reportException: reportWorkerException,
   sleep: (delayMs) =>
     new Promise((resolve) => {
@@ -64,6 +68,17 @@ const daytonaSettleRetryDelaysMs = [
 ] as const;
 const daytonaCreateAttempts = 3;
 const daytonaCreateRetryDelayMs = 5_000;
+// Waits between creations Daytona rejects at the organization's limits, about
+// four minutes in all, while running sandboxes finish and free CPU and memory.
+const daytonaQuotaRetryDelaysMs = [5_000, 15_000, 30_000, 60_000, 120_000] as const;
+// Stopped sandboxes count toward Daytona's disk limit and archived ones do
+// not, so a paused sandbox is archived once a quick follow-up is unlikely.
+export const pausedSandboxArchiveMinutes = 30;
+// Stopped sandboxes archived at once when Daytona's disk limit is reached.
+const quotaEvictionBatchSize = 20;
+// A sandbox stopped more recently may be about to restart, for example while
+// its secrets are mounted.
+const quotaEvictionMinStoppedMs = 5 * 60_000;
 // The Daytona SDK gives up on a sandbox that has not started within 60
 // seconds by default, while Daytona keeps starting it.
 const daytonaCreateTimeoutSec = 120;
@@ -75,6 +90,138 @@ const daytonaSandboxNameLimit = 64;
 function isDaytonaStartFailure(error: unknown): boolean {
   return error instanceof Error &&
     error.message.includes("Sandbox failed to start");
+}
+
+// Daytona rejects a new sandbox outright while the organization is at its
+// disk, CPU or memory limit, for example "Total disk limit exceeded. Maximum
+// allowed: 2000GiB." Nothing is created.
+function isDaytonaQuotaError(error: unknown): boolean {
+  return error instanceof Error && /\blimit exceeded\b/i.test(error.message);
+}
+
+function isDaytonaDiskQuotaError(error: unknown): boolean {
+  return error instanceof Error && /\bdisk limit exceeded\b/i.test(error.message);
+}
+
+// Thrown when Daytona still refuses new sandboxes after every quota retry.
+// The message is shown to the organization in place of Daytona's, which
+// asks the reader to upgrade Responder's Daytona plan.
+export class DaytonaCapacityError extends Error {
+  constructor(options: { cause: unknown }) {
+    super(
+      "Responder's sandbox capacity is temporarily full. Try again in a few minutes.",
+      options,
+    );
+    this.name = "DaytonaCapacityError";
+  }
+}
+
+// Archives the stopped Responder sandboxes that were stopped longest ago, so
+// their disk no longer counts toward Daytona's limit. An archived sandbox
+// still resumes; it takes longer to start. Returns how many were archived.
+export async function archiveStoppedSandboxes(
+  config: DaytonaCleanupConfig,
+  options: { limit: number; minStoppedMs: number },
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<number> {
+  const client = dependencies.createClient(config);
+  try {
+    const stoppedBefore = dependencies.now() - options.minStoppedMs;
+    const candidates: Sandbox[] = [];
+    for await (const sandbox of client.list({ name: "responder-", states: [SandboxState.STOPPED] })) {
+      const updatedAt = Date.parse(sandbox.updatedAt ?? "");
+      if (Number.isFinite(updatedAt) && updatedAt < stoppedBefore) {
+        candidates.push(sandbox);
+      }
+    }
+    candidates.sort((left, right) =>
+      Date.parse(left.updatedAt ?? "") - Date.parse(right.updatedAt ?? ""));
+    let archived = 0;
+    for (const sandbox of candidates.slice(0, options.limit)) {
+      try {
+        await sandbox.archive();
+        archived += 1;
+      } catch (error) {
+        // A sandbox that restarted or was deleted meanwhile is skipped.
+        console.error(JSON.stringify({
+          errorName: error instanceof Error ? error.name : typeof error,
+          event: "daytona_sandbox_archive_failed",
+          sandboxId: sandbox.name,
+        }));
+      }
+    }
+    return archived;
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
+// Paused sandboxes are kept for a day. Archived and failed sandboxes older
+// than that are deleted in case Daytona's own deletion interval missed them.
+const sandboxRetentionMs = 24 * 60 * 60_000;
+// Stopped sandboxes archived in one sweep.
+const sweepArchiveLimit = 100;
+
+// Keeps Responder's sandboxes within Daytona's limits: archives sandboxes
+// paused longer than the archive interval, including ones set up before it
+// existed, deletes expired ones, and logs what is left.
+export async function sweepDaytonaSandboxes(
+  config: DaytonaCleanupConfig,
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<void> {
+  const archived = await archiveStoppedSandboxes(
+    config,
+    { limit: sweepArchiveLimit, minStoppedMs: pausedSandboxArchiveMinutes * 60_000 },
+    dependencies,
+  );
+  const client = dependencies.createClient(config);
+  try {
+    const expiredBefore = dependencies.now() - sandboxRetentionMs;
+    const expired: Sandbox[] = [];
+    let sandboxes = 0;
+    let cpu = 0;
+    let diskGiB = 0;
+    let memoryGiB = 0;
+    for await (const sandbox of client.list({ name: "responder-" })) {
+      sandboxes += 1;
+      if (
+        (sandbox.state === SandboxState.ARCHIVED || sandbox.state === SandboxState.ERROR) &&
+        Date.parse(sandbox.updatedAt ?? "") < expiredBefore
+      ) {
+        expired.push(sandbox);
+      }
+      if (sandbox.state === SandboxState.ARCHIVED) continue;
+      diskGiB += sandbox.disk;
+      if (sandbox.state === SandboxState.STARTED) {
+        cpu += sandbox.cpu;
+        memoryGiB += sandbox.memory;
+      }
+    }
+    let deleted = 0;
+    for (const sandbox of expired) {
+      try {
+        await client.delete(sandbox, 60, false);
+        deleted += 1;
+      } catch (error) {
+        console.error(JSON.stringify({
+          errorName: error instanceof Error ? error.name : typeof error,
+          event: "daytona_expired_sandbox_delete_failed",
+          sandboxId: sandbox.name,
+        }));
+      }
+    }
+    console.log(JSON.stringify({
+      archived,
+      cpu,
+      deleted,
+      diskGiB,
+      event: "daytona_sandbox_sweep",
+      memoryGiB,
+      sandboxes,
+    }));
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
 }
 
 // Cleanup errors for a sandbox that never appeared, already reported where
@@ -315,11 +462,17 @@ async function failCreation(
   const left = abandoned
     .filter((_sandbox, index) => deletionErrors[index] !== undefined)
     .map((sandbox) => sandbox.name);
-  const cleanupErrors = deletionErrors.filter((error) => error !== undefined);
+  // A sandbox that never appeared was already reported and must not hide
+  // why the creation failed.
+  const cleanupErrors = deletionErrors.filter((error) =>
+    error !== undefined &&
+    !(typeof error === "object" && error !== null && missingSandboxErrors.has(error)));
   const error = cleanupErrors.length > 0
     ? new AggregateError(
       [createError, ...cleanupErrors],
-      `Unable to create or clean up Daytona sandbox ${sandboxName}`,
+      `Unable to create or clean up Daytona sandbox ${sandboxName}: ${
+        createError instanceof Error ? createError.message : String(createError)
+      }`,
     )
     : createError;
   if (typeof error === "object" && error !== null) {
@@ -344,7 +497,9 @@ export async function createDaytonaSandboxSession(
     throw new Error(`Sandbox name ${sandboxName} is too long`);
   }
   const abandoned: AbandonedSandbox[] = [];
-  for (let attempt = 1; ; attempt += 1) {
+  let attempt = 1;
+  let quotaRetries = 0;
+  for (;;) {
     const attemptName = sandboxNameForAttempt(sandboxName, attempt);
     let session: DaytonaSandboxSession | undefined;
     try {
@@ -362,6 +517,34 @@ export async function createDaytonaSandboxSession(
         });
       }
     } catch (createError) {
+      // Daytona created nothing, so the same name is tried again once
+      // capacity frees up.
+      if (isDaytonaQuotaError(createError)) {
+        if (quotaRetries >= daytonaQuotaRetryDelaysMs.length || signal?.aborted) {
+          return await failCreation(
+            new DaytonaCapacityError({ cause: createError }),
+            sandboxName,
+            abandoned,
+          );
+        }
+        const archived = isDaytonaDiskQuotaError(createError)
+          ? await archiveStoppedSandboxes(
+            config,
+            { limit: quotaEvictionBatchSize, minStoppedMs: quotaEvictionMinStoppedMs },
+            dependencies,
+          ).catch(() => 0)
+          : 0;
+        console.error(JSON.stringify({
+          archived,
+          error: createError instanceof Error ? createError.message.slice(0, 300) : String(createError),
+          event: "daytona_sandbox_quota_retry",
+          retry: quotaRetries + 1,
+          sandboxId: attemptName,
+        }));
+        await dependencies.sleep(daytonaQuotaRetryDelaysMs[quotaRetries]!);
+        quotaRetries += 1;
+        continue;
+      }
       abandoned.push(deleteAbandonedSandbox(attemptName, config, dependencies));
       if (
         attempt >= daytonaCreateAttempts ||
@@ -382,6 +565,7 @@ export async function createDaytonaSandboxSession(
       if (signal?.aborted) {
         return await failCreation(createError, sandboxName, abandoned);
       }
+      attempt += 1;
       continue;
     }
     // No session means the caller aborted before this attempt's creation.
@@ -465,6 +649,12 @@ export async function configureDaytonaSandboxLifecycle(
       () => sandbox.setAutoDeleteInterval(autoDeleteInterval),
       dependencies,
     );
+    if (autoDeleteInterval !== 0) {
+      await retryTransientDaytonaOperation(
+        () => sandbox.setAutoArchiveInterval(pausedSandboxArchiveMinutes),
+        dependencies,
+      );
+    }
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }
