@@ -185,7 +185,12 @@ function scrubWorkerSentryEvent(
   environment: NodeJS.ProcessEnv,
 ): Event {
   const secrets = eventSecrets(environment);
-  redactEventValue(event, secrets, new WeakSet());
+  // sdkProcessingMetadata is never sent. On a transaction it holds the live
+  // scopes of the span, and through them Sentry's own client, which the
+  // redaction must not walk into and change.
+  const skipped = new WeakSet<object>();
+  if (event.sdkProcessingMetadata) skipped.add(event.sdkProcessingMetadata);
+  redactEventValue(event, secrets, skipped);
 
   for (const exception of event.exception?.values ?? []) {
     if (exception.value && exception.value.length > 2_000) {
