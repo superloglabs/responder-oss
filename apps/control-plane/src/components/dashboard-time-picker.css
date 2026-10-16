@@ -26,12 +26,6 @@
   .timePicker__range { border-radius: 5px; }
 }
 
-.dashboardLive { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid #dce8dd; border-radius: 999px; background: #f1f7f1; color: #4b7650; font: inherit; font-size: 11px; font-weight: 500; line-height: 16px; }
-.dashboardLive__dot { width: 5px; height: 5px; border-radius: 3px; background: #4b7650; box-shadow: 0 0 8px #4b7650; }
-.dashboardLive--paused { border-color: #e3e3e3; background: #f5f5f5; color: #666; cursor: pointer; }
-.dashboardLive--paused:hover { border-color: #c4c4c4; color: #1a1a1a; }
-.dashboardLive--paused:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
-
 /* The popover. */
 .timePickerPanel { z-index: 50; width: min(632px, calc(100vw - 24px)); border-radius: 10px; background: #fff; color: #1a1a1a; font-family: var(--ds-font-sans); font-size: 12px; line-height: 16px; box-shadow: 0 0 0 .5px #ddd, 0 8px 24px #0000001f, 0 2px 6px #0000000f; outline: 0; }
 .timePickerPanel__inner { position: relative; display: flex; flex-direction: column; }

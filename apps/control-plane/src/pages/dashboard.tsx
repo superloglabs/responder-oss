@@ -1,10 +1,10 @@
-import { ArrowClockwiseIcon, DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { BracketsCurlyIcon, DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardDialog } from "../components/dashboard-dialog";
-import { DashboardTimePicker, LiveStatus } from "../components/dashboard-time-picker";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { DashboardVariableBar, DashboardVariablesEditor } from "../components/dashboard-variables";
 import { DashboardWidgetBody } from "../components/dashboard-widget";
 import { DashboardWidgetEditor } from "../components/dashboard-widget-editor";
@@ -18,7 +18,6 @@ import {
 import { Button, IconButton, TextField } from "../design-system";
 import {
   browserTimeZone,
-  defaultTimeRange,
   isLive,
   liveRefreshInterval,
   timeRangeFromParams,
@@ -166,8 +165,6 @@ export function DashboardPage() {
   const range = useMemo(() => timeRangeFromParams(params), [rangeKey]);
   // The range before someone zoomed into a chart, which zooming out returns to.
   const [zoomedFrom, setZoomedFrom] = useState<DashboardTimeRange | null>(null);
-  // The live range Resume live returns to.
-  const [lastLive, setLastLive] = useState<DashboardTimeRange>(() => (isLive(range) ? range : defaultTimeRange));
   const [timeZonePreference, setTimeZonePreference] = useState(storedTimeZone);
   const timeZone = timeZonePreference === "browser" ? browserTimeZone() : timeZonePreference;
   const [now, setNow] = useState(() => Date.now());
@@ -217,7 +214,6 @@ export function DashboardPage() {
   }, [range]);
 
   const changeRange = useCallback((next: DashboardTimeRange, zoomed: DashboardTimeRange | null = null) => {
-    if (isLive(next)) setLastLive(next);
     setZoomedFrom(zoomed);
     setNow(Date.now());
     setParams((current) => timeRangeParams(next, current), { replace: true });
@@ -367,94 +363,93 @@ export function DashboardPage() {
   );
 
   return (
-    <AppShell active="dashboards" redesigned>
+    <AppShell active="dashboards" density="dashboard" redesigned>
       <div className="dashboardPage">
-        <header className="automationCreate__header">
-          <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
-            <Link to="/dashboards">Dashboards</Link>
-            <span aria-hidden="true">›</span>
-            <span aria-current="page">{dashboard.name}</span>
-          </nav>
-          <div className="dashboardPage__titleRow">
-            {renaming === null ? (
-              <h1>{dashboard.name}</h1>
-            ) : (
-              <form className="dashboardPage__rename" onSubmit={(event: FormEvent) => { event.preventDefault(); void rename(); }}>
-                <TextField
-                  autoFocus
-                  label="Dashboard name"
-                  maxLength={120}
-                  onBlur={() => void rename()}
-                  onChange={(event) => setRenaming(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === "Escape") setRenaming(null); }}
-                  value={renaming}
-                />
-              </form>
-            )}
-            <span className="automationCreate__spacer" />
-            <LiveStatus live={isLive(range)} onResume={() => changeRange(lastLive)} />
-            <DashboardTimePicker
-              now={now}
-              onChange={(next) => changeRange(next)}
-              onTimeZoneChange={changeTimeZone}
-              onZoomOut={() => {
-                const zoomed = zoomOutTimeRange(range, Date.now(), zoomedFrom);
-                changeRange(zoomed.range, zoomed.zoomedFrom);
-              }}
-              range={range}
-              timeZone={timeZone}
-              timeZonePreference={timeZonePreference}
-              zoomed={zoomedFrom !== null}
-            />
-            <IconButton
-              aria-label="Refresh"
-              onClick={() => {
-                setNow(Date.now());
-                setRefresh((count) => count + 1);
-              }}
-              size="small"
-              variant="ghost"
-            >
-              <ArrowClockwiseIcon size={14} />
-            </IconButton>
-            <Button onClick={() => setEditing({ widget: null })} size="small" variant="primary">
-              <PlusIcon size={12} />Add widget
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton aria-label="Dashboard actions" size="small" variant="ghost">
-                  <DotsThreeIcon size={16} weight="bold" />
-                </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setRenaming(dashboard.name)}>Rename</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setEditingVariables(true)}>Variables</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setRemoving("dashboard")}>Delete dashboard</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+        <header className="dashboardPage__controls">
+          <div className="dashboardPage__column automationCreate__header">
+            <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
+              <Link to="/dashboards">Dashboards</Link>
+              <span aria-hidden="true">›</span>
+              <span aria-current="page">{dashboard.name}</span>
+            </nav>
+            <div className="dashboardPage__titleRow">
+              {renaming === null ? (
+                <h1>{dashboard.name}</h1>
+              ) : (
+                <form className="dashboardPage__rename" onSubmit={(event: FormEvent) => { event.preventDefault(); void rename(); }}>
+                  <TextField
+                    autoFocus
+                    label="Dashboard name"
+                    maxLength={120}
+                    onBlur={() => void rename()}
+                    onChange={(event) => setRenaming(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === "Escape") setRenaming(null); }}
+                    value={renaming}
+                  />
+                </form>
+              )}
+              <span className="automationCreate__spacer" />
+              <DashboardTimePicker
+                now={now}
+                onChange={(next) => changeRange(next)}
+                onTimeZoneChange={changeTimeZone}
+                onZoomOut={() => {
+                  const zoomed = zoomOutTimeRange(range, Date.now(), zoomedFrom);
+                  changeRange(zoomed.range, zoomed.zoomedFrom);
+                }}
+                range={range}
+                timeZone={timeZone}
+                timeZonePreference={timeZonePreference}
+                zoomed={zoomedFrom !== null}
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton aria-label="Dashboard actions" size="small" variant="ghost">
+                    <DotsThreeIcon size={16} weight="bold" />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setRenaming(dashboard.name)}>
+                    <PencilSimpleIcon />Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setEditingVariables(true)}>
+                    <BracketsCurlyIcon />{dashboard.variables.length > 0 ? "Variables" : "Add variable"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setRemoving("dashboard")} variant="destructive">
+                    <TrashIcon />Delete dashboard
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </header>
-        <DashboardVariableBar
-          onAdd={() => setEditingVariables(true)}
-          onChange={(name, value) => changeValues({ ...values, [name]: value })}
-          range={range}
-          values={values}
-          variables={dashboard.variables}
-        />
-        {error ? <p className="formError" role="alert">{error}</p> : null}
-        {dashboard.widgets.length === 0 ? (
-          <section className="emptyState emptyState--list">
-            <h2>No widgets yet</h2>
-            <p>Add a chart of logs, spans or a metric, a table of recent logs or traces, or a note.</p>
-            <Button onClick={() => setEditing({ widget: null })} size="small" variant="primary">
-              <PlusIcon size={12} />Add widget
-            </Button>
-          </section>
-        ) : null}
-        {dashboard.widgets.length > 0 ? (
-          <DashboardGrid onLayoutChange={onLayoutChange} renderWidget={tiles} widgets={dashboard.widgets} />
-        ) : null}
+        <div className="dashboardPage__canvas">
+          <div className="dashboardPage__column">
+            <div className="dashboardPage__toolbar">
+              <DashboardVariableBar
+                onChange={(name, value) => changeValues({ ...values, [name]: value })}
+                range={range}
+                values={values}
+                variables={dashboard.variables}
+              />
+              <span className="automationCreate__spacer" />
+              <Button onClick={() => setEditing({ widget: null })} size="small" variant="primary">
+                <PlusIcon size={12} />Add widget
+              </Button>
+            </div>
+            {error ? <p className="formError" role="alert">{error}</p> : null}
+            {dashboard.widgets.length === 0 ? (
+              <section className="emptyState emptyState--list">
+                <h2>No widgets yet</h2>
+                <p>Add a chart of logs, spans or a metric, a table of recent logs or traces, or a note.</p>
+              </section>
+            ) : null}
+            {dashboard.widgets.length > 0 ? (
+              <DashboardGrid onLayoutChange={onLayoutChange} renderWidget={tiles} widgets={dashboard.widgets} />
+            ) : null}
+          </div>
+        </div>
       </div>
       {editing ? (
         <DashboardWidgetEditor

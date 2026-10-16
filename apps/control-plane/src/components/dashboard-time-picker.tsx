@@ -8,7 +8,6 @@ import {
   GlobeSimpleIcon,
   MagnifyingGlassIcon,
   MagnifyingGlassMinusIcon,
-  PlayIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
 import { Popover } from "radix-ui";
@@ -166,22 +165,6 @@ export function DashboardTimePicker({
         />
       </Popover.Content>
     </Popover.Root>
-  );
-}
-
-// The Live pill, or a button that returns a paused dashboard to live.
-export function LiveStatus({ live, onResume }: { live: boolean; onResume: () => void }) {
-  if (live) {
-    return (
-      <span className="dashboardLive" title="The dashboard follows now and refreshes on its own">
-        <span aria-hidden="true" className="dashboardLive__dot" />Live
-      </span>
-    );
-  }
-  return (
-    <button className="dashboardLive dashboardLive--paused" onClick={onResume} type="button">
-      <PlayIcon size={8} weight="fill" />Resume live
-    </button>
   );
 }
 

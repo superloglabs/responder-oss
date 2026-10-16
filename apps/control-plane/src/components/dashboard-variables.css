@@ -11,9 +11,6 @@
 .dashboardVariable__input { min-width: 0; padding: 0 10px; border: 0; outline: 0; background: transparent; color: #1a1a1a; font: inherit; }
 .dashboardVariable__input::placeholder { color: #999; }
 .dashboardVariable--free { cursor: text; }
-.dashboardVariables__add { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #999; font: inherit; font-size: 12px; cursor: pointer; }
-.dashboardVariables__add:hover { background: #f5f5f5; color: #444; }
-.dashboardVariables__add:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
 
 .dashboardVariableMenu { z-index: 50; display: flex; flex-direction: column; width: 340px; max-height: min(460px, var(--radix-popover-content-available-height)); border-radius: 10px; background: #fff; color: #1a1a1a; font-family: var(--ds-font-sans); font-size: 12px; line-height: 16px; box-shadow: 0 0 0 .5px #ddd, 0 8px 24px #0000001f, 0 2px 6px #0000000f; outline: 0; }
 .dashboardVariableMenu button { font: inherit; cursor: pointer; }
