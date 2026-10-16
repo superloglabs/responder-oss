@@ -19,6 +19,7 @@ import {
   onboardingPath,
   onboardingPlanCards,
   onboardingStepFromPath,
+  onboardingStepStages,
   onboardingSteps,
   planBillingState,
   planChangeConfirmation,
@@ -134,7 +135,7 @@ export function OnboardingPage() {
     const githubConnected = connected.includes("github");
     return (
       <OnboardingFrame
-        activeStages={["cause", "fix"]}
+        activeStages={onboardingStepStages.code}
         connected={connected}
         footer={<>
           {secondaryActions}
@@ -175,7 +176,7 @@ export function OnboardingPage() {
     const anyConnected = groups.some((group) => group.providers.some(({ provider }) => connected.includes(provider)));
     return (
       <OnboardingFrame
-        activeStages={["alert"]}
+        activeStages={onboardingStepStages.alerts}
         connected={connected}
         footer={<>
           {secondaryActions}

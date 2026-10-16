@@ -22,7 +22,7 @@ import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import { OnboardingFrame, OnboardingLoading } from "./onboarding-frame";
-import { onboardingStepAtPath, onboardingSteps } from "../pages/onboarding-presentation";
+import { onboardingStepAtPath, onboardingStepStages, onboardingSteps } from "../pages/onboarding-presentation";
 import { cellSwitchUrl, rememberCell, useCellDirectory } from "../cells";
 import { SegmentedControl } from "../design-system";
 
@@ -577,7 +577,7 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
   if (isGuided) {
     return (
       <OnboardingFrame
-        activeStages={[]}
+        activeStages={onboardingStepStages.workspace}
         footer={
           <button
             className="onboarding__primary"

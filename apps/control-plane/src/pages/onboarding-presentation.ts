@@ -14,6 +14,16 @@ export const onboardingStepLabels: Record<OnboardingStep, string> = {
 // where billing can change them.
 export const onboardingSteps: readonly OnboardingStep[] = ["workspace", "code", "alerts", "usage", "templates"];
 
+export type OnboardingStage = "alert" | "cause" | "fix";
+
+// The explainer stages each step highlights. Steps without an entry take the
+// full width.
+export const onboardingStepStages: Partial<Record<OnboardingStep, OnboardingStage[]>> = {
+  alerts: ["alert"],
+  code: ["cause", "fix"],
+  workspace: [],
+};
+
 export function onboardingPath(step: Exclude<OnboardingStep, "workspace">): string {
   return `/onboarding/${step}`;
 }

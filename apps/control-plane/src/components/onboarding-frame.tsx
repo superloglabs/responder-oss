@@ -1,10 +1,14 @@
 import type { ReactNode } from "react";
 import { BellIcon, GitPullRequestIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { onboardingStepLabels, onboardingSteps, type OnboardingStep } from "../pages/onboarding-presentation";
+import {
+  onboardingStepLabels,
+  onboardingStepStages,
+  onboardingSteps,
+  type OnboardingStage,
+  type OnboardingStep,
+} from "../pages/onboarding-presentation";
 import { ProviderGlyph } from "./icons";
 import "./onboarding.css";
-
-export type OnboardingStage = "alert" | "cause" | "fix";
 
 // The setup card: progress across the steps, the step's content and actions,
 // and, beside steps that connect tools, how Superlog uses them.
@@ -56,16 +60,17 @@ export function OnboardingFrame({
 }
 
 // The setup card while the session, the workspace, or a step's data loads,
-// so the progress stays on screen between steps and after a page load.
+// so the progress stays on screen between steps and after a page load. It
+// has the step's layout, so the card keeps its shape when the step appears.
 export function OnboardingLoading({ step }: { step: OnboardingStep }) {
   return (
-    <OnboardingFrame activeStages={[]} footer={null} step={step} steps={onboardingSteps}>
+    <OnboardingFrame activeStages={onboardingStepStages[step]} footer={null} step={step} steps={onboardingSteps}>
       <p className="onboarding__loading">Loading…</p>
     </OnboardingFrame>
   );
 }
 
-const alertGlyphs =["sentry", "datadog", "slack", "discord"] as const;
+const alertGlyphs = ["sentry", "datadog", "slack", "discord"] as const;
 
 function HowItWorks({ activeStages, connected }: { activeStages: OnboardingStage[]; connected: readonly string[] }) {
   const stageClass = (stage: OnboardingStage) => `onboardingFlow__stage${activeStages.includes(stage) ? " isActive" : ""}`;
