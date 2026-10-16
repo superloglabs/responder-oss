@@ -31,6 +31,16 @@ export interface AutomationTemplate extends AutomationTemplateContent {
   id: string;
 }
 
+// Written for one workspace by a model each morning. The reason says what in
+// the workspace it is based on.
+export interface SuggestedAutomationTemplate extends AutomationTemplate {
+  reason: string;
+}
+
+export function isSuggestedAutomationTemplate(template: object | undefined): template is SuggestedAutomationTemplate {
+  return template !== undefined && "reason" in template;
+}
+
 export const automationTemplates: AutomationTemplate[] = builtInAutomationTemplates;
 
 // Shown first, in this order, before the member picks a category.

@@ -47,6 +47,7 @@ import type {
   AutomationNotification,
   AutomationTrigger,
 } from "../automations/config.js";
+import type { SuggestedAutomationTemplate } from "../automations/suggested-templates.js";
 import type {
   SyntheticAssertion,
   SyntheticAssertionResult,
@@ -1288,6 +1289,38 @@ export const sharedAutomationTemplates = pgTable(
     uniqueIndex("shared_automation_templates_automation_idx").on(
       table.automationId,
     ),
+  ],
+);
+
+// Automation templates written by a model for one organization each morning.
+// One row per organization and UTC day. The worker claims the day by
+// inserting the row as `generating`, then stores the templates as `ready`.
+export const automationTemplateSuggestions = pgTable(
+  "automation_template_suggestions",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    generatedOn: text("generated_on").notNull(),
+    status: text("status")
+      .$type<"generating" | "ready" | "failed">()
+      .notNull()
+      .default("generating"),
+    attempts: integer("attempts").notNull().default(1),
+    templates: jsonb("templates")
+      .$type<SuggestedAutomationTemplate[]>()
+      .notNull()
+      .default([]),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.generatedOn] }),
   ],
 );
 

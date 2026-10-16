@@ -1,4 +1,5 @@
 import { fetchAutomationOptions, type AutomationConfiguration, type AutomationOptions, type SharedAutomationTemplate } from "../automations-api";
+import type { SuggestedAutomationTemplate } from "./automation-templates";
 import { providerDisplayName } from "../components/provider-glyphs";
 
 // Keeps a new automation's draft while a connector is connected in the same
@@ -13,9 +14,11 @@ export interface AutomationDraft {
   automationId?: string;
   name: string;
   configuration: AutomationConfiguration;
-  // The built-in or shared template a new automation started from, if any.
+  // The built-in, shared, or suggested template a new automation started
+  // from, if any.
   templateId?: string;
   sharedTemplate?: SharedAutomationTemplate;
+  suggestedTemplate?: SuggestedAutomationTemplate;
   githubIncluded: boolean;
   connecting: string;
   // Accounts of the connecting provider before the flow, to find the new one.

@@ -37,6 +37,7 @@ import {
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
 import { sharedAutomationTemplateSlugSchema } from "../../../../packages/core/src/automations/shared-template.js";
+import { getLatestAutomationSuggestions } from "../../../../packages/core/src/db/automation-template-suggestions.js";
 import {
   getAutomationShare,
   shareAutomation,
@@ -216,6 +217,14 @@ export const automationRoutes = new Hono()
     return context.json({
       automations: await listAutomations(access.tenant.organizationId),
     });
+  })
+  // Templates the worker wrote for this workspace this morning, or the most
+  // recent day it wrote them.
+  .get("/suggestions", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const latest = await getLatestAutomationSuggestions(access.tenant.organizationId);
+    return context.json({ generatedOn: latest?.generatedOn ?? null, suggestions: latest?.templates ?? [] });
   })
   .get("/options", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
@@ -412,9 +421,13 @@ export const automationRoutes = new Hono()
         400,
       );
     }
-    // Set when the automation started from a shared template, for analytics.
+    // Set when the automation started from a shared or suggested template,
+    // for analytics.
     const sharedTemplate = sharedAutomationTemplateSlugSchema.safeParse(
       (body as { sharedTemplate?: unknown }).sharedTemplate,
+    );
+    const suggestedTemplate = z.uuid().safeParse(
+      (body as { suggestedTemplate?: unknown }).suggestedTemplate,
     );
     try {
       const automation = await createAutomation(
@@ -430,6 +443,7 @@ export const automationRoutes = new Hono()
           automation_id: automation.id,
           model: parsed.data.configuration.model,
           shared_template_slug: sharedTemplate.success ? sharedTemplate.data : null,
+          suggested_template_id: suggestedTemplate.success ? suggestedTemplate.data : null,
           trigger_kinds: [...new Set(parsed.data.configuration.triggers.map((trigger) => trigger.kind))].join(","),
         },
       });
