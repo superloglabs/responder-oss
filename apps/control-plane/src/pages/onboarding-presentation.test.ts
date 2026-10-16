@@ -5,6 +5,7 @@ import {
   onboardingPlanCards,
   planBillingState,
   planChangeConfirmation,
+  onboardingStepAtPath,
   onboardingStepFromPath,
   onboardingSteps,
   recommendedTemplates,
@@ -23,6 +24,14 @@ describe("onboarding steps", () => {
     expect(onboardingStepFromPath("plan")).toBe("code");
     expect(onboardingStepFromPath("workspace")).toBe("code");
     expect(onboardingStepFromPath(undefined)).toBe("code");
+  });
+
+  it("reads the step from setup URLs only", () => {
+    expect(onboardingStepAtPath("/onboarding/usage")).toBe("usage");
+    expect(onboardingStepAtPath("/onboarding/")).toBe("code");
+    expect(onboardingStepAtPath("/onboarding")).toBe("code");
+    expect(onboardingStepAtPath("/onboarding-guide")).toBeNull();
+    expect(onboardingStepAtPath("/app")).toBeNull();
   });
 });
 

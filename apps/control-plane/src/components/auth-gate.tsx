@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowRightIcon } from "@phosphor-icons/react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
@@ -20,8 +21,8 @@ import { requestCapabilities } from "../organization-capabilities";
 import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
-import { OnboardingFrame } from "./onboarding-frame";
-import { onboardingSteps } from "../pages/onboarding-presentation";
+import { OnboardingFrame, OnboardingLoading } from "./onboarding-frame";
+import { onboardingStepAtPath, onboardingStepStages, onboardingSteps } from "../pages/onboarding-presentation";
 import { cellSwitchUrl, rememberCell, useCellDirectory } from "../cells";
 import { SegmentedControl } from "../design-system";
 
@@ -471,25 +472,27 @@ function PasswordResetRequest({ onBack }: { onBack: () => void }) {
 }
 
 interface WorkspaceSetupProps {
+  // Reports while a new workspace is being created, so the gate keeps this
+  // setup on screen after the workspace becomes active.
+  onCreating: (creating: boolean) => void;
   onReady: () => Promise<void>;
 }
 
-function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
+function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
+  const navigate = useNavigate();
   const organizations = authClient.useListOrganizations();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasOrganizations = (organizations.data?.length ?? 0) > 0;
+  // Guided setup stays on screen once shown, including after the new
+  // workspace joins the list.
+  const [isGuided, setIsGuided] = useState(false);
+  if (!isGuided && !organizations.isPending && !hasOrganizations && !automationSetupReturnPath(window.location)) {
+    setIsGuided(true);
+  }
 
-  // A function destination is resolved after activation, when the new
-  // workspace's capabilities are readable.
-  async function activate(
-    organizationId: string,
-    redirectTo?: string | (() => Promise<string>),
-  ) {
-    setError(null);
-    setIsSubmitting(true);
+  async function activate(organizationId: string): Promise<boolean> {
     const result = await authClient.organization.setActive({ organizationId });
-    setIsSubmitting(false);
     if (result.error) {
       console.error(
         JSON.stringify({
@@ -499,7 +502,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
         }),
       );
       setError(result.error.message ?? "Could not open that workspace");
-      return;
+      return false;
     }
     console.info(
       JSON.stringify({
@@ -508,10 +511,18 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
       }),
     );
     await onReady();
-    const destination = typeof redirectTo === "function" ? await redirectTo() : redirectTo;
-    if (destination) window.location.replace(destination);
+    return true;
   }
 
+  async function open(organizationId: string) {
+    setError(null);
+    setIsSubmitting(true);
+    await activate(organizationId);
+    setIsSubmitting(false);
+  }
+
+  // Opens the new workspace's first page in place, so guided setup moves to
+  // its next step without reloading the page.
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -525,9 +536,11 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
       setError("Use at least one letter or number in the workspace name");
       return;
     }
+    onCreating(true);
     const result = await authClient.organization.create({ name, slug });
 
     if (result.error || !result.data) {
+      onCreating(false);
       console.error(
         JSON.stringify({
           event: "workspace_creation_failed",
@@ -545,19 +558,26 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
         organizationId: result.data.id,
       }),
     );
-    await activate(
-      result.data.id,
+    if (!(await activate(result.data.id))) {
+      onCreating(false);
+      setIsSubmitting(false);
+      return;
+    }
+    // The first page depends on the new workspace's capabilities, which are
+    // readable once it is active.
+    const destination =
       automationSetupReturnPath(window.location) ??
-        (async () => newWorkspacePath(await requestCapabilities())),
-    );
+      newWorkspacePath(await requestCapabilities());
+    navigate(destination, { replace: true });
+    onCreating(false);
   }
 
   // A member without workspaces starts guided setup by naming one, unless
   // they came to set up a template.
-  if (!organizations.isPending && !hasOrganizations && !automationSetupReturnPath(window.location)) {
+  if (isGuided) {
     return (
       <OnboardingFrame
-        activeStages={[]}
+        activeStages={onboardingStepStages.workspace}
         footer={
           <button
             className="onboarding__primary"
@@ -613,7 +633,7 @@ function WorkspaceSetup({ onReady }: WorkspaceSetupProps) {
               className="workspaceChoice"
               disabled={isSubmitting}
               key={organization.id}
-              onClick={() => void activate(organization.id)}
+              onClick={() => void open(organization.id)}
               type="button"
             >
               <span>{organization.name}</span>
@@ -828,6 +848,7 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const signedInUserId = session.data?.user.id;
   const activeOrganizationId = session.data?.session.activeOrganizationId;
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   // A signed-in visitor's next /app visit on any cell's host comes back here.
   useEffect(() => {
     if (signedInUserId && cells?.current) {
@@ -883,13 +904,18 @@ export function AuthGate({ children }: AuthGateProps) {
     };
   }, [signedInUserId]);
 
-  if (session.isPending) {
-    return (
-      <AuthFrame>
-        <p className="authMuted">Loading Superlog…</p>
-      </AuthFrame>
-    );
-  }
+  // Guided setup keeps its card on screen while the session and the
+  // workspace load.
+  const onboardingStep = onboardingStepAtPath(window.location.pathname);
+  const loading = onboardingStep ? (
+    <OnboardingLoading step={onboardingStep} />
+  ) : (
+    <AuthFrame>
+      <p className="authMuted">Loading Superlog…</p>
+    </AuthFrame>
+  );
+
+  if (session.isPending) return loading;
 
   if (session.error) {
     return (
@@ -946,11 +972,11 @@ export function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  if (!session.data.session.activeOrganizationId) {
+  if (!session.data.session.activeOrganizationId || isCreatingWorkspace) {
     return (
       <>
         <ImpersonationBanner />
-        <WorkspaceSetup onReady={session.refetch} />
+        <WorkspaceSetup onCreating={setIsCreatingWorkspace} onReady={session.refetch} />
       </>
     );
   }
@@ -958,13 +984,7 @@ export function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       <ImpersonationBanner />
-      <OrganizationCapabilitiesProvider
-        fallback={
-          <AuthFrame>
-            <p className="authMuted">Loading Superlog…</p>
-          </AuthFrame>
-        }
-      >
+      <OrganizationCapabilitiesProvider fallback={loading}>
         {children}
       </OrganizationCapabilitiesProvider>
     </>

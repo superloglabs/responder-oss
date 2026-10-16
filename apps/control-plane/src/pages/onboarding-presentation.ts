@@ -14,6 +14,16 @@ export const onboardingStepLabels: Record<OnboardingStep, string> = {
 // where billing can change them.
 export const onboardingSteps: readonly OnboardingStep[] = ["workspace", "code", "alerts", "usage", "templates"];
 
+export type OnboardingStage = "alert" | "cause" | "fix";
+
+// The explainer stages each step highlights. Steps without an entry take the
+// full width.
+export const onboardingStepStages: Partial<Record<OnboardingStep, OnboardingStage[]>> = {
+  alerts: ["alert"],
+  code: ["cause", "fix"],
+  workspace: [],
+};
+
 export function onboardingPath(step: Exclude<OnboardingStep, "workspace">): string {
   return `/onboarding/${step}`;
 }
@@ -23,6 +33,12 @@ export function onboardingPath(step: Exclude<OnboardingStep, "workspace">): stri
 export function onboardingStepFromPath(value: string | undefined): Exclude<OnboardingStep, "workspace"> {
   const step = onboardingSteps.find((candidate) => candidate === value);
   return step && step !== "workspace" ? step : "code";
+}
+
+// The step a setup URL opens, or null outside guided setup.
+export function onboardingStepAtPath(pathname: string): Exclude<OnboardingStep, "workspace"> | null {
+  const match = /^\/onboarding(?:\/([^/]*))?\/?$/.exec(pathname);
+  return match ? onboardingStepFromPath(match[1]) : null;
 }
 
 // Providers with a working connection. Accounts that failed or were revoked
