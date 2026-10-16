@@ -29,10 +29,10 @@ describe("primaryNavigation", () => {
   it("lists logs, traces and metrics with the telemetry capability", () => {
     expect(
       primaryNavigation({ automations: true, simplified: false, telemetry: true }).map((item) => item.label),
-    ).toEqual(["Agents", "Automations", "PRs", "Skills", "Issues", "Scans", "Suggestions", "Overview", "Logs", "Traces", "Metrics", "AI models", "Add telemetry", "Settings"]);
+    ).toEqual(["Agents", "Automations", "PRs", "Skills", "Issues", "Scans", "Suggestions", "Overview", "Logs", "Traces", "Metrics", "AI models", "Settings"]);
     expect(
       primaryNavigation({ automations: true, simplified: true, telemetry: true }).map((item) => item.label),
-    ).toEqual(["Automations", "PRs", "Skills", "Overview", "Logs", "Traces", "Metrics", "AI models", "Add telemetry", "Integrations", "Tag mode", "Settings"]);
+    ).toEqual(["Automations", "PRs", "Skills", "Overview", "Logs", "Traces", "Metrics", "AI models", "Integrations", "Tag mode", "Settings"]);
   });
 
   it("lists the traces overview and search under Traces", () => {
@@ -47,7 +47,7 @@ describe("primaryNavigation", () => {
   it("lists alerts and synthetic checks only with telemetry and the alerts capability", () => {
     expect(
       primaryNavigation({ alerts: true, automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),
-    ).toEqual(["Automations", "PRs", "Skills", "Overview", "Logs", "Traces", "Metrics", "AI models", "Dashboards", "Alerts", "Synthetics", "Add telemetry", "Integrations", "Tag mode", "Settings"]);
+    ).toEqual(["Automations", "PRs", "Skills", "Overview", "Logs", "Traces", "Metrics", "AI models", "Dashboards", "Alerts", "Synthetics", "Integrations", "Tag mode", "Settings"]);
     expect(primaryNavigation({ alerts: true, automations: true, simplified: true }).map((item) => item.label)).not.toContain("Alerts");
     expect(
       primaryNavigation({ alerts: false, automations: true, simplified: true, telemetry: true }).map((item) => item.label),
@@ -60,7 +60,7 @@ describe("primaryNavigation", () => {
   it("lists dashboards only with telemetry", () => {
     expect(
       primaryNavigation({ automations: true, dashboards: true, simplified: true, telemetry: true }).map((item) => item.label),
-    ).toEqual(["Automations", "PRs", "Skills", "Overview", "Logs", "Traces", "Metrics", "AI models", "Dashboards", "Add telemetry", "Integrations", "Tag mode", "Settings"]);
+    ).toEqual(["Automations", "PRs", "Skills", "Overview", "Logs", "Traces", "Metrics", "AI models", "Dashboards", "Integrations", "Tag mode", "Settings"]);
     expect(
       primaryNavigation({ automations: true, dashboards: true, simplified: true }).map((item) => item.label),
     ).not.toContain("Dashboards");

@@ -760,8 +760,8 @@ separate integration boundary.
 
 ## Telemetry sources
 
-Workspaces with the telemetry capability open **Add telemetry** in the sidebar
-to send logs, traces and metrics. Every option needs a cell with a collector
+Workspaces with the telemetry capability open **Add telemetry** from the
+telemetry Overview page to send logs, traces and metrics. Every option needs a cell with a collector
 (`TELEMETRY_COLLECTOR_URL`).
 
 - **OpenTelemetry**: create an ingest key and paste the generated prompt into a
