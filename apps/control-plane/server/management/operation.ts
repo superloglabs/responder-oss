@@ -29,11 +29,13 @@ export class ManagementError extends Error {
 export type ManagementTag =
   | "API keys"
   | "Automations"
+  | "Dashboards"
   | "Integrations"
   | "Models"
   | "Runs"
   | "Secrets"
   | "Tag mode"
+  | "Telemetry"
   | "Workspace";
 
 // Responses are serialized as JSON before they are checked against the

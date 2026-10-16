@@ -7,11 +7,13 @@ type JsonSchema = Record<string, unknown>;
 const tagDescriptions: Record<ManagementTag, string> = {
   "API keys": "Keys that authenticate the management API and MCP server.",
   Automations: "Create and change automations.",
+  Dashboards: "Create and change dashboards over the workspace's telemetry.",
   Integrations: "Connected integrations and the IDs automations and tag mode use.",
   Models: "Model API keys, subscriptions, and available models.",
   Runs: "Start, follow, and cancel automation runs.",
   Secrets: "Credentials agents can use without seeing them.",
   "Tag mode": "What Superlog can use and change when someone mentions it in Slack.",
+  Telemetry: "Read the workspace's logs, traces, and metrics.",
   Workspace: "The workspace and its members.",
 };
 
@@ -123,8 +125,8 @@ function openApiOperation(operation: ManagementOperation) {
         ? { "400": errorResponse("The request is invalid. `issues` lists each invalid field.") }
         : {}),
       "401": errorResponse("The API key is missing, revoked, or its creator left the workspace."),
-      ...(pathNames.length > 0 || operation.requiresAutomations
-        ? { "404": errorResponse("The resource does not exist in this workspace, or automations are not enabled.") }
+      ...(pathNames.length > 0 || operation.requiresAutomations || operation.tag === "Telemetry" || operation.tag === "Dashboards"
+        ? { "404": errorResponse("The resource does not exist in this workspace, or the feature it belongs to is not enabled.") }
         : {}),
       ...(operation.effect !== "read"
         ? { "409": errorResponse("The request conflicts with the current state, such as a name already in use.") }
@@ -160,7 +162,7 @@ export function buildOpenApiDocument(
     },
     info: {
       description:
-        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets. Every request acts as the member who created the API key.",
+        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, and build dashboards over it. Every request acts as the member who created the API key.",
       title: "Superlog management API",
       version: "1.0.0",
     },
