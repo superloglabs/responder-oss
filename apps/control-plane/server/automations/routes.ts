@@ -37,7 +37,12 @@ import {
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
 import { sharedAutomationTemplateSlugSchema } from "../../../../packages/core/src/automations/shared-template.js";
-import { getLatestAutomationSuggestions } from "../../../../packages/core/src/db/automation-template-suggestions.js";
+import {
+  finishAutomationSuggestionRefill,
+  getLatestAutomationSuggestions,
+  removeAutomationSuggestions,
+  type LatestAutomationSuggestions,
+} from "../../../../packages/core/src/db/automation-template-suggestions.js";
 import {
   getAutomationShare,
   shareAutomation,
@@ -49,7 +54,7 @@ import {
 } from "../../../../packages/core/src/db/usage-history.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
-import { queueAutomationRun, queueAutomationRunFollowUp } from "./queue.js";
+import { queueAutomationRun, queueAutomationRunFollowUp, queueAutomationSuggestionRefill } from "./queue.js";
 import { listSentryEnvironments } from "../integrations/sentry.js";
 import {
   getFreshSentryCredentials,
@@ -116,6 +121,36 @@ function isAutomationNameConflict(error: unknown): boolean {
     if (typeof current !== "object") break;
   }
   return false;
+}
+
+function suggestionsBody(latest: LatestAutomationSuggestions | null) {
+  return {
+    canRefresh: latest?.canRefresh ?? false,
+    generatedOn: latest?.generatedOn ?? null,
+    refreshing: latest?.refreshing ?? false,
+    suggestions: latest?.templates ?? [],
+  };
+}
+
+// Hides suggested templates and queues their replacements. When the job
+// cannot be queued, the request is closed so the gallery does not wait.
+async function removeSuggestions(organizationId: string, templateIds: string[] | "all") {
+  const now = new Date();
+  const removal = await removeAutomationSuggestions({ now, organizationId, templateIds });
+  if (removal.kind !== "removed" || !removal.refillRequested) return removal;
+  const { generatedOn } = removal.suggestions;
+  try {
+    await queueAutomationSuggestionRefill({ generatedOn, organizationId });
+    return removal;
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : "Queue failed",
+      event: "automation_suggestions_refill_queue_failed",
+      organizationId,
+    }));
+    await finishAutomationSuggestionRefill({ generatedOn, organizationId, requestedAt: now, templates: [] });
+    return { ...removal, suggestions: { ...removal.suggestions, refreshing: false } };
+  }
 }
 
 function configurationError(error: unknown, name: string): {
@@ -223,8 +258,28 @@ export const automationRoutes = new Hono()
   .get("/suggestions", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
-    const latest = await getLatestAutomationSuggestions(access.tenant.organizationId);
-    return context.json({ generatedOn: latest?.generatedOn ?? null, suggestions: latest?.templates ?? [] });
+    return context.json(suggestionsBody(await getLatestAutomationSuggestions(access.tenant.organizationId)));
+  })
+  // Replaces every shown suggestion with new ones.
+  .post("/suggestions/refresh", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const removal = await removeSuggestions(access.tenant.organizationId, "all");
+    if (removal.kind === "none") return context.json({ error: "No suggestions to refresh" }, 404);
+    if (removal.kind === "limit") {
+      return context.json({ ...suggestionsBody(removal.suggestions), error: "No more suggestions today. New ones arrive tomorrow morning." }, 429);
+    }
+    return context.json(suggestionsBody(removal.suggestions));
+  })
+  // Hides one suggestion and asks for a replacement.
+  .post("/suggestions/:templateId/dismiss", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const templateId = z.uuid().safeParse(context.req.param("templateId"));
+    if (!templateId.success) return context.json({ error: "Invalid suggestion" }, 400);
+    const removal = await removeSuggestions(access.tenant.organizationId, [templateId.data]);
+    if (removal.kind !== "removed") return context.json({ error: "Suggestion not found" }, 404);
+    return context.json(suggestionsBody(removal.suggestions));
   })
   .get("/options", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
@@ -447,6 +502,17 @@ export const automationRoutes = new Hono()
           trigger_kinds: [...new Set(parsed.data.configuration.triggers.map((trigger) => trigger.kind))].join(","),
         },
       });
+      // A used suggestion leaves the gallery and gets a replacement. The
+      // automation is saved either way.
+      if (suggestedTemplate.success) {
+        await removeSuggestions(access.tenant.organizationId, [suggestedTemplate.data]).catch((error: unknown) => {
+          console.error(JSON.stringify({
+            error: error instanceof Error ? error.message : "Removal failed",
+            event: "automation_suggestion_removal_failed",
+            organizationId: access.tenant.organizationId,
+          }));
+        });
+      }
       return context.json({ automationId: automation.id }, 201);
     } catch (error) {
       const response = configurationError(error, parsed.data.name);

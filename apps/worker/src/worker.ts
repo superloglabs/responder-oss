@@ -4,6 +4,8 @@ import {
   automationRunJobSchema,
   automationRunLocalConcurrency,
   automationRunQueue,
+  automationSuggestionRefillJobSchema,
+  automationSuggestionRefillQueue,
   createJobBoss,
   gcpProjectSetupJobSchema,
   gcpProjectSetupQueue,
@@ -100,7 +102,11 @@ import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
-import { generateDueAutomationSuggestions } from "./automation-template-suggestions.js";
+import {
+  automationSuggestionModel,
+  generateDueAutomationSuggestions,
+  refillAutomationSuggestions,
+} from "./automation-template-suggestions.js";
 import {
   createSyntheticCheckScheduler,
   defaultSyntheticCheckDependencies,
@@ -668,6 +674,19 @@ await boss.work(linearTicketQueue, { localConcurrency: 2 }, tracedJobHandler(lin
     throw error;
   }
 }));
+await boss.work(
+  automationSuggestionRefillQueue,
+  { groupConcurrency: 1, localConcurrency: 2 },
+  tracedJobHandler(automationSuggestionRefillQueue, async ([job]) => {
+    const payload = automationSuggestionRefillJobSchema.parse(job.data);
+    await refillAutomationSuggestions({
+      generatedOn: payload.generatedOn,
+      model: automationSuggestionModel(process.env),
+      organizationId: payload.organizationId,
+    });
+    return { organizationId: payload.organizationId };
+  }),
+);
 await boss.work(gcpProjectSetupQueue, { localConcurrency: 2 }, tracedJobHandler(gcpProjectSetupQueue, async ([job]) => {
   const payload = gcpProjectSetupJobSchema.parse(job.data);
   const status = await processGcpProjectSetupJob(payload, {

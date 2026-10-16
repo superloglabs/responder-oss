@@ -1295,6 +1295,9 @@ export const sharedAutomationTemplates = pgTable(
 // Automation templates written by a model for one organization each morning.
 // One row per organization and UTC day. The worker claims the day by
 // inserting the row as `generating`, then stores the templates as `ready`.
+// Templates a member used or dismissed stay in `templates`, so the model does
+// not suggest them again, and are listed in `removedTemplateIds`. Removing one
+// sets `refillRequestedAt` until the worker writes a replacement.
 export const automationTemplateSuggestions = pgTable(
   "automation_template_suggestions",
   {
@@ -1311,6 +1314,12 @@ export const automationTemplateSuggestions = pgTable(
       .$type<SuggestedAutomationTemplate[]>()
       .notNull()
       .default([]),
+    removedTemplateIds: jsonb("removed_template_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    refillRequestedAt: timestamp("refill_requested_at", { withTimezone: true }),
+    refills: integer("refills").notNull().default(0),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

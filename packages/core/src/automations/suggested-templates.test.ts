@@ -71,6 +71,14 @@ describe("suggested automation templates", () => {
     expect(templates.map((template) => template.name)).toEqual(["One", "Two", "Three"]);
   });
 
+  it("keeps only as many as a refill needs", () => {
+    const output = { suggestions: [suggestion({ name: "One" }), suggestion({ name: "Two" })] };
+
+    expect(suggestedAutomationTemplates(output, { connectedProviders: ["github"], limit: 1, takenNames: [] }, newId)
+      .map((template) => template.name)).toEqual(["One"]);
+    expect(suggestedAutomationTemplates(output, { connectedProviders: ["github"], limit: 0, takenNames: [] }, newId)).toEqual([]);
+  });
+
   it("produces schedules the automation schema accepts", () => {
     const [template] = suggestedAutomationTemplates({
       suggestions: [suggestion({ trigger: { frequency: "weekly", hour: 27, kind: "schedule", weekday: -1 } })],
@@ -85,7 +93,8 @@ describe("suggested automation templates", () => {
     const prompt = automationSuggestionPrompt({
       automations: [{ description: "Fixes Sentry regressions.", name: "Fix regressions" }],
       connectedProviders: ["github", "sentry"],
-      previousSuggestions: ["Find flaky tests"],
+      dismissedSuggestions: ["Summarize deploys"],
+      previousSuggestions: ["Find flaky tests", "Summarize deploys"],
       recentIssues: [{ severity: "high", title: "Checkout returns 500" }],
       repositories: ["acme/web"],
       workspaceName: "Acme",
@@ -95,6 +104,7 @@ describe("suggested automation templates", () => {
     expect(prompt).toContain("- acme/web");
     expect(prompt).toContain("- Fix regressions: Fixes Sentry regressions.");
     expect(prompt).toContain("- Checkout returns 500 (high)");
-    expect(prompt).toContain("Suggested on previous days:\n- Find flaky tests");
+    expect(prompt).toContain("Suggested before:\n- Find flaky tests\n- Summarize deploys");
+    expect(prompt).toContain("Dismissed by the team:\n- Summarize deploys");
   });
 });

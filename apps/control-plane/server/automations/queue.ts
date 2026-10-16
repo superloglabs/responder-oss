@@ -11,6 +11,7 @@ import type { AutomationUserMessageEventData } from "../../../../packages/core/s
 import {
   automationRunJobOptions,
   automationRunQueue,
+  automationSuggestionRefillQueue,
   createJobBoss,
   prepareWorkerQueues,
 } from "../../../../packages/core/src/jobs.js";
@@ -129,6 +130,21 @@ export async function queueAutomationRunReply(input: {
     });
     throw new Error("Automation worker is unavailable", { cause: error });
   }
+}
+
+// Asks the worker for suggested templates to replace ones a member used or
+// dismissed.
+export async function queueAutomationSuggestionRefill(input: {
+  generatedOn: string;
+  organizationId: string;
+}): Promise<void> {
+  const jobId = await (await getBoss()).send(automationSuggestionRefillQueue, {
+    generatedOn: input.generatedOn,
+    kind: "automation_suggestion_refill",
+    organizationId: input.organizationId,
+    queuedAt: new Date().toISOString(),
+  }, { group: { id: input.organizationId } });
+  if (!jobId) throw new Error("Automation suggestion refill job was not created");
 }
 
 export async function closeAutomationQueue(): Promise<void> {

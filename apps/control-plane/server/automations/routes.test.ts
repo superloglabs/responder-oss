@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
   modelCatalog: vi.fn(),
   queueFollowUp: vi.fn(),
   queueRun: vi.fn(),
+  queueSuggestionRefill: vi.fn(),
+  finishSuggestionRefill: vi.fn(),
+  latestSuggestions: vi.fn(),
+  removeSuggestions: vi.fn(),
   tenant: vi.fn().mockResolvedValue({
     ok: true,
     organizationId: "15151515-1515-4515-8515-151515151515",
@@ -99,6 +103,12 @@ vi.mock("../../../../packages/core/src/analytics.js", () => ({
 vi.mock("./queue.js", () => ({
   queueAutomationRun: mocks.queueRun,
   queueAutomationRunFollowUp: mocks.queueFollowUp,
+  queueAutomationSuggestionRefill: mocks.queueSuggestionRefill,
+}));
+vi.mock("../../../../packages/core/src/db/automation-template-suggestions.js", () => ({
+  finishAutomationSuggestionRefill: mocks.finishSuggestionRefill,
+  getLatestAutomationSuggestions: mocks.latestSuggestions,
+  removeAutomationSuggestions: mocks.removeSuggestions,
 }));
 
 vi.mock(
@@ -519,6 +529,41 @@ describe("automation control-plane routes", () => {
       }));
     });
 
+    it("removes the suggestion an automation was created from and queues a replacement", async () => {
+      const suggestionId = "51515151-5151-4515-8515-515151515151";
+      mocks.createAutomation.mockResolvedValue({ id: automationId });
+      mocks.removeSuggestions.mockResolvedValue({
+        kind: "removed",
+        refillRequested: true,
+        suggestions: { canRefresh: true, generatedOn: "2026-10-16", refreshing: true, templates: [] },
+      });
+
+      const response = await app.request("/api/automations", {
+        body: JSON.stringify({
+          configuration: {
+            harness: "codex",
+            maxModelRequests: 24,
+            maxOutputTokensPerRequest: 16_000,
+            maxRuntimeSeconds: 1_800,
+            model: "gpt-5.4",
+            modelProvider: "openai",
+            prompt: "Rate it.",
+            repositoryIds: ["41414141-4141-4141-8141-414141414141"],
+            toolPolicy: "full",
+            triggers: [{ frequency: "daily", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 }],
+          },
+          name: "Triage",
+          suggestedTemplate: suggestionId,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(201);
+      expect(mocks.removeSuggestions).toHaveBeenCalledWith(expect.objectContaining({ organizationId, templateIds: [suggestionId] }));
+      expect(mocks.queueSuggestionRefill).toHaveBeenCalledWith({ generatedOn: "2026-10-16", organizationId });
+    });
+
     it("explains a duplicate automation name instead of failing", async () => {
       // Drizzle reports the Postgres violation as the cause of its own error.
       mocks.createAutomation.mockRejectedValue(new Error("Failed query", {
@@ -553,6 +598,64 @@ describe("automation control-plane routes", () => {
         code: "automation_name_taken",
         error: 'An automation named "Triage" already exists. Choose a different name.',
       });
+    });
+  });
+  describe("suggested templates", () => {
+    const suggestionId = "51515151-5151-4515-8515-515151515151";
+    const shown = { canRefresh: true, generatedOn: "2026-10-16", refreshing: true, templates: [{ id: "next" }] };
+
+    it("dismisses a suggestion and queues its replacement", async () => {
+      mocks.removeSuggestions.mockResolvedValue({ kind: "removed", refillRequested: true, suggestions: shown });
+
+      const response = await app.request(`/api/automations/suggestions/${suggestionId}/dismiss`, { method: "POST" });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ canRefresh: true, generatedOn: "2026-10-16", refreshing: true, suggestions: [{ id: "next" }] });
+      expect(mocks.removeSuggestions).toHaveBeenCalledWith(expect.objectContaining({ organizationId, templateIds: [suggestionId] }));
+      expect(mocks.queueSuggestionRefill).toHaveBeenCalledWith({ generatedOn: "2026-10-16", organizationId });
+    });
+
+    it("closes the request when the replacement cannot be queued", async () => {
+      mocks.removeSuggestions.mockResolvedValue({ kind: "removed", refillRequested: true, suggestions: shown });
+      mocks.queueSuggestionRefill.mockRejectedValueOnce(new Error("queue down"));
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const response = await app.request(`/api/automations/suggestions/${suggestionId}/dismiss`, { method: "POST" });
+
+      await expect(response.json()).resolves.toMatchObject({ refreshing: false });
+      expect(mocks.finishSuggestionRefill).toHaveBeenCalledWith(expect.objectContaining({ generatedOn: "2026-10-16", organizationId, templates: [] }));
+      logged.mockRestore();
+    });
+
+    it("does not queue when the day has no replacements left", async () => {
+      mocks.removeSuggestions.mockResolvedValue({ kind: "removed", refillRequested: false, suggestions: { ...shown, canRefresh: false, refreshing: false } });
+
+      const response = await app.request(`/api/automations/suggestions/${suggestionId}/dismiss`, { method: "POST" });
+
+      expect(response.status).toBe(200);
+      expect(mocks.queueSuggestionRefill).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown suggestion", async () => {
+      mocks.removeSuggestions.mockResolvedValue({ kind: "none" });
+
+      expect((await app.request("/api/automations/suggestions/not-an-id/dismiss", { method: "POST" })).status).toBe(400);
+      expect((await app.request(`/api/automations/suggestions/${suggestionId}/dismiss`, { method: "POST" })).status).toBe(404);
+    });
+
+    it("refreshes every suggestion until the day's limit", async () => {
+      mocks.removeSuggestions.mockResolvedValueOnce({ kind: "removed", refillRequested: true, suggestions: { ...shown, templates: [] } });
+
+      const refreshed = await app.request("/api/automations/suggestions/refresh", { method: "POST" });
+
+      expect(refreshed.status).toBe(200);
+      expect(mocks.removeSuggestions).toHaveBeenCalledWith(expect.objectContaining({ organizationId, templateIds: "all" }));
+
+      mocks.removeSuggestions.mockResolvedValueOnce({ kind: "limit", suggestions: { ...shown, canRefresh: false, refreshing: false } });
+      const limited = await app.request("/api/automations/suggestions/refresh", { method: "POST" });
+
+      expect(limited.status).toBe(429);
+      await expect(limited.json()).resolves.toMatchObject({ error: "No more suggestions today. New ones arrive tomorrow morning.", suggestions: [{ id: "next" }] });
     });
   });
 });
