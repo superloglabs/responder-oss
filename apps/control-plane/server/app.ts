@@ -34,6 +34,7 @@ import { createAlertRoutes } from "./telemetry/alert-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createIngestKeyRoutes } from "./telemetry/ingest-key-routes.js";
 import { createIngestRoutes } from "./telemetry/ingest-routes.js";
+import { createBrowserRelayRoutes } from "./telemetry/browser-relay-routes.js";
 import { createSourceRoutes } from "./telemetry/source-routes.js";
 import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
@@ -59,6 +60,7 @@ import { skillRoutes } from "./skills/routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
 import { oauthMetadataRoutes } from "./oauth-metadata-routes.js";
+import { requestMetrics } from "./request-metrics.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -306,6 +308,7 @@ if (Sentry.isInitialized()) {
     await next();
   });
 }
+instrumentedApp.use("/api/*", requestMetrics());
 // After the body limits and monitoring, before the webhook and OAuth callback
 // handlers.
 instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
@@ -485,6 +488,7 @@ export const app = instrumentedApp
   .route("/api/scans", scanRoutes)
   .route("/api/suggestions", suggestionRoutes)
   .route("/api/ingest", createIngestRoutes())
+  .route("/api/telemetry/browser", createBrowserRelayRoutes())
   .route("/api/telemetry/ingest-keys", createIngestKeyRoutes())
   .route("/api/telemetry/sources", createSourceRoutes())
   .route("/api/telemetry/alerts", createAlertRoutes())

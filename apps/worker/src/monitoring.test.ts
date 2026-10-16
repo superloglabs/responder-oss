@@ -4,8 +4,14 @@ const sentryMocks = vi.hoisted(() => ({
   addEventProcessor: vi.fn(),
   captureException: vi.fn(),
   flush: vi.fn().mockResolvedValue(true),
+  httpIntegration: vi.fn(() => ({ name: "Http" })),
   init: vi.fn(),
   isInitialized: vi.fn().mockReturnValue(false),
+  nativeNodeFetchIntegration: vi.fn(() => ({ name: "NodeFetch" })),
+  openAIIntegration: vi.fn(() => ({ name: "OpenAI" })),
+  postgresIntegration: vi.fn(() => ({ name: "Postgres" })),
+  SentryContextManager: vi.fn(),
+  validateOpenTelemetrySetup: vi.fn(),
   scope: {
     setContext: vi.fn(),
     setTag: vi.fn(),
@@ -13,12 +19,28 @@ const sentryMocks = vi.hoisted(() => ({
   withScope: vi.fn(),
 }));
 
+const telemetryMocks = vi.hoisted(() => ({
+  flush: vi.fn().mockResolvedValue(undefined),
+  startNodeTelemetry: vi.fn(),
+}));
+
+vi.mock("@responder/core/observability/opentelemetry", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@responder/core/observability/opentelemetry")>(),
+  startNodeTelemetry: telemetryMocks.startNodeTelemetry,
+}));
+
 vi.mock("@sentry/node", () => ({
   addEventProcessor: sentryMocks.addEventProcessor,
   captureException: sentryMocks.captureException,
   flush: sentryMocks.flush,
+  httpIntegration: sentryMocks.httpIntegration,
   init: sentryMocks.init,
   isInitialized: sentryMocks.isInitialized,
+  nativeNodeFetchIntegration: sentryMocks.nativeNodeFetchIntegration,
+  openAIIntegration: sentryMocks.openAIIntegration,
+  postgresIntegration: sentryMocks.postgresIntegration,
+  SentryContextManager: sentryMocks.SentryContextManager,
+  validateOpenTelemetrySetup: sentryMocks.validateOpenTelemetrySetup,
   withScope: sentryMocks.withScope.mockImplementation(
     (callback: (scope: typeof sentryMocks.scope) => void) =>
       callback(sentryMocks.scope),
@@ -42,6 +64,11 @@ describe("worker error monitoring", () => {
     sentryMocks.scope.setContext.mockClear();
     sentryMocks.scope.setTag.mockClear();
     sentryMocks.withScope.mockClear();
+    sentryMocks.validateOpenTelemetrySetup.mockClear();
+    telemetryMocks.flush.mockClear();
+    telemetryMocks.startNodeTelemetry
+      .mockReset()
+      .mockReturnValue({ flush: telemetryMocks.flush, shutdown: vi.fn() });
   });
 
   it("adds organization names to captured errors", async () => {
@@ -166,10 +193,14 @@ describe("worker error monitoring", () => {
         defaultIntegrations: false,
         dsn: environment.SENTRY_DSN,
         environment: "production",
+        integrations: [],
         release: "abc123",
         sendDefaultPii: false,
+        skipOpenTelemetrySetup: false,
+        tracesSampleRate: 0,
       }),
     );
+    expect(telemetryMocks.startNodeTelemetry).not.toHaveBeenCalled();
     const eventProcessor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
       event: Record<string, unknown>,
     ) => Record<string, unknown>;
@@ -469,5 +500,43 @@ describe("worker error monitoring", () => {
     expect(
       (sentryMocks.captureException.mock.calls[0]![0] as Error).message,
     ).toBe("Worker operation failed with a non-Error exception");
+  });
+
+  it("exports traces, metrics, and logs over OTLP without reporting errors to Sentry", async () => {
+    const client = { name: "client" };
+    sentryMocks.init.mockReturnValue(client);
+    const monitoring = await import("./monitoring.js");
+    const environment = {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://superlog.sh/api/ingest",
+      SENTRY_TRACES_SAMPLE_RATE: "0.5",
+    };
+
+    expect(monitoring.initializeErrorMonitoring(environment)).toBe(true);
+    expect(sentryMocks.init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultIntegrations: false,
+        dsn: "https://otlp@sentry.invalid/1",
+        integrations: [
+          { name: "Http" },
+          { name: "NodeFetch" },
+          { name: "Postgres" },
+          { name: "OpenAI" },
+        ],
+        skipOpenTelemetrySetup: true,
+        tracesSampleRate: 0.5,
+        transport: expect.any(Function),
+      }),
+    );
+    expect(sentryMocks.nativeNodeFetchIntegration).toHaveBeenCalledWith({ spans: true });
+    expect(telemetryMocks.startNodeTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({ sentryClient: client, serviceName: "responder-worker" }),
+    );
+    expect(sentryMocks.validateOpenTelemetrySetup).toHaveBeenCalled();
+
+    await monitoring.reportWorkerException(new Error("failed"), { operation: "worker" });
+    expect(sentryMocks.captureException).not.toHaveBeenCalled();
+    await expect(monitoring.flushWorkerMonitoring(500)).resolves.toBe(false);
+    expect(telemetryMocks.flush).toHaveBeenCalledWith(500);
+    expect(sentryMocks.flush).not.toHaveBeenCalled();
   });
 });
