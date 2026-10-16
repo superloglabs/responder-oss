@@ -58,6 +58,7 @@
 .appShell--workspace .agentListTable.explorerTableWrap .dsDataTable--workspace td { padding: 5px 12px; font-size: 13px; line-height: 20px; }
 .appShell--workspace .dsDataTable--workspace tr.dsDataTable__row--selected td { background: #f1f2fe; }
 .appShell--workspace .explorerTableWrap .dsBadge { min-height: 0; height: 20px; padding: 0 7px; font-size: 11px; line-height: 16px; }
+.explorerTableWrap td .explorerCell--muted { display: block; }
 .explorerCell--muted { overflow: hidden; color: #434343; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .explorerCell--number { display: block; color: #1a1a1a; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .explorerCell--message { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: #1a1a1a; cursor: pointer; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
