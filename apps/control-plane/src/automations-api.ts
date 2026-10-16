@@ -5,6 +5,7 @@ export type { ModelProviderId as AutomationModelProvider, AvailableAutomationMod
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
 import type { UsageHistory, UsageHistoryDays } from "./usage-history-presentation";
+import type { SuggestedAutomationTemplate } from "./pages/automation-templates";
 export type AutomationRunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type AutomationTrigger =
@@ -249,15 +250,22 @@ export async function fetchSlackAuthors(accountId: string, channelIds: string[],
   return authors ?? [];
 }
 
+// Templates written for this workspace this morning.
+export async function fetchAutomationSuggestions(): Promise<SuggestedAutomationTemplate[]> {
+  const response = await automationJson<{ suggestions: SuggestedAutomationTemplate[] }>("/api/automations/suggestions");
+  return response.suggestions;
+}
+
 export function fetchAutomationOptions(): Promise<AutomationOptions> {
   return automationJson<AutomationOptions>("/api/automations/options");
 }
 
-// `sharedTemplate` names the shared template a new automation started from.
+// `startedFrom` names the shared or suggested template a new automation
+// started from, for analytics.
 export async function saveAutomation(
   automationId: string | undefined,
   input: AutomationInput,
-  sharedTemplate?: string,
+  startedFrom?: { sharedTemplate: string } | { suggestedTemplate: string },
 ): Promise<string> {
   const response = await automationJson<{
     automationId?: string;
@@ -265,7 +273,7 @@ export async function saveAutomation(
   }>(automationId
     ? `/api/automations/${encodeURIComponent(automationId)}`
     : "/api/automations", {
-    body: JSON.stringify(sharedTemplate ? { ...input, sharedTemplate } : input),
+    body: JSON.stringify({ ...input, ...startedFrom }),
     headers: { "content-type": "application/json" },
     method: automationId ? "PUT" : "POST",
   });

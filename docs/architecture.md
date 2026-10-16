@@ -203,6 +203,14 @@ investigation credits.
   fails, the cached membership is used. Usage past a balance that the plan
   bills for is expected and sends nothing.
 - The app shows a banner from the same balances while new work is paused.
+- Suggested automation templates are paid by Responder and do not use the
+  usage credit. From 05:00 UTC each day, the worker asks a model through
+  Responder's AI Gateway key for templates for each organization with
+  automations that a member used in the last week. The model reads the
+  workspace name, connected providers, repository names, automation names,
+  and the titles of the last two weeks' issues. One row per organization and
+  day holds the result; a failed day is retried up to three times, and rows
+  are kept for 14 days.
 
 Postgres and pg-boss hold investigation, remediation, and follow-up work.
 Delivery may be at least once, so handlers use idempotency keys and state

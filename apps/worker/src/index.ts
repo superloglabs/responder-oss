@@ -101,6 +101,7 @@ import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
+import { generateDueAutomationSuggestions } from "./automation-template-suggestions.js";
 import {
   createSyntheticCheckScheduler,
   defaultSyntheticCheckDependencies,
@@ -137,6 +138,7 @@ let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
 const pollers: {
+  automationSuggestions?: NodeJS.Timeout;
   automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
   gcpTelemetry?: NodeJS.Timeout;
@@ -563,6 +565,7 @@ async function shutdown(signal: string): Promise<void> {
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
   if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
+  if (pollers.automationSuggestions) clearInterval(pollers.automationSuggestions);
   if (pollers.gcpTelemetry) clearInterval(pollers.gcpTelemetry);
   if (pollers.syntheticChecks) clearInterval(pollers.syntheticChecks);
   if (pollers.syntheticCheckPurge) clearInterval(pollers.syntheticCheckPurge);
@@ -1142,5 +1145,8 @@ pollers.syntheticCheckPurge = setInterval(purgeSyntheticChecks, 10 * 60 * 1_000)
 pollers.syntheticCheckPurge.unref();
 pollers.gcpTelemetry = setInterval(() => void pullGcpTelemetry(), 60_000);
 pollers.gcpTelemetry.unref();
+void generateDueAutomationSuggestions();
+pollers.automationSuggestions = setInterval(() => void generateDueAutomationSuggestions(), 10 * 60 * 1_000);
+pollers.automationSuggestions.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));

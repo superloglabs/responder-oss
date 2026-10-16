@@ -22,6 +22,8 @@
 .automationTemplate__category { color: #888; font-size: 12px; line-height: 18px; }
 .automationTemplate strong { font-size: 13px; font-weight: 500; line-height: 20px; }
 .automationTemplate__description { color: #666; font-size: 12px; line-height: 18px; }
+.automationTemplate__reason { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; color: #4e58c7; font-size: 12px; line-height: 18px; }
+.automationTemplate__reason > svg { flex-shrink: 0; margin-top: 3px; }
 .automationTemplate__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: .5px solid #e6e8ec; color: #666; font-size: 12px; line-height: 18px; }
 .automationTemplate__connectors { display: flex; align-items: center; gap: 6px; }
 .automationTemplate__connectors .providerGlyph, .automationTemplate__connectors .providerGlyph > svg { width: 14px; height: 14px; }

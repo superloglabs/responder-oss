@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useEffectEvent, useState, useRef } from "rea
 import { Link, useMatch, useNavigate } from "react-router-dom";
 import {
   fetchAutomationOptions,
+  fetchAutomationSuggestions,
   fetchSharedAutomationTemplate,
   runAutomation,
   saveAutomation,
@@ -26,7 +27,7 @@ import { currentProjectSelectionState } from "../project-selection";
 import { ProviderGlyph } from "../components/icons";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { restoreAutomationDraft, saveAutomationDraft, takeAutomationDraft, waitForConnectedAccounts } from "./automation-draft";
-import { applyAutomationTemplate, automationTemplateMissingFields, findAutomationTemplate, type AutomationTemplate } from "./automation-templates";
+import { applyAutomationTemplate, automationTemplateMissingFields, findAutomationTemplate, isSuggestedAutomationTemplate, type AutomationTemplate, type SuggestedAutomationTemplate } from "./automation-templates";
 import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
@@ -69,8 +70,17 @@ function incompleteReason(configuration: AutomationConfiguration): { field: "tri
   return null;
 }
 
-function isSharedTemplate(template: AutomationTemplate | SharedAutomationTemplate | undefined): template is SharedAutomationTemplate {
+type StartingTemplate = AutomationTemplate | SharedAutomationTemplate | SuggestedAutomationTemplate;
+
+function isSharedTemplate(template: StartingTemplate | undefined): template is SharedAutomationTemplate {
   return template !== undefined && "slug" in template;
+}
+
+// What the draft keeps to restore the template after connecting.
+function draftTemplate(template: StartingTemplate | undefined) {
+  if (isSharedTemplate(template)) return { sharedTemplate: template };
+  if (isSuggestedAutomationTemplate(template)) return { suggestedTemplate: template };
+  return { templateId: template?.id };
 }
 
 function toggle(list: string[], value: string): string[] {
@@ -92,9 +102,11 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const navigate = useNavigate();
   const [options, setOptions] = useState<AutomationOptions | null>(null);
   // A new automation can start from a template chosen on the automation list,
-  // or from one another workspace shared, which loads with the options.
-  const [template, setTemplate] = useState<AutomationTemplate | SharedAutomationTemplate | undefined>(() => automationId ? undefined : findAutomationTemplate(new URLSearchParams(window.location.search).get("template")));
+  // from one suggested for the workspace, or from one another workspace
+  // shared. Suggested and shared templates load with the options.
+  const [template, setTemplate] = useState<StartingTemplate | undefined>(() => automationId ? undefined : findAutomationTemplate(new URLSearchParams(window.location.search).get("template")));
   const [sharedTemplateSlug] = useState(() => automationId ? null : new URLSearchParams(window.location.search).get("shared"));
+  const [suggestionId] = useState(() => automationId ? null : new URLSearchParams(window.location.search).get("suggestion"));
   const [name, setName] = useState(initialAutomation?.name ?? template?.name ?? "New automation");
   const [savedName, setSavedName] = useState(initialAutomation?.name ?? "");
   const description = initialAutomation?.description ?? template?.description ?? "";
@@ -188,7 +200,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     });
   }
 
-  const optionsLoaded = useEffectEvent((loadedOptions: AutomationOptions, sharedTemplate: SharedAutomationTemplate | null, isCancelled: () => boolean) => {
+  const optionsLoaded = useEffectEvent((loadedOptions: AutomationOptions, loadedTemplate: SharedAutomationTemplate | SuggestedAutomationTemplate | null, isCancelled: () => boolean) => {
     setOptions(loadedOptions);
     const restored = restoreAutomationDraft(loadedOptions, window.location, automationId);
     // Saved settings and drafts can reference connections removed since. The
@@ -203,13 +215,15 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         updateConfiguration(() => saved.current.configuration, false);
         return;
       }
-      const starting = sharedTemplate ?? template;
-      if (sharedTemplate) {
-        setTemplate(sharedTemplate);
-        nameRef.current = sharedTemplate.name;
-        setName(sharedTemplate.name);
+      const starting = loadedTemplate ?? template;
+      if (loadedTemplate) {
+        setTemplate(loadedTemplate);
+        nameRef.current = loadedTemplate.name;
+        setName(loadedTemplate.name);
       } else if (sharedTemplateSlug) {
         setError("This shared template is no longer available. Set up the automation below or pick a template from Automations.");
+      } else if (suggestionId) {
+        setError("This suggestion is no longer available. Set up the automation below or pick a template from Automations.");
       }
       updateConfiguration((current) => {
         const blank = { ...current, contextAccountIds: defaultContextAccountIds(loadedOptions), model: "", repositoryIds: [] };
@@ -219,7 +233,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       }, false);
       return;
     }
-    setTemplate(restored.draft.sharedTemplate ?? findAutomationTemplate(restored.draft.templateId));
+    setTemplate(restored.draft.sharedTemplate ?? restored.draft.suggestedTemplate ?? findAutomationTemplate(restored.draft.templateId));
     nameRef.current = restored.draft.name;
     setName(restored.draft.name);
     setGithubIncluded(restored.draft.githubIncluded);
@@ -244,10 +258,14 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     let cancelled = false;
     void Promise.all([
       fetchAutomationOptions(),
-      sharedTemplateSlug ? fetchSharedAutomationTemplate(sharedTemplateSlug).catch(() => null) : null,
+      sharedTemplateSlug
+        ? fetchSharedAutomationTemplate(sharedTemplateSlug).catch(() => null)
+        : suggestionId
+          ? fetchAutomationSuggestions().then((suggestions) => suggestions.find((suggestion) => suggestion.id === suggestionId) ?? null, () => null)
+          : null,
     ])
-      .then(([loadedOptions, sharedTemplate]) => {
-        if (!cancelled) optionsLoaded(loadedOptions, sharedTemplate, () => cancelled);
+      .then(([loadedOptions, loadedTemplate]) => {
+        if (!cancelled) optionsLoaded(loadedOptions, loadedTemplate, () => cancelled);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Unable to load automation");
@@ -256,7 +274,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sharedTemplateSlug]);
+  }, [sharedTemplateSlug, suggestionId]);
 
   // A skill created from the picker opens in a new tab. Its options are read
   // again when this tab regains focus, so the new skill can be added.
@@ -280,7 +298,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
       const { integrations } = await response.json() as { integrations: Array<{ id: string; connectUrl: string | null }> };
       const connectUrl = integrations.find((integration) => integration.id === provider)?.connectUrl;
       if (!connectUrl) throw new Error(`${providerDisplayName(provider)} connections are not configured for this installation.`);
-      saveAutomationDraft({ automationId, name, configuration, ...(isSharedTemplate(template) ? { sharedTemplate: template } : { templateId: template?.id }), githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
+      saveAutomationDraft({ automationId, name, configuration, ...draftTemplate(template), githubIncluded, connecting: provider, knownAccountIds: options?.accounts.filter((account) => account.provider === provider).map((account) => account.id) ?? [], savedAt: Date.now() });
       if (provider === "aws" || provider === "datadog" || provider === "custom_mcp" || provider === "gcp" || provider === "grafana") {
         setConnectDialog({ provider, connectUrl });
         return;
@@ -314,7 +332,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
     setSaving(true);
     setError(null);
     try {
-      const id = await saveAutomation(undefined, { configuration, description, enabled, name }, isSharedTemplate(template) ? template.slug : undefined);
+      const startedFrom = isSharedTemplate(template) ? { sharedTemplate: template.slug } : isSuggestedAutomationTemplate(template) ? { suggestedTemplate: template.id } : undefined;
+      const id = await saveAutomation(undefined, { configuration, description, enabled, name }, startedFrom);
       navigate(`/automations/${id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save automation");
@@ -323,8 +342,9 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   }
 
   // Every built-in and shared template has a public page to send to others.
+  // Suggestions belong to the workspace and have none.
   async function copyTemplateLink() {
-    if (!template) return;
+    if (!template || isSuggestedAutomationTemplate(template)) return;
     const path = sharedAutomationTemplatePath(isSharedTemplate(template) ? template.slug : template.id);
     try {
       await copyToClipboard(new URL(path, window.location.origin).toString());
@@ -426,8 +446,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         </header>
         {template && !automationId ? <div className="automationCreate__template" role="status">
           <SquaresFourIcon aria-hidden="true" size={16} />
-          <p>Started from the {template.name} template{isSharedTemplate(template) ? ` shared by ${template.workspaceName}` : ""}. Choose {automationTemplateMissingFields(template)}, then save.</p>
-          <button onClick={() => void copyTemplateLink()} type="button">{templateLinkCopied ? "Link copied" : "Copy link"}</button>
+          <p>Started from the {template.name} {isSuggestedAutomationTemplate(template) ? "suggestion" : "template"}{isSharedTemplate(template) ? ` shared by ${template.workspaceName}` : ""}. Choose {automationTemplateMissingFields(template)}, then save.</p>
+          {isSuggestedAutomationTemplate(template) ? null : <button onClick={() => void copyTemplateLink()} type="button">{templateLinkCopied ? "Link copied" : "Copy link"}</button>}
           <button onClick={startBlank} type="button">Start blank</button>
         </div> : null}
         {error ? <p className="formError" role="alert">{error}</p> : null}

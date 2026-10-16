@@ -65,7 +65,8 @@ The UI and authentication flow work without provider credentials. Set
 `.env.local`. Agents using initial triage reactions also require an
 `AI_GATEWAY_API_KEY` for Jev through Vercel AI Gateway. The same key funds
 automation runs that use included usage rather than an organization's own
-model key. See
+model key, and writes each workspace's suggested automation templates every
+morning. See
 [.env.example](.env.example) for all configuration.
 
 Provider OAuth and webhooks require a public HTTPS origin. The local tunnel

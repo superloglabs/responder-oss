@@ -610,6 +610,13 @@
       "when": 1792080440164,
       "tag": "0086_github_pull_request_authors",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1792136363579,
+      "tag": "0087_automation_template_suggestions",
+      "breakpoints": true
     }
   ]
 }
