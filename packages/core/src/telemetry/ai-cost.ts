@@ -214,10 +214,17 @@ function priceAt(key: AiModelKey, timestamp: Date) {
     timestamp,
     ...(key.tier ? { priceContext: { service_tier: key.tier } } : {}),
   };
-  const providerId = key.provider ? (CATALOGUE_PROVIDERS[key.provider] ?? key.provider) : undefined;
   const usage = { input_tokens: 0, output_tokens: 0 };
-  // An unknown provider name falls back to matching the model name.
-  return (providerId ? calcPrice(usage, key.model, { ...options, providerId }) : null) ?? calcPrice(usage, key.model, options);
+  const lookup = (model: string, provider: string) => {
+    const providerId = provider ? (CATALOGUE_PROVIDERS[provider] ?? provider) : undefined;
+    // An unknown provider name falls back to matching the model name.
+    return (providerId ? calcPrice(usage, model, { ...options, providerId }) : null) ?? calcPrice(usage, model, options);
+  };
+  // Gateways and routers name a model "<provider>/<model>", such as
+  // anthropic/claude-haiku-4.5. A name the catalogue does not know is looked
+  // up as its two parts.
+  const slash = key.model.indexOf("/");
+  return lookup(key.model, key.provider) ?? (slash > 0 ? lookup(key.model.slice(slash + 1), key.model.slice(0, slash)) : null);
 }
 
 function base(price: number | TieredPrices | undefined): number | undefined {

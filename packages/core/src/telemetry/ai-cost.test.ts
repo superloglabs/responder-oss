@@ -36,6 +36,23 @@ describe("resolveAiPrices", () => {
     expect(params.aiPriceTo.every((to) => to === 2 ** 40)).toBe(true);
   });
 
+  it("prices gateway model names by their provider and model", () => {
+    const { prices, unpriced } = resolveAiPrices(
+      [
+        { model: "anthropic/claude-haiku-4.5", provider: "gateway", tier: "" },
+        { model: "openai/gpt-4o-mini", provider: "", tier: "" },
+      ],
+      window,
+    );
+
+    expect(unpriced).toEqual([]);
+    expect(prices.map((price) => [price.model, price.catalogModel])).toEqual([
+      ["anthropic/claude-haiku-4.5", "claude-haiku-4-5"],
+      ["openai/gpt-4o-mini", "gpt-4o-mini"],
+    ]);
+    expect(prices[0]!.card).toEqual(resolveAiPrices([{ model: "claude-haiku-4.5", provider: "anthropic", tier: "" }], window).prices[0]!.card);
+  });
+
   it("carries long-context prices and their threshold", () => {
     const { params, prices } = resolveAiPrices([{ model: "claude-sonnet-4-5", provider: "anthropic", tier: "" }], window);
 

@@ -223,6 +223,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@ai-sdk/otel':
+        specifier: 1.0.107
+        version: 1.0.107(zod@4.4.3)
       '@aws-crypto/sha256-js':
         specifier: 5.2.0
         version: 5.2.0
@@ -283,6 +286,10 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+    devDependencies:
+      '@opentelemetry/sdk-trace-base':
+        specifier: 2.10.0
+        version: 2.10.0(@opentelemetry/api@1.9.1)
 
   packages/core:
     dependencies:
@@ -393,6 +400,10 @@ packages:
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/otel@1.0.107':
+    resolution: {integrity: sha512-hL16fbCnotmeyszS4y+TVYVBiL3thy0h7shOgPpGJG4pui5Hbse7Ud0E5tcnX3fI89Li/WHVtSYdDhg6eUAaQg==}
+    engines: {node: '>=22'}
 
   '@ai-sdk/provider-utils@5.0.45':
     resolution: {integrity: sha512-gLuaCups8OCIRz3eO6WWz5op7VLYNNtFzyH0sWUr0FE9v7cTxR0qxDpQdrKnGcql+9WWttobjnZsJVsuEbsPQQ==}
@@ -5720,6 +5731,14 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.45(zod@4.4.3)
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
+
+  '@ai-sdk/otel@1.0.107(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.17
+      '@opentelemetry/api': 1.9.1
+      ai: 7.0.107(zod@4.4.3)
+    transitivePeerDependencies:
+      - zod
 
   '@ai-sdk/provider-utils@5.0.45(zod@4.4.3)':
     dependencies:

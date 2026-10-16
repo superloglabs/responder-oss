@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { issueAutomationModelBrokerToken } from "../../../../packages/core/src/automations/model-broker.js";
 import {
   aiGatewayChatCompletionsEndpoint,
@@ -656,5 +658,129 @@ describe("Responder-funded automation inference", () => {
     expect(response.status).toBe(529);
     expect(releaseInference).toHaveBeenCalledWith("reservation-1");
     expect(completeInference).not.toHaveBeenCalled();
+  });
+});
+
+describe("automation model call spans", () => {
+  const exporter = new InMemorySpanExporter();
+
+  beforeAll(() => {
+    trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }));
+  });
+  beforeEach(() => exporter.reset());
+  afterAll(() => trace.disable());
+
+  function request(routes: ReturnType<typeof brokerRoutes>, path: string, body: unknown) {
+    return routes.request(path, {
+      body: JSON.stringify(body),
+      headers: {
+        authorization: `Bearer ${bearerToken()}`,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+  }
+
+  it("records the model and token usage of a call, without its prompt", async () => {
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({ ...claim, model: "claude-sonnet-5", provider: "anthropic" }),
+      providerFetch: vi.fn().mockResolvedValue(
+        new Response(
+          [
+            'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":200,"cache_read_input_tokens":700,"cache_creation_input_tokens":100,"output_tokens":1}}}\n\n',
+            'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":40}}\n\n',
+          ].join(""),
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      ),
+    });
+
+    const response = await request(routes, "/v1/messages", {
+      max_tokens: 1_024,
+      messages: [{ content: "secret prompt", role: "user" }],
+      model: "claude-sonnet-5",
+      stream: true,
+    });
+    await response.text();
+
+    await vi.waitFor(() => expect(exporter.getFinishedSpans()).toHaveLength(1));
+    const [span] = exporter.getFinishedSpans();
+    expect(span!.name).toBe("chat claude-sonnet-5");
+    expect(span!.kind).toBe(SpanKind.CLIENT);
+    expect(span!.attributes).toEqual({
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "anthropic",
+      "gen_ai.request.max_tokens": 4_096,
+      "gen_ai.request.model": "claude-sonnet-5",
+      "gen_ai.usage.cache_creation.input_tokens": 100,
+      "gen_ai.usage.cache_read.input_tokens": 700,
+      "gen_ai.usage.input_tokens": 1_000,
+      "gen_ai.usage.output_tokens": 40,
+      "responder.automation.run_id": "run-1",
+      "responder.inference.source": "byok",
+      "responder.organization.id": claim.organizationId,
+    });
+    expect(JSON.stringify(span!.attributes)).not.toContain("secret prompt");
+  });
+
+  it("names providers as the GenAI conventions do", async () => {
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({ ...claim, model: "grok-5", provider: "xai" }),
+      providerFetch: vi.fn().mockResolvedValue(Response.json({ usage: { completion_tokens: 5, prompt_tokens: 10 } })),
+    });
+
+    const response = await request(routes, "/v1/providers/xai/chat/completions", {
+      messages: [{ content: "hello", role: "user" }],
+      model: "grok-5",
+    });
+    await response.text();
+
+    await vi.waitFor(() => expect(exporter.getFinishedSpans()).toHaveLength(1));
+    expect(exporter.getFinishedSpans()[0]!.attributes).toMatchObject({
+      "gen_ai.provider.name": "x_ai",
+      "gen_ai.usage.input_tokens": 10,
+      "gen_ai.usage.output_tokens": 5,
+    });
+  });
+
+  it("marks a call the provider refused as failed", async () => {
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue(claim),
+      providerFetch: vi.fn().mockResolvedValue(Response.json({ error: "overloaded" }, { status: 529 })),
+    });
+
+    const response = await request(routes, "/v1/responses", { input: "hello", model: "gpt-5.1-codex" });
+    expect(response.status).toBe(529);
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span!.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span!.attributes).toMatchObject({ "error.type": "529", "http.response.status_code": 529 });
+    expect(span!.attributes).not.toHaveProperty("gen_ai.usage.input_tokens");
+  });
+
+  it("marks a call that could not reach the provider as failed", async () => {
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue(claim),
+      providerFetch: vi.fn().mockRejectedValue(new TypeError("fetch failed")),
+    });
+
+    const response = await request(routes, "/v1/responses", { input: "hello", model: "gpt-5.1-codex" });
+    expect(response.status).toBe(502);
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span!.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span!.attributes["error.type"]).toBe("TypeError");
+  });
+
+  it("records no span for a request refused before reaching a provider", async () => {
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({ ...claim, apiKey: null, inferenceSource: "responder" }),
+      reserveInference: vi.fn().mockResolvedValue(null),
+    });
+
+    const response = await request(routes, "/v1/responses", { input: "hello", model: "gpt-5.1-codex" });
+    expect(response.status).toBe(402);
+    expect(exporter.getFinishedSpans()).toHaveLength(0);
   });
 });
