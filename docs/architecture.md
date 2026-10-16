@@ -206,7 +206,8 @@ investigation credits.
 - Suggested automation templates are paid by Responder and do not use the
   usage credit. From 05:00 UTC each day, the worker asks a model through
   Responder's AI Gateway key for templates for each organization with
-  automations that a member used in the last week. The model reads the
+  automations and a connected repository that a member used in the last
+  week. The model reads the
   workspace name, connected providers, repository names, automation names,
   and the titles of the last two weeks' issues. One row per organization and
   day holds the result; a failed day is retried up to three times, and rows
