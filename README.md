@@ -109,11 +109,12 @@ security boundaries.
 
 Workspace API keys, created under **Settings → API keys**, authenticate a REST
 API at `/api/v1` and a remote MCP server at `/api/mcp`. Both manage
-automations, runs, tag mode, model access, and workspace secrets, and read the
-workspace's logs, traces, and metrics when telemetry is enabled. MCP clients
-can also connect with OAuth: they register themselves, and the person signs in
-and chooses a workspace at `/oauth/authorize`. The OpenAPI document is served
-at `/api/v1/openapi.json`; `pnpm -s api:openapi` prints it.
+automations, runs, tag mode, model access, and workspace secrets. When
+telemetry is enabled, they also read the workspace's logs, traces, and metrics
+and manage its dashboards. MCP clients can also connect with OAuth: they
+register themselves, and the person signs in and chooses a workspace at
+`/oauth/authorize`. The OpenAPI document is served at `/api/v1/openapi.json`;
+`pnpm -s api:openapi` prints it.
 
 ## Development
 

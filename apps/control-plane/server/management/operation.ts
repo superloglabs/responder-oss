@@ -29,6 +29,7 @@ export class ManagementError extends Error {
 export type ManagementTag =
   | "API keys"
   | "Automations"
+  | "Dashboards"
   | "Integrations"
   | "Models"
   | "Runs"

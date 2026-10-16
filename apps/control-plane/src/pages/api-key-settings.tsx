@@ -87,7 +87,7 @@ export function ApiKeySettingsPage() {
         <p className="memberAccessNote">
           API keys give the <a href={docsUrl} rel="noreferrer" target="_blank">management API</a> and
           the Superlog MCP server access to this workspace&apos;s automations,
-          runs, tag mode, model access, secrets, and telemetry. A key acts as the member
+          runs, tag mode, model access, secrets, telemetry, and dashboards. A key acts as the member
           who created it and stops working if they leave the workspace. Most
           MCP clients can <Link to="/settings/mcp">sign in without a key</Link>.
         </p>
