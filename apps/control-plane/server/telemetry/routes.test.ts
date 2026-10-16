@@ -67,6 +67,11 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     metricSeries: vi.fn(async () => [{ bucket: "2026-10-13 11:00:00", group: "", value: 12.5 }]),
     metricWindowAggregate: vi.fn(async () => [{ group: "", value: 12.5 }]),
     now: () => now,
+    overview: vi.fn(async () => ({
+      ai: { calls: 0, callsWithInput: 0, callsWithModel: 0, callsWithOutput: 0, callsWithoutUsage: 0, models: [], services: [] },
+      bucketSeconds: 1_800,
+      services: [],
+    })),
     queryLogs: vi.fn(async () => [{ body: "hello", service: "checkout" }]),
     queryTrace: vi.fn(async () => ({ logs: [], spans: [{ span_id: "a1" }] })),
     queryTraces: vi.fn(async () => [{ trace_id: traceId }]),
@@ -315,6 +320,25 @@ describe("telemetry routes", () => {
       service: "checkout",
       step: { n: 30, unit: "SECOND" },
     });
+  });
+
+  it("summarizes what each service sent for the telemetry overview", async () => {
+    const { app, dependencies } = routes();
+
+    const response = await app.request("/overview?range=24h");
+
+    await expect(response.json()).resolves.toMatchObject({
+      overview: { bucketSeconds: 1_800, services: [] },
+      since: "2026-10-12T12:00:00.000Z",
+      until: "2026-10-13T12:00:00.000Z",
+    });
+    expect(dependencies.overview).toHaveBeenCalledWith(expect.anything(), organizationId, {
+      since: "2026-10-12T12:00:00.000Z",
+      until: "2026-10-13T12:00:00.000Z",
+    });
+    expect((await app.request("/overview?range=3d")).status).toBe(400);
+    const unavailable = routes({ hasTelemetry: vi.fn(async () => false) });
+    expect((await unavailable.app.request("/overview")).status).toBe(404);
   });
 
   it("returns a trace's spans and logs, and 404 for a trace with no spans", async () => {

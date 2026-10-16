@@ -1,0 +1,98 @@
+.telemetryOverview { width: 100%; max-width: 1000px; margin: 0 auto; gap: 20px; padding-bottom: 48px; }
+.telemetryOverview__heading { align-items: flex-end; }
+.telemetryOverview__heading p { margin: 6px 0 0; color: #62625d; font-size: 13px; line-height: 20px; }
+
+.telOverviewSection { display: flex; align-items: baseline; gap: 10px; padding-top: 12px; }
+.telOverviewSection h2 { margin: 0; color: #171715; font-size: 15px; font-weight: 600; line-height: 22px; }
+.telOverviewSection > span { color: #8a8a85; font-size: 13px; line-height: 20px; }
+.telOverviewSection .dsSegmentedControl { margin-left: auto; align-self: center; gap: 2px; padding: 2px; border: 0; border-radius: 999px; background: #f2f2f0; }
+.telOverviewSection .dsSegmentedControl__option { border-radius: 999px; font-size: 12px; }
+.telOverviewSection__link { margin-left: auto; color: #41413d; font-size: 13px; text-decoration: none; }
+.telOverviewSection__link:hover { color: #171715; text-decoration: underline; }
+.telOverviewNote { margin: 0; color: #8a8a85; font-size: 13px; }
+
+.telOverviewTray { display: flex; flex-direction: column; padding: 4px; border-radius: 18px; background: #f4f4f2; }
+.telOverviewTray__label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; color: #41413d; font-size: 12px; line-height: 16px; }
+.telOverviewTray__name, .telOverviewTray__status { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.telOverviewTray__name svg { flex-shrink: 0; color: #62625d; }
+.telOverviewTray__card { display: flex; flex-direction: column; padding: 20px 20px 4px; border-radius: 14px; background: #fff; box-shadow: 0 1px 2px #0000000f, 0 0 0 1px #0000000a; }
+
+.telOverviewDot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 999px; background: #c9c9c4; }
+.telOverviewDot--ok { background: #3d6f31; }
+.telOverviewDot--warning { background: #c9a13b; }
+.telOverviewDot--error { background: #b4544c; }
+
+.telOverviewSignals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; padding-bottom: 20px; }
+.telOverviewSignal { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding-left: 14px; border-left: 1px solid #e2e2df; }
+.telOverviewSignal h3 { margin: 0; color: #41413d; font-size: 12px; font-weight: 600; letter-spacing: .02em; line-height: 16px; }
+.telOverviewSignal__stats { display: flex; gap: 28px; }
+.telOverviewStat { display: flex; flex-direction: column; gap: 4px; }
+.telOverviewStat__label { display: flex; align-items: center; gap: 6px; color: #62625d; font-size: 12px; line-height: 16px; }
+.telOverviewStat__dot { width: 6px; height: 6px; border-radius: 999px; }
+.telOverviewStat__dot--error { background: #d9534f; }
+.telOverviewStat__dot--warning { background: #e9b949; }
+.telOverviewStat__value { display: flex; align-items: baseline; gap: 6px; color: #171715; font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 26px; font-variant-numeric: tabular-nums; }
+.telOverviewStat__value small { color: #8a8a85; font-size: 12px; font-weight: 400; letter-spacing: 0; }
+.telOverviewStat__value--missing { color: #a3a39e; }
+.telOverviewStat__value--missing small { color: #a1463f; font-size: 13px; }
+
+.telOverviewPills { display: flex; gap: 3px; height: 20px; }
+.telOverviewPills__pill { flex: 1 1 0; min-width: 0; border-radius: 999px; background: #ececea; }
+.telOverviewPills--logs .telOverviewPills__pill--ok { background: #4e7cf6; }
+.telOverviewPills--traces .telOverviewPills__pill--ok { background: #8b6cf0; }
+.telOverviewPills__pill--warning { background: #e9b949; }
+.telOverviewPills__pill--error { background: #d9534f; }
+
+.telOverviewRows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.telOverviewRows--flush .telOverviewRow:first-child { border-top: 0; }
+.telOverviewRow { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid #efefec; }
+.telOverviewRow__icon { display: flex; flex-shrink: 0; justify-content: center; width: 20px; }
+.telOverviewRow__icon--error { color: #b4544c; }
+.telOverviewRow__icon--warning { color: #b8901f; }
+.telOverviewRow__icon--ok { color: #3d6f31; }
+.telOverviewRow__icon--suggestion { color: #5b5fef; }
+.telOverviewRow__text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; color: #62625d; font-size: 13px; line-height: 20px; text-decoration: none; }
+.telOverviewRow__text strong { color: #171715; font-weight: 500; }
+a.telOverviewRow__text:hover strong { text-decoration: underline; }
+.telOverviewRow--quiet .telOverviewRow__text { color: #41413d; }
+
+.copyPromptButton { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid #e2e2df; border-radius: 999px; background: #fff; box-shadow: 0 1px 2px #0000000d; color: #1a1a1a; font: inherit; font-size: 12px; line-height: 16px; white-space: nowrap; cursor: pointer; }
+.copyPromptButton:hover { background: #f7f7f5; }
+.copyPromptButton:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+
+.telOverviewAi { display: flex; gap: 32px; padding-bottom: 16px; }
+.telOverviewAi__pitch { display: flex; flex: 1; flex-direction: column; gap: 14px; min-width: 0; }
+.telOverviewAi__pitch h3 { margin: 0; color: #171715; font-size: 15px; font-weight: 600; line-height: 22px; }
+.telOverviewAi__pitch > p { margin: -10px 0 0; color: #62625d; font-size: 13px; line-height: 20px; }
+.telOverviewAi__attributes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.telOverviewAi__attributes li { display: flex; align-items: center; gap: 8px; color: #8a8a85; font-size: 12px; line-height: 18px; }
+.telOverviewAi__attributes code, .telOverviewAi__model code, .telOverviewMore code { color: #41413d; font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.telOverviewAi__missing { color: #a1463f; }
+.telOverviewAi__pending { width: 14px; height: 14px; flex-shrink: 0; border: 1.5px dashed #c9c9c4; border-radius: 999px; }
+.telOverviewAi__pending--partial { border-style: solid; border-color: #e9b949; }
+.telOverviewAi__action { display: flex; align-items: center; gap: 12px; color: #8a8a85; font-size: 12px; }
+.telOverviewAi__preview { display: flex; flex-direction: column; gap: 14px; width: 340px; flex-shrink: 0; padding: 14px 16px; border: 1px solid #efefec; border-radius: 12px; background: #fafaf8; }
+.telOverviewAi__preview header { display: flex; justify-content: space-between; color: #8a8a85; font-size: 12px; line-height: 16px; }
+.telOverviewAi__preview header strong { color: #41413d; font-weight: 600; }
+.telOverviewAi__preview ul { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.telOverviewAi__preview li { display: flex; flex-direction: column; gap: 5px; }
+.telOverviewAi__model { display: flex; justify-content: space-between; gap: 8px; color: #a3a39e; font-size: 12px; line-height: 16px; }
+.telOverviewAi__model code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.telOverviewAi__bar { height: 8px; border-radius: 999px; background-image: repeating-linear-gradient(135deg, #e4e4e0 0 4px, #f1f1ee 4px 8px); }
+.telOverviewAi__preview p { margin: 0; padding-top: 10px; border-top: 1px solid #efefec; color: #8a8a85; font-size: 12px; line-height: 16px; }
+
+.telOverviewMore { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border: 0; border-radius: 18px; background: #f4f4f2; color: #41413d; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.telOverviewMore code { overflow: hidden; color: #8a8a85; text-overflow: ellipsis; white-space: nowrap; }
+.telOverviewMore__action { display: flex; align-items: center; gap: 6px; margin-left: auto; color: #1a1a1a; }
+
+.telOverviewEmpty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 48px 0; text-align: center; }
+.telOverviewEmpty .hairline { margin-bottom: 18px; }
+.telOverviewEmpty h2 { margin: 0; color: #171715; font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 24px; }
+.telOverviewEmpty p { max-width: 460px; margin: 0; color: #62625d; font-size: 14px; line-height: 22px; }
+.telOverviewEmpty__actions { display: flex; gap: 8px; margin-top: 12px; }
+
+@media (max-width: 900px) {
+  .telOverviewSignals, .telOverviewAi { grid-template-columns: minmax(0, 1fr); flex-direction: column; }
+  .telOverviewAi__preview { width: auto; }
+  .telOverviewSignal__stats { gap: 18px; }
+}

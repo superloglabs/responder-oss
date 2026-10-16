@@ -16,6 +16,7 @@ export type NavigationSection =
   | "suggestions"
   | "synthetics"
   | "tag-mode"
+  | "telemetry-overview"
   | "traces";
 
 export interface NavigationItem {
@@ -48,6 +49,7 @@ export function primaryNavigation(options: {
     : [];
   const telemetry: NavigationItem[] = options.telemetry
     ? [
+        { label: "Overview", section: "telemetry-overview", to: "/telemetry" },
         { label: "Logs", section: "logs", to: "/logs" },
         {
           children: [

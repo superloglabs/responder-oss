@@ -59,7 +59,7 @@ export function TelemetryGate({
   state,
 }: {
   children: ReactNode;
-  signal: "AI models" | "Logs" | "Metrics" | "Traces";
+  signal: "AI models" | "Logs" | "Metrics" | "Telemetry" | "Traces";
   state: TelemetryAvailableState;
 }) {
   if (state.available === undefined) {
@@ -75,7 +75,7 @@ export function TelemetryGate({
   if (!state.available) {
     return (
       <section className="emptyState emptyState--list">
-        <h2>{signal} are not available</h2>
+        <h2>{signal} {signal === "Telemetry" ? "is" : "are"} not available</h2>
         <p>This workspace cannot read telemetry yet.</p>
       </section>
     );

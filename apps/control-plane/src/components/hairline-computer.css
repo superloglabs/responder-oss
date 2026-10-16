@@ -1,0 +1,17 @@
+.hairline { display: block; max-width: 100%; height: auto; overflow: visible; }
+.hairline :is(.hairline__hi, .hairline__edge, .hairline__mid, .hairline__lo) {
+  fill: none;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.hairline .hairline__hi { stroke: #171715; }
+.hairline .hairline__edge { stroke: #5f5f5a; }
+.hairline .hairline__mid { stroke: #a3a39e; }
+.hairline .hairline__lo { stroke: #d9d9d5; }
+.hairline .hairline__fill { fill: var(--issues-panel, #fcfcfc); }
+.hairline .hairline__glass { fill: #f7f7f5; }
+.hairline .hairline__shadow { fill: #f2f2f0; stroke: none; }
+.hairline .hairline__label { fill: #a3a39e; font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hairline .hairline__mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }

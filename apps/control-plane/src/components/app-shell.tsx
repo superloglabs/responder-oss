@@ -32,6 +32,7 @@ import {
   ScanIcon,
   RobotIcon,
   SignOutIcon,
+  SquaresFourIcon,
   TagIcon,
   TreeStructureIcon,
   UserCircleIcon,
@@ -58,6 +59,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   suggestions: FlagIcon,
   synthetics: GlobeIcon,
   "tag-mode": TagIcon,
+  "telemetry-overview": SquaresFourIcon,
   traces: TreeStructureIcon,
 };
 
