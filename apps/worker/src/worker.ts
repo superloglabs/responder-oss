@@ -98,6 +98,7 @@ import {
 import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setup-job";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
+import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
@@ -113,6 +114,7 @@ import {
   purgeSyntheticCheckRuns,
 } from "./synthetic-checks.js";
 import { pullGcpTelemetrySources } from "./telemetry-sources.js";
+import { sweepDaytonaSandboxes } from "./sandbox.js";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -143,6 +145,7 @@ const pollers: {
   automationSuggestions?: NodeJS.Timeout;
   automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
+  daytonaSweep?: NodeJS.Timeout;
   gcpTelemetry?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
@@ -213,6 +216,21 @@ function pullGcpTelemetry(): Promise<void> {
       gcpTelemetryPass = undefined;
     });
   return gcpTelemetryPass;
+}
+
+let daytonaSweep: Promise<void> | undefined;
+// Runs at most one sandbox sweep at a time, when Daytona is configured.
+function sweepSandboxes(): Promise<void> {
+  if (!process.env.DAYTONA_API_KEY) return Promise.resolve();
+  daytonaSweep ??= Promise.resolve()
+    .then(() => sweepDaytonaSandboxes(requireDaytonaClientConfig()))
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "sandbox_cleanup" });
+    })
+    .finally(() => {
+      daytonaSweep = undefined;
+    });
+  return daytonaSweep;
 }
 
 async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
@@ -558,6 +576,7 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   if (pollers.replayRequest) clearInterval(pollers.replayRequest);
   if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
+  if (pollers.daytonaSweep) clearInterval(pollers.daytonaSweep);
   if (pollers.automationUsageBilling) {
     clearInterval(pollers.automationUsageBilling);
   }
@@ -1136,6 +1155,9 @@ pollers.brokerGrantCleanup = setInterval(
   60 * 60 * 1_000,
 );
 pollers.brokerGrantCleanup.unref();
+void sweepSandboxes();
+pollers.daytonaSweep = setInterval(() => void sweepSandboxes(), 10 * 60 * 1_000);
+pollers.daytonaSweep.unref();
 pollers.automationUsageBilling = setInterval(
   () => void settleAutomationUsageBilling(),
   60 * 1_000,
