@@ -44,7 +44,7 @@ export function TelemetrySourcePage() {
   useDocumentTitle(option ? `Add telemetry · ${option.title}` : "Add telemetry");
   if (!option) return <Navigate replace to="/telemetry/setup" />;
   return (
-    <AppShell active="add-telemetry" redesigned>
+    <AppShell active="telemetry-overview" redesigned>
       <header className="workspaceHeading">
         <h1>
           {option.id === "opentelemetry" ? (

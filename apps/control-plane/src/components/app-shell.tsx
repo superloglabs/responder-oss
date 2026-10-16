@@ -28,7 +28,6 @@ import {
   BookOpenTextIcon,
   MagnifyingGlassIcon,
   PlugsConnectedIcon,
-  PlusCircleIcon,
   ScanIcon,
   RobotIcon,
   SignOutIcon,
@@ -42,7 +41,6 @@ import { ColorThemeToggle } from "./color-theme-toggle";
 import "./workspace.css";
 
 const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
-  "add-telemetry": PlusCircleIcon,
   agents: LightningIcon,
   "ai-models": CoinsIcon,
   alerts: BellIcon,

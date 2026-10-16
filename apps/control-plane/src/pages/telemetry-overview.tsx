@@ -14,7 +14,7 @@ import { fetchSuggestion, fetchSuggestions } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { CopyPromptButton } from "../components/copy-prompt-button";
 import { HairlineComputer } from "../components/hairline-computer";
-import { TelemetryGate } from "../components/telemetry";
+import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
 import { SegmentedControl } from "../design-system";
 import {
   fetchTelemetryOverview,
@@ -322,11 +322,16 @@ function EmptyOverview() {
   );
 }
 
+// An empty overview shows its own setup links instead of the services.
+function isEmpty(overview: TelemetryOverview, range: TelemetryRange): boolean {
+  return overview.services.length === 0 && !aiCostCallout(overview.ai, range);
+}
+
 function OverviewBody({ overview, range }: { overview: TelemetryOverview; range: TelemetryRange }) {
   const [filter, setFilter] = useState<"all" | "problems">("all");
   const [showHealthy, setShowHealthy] = useState(false);
   const callout = aiCostCallout(overview.ai, range);
-  if (overview.services.length === 0 && !callout) return <EmptyOverview />;
+  if (isEmpty(overview, range)) return <EmptyOverview />;
 
   const rated = overview.services.map((service) => {
     const problems = serviceProblems(service, range);
@@ -400,6 +405,7 @@ export function TelemetryOverviewPage() {
                 options={ranges}
                 value={range}
               />
+              {overview.data && !isEmpty(overview.data.overview, range) ? <SendTelemetryLink variant="secondary" /> : null}
             </div>
           ) : null}
         </header>

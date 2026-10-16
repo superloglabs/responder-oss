@@ -30,7 +30,7 @@ export function TelemetrySetupPage() {
   }, [load]);
 
   return (
-    <AppShell active="add-telemetry" redesigned>
+    <AppShell active="telemetry-overview" redesigned>
       <header className="workspaceHeading">
         <h1><PlusCircleIcon aria-hidden="true" size={16} weight="bold" />Add telemetry</h1>
       </header>
@@ -50,6 +50,7 @@ export function TelemetrySetupPage() {
         </section>
       ) : (
         <div className="telemetrySetup">
+          <Link className="telemetrySetup__back" to="/telemetry">← Overview</Link>
           <p className="telemetrySetup__intro">
             Send logs, traces and metrics to this workspace. They appear in <Link to="/logs">Logs</Link>,{" "}
             <Link to="/traces">Traces</Link> and <Link to="/metrics">Metrics</Link>.
