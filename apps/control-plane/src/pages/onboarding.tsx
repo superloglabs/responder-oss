@@ -5,7 +5,7 @@ import { fetchAutomationCredentials } from "../automations-api";
 import { AutomationSubscriptionConnect } from "../components/automation-subscription-connect";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { ProviderGlyph } from "../components/icons";
-import { OnboardingFrame } from "../components/onboarding-frame";
+import { OnboardingFrame, OnboardingLoading } from "../components/onboarding-frame";
 import { providerDisplayName, type ProviderGlyphId } from "../components/provider-glyphs";
 import { useIntegrationConnect } from "../components/use-integration-connect";
 import { useOrganizationCapabilities } from "../organization-capabilities";
@@ -116,18 +116,18 @@ export function OnboardingPage() {
     </span>
   );
 
-  if (error || !integrations || billing === undefined) {
+  if (error) {
     return (
       <OnboardingFrame activeStages={[]} footer={null} step={step} steps={steps}>
-        {error ? (
-          <div className="onboarding__intro">
-            <h1>Setup is unavailable</h1>
-            <p>{error}. <Link to={finish}>Continue to Superlog</Link>.</p>
-          </div>
-        ) : <p className="onboarding__loading">Loading…</p>}
+        <div className="onboarding__intro">
+          <h1>Setup is unavailable</h1>
+          <p>{error}. <Link to={finish}>Continue to Superlog</Link>.</p>
+        </div>
       </OnboardingFrame>
     );
   }
+
+  if (!integrations || billing === undefined) return <OnboardingLoading step={step} />;
 
   if (step === "code") {
     const github = integrations.find((integration) => integration.id === "github");

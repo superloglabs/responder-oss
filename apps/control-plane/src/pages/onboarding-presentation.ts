@@ -25,6 +25,12 @@ export function onboardingStepFromPath(value: string | undefined): Exclude<Onboa
   return step && step !== "workspace" ? step : "code";
 }
 
+// The step a setup URL opens, or null outside guided setup.
+export function onboardingStepAtPath(pathname: string): Exclude<OnboardingStep, "workspace"> | null {
+  const match = /^\/onboarding(?:\/([^/]*))?\/?$/.exec(pathname);
+  return match ? onboardingStepFromPath(match[1]) : null;
+}
+
 // Providers with a working connection. Accounts that failed or were revoked
 // stay listed but do not make the provider connected.
 export function connectedProviders(integrations: ReadonlyArray<{ id: string; state: string }>): string[] {

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { BellIcon, GitPullRequestIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
-import { onboardingStepLabels, type OnboardingStep } from "../pages/onboarding-presentation";
+import { onboardingStepLabels, onboardingSteps, type OnboardingStep } from "../pages/onboarding-presentation";
 import { ProviderGlyph } from "./icons";
 import "./onboarding.css";
 
@@ -55,7 +55,17 @@ export function OnboardingFrame({
   );
 }
 
-const alertGlyphs = ["sentry", "datadog", "slack", "discord"] as const;
+// The setup card while the session, the workspace, or a step's data loads,
+// so the progress stays on screen between steps and after a page load.
+export function OnboardingLoading({ step }: { step: OnboardingStep }) {
+  return (
+    <OnboardingFrame activeStages={[]} footer={null} step={step} steps={onboardingSteps}>
+      <p className="onboarding__loading">Loading…</p>
+    </OnboardingFrame>
+  );
+}
+
+const alertGlyphs =["sentry", "datadog", "slack", "discord"] as const;
 
 function HowItWorks({ activeStages, connected }: { activeStages: OnboardingStage[]; connected: readonly string[] }) {
   const stageClass = (stage: OnboardingStage) => `onboardingFlow__stage${activeStages.includes(stage) ? " isActive" : ""}`;
