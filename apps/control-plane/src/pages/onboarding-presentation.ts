@@ -1,4 +1,5 @@
 import { automationTemplates, type AutomationTemplate } from "./automation-templates";
+import type { PlanCatalog } from "../plan-comparison";
 
 export type OnboardingStep = "workspace" | "code" | "alerts" | "usage" | "templates";
 
@@ -60,19 +61,27 @@ export function planChangeConfirmation(plan: { name: string; price: number }, cu
 }
 
 // Integrations offered on the alerts step, grouped by what they tell the
-// agent. These are the providers the built-in templates trigger on or read.
+// agent: where errors and alerts come from, and where the team discusses them.
 export const onboardingAlertSources = [
-  { label: "Errors and monitoring", providers: ["sentry", "datadog"] },
+  { label: "Errors and monitoring", providers: ["sentry", "datadog", "grafana"] },
   { label: "Team chat", providers: ["slack", "discord"] },
 ] as const;
 
 export type OnboardingProvider = "github" | (typeof onboardingAlertSources)[number]["providers"][number];
 
-// Templates for teams that just connected their tools, most useful first.
-// Sorting by connected providers can move a later template ahead.
+// Error tools, in the order their error alerts are preferred: Sentry starts
+// a run on each new issue, while Datadog and Grafana are checked every hour.
+const errorSources = ["sentry", "datadog", "grafana"] as const;
+
+const criticalErrorTemplateIds: Record<(typeof errorSources)[number], string> = {
+  datadog: "alert-on-critical-datadog-errors",
+  grafana: "alert-on-critical-grafana-errors",
+  sentry: "triage-sentry-issues",
+};
+
+// Templates offered after the two every setup starts with, most useful
+// first. Sorting by connected providers can move a later template ahead.
 const onboardingTemplateOrder = [
-  "triage-sentry-issues",
-  "triage-slack-alerts",
   "fix-sentry-regressions",
   "reliability-check",
   "fix-slack-bug-reports",
@@ -91,36 +100,58 @@ export function templateProviders(template: Pick<AutomationTemplate, "connectors
   return [...new Set([...triggerProviders, ...template.connectors])];
 }
 
+// The providers a template uses in a workspace. A template that reads every
+// error tool needs only one: the connected ones, or Sentry when none is.
+export function workspaceTemplateProviders(template: Pick<AutomationTemplate, "connectors" | "triggers">, connected: ReadonlySet<string>): string[] {
+  const providers = templateProviders(template);
+  if (!errorSources.every((source) => template.connectors.includes(source))) return providers;
+  const connectedSources = errorSources.filter((source) => connected.has(source));
+  const used: readonly string[] = connectedSources.length ? connectedSources : [errorSources[0]];
+  return providers.filter((provider) => !(errorSources as readonly string[]).includes(provider) || used.includes(provider));
+}
+
 export interface TemplateRecommendation {
   missing: string[];
+  providers: string[];
   template: AutomationTemplate;
 }
 
-// Recommends templates that work with the connected providers. Templates
-// with fewer missing providers come first, then those that use more of
-// what was connected, so a workspace with Sentry and Slack sees Sentry
-// alerts before a weekly code review.
+// Every setup starts with triaging alerts in Slack and alerting on critical
+// errors from the connected error tool. The rest work with the connected
+// providers: templates with fewer missing providers come first, then those
+// that use more of what was connected.
 export function recommendedTemplates(connected: readonly string[], limit = 3): TemplateRecommendation[] {
   const connectedSet = new Set(connected);
+  const source = errorSources.find((candidate) => connectedSet.has(candidate)) ?? errorSources[0];
+  const pinned = ["triage-slack-alerts", criticalErrorTemplateIds[source]];
+  const offeredLater = new Set([...pinned, ...Object.values(criticalErrorTemplateIds)]);
   const rank = (id: string) => {
     const index = onboardingTemplateOrder.indexOf(id);
     return index === -1 ? onboardingTemplateOrder.length : index;
   };
-  return automationTemplates
-    .map((template) => {
-      const providers = templateProviders(template);
-      return {
-        missing: providers.filter((provider) => !connectedSet.has(provider)),
-        template,
-        uses: providers.filter((provider) => provider !== "github" && connectedSet.has(provider)).length,
-      };
-    })
+  const recommend = (template: AutomationTemplate) => {
+    const providers = workspaceTemplateProviders(template, connectedSet);
+    return {
+      missing: providers.filter((provider) => !connectedSet.has(provider)),
+      providers,
+      template,
+      uses: providers.filter((provider) => provider !== "github" && connectedSet.has(provider)).length,
+    };
+  };
+  const first = pinned.flatMap((id) => {
+    const template = automationTemplates.find((candidate) => candidate.id === id);
+    return template ? [recommend(template)] : [];
+  });
+  const rest = automationTemplates
+    .filter((template) => !offeredLater.has(template.id))
+    .map(recommend)
     .sort((left, right) =>
       left.missing.length - right.missing.length ||
       right.uses - left.uses ||
-      rank(left.template.id) - rank(right.template.id))
+      rank(left.template.id) - rank(right.template.id));
+  return [...first, ...rest]
     .slice(0, limit)
-    .map(({ missing, template }) => ({ missing, template }));
+    .map(({ missing, providers, template }) => ({ missing, providers, template }));
 }
 
 export type PlanBillingState<Billing> =
@@ -148,10 +179,14 @@ export interface BillingPlanSummary {
 }
 
 export interface OnboardingPlanCard {
+  // Who the plan is for, from the plan catalog.
+  audience: string | null;
   // Usage credit in dollars and whether it renews each month.
   credit: number;
   creditRenews: boolean;
   current: boolean;
+  // What else the plan includes, from the plan catalog.
+  highlights: readonly string[];
   id: string;
   machineHours: number | null;
   name: string;
@@ -161,8 +196,13 @@ export interface OnboardingPlanCard {
 
 // The free plan is listed only while it is the current plan, because its
 // credit is known only from the current summary. The cheapest paid plan is
-// recommended to a free workspace.
-export function onboardingPlanCards(summary: BillingPlanSummary): OnboardingPlanCard[] {
+// recommended to a free workspace. The catalog describes each plan the way
+// the pricing page does.
+export function onboardingPlanCards(summary: BillingPlanSummary, catalog: PlanCatalog): OnboardingPlanCard[] {
+  const described = (id: string) => {
+    const plan = catalog.plans.find((candidate) => candidate.billingPlanId === id);
+    return { audience: plan?.audience ?? null, highlights: plan?.highlights ?? [] };
+  };
   const paidPlans = [...summary.plans].sort((left, right) => left.price - right.price);
   const free: OnboardingPlanCard[] = summary.paid
     ? []
@@ -170,6 +210,7 @@ export function onboardingPlanCards(summary: BillingPlanSummary): OnboardingPlan
         credit: summary.allowance,
         creditRenews: summary.nextResetAt !== null,
         current: true,
+        ...described("free"),
         id: "free",
         machineHours: summary.machineHours?.granted ?? null,
         name: "Free",
@@ -182,6 +223,7 @@ export function onboardingPlanCards(summary: BillingPlanSummary): OnboardingPlan
       credit: plan.included,
       creditRenews: true,
       current: summary.paid && plan.id === summary.planId,
+      ...described(plan.id),
       id: plan.id,
       machineHours: summary.machineHours ? plan.machineHours : null,
       name: plan.name,

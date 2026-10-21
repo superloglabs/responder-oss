@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BellIcon, GitPullRequestIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import {
+  onboardingAlertSources,
   onboardingStepLabels,
   onboardingStepStages,
   onboardingSteps,
@@ -8,6 +9,7 @@ import {
   type OnboardingStep,
 } from "../pages/onboarding-presentation";
 import { ProviderGlyph } from "./icons";
+import { providerDisplayName } from "./provider-glyphs";
 import "./onboarding.css";
 
 // The setup card: progress across the steps, the step's content and actions,
@@ -70,17 +72,19 @@ export function OnboardingLoading({ step }: { step: OnboardingStep }) {
   );
 }
 
-const alertGlyphs = ["sentry", "datadog", "slack", "discord"] as const;
+const alertGlyphs = onboardingAlertSources.flatMap((group) => group.providers);
+// The first connected error source names where the example error came from.
+const errorSources: readonly string[] = onboardingAlertSources[0].providers;
 
 function HowItWorks({ activeStages, connected }: { activeStages: OnboardingStage[]; connected: readonly string[] }) {
   const stageClass = (stage: OnboardingStage) => `onboardingFlow__stage${activeStages.includes(stage) ? " isActive" : ""}`;
-  const source = connected.includes("sentry") ? "Sentry" : connected.includes("datadog") ? "Datadog" : null;
+  const source = errorSources.find((provider) => connected.includes(provider));
   return (
     <ol className="onboardingFlow">
       <li className={stageClass("alert")}>
         <span className="onboardingFlow__icon"><BellIcon aria-hidden="true" size={16} /></span>
         <div>
-          <strong>An alert comes in</strong>
+          <strong>An alert or error comes in</strong>
           <span className="onboardingFlow__sources">
             {alertGlyphs.map((provider) => (
               <ProviderGlyph
@@ -91,7 +95,7 @@ function HowItWorks({ activeStages, connected }: { activeStages: OnboardingStage
               />
             ))}
           </span>
-          <code className="onboardingFlow__error">TypeError in checkout.ts{source ? ` · ${source}` : ""}</code>
+          <code className="onboardingFlow__error">TypeError in checkout.ts{source ? ` · ${providerDisplayName(source)}` : ""}</code>
         </div>
       </li>
       <li className={stageClass("cause")}>

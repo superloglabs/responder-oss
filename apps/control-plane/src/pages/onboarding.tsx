@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, CpuIcon, SparkleIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, CpuIcon, KeyIcon, SparkleIcon } from "@phosphor-icons/react";
 import { fetchAutomationCredentials } from "../automations-api";
 import { AutomationSubscriptionConnect } from "../components/automation-subscription-connect";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
+import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { ProviderGlyph } from "../components/icons";
 import { OnboardingFrame, OnboardingLoading } from "../components/onboarding-frame";
 import { providerDisplayName, type ProviderGlyphId } from "../components/provider-glyphs";
 import { useIntegrationConnect } from "../components/use-integration-connect";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { homePath } from "../primary-navigation";
+import { planCatalog } from "../plan-catalog";
 import { useDocumentTitle } from "../use-document-title";
+import { automationModelProviders } from "../../../../packages/core/src/automations/model-providers";
 import { automationTemplateCategoryLabels } from "./automation-templates";
 import {
   connectedProviders,
@@ -24,7 +27,6 @@ import {
   planBillingState,
   planChangeConfirmation,
   recommendedTemplates,
-  templateProviders,
   type BillingPlanSummary,
   type OnboardingProvider,
   type OnboardingStep,
@@ -201,7 +203,7 @@ export function OnboardingPage() {
             </div>
           </section>
         ))}
-        <p className="onboarding__note">More tools, such as Linear, Grafana, and PostHog, are in <Link to="/settings">Integrations</Link>.</p>
+        <p className="onboarding__note">More tools, such as Linear and PostHog, are in <Link to="/settings">Integrations</Link>.</p>
       </OnboardingFrame>
     );
   }
@@ -276,39 +278,36 @@ export function OnboardingPage() {
         <p>Picked for the tools you connected. Each one opens prefilled, so you only choose the channels and repositories, then save.</p>
       </div>
       <ul className="onboarding__templates">
-        {recommendations.map(({ missing, template }) => {
-          const providers = templateProviders(template);
-          return (
-            <li key={template.id}>
-              <Link className="onboardingTemplate" to={`/automations/new?template=${template.id}`}>
-                <span className="onboardingTemplate__top">
-                  <span className="onboardingTemplate__category">{automationTemplateCategoryLabels[template.category]}</span>
-                  <span className="onboardingTemplate__providers">
-                    <span className="srOnly">Uses {providers.map(providerDisplayName).join(", ")}</span>
-                    {providers.map((provider) => (
-                      <ProviderGlyph
-                        className={missing.includes(provider) ? "isMissing" : undefined}
-                        decorative
-                        key={provider}
-                        provider={provider as ProviderGlyphId}
-                      />
-                    ))}
-                  </span>
+        {recommendations.map(({ missing, providers, template }) => (
+          <li key={template.id}>
+            <Link className="onboardingTemplate" to={`/automations/new?template=${template.id}`}>
+              <span className="onboardingTemplate__top">
+                <span className="onboardingTemplate__category">{automationTemplateCategoryLabels[template.category]}</span>
+                <span className="onboardingTemplate__providers">
+                  <span className="srOnly">Uses {providers.map(providerDisplayName).join(", ")}</span>
+                  {providers.map((provider) => (
+                    <ProviderGlyph
+                      className={missing.includes(provider) ? "isMissing" : undefined}
+                      decorative
+                      key={provider}
+                      provider={provider as ProviderGlyphId}
+                    />
+                  ))}
                 </span>
-                <strong>{template.name}</strong>
-                <span className="onboardingTemplate__description">{template.description}</span>
-                <span className="onboardingTemplate__footer">
-                  <span className={missing.length ? "onboardingTemplate__status" : "onboardingTemplate__status isReady"}>
-                    {missing.length
-                      ? `Connect ${missing.map(providerDisplayName).join(" and ")} while setting up`
-                      : <><CheckIcon aria-hidden="true" size={12} />Ready with your tools</>}
-                  </span>
-                  <span className="onboardingTemplate__action">Set up<ArrowRightIcon aria-hidden="true" size={12} /></span>
+              </span>
+              <strong>{template.name}</strong>
+              <span className="onboardingTemplate__description">{template.description}</span>
+              <span className="onboardingTemplate__footer">
+                <span className={missing.length ? "onboardingTemplate__status" : "onboardingTemplate__status isReady"}>
+                  {missing.length
+                    ? `Connect ${providerList.format(missing.map(providerDisplayName))} while setting up`
+                    : <><CheckIcon aria-hidden="true" size={12} />Ready with your tools</>}
                 </span>
-              </Link>
-            </li>
-          );
-        })}
+                <span className="onboardingTemplate__action">Set up<ArrowRightIcon aria-hidden="true" size={12} /></span>
+              </span>
+            </Link>
+          </li>
+        ))}
       </ul>
       <p className="onboarding__note">Or <Link to="/automations">browse all templates</Link> and <Link to="/automations/new">start from scratch</Link>.</p>
     </OnboardingFrame>
@@ -345,7 +344,7 @@ function ConnectRow({ description, integration, onConnected, provider }: {
 }
 
 // One alert source. OAuth providers connect in a popup so this step stays
-// open; Datadog asks for keys and returns here.
+// open; Datadog and Grafana ask for their details and return here.
 function ConnectTile({ integration, onConnected, provider }: {
   integration: OnboardingIntegration;
   onConnected: (provider: string, signal: AbortSignal) => Promise<boolean>;
@@ -353,7 +352,8 @@ function ConnectTile({ integration, onConnected, provider }: {
 }) {
   const name = providerDisplayName(provider);
   const { connect, connecting, error } = useIntegrationConnect(provider, name, onConnected);
-  const [choosingDatadogSite, setChoosingDatadogSite] = useState(false);
+  const [enteringDetails, setEnteringDetails] = useState(false);
+  const asksForDetails = provider === "datadog" || provider === "grafana";
   const isConnected = integration.state === "connected";
   return (
     <div className={`onboardingTile${isConnected ? " isConnected" : ""}`}>
@@ -368,7 +368,7 @@ function ConnectTile({ integration, onConnected, provider }: {
         <button
           className="onboarding__textButton"
           disabled={connecting}
-          onClick={() => provider === "datadog" ? setChoosingDatadogSite(true) : void connect()}
+          onClick={() => asksForDetails ? setEnteringDetails(true) : void connect()}
           type="button"
         >
           {connecting ? "Connecting…" : "Connect"}
@@ -377,8 +377,16 @@ function ConnectTile({ integration, onConnected, provider }: {
       {provider === "datadog" ? (
         <DatadogConnectionDialog
           connectUrl={integration.connectUrl ?? ""}
-          onCancel={() => setChoosingDatadogSite(false)}
-          open={choosingDatadogSite}
+          onCancel={() => setEnteringDetails(false)}
+          open={enteringDetails}
+          returnTo={onboardingPath("alerts")}
+        />
+      ) : null}
+      {provider === "grafana" ? (
+        <GrafanaConnectionDialog
+          connectUrl={integration.connectUrl ?? ""}
+          onCancel={() => setEnteringDetails(false)}
+          open={enteringDetails}
           returnTo={onboardingPath("alerts")}
         />
       ) : null}
@@ -392,7 +400,7 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
   returnTo: string;
   summary: BillingPlanSummary;
 }) {
-  const cards = onboardingPlanCards(summary);
+  const cards = onboardingPlanCards(summary, planCatalog);
   const [changingPlan, setChangingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -435,9 +443,11 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
               {card.recommended ? <span className="onboardingPlan__badge onboardingPlan__badge--accent">Recommended</span> : null}
             </header>
             <p className="onboardingPlan__price">{formatPlanPrice(card.price)}{card.price > 0 ? <small>/mo</small> : null}</p>
+            {card.audience ? <p className="onboardingPlan__audience">{card.audience}</p> : null}
             <ul>
               <li><SparkleIcon aria-hidden="true" className="onboardingPlan__credit" size={14} weight="fill" /><span><strong>{formatPlanPrice(card.credit)}</strong> AI usage {card.creditRenews ? "a month" : "to try"}</span></li>
               {card.machineHours !== null ? <li><CpuIcon aria-hidden="true" size={14} /><span><strong>{card.machineHours} h</strong> machine time a month</span></li> : null}
+              {card.highlights.map((highlight) => <li key={highlight}><CheckIcon aria-hidden="true" size={14} /><span>{highlight}</span></li>)}
             </ul>
             {card.current ? (
               <button className="onboarding__button" disabled={changingPlan !== null} onClick={onContinue} type="button">Continue on {card.name}</button>
@@ -455,7 +465,29 @@ function PlanStep({ chargesSavedMethod, onContinue, returnTo, summary }: {
         ))}
       </div>
       <CodexConnection billing />
+      <ApiKeyNote />
     </>
+  );
+}
+
+const providerList = new Intl.ListFormat("en", { type: "conjunction" });
+
+const modelProviderNames = new Intl.ListFormat("en", { type: "disjunction" })
+  .format(automationModelProviders.map((provider) => provider.name));
+
+// API keys are added in Models settings after setup, on any plan.
+function ApiKeyNote() {
+  return (
+    <div className="onboardingConnection">
+      <span className="onboardingConnection__logo"><KeyIcon aria-hidden="true" size={20} /></span>
+      <span className="onboardingConnection__body">
+        <strong>Use your own API keys</strong>
+        <small>
+          On any plan, you can add an {modelProviderNames} API key later in Settings → Models.
+          Automations that use that provider then run on your key. The provider bills you directly, and that usage does not count toward your AI usage credit.
+        </small>
+      </span>
+    </div>
   );
 }
 

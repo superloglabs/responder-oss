@@ -24,6 +24,28 @@ export interface BuiltInAutomationTemplate {
 // Scheduled templates use the member's time zone when applied.
 const weeklyAtNine = { frequency: "weekly", hour: 9, kind: "schedule", timezone: "UTC", weekday: 1 } as const;
 
+// Datadog and Grafana cannot start a run when an error appears, so their
+// error alerts check the past hour on a schedule instead.
+function hourlyErrorCheckPrompt(source: string, search: string): string {
+  return [
+    `This is an hourly check for new errors in ${source}.`,
+    search,
+    "Keep errors that first appeared in the past hour or that happen far more often than in the same hour on each of the past seven days.",
+    "Classify each one using the SEV-1 to SEV-3 framework. If it's a complete false positive, don't report it to the output channel.",
+    "",
+    "For each SEV-1 or SEV-2 error, post a message with the following format:",
+    "",
+    "🟧 SEV-2: Euro payments are failing",
+    "",
+    "After commit 0x12121 by @user, the DB started running out of memory.",
+    "3 users are affected, all from the Airbus organization.",
+    "",
+    "In the thread, add info on the root cause and proposed fix. Open a PR and link it in the thread.",
+    "Make sure that your output is succinct and easy to read. Do not use jargon.",
+    "If no error is SEV-1 or SEV-2, do not post anything.",
+  ].join("\n");
+}
+
 export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
   {
     category: "support",
@@ -72,7 +94,8 @@ export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
   },
   {
     category: "bug_triage",
-    connectors: ["sentry", "github"],
+    // Reads whichever of these error tools the workspace connected.
+    connectors: ["sentry", "datadog", "grafana", "github"],
     description: "When an alert lands in Slack, flag it 🟥 🟧 🟨 or ✅, explain what broke in plain words, and add a button that opens the fix.",
     id: "triage-slack-alerts",
     name: "Triage alerts in Slack",
@@ -118,6 +141,30 @@ export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
       "Make sure to mention the exact reason for the change in the PR body. Don't hesitate to use Markdown and code permalinks (e.g. https://github.com/<org>/<repository>/blob/<sha>/<path>/<file.ts>#L2-L42).",
     ].join("\n"),
     triggers: [{ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: [] }],
+  },
+  {
+    category: "bug_triage",
+    connectors: ["datadog", "github", "slack"],
+    description: "Every hour, find new errors in Datadog logs and traces, post the critical ones to Slack in plain words, and open a pull request with the fix.",
+    id: "alert-on-critical-datadog-errors",
+    name: "Alert on critical Datadog errors",
+    prompt: hourlyErrorCheckPrompt(
+      "Datadog",
+      "Search Datadog logs with status:error and APM spans with errors from the past hour, and group them by service and error message.",
+    ),
+    triggers: [{ ...weeklyAtNine, frequency: "hourly" }],
+  },
+  {
+    category: "bug_triage",
+    connectors: ["grafana", "github", "slack"],
+    description: "Every hour, find new errors in your Grafana logs, post the critical ones to Slack in plain words, and open a pull request with the fix.",
+    id: "alert-on-critical-grafana-errors",
+    name: "Alert on critical Grafana errors",
+    prompt: hourlyErrorCheckPrompt(
+      "Grafana",
+      "Query Loki for error-level logs from the past hour and group them by service and error message. Where Prometheus has request error rates, check those too.",
+    ),
+    triggers: [{ ...weeklyAtNine, frequency: "hourly" }],
   },
   {
     category: "bug_triage",
