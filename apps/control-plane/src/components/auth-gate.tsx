@@ -572,6 +572,12 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
     onCreating(false);
   }
 
+  // The setup card holds the place while the workspace list loads, so a new
+  // member does not see the workspace picker before guided setup.
+  if (organizations.isPending && !automationSetupReturnPath(window.location)) {
+    return <OnboardingLoading step="workspace" />;
+  }
+
   // A member without workspaces starts guided setup by naming one, unless
   // they came to set up a template.
   if (isGuided) {
