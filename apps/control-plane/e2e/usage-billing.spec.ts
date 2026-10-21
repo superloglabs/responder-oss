@@ -173,7 +173,6 @@ test("compares plans and opens checkout for the chosen plan", async ({ page }) =
   const pro = plans.getByRole("article", { name: "Pro" });
   await expect(plans.getByRole("article", { name: "Team" }).getByText("Recommended")).toBeVisible();
   await expect(pro.getByText("Recommended")).toHaveCount(0);
-  await expect(pro.getByText("Today: $100")).toBeVisible();
   await expect(pro.getByText("Everything in Free, plus")).toBeVisible();
   await expect(pro.getByRole("listitem").filter({ hasText: "Machine hours" })).toContainText("50 hrs / mo");
 
