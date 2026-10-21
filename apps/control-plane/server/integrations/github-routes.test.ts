@@ -496,6 +496,19 @@ describe("GitHub pull request author", () => {
     expect(setGitHubPullRequestAuthor).not.toHaveBeenCalled();
   });
 
+  it("names the GitHub App's bot account when no member opens pull requests", async () => {
+    configureGitHub();
+    vi.mocked(getGitHubPullRequestAuthor).mockResolvedValue(null);
+
+    const response = await app.request("/api/integrations/github/pull-request-author");
+
+    expect(await response.json()).toEqual({
+      appLogin: "responder-test[bot]",
+      author: null,
+      canRemove: false,
+    });
+  });
+
   it("lets only the member or an admin stop it", async () => {
     vi.mocked(getGitHubPullRequestAuthor).mockResolvedValue({
       githubLogin: "octocat",

@@ -44,6 +44,7 @@ function initials(name: string): string {
 }
 
 interface PullRequestAuthorState {
+  appLogin: string | null;
   author: {
     githubLogin: string;
     status: "connected" | "error";
@@ -466,7 +467,7 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
   );
   const [notice, setNotice] = useState<string | null>(() =>
     returned?.status === "connected"
-      ? "Responder now opens pull requests from your GitHub account."
+      ? "Your GitHub account now opens pull requests."
       : null,
   );
 
@@ -496,7 +497,7 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
         throw new Error(body?.error ?? "Could not change the pull request author");
       }
       setState(await load());
-      setNotice("The Responder GitHub App now opens pull requests.");
+      setNotice("The GitHub App now opens pull requests.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not change the pull request author");
     } finally {
@@ -514,8 +515,8 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
         <h3>Pull requests</h3>
       </div>
       <p className="memberAccessNote">
-        Responder opens pull requests from its GitHub App unless a member's
-        account is chosen here. Review bots that bill per pull request author
+        The GitHub App opens pull requests unless a member's account is
+        chosen here. Review bots that bill per pull request author
         then count that member's seat. When the member cannot push to a
         repository, the GitHub App opens the pull request instead.
       </p>
@@ -529,7 +530,9 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
             </span>
             <span className="memberIdentity">
               <strong>
-                {author ? `@${author.githubLogin}` : "Responder GitHub App"}
+                {author
+                  ? `@${author.githubLogin}`
+                  : state.appLogin ? `@${state.appLogin}` : "GitHub App"}
                 {isCurrentUser ? <small>You</small> : null}
               </strong>
               <span>
@@ -537,7 +540,7 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
                   ? author.status === "error"
                     ? `GitHub no longer accepts ${author.user.name}'s authorization. The GitHub App opens pull requests until a member connects again.`
                     : `${author.user.name}'s GitHub account opens pull requests.`
-                  : "Opens pull requests as the app's bot account."}
+                  : "The GitHub App opens pull requests as its bot account."}
               </span>
             </span>
             <span className="roleLabel">
