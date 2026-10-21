@@ -1,0 +1,501 @@
+.billingPlans {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #f7f7f5;
+  color: #1a1a1a;
+  font-family: var(--ds-font-sans);
+  animation: billingPlansIn 160ms ease-out;
+}
+
+@keyframes billingPlansIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .billingPlans { animation: none; }
+}
+
+.billingPlans__dialog {
+  position: relative;
+  width: min(1160px, 100%);
+  margin: 0 auto;
+  padding: 72px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  outline: none;
+}
+
+.billingPlans__close {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #666;
+  cursor: pointer;
+}
+
+.billingPlans__close:hover {
+  background: #ebebe8;
+  color: #1a1a1a;
+}
+
+.billingPlans__close:focus-visible,
+.billingPlans__toggle:focus-visible,
+.billingPlans__action:focus-visible,
+.billingPlans summary:focus-visible {
+  outline: 2px solid #4e58f9;
+  outline-offset: 2px;
+}
+
+.billingPlans__header {
+  text-align: center;
+}
+
+.billingPlans__header h2 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 38px;
+  letter-spacing: -0.02em;
+}
+
+.billingPlans__header p {
+  max-width: 560px;
+  margin: 8px auto 0;
+  color: #666;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.billingPlans__cards {
+  display: grid;
+  grid-template-columns: repeat(var(--billing-plan-count, 3), minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.billingPlans__card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e6e8ec;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.billingPlans__card.isRecommended {
+  border-color: #4e58f9;
+  box-shadow: 0 0 0 1px #4e58f9, 0 16px 32px -20px #4e58f980;
+}
+
+.billingPlans__cardTop {
+  margin: 6px 6px 0;
+  padding: 20px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border-radius: 12px;
+  background-color: var(--billing-plan-tint);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgb(255 255 255 / 70%) 1px, transparent 0),
+    linear-gradient(160deg, var(--billing-plan-tint-strong), var(--billing-plan-tint) 70%);
+  background-size: 7px 7px, 100% 100%;
+}
+
+.billingPlans__card--tone0 {
+  --billing-plan-tint: #eef0ff;
+  --billing-plan-tint-strong: #d9ddfe;
+}
+
+.billingPlans__card--tone1 {
+  --billing-plan-tint: #e9f7f1;
+  --billing-plan-tint-strong: #c9ecdc;
+}
+
+.billingPlans__card--tone2 {
+  --billing-plan-tint: #f3ecfb;
+  --billing-plan-tint-strong: #e2d3f6;
+}
+
+.billingPlans__cardHeading {
+  width: 100%;
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.billingPlans__label {
+  color: #555;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.billingPlans__status {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 80%);
+  color: #444;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.billingPlans__status--accent {
+  background: #4e58f9;
+  color: #fff;
+}
+
+.billingPlans__card h3 {
+  margin: 10px 0 0;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 26px;
+}
+
+.billingPlans__price {
+  margin: 6px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.billingPlans__price strong {
+  font-size: 38px;
+  font-weight: 500;
+  line-height: 44px;
+  letter-spacing: -0.03em;
+}
+
+.billingPlans__price small {
+  color: #555;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.billingPlans__audience {
+  margin: 2px 0 0;
+  color: #555;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.billingPlans__badge {
+  width: 100%;
+  margin-top: 16px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px #0000000f;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+}
+
+.billingPlans__action {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: #1a1a1a;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.billingPlans__action:hover:not(:disabled) {
+  background: #333;
+}
+
+.billingPlans__action--primary {
+  background: #4e58f9;
+}
+
+.billingPlans__action--primary:hover:not(:disabled) {
+  background: #3f4af8;
+}
+
+.billingPlans__action:disabled {
+  background: rgb(255 255 255 / 80%);
+  color: #666;
+  cursor: default;
+}
+
+.billingPlans__note {
+  width: 100%;
+  margin: 8px 0 0;
+  color: #555;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.billingPlans__cardBody {
+  padding: 18px 22px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.billingPlans__description {
+  margin: 0;
+  color: #1a1a1a;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.billingPlans__base {
+  margin: 4px 0 0;
+  color: #666;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.billingPlans__features {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+}
+
+.billingPlans__features li {
+  padding: 7px 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #f0f0ee;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.billingPlans__features li > span {
+  color: #666;
+}
+
+.billingPlans__features strong {
+  flex: 0 1 auto;
+  color: #1a1a1a;
+  font-weight: 500;
+  text-align: right;
+}
+
+.billingPlans__more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.billingPlans__toggle {
+  min-height: 32px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e6e8ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #1a1a1a;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.billingPlans__toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.billingPlans__tableWrap {
+  /* Contains the hidden cell labels, which would otherwise widen the page. */
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  padding: 8px 24px 12px;
+  border: 1px solid #e6e8ec;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.billingPlans__table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  color: #444;
+  font-size: 13px;
+  line-height: 20px;
+  table-layout: fixed;
+}
+
+.billingPlans__table th,
+.billingPlans__table td {
+  padding: 11px 12px 11px 0;
+  border-bottom: 1px solid #f0f0ee;
+  text-align: left;
+  vertical-align: top;
+}
+
+.billingPlans__table tbody:last-of-type tr:last-child > * {
+  border-bottom: 0;
+}
+
+.billingPlans__table th[scope="row"] {
+  width: 28%;
+  color: #1a1a1a;
+  font-weight: 400;
+}
+
+.billingPlans__table th[scope="row"] span {
+  display: block;
+  color: #888;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.billingPlans__table thead th {
+  padding-top: 14px;
+}
+
+.billingPlans__table thead strong {
+  display: block;
+  color: #1a1a1a;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.billingPlans__table thead span {
+  color: #888;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.billingPlans__table .billingPlans__group th {
+  padding-top: 22px;
+  color: #888;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.billingPlans__check {
+  color: #3f4af8;
+}
+
+.billingPlans__check svg {
+  vertical-align: -2px;
+}
+
+.billingPlans__dash {
+  color: #b5b5b0;
+}
+
+.billingPlans__questions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.billingPlans__questions h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.billingPlans__questions > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 32px;
+}
+
+.billingPlans details {
+  border-bottom: 1px solid #e6e8ec;
+}
+
+.billingPlans summary {
+  padding: 14px 0;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.billingPlans details p {
+  margin: 0 0 14px;
+  color: #666;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.billingPlans__srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .billingPlans__cards {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 480px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .billingPlans__questions > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .billingPlans__dialog {
+    padding: 64px 16px 48px;
+  }
+
+  .billingPlans__close {
+    top: 12px;
+    right: 12px;
+  }
+
+  .billingPlans__header h2 {
+    font-size: 24px;
+    line-height: 32px;
+  }
+
+  .billingPlans__tableWrap {
+    padding: 4px 16px 8px;
+  }
+}

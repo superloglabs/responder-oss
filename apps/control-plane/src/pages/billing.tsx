@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { BILLING_PLANS_ID, BillingPlans } from "../components/billing-plans";
 import { BillingSkeleton } from "../components/screen-skeletons";
 import { SettingsHeading } from "../components/settings-heading";
 import { UsageChart } from "../components/usage-chart";
 import { UsageChoiceGroup, UsageRangeControl } from "../components/usage-history-view";
 import "../components/usage-history.css";
+import { planCatalog } from "../plan-catalog";
+import { canUpgrade } from "../plan-comparison";
 import { useDocumentTitle } from "../use-document-title";
 import { useUsageHistory } from "../use-usage-history";
 import {
@@ -200,6 +204,29 @@ function AutomationBilling({
   const breakdown = summary.sandboxTimeBilled ? summary.breakdown ?? null : null;
   const segments = breakdown ? usageSegments(breakdown, percent) : null;
   const currentPlan = summary.plans.find((plan) => plan.id === summary.planId);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const plansHash = `#${BILLING_PLANS_ID}`;
+  const [plansOpened, setPlansOpened] = useState(false);
+  // The billing banner links here with the plans open.
+  const plansOpen = plansOpened || location.hash === plansHash;
+  const plansButton = useRef<HTMLButtonElement>(null);
+  const plansWereOpen = useRef(plansOpen);
+
+  // Runs after the dialog returns focus to its opener, which is the page
+  // itself when the banner link opened it.
+  useEffect(() => {
+    if (plansWereOpen.current && !plansOpen) plansButton.current?.focus();
+    plansWereOpen.current = plansOpen;
+  }, [plansOpen]);
+
+  function closePlans() {
+    setPlansOpened(false);
+    if (location.hash === plansHash) {
+      navigate({ pathname: location.pathname, search: location.search }, { replace: true });
+    }
+  }
+
   return (
     <>
       <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
@@ -293,19 +320,15 @@ function AutomationBilling({
             </p>
           ) : null}
           <div className="billingPlanActions">
-            {summary.plans
-              .filter((plan) => plan.id !== summary.planId)
-              .map((plan) => (
-                <button
-                  className="button button--primary"
-                  disabled={redirecting || !summary.configured}
-                  key={plan.id}
-                  onClick={() => onChangePlan(plan.id)}
-                  type="button"
-                >
-                  {`Switch to ${plan.name}`}
-                </button>
-              ))}
+            <button
+              aria-haspopup="dialog"
+              className="button button--primary"
+              onClick={() => setPlansOpened(true)}
+              ref={plansButton}
+              type="button"
+            >
+              {canUpgrade(planCatalog, summary) ? "Upgrade plan" : "Change plan"}
+            </button>
             {paid && !summary.cancelsAtPeriodEnd ? (
               <button
                 className="button button--secondary"
@@ -339,6 +362,15 @@ function AutomationBilling({
           </div>
         </article>
       </section>
+      {plansOpen ? (
+        <BillingPlans
+          billing={summary}
+          catalog={planCatalog}
+          disabled={redirecting || !summary.configured}
+          onChangePlan={onChangePlan}
+          onClose={closePlans}
+        />
+      ) : null}
     </>
   );
 }
