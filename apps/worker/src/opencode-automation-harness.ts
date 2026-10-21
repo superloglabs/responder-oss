@@ -34,6 +34,42 @@ function commandSucceeded(output: string): boolean {
   return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
+// The JSON events OpenCode printed, skipping the exec output's own lines.
+function openCodeEvents(output: string): Array<Record<string, unknown>> {
+  return output.split("\n").flatMap((line) => {
+    if (!line.startsWith("{")) return [];
+    try {
+      const event: unknown = JSON.parse(line);
+      return event && typeof event === "object" && !Array.isArray(event) ? [event as Record<string, unknown>] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function openCodeErrorMessage(event: Record<string, unknown>): string {
+  const error = event.error && typeof event.error === "object" ? event.error as Record<string, unknown> : {};
+  const data = error.data && typeof error.data === "object" ? error.data as Record<string, unknown> : {};
+  if (typeof data.message === "string" && data.message.trim()) return data.message.trim();
+  return typeof error.name === "string" && error.name ? error.name : "unknown error";
+}
+
+// OpenCode can exit 0 after a model error, or without printing anything, so
+// a run succeeds only when it exits 0, reports no error and finishes a step.
+export function openCodeHarnessFailure(output: string): string | null {
+  const events = openCodeEvents(output);
+  const error = events.findLast((event) => event.type === "error");
+  if (error) return `OpenCode automation harness failed: ${openCodeErrorMessage(error)}`;
+  const exitCode = /(?:^|\n)Process exited with code (\d+)(?:\n|$)/u.exec(output)?.[1];
+  if (!commandSucceeded(output)) {
+    return exitCode ? `OpenCode automation harness failed: OpenCode exited with code ${exitCode}` : "OpenCode automation harness failed";
+  }
+  if (!events.some((event) => event.type === "step_finish")) {
+    return "OpenCode automation harness failed: OpenCode finished without a model response";
+  }
+  return null;
+}
+
 // Returns the executable to run: the snapshot's prebuilt copy when it has the
 // pinned version, otherwise a copy installed now.
 export async function prepareOpenCodeAutomationHarness(
@@ -65,6 +101,10 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
   const brokerBaseUrl = validateBrokerBaseUrl(input.model.brokerBaseUrl);
   const contextServers = validateAutomationContextServers(input.contextServers);
   const toolServer = validateAutomationToolServer(input.toolServer, contextServers);
+  const outputLimit = input.model.maxOutputTokensPerRequest;
+  if (outputLimit !== undefined && (!Number.isSafeInteger(outputLimit) || outputLimit <= 0)) {
+    throw new Error("Maximum output tokens per request must be a positive integer");
+  }
   const npm = input.model.provider === "anthropic"
     ? "@ai-sdk/anthropic"
     : "@ai-sdk/openai-compatible";
@@ -99,7 +139,14 @@ export function openCodeAutomationConfig(input: AutomationHarnessInput) {
     provider: {
       responder: {
         models: {
-          [input.model.model]: { name: input.model.model, tool_call: true },
+          [input.model.model]: {
+            // OpenCode asks for 32,000 output tokens unless capped, and the
+            // broker refuses requests above the grant's limit. A context of
+            // 0 keeps OpenCode's default for a model it does not know.
+            ...(outputLimit === undefined ? {} : { limit: { context: 0, output: outputLimit } }),
+            name: input.model.model,
+            tool_call: true,
+          },
         },
         name: "Responder model broker",
         npm,
@@ -164,6 +211,7 @@ export async function runOpenCodeAutomation(
     maxOutputTokens: automationHarnessMaxOutputTokens,
     workdir: automationWorkspaceRoot,
   });
-  if (!commandSucceeded(output)) throw new AutomationHarnessError("OpenCode automation harness failed", output);
+  const failure = openCodeHarnessFailure(output);
+  if (failure) throw new AutomationHarnessError(failure, output);
   return { eventStream: output };
 }

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildOpenCodeAutomationCommand,
   openCodeAutomationConfig,
+  openCodeHarnessFailure,
   openCodeVersion,
   prepareOpenCodeAutomationHarness,
 } from "./opencode-automation-harness.js";
@@ -83,6 +84,20 @@ describe("OpenCode automation harness", () => {
     });
   });
 
+  it("caps output tokens at the grant's per-request limit", () => {
+    const config = openCodeAutomationConfig({
+      ...input,
+      model: { ...input.model, maxOutputTokensPerRequest: 16_000 },
+    });
+    expect(config.provider.responder.models["gpt-5.4"]).toMatchObject({
+      limit: { context: 0, output: 16_000 },
+    });
+    expect(() => openCodeAutomationConfig({
+      ...input,
+      model: { ...input.model, maxOutputTokensPerRequest: 0 },
+    })).toThrow("Maximum output tokens per request must be a positive integer");
+  });
+
   it("keeps the prompt out of the shell command", () => {
     const command = buildOpenCodeAutomationCommand(input);
     expect(command).toContain("OPENCODE_CONFIG=");
@@ -97,4 +112,38 @@ it.each(["google", "xai", "mistral", "deepseek"])("uses scoped chat completion r
   expect(config.provider.responder.npm).toBe("@ai-sdk/openai-compatible");
   expect(config.provider.responder.options.baseURL).toBe(`https://models.responder.test/v1/providers/${provider}`);
   expect(config.provider.responder.models["current-model"].tool_call).toBe(true);
+});
+
+describe("OpenCode harness result", () => {
+  const exec = (exitCode: number, ...events: unknown[]) =>
+    `Chunk ID: abc123\nWall time: 8.6543 seconds\nProcess exited with code ${exitCode}\nOutput:\n${events.map((event) => JSON.stringify(event)).join("\n")}`;
+  const step = { type: "step_finish", part: { reason: "stop", type: "step-finish" } };
+
+  it("accepts a run that finished a step", () => {
+    expect(openCodeHarnessFailure(exec(0, { type: "step_start" }, step))).toBeNull();
+  });
+
+  it("fails a run that exited 0 without any output", () => {
+    expect(openCodeHarnessFailure(exec(0))).toBe(
+      "OpenCode automation harness failed: OpenCode finished without a model response",
+    );
+  });
+
+  it("fails a run that reported a model error, whatever its exit code", () => {
+    const error = {
+      error: { data: { message: "Payment Required: The usage allowance for this billing period is used up", statusCode: 402 }, name: "APIError" },
+      type: "error",
+    };
+    for (const exitCode of [0, 1]) {
+      expect(openCodeHarnessFailure(exec(exitCode, error))).toBe(
+        "OpenCode automation harness failed: Payment Required: The usage allowance for this billing period is used up",
+      );
+    }
+  });
+
+  it("names the exit code when OpenCode printed no error", () => {
+    expect(openCodeHarnessFailure(exec(137))).toBe(
+      "OpenCode automation harness failed: OpenCode exited with code 137",
+    );
+  });
 });
