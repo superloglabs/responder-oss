@@ -106,6 +106,37 @@ async function createWorkspace(page: Page, capabilities: string[]) {
   await page.getByLabel("Workspace name").press("Enter");
 }
 
+test("keeps guided setup on screen while the workspace list loads", async ({ page }) => {
+  let releaseList = () => {};
+  const listReleased = new Promise<void>((resolve) => {
+    releaseList = resolve;
+  });
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(null) });
+      return;
+    }
+
+    if (path.endsWith("/organization/list")) {
+      await listReleased;
+      await route.fulfill({ json: [] });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+  await page.goto("/app");
+
+  await expect(page.getByRole("list", { name: "Setup progress" })).toBeVisible();
+  await expect(page.getByText("Loading…")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a workspace" })).toHaveCount(0);
+
+  releaseList();
+  await expect(page.getByRole("heading", { name: "Name your workspace" })).toBeVisible();
+});
+
 test("opens agent creation after creating a workspace", async ({ page }) => {
   await createWorkspace(page, []);
 
