@@ -77,7 +77,10 @@ export const githubPullRequestAuthorRoutes = new Hono()
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) return context.json({ error: tenant.error }, tenant.status);
     const author = await getGitHubPullRequestAuthor(tenant.organizationId);
+    const appSlug = process.env.GITHUB_APP_SLUG;
     return context.json({
+      // The bot account GitHub shows on pull requests the GitHub App opens.
+      appLogin: appSlug ? `${appSlug}[bot]` : null,
       author: author
         ? {
             githubLogin: author.githubLogin,
