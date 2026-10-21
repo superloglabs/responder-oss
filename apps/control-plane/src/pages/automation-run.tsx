@@ -91,6 +91,7 @@ function triggerMeta(run: AutomationRunDetail): string[] {
     return ["Sentry", attributes.action === "created" ? "New issue" : "Regression", typeof attributes.shortId === "string" ? attributes.shortId : null].filter((value): value is string => Boolean(value));
   }
   if (provider === "axiom") return ["Axiom", "Monitor alert"];
+  if (provider === "signoz") return ["SigNoz", typeof attributes.alertName === "string" ? attributes.alertName : "Alert"];
   if (provider === "devrev") return ["DevRev", typeof attributes.displayId === "string" ? attributes.displayId : "New ticket"];
   if (provider === "github") {
     return ["GitHub", attributes.event === "merged" ? "Pull request merged" : "Pull request opened", typeof attributes.repository === "string" && typeof attributes.pullRequestNumber === "number" ? `${attributes.repository}#${attributes.pullRequestNumber}` : null].filter((value): value is string => Boolean(value));

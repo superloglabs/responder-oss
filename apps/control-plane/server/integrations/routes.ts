@@ -69,6 +69,7 @@ import {
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
+  automationOnlyIntegrationIds,
   getIntegrationDefinition,
   integrationCatalog,
   integrationIsConfigured,
@@ -105,6 +106,15 @@ import {
   DatadogCredentialsError,
 } from "./datadog.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
+import {
+  signozAccount,
+  SignozCredentialsError,
+  SignozInstanceNotFoundError,
+} from "./signoz.js";
+import {
+  parseSignozInstanceUrl,
+  signozWebhookSecret,
+} from "../../../../packages/core/src/integrations/signoz.js";
 import {
   createDevRevTicketWebhook,
   deleteDevRevWebhook,
@@ -175,6 +185,7 @@ import {
 import {
   axiomWebhookUrl,
   devrevWebhookUrl,
+  signozWebhookUrl,
   dash0WebhookUrl,
   cellCallbackUrl,
   integrationCallbackUrl,
@@ -341,6 +352,11 @@ const datadogConnectionSchema = z.object({
   applicationKey: z.string().trim().min(1).max(512),
   returnTo: z.string().max(2_048).optional(),
   site: z.string().min(1),
+});
+const signozConnectionSchema = z.object({
+  apiKey: z.string().trim().min(1).max(4_096),
+  instanceUrl: z.string().trim().min(1).max(2_048),
+  returnTo: z.string().max(2_048).optional(),
 });
 const dash0ConnectionSchema = z.object({
   mcpUrl: z.string().trim().url().max(2_048),
@@ -825,7 +841,7 @@ export async function startIntegrationConnection(input: {
   }
 
   if (
-    (parsedProvider.data === "devrev" || parsedProvider.data === "discord") &&
+    automationOnlyIntegrationIds.has(parsedProvider.data) &&
     !(await organizationHasCapability(tenant.organizationId, "automations"))
   ) {
     return Response.json({ error: "Unknown integration provider" }, { status: 404 });
@@ -842,7 +858,8 @@ export async function startIntegrationConnection(input: {
     parsedProvider.data === "clickstack" ||
     parsedProvider.data === "upstash" ||
     parsedProvider.data === "langfuse" ||
-    parsedProvider.data === "supabase"
+    parsedProvider.data === "supabase" ||
+    parsedProvider.data === "signoz"
   ) {
     return Response.json({ error: `Use the ${definition.name} connection endpoint` }, { status: 405 });
   }
@@ -1123,7 +1140,7 @@ export const integrationRoutes = new Hono()
     return context.json({
       integrations: integrationCatalog
         .filter((definition) =>
-          (definition.id !== "devrev" && definition.id !== "discord") || automationsEnabled
+          !automationOnlyIntegrationIds.has(definition.id) || automationsEnabled
         )
         .map((definition) => {
         const providerAccounts = accounts.filter(
@@ -1192,7 +1209,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "clickstack" ||
                   definition.id === "upstash" ||
                   definition.id === "langfuse" ||
-                  definition.id === "supabase"
+                  definition.id === "supabase" ||
+                  definition.id === "signoz"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -1734,6 +1752,80 @@ export const integrationRoutes = new Hono()
       );
     }
   })
+  .post("/signoz/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (!(await organizationHasCapability(tenant.organizationId, "automations"))) {
+      return context.json({ error: "Unknown integration provider" }, 404);
+    }
+
+    const parsed = signozConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter the SigNoz instance URL and an API key" }, 400);
+    }
+    const instance = parseSignozInstanceUrl(parsed.data.instanceUrl);
+    if (!instance) {
+      return context.json(
+        { error: "Enter a SigNoz Cloud instance URL, such as https://acme.us.signoz.cloud" },
+        400,
+      );
+    }
+
+    try {
+      const account = await signozAccount({ apiKey: parsed.data.apiKey, instance });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "signoz",
+        externalAccountId: account.externalAccountId,
+        displayName: account.displayName,
+        encryptedCredentials: encryptCredentials({
+          apiKey: parsed.data.apiKey,
+          authType: "api_key",
+          instanceUrl: instance.instanceUrl,
+        }),
+        credentialKeyVersion: 1,
+        metadata: account.metadata,
+      });
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "signoz",
+        },
+      });
+      console.info(
+        JSON.stringify({
+          accountId,
+          event: "signoz_connected",
+          organizationId: tenant.organizationId,
+          region: instance.region,
+        }),
+      );
+      return context.json({
+        accountId,
+        redirectUrl: settingsRedirect(
+          parsed.data.returnTo ?? "/settings",
+          "signoz",
+          "connected",
+        ),
+      });
+    } catch (error) {
+      if (error instanceof SignozCredentialsError) {
+        return context.json({ error: error.message }, 401);
+      }
+      if (error instanceof SignozInstanceNotFoundError) {
+        return context.json({ error: error.message }, 400);
+      }
+      logCallbackError("SigNoz", error, { organizationId: tenant.organizationId });
+      return context.json({ error: "Unable to verify the SigNoz connection" }, 502);
+    }
+  })
   .post("/devrev/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -2090,6 +2182,31 @@ export const integrationRoutes = new Hono()
       authorization: `Bearer ${axiomWebhookSecret(accountId.data)}`,
       bodyTemplate: AXIOM_WEBHOOK_BODY_TEMPLATE,
       webhookUrl: axiomWebhookUrl(accountId.data),
+    });
+  })
+  // Where a SigNoz webhook notification channel sends alerts so they can
+  // start automations.
+  .get("/signoz/:accountId/webhook-config", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("accountId"));
+    if (!accountId.success) {
+      return context.json({ error: "SigNoz connection not found" }, 404);
+    }
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "signoz",
+    });
+    if (account?.status !== "connected") {
+      return context.json({ error: "SigNoz connection not found" }, 404);
+    }
+    context.header("cache-control", "no-store");
+    return context.json({
+      bearerToken: signozWebhookSecret(accountId.data),
+      webhookUrl: signozWebhookUrl(accountId.data),
     });
   })
   .post("/grafana/connect", async (context) => {

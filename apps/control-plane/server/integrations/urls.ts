@@ -66,6 +66,15 @@ export function axiomWebhookUrl(integrationAccountId: string): string {
   ).toString();
 }
 
+export function signozWebhookUrl(integrationAccountId: string): string {
+  const callbackBaseUrl =
+    process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
+  return new URL(
+    `/api/webhooks/signoz/${encodeURIComponent(integrationAccountId)}`,
+    callbackBaseUrl,
+  ).toString();
+}
+
 export function devrevWebhookUrl(integrationAccountId: string): string {
   const callbackBaseUrl =
     process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();

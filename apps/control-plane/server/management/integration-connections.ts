@@ -1,7 +1,7 @@
 import { createChatConnectionTicket, chatConnectionHandoffUrl } from "../integrations/chat-connection.js";
 import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
-import { integrationCatalog, integrationIsConfigured, productIntegrationIds } from "../integrations/catalog.js";
+import { automationOnlyIntegrationIds, integrationCatalog, integrationIsConfigured, productIntegrationIds } from "../integrations/catalog.js";
 import { startIntegrationConnection } from "../integrations/routes.js";
 import { controlPlaneBaseUrl } from "../integrations/urls.js";
 import { defineOperation, ManagementError } from "./operation.js";
@@ -10,8 +10,6 @@ const consentProviders = new Set([
   "slack", "github", "sentry", "discord", "vercel", "linear", "gcp", "axiom", "posthog",
   "cloudflare",
 ]);
-// Only automations use these, so they are offered only with automations on.
-const automationOnlyProviders = new Set(["devrev", "discord"]);
 const provider = z.enum(productIntegrationIds);
 const connectionType = z.enum(["oauth", "secure_setup"]);
 
@@ -34,7 +32,7 @@ export const integrationConnectionOperations = [
     async run(context) {
       const automations = await organizationHasCapability(context.organizationId, "automations");
       return { integrations: integrationCatalog
-        .filter((item) => item.implemented && (!automationOnlyProviders.has(item.id) || automations))
+        .filter((item) => item.implemented && (!automationOnlyIntegrationIds.has(item.id) || automations))
         .map((item) => ({
           provider: item.id, name: item.name, description: item.description,
           available: integrationIsConfigured(item),
@@ -59,7 +57,7 @@ export const integrationConnectionOperations = [
     }),
     async run(context, input) {
       const definition = integrationCatalog.find((item) => item.id === input.provider)!;
-      if (!definition.implemented || (automationOnlyProviders.has(input.provider) &&
+      if (!definition.implemented || (automationOnlyIntegrationIds.has(input.provider) &&
           !await organizationHasCapability(context.organizationId, "automations"))) {
         throw new ManagementError(404, "Integration is not available.", "integration_unavailable");
       }

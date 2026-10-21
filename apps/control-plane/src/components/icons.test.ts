@@ -24,6 +24,7 @@ describe("ProviderGlyph", () => {
     ["linear", "Linear", "LI"],
     ["posthog", "PostHog", "PH"],
     ["sentry", "Sentry", "SE"],
+    ["signoz", "SigNoz", "SZ"],
     ["slack", "Slack", "SL"],
     ["vercel", "Vercel", "▲"],
   ] as const)(

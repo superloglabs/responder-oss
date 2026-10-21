@@ -4295,3 +4295,150 @@ describe("DevRev connections", () => {
     expect(getDevRevOrganization).not.toHaveBeenCalled();
   });
 });
+
+describe("SigNoz connections", () => {
+  const accountId = "30000000-0000-4000-8000-000000000000";
+
+  function connect(body: Record<string, unknown> = {}) {
+    return app.request("/api/integrations/signoz/connect", {
+      body: JSON.stringify({
+        apiKey: "signoz-api-key",
+        instanceUrl: "acme.us.signoz.cloud/home",
+        returnTo: "/automations/new",
+        ...body,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://hooks.responder.example");
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 5).toString("base64"));
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+    vi.mocked(encryptCredentials).mockImplementation((value) => JSON.stringify(value));
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(accountId);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("verifies the service account key against the instance and stores it encrypted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      data: { id: "sa-1", name: "Responder", orgId: "org-1" },
+      status: "success",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await connect();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId,
+      redirectUrl: "https://responder.example/automations/new?integration=signoz&status=connected",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://acme.us.signoz.cloud/api/v1/service_accounts/me",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "SIGNOZ-API-KEY": "signoz-api-key" }),
+        redirect: "error",
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith({
+      credentialKeyVersion: 1,
+      displayName: "acme.us.signoz.cloud",
+      encryptedCredentials: JSON.stringify({
+        apiKey: "signoz-api-key",
+        authType: "api_key",
+        instanceUrl: "https://acme.us.signoz.cloud",
+      }),
+      externalAccountId: "acme.us.signoz.cloud",
+      metadata: {
+        instanceUrl: "https://acme.us.signoz.cloud",
+        mcpUrl: "https://mcp.us.signoz.cloud/mcp",
+        region: "us",
+        serviceAccountName: "Responder",
+        signozOrganizationId: "org-1",
+      },
+      organizationId: tenant.organizationId,
+      provider: "signoz",
+    });
+  });
+
+  it("accepts only SigNoz Cloud instances", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await connect({ instanceUrl: "https://169.254.169.254" });
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects a key SigNoz does not accept", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ status: "error" }, { status: 401 })));
+
+    const response = await connect();
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "SigNoz rejected the API key" });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("reports an instance URL that SigNoz Cloud does not serve", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<!DOCTYPE html>", {
+      headers: { "content-type": "text/html" },
+      status: 404,
+    })));
+
+    const response = await connect();
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.stringContaining("SigNoz has no instance at this URL"),
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("shows the alert channel setup for a connected instance", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({ status: "connected" } as never);
+
+    const response = await app.request(`/api/integrations/signoz/${accountId}/webhook-config`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body).toEqual({
+      bearerToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      webhookUrl: `https://hooks.responder.example/api/webhooks/signoz/${accountId}`,
+    });
+    expect(getOrganizationIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: accountId,
+      organizationId: tenant.organizationId,
+      provider: "signoz",
+    });
+  });
+
+  it("is available only with automations", async () => {
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+    const listed = await (await app.request("/api/integrations")).json();
+    expect(listed.integrations).toContainEqual(expect.objectContaining({
+      connectUrl: "/api/integrations/signoz/connect",
+      id: "signoz",
+    }));
+
+    vi.mocked(organizationHasCapability).mockResolvedValue(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const hidden = await (await app.request("/api/integrations")).json();
+    expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "signoz" }));
+    expect((await connect()).status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

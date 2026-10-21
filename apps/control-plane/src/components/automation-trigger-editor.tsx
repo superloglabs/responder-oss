@@ -9,6 +9,8 @@ import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
 import { AxiomWebhookDialog } from "./axiom-webhook-dialog";
 import { DevRevConnectionDialog } from "./devrev-connection-dialog";
+import { SignozConnectionDialog } from "./signoz-connection-dialog";
+import { SignozWebhookDialog } from "./signoz-webhook-dialog";
 import { SentryEnvironmentPicker } from "./sentry-environment-picker";
 import { SlackAuthorPickers } from "./slack-author-picker";
 import { SlackFilterMenu } from "./slack-filter-menu";
@@ -63,29 +65,42 @@ function ScheduleFields({ trigger, onChange }: { trigger: ScheduleTrigger; onCha
 // resources to choose. The member adds the webhook as an Axiom notifier.
 function AxiomTriggerFields({ accountId }: { accountId: string }) {
   const [open, setOpen] = useState(false);
-  return <div className="automationTrigger__axiom">
+  return <div className="automationTrigger__webhook">
     <p className="automationTrigger__hint">Runs when a monitor that uses the Responder notifier alerts.</p>
     <button className="button button--secondary button--small" onClick={() => setOpen(true)} type="button">Set up Axiom notifier</button>
     <AxiomWebhookDialog accountId={accountId} open={open} onClose={() => setOpen(false)} />
   </div>;
 }
 
-// DevRev connects with a token in a dialog instead of a popup.
-function DevRevTriggerConnect({ onConnected }: {
+// SigNoz sends alerts to the connection's webhook, so its trigger has no
+// resources to choose. The member adds the webhook as a SigNoz alert channel.
+function SignozTriggerFields({ accountId }: { accountId: string }) {
+  const [open, setOpen] = useState(false);
+  return <div className="automationTrigger__webhook">
+    <p className="automationTrigger__hint">Runs when an alert rule that notifies the Responder channel fires.</p>
+    <button className="button button--secondary button--small" onClick={() => setOpen(true)} type="button">Set up SigNoz channel</button>
+    <SignozWebhookDialog accountId={accountId} open={open} onClose={() => setOpen(false)} />
+  </div>;
+}
+
+// DevRev and SigNoz connect with credentials in a dialog instead of a popup.
+function DialogTriggerConnect({ kind, onConnected }: {
+  kind: "devrev" | "signoz";
   onConnected: (kind: ConnectedTriggerKind, signal: AbortSignal) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   function connected() {
     setOpen(false);
-    void onConnected("devrev", new AbortController().signal)
-      .then((usable) => setError(usable ? null : "DevRev connected, but the connection is not available yet. Try again to refresh it."))
+    void onConnected(kind, new AbortController().signal)
+      .then((usable) => setError(usable ? null : `${providerDisplayName(kind)} connected, but the connection is not available yet. Try again to refresh it.`))
       .catch(() => setError("Could not refresh the connection. Please try again."));
   }
+  const Dialog = kind === "devrev" ? DevRevConnectionDialog : SignozConnectionDialog;
   return <div className="automationTrigger__connectAction">
     <button className="automationCreate__save" onClick={() => { setError(null); setOpen(true); }} type="button"><PlugsConnectedIcon size={16} />Connect</button>
     {error ? <p className="automationTrigger__connectError" role="alert">{error}</p> : null}
-    <DevRevConnectionDialog onCancel={() => setOpen(false)} onConnected={connected} open={open} returnTo="/automations" />
+    <Dialog onCancel={() => setOpen(false)} onConnected={connected} open={open} returnTo="/automations" />
   </div>;
 }
 
@@ -123,7 +138,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
   const resources = connected?.kind === "github"
     ? options?.repositories.filter((repository) => repository.integrationAccountId === connected.integrationAccountId).map((repository) => ({ displayName: repository.fullName, externalId: repository.id })) ?? []
     : options?.resources.filter((resource) => resource.integrationAccountId === connected?.integrationAccountId && resource.kind === (connected?.kind === "sentry" ? "sentry_project" : connected?.kind === "discord" ? "discord_channel" : "slack_channel")) ?? [];
-  const selectedIds = !connected || connected.kind === "axiom" || connected.kind === "devrev" ? [] : connected.kind === "sentry" ? connected.projectIds : connected.kind === "github" ? connected.repositoryIds : connected.channelIds;
+  const selectedIds = !connected || connected.kind === "axiom" || connected.kind === "devrev" || connected.kind === "signoz" ? [] : connected.kind === "sentry" ? connected.projectIds : connected.kind === "github" ? connected.repositoryIds : connected.channelIds;
   const providerName = providerDisplayName(trigger.kind);
   const removeTrigger = <button aria-label={`Remove ${providerName} trigger`} className="automationCreate__iconButton" onClick={onRemove} type="button"><TrashIcon size={14} /></button>;
 
@@ -147,8 +162,8 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
       <p>Connect {providerName} to use this trigger</p>
     </div>
     <div className="automationTrigger__connectionActions">
-      {connected.kind === "devrev"
-        ? <DevRevTriggerConnect onConnected={onConnected} />
+      {connected.kind === "devrev" || connected.kind === "signoz"
+        ? <DialogTriggerConnect kind={connected.kind} onConnected={onConnected} />
         : <AutomationTriggerConnect key={connected.kind} kind={connected.kind} name={providerName} onConnected={onConnected} />}
       {removeTrigger}
     </div>
@@ -157,7 +172,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     <div className="automationTrigger__heading">
       <AutomationTriggerIcon kind={connected.kind} />
       <span className="automationTrigger__provider">{title}</span>
-      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "axiom" || connected.kind === "devrev" ? { ...connected, integrationAccountId: event.target.value } : connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : connected.kind === "github" ? { ...connected, integrationAccountId: event.target.value, repositoryIds: [] } : connected.kind === "slack" ? { ...connected, ignoredAuthors: undefined, includedAuthors: undefined, integrationAccountId: event.target.value, channelIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
+      {accounts.length > 1 || !account ? <select aria-label="Trigger connection" className="automationTrigger__account" value={account ? connected.integrationAccountId : ""} onChange={(event) => onChange(connected.kind === "axiom" || connected.kind === "devrev" || connected.kind === "signoz" ? { ...connected, integrationAccountId: event.target.value } : connected.kind === "sentry" ? { ...connected, excludedEnvironments: undefined, integrationAccountId: event.target.value, projectIds: [] } : connected.kind === "github" ? { ...connected, integrationAccountId: event.target.value, repositoryIds: [] } : connected.kind === "slack" ? { ...connected, ignoredAuthors: undefined, includedAuthors: undefined, integrationAccountId: event.target.value, channelIds: [] } : { ...connected, integrationAccountId: event.target.value, channelIds: [] })}>
         <option value="" disabled>Choose a workspace</option>
         {accounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}
       </select> : <span className="automationTrigger__account">{account?.displayName ?? "Not connected"}</span>}
@@ -166,6 +181,8 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     </div>
     {connected.kind === "axiom" ? <div className="automationTrigger__fields" ref={fieldsRef}>
       {account ? <AxiomTriggerFields accountId={connected.integrationAccountId} /> : null}
+    </div> : connected.kind === "signoz" ? <div className="automationTrigger__fields" ref={fieldsRef}>
+      {account ? <SignozTriggerFields accountId={connected.integrationAccountId} /> : null}
     </div> : connected.kind === "devrev" ? <div className="automationTrigger__fields" ref={fieldsRef}>
       <p className="automationTrigger__hint">Runs when a ticket is created. The run's final reply is posted as an internal comment on the ticket.</p>
     </div> : connected.kind === "github" ? <div className="automationTrigger__fields" ref={fieldsRef}>
@@ -235,7 +252,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
       return;
     }
     const account = options?.accounts.find((item) => item.provider === kind);
-    if (kind === "axiom" || kind === "devrev") {
+    if (kind === "axiom" || kind === "devrev" || kind === "signoz") {
       onChange([...triggers, { kind, integrationAccountId: account?.id ?? "" }]);
       return;
     }

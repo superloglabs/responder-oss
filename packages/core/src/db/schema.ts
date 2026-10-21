@@ -104,6 +104,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "linear",
   "discord",
   "devrev",
+  "signoz",
 ]);
 
 export const integrationResourceKind = pgEnum("integration_resource_kind", [

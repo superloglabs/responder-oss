@@ -30,7 +30,7 @@ export function shareableAutomationTriggers(
     if (trigger.kind === "github") {
       return { eventTypes: trigger.eventTypes, integrationAccountId: "", kind: "github", repositoryIds: [] };
     }
-    if (trigger.kind === "axiom" || trigger.kind === "devrev") {
+    if (trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz") {
       return { integrationAccountId: "", kind: trigger.kind };
     }
     return { ...(trigger.frequency === "custom" ? { cron: trigger.cron } : {}), frequency: trigger.frequency, hour: trigger.hour, kind: "schedule", timezone: "UTC", weekday: trigger.weekday };

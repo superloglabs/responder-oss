@@ -10,6 +10,7 @@ export const automationContextProviders = [
   "grafana",
   "linear",
   "sentry",
+  "signoz",
   "slack",
   "vercel",
 ] as const;
