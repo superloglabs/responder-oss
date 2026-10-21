@@ -116,6 +116,16 @@ import {
   signozWebhookSecret,
 } from "../../../../packages/core/src/integrations/signoz.js";
 import {
+  honeycombAccount,
+  HoneycombCredentialsError,
+  HoneycombScopesError,
+} from "./honeycomb.js";
+import {
+  getHoneycombRegion,
+  honeycombRegionIds,
+  honeycombWebhookSecret,
+} from "../../../../packages/core/src/integrations/honeycomb.js";
+import {
   createDevRevTicketWebhook,
   deleteDevRevWebhook,
   DevRevApiError,
@@ -186,6 +196,7 @@ import {
   axiomWebhookUrl,
   devrevWebhookUrl,
   signozWebhookUrl,
+  honeycombWebhookUrl,
   dash0WebhookUrl,
   cellCallbackUrl,
   integrationCallbackUrl,
@@ -356,6 +367,12 @@ const datadogConnectionSchema = z.object({
 const signozConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4_096),
   instanceUrl: z.string().trim().min(1).max(2_048),
+  returnTo: z.string().max(2_048).optional(),
+});
+const honeycombConnectionSchema = z.object({
+  keyId: z.string().trim().min(1).max(512),
+  keySecret: z.string().trim().min(1).max(4_096),
+  region: z.enum(honeycombRegionIds),
   returnTo: z.string().max(2_048).optional(),
 });
 const dash0ConnectionSchema = z.object({
@@ -859,7 +876,8 @@ export async function startIntegrationConnection(input: {
     parsedProvider.data === "upstash" ||
     parsedProvider.data === "langfuse" ||
     parsedProvider.data === "supabase" ||
-    parsedProvider.data === "signoz"
+    parsedProvider.data === "signoz" ||
+    parsedProvider.data === "honeycomb"
   ) {
     return Response.json({ error: `Use the ${definition.name} connection endpoint` }, { status: 405 });
   }
@@ -1210,7 +1228,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "upstash" ||
                   definition.id === "langfuse" ||
                   definition.id === "supabase" ||
-                  definition.id === "signoz"
+                  definition.id === "signoz" ||
+                  definition.id === "honeycomb"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -1826,6 +1845,79 @@ export const integrationRoutes = new Hono()
       return context.json({ error: "Unable to verify the SigNoz connection" }, 502);
     }
   })
+  .post("/honeycomb/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (!(await organizationHasCapability(tenant.organizationId, "automations"))) {
+      return context.json({ error: "Unknown integration provider" }, 404);
+    }
+
+    const parsed = honeycombConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter the Honeycomb region, key ID, and key secret" }, 400);
+    }
+    const region = getHoneycombRegion(parsed.data.region);
+
+    try {
+      const account = await honeycombAccount({
+        keyId: parsed.data.keyId,
+        keySecret: parsed.data.keySecret,
+        region,
+      });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "honeycomb",
+        externalAccountId: account.externalAccountId,
+        displayName: account.displayName,
+        encryptedCredentials: encryptCredentials({
+          authType: "api_key",
+          keyId: parsed.data.keyId,
+          keySecret: parsed.data.keySecret,
+          region: region.id,
+        }),
+        credentialKeyVersion: 1,
+        metadata: account.metadata,
+      });
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "honeycomb",
+        },
+      });
+      console.info(
+        JSON.stringify({
+          accountId,
+          event: "honeycomb_connected",
+          organizationId: tenant.organizationId,
+          region: region.id,
+        }),
+      );
+      return context.json({
+        accountId,
+        redirectUrl: settingsRedirect(
+          parsed.data.returnTo ?? "/settings",
+          "honeycomb",
+          "connected",
+        ),
+      });
+    } catch (error) {
+      if (error instanceof HoneycombCredentialsError) {
+        return context.json({ error: error.message }, 401);
+      }
+      if (error instanceof HoneycombScopesError) {
+        return context.json({ error: error.message }, 400);
+      }
+      logCallbackError("Honeycomb", error, { organizationId: tenant.organizationId });
+      return context.json({ error: "Unable to verify the Honeycomb connection" }, 502);
+    }
+  })
   .post("/devrev/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -2207,6 +2299,31 @@ export const integrationRoutes = new Hono()
     return context.json({
       bearerToken: signozWebhookSecret(accountId.data),
       webhookUrl: signozWebhookUrl(accountId.data),
+    });
+  })
+  // Where a Honeycomb webhook recipient sends trigger and SLO alerts so they
+  // can start automations.
+  .get("/honeycomb/:accountId/webhook-config", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("accountId"));
+    if (!accountId.success) {
+      return context.json({ error: "Honeycomb connection not found" }, 404);
+    }
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "honeycomb",
+    });
+    if (account?.status !== "connected") {
+      return context.json({ error: "Honeycomb connection not found" }, 404);
+    }
+    context.header("cache-control", "no-store");
+    return context.json({
+      sharedSecret: honeycombWebhookSecret(accountId.data),
+      webhookUrl: honeycombWebhookUrl(accountId.data),
     });
   })
   .post("/grafana/connect", async (context) => {

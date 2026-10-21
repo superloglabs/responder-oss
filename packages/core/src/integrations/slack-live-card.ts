@@ -163,6 +163,7 @@ function humanizeToolName(value: string): string {
     dsn: "DSN",
     dsns: "DSNs",
     grafana: "Grafana",
+    honeycomb: "Honeycomb",
     mcp: "MCP",
     pr: "PR",
     rum: "RUM",

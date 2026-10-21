@@ -4442,3 +4442,173 @@ describe("SigNoz connections", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("Honeycomb connections", () => {
+  const accountId = "40000000-0000-4000-8000-000000000000";
+
+  function connect(body: Record<string, unknown> = {}) {
+    return app.request("/api/integrations/honeycomb/connect", {
+      body: JSON.stringify({
+        keyId: "hcxmk_01",
+        keySecret: "honeycomb-secret",
+        region: "eu",
+        returnTo: "/automations/new",
+        ...body,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://hooks.responder.example");
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 5).toString("base64"));
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+    vi.mocked(encryptCredentials).mockImplementation((value) => JSON.stringify(value));
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(accountId);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("verifies the management key in the team's region and stores it encrypted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      data: {
+        attributes: { key_type: "management", name: "Responder", scopes: ["environments:read", "mcp:read"] },
+        id: "hcxmk_01",
+        relationships: { team: { data: { id: "team-1", type: "teams" } } },
+        type: "api-keys",
+      },
+      included: [{ attributes: { name: "Acme", slug: "acme" }, id: "team-1", type: "teams" }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await connect();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId,
+      redirectUrl: "https://responder.example/automations/new?integration=honeycomb&status=connected",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.eu1.honeycomb.io/2/auth",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer hcxmk_01:honeycomb-secret" }),
+        redirect: "error",
+      }),
+    );
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith({
+      credentialKeyVersion: 1,
+      displayName: "Acme",
+      encryptedCredentials: JSON.stringify({
+        authType: "api_key",
+        keyId: "hcxmk_01",
+        keySecret: "honeycomb-secret",
+        region: "eu",
+      }),
+      externalAccountId: "eu:team-1",
+      metadata: {
+        keyName: "Responder",
+        mcpUrl: "https://mcp.eu1.honeycomb.io/mcp",
+        region: "eu",
+        teamId: "team-1",
+        teamSlug: "acme",
+        teamUrl: "https://ui.eu1.honeycomb.io/acme",
+      },
+      organizationId: tenant.organizationId,
+      provider: "honeycomb",
+    });
+  });
+
+  it("rejects a key without MCP and environment read access", async () => {
+    const auth = (scopes: string[]) => Response.json({
+      data: {
+        attributes: { name: "Responder", scopes },
+        id: "hcxmk_01",
+        relationships: { team: { data: { id: "team-1", type: "teams" } } },
+        type: "api-keys",
+      },
+      included: [{ attributes: { name: "Acme", slug: "acme" }, id: "team-1", type: "teams" }],
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(auth(["mcp:read"]))
+      .mockResolvedValueOnce(auth(["environments:read", "boards:read"]))
+      .mockResolvedValueOnce(auth(["environments:write", "mcp:write"]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const missingEnvironments = await connect();
+    const missingMcp = await connect();
+    const write = await connect();
+
+    expect(missingEnvironments.status).toBe(400);
+    await expect(missingEnvironments.json()).resolves.toEqual({
+      error: "The Honeycomb key needs read access to Model Context Protocol and Environments.",
+    });
+    expect(missingMcp.status).toBe(400);
+    expect(write.status).toBe(200);
+    expect(upsertIntegrationAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts only Honeycomb's regions", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await connect({ region: "https://169.254.169.254" });
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects a key Honeycomb does not accept", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "unknown API key" }, { status: 401 })));
+
+    const response = await connect();
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.stringContaining("Honeycomb rejected the API key"),
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("shows the webhook recipient setup for a connected team", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({ status: "connected" } as never);
+
+    const response = await app.request(`/api/integrations/honeycomb/${accountId}/webhook-config`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      sharedSecret: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      webhookUrl: `https://hooks.responder.example/api/webhooks/honeycomb/${accountId}`,
+    });
+    expect(getOrganizationIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: accountId,
+      organizationId: tenant.organizationId,
+      provider: "honeycomb",
+    });
+  });
+
+  it("is available only with automations", async () => {
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+    const listed = await (await app.request("/api/integrations")).json();
+    expect(listed.integrations).toContainEqual(expect.objectContaining({
+      connectUrl: "/api/integrations/honeycomb/connect",
+      id: "honeycomb",
+    }));
+
+    vi.mocked(organizationHasCapability).mockResolvedValue(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const hidden = await (await app.request("/api/integrations")).json();
+    expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "honeycomb" }));
+    expect((await connect()).status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

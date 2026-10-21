@@ -8,6 +8,7 @@ export const automationContextProviders = [
   "datadog",
   "gcp",
   "grafana",
+  "honeycomb",
   "linear",
   "sentry",
   "signoz",

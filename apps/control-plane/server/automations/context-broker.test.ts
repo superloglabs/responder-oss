@@ -918,6 +918,33 @@ describe("automation context broker", () => {
     expect(dependencies.providerFetch).not.toHaveBeenCalled();
   });
 
+  it("sends Honeycomb requests to the team region's hosted MCP server with the key", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app, dependencies } = appFor(claim("honeycomb", {
+      authType: "api_key",
+      keyId: "hcxmk_01",
+      keySecret: "honeycomb-secret",
+      region: "eu",
+    }));
+    dependencies.providerFetch.mockResolvedValue(new Response(
+      JSON.stringify({ id: 1, jsonrpc: "2.0", result: { tools: [{ name: "run_query" }] } }),
+      { headers: { "content-type": "application/json" } },
+    ));
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(200);
+    const [url, request] = dependencies.providerFetch.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://mcp.eu1.honeycomb.io/mcp");
+    expect(new Headers(request.headers).get("authorization")).toBe("Bearer hcxmk_01:honeycomb-secret");
+    const body = await response.text();
+    expect(body).toContain("run_query");
+    expect(body).not.toContain("honeycomb-secret");
+  });
+
   it("refreshes Sentry credentials before proxying", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
     const activeClaim = claim("sentry", {

@@ -4,7 +4,7 @@ import { hkdfSync } from "node:crypto";
 // derived from the credential key, so credential refreshes cannot lose it and
 // a new connection gets a new secret.
 export function connectionWebhookSecret(
-  provider: "axiom" | "signoz",
+  provider: "axiom" | "honeycomb" | "signoz",
   integrationAccountId: string,
   encodedKey = process.env.CREDENTIAL_ENCRYPTION_KEY,
 ): string {

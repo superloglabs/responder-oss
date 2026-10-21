@@ -198,6 +198,21 @@ export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
   },
   {
     category: "bug_triage",
+    connectors: ["honeycomb", "github"],
+    description: "When a Honeycomb trigger or SLO burn alert fires, query the events behind it and find the cause in your code.",
+    id: "investigate-honeycomb-alerts",
+    name: "Investigate Honeycomb alerts",
+    prompt: [
+      "A Honeycomb trigger or SLO burn alert fired. The trigger payload has its name, summary, threshold, the groups that crossed it, and a link to the query result.",
+      "Use the Honeycomb tools to read the trigger or SLO and query the dataset it watches around the time it fired. Break the result down by the fields that separate failing requests from healthy ones.",
+      "Find what changed: a deploy, a dependency, a traffic change, or a code path in the selected repositories.",
+      "Report what is failing, who is affected, the likely cause, and the queries you used.",
+      "If the alert is noise, such as a threshold that is too tight, say so in one line and suggest a better threshold.",
+    ].join("\n"),
+    triggers: [{ integrationAccountId: "", kind: "honeycomb" }],
+  },
+  {
+    category: "bug_triage",
     connectors: ["github"],
     description: "When a bug is posted in your bugs channel, reproduce it, open a pull request with a regression test, and reply with the link.",
     id: "fix-slack-bug-reports",

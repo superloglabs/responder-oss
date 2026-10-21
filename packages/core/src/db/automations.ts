@@ -480,10 +480,18 @@ export function findAutomationsForSignozAlert(
   return findAutomationsForConnectionTrigger("signoz", integrationAccountId);
 }
 
+// Enabled automations with a Honeycomb trigger on the connection whose
+// webhook received the alert.
+export function findAutomationsForHoneycombAlert(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  return findAutomationsForConnectionTrigger("honeycomb", integrationAccountId);
+}
+
 // These triggers have no resources to choose: every event that reaches the
 // connection's webhook starts a run.
 async function findAutomationsForConnectionTrigger(
-  kind: "axiom" | "devrev" | "signoz",
+  kind: "axiom" | "devrev" | "honeycomb" | "signoz",
   integrationAccountId: string,
 ): Promise<Array<{ automationId: string }>> {
   const rows = await getDatabase()
@@ -645,9 +653,12 @@ async function validateConfigurationResources(
         "integration_not_found",
       );
     }
-    // Axiom and SigNoz alerts and DevRev tickets arrive at the connection's
-    // webhook, so there is no resource to choose.
-    if (trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz") continue;
+    // Axiom, SigNoz, and Honeycomb alerts and DevRev tickets arrive at the
+    // connection's webhook, so there is no resource to choose.
+    if (
+      trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz" ||
+      trigger.kind === "honeycomb"
+    ) continue;
     if (trigger.kind === "github") {
       const triggerRepositories = await tx
         .select({ id: repositories.id })
@@ -1639,7 +1650,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "devrev" | "discord" | "github" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
+  provider: "axiom" | "devrev" | "discord" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
   sourceUrl?: string;
   title: string;
 }

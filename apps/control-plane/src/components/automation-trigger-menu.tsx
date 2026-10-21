@@ -22,6 +22,9 @@ const providers = [
   { kind: "signoz", name: "SigNoz", events: [
     { value: "alert", label: "Alert fired" },
   ] },
+  { kind: "honeycomb", name: "Honeycomb", events: [
+    { value: "alert", label: "Trigger or SLO alert" },
+  ] },
   { kind: "devrev", name: "DevRev", events: [
     { value: "ticket", label: "New ticket" },
   ] },
