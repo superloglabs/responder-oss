@@ -31,6 +31,24 @@ export class HoneycombCredentialsError extends Error {
   }
 }
 
+export class HoneycombScopesError extends Error {
+  constructor() {
+    super("The Honeycomb key needs read access to Model Context Protocol and Environments.");
+  }
+}
+
+// Honeycomb's MCP server needs read access to MCP and to environments. A
+// write scope includes read. Scope IDs look like `environments:read`.
+function hasMcpScopes(scopes: string[]): boolean {
+  const granted = scopes.map((scope) => scope.toLowerCase());
+  const covers = (resource: RegExp) =>
+    granted.some((scope) => {
+      const [name, access] = scope.split(":");
+      return resource.test(name ?? "") && (access === "read" || access === "write");
+    });
+  return covers(/^environments?$/u) && covers(/^(?:mcp|model[-_]?context[-_]?protocol)$/u);
+}
+
 // Verifies a management API key against the team's region. The team
 // identifies the connection.
 export async function honeycombAccount(input: {
@@ -52,6 +70,8 @@ export async function honeycombAccount(input: {
   if (!response.ok) throw new Error(`Honeycomb returned ${response.status}`);
 
   const payload = honeycombAuthSchema.parse(await response.json());
+  const scopes = payload.data.attributes?.scopes;
+  if (scopes && !hasMcpScopes(scopes)) throw new HoneycombScopesError();
   const teamId = payload.data.relationships.team.data.id;
   const team = payload.included?.find((item) => item.type === "teams" && item.id === teamId);
   const teamSlug = team?.attributes?.slug;

@@ -115,7 +115,11 @@ import {
   parseSignozInstanceUrl,
   signozWebhookSecret,
 } from "../../../../packages/core/src/integrations/signoz.js";
-import { honeycombAccount, HoneycombCredentialsError } from "./honeycomb.js";
+import {
+  honeycombAccount,
+  HoneycombCredentialsError,
+  HoneycombScopesError,
+} from "./honeycomb.js";
 import {
   getHoneycombRegion,
   honeycombRegionIds,
@@ -1906,6 +1910,9 @@ export const integrationRoutes = new Hono()
     } catch (error) {
       if (error instanceof HoneycombCredentialsError) {
         return context.json({ error: error.message }, 401);
+      }
+      if (error instanceof HoneycombScopesError) {
+        return context.json({ error: error.message }, 400);
       }
       logCallbackError("Honeycomb", error, { organizationId: tenant.organizationId });
       return context.json({ error: "Unable to verify the Honeycomb connection" }, 502);

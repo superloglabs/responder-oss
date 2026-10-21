@@ -4479,7 +4479,7 @@ describe("Honeycomb connections", () => {
   it("verifies the management key in the team's region and stores it encrypted", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({
       data: {
-        attributes: { key_type: "management", name: "Responder", scopes: ["mcp:read"] },
+        attributes: { key_type: "management", name: "Responder", scopes: ["environments:read", "mcp:read"] },
         id: "hcxmk_01",
         relationships: { team: { data: { id: "team-1", type: "teams" } } },
         type: "api-keys",
@@ -4523,6 +4523,35 @@ describe("Honeycomb connections", () => {
       organizationId: tenant.organizationId,
       provider: "honeycomb",
     });
+  });
+
+  it("rejects a key without MCP and environment read access", async () => {
+    const auth = (scopes: string[]) => Response.json({
+      data: {
+        attributes: { name: "Responder", scopes },
+        id: "hcxmk_01",
+        relationships: { team: { data: { id: "team-1", type: "teams" } } },
+        type: "api-keys",
+      },
+      included: [{ attributes: { name: "Acme", slug: "acme" }, id: "team-1", type: "teams" }],
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(auth(["mcp:read"]))
+      .mockResolvedValueOnce(auth(["environments:read", "boards:read"]))
+      .mockResolvedValueOnce(auth(["environments:write", "mcp:write"]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const missingEnvironments = await connect();
+    const missingMcp = await connect();
+    const write = await connect();
+
+    expect(missingEnvironments.status).toBe(400);
+    await expect(missingEnvironments.json()).resolves.toEqual({
+      error: "The Honeycomb key needs read access to Model Context Protocol and Environments.",
+    });
+    expect(missingMcp.status).toBe(400);
+    expect(write.status).toBe(200);
+    expect(upsertIntegrationAccount).toHaveBeenCalledTimes(1);
   });
 
   it("accepts only Honeycomb's regions", async () => {
