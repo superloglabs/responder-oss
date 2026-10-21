@@ -1,5 +1,3 @@
-import { formatPlanPrice } from "./pages/onboarding-presentation";
-
 // Plans a workspace compares before it changes plan. The edition's plan
 // catalog supplies what each plan includes; the billing summary decides what
 // choosing each plan does.
@@ -35,6 +33,8 @@ export interface CatalogPlan {
 export interface PlanComparisonRow {
   label: string;
   note?: string;
+  // The row holds each plan's seat count, which plan cards also show.
+  seats?: boolean;
   // One value per catalog plan, in catalog order.
   values: readonly PlanComparisonValue[];
 }
@@ -86,6 +86,16 @@ export function planAdditions(
   return { base: base?.name ?? null, features };
 }
 
+// The plan's seats, such as "1 seat" or "Unlimited seats", read from the
+// comparison row that holds them.
+export function planSeats(catalog: PlanCatalog, planId: string): string | null {
+  const index = catalog.plans.findIndex((plan) => plan.id === planId);
+  const row = catalog.comparison.flatMap((group) => group.rows).find((candidate) => candidate.seats);
+  const value = index === -1 ? undefined : row?.values[index];
+  if (typeof value !== "string") return null;
+  return `${value} ${value === "1" ? "seat" : "seats"}`;
+}
+
 export interface PlanBillingState {
   cancelsAtPeriodEnd: boolean;
   paid: boolean;
@@ -97,7 +107,7 @@ export interface PlanBillingState {
 }
 
 export type PlanChoice =
-  | { kind: "change"; label: string; planId: string; price: number; upgrade: boolean }
+  | { kind: "change"; label: string; planId: string; upgrade: boolean }
   | { kind: "contact"; label: string; url: string }
   | { kind: "current" }
   // Starts at the end of the billing period.
@@ -120,17 +130,8 @@ export function planChoice(plan: CatalogPlan, billing: PlanBillingState): PlanCh
     kind: "change",
     label: `${upgrade ? "Upgrade to" : "Switch to"} ${plan.name}`,
     planId: paidPlan.id,
-    price: paidPlan.price,
     upgrade,
   };
-}
-
-// When choosing the plan is charged, matching the plan change confirmation.
-export function planChoiceNote(choice: PlanChoice, billing: PlanBillingState): string | null {
-  if (choice.kind === "scheduled") return "Starts at the end of this billing period";
-  if (choice.kind !== "change") return null;
-  if (!choice.upgrade) return "Starts at the end of this billing period";
-  return billing.paid ? "Charged today, prorated for this period" : `Today: ${formatPlanPrice(choice.price)}`;
 }
 
 // The catalog's recommended plan, while choosing it is an upgrade.

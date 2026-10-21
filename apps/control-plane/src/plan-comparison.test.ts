@@ -3,7 +3,7 @@ import {
   canUpgrade,
   planAdditions,
   planChoice,
-  planChoiceNote,
+  planSeats,
   recommendedPlanId,
   upgradePlans,
   type CatalogPlan,
@@ -33,7 +33,7 @@ const catalog: PlanCatalog = {
       rows: [
         { label: "Own API key", values: [true, true, true, true] },
         { label: "Machine hours", values: ["2 h", "50 h", "500 h", "Custom"] },
-        { label: "Seats", values: ["1", "1", "Unlimited", "Unlimited"] },
+        { label: "Seats", seats: true, values: ["1", "1", "Unlimited", "Unlimited"] },
         { label: "SSO", values: [false, false, false, true] },
       ],
       title: "Plans",
@@ -99,11 +99,27 @@ describe("planAdditions", () => {
   });
 });
 
+describe("planSeats", () => {
+  it("reads each plan's seats from the seats row", () => {
+    expect(planSeats(catalog, "pro")).toBe("1 seat");
+    expect(planSeats(catalog, "team")).toBe("Unlimited seats");
+    expect(planSeats(catalog, "missing")).toBeNull();
+  });
+
+  it("is empty without a seats row", () => {
+    const comparison = catalog.comparison.map((group) => ({
+      ...group,
+      rows: group.rows.map((row) => ({ ...row, seats: false })),
+    }));
+    expect(planSeats({ ...catalog, comparison }, "pro")).toBeNull();
+  });
+});
+
 describe("planChoice", () => {
   it("offers every paid plan as an upgrade to a free workspace", () => {
     expect([pro, team, enterprise].map((candidate) => planChoice(candidate, billing()))).toEqual([
-      { kind: "change", label: "Upgrade to Pro", planId: "plan_pro", price: 100, upgrade: true },
-      { kind: "change", label: "Upgrade to Team", planId: "plan_team", price: 200, upgrade: true },
+      { kind: "change", label: "Upgrade to Pro", planId: "plan_pro", upgrade: true },
+      { kind: "change", label: "Upgrade to Team", planId: "plan_team", upgrade: true },
       { kind: "contact", label: "Contact us", url: "mailto:sales@example.com" },
     ]);
   });
@@ -114,7 +130,6 @@ describe("planChoice", () => {
       kind: "change",
       label: "Switch to Pro",
       planId: "plan_pro",
-      price: 100,
       upgrade: false,
     });
     expect(planChoice(team, state)).toEqual({ kind: "current" });
@@ -128,17 +143,6 @@ describe("planChoice", () => {
   it("does not sell plans the installation does not offer", () => {
     expect(planChoice(team, billing({ plans: [{ id: "plan_pro", price: 100 }] }))).toEqual({ kind: "unavailable" });
     expect(planChoice(plan("enterprise", null), billing())).toEqual({ kind: "unavailable" });
-  });
-});
-
-describe("planChoiceNote", () => {
-  it("says when the plan is charged", () => {
-    expect(planChoiceNote(planChoice(pro, billing()), billing())).toBe("Today: $100");
-    const paidPro = billing({ paid: true, planId: "plan_pro", planPrice: 100 });
-    expect(planChoiceNote(planChoice(team, paidPro), paidPro)).toBe("Charged today, prorated for this period");
-    const paidTeam = billing({ paid: true, planId: "plan_team", planPrice: 200 });
-    expect(planChoiceNote(planChoice(pro, paidTeam), paidTeam)).toBe("Starts at the end of this billing period");
-    expect(planChoiceNote({ kind: "current" }, paidTeam)).toBeNull();
   });
 });
 

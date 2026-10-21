@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRightIcon, CaretDownIcon, CheckIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon, CaretDownIcon, CheckIcon, UserIcon, UsersIcon, XIcon } from "@phosphor-icons/react";
 import {
   planAdditions,
   planChoice,
-  planChoiceNote,
+  planSeats,
   recommendedPlanId,
   upgradePlans,
   type PlanBillingState,
@@ -136,11 +136,14 @@ export function BillingPlans({
   const recommended = recommendedPlanId(catalog, billing);
   const plans = upgradePlans(catalog).map((plan) => {
     const choice = planChoice(plan, billing);
+    const seats = planSeats(catalog, plan.id);
     return {
       additions: planAdditions(catalog, plan.id),
       choice,
-      note: planChoiceNote(choice, billing),
       plan,
+      // Shown beside the audience unless the highlight already says it.
+      seats: seats && seats.toLowerCase() !== plan.badge.toLowerCase() ? seats : null,
+      single: seats === "1 seat",
       // The recommended plan leads; without one, upgrades do.
       primary: recommended === null ? choice.kind === "change" && choice.upgrade : plan.id === recommended,
     };
@@ -179,7 +182,7 @@ export function BillingPlans({
         </header>
 
         <div className="billingPlans__cards" style={{ "--billing-plan-count": plans.length } as CSSProperties}>
-          {plans.map(({ additions, choice, note, plan, primary }, index) => (
+          {plans.map(({ additions, choice, plan, primary, seats, single }, index) => (
             <article
               aria-labelledby={`billing-plan-${plan.id}`}
               className={`billingPlans__card billingPlans__card--tone${index % 3}${plan.id === recommended ? " isRecommended" : ""}`}
@@ -199,10 +202,17 @@ export function BillingPlans({
                   <strong>{plan.price}</strong>
                   {plan.unit ? <small>{plan.unit}</small> : null}
                 </p>
-                <p className="billingPlans__audience">{plan.audience}</p>
+                <p className="billingPlans__audience">
+                  {seats ? (
+                    <span className="billingPlans__seats">
+                      {single ? <UserIcon aria-hidden="true" size={13} weight="bold" /> : <UsersIcon aria-hidden="true" size={13} weight="bold" />}
+                      {seats}
+                    </span>
+                  ) : null}
+                  <span>{plan.audience}</span>
+                </p>
                 <span className="billingPlans__badge">{plan.badge}</span>
                 <PlanAction choice={choice} disabled={disabled} onChangePlan={onChangePlan} primary={primary} />
-                <p className="billingPlans__note">{note ?? " "}</p>
               </div>
               <div className="billingPlans__cardBody">
                 <p className="billingPlans__description">{plan.description}</p>
