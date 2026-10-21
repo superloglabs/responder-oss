@@ -31,6 +31,10 @@ export type AutomationTrigger =
     }
   | {
       integrationAccountId: string;
+      kind: "signoz";
+    }
+  | {
+      integrationAccountId: string;
       kind: "devrev";
     }
   | {
@@ -66,7 +70,7 @@ export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
-// Where a scheduled, Sentry, Axiom, or GitHub automation posts each finished run.
+// Where a scheduled, Sentry, Axiom, SigNoz, or GitHub automation posts each finished run.
 export interface AutomationNotification {
   channelId: string;
   integrationAccountId: string;
@@ -197,7 +201,7 @@ export interface AutomationCredential {
 
 export interface AutomationOptions extends Omit<AgentOptions, "accounts" | "resources"> {
   accounts: Array<Omit<AgentOptions["accounts"][number], "provider"> & {
-    provider: AgentOptions["accounts"][number]["provider"] | "devrev" | "discord";
+    provider: AgentOptions["accounts"][number]["provider"] | "devrev" | "discord" | "signoz";
   }>;
   credentials: AutomationCredential[];
   // Workspace skills, with the names of the secrets each one brings.

@@ -531,6 +531,48 @@ The hosted Axiom MCP endpoint routes query results through US infrastructure.
 Review Axiom's data-routing and query-cost controls before enabling it for
 sensitive or high-volume datasets.
 
+## SigNoz
+
+SigNoz is an automation trigger and connector, available in workspaces with
+the `automations` capability. Connect it from Settings or the automation
+editor with a SigNoz Cloud instance URL, such as
+`https://acme.us.signoz.cloud`, and a service account API key. In SigNoz, open
+**Settings → Service Accounts**, create a service account, and add an API key.
+The Viewer role lets runs read telemetry; Editor also lets them change alerts
+and dashboards. Responder verifies the key against
+`/api/v1/service_accounts/me` on the instance and stores it in the encrypted
+tenant credential envelope. Each instance is a separate integration account.
+Only SigNoz Cloud hosts of the form `<tenant>.<region>.signoz.cloud` are
+accepted.
+
+As a connector, the run reaches SigNoz through the run-scoped context broker,
+which forwards tool listings and calls to the region's hosted MCP server,
+`https://mcp.<region>.signoz.cloud/mcp`, with the `SIGNOZ-API-KEY` and
+`X-SigNoz-URL` headers. The key never enters the sandbox. The service account
+role limits what the tools can do.
+
+As a trigger, a SigNoz alert starts the automation. Each SigNoz connection has
+its own webhook:
+
+```text
+<public>/api/webhooks/signoz/<connection>
+```
+
+The trigger card's **Set up SigNoz channel** shows the URL and a token. In
+SigNoz, open **Settings → Alert Channels**, create a **Webhook** channel with
+that URL, leave **Username** empty, and paste the token as the **Password**.
+SigNoz then sends it as a bearer token. Select the channel in the alert rules
+that should start runs. The token is derived per connection from
+`CREDENTIAL_ENCRYPTION_KEY`; reconnecting the same instance keeps it, and
+rotating that key changes it.
+
+SigNoz sends Alertmanager's webhook body, which can hold several alerts.
+Responder starts one run per firing alert, at most 20 per delivery, and
+ignores resolved alerts. Alertmanager repeats firing alerts until they
+resolve; an alert's fingerprint and start time identify it, so a repeat does
+not start a second run. SigNoz-triggered automations report to their
+notification channels.
+
 ## Upstash
 
 Connect Upstash from Settings with the Upstash account email and a developer

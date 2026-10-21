@@ -25,7 +25,7 @@ export interface AutomationSuggestionContext {
 }
 
 // Providers that start runs. A suggestion can only use one that is connected.
-const triggerProviders = new Set(["axiom", "devrev", "discord", "github", "sentry", "slack"]);
+const triggerProviders = new Set(["axiom", "devrev", "discord", "github", "sentry", "signoz", "slack"]);
 
 // The model's answer. Structured output accepts `anyOf` but not `oneOf` or
 // numeric ranges, so the trigger is a plain union and lengths and ranges are
@@ -45,6 +45,7 @@ export const automationSuggestionOutputSchema = z.object({
       z.object({ kind: z.literal("discord") }),
       z.object({ kind: z.literal("axiom") }),
       z.object({ kind: z.literal("devrev") }),
+      z.object({ kind: z.literal("signoz") }),
       z.object({
         frequency: z.enum(["hourly", "daily", "weekly"]),
         hour: z.number().describe("Local hour, 0 to 23."),
@@ -81,6 +82,7 @@ function templateTrigger(trigger: SuggestionTrigger): AutomationTrigger {
       return { channelIds: [], integrationAccountId: "", kind: "discord" };
     case "axiom":
     case "devrev":
+    case "signoz":
       return { integrationAccountId: "", kind: trigger.kind };
     case "schedule":
       return { frequency: trigger.frequency, hour: clamp(trigger.hour, 0, 23), kind: "schedule", timezone: "UTC", weekday: clamp(trigger.weekday, 0, 6) };

@@ -871,6 +871,53 @@ describe("automation context broker", () => {
     expect(await response.text()).not.toContain("dd-api-secret");
   });
 
+  it("sends SigNoz requests to the instance region's hosted MCP server with the key", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app, dependencies } = appFor(claim("signoz", {
+      apiKey: "signoz-secret",
+      authType: "api_key",
+      instanceUrl: "https://acme.eu.signoz.cloud",
+    }));
+    dependencies.providerFetch.mockResolvedValue(new Response(
+      JSON.stringify({ id: 1, jsonrpc: "2.0", result: { tools: [{ name: "signoz_search_logs" }] } }),
+      { headers: { "content-type": "application/json" } },
+    ));
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(200);
+    const [url, request] = dependencies.providerFetch.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://mcp.eu.signoz.cloud/mcp");
+    const headers = new Headers(request.headers);
+    expect(headers.get("signoz-api-key")).toBe("signoz-secret");
+    expect(headers.get("x-signoz-url")).toBe("https://acme.eu.signoz.cloud");
+    expect(headers.get("authorization")).toBeNull();
+    const body = await response.text();
+    expect(body).toContain("signoz_search_logs");
+    expect(body).not.toContain("signoz-secret");
+  });
+
+  it("refuses SigNoz credentials that name a host outside SigNoz Cloud", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { app, dependencies } = appFor(claim("signoz", {
+      apiKey: "signoz-secret",
+      authType: "api_key",
+      instanceUrl: "https://attacker.example",
+    }));
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(dependencies.providerFetch).not.toHaveBeenCalled();
+  });
+
   it("refreshes Sentry credentials before proxying", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
     const activeClaim = claim("sentry", {

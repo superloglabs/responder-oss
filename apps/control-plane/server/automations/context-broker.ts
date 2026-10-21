@@ -17,6 +17,7 @@ import { freshSentryCredentials } from "../../../../packages/core/src/db/investi
 import { awsConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/aws.js";
 import { parseAxiomCredentials } from "../../../../packages/core/src/integrations/axiom.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
+import { parseSignozCredentials } from "../../../../packages/core/src/integrations/signoz.js";
 import {
   parseCustomMcpCredentials,
   refreshCustomMcpOAuth,
@@ -165,6 +166,18 @@ async function providerTarget(
       headers.set("authorization", `Bearer ${parsed.accessToken}`);
     }
     return { headers, url: getDatadogSite(parsed.site).mcpUrl };
+  }
+  // SigNoz Cloud's hosted MCP server for the instance's region takes the
+  // service account key and the instance in headers.
+  if (claim.account.provider === "signoz") {
+    const parsed = parseSignozCredentials(credentials);
+    return {
+      headers: new Headers({
+        "SIGNOZ-API-KEY": parsed.apiKey,
+        "X-SigNoz-URL": parsed.instanceUrl,
+      }),
+      url: parsed.mcpUrl,
+    };
   }
   if (claim.account.provider === "sentry") {
     const sentry = await dependencies.freshSentryCredentials({

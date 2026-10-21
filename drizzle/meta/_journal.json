@@ -624,6 +624,13 @@
       "when": 1792147501845,
       "tag": "0088_automation_suggestion_refills",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1792595877454,
+      "tag": "0089_add_signoz_integration",
+      "breakpoints": true
     }
   ]
 }

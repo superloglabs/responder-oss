@@ -19,9 +19,17 @@ export const productIntegrationIds = [
   "linear",
   "discord",
   "devrev",
+  "signoz",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
+
+// Only automations use these, so they are offered only with automations on.
+export const automationOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = new Set([
+  "devrev",
+  "discord",
+  "signoz",
+]);
 
 interface IntegrationDefinition {
   id: ProductIntegrationId;
@@ -108,6 +116,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     id: "datadog",
     name: "Datadog",
     description: "Monitor triggers with logs, metrics, and trace context.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "signoz",
+    name: "SigNoz",
+    description: "Alert triggers with logs, metrics, and trace context for automations.",
     implemented: true,
     requiredEnvironment: [],
   },

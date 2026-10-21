@@ -15,6 +15,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { DevRevConnectionDialog } from "../components/devrev-connection-dialog";
+import { SignozConnectionDialog } from "../components/signoz-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import {
@@ -56,7 +57,8 @@ interface IntegrationSummary {
     | "clickstack"
     | "linear"
     | "discord"
-    | "devrev";
+    | "devrev"
+    | "signoz";
   name: string;
   description: string;
   state: IntegrationState;
@@ -395,6 +397,7 @@ function DefaultIntegrationCard({
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
   const [connectingDevRev, setConnectingDevRev] = useState(false);
+  const [connectingSignoz, setConnectingSignoz] = useState(false);
   const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     integration.id === "supabase" && Boolean(supabaseSelectionState),
@@ -437,6 +440,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "devrev") {
       setConnectingDevRev(true);
+      return;
+    }
+    if (integration.id === "signoz") {
+      setConnectingSignoz(true);
       return;
     }
     if (integration.id === "supabase") {
@@ -525,6 +532,11 @@ function DefaultIntegrationCard({
       <DevRevConnectionDialog
         onCancel={() => setConnectingDevRev(false)}
         open={connectingDevRev}
+        returnTo="/settings"
+      />
+      <SignozConnectionDialog
+        onCancel={() => setConnectingSignoz(false)}
+        open={connectingSignoz}
         returnTo="/settings"
       />
       <SupabaseConnectionDialog

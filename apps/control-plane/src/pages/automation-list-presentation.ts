@@ -41,6 +41,7 @@ export function triggerEventLabel(trigger: AutomationListTrigger): string {
     return trigger.eventTypes[0] === "regression" ? "Issue regression" : "New issue";
   }
   if (trigger.kind === "axiom") return "Monitor alert";
+  if (trigger.kind === "signoz") return "Alert fired";
   if (trigger.kind === "devrev") return "New ticket";
   if (trigger.kind === "github") {
     if (trigger.eventTypes.length > 1) return "Pull request opened or merged";
@@ -70,6 +71,7 @@ export function triggerTitle(trigger: AutomationListTrigger): string {
     return trigger.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue";
   }
   if (trigger.kind === "axiom") return "Axiom monitor alert";
+  if (trigger.kind === "signoz") return "SigNoz alert fired";
   if (trigger.kind === "devrev") return "DevRev new ticket";
   if (trigger.kind === "github") {
     if (trigger.eventTypes.length > 1) return "GitHub pull request opened or merged";

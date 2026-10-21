@@ -19,6 +19,9 @@ const providers = [
   { kind: "axiom", name: "Axiom", events: [
     { value: "alert", label: "Monitor alert" },
   ] },
+  { kind: "signoz", name: "SigNoz", events: [
+    { value: "alert", label: "Alert fired" },
+  ] },
   { kind: "devrev", name: "DevRev", events: [
     { value: "ticket", label: "New ticket" },
   ] },

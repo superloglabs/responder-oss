@@ -16,6 +16,7 @@ export function sharedTriggerDescription(trigger: AutomationTrigger): string {
     return `When Sentry reports ${events} in a project you choose`;
   }
   if (trigger.kind === "axiom") return "When an Axiom monitor sends an alert to its Responder notifier";
+  if (trigger.kind === "signoz") return "When a SigNoz alert that uses the Responder channel fires";
   if (trigger.kind === "devrev") return "When a ticket is created in DevRev";
   if (trigger.kind === "github") {
     const events = trigger.eventTypes.length > 1

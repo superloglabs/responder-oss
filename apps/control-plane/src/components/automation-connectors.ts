@@ -1,4 +1,4 @@
 // Connectors an automation run can use. GitHub gives repository access; the
 // others are served through the run-scoped context broker.
-export const automationConnectorProviders = ["github", "slack", "sentry", "axiom", "datadog", "grafana", "aws", "gcp", "cloudflare", "vercel", "linear", "custom_mcp"] as const;
+export const automationConnectorProviders = ["github", "slack", "sentry", "axiom", "signoz", "datadog", "grafana", "aws", "gcp", "cloudflare", "vercel", "linear", "custom_mcp"] as const;
 export type AutomationConnectorProvider = typeof automationConnectorProviders[number];

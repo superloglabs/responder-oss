@@ -183,6 +183,21 @@ export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
   },
   {
     category: "bug_triage",
+    connectors: ["signoz", "github"],
+    description: "When a SigNoz alert fires, query the logs, traces, and metrics around it and find the cause in your code.",
+    id: "investigate-signoz-alerts",
+    name: "Investigate SigNoz alerts",
+    prompt: [
+      "A SigNoz alert started firing. The trigger payload has the alert name, its labels and annotations, and when it started.",
+      "Use the SigNoz tools to read the alert rule and query the logs, traces, and metrics it watches around the start time.",
+      "Find what changed: a deploy, a dependency, a traffic change, or a code path in the selected repositories.",
+      "Report what is failing, who is affected, the likely cause, and the queries you used.",
+      "If the alert is noise, such as a threshold that is too tight, say so in one line and suggest a better threshold.",
+    ].join("\n"),
+    triggers: [{ integrationAccountId: "", kind: "signoz" }],
+  },
+  {
+    category: "bug_triage",
     connectors: ["github"],
     description: "When a bug is posted in your bugs channel, reproduce it, open a pull request with a regression test, and reply with the link.",
     id: "fix-slack-bug-reports",

@@ -1,6 +1,6 @@
-import { hkdfSync } from "node:crypto";
 import { z } from "zod";
 import type { StoredCustomMcpOAuthState } from "./custom-mcp.js";
+import { connectionWebhookSecret } from "./webhook-secret.js";
 
 export const AXIOM_MCP_URL = "https://mcp.axiom.co/mcp";
 
@@ -53,25 +53,12 @@ export function parseAxiomCredentials(input: unknown): AxiomCredentials {
   return axiomCredentialsSchema.parse(input) as AxiomCredentials;
 }
 
-// The bearer secret Axiom sends with monitor alerts for one connection. It is
-// derived from the credential key, so OAuth refreshes cannot lose it and a
-// new connection gets a new secret.
+// The bearer secret Axiom sends with monitor alerts for one connection.
 export function axiomWebhookSecret(
   integrationAccountId: string,
   encodedKey = process.env.CREDENTIAL_ENCRYPTION_KEY,
 ): string {
-  if (!encodedKey) throw new Error("CREDENTIAL_ENCRYPTION_KEY is required");
-  const key = Buffer.from(encodedKey, "base64");
-  if (key.length !== 32) {
-    throw new Error("CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
-  }
-  return Buffer.from(hkdfSync(
-    "sha256",
-    key,
-    Buffer.alloc(0),
-    `responder:axiom-webhook:${integrationAccountId}`,
-    32,
-  )).toString("base64url");
+  return connectionWebhookSecret("axiom", integrationAccountId, encodedKey);
 }
 
 // The custom webhook body Responder asks Axiom to send. It has the fields of

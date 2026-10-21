@@ -9,6 +9,7 @@ import {
   findAutomationsForDevRevTicket,
   findAutomationsForGitHubPullRequest,
   findAutomationsForSentryIssue,
+  findAutomationsForSignozAlert,
   findDueScheduledAutomations,
   getAutomationRunSlackButtons,
   listAutomationPullRequests,
@@ -322,6 +323,15 @@ describe("trigger matching", () => {
       { automationId: "slack-only", triggers: [slack] },
     ]]));
     await expect(findAutomationsForAxiomAlert(accountId)).resolves.toEqual([{ automationId: "axiom" }]);
+  });
+
+  it("matches SigNoz alerts to automations with a SigNoz trigger on that connection", async () => {
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { automationId: "signoz", triggers: [slack, { integrationAccountId: accountId, kind: "signoz" }] },
+      { automationId: "axiom", triggers: [{ integrationAccountId: accountId, kind: "axiom" }] },
+      { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "signoz" }] },
+    ]]));
+    await expect(findAutomationsForSignozAlert(accountId)).resolves.toEqual([{ automationId: "signoz" }]);
   });
 
   it("matches DevRev tickets to automations with a DevRev trigger on that connection", async () => {

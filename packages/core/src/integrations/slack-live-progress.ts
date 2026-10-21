@@ -153,7 +153,7 @@ function assistantPhaseForTool(tool: string): string {
   ) {
     return "Reading the code.";
   }
-  if (/axiom|datadog|grafana|sentry|clickstack|upstash|langfuse|vercel|mcp/i.test(tool)) {
+  if (/axiom|datadog|grafana|sentry|signoz|clickstack|upstash|langfuse|vercel|mcp/i.test(tool)) {
     return "Checking connected tools.";
   }
   return "Working on the request.";
@@ -170,7 +170,7 @@ function phaseForTool(tool: string): string {
   ) {
     return "Inspecting the relevant source code.";
   }
-  if (/axiom|datadog|grafana|sentry|clickstack|upstash|langfuse|vercel|mcp/i.test(tool)) {
+  if (/axiom|datadog|grafana|sentry|signoz|clickstack|upstash|langfuse|vercel|mcp/i.test(tool)) {
     return "Gathering telemetry and surrounding service activity.";
   }
   return "Gathering evidence for the investigation.";

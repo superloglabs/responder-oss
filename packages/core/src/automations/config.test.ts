@@ -70,6 +70,14 @@ describe("automation configuration", () => {
       ...baseConfiguration,
       notifications: [notification],
       triggers: [{
+        integrationAccountId: "41414141-4141-4141-8141-414141414141",
+        kind: "signoz",
+      }],
+    }).notifications).toEqual([notification]);
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [{
         eventTypes: ["opened", "merged"],
         integrationAccountId: "41414141-4141-4141-8141-414141414141",
         kind: "github",

@@ -167,6 +167,7 @@ function humanizeToolName(value: string): string {
     pr: "PR",
     rum: "RUM",
     sentry: "Sentry",
+    signoz: "SigNoz",
     slack: "Slack",
     supabase: "Supabase",
     upstash: "Upstash",

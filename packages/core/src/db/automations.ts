@@ -472,10 +472,18 @@ export function findAutomationsForDevRevTicket(
   return findAutomationsForConnectionTrigger("devrev", integrationAccountId);
 }
 
+// Enabled automations with a SigNoz trigger on the connection whose webhook
+// received the alert.
+export function findAutomationsForSignozAlert(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  return findAutomationsForConnectionTrigger("signoz", integrationAccountId);
+}
+
 // These triggers have no resources to choose: every event that reaches the
 // connection's webhook starts a run.
 async function findAutomationsForConnectionTrigger(
-  kind: "axiom" | "devrev",
+  kind: "axiom" | "devrev" | "signoz",
   integrationAccountId: string,
 ): Promise<Array<{ automationId: string }>> {
   const rows = await getDatabase()
@@ -637,9 +645,9 @@ async function validateConfigurationResources(
         "integration_not_found",
       );
     }
-    // Axiom alerts and DevRev tickets arrive at the connection's webhook, so
-    // there is no resource to choose.
-    if (trigger.kind === "axiom" || trigger.kind === "devrev") continue;
+    // Axiom and SigNoz alerts and DevRev tickets arrive at the connection's
+    // webhook, so there is no resource to choose.
+    if (trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz") continue;
     if (trigger.kind === "github") {
       const triggerRepositories = await tx
         .select({ id: repositories.id })
@@ -1631,7 +1639,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "devrev" | "discord" | "github" | "manual" | "schedule" | "sentry" | "slack";
+  provider: "axiom" | "devrev" | "discord" | "github" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
   sourceUrl?: string;
   title: string;
 }
