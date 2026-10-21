@@ -9,20 +9,24 @@ import { Alert } from "../design-system";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-const bannerCopy: Record<BillingBannerKind, { action: string; body: string; title: string }> = {
+// Upgrade actions open the plan comparison on the billing page.
+const bannerCopy: Record<BillingBannerKind, { action: string; body: string; path: string; title: string }> = {
   investigations: {
     action: "Enable billing",
+    path: "/settings/billing",
     body: "New investigations are paused until your allowance resets or pay-as-you-go billing is enabled.",
     title: "Monthly limit reached",
   },
   machine_hours: {
     action: "Upgrade plan",
     body: "New investigations and runs are paused until your hours reset or the plan is upgraded.",
+    path: "/settings/billing#plans",
     title: "Machine hours used up",
   },
   usage: {
     action: "Upgrade plan",
     body: "New investigations and runs are paused until your allowance resets or the plan is upgraded.",
+    path: "/settings/billing#plans",
     title: "Usage limit reached",
   },
 };
@@ -55,7 +59,7 @@ export function BillingBanner() {
   return (
     <Alert
       actions={
-        <Link className="dsButton dsButton--primary dsButton--small" to="/settings/billing">
+        <Link className="dsButton dsButton--primary dsButton--small" to={copy.path}>
           {copy.action}
         </Link>
       }

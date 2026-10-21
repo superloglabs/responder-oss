@@ -135,7 +135,7 @@ test("shows only the usage allowance to a usage-billed workspace", async ({ page
   await expect(page.getByText(/Covers model usage and sandbox time/u)).toBeVisible();
   await expect(page.getByText("Monthly investigations")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Enable pay as you go" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Switch to Pro" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upgrade plan" })).toBeVisible();
 });
 
 test("shows usage credit and machine hours on plans that include machine hours", async ({ page }) => {
@@ -151,7 +151,51 @@ test("shows usage credit and machine hours on plans that include machine hours",
   await expect(page.locator(".billingMeter").getByText("Machine hours", { exact: true })).toBeVisible();
   await expect(page.getByText(/1\.5 h of 2\.0 h remain/u)).toBeVisible();
   await expect(page.locator(".billingBreakdown")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Switch to Team" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upgrade plan" })).toBeVisible();
+});
+
+test("compares plans and opens checkout for the chosen plan", async ({ page }) => {
+  await mockWorkspace(page, billing({ machineHours: machineHours(1.5), usageBased: true }));
+  let requestedPlan: unknown = null;
+  await page.route("**/api/billing/automations/plan", async (route) => {
+    requestedPlan = (route.request().postDataJSON() as { planId?: unknown }).planId;
+    await route.fulfill({ json: { url: "/settings/billing?status=automation-plan" } });
+  });
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.goto("/settings/billing");
+
+  await page.getByRole("button", { name: "Upgrade plan" }).click();
+  const plans = page.getByRole("dialog", { name: "Choose a plan" });
+  await expect(plans).toBeVisible();
+  await expect(plans.getByRole("button", { name: "Close plans" })).toBeFocused();
+
+  await expect(plans.getByRole("article", { name: "Free" })).toHaveCount(0);
+  const pro = plans.getByRole("article", { name: "Pro" });
+  await expect(plans.getByRole("article", { name: "Team" }).getByText("Recommended")).toBeVisible();
+  await expect(pro.getByText("Recommended")).toHaveCount(0);
+  await expect(pro.getByText("Today: $100")).toBeVisible();
+  await expect(pro.getByText("Everything in Free, plus")).toBeVisible();
+  await expect(pro.getByRole("listitem").filter({ hasText: "Machine hours" })).toContainText("50 hrs / mo");
+
+  await expect(plans.getByRole("table", { name: "Plan comparison" })).toHaveCount(0);
+  await plans.getByRole("button", { name: "Compare all features" }).click();
+  await expect(plans.getByRole("table", { name: "Plan comparison" })).toContainText("2 hrs / mo");
+
+  await pro.getByRole("button", { name: "Upgrade to Pro" }).click();
+  await expect.poll(() => requestedPlan).toBe("responder_plan_pro");
+  await expect(page.getByText("Automation plan updated.")).toBeVisible();
+});
+
+test("closes the plan dialog opened from a link", async ({ page }) => {
+  await mockWorkspace(page, billing({ machineHours: machineHours(1.5), usageBased: true }));
+  await page.goto("/settings/billing#plans");
+
+  const plans = page.getByRole("dialog", { name: "Choose a plan" });
+  await expect(plans).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(plans).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Upgrade plan" })).toBeFocused();
+  expect(new URL(page.url()).hash).toBe("");
 });
 
 test("warns a workspace when its machine hours are used up", async ({ page }) => {
@@ -217,7 +261,7 @@ test("warns a usage-billed workspace when its allowance is used", async ({ page 
   await expect(page.getByRole("status").filter({ hasText: "Usage limit reached" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Upgrade plan" })).toHaveAttribute(
     "href",
-    "/settings/billing",
+    "/settings/billing#plans",
   );
 });
 
