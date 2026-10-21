@@ -426,9 +426,17 @@ const providerLogos = {
   vercel: VercelLogo,
 } as const;
 
+// A page loaded before a deploy can be sent a provider it does not know yet,
+// such as a newly added integration. Show its initials instead of crashing.
+function glyphFor(provider: ProviderGlyphId): { label: string; logo?: keyof typeof providerLogos; text?: string } {
+  if (Object.hasOwn(providerGlyphs, provider)) return providerGlyphs[provider];
+  const name = String(provider);
+  return { label: name, text: name.slice(0, 2).toUpperCase() };
+}
+
 function ProviderGlyphContent({ provider }: { provider: ProviderGlyphId }) {
-  const glyph = providerGlyphs[provider];
-  if (!("logo" in glyph)) return glyph.text;
+  const glyph = glyphFor(provider);
+  if (!glyph.logo) return glyph.text;
 
   const Logo = providerLogos[glyph.logo];
   return <Logo />;
@@ -439,7 +447,7 @@ export function ProviderGlyph({
   decorative = false,
   provider,
 }: ProviderGlyphProps) {
-  const glyph = providerGlyphs[provider];
+  const glyph = glyphFor(provider);
   return (
     <span
       aria-hidden={decorative ? true : undefined}

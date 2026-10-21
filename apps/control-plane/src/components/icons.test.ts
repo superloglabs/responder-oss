@@ -133,4 +133,13 @@ describe("ProviderGlyph", () => {
     expect(markup).toContain("#4285f4");
     expect(markup).not.toContain(">GCP</span>");
   });
+
+  it("shows initials for a provider this build does not know yet", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ProviderGlyph, { provider: "newtool" as never }),
+    );
+
+    expect(markup).toContain('aria-label="newtool"');
+    expect(markup).toContain(">NE</span>");
+  });
 });
