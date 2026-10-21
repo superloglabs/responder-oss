@@ -18,6 +18,9 @@ export interface CatalogPlan {
   // Where the billing page sends a workspace that asks about the plan.
   contactUrl?: string;
   description: string;
+  // Short lines guided setup lists on the plan card, after the usage credit
+  // and machine hours, such as seats and support.
+  highlights?: readonly string[];
   id: string;
   // Short use case shown above the name.
   label: string;

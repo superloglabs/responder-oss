@@ -307,6 +307,7 @@
 .onboardingPlan__badge--accent { background: var(--onboarding-accent); color: #fff; }
 .onboardingPlan__price { margin: 0; font-size: 34px; font-weight: 500; line-height: 40px; letter-spacing: -0.02em; }
 .onboardingPlan__price small { margin-left: 2px; color: var(--onboarding-muted); font-size: 14px; font-weight: 400; letter-spacing: 0; }
+.onboardingPlan__audience { margin: -4px 0 0; color: var(--onboarding-muted); font-size: 13px; line-height: 18px; }
 .onboardingPlan ul { flex: 1; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; list-style: none; }
 .onboardingPlan li { display: flex; align-items: center; gap: 8px; color: var(--onboarding-muted); font-size: 14px; line-height: 20px; }
 .onboardingPlan li strong { color: #202020; font-weight: 500; }

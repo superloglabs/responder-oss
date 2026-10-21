@@ -11,6 +11,7 @@ import {
   recommendedTemplates,
   templateProviders,
 } from "./onboarding-presentation";
+import type { CatalogPlan, PlanCatalog } from "../plan-comparison";
 
 const ids = (connected: string[]) => recommendedTemplates(connected).map(({ template }) => template.id);
 
@@ -81,27 +82,44 @@ describe("recommendedTemplates", () => {
     expect(templateProviders(sentryAlerts)).toEqual(["sentry", "github", "slack"]);
   });
 
-  it("recommends Sentry and Slack triage to a workspace with both", () => {
+  it("starts with Slack triage and Sentry alerts when Sentry is connected", () => {
     expect(ids(["github", "sentry", "slack"])).toEqual([
-      "triage-sentry-issues",
       "triage-slack-alerts",
+      "triage-sentry-issues",
       "match-reports-to-errors",
     ]);
   });
 
-  it("puts the reliability check first when Sentry, Datadog, and Slack are connected", () => {
-    expect(ids(["github", "sentry", "datadog", "slack"])[0]).toBe("reliability-check");
+  it("alerts on errors from Datadog or Grafana when Sentry is not connected", () => {
+    expect(ids(["github", "datadog", "slack"]).slice(0, 2)).toEqual(["triage-slack-alerts", "alert-on-critical-datadog-errors"]);
+    expect(ids(["github", "grafana", "slack"]).slice(0, 2)).toEqual(["triage-slack-alerts", "alert-on-critical-grafana-errors"]);
+    expect(ids(["github", "sentry", "grafana", "slack"]).slice(0, 2)).toEqual(["triage-slack-alerts", "triage-sentry-issues"]);
   });
 
-  it("recommends community answers to a Discord workspace", () => {
-    expect(ids(["github", "discord"])[0]).toBe("answer-community-questions");
+  it("offers one error alert even when several error tools are connected", () => {
+    const alerts = ids(["github", "sentry", "datadog", "grafana", "slack"])
+      .filter((id) => ["triage-sentry-issues", "alert-on-critical-datadog-errors", "alert-on-critical-grafana-errors"].includes(id));
+    expect(alerts).toEqual(["triage-sentry-issues"]);
   });
 
-  it("recommends what needs the fewest connections when only GitHub is connected", () => {
-    const [first, ...rest] = recommendedTemplates(["github"]);
-    expect(first).toMatchObject({ missing: [], template: { id: "update-docs" } });
-    expect(rest).toHaveLength(2);
-    expect(rest.every(({ missing }) => missing.length === 1)).toBe(true);
+  it("triages Slack alerts with the error tools the workspace connected", () => {
+    const [triage] = recommendedTemplates(["github", "grafana", "slack"]);
+    expect(triage).toMatchObject({ missing: [], providers: ["slack", "grafana", "github"] });
+    const [unconnected] = recommendedTemplates(["github"]);
+    expect(unconnected).toMatchObject({ missing: ["slack", "sentry"], providers: ["slack", "sentry", "github"] });
+  });
+
+  it("puts the reliability check third when Sentry, Datadog, and Slack are connected", () => {
+    expect(ids(["github", "sentry", "datadog", "slack"])[2]).toBe("reliability-check");
+  });
+
+  it("recommends community answers to a Discord workspace after the first two", () => {
+    expect(ids(["github", "discord"])[2]).toBe("answer-community-questions");
+  });
+
+  it("recommends what needs the fewest connections after the first two", () => {
+    const [, , third] = recommendedTemplates(["github"]);
+    expect(third).toMatchObject({ missing: [], template: { id: "update-docs" } });
   });
 
   it("names the providers a recommendation still needs", () => {
@@ -115,6 +133,20 @@ describe("onboardingPlanCards", () => {
     { id: "team", included: 200, machineHours: 500, name: "Team", price: 200 },
     { id: "pro", included: 100, machineHours: 50, name: "Pro", price: 100 },
   ];
+  const catalogPlan = (billingPlanId: string, details: Partial<CatalogPlan>): CatalogPlan => ({
+    action: "Choose",
+    audience: "",
+    badge: "",
+    billingPlanId,
+    description: "",
+    id: billingPlanId,
+    label: "",
+    name: billingPlanId,
+    price: "",
+    unit: "",
+    ...details,
+  });
+  const catalog: PlanCatalog = { comparison: [], intro: "", plans: [], questions: [] };
 
   it("lists the free plan first and recommends the cheapest paid plan", () => {
     const cards = onboardingPlanCards({
@@ -125,7 +157,7 @@ describe("onboardingPlanCards", () => {
       planId: "free",
       planPrice: 0,
       plans,
-    });
+    }, catalog);
     expect(cards.map((card) => [card.id, card.current, card.recommended])).toEqual([
       ["free", true, false],
       ["pro", false, true],
@@ -144,10 +176,33 @@ describe("onboardingPlanCards", () => {
       planId: "pro",
       planPrice: 100,
       plans,
-    });
+    }, catalog);
     expect(cards.map((card) => [card.id, card.current, card.recommended])).toEqual([
       ["pro", true, false],
       ["team", false, false],
+    ]);
+  });
+
+  it("describes each plan from the catalog", () => {
+    const cards = onboardingPlanCards({
+      allowance: 5,
+      machineHours: { granted: 2 },
+      nextResetAt: null,
+      paid: false,
+      planId: "free",
+      planPrice: 0,
+      plans,
+    }, {
+      ...catalog,
+      plans: [
+        catalogPlan("free", { audience: "For trying it out", highlights: ["1 seat"] }),
+        catalogPlan("team", { audience: "For teams", highlights: ["Unlimited seats", "Priority support"] }),
+      ],
+    });
+    expect(cards.map((card) => [card.id, card.audience, card.highlights])).toEqual([
+      ["free", "For trying it out", ["1 seat"]],
+      ["pro", null, []],
+      ["team", "For teams", ["Unlimited seats", "Priority support"]],
     ]);
   });
 
@@ -160,7 +215,7 @@ describe("onboardingPlanCards", () => {
       planId: "free",
       planPrice: 0,
       plans,
-    });
+    }, catalog);
     expect(cards.every((card) => card.machineHours === null)).toBe(true);
   });
 });
