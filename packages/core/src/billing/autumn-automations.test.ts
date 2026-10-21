@@ -346,13 +346,39 @@ describe("automation billing", () => {
     ))).toMatchObject({
       allowance: 100,
       creditOverageAllowed: true,
+      includesTeammates: false,
       machineHours: { granted: 50, overageAllowed: false, remaining: 45, usage: 5 },
       paid: true,
       planId: "responder_plan_pro",
       planName: "Pro",
+      plans: [
+        { id: "responder_plan_pro", includesTeammates: false },
+        { id: "responder_plan_team", includesTeammates: true },
+      ],
       remaining: 40,
       usage: 60,
     });
+  });
+
+  it.each([
+    ["responder_plan_free", false],
+    ["responder_plan_pro", false],
+    ["responder_plan_team", true],
+    ["responder_automations_free", false],
+    ["responder_automations_100", false],
+    ["responder_automations_200", true],
+  ])("lets a workspace on %s invite teammates: %s", (planId, includesTeammates) => {
+    expect(summarizeAutomationBillingCustomer(customer(
+      [{ canceledAt: null, planId, status: "active" }],
+    )).includesTeammates).toBe(includesTeammates);
+  });
+
+  it("does not limit seats when Autumn returns no customer", () => {
+    expect(summarizeAutomationBillingCustomer({
+      balances: {},
+      id: null,
+      subscriptions: [],
+    } as unknown as Customer).includesTeammates).toBe(true);
   });
 
   it("summarizes the active and scheduled automation plans", () => {

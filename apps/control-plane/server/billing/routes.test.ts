@@ -10,9 +10,12 @@ const mocks = vi.hoisted(() => ({
   changeAutomationPlan: vi.fn(),
   createBillingPortal: vi.fn(),
   createPayAsYouGoCheckout: vi.fn(),
+  getAutomationBillingSummary: vi.fn(),
   getBillingSummary: vi.fn(),
+  getUsageBreakdown: vi.fn(),
   getUsageHistory: vi.fn(),
   organizationHasCapability: vi.fn(),
+  organizationUsesUsageBilling: vi.fn(),
   tenant: vi.fn(),
 }));
 
@@ -22,20 +25,20 @@ vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
   changeAutomationPlan: mocks.changeAutomationPlan,
   createBillingPortal: mocks.createBillingPortal,
   createPayAsYouGoCheckout: mocks.createPayAsYouGoCheckout,
-  getAutomationBillingSummary: vi.fn(),
+  getAutomationBillingSummary: mocks.getAutomationBillingSummary,
   getBillingSummary: mocks.getBillingSummary,
   isAutomationPaidPlanId: (value: unknown) => value === "automation_pro",
   resumeAutomationPlan: vi.fn(),
 }));
 vi.mock("../../../../packages/core/src/billing/usage-billing.js", () => ({
-  organizationUsesUsageBilling: vi.fn().mockResolvedValue(false),
+  organizationUsesUsageBilling: mocks.organizationUsesUsageBilling,
   usagePeriodStart: vi.fn(),
 }));
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   organizationHasCapability: mocks.organizationHasCapability,
 }));
 vi.mock("../../../../packages/core/src/db/usage-breakdown.js", () => ({
-  getUsageBreakdown: vi.fn(),
+  getUsageBreakdown: mocks.getUsageBreakdown,
 }));
 vi.mock("../../../../packages/core/src/db/usage-history.js", async (original) => ({
   ...(await original<typeof import("../../../../packages/core/src/db/usage-history.js")>()),
@@ -47,6 +50,7 @@ vi.mock("../../../../packages/core/src/billing/usage-charges.js", () => ({
 
 const app = new Hono().route("/api/billing", billingRoutes);
 mocks.organizationHasCapability.mockResolvedValue(false);
+mocks.organizationUsesUsageBilling.mockResolvedValue(false);
 const summary = { enabled: true, usage: 3 };
 
 // Cache and rate-limit state outlive a test, so each test uses its own workspace.
@@ -68,6 +72,7 @@ describe("billing routes", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     mocks.organizationHasCapability.mockResolvedValue(false);
+    mocks.organizationUsesUsageBilling.mockResolvedValue(false);
   });
 
   it("loads the summary once for concurrent requests from a workspace", async () => {
@@ -79,7 +84,12 @@ describe("billing routes", () => {
     );
 
     expect(responses.map((response) => response.status)).toEqual(Array(20).fill(200));
-    expect(await responses[0]?.json()).toEqual({ ...summary, automations: null, usageBased: false });
+    expect(await responses[0]?.json()).toEqual({
+      ...summary,
+      automations: null,
+      invitationsNeedTeamPlan: false,
+      usageBased: false,
+    });
     expect(mocks.getBillingSummary).toHaveBeenCalledTimes(1);
   });
 
@@ -159,6 +169,29 @@ describe("billing routes", () => {
 
     expect(change.status).toBe(200);
     expect(mocks.getBillingSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+  ])("reports that a plan with includesTeammates %s needs Team to invite: %s", async (includesTeammates, needsTeamPlan) => {
+    signIn();
+    mocks.getBillingSummary.mockResolvedValue(summary);
+    mocks.organizationUsesUsageBilling.mockResolvedValue(true);
+    mocks.getAutomationBillingSummary.mockResolvedValue({
+      includesTeammates,
+      machineHours: null,
+      nextResetAt: null,
+      periodStart: null,
+    });
+    mocks.getUsageBreakdown.mockResolvedValue({ inferenceMicros: 0, sandboxMicros: 0 });
+
+    const response = await app.request("/api/billing");
+
+    expect(await response.json()).toMatchObject({
+      invitationsNeedTeamPlan: needsTeamPlan,
+      usageBased: true,
+    });
   });
 
   it("limits how often a member can call billing", async () => {

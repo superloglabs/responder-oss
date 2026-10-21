@@ -20,6 +20,7 @@ import {
 import { sandboxTimeIsBilled } from "../../../../packages/core/src/billing/usage-charges.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
+import { invitationsNeedTeamPlan } from "./invitations.js";
 import { createRateLimiter } from "../rate-limit.js";
 import { getActiveTenant, type ActiveTenantResult } from "../tenant.js";
 
@@ -89,6 +90,7 @@ async function loadBillingSummary(tenant: ActiveTenant) {
       // Plans with machine hours meter sandbox time there instead.
       sandboxTimeBilled: sandboxTimeIsBilled() && automations.machineHours === null,
     },
+    invitationsNeedTeamPlan: invitationsNeedTeamPlan({ automations, usageBased }),
     usageBased,
   };
 }

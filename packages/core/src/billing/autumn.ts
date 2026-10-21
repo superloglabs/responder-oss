@@ -344,6 +344,17 @@ export function isAutomationPaidPlanId(value: unknown): value is AutomationPaidP
   return AUTOMATION_PAID_PLANS.some((plan) => plan.id === value);
 }
 
+// Free and Pro have one seat. Team, and the $200 plan from before it, let a
+// workspace invite teammates.
+const teammatePlanIds: ReadonlySet<AutomationPlanId> = new Set([
+  "responder_plan_team",
+  "responder_automations_200",
+]);
+
+export function automationPlanIncludesTeammates(planId: AutomationPlanId): boolean {
+  return teammatePlanIds.has(planId);
+}
+
 export interface UsageBalanceSummary {
   granted: number;
   nextResetAt: number | null;
@@ -364,6 +375,8 @@ export interface AutomationBillingSummary {
   // The credit never stops work.
   creditUnlimited: boolean;
   enabled: boolean;
+  // The workspace may invite teammates.
+  includesTeammates: boolean;
   // Null on plans that pay for sandbox time from the usage credit.
   machineHours: UsageBalanceSummary | null;
   nextResetAt: number | null;
@@ -376,6 +389,7 @@ export interface AutomationBillingSummary {
   plans: Array<{
     id: AutomationPaidPlanId;
     included: number;
+    includesTeammates: boolean;
     machineHours: number;
     name: string;
     price: number;
@@ -447,7 +461,10 @@ async function ensureAutomationPlan(
 }
 
 function paidPlanSummaries(): AutomationBillingSummary["plans"] {
-  return AUTOMATION_PAID_PLANS.map((plan) => ({ ...plan }));
+  return AUTOMATION_PAID_PLANS.map((plan) => ({
+    ...plan,
+    includesTeammates: automationPlanIncludesTeammates(plan.id),
+  }));
 }
 
 function disabledAutomationSummary(configured: boolean, enabled: boolean): AutomationBillingSummary {
@@ -458,6 +475,8 @@ function disabledAutomationSummary(configured: boolean, enabled: boolean): Autom
     creditOverageAllowed: false,
     creditUnlimited: false,
     enabled,
+    // Without billing, seats are not limited.
+    includesTeammates: true,
     machineHours: {
       granted: AUTOMATION_FREE_MACHINE_HOURS,
       nextResetAt: null,
@@ -506,6 +525,9 @@ export function summarizeAutomationBillingCustomer(
     creditOverageAllowed: balance?.overageAllowed ?? false,
     creditUnlimited: balance?.unlimited ?? false,
     enabled: true,
+    // Autumn returns no customer during an outage. Seats are not limited
+    // then, as usage is not.
+    includesTeammates: customer.id === null || automationPlanIncludesTeammates(current.id),
     machineHours: machineHours ? balanceSummary(machineHours) : null,
     nextResetAt: balance?.nextResetAt ?? null,
     paid: current.price > 0,

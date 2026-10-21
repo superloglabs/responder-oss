@@ -48,6 +48,7 @@ interface AutomationBillingSummary {
   plans: Array<{
     id: AutomationPlanId;
     included: number;
+    includesTeammates?: boolean;
     machineHours: number;
     name: string;
     price: number;
@@ -168,7 +169,8 @@ function PlanUsage({
 }
 
 function planIncludes(plan: AutomationBillingSummary["plans"][number]): string {
-  return `${dollars(plan.included)} of usage credit and ${plan.machineHours} machine hours each month`;
+  const usage = `${dollars(plan.included)} of usage credit and ${plan.machineHours} machine hours each month`;
+  return plan.includesTeammates ? `unlimited seats, ${usage}` : usage;
 }
 
 // Splits the used share of the bar between model usage and sandbox time in

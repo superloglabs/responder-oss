@@ -30,6 +30,7 @@ import {
   adminAc as organizationAdminAc,
   memberAc as organizationMemberAc,
 } from "better-auth/plugins/organization/access";
+import { assertWorkspaceCanInvite } from "./billing/invitations.js";
 import { allowsMarketing } from "./consent-policy.js";
 import { sendEmail } from "@responder/core/email";
 import {
@@ -334,6 +335,9 @@ export function createResponderAuth() {
           }
         },
         organizationHooks: {
+          beforeCreateInvitation: async ({ organization }) => {
+            await assertWorkspaceCanInvite(organization.id);
+          },
           afterCreateOrganization: async ({ organization, user }) => {
             await grantNewOrganizationCapabilities(organization.id, user.id);
             await captureAnalyticsEvent({

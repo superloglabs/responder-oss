@@ -1,5 +1,6 @@
 import { EnvelopeIcon } from "@phosphor-icons/react";
 import { type FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { AppShell } from "../components/app-shell";
@@ -7,6 +8,12 @@ import { SettingsHeading } from "../components/settings-heading";
 import { MemberListSkeleton } from "../components/screen-skeletons";
 import { SelectField, type SelectOption } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
+import {
+  teamPlanDescription,
+  teamPlanRequiredCode,
+  teammatePlan,
+  type TeamPlan,
+} from "./workspace-settings-presentation";
 
 type WorkspaceRole = "admin" | "member";
 
@@ -63,6 +70,11 @@ function invitationUrl(invitationId: string): string {
   return `${window.location.origin}/invite/${invitationId}`;
 }
 
+interface WorkspaceBilling {
+  automations: { plans: TeamPlan[] } | null;
+  invitationsNeedTeamPlan?: boolean;
+}
+
 export function WorkspaceSettingsPage() {
   useDocumentTitle("Workspace settings");
   const session = authClient.useSession();
@@ -81,6 +93,27 @@ export function WorkspaceSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [latestInvitation, setLatestInvitation] = useState<string | null>(null);
+  const [needsTeamPlan, setNeedsTeamPlan] = useState(false);
+  const [teamPlan, setTeamPlan] = useState<TeamPlan | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin || !organizationId) return;
+    let active = true;
+    // Without the billing summary the form stays, and a refused invitation
+    // still offers Team.
+    void fetch("/api/billing")
+      .then(async (response) =>
+        response.ok ? ((await response.json()) as WorkspaceBilling) : null)
+      .then((billing) => {
+        if (!active || !billing) return;
+        setNeedsTeamPlan(billing.invitationsNeedTeamPlan === true);
+        setTeamPlan(teammatePlan(billing));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [isAdmin, organizationId]);
 
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -110,6 +143,10 @@ export function WorkspaceSettingsPage() {
           errorCode: authErrorCode(result.error, "missing_data"),
         }),
       );
+      if (result.error?.code === teamPlanRequiredCode) {
+        setNeedsTeamPlan(true);
+        return;
+      }
       setError(result.error?.message ?? "Could not create the invitation");
       return;
     }
@@ -282,7 +319,19 @@ export function WorkspaceSettingsPage() {
           <p className="settingsNotice settingsNotice--success">{notice}</p>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && needsTeamPlan ? (
+          <section aria-labelledby="team-plan-offer" className="inviteForm teamPlanOffer">
+            <div>
+              <h3 id="team-plan-offer">Invite teammates on the Team plan</h3>
+              <p>{teamPlanDescription(teamPlan)}</p>
+            </div>
+            <div className="inviteForm__controls">
+              <Link className="button button--primary" to="/settings/billing#plans">
+                {teamPlan ? `Upgrade to ${teamPlan.name}` : "See plans"}
+              </Link>
+            </div>
+          </section>
+        ) : isAdmin ? (
           <form className="inviteForm" onSubmit={invite}>
             <div>
               <h3>Invite a teammate</h3>

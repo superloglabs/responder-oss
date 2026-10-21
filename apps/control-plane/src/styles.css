@@ -370,6 +370,10 @@ body:has(.appShell--investigation) {
   flex: 0 0 auto;
 }
 
+.appShell--settings .teamPlanOffer .inviteForm__controls .button {
+  width: auto;
+}
+
 .appShell--settings .invitationLink {
   padding-top: 16px;
   border-top-color: var(--ds-border-subtle);
