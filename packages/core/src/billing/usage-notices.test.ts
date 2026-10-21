@@ -10,6 +10,7 @@ function summary(overrides: Partial<AutomationBillingSummary> = {}): AutomationB
     creditOverageAllowed: false,
     creditUnlimited: false,
     enabled: true,
+    includesTeammates: false,
     machineHours: {
       granted: 2,
       nextResetAt: 1_800_000_100,
