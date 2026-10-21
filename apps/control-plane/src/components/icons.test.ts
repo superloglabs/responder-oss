@@ -21,6 +21,7 @@ describe("ProviderGlyph", () => {
     ["discord", "Discord", "DC"],
     ["github", "GitHub", "GH"],
     ["grafana", "Grafana", "GF"],
+    ["honeycomb", "Honeycomb", "HO"],
     ["linear", "Linear", "LI"],
     ["posthog", "PostHog", "PH"],
     ["sentry", "Sentry", "SE"],

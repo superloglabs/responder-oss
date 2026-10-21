@@ -8,6 +8,7 @@ import {
   findAutomationsForAxiomAlert,
   findAutomationsForDevRevTicket,
   findAutomationsForGitHubPullRequest,
+  findAutomationsForHoneycombAlert,
   findAutomationsForSentryIssue,
   findAutomationsForSignozAlert,
   findDueScheduledAutomations,
@@ -332,6 +333,15 @@ describe("trigger matching", () => {
       { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "signoz" }] },
     ]]));
     await expect(findAutomationsForSignozAlert(accountId)).resolves.toEqual([{ automationId: "signoz" }]);
+  });
+
+  it("matches Honeycomb alerts to automations with a Honeycomb trigger on that connection", async () => {
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { automationId: "honeycomb", triggers: [slack, { integrationAccountId: accountId, kind: "honeycomb" }] },
+      { automationId: "signoz", triggers: [{ integrationAccountId: accountId, kind: "signoz" }] },
+      { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "honeycomb" }] },
+    ]]));
+    await expect(findAutomationsForHoneycombAlert(accountId)).resolves.toEqual([{ automationId: "honeycomb" }]);
   });
 
   it("matches DevRev tickets to automations with a DevRev trigger on that connection", async () => {

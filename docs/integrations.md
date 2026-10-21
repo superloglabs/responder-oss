@@ -573,6 +573,45 @@ resolve; an alert's fingerprint and start time identify it, so a repeat does
 not start a second run. SigNoz-triggered automations report to their
 notification channels.
 
+## Honeycomb
+
+Honeycomb is an automation trigger and connector, available in workspaces
+with the `automations` capability. Connect it from Settings or the automation
+editor with the team's region (US or EU) and a management API key. In
+Honeycomb, a team owner opens **Team Settings → API Keys → Management Keys**
+and creates a key with read access to **Model Context Protocol** and
+**Environments**. Responder verifies the key against `/2/auth` on the region's
+API and stores the key ID and secret in the encrypted tenant credential
+envelope. Each team is a separate integration account.
+
+As a connector, the run reaches Honeycomb through the run-scoped context
+broker, which forwards tool listings and calls to the region's hosted MCP
+server, `https://mcp.honeycomb.io/mcp` or `https://mcp.eu1.honeycomb.io/mcp`,
+with `Authorization: Bearer <key ID>:<secret>`. The key never enters the
+sandbox. The key's scopes limit what the tools can do.
+
+As a trigger, a Honeycomb trigger or SLO burn alert starts the automation.
+Each Honeycomb connection has its own webhook:
+
+```text
+<public>/api/webhooks/honeycomb/<connection>
+```
+
+The trigger card's **Set up Honeycomb webhook** shows the URL and a shared
+secret. In Honeycomb, open **Team Settings → Integrations**, add a **Webhook**
+with that URL and secret, and keep the default payload. Add the webhook as a
+recipient on the triggers and burn alerts that should start runs. Honeycomb
+sends the secret in `X-Honeycomb-Webhook-Token`. The secret is derived per
+connection from `CREDENTIAL_ENCRYPTION_KEY`; reconnecting the same team keeps
+it, and rotating that key changes it.
+
+Responder starts a run for each `TRIGGERED` notification and ignores `OK`
+(resolved) notifications and Honeycomb's test notifications. A retry carries
+the same `X-Honeycomb-Webhook-Delivery-ID`, so it does not start a second run.
+A trigger set to alert on every evaluation, rather than on change, sends a
+new delivery each time it is evaluated, and each one starts a run.
+Honeycomb-triggered automations report to their notification channels.
+
 ## Upstash
 
 Connect Upstash from Settings with the Upstash account email and a developer

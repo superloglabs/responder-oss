@@ -17,6 +17,10 @@ import { freshSentryCredentials } from "../../../../packages/core/src/db/investi
 import { awsConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/aws.js";
 import { parseAxiomCredentials } from "../../../../packages/core/src/integrations/axiom.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
+import {
+  honeycombAuthorization,
+  parseHoneycombCredentials,
+} from "../../../../packages/core/src/integrations/honeycomb.js";
 import { parseSignozCredentials } from "../../../../packages/core/src/integrations/signoz.js";
 import {
   parseCustomMcpCredentials,
@@ -176,6 +180,15 @@ async function providerTarget(
         "SIGNOZ-API-KEY": parsed.apiKey,
         "X-SigNoz-URL": parsed.instanceUrl,
       }),
+      url: parsed.mcpUrl,
+    };
+  }
+  // Honeycomb's hosted MCP server for the team's region takes the management
+  // API key as a bearer token.
+  if (claim.account.provider === "honeycomb") {
+    const parsed = parseHoneycombCredentials(credentials);
+    return {
+      headers: new Headers({ authorization: honeycombAuthorization(parsed) }),
       url: parsed.mcpUrl,
     };
   }

@@ -16,6 +16,7 @@ import { UpstashConnectionDialog } from "../components/upstash-connection-dialog
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { DevRevConnectionDialog } from "../components/devrev-connection-dialog";
 import { SignozConnectionDialog } from "../components/signoz-connection-dialog";
+import { HoneycombConnectionDialog } from "../components/honeycomb-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import {
@@ -58,7 +59,8 @@ interface IntegrationSummary {
     | "linear"
     | "discord"
     | "devrev"
-    | "signoz";
+    | "signoz"
+    | "honeycomb";
   name: string;
   description: string;
   state: IntegrationState;
@@ -398,6 +400,7 @@ function DefaultIntegrationCard({
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
   const [connectingDevRev, setConnectingDevRev] = useState(false);
   const [connectingSignoz, setConnectingSignoz] = useState(false);
+  const [connectingHoneycomb, setConnectingHoneycomb] = useState(false);
   const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     integration.id === "supabase" && Boolean(supabaseSelectionState),
@@ -444,6 +447,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "signoz") {
       setConnectingSignoz(true);
+      return;
+    }
+    if (integration.id === "honeycomb") {
+      setConnectingHoneycomb(true);
       return;
     }
     if (integration.id === "supabase") {
@@ -537,6 +544,11 @@ function DefaultIntegrationCard({
       <SignozConnectionDialog
         onCancel={() => setConnectingSignoz(false)}
         open={connectingSignoz}
+        returnTo="/settings"
+      />
+      <HoneycombConnectionDialog
+        onCancel={() => setConnectingHoneycomb(false)}
+        open={connectingHoneycomb}
         returnTo="/settings"
       />
       <SupabaseConnectionDialog

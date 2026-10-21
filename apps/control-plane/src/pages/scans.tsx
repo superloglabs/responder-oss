@@ -45,7 +45,7 @@ type ScanSource = {
   id: string;
   kind: "account" | "github" | "vercel";
   name: string;
-  provider: Exclude<ProviderGlyphId, "devrev" | "discord" | "google" | "scan" | "signoz">;
+  provider: Exclude<ProviderGlyphId, "devrev" | "discord" | "google" | "honeycomb" | "scan" | "signoz">;
   resourceLabel: string;
   resources: Array<{
     description: string;

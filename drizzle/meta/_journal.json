@@ -631,6 +631,13 @@
       "when": 1792595877454,
       "tag": "0089_add_signoz_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1792606217872,
+      "tag": "0090_add_honeycomb_integration",
+      "breakpoints": true
     }
   ]
 }
