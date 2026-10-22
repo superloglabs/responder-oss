@@ -18,6 +18,8 @@ import { AlertsPage } from "./pages/alerts";
 import { SyntheticCheckPage } from "./pages/synthetic-check";
 import { SyntheticCheckEditPage } from "./pages/synthetic-check-edit";
 import { SyntheticsPage } from "./pages/synthetics";
+import { ErrorIssuePage } from "./pages/error-issue";
+import { ErrorsPage } from "./pages/errors";
 import { DashboardPage } from "./pages/dashboard";
 import { AiModelsPage } from "./pages/ai-models";
 import { DashboardsPage } from "./pages/dashboards";
@@ -178,6 +180,8 @@ export function App() {
         <Route element={<AlertsPage />} path="/alerts" />
         <Route element={<AlertPage />} path="/alerts/new" />
         <Route element={<AlertPage />} path="/alerts/:alertId" />
+        <Route element={<ErrorsPage />} path="/errors" />
+        <Route element={<ErrorIssuePage />} path="/errors/:issueId" />
         <Route element={<SyntheticsPage />} path="/synthetics" />
         <Route element={<SyntheticCheckEditPage />} path="/synthetics/new" />
         <Route element={<SyntheticCheckPage />} path="/synthetics/:checkId" />

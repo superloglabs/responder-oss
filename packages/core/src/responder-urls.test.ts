@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  responderErrorIssueUrl,
   responderInvestigationUrl,
   responderIssueUrl,
 } from "./responder-urls.js";
@@ -9,6 +10,11 @@ describe("Responder URLs", () => {
     expect(
       responderIssueUrl("issue 1", "https://responder.example/app/"),
     ).toBe("https://responder.example/app/issues/issue%201");
+  });
+
+  it("builds an error issue URL", () => {
+    expect(responderErrorIssueUrl("issue 1", "https://responder.example/app/?tab=x"))
+      .toBe("https://responder.example/app/errors/issue%201");
   });
 
   it("rejects non-HTTP origins", () => {

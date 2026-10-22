@@ -14,6 +14,14 @@ export function responderIssueUrl(issueId: string, origin: string): string {
   return url.toString();
 }
 
+export function responderErrorIssueUrl(issueId: string, origin: string): string {
+  const url = responderUrl(origin);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/errors/${encodeURIComponent(issueId)}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 export function responderInvestigationUrl(input: {
   agentId: string;
   investigationId: string;

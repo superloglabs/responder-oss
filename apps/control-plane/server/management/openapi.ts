@@ -8,6 +8,7 @@ const tagDescriptions: Record<ManagementTag, string> = {
   "API keys": "Keys that authenticate the management API and MCP server.",
   Automations: "Create and change automations.",
   Dashboards: "Create and change dashboards over the workspace's telemetry.",
+  Errors: "Exceptions in the workspace's telemetry, grouped into issues by fingerprint.",
   Integrations: "Connected integrations and the IDs automations and tag mode use.",
   Models: "Model API keys, subscriptions, and available models.",
   Runs: "Start, follow, and cancel automation runs.",
@@ -125,7 +126,7 @@ function openApiOperation(operation: ManagementOperation) {
         ? { "400": errorResponse("The request is invalid. `issues` lists each invalid field.") }
         : {}),
       "401": errorResponse("The API key is missing, revoked, or its creator left the workspace."),
-      ...(pathNames.length > 0 || operation.requiresAutomations || operation.tag === "Telemetry" || operation.tag === "Dashboards"
+      ...(pathNames.length > 0 || operation.requiresAutomations || operation.tag === "Telemetry" || operation.tag === "Dashboards" || operation.tag === "Errors"
         ? { "404": errorResponse("The resource does not exist in this workspace, or the feature it belongs to is not enabled.") }
         : {}),
       ...(operation.effect !== "read"
