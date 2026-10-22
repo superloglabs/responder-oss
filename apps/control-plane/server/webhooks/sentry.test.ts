@@ -48,6 +48,8 @@ function signedIssueRequest(
   issueId: string,
   options: {
     action?: "created" | "unresolved" | "resolved";
+    issueCategory?: string;
+    issueType?: string;
     lastSeen?: string;
   } = {},
 ) {
@@ -59,6 +61,8 @@ function signedIssueRequest(
         id: issueId,
         shortId: `EXAMPLE-${issueId}`,
         title: `Example capacity error ${issueId}`,
+        issueCategory: options.issueCategory,
+        issueType: options.issueType,
         lastSeen: options.lastSeen ?? "2024-01-02T03:04:05.000Z",
         web_url: `https://example.sentry.io/issues/${issueId}/`,
         project: {
@@ -226,6 +230,29 @@ describe("Sentry issue webhooks", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
     expect(findAgentsForSentryIssue).not.toHaveBeenCalled();
+  });
+
+  it("ignores metric issues opened by Sentry alert rules", async () => {
+    vi.stubEnv("SENTRY_CLIENT_SECRET", "sentry-secret");
+    const request = signedIssueRequest("1234567893", {
+      action: "unresolved",
+      issueCategory: "metric",
+      issueType: "metric_issue",
+    });
+
+    const response = await app.request("/api/webhooks/sentry", {
+      method: "POST",
+      body: request.body,
+      headers: {
+        "sentry-hook-resource": "issue",
+        "sentry-hook-signature": request.signature,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
+    expect(findAgentsForSentryIssue).not.toHaveBeenCalled();
+    expect(findAutomationsForSentryIssue).not.toHaveBeenCalled();
   });
 
   it("ignores signed non-issue resources without querying agents", async () => {
