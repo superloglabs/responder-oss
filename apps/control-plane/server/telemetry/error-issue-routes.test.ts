@@ -92,6 +92,11 @@ describe("error issue routes", () => {
     });
   });
 
+  it("lists the services issues came from", async () => {
+    const { app } = routes();
+    expect(await (await app.request("/services")).json()).toEqual({ services: ["api"] });
+  });
+
   it("rejects an unknown status filter", async () => {
     const { app } = routes();
     expect((await app.request("/?status=ignored")).status).toBe(400);

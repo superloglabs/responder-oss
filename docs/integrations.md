@@ -962,6 +962,18 @@ grouped by, and resolves, silences or reopens it. The API is
 `/api/error-issues`. The management API and MCP server offer
 `list_error_issues`, `get_error_issue` and `update_error_issue`.
 
+An automation can start on error issues with the **Errors** trigger, offered
+in workspaces with telemetry. It runs on new issues, regressions (a resolved
+issue that occurs again), or both, and can be limited to some services. The
+worker starts the runs after the pass that opened the issue is saved. A new
+issue runs each automation once; a regression runs it once per time the
+issue reopens. The run's trigger has the issue's title, service, counts,
+fingerprint and frames, and its newest occurrence with the stack trace, trace
+ID and attributes, and links to the issue page. An automation starts at most
+ten runs per pass; issues past that are logged and skipped. Error runs report
+to notification channels and keep an issue catalog, like alert runs. The
+**Investigate new errors** template uses the trigger.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

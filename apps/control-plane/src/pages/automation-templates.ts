@@ -65,7 +65,9 @@ export function findAutomationTemplate(id: string | null | undefined): Automatio
 export function applyAutomationTemplate(configuration: AutomationConfiguration, template: AutomationTemplateContent, options: AutomationOptions, timezone = browserTimeZone()): AutomationConfiguration {
   const triggers = template.triggers.map((trigger): AutomationTrigger => trigger.kind === "schedule"
     ? { ...trigger, timezone }
-    : { ...trigger, integrationAccountId: options.accounts.find((account) => account.provider === trigger.kind)?.id ?? "" });
+    : trigger.kind === "errors"
+      ? trigger
+      : { ...trigger, integrationAccountId: options.accounts.find((account) => account.provider === trigger.kind)?.id ?? "" });
   const contextAccountIds = template.connectors.flatMap((provider) => {
     const account = options.accounts.find((candidate) => candidate.provider === provider);
     return provider === "github" || !account ? [] : [account.id];
@@ -89,7 +91,7 @@ const triggerResources: Record<ConnectedAutomationTrigger["kind"], string | null
 
 // What the user still chooses after applying a template, for the page notice.
 export function automationTemplateMissingFields(template: Pick<AutomationTemplateContent, "triggers">): string {
-  const resources = [...new Set(template.triggers.flatMap((trigger) => trigger.kind === "schedule" ? [] : [triggerResources[trigger.kind] ?? []].flat()))];
+  const resources = [...new Set(template.triggers.flatMap((trigger) => trigger.kind === "schedule" || trigger.kind === "errors" ? [] : [triggerResources[trigger.kind] ?? []].flat()))];
   const fields = [...resources, "a repository"];
   return fields.length > 2 ? `${fields.slice(0, -1).join(", ")}, and a repository` : fields.join(" and ");
 }

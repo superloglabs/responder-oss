@@ -90,6 +90,9 @@ function triggerMeta(run: AutomationRunDetail): string[] {
   if (provider === "sentry") {
     return ["Sentry", attributes.action === "created" ? "New issue" : "Regression", typeof attributes.shortId === "string" ? attributes.shortId : null].filter((value): value is string => Boolean(value));
   }
+  if (provider === "errors") {
+    return ["Errors", attributes.transition === "regressed" ? "Regression" : "New error", typeof attributes.service === "string" ? attributes.service : null].filter((value): value is string => Boolean(value));
+  }
   if (provider === "axiom") return ["Axiom", "Monitor alert"];
   if (provider === "signoz") return ["SigNoz", typeof attributes.alertName === "string" ? attributes.alertName : "Alert"];
   if (provider === "honeycomb") return ["Honeycomb", typeof attributes.alertName === "string" ? attributes.alertName : "Alert"];
@@ -113,7 +116,7 @@ function TriggerCard({ run }: { run: AutomationRunDetail }) {
   const project = run.trigger.attributes.projectName ?? run.trigger.attributes.projectSlug;
   return <article className="automationRun__card automationRun__trigger" aria-label="Trigger">
     <div className="automationRun__triggerMeta">
-      {provider === "schedule" ? <AutomationTriggerIcon kind="schedule" /> : provider in providerGlyphs ? <ProviderGlyph decorative provider={provider as ProviderGlyphId} /> : null}
+      {provider === "schedule" || provider === "errors" ? <AutomationTriggerIcon kind={provider} /> : provider in providerGlyphs ? <ProviderGlyph decorative provider={provider as ProviderGlyphId} /> : null}
       <span>{triggerMeta(run).join(" · ")}</span>
       <span className="automationCreate__spacer" />
       <time dateTime={run.createdAt} title={new Date(run.createdAt).toLocaleString()}>{clockTime(run.createdAt)}</time>

@@ -86,7 +86,7 @@ export function availableAutomationConfiguration(
 }
 
 function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions): AutomationTrigger {
-  if (trigger.kind === "schedule") return trigger;
+  if (trigger.kind === "schedule" || trigger.kind === "errors") return trigger;
   const triggerAccountAvailable = options.accounts.some((account) =>
     account.id === trigger.integrationAccountId && account.provider === trigger.kind
   );
@@ -116,6 +116,7 @@ function availableTrigger(trigger: AutomationTrigger, options: AutomationOptions
 // Returns whether a trigger has everything the server needs to accept it.
 export function isTriggerComplete(trigger: AutomationTrigger): boolean {
   if (trigger.kind === "schedule") return isScheduleComplete(trigger);
+  if (trigger.kind === "errors") return trigger.eventTypes.length > 0;
   if (!trigger.integrationAccountId) return false;
   if (trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "betterstack") return true;
   if (trigger.kind === "github") return trigger.repositoryIds.length > 0 && trigger.eventTypes.length > 0;

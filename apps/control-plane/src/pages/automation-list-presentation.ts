@@ -40,6 +40,10 @@ export function triggerEventLabel(trigger: AutomationListTrigger): string {
     if (trigger.eventTypes.length > 1) return "New issue or regression";
     return trigger.eventTypes[0] === "regression" ? "Issue regression" : "New issue";
   }
+  if (trigger.kind === "errors") {
+    if (trigger.eventTypes.length > 1) return "New error or regression";
+    return trigger.eventTypes[0] === "regression" ? "Error regression" : "New error";
+  }
   if (trigger.kind === "axiom") return "Monitor alert";
   if (trigger.kind === "signoz") return "Alert fired";
   if (trigger.kind === "honeycomb") return "Trigger or SLO alert";
@@ -71,6 +75,10 @@ export function triggerTitle(trigger: AutomationListTrigger): string {
   if (trigger.kind === "sentry") {
     if (trigger.eventTypes.length === 2) return "Sentry new issue or regression";
     return trigger.eventTypes[0] === "regression" ? "Sentry issue regression" : "Sentry new issue";
+  }
+  if (trigger.kind === "errors") {
+    if (trigger.eventTypes.length > 1) return "New error or regression";
+    return trigger.eventTypes[0] === "regression" ? "Error regression" : "New error";
   }
   if (trigger.kind === "axiom") return "Axiom monitor alert";
   if (trigger.kind === "signoz") return "SigNoz alert fired";
