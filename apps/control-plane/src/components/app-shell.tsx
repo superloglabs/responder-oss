@@ -16,6 +16,7 @@ import {
 import { BillingBanner } from "./billing-banner";
 import {
   BellIcon,
+  BugIcon,
   CaretDownIcon,
   ChartLineIcon,
   ChartLineUpIcon,
@@ -49,6 +50,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
   alerts: BellIcon,
   automations: RobotIcon,
   dashboards: ChartLineIcon,
+  errors: BugIcon,
   integrations: PlugsConnectedIcon,
   issues: ListBulletsIcon,
   logs: MagnifyingGlassIcon,

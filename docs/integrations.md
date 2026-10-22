@@ -953,6 +953,15 @@ fingerprint opens an issue; an occurrence from after an issue was resolved
 opens it again; a silenced issue only counts. A cell whose ClickHouse lacks the table skips
 the pass.
 
+The **Errors** page, under Detect, lists a telemetry workspace's issues by
+status, most recently seen first, with occurrences over the last 14 days. It
+filters by service and searches titles, top frames and exception types. An
+issue's page shows its occurrences per day over 30 days, the newest
+occurrence with its stack trace, attributes and trace, and the frames it is
+grouped by, and resolves, silences or reopens it. The API is
+`/api/error-issues`. The management API and MCP server offer
+`list_error_issues`, `get_error_issue` and `update_error_issue`.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

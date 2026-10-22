@@ -30,6 +30,7 @@ export type ManagementTag =
   | "API keys"
   | "Automations"
   | "Dashboards"
+  | "Errors"
   | "Integrations"
   | "Models"
   | "Runs"
